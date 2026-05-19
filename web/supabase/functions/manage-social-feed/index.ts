@@ -64,6 +64,18 @@ function normalizeRole(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
+function normalizeVerificationStatus(value: unknown) {
+  return typeof value === "string" ? value.trim().toUpperCase() : "";
+}
+
+function isApprovedProfile(profile: any) {
+  return profile?.is_verified === true && normalizeVerificationStatus(profile?.verification_status) === "APPROVED";
+}
+
+function canExposePostAuthor(post: any, uid: string) {
+  return post?.author_id === uid || isApprovedProfile(post?.author);
+}
+
 function normalizeVisibility(value: unknown) {
   const visibility = typeof value === "string" ? value.trim().toLowerCase() : "public";
   return POST_VISIBILITIES.has(visibility) ? visibility : "public";
@@ -1004,7 +1016,7 @@ Deno.serve(async (req: Request) => {
       const pageOffset = Number(offset) || 0;
       const shouldPersonalize = params?.personalize !== false && Boolean(uid);
       const feedPostSelect =
-        "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(id, post_id, media_type, storage_path, thumbnail_path, is_cover, mime_type, width, height, duration_seconds, display_order, safety_status, safety_metadata)";
+        "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role, is_verified, verification_status), media:post_media(id, post_id, media_type, storage_path, thumbnail_path, is_cover, mime_type, width, height, duration_seconds, display_order, safety_status, safety_metadata)";
       const cursorCreatedAt =
         typeof cursor === "string" && cursor.trim().length > 0
           ? cursor.trim()
@@ -1062,7 +1074,7 @@ Deno.serve(async (req: Request) => {
       if (error) return jsonResponse({ error: error.message }, 500);
       const postsMs = Math.round(performance.now() - postsStartedAt);
 
-      const rows = data || [];
+      const rows = (data || []).filter((post: any) => canExposePostAuthor(post, uid));
       const pageRows = params.cursor !== undefined ? rows.slice(0, pageSize) : rows;
       const nextCursor =
         params.cursor !== undefined && rows.length > pageSize
@@ -1633,6 +1645,8 @@ Deno.serve(async (req: Request) => {
           ? supabaseAdmin
               .from("profiles")
               .select("id, full_name, avatar_url, role")
+              .eq("is_verified", true)
+              .eq("verification_status", "APPROVED")
               .in("id", followedProfileIds)
           : Promise.resolve({ data: [] }),
         followedGroupIds.length > 0

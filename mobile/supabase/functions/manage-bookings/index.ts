@@ -117,62 +117,6 @@ function toHours(start: string, end: string) {
   return (endMinutes - startMinutes) / 60;
 }
 
-function toTimeMinutes(value?: string | null) {
-  const normalized = normalizeTime(value);
-  const [hour, minute] = normalized.split(":").map(Number);
-
-  if (
-    !Number.isFinite(hour) ||
-    !Number.isFinite(minute) ||
-    hour < 0 ||
-    hour > 24 ||
-    minute < 0 ||
-    minute > 59 ||
-    (hour === 24 && minute !== 0)
-  ) {
-    return null;
-  }
-
-  return hour * 60 + minute;
-}
-
-function getInternalSlotConflictMessage(slots: Array<{ start: string; end: string }>) {
-  const ranges = slots
-    .map((slot, index) => ({
-      index,
-      start: normalizeTime(slot?.start).slice(0, 5),
-      end: normalizeTime(slot?.end).slice(0, 5),
-      startMinutes: toTimeMinutes(slot?.start),
-      endMinutes: toTimeMinutes(slot?.end),
-    }))
-    .sort((a, b) => (a.startMinutes ?? 0) - (b.startMinutes ?? 0));
-
-  for (const range of ranges) {
-    if (
-      range.startMinutes === null ||
-      range.endMinutes === null ||
-      range.endMinutes <= range.startMinutes
-    ) {
-      return `Invalid time slot: ${range.start} - ${range.end}.`;
-    }
-  }
-
-  for (let index = 1; index < ranges.length; index += 1) {
-    const previous = ranges[index - 1];
-    const current = ranges[index];
-
-    if (current.startMinutes === previous.startMinutes && current.endMinutes === previous.endMinutes) {
-      return `Duplicate time slot: ${current.start} - ${current.end}.`;
-    }
-
-    if ((current.startMinutes ?? 0) < (previous.endMinutes ?? 0)) {
-      return `Overlapping time slots: ${previous.start} - ${previous.end} and ${current.start} - ${current.end}.`;
-    }
-  }
-
-  return null;
-}
-
 function toManilaDateTime(dateValue: string, timeValue: string): Date | null {
   if (!dateValue || !timeValue) return null;
 
@@ -508,6 +452,135 @@ async function getRequesterRole(supabaseClient: any, userId: string) {
 
   if (error) throw error;
   return data?.role || null;
+}
+
+type StaffAssignment = {
+  id: string;
+  staff_user_id: string;
+  entity_type: "studio" | "venue" | "production";
+  studio_id: string | null;
+  gig_id: string | null;
+  production_team_id: string | null;
+  access_level: number;
+};
+
+function buildStaffContext(assignment: StaffAssignment | null) {
+  if (!assignment) return null;
+  const effectiveRole =
+    assignment.entity_type === "studio"
+      ? "studio-owner"
+      : assignment.entity_type === "venue"
+        ? "venue-owner"
+        : "producer";
+  const targetId =
+    assignment.entity_type === "studio"
+      ? assignment.studio_id
+      : assignment.entity_type === "venue"
+        ? assignment.gig_id
+        : assignment.production_team_id;
+
+  return {
+    id: assignment.id,
+    entity_type: assignment.entity_type,
+    access_level: assignment.access_level,
+    effective_role: effectiveRole,
+    target_id: targetId,
+    studio_id: assignment.studio_id,
+    gig_id: assignment.gig_id,
+    production_team_id: assignment.production_team_id,
+    can_edit_listing: assignment.access_level === 1,
+    can_manage_bookings: assignment.access_level === 1 || assignment.access_level === 2,
+    view_only: assignment.access_level === 3,
+  };
+}
+
+async function getActiveStaffAssignment(supabaseAdmin: any, userId: string): Promise<StaffAssignment | null> {
+  const { data, error } = await supabaseAdmin
+    .from("staff_listing_access")
+    .select("id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level")
+    .eq("staff_user_id", userId)
+    .is("revoked_at", null)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingTableError(error, "staff_listing_access")) return null;
+    throw error;
+  }
+
+  if (!data) return null;
+  const entityType = String(data.entity_type || "").trim();
+  const level = Number(data.access_level);
+
+  if (
+    !["studio", "venue", "production"].includes(entityType) ||
+    ![1, 2, 3].includes(level)
+  ) {
+    return null;
+  }
+
+  return {
+    id: data.id,
+    staff_user_id: data.staff_user_id,
+    entity_type: entityType as StaffAssignment["entity_type"],
+    studio_id: data.studio_id || null,
+    gig_id: data.gig_id || null,
+    production_team_id: data.production_team_id || null,
+    access_level: level,
+  };
+}
+
+async function getStaffAccessForStudio(supabaseAdmin: any, userId: string, studioId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("staff_listing_access")
+    .select("access_level")
+    .eq("staff_user_id", userId)
+    .eq("entity_type", "studio")
+    .eq("studio_id", studioId)
+    .is("revoked_at", null)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingTableError(error, "staff_listing_access")) return null;
+    throw error;
+  }
+
+  return data?.access_level ? Number(data.access_level) : null;
+}
+
+async function getStaffAccessForGig(supabaseAdmin: any, userId: string, gigId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("staff_listing_access")
+    .select("access_level")
+    .eq("staff_user_id", userId)
+    .eq("entity_type", "venue")
+    .eq("gig_id", gigId)
+    .is("revoked_at", null)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingTableError(error, "staff_listing_access")) return null;
+    throw error;
+  }
+
+  return data?.access_level ? Number(data.access_level) : null;
+}
+
+async function getStaffAccessForProduction(supabaseAdmin: any, userId: string, teamId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("staff_listing_access")
+    .select("access_level")
+    .eq("staff_user_id", userId)
+    .eq("entity_type", "production")
+    .eq("production_team_id", teamId)
+    .is("revoked_at", null)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingTableError(error, "staff_listing_access")) return null;
+    throw error;
+  }
+
+  return data?.access_level ? Number(data.access_level) : null;
 }
 
 const GIG_APPLICATION_BOOKING_SELECT = `
@@ -1027,6 +1100,16 @@ serve(async (req: Request) => {
       if (profileError) throw profileError;
 
       const userRole = profile?.role;
+      const requesterId = userId || authUser.id;
+      let activityRole = userRole;
+      let staffAssignment: StaffAssignment | null = null;
+      let staffContext: ReturnType<typeof buildStaffContext> = null;
+
+      if (userRole === "staff") {
+        staffAssignment = await getActiveStaffAssignment(supabaseAdmin, requesterId);
+        staffContext = buildStaffContext(staffAssignment);
+        activityRole = staffContext?.effective_role || "staff";
+      }
 
       if (userRole === "musician" || userRole === "studio-owner") {
         await autoStartBookingsAndNotify(supabaseAdmin, userId, userRole);
@@ -1042,7 +1125,7 @@ serve(async (req: Request) => {
       const now = new Date();
 
       // A. For Musicians: Fetch their Studio Bookings as customers
-      if (userRole === "musician") {
+      if (activityRole === "musician") {
         const { data: bookings, error: bookingError } = await supabaseClient
           .from("studio_bookings")
           .select("*, studio:studios(name, owner_id, studio_media(media_url, sort_order))")
@@ -1205,14 +1288,15 @@ serve(async (req: Request) => {
       }
 
       // B. For Studio Owners: Fetch bookings for THEIR studios
-      if (userRole === "studio-owner") {
+      if (activityRole === "studio-owner") {
         // First get their studios
-        const { data: studios } = await supabaseClient
-          .from("studios")
-          .select("id")
-          .eq("owner_id", userId);
-
-        const studioIds = studios?.map((s: any) => s.id) || [];
+        const studioIds = staffAssignment?.entity_type === "studio" && staffAssignment.studio_id
+          ? [staffAssignment.studio_id]
+          : ((await supabaseClient
+            .from("studios")
+            .select("id")
+            .eq("owner_id", requesterId)).data || []).map((s: any) => s.id);
+        const staffCanAct = !staffContext || staffContext.can_manage_bookings;
 
         if (studioIds.length > 0) {
           const { data: bookings, error: bookingError } = await supabaseClient
@@ -1364,6 +1448,10 @@ serve(async (req: Request) => {
               has_late_report: Boolean(lateReportMeta),
               late_report_count: lateReportMeta?.count || 0,
               late_reported_at: lateReportMeta?.latestAt || null,
+              viewer_access: staffContext ? "staff" : "studio_owner",
+              viewer_can_act: staffCanAct,
+              viewer_read_only_reason: staffCanAct ? null : "This staff account has view-only access.",
+              staff_access_level: staffContext?.access_level || null,
             };
 
             if (b.status === "pending" || b.status === "pending_relocation") {
@@ -1410,7 +1498,7 @@ serve(async (req: Request) => {
       }
 
       // C. For Musicians: Fetch Gig Applications
-      if (userRole === "musician") {
+      if (activityRole === "musician") {
         let gigApps: any[] = [];
 
         try {
@@ -1592,11 +1680,14 @@ serve(async (req: Request) => {
       }
 
       // C2. For Producers: Fetch production-routed gig applications
-      if (userRole === "producer") {
-        const { data: teamMemberships, error: teamMembershipError } = await supabaseClient
-          .from("production_team_members")
-          .select("team_id, role")
-          .eq("user_id", userId);
+      if (activityRole === "producer") {
+        const teamMembershipsResult = staffAssignment?.entity_type === "production" && staffAssignment.production_team_id
+          ? { data: [{ team_id: staffAssignment.production_team_id, role: `staff_level_${staffAssignment.access_level}` }], error: null }
+          : await supabaseClient
+            .from("production_team_members")
+            .select("team_id, role")
+            .eq("user_id", requesterId);
+        const { data: teamMemberships, error: teamMembershipError } = teamMembershipsResult;
 
         if (teamMembershipError) {
         }
@@ -1638,9 +1729,11 @@ serve(async (req: Request) => {
             const gig = app.gig;
             const teamRole = teamRoleById.get(app.production_team_id) || "member";
             const canManageApplication =
-              ["owner", "manager"].includes(String(teamRole)) ||
-              app.applicant_id === userId ||
-              app.submitted_by_user_id === userId;
+              staffContext
+                ? staffContext.can_manage_bookings
+                : ["owner", "manager"].includes(String(teamRole)) ||
+                  app.applicant_id === requesterId ||
+                  app.submitted_by_user_id === requesterId;
             const dateStr = gig?.event_date || app.created_at?.split("T")[0] || "TBA";
             const performerName =
               app.group?.name ||
@@ -1698,6 +1791,7 @@ serve(async (req: Request) => {
               cv_url: app.cv_url,
               slot_type: app.slot_type,
               reviewed_by_applicant: app.reviewed_by_applicant || false,
+              staff_access_level: staffContext?.access_level || null,
             };
 
             if (normalizedStatus === "pending") {
@@ -1743,14 +1837,20 @@ serve(async (req: Request) => {
       }
 
       // D. For Venue Owners: Fetch accepted applications for their gigs
-      if (userRole === "venue-owner") {
+      if (activityRole === "venue-owner") {
         // First get their gigs
-        const { data: gigs } = await supabaseClient
-          .from("gigs")
-          .select("id, name, event_date, location")
-          .eq("organizer_id", userId);
+        const { data: gigs } = staffAssignment?.entity_type === "venue" && staffAssignment.gig_id
+          ? await supabaseClient
+            .from("gigs")
+            .select("id, name, event_date, location")
+            .eq("id", staffAssignment.gig_id)
+          : await supabaseClient
+            .from("gigs")
+            .select("id, name, event_date, location")
+            .eq("organizer_id", requesterId);
 
         const gigIds = gigs?.map((g: any) => g.id) || [];
+        const staffCanAct = !staffContext || staffContext.can_manage_bookings;
 
         if (gigIds.length > 0) {
           const { data: acceptedApps, error: appError } = await supabaseClient
@@ -1808,9 +1908,9 @@ serve(async (req: Request) => {
               production_roster_id: app.production_roster_id,
               production_team_name: app.production_team?.name || null,
               raw_status: app.status,
-              viewer_access: "organizer",
-              viewer_can_act: true,
-              viewer_read_only_reason: null,
+              viewer_access: staffContext ? "staff" : "organizer",
+              viewer_can_act: staffCanAct,
+              viewer_read_only_reason: staffCanAct ? null : "This staff account has view-only access.",
               submitted_by_name: app.submitter?.full_name || null,
               raw_date: dateStr,
               name: `${gig?.name || "Gig"} - ${performerName}`,
@@ -1843,6 +1943,7 @@ serve(async (req: Request) => {
               pitch_message: app.pitch_message, // Added pitch message
               group_members: [], // Include group members for display
               reviewed_by_organizer: app.reviewed_by_organizer || false,
+              staff_access_level: staffContext?.access_level || null,
             };
 
             if (app.status === "pending") {
@@ -1889,34 +1990,43 @@ serve(async (req: Request) => {
 
       if (params.includeScreenPayload === true) {
         const loadPendingPermitListings = async () => {
-          if (userRole !== "studio-owner" && userRole !== "venue-owner") {
+          if (activityRole !== "studio-owner" && activityRole !== "venue-owner") {
             return [];
           }
 
-          const permitTable = userRole === "studio-owner" ? "studios" : "gigs";
-          const permitOwnerField = userRole === "studio-owner" ? "owner_id" : "organizer_id";
-          const { data: permitRows, error: permitError } = await supabaseClient
+          const permitTable = activityRole === "studio-owner" ? "studios" : "gigs";
+          const permitOwnerField = activityRole === "studio-owner" ? "owner_id" : "organizer_id";
+          let permitQuery = supabaseClient
             .from(permitTable)
             .select("id, name, permit_status, permit_rejection_reason, permit_resubmissions_used, permit_reviewed_at, created_at")
-            .eq(permitOwnerField, userId)
             .in("permit_status", ["pending", "pending_review", "resubmitted", "rejected"])
             .order("created_at", { ascending: false });
+
+          if (staffContext?.target_id) {
+            permitQuery = permitQuery.eq("id", staffContext.target_id);
+          } else {
+            permitQuery = permitQuery.eq(permitOwnerField, requesterId);
+          }
+
+          const { data: permitRows, error: permitError } = await permitQuery;
 
           if (permitError) throw permitError;
 
           return (permitRows || []).map((row: any) => ({
             ...row,
-            entity_type: userRole === "studio-owner" ? "studio" : "gig",
+            entity_type: activityRole === "studio-owner" ? "studio" : "gig",
           }));
         };
 
         const connectionRequestSelect =
           "id, created_at, sender_id, receiver_id, group_id, studio_id, message, status, event_details, attachment_url";
         const loadOwnedGroupIds = async () => {
+          if (staffContext) return [];
+
           const { data: ownedGroups, error: ownedGroupsError } = await supabaseClient
             .from("groups")
             .select("id")
-            .eq("owner_id", userId);
+            .eq("owner_id", requesterId);
 
           if (ownedGroupsError) throw ownedGroupsError;
 
@@ -1930,26 +2040,38 @@ serve(async (req: Request) => {
           loadOwnedGroupIds(),
         ]);
 
-        const requestResults = await Promise.all([
-          supabaseClient
-            .from("booking_requests")
-            .select(connectionRequestSelect)
-            .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
-            .in("status", ["pending", "accepted", "approved", "connected", "rejected", "declined", "cancelled"])
-            .order("created_at", { ascending: false })
-            .limit(40),
-          ...(ownedGroupIds.length > 0
+        const requestResults = await Promise.all(
+          staffContext?.entity_type === "studio" && staffContext.studio_id
             ? [
                 supabaseClient
                   .from("booking_requests")
                   .select(connectionRequestSelect)
-                  .in("group_id", ownedGroupIds)
+                  .eq("studio_id", staffContext.studio_id)
                   .in("status", ["pending", "accepted", "approved", "connected", "rejected", "declined", "cancelled"])
                   .order("created_at", { ascending: false })
                   .limit(40),
               ]
-            : []),
-        ]);
+            : [
+                supabaseClient
+                  .from("booking_requests")
+                  .select(connectionRequestSelect)
+                  .or(`sender_id.eq.${requesterId},receiver_id.eq.${requesterId}`)
+                  .in("status", ["pending", "accepted", "approved", "connected", "rejected", "declined", "cancelled"])
+                  .order("created_at", { ascending: false })
+                  .limit(40),
+                ...(ownedGroupIds.length > 0
+                  ? [
+                      supabaseClient
+                        .from("booking_requests")
+                        .select(connectionRequestSelect)
+                        .in("group_id", ownedGroupIds)
+                        .in("status", ["pending", "accepted", "approved", "connected", "rejected", "declined", "cancelled"])
+                        .order("created_at", { ascending: false })
+                        .limit(40),
+                    ]
+                  : []),
+              ],
+        );
 
         const connectionRequestsById = new Map<string, any>();
         requestResults.forEach((result) => {
@@ -2009,7 +2131,9 @@ serve(async (req: Request) => {
         return new Response(JSON.stringify({
           ...categorized,
           categorized,
-          role: userRole,
+          role: activityRole,
+          profile_role: userRole,
+          staff_context: staffContext,
           ownedGroupIds,
           pendingPermitListings,
           connectionRequests,
@@ -2022,7 +2146,13 @@ serve(async (req: Request) => {
         });
       }
 
-      return new Response(JSON.stringify(categorized), {
+      return new Response(JSON.stringify({
+        ...categorized,
+        categorized,
+        role: activityRole,
+        profile_role: userRole,
+        staff_context: staffContext,
+      }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
       });
@@ -2120,17 +2250,6 @@ serve(async (req: Request) => {
           {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
             status: 400,
-          },
-        );
-      }
-
-      const internalSlotConflict = getInternalSlotConflictMessage(slots);
-      if (internalSlotConflict) {
-        return new Response(
-          JSON.stringify({ error: internalSlotConflict }),
-          {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 409,
           },
         );
       }
@@ -2958,6 +3077,19 @@ serve(async (req: Request) => {
           .single();
 
         if (bookingInfo) {
+          const staffAccessLevel = await getStaffAccessForStudio(supabaseAdmin, authUser.id, bookingInfo.studio_id);
+          const canReportAttendance =
+            bookingInfo.user_id === authUser.id ||
+            bookingInfo.studio?.owner_id === authUser.id ||
+            (staffAccessLevel !== null && staffAccessLevel <= 2);
+
+          if (!canReportAttendance) {
+            return new Response(JSON.stringify({ error: "Forbidden" }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 403,
+            });
+          }
+
           const reporterId = params.userId || null;
           const studioName = bookingInfo.studio?.name || "the studio";
           const eventLabel =
@@ -3005,6 +3137,36 @@ serve(async (req: Request) => {
 
       const updateData: any = { status: new_status };
 
+      if (table === "studio_bookings") {
+        const { data: targetBooking, error: targetBookingError } = await supabaseAdmin
+          .from("studio_bookings")
+          .select("id, user_id, studio_id, studio:studios(owner_id)")
+          .eq("id", booking_id)
+          .maybeSingle();
+
+        if (targetBookingError) throw targetBookingError;
+
+        if (!targetBooking) {
+          return new Response(JSON.stringify({ error: "Booking not found" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 404,
+          });
+        }
+
+        const staffAccessLevel = await getStaffAccessForStudio(supabaseAdmin, authUser.id, targetBooking.studio_id);
+        const canUpdateStudioBooking =
+          targetBooking.user_id === authUser.id ||
+          targetBooking.studio?.owner_id === authUser.id ||
+          (staffAccessLevel !== null && staffAccessLevel <= 2);
+
+        if (!canUpdateStudioBooking) {
+          return new Response(JSON.stringify({ error: "Forbidden" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 403,
+          });
+        }
+      }
+
       if (table === "gig_applications") {
         const { data: targetApplication, error: targetError } = await supabaseAdmin
           .from("gig_applications")
@@ -3034,6 +3196,12 @@ serve(async (req: Request) => {
           targetApplication.applicant_id === authUser.id ||
           targetApplication.submitted_by_user_id === authUser.id;
         let isProductionManager = false;
+        const venueStaffAccessLevel = await getStaffAccessForGig(supabaseAdmin, authUser.id, targetApplication.gig_id);
+        const productionStaffAccessLevel = targetApplication.production_team_id
+          ? await getStaffAccessForProduction(supabaseAdmin, authUser.id, targetApplication.production_team_id)
+          : null;
+        const isVenueStaffManager = venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2;
+        const isProductionStaffManager = productionStaffAccessLevel !== null && productionStaffAccessLevel <= 2;
 
         if (targetApplication.production_team_id) {
           const { data: productionMembership, error: productionMembershipError } =
@@ -3049,14 +3217,16 @@ serve(async (req: Request) => {
           isProductionManager = !!productionMembership;
         }
 
-        const organizerAllowedStatuses = ["accepted", "approved", "rejected", "completed", "cancelled", "fired"];
+        const organizerAllowedStatuses = ["accepted", "rejected", "completed", "cancelled", "fired"];
         const applicantAllowedStatuses = ["cancelled", "resigned"];
         const productionManagerAllowedStatuses = ["cancelled", "resigned", "fired"];
 
         if (
           !(isOrganizer && organizerAllowedStatuses.includes(new_status)) &&
           !(isApplicant && applicantAllowedStatuses.includes(new_status)) &&
-          !(isProductionManager && productionManagerAllowedStatuses.includes(new_status))
+          !(isProductionManager && productionManagerAllowedStatuses.includes(new_status)) &&
+          !(isVenueStaffManager && organizerAllowedStatuses.includes(new_status)) &&
+          !(isProductionStaffManager && productionManagerAllowedStatuses.includes(new_status))
         ) {
           return new Response(JSON.stringify({ error: "Forbidden" }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -3074,30 +3244,15 @@ serve(async (req: Request) => {
       }
 
 
-      const updateClient = table === "gig_applications" ? supabaseAdmin : supabaseClient;
-      let data: any = null;
-      let error: any = null;
+      const updateClient = table === "gig_applications" || table === "studio_bookings" ? supabaseAdmin : supabaseClient;
 
-      if (table === "gig_applications" && (new_status === "accepted" || new_status === "approved")) {
-        const acceptResult = await supabaseAdmin.rpc("accept_gig_application_safely", {
-          p_application_id: booking_id,
-          p_actor_user_id: authUser.id,
-          p_new_status: new_status,
-        });
+      const { data, error } = await updateClient
+        .from(table)
+        .update(updateData)
+        .eq("id", booking_id)
+        .select()
+        .maybeSingle();
 
-        data = acceptResult.data;
-        error = acceptResult.error;
-      } else {
-        const updateResult = await updateClient
-          .from(table)
-          .update(updateData)
-          .eq("id", booking_id)
-          .select()
-          .maybeSingle();
-
-        data = updateResult.data;
-        error = updateResult.error;
-      }
 
       if (error) throw error;
 
@@ -3156,7 +3311,7 @@ serve(async (req: Request) => {
 
       // NOTIFICATION LOGIC
       if (
-        ["cancelled", "resigned", "rejected", "confirmed", "accepted", "approved", "completed", "fired"].includes(new_status)
+        ["cancelled", "resigned", "rejected", "confirmed", "accepted", "completed", "fired"].includes(new_status)
       ) {
         try {
           const notificationEventType =
@@ -3418,8 +3573,12 @@ serve(async (req: Request) => {
 
       const isMusicianReporter = reporterUserId === musicianId;
       const isOwnerReporter = Boolean(studioOwnerId && reporterUserId === studioOwnerId);
+      const incidentStaffAccess = bookingDetails.studio_id
+        ? await getStaffAccessForStudio(supabaseAdmin, reporterUserId, bookingDetails.studio_id)
+        : null;
+      const isStaffReporter = incidentStaffAccess !== null && incidentStaffAccess <= 2;
 
-      if (!isMusicianReporter && !isOwnerReporter) {
+      if (!isMusicianReporter && !isOwnerReporter && !isStaffReporter) {
         return new Response(
           JSON.stringify({ error: "You are not allowed to report this booking." }),
           {
@@ -3610,7 +3769,22 @@ serve(async (req: Request) => {
         );
       }
 
-      if (bookingDetails.studio?.owner_id !== user_id) {
+      if (user_id !== authUser.id) {
+        return new Response(
+          JSON.stringify({ error: "Forbidden" }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 403,
+          },
+        );
+      }
+
+      const staffAccessLevel = await getStaffAccessForStudio(supabaseAdmin, authUser.id, bookingDetails.studio_id);
+      const canApprovePartialSlots =
+        bookingDetails.studio?.owner_id === authUser.id ||
+        (staffAccessLevel !== null && staffAccessLevel <= 2);
+
+      if (!canApprovePartialSlots) {
         return new Response(
           JSON.stringify({ error: "Not authorized to update this booking." }),
           {
@@ -3672,47 +3846,6 @@ serve(async (req: Request) => {
         start: normalizeTime(slot?.start),
         end: normalizeTime(slot?.end),
       }));
-
-      const acceptedSlotConflict = getInternalSlotConflictMessage(normalizedAcceptedSlots);
-      if (acceptedSlotConflict) {
-        return new Response(
-          JSON.stringify({ error: acceptedSlotConflict }),
-          {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 409,
-          },
-        );
-      }
-
-      const { data: acceptedSlotsAvailable, error: acceptedSlotsAvailabilityError } =
-        await supabaseAdmin.rpc("are_slots_available", {
-          p_studio_id: bookingDetails.studio_id,
-          p_booking_date: bookingDetails.booking_date,
-          p_time_slots: normalizedAcceptedSlots,
-          p_user_id: bookingDetails.user_id,
-          p_exclude_booking_id: booking_id,
-        });
-
-      if (acceptedSlotsAvailabilityError) {
-        console.error("Accepted slot availability check failed:", acceptedSlotsAvailabilityError);
-        return new Response(
-          JSON.stringify({ error: "Failed to validate accepted slots. Please try again." }),
-          {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 400,
-          },
-        );
-      }
-
-      if (!acceptedSlotsAvailable) {
-        return new Response(
-          JSON.stringify({ error: "One or more accepted slots are no longer available." }),
-          {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 409,
-          },
-        );
-      }
 
       const totalHours = normalizedAcceptedSlots.reduce(
         (sum: number, slot: any) => sum + toHours(slot.start, slot.end),
@@ -3849,7 +3982,7 @@ serve(async (req: Request) => {
       if (bookingId && bookingType === "studio_booking") {
         const { data: bookingAuth, error: bookingAuthError } = await supabaseClient
           .from("studio_bookings")
-          .select("id, user_id, studio:studios(owner_id)")
+          .select("id, user_id, studio_id, studio:studios(owner_id)")
           .eq("id", bookingId)
           .single();
 
@@ -3862,8 +3995,12 @@ serve(async (req: Request) => {
 
         const isStudioOwnerReviewer = reviewerRole === "owner" && bookingAuth.studio?.owner_id === userId;
         const isCustomerReviewer = reviewerRole === "customer" && bookingAuth.user_id === userId;
+        const staffAccessLevel = reviewerRole === "owner"
+          ? await getStaffAccessForStudio(supabaseAdmin, userId, bookingAuth.studio_id)
+          : null;
+        const isStudioStaffReviewer = staffAccessLevel !== null && staffAccessLevel <= 2;
 
-        if (!isStudioOwnerReviewer && !isCustomerReviewer) {
+        if (!isStudioOwnerReviewer && !isCustomerReviewer && !isStudioStaffReviewer) {
           return new Response(
             JSON.stringify({ error: "You are not allowed to submit this studio review." }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 },
@@ -3874,7 +4011,7 @@ serve(async (req: Request) => {
       if (bookingId && bookingType === "gig_application") {
         const { data: appAuth, error: appAuthError } = await supabaseClient
           .from("gig_applications")
-          .select("id, applicant_id, group_id, gig:gig_id(organizer_id)")
+          .select("id, applicant_id, group_id, gig_id, production_team_id, gig:gig_id(organizer_id)")
           .eq("id", bookingId)
           .single();
 
@@ -3887,8 +4024,17 @@ serve(async (req: Request) => {
 
         const isOrganizerReviewer = reviewerRole === "organizer" && appAuth.gig?.organizer_id === userId;
         const isApplicantReviewer = reviewerRole === "applicant" && appAuth.applicant_id === userId;
+        const venueStaffAccessLevel = reviewerRole === "organizer"
+          ? await getStaffAccessForGig(supabaseAdmin, userId, appAuth.gig_id)
+          : null;
+        const productionStaffAccessLevel = reviewerRole === "organizer" && appAuth.production_team_id
+          ? await getStaffAccessForProduction(supabaseAdmin, userId, appAuth.production_team_id)
+          : null;
+        const isGigStaffReviewer =
+          (venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2) ||
+          (productionStaffAccessLevel !== null && productionStaffAccessLevel <= 2);
 
-        if (!isOrganizerReviewer && !isApplicantReviewer) {
+        if (!isOrganizerReviewer && !isApplicantReviewer && !isGigStaffReviewer) {
           return new Response(
             JSON.stringify({ error: "You are not allowed to submit this gig review." }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 },
@@ -4094,8 +4240,15 @@ serve(async (req: Request) => {
         });
       }
 
-      // 2. Verify scanner is the studio owner
-      if (!booking.studio || booking.studio.owner_id !== scanner_id) {
+      // 2. Verify scanner is the studio owner or assigned staff with booking actions.
+      const qrStaffAccessLevel = booking.studio_id
+        ? await getStaffAccessForStudio(supabaseAdmin, authUser.id, booking.studio_id)
+        : null;
+      const canScanForStudio =
+        booking.studio?.owner_id === scanner_id ||
+        (scanner_id === authUser.id && qrStaffAccessLevel !== null && qrStaffAccessLevel <= 2);
+
+      if (!booking.studio || !canScanForStudio) {
         return new Response(
           JSON.stringify({
             error: "You are not authorized to scan for this studio.",
@@ -4198,8 +4351,15 @@ serve(async (req: Request) => {
         );
       }
 
-      // 2. Verify the user is the gig organizer
-      if (originalApp.gig?.organizer_id !== authUser.id) {
+      // 2. Verify the user is the gig organizer or assigned venue staff with booking actions.
+      const renewalStaffAccessLevel = originalApp.gig_id
+        ? await getStaffAccessForGig(supabaseAdmin, authUser.id, originalApp.gig_id)
+        : null;
+      const canRenewContract =
+        originalApp.gig?.organizer_id === authUser.id ||
+        (renewalStaffAccessLevel !== null && renewalStaffAccessLevel <= 2);
+
+      if (!canRenewContract) {
         return new Response(
           JSON.stringify({
             error: "You are not authorized to renew this contract.",
@@ -4412,6 +4572,13 @@ serve(async (req: Request) => {
         });
       }
 
+      if (booking.user_id !== authUser.id) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+
       // 2. Prepare update data
       // If it sends 'confirmed' status, it moves to Upcoming
       const updateData: any = {
@@ -4484,18 +4651,8 @@ serve(async (req: Request) => {
         );
       }
 
-      if (owner_id !== authUser.id) {
-        return new Response(
-          JSON.stringify({ error: "You are not authorized to modify this booking" }),
-          {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 403,
-          },
-        );
-      }
-
       // 1. Get the booking and verify ownership
-      const { data: booking, error: bookingError } = await supabaseAdmin
+      const { data: booking, error: bookingError } = await supabaseClient
         .from("studio_bookings")
         .select("*, studio:studios(id, owner_id, name)")
         .eq("id", booking_id)
@@ -4511,8 +4668,15 @@ serve(async (req: Request) => {
         );
       }
 
-      // 2. Verify the owner owns this studio
-      if (booking.studio?.owner_id !== owner_id) {
+      // 2. Verify the owner owns this studio, or assigned staff can manage booking actions.
+      const clearBalanceStaffAccess = booking.studio_id
+        ? await getStaffAccessForStudio(supabaseAdmin, authUser.id, booking.studio_id)
+        : null;
+      const canClearBalance =
+        booking.studio?.owner_id === authUser.id ||
+        (clearBalanceStaffAccess !== null && clearBalanceStaffAccess <= 2);
+
+      if (!canClearBalance) {
         return new Response(
           JSON.stringify({ error: "You are not authorized to modify this booking" }),
           {
@@ -4560,7 +4724,7 @@ serve(async (req: Request) => {
       const { data: wallet, error: walletError } = await supabaseAdmin
         .from("wallets")
         .select("id, balance")
-        .eq("user_id", owner_id)
+        .eq("user_id", booking.studio?.owner_id || owner_id)
         .single();
 
       if (walletError) {

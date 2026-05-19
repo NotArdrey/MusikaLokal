@@ -58,6 +58,8 @@ export async function searchProductionInviteTargets({
           .from("profiles")
           .select("id, full_name, avatar_url, address, role")
           .eq("role", "musician")
+          .eq("is_verified", true)
+          .eq("verification_status", "APPROVED")
           .or(`full_name.ilike.%${normalizedQuery}%,address.ilike.%${normalizedQuery}%`)
           .limit(10);
 

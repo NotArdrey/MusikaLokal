@@ -8,8 +8,9 @@ import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import Modal, { normalizeConfirmationInput } from '../src/components/modal';
 import Navbar from '../src/components/navbar';
-import { useRequireAuth } from '../src/context/AuthContext';
+import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { StaffAssignment, fetchActiveStaffAssignment, getStaffPermissions } from '../src/utils/staffAccess';
 
 const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
@@ -41,6 +42,7 @@ export default function MyStudioScreen() {
             : '#D8E3F2'
         : colors.border;
     const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+    const { userRole } = useAuth();
     const params = useLocalSearchParams<{ refresh?: string }>();
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
     const [modalVisible, setModalVisible] = useState(false);
@@ -48,6 +50,7 @@ export default function MyStudioScreen() {
     const [selectedName, setSelectedName] = useState('');
     const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
     const [studios, setStudios] = useState<any[]>([]);
+    const [staffAssignment, setStaffAssignment] = useState<StaffAssignment | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -71,11 +74,26 @@ export default function MyStudioScreen() {
     const fetchStudios = useCallback(async () => {
         if (!userId) return;
         try {
-            const { data: baseStudios, error: baseError } = await supabase
+            const activeStaffAssignment = userRole === 'staff'
+                ? await fetchActiveStaffAssignment(supabase, userId)
+                : null;
+            setStaffAssignment(activeStaffAssignment);
+
+            if (userRole === 'staff' && (!activeStaffAssignment || activeStaffAssignment.entity_type !== 'studio' || !activeStaffAssignment.studio_id)) {
+                setStudios([]);
+                return;
+            }
+
+            let studioQuery = supabase
                 .from('studios')
                 .select('id, owner_id, name, description, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
-                .eq('owner_id', userId)
                 .order('created_at', { ascending: false });
+
+            studioQuery = activeStaffAssignment?.entity_type === 'studio' && activeStaffAssignment.studio_id
+                ? studioQuery.eq('id', activeStaffAssignment.studio_id)
+                : studioQuery.eq('owner_id', userId);
+
+            const { data: baseStudios, error: baseError } = await studioQuery;
 
             if (baseError) throw baseError;
 
@@ -144,7 +162,7 @@ export default function MyStudioScreen() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [userId]);
+    }, [userId, userRole]);
 
     useFocusEffect(
         useCallback(() => {
@@ -164,11 +182,15 @@ export default function MyStudioScreen() {
     useEffect(() => {
         if (!isAuthenticated || !userId) return;
 
+        const realtimeFilter = staffAssignment?.entity_type === 'studio' && staffAssignment.studio_id
+            ? `id=eq.${staffAssignment.studio_id}`
+            : `owner_id=eq.${userId}`;
+
         const channel = supabase
             .channel(`my-studio-listings:${userId}`)
             .on(
                 'postgres_changes',
-                { event: '*', schema: 'public', table: 'studios', filter: `owner_id=eq.${userId}` },
+                { event: '*', schema: 'public', table: 'studios', filter: realtimeFilter },
                 () => {
                     fetchStudios();
                 }
@@ -178,7 +200,7 @@ export default function MyStudioScreen() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [isAuthenticated, userId, fetchStudios]);
+    }, [isAuthenticated, userId, fetchStudios, staffAssignment]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -205,6 +227,10 @@ export default function MyStudioScreen() {
 
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;
+        if (userRole === 'staff') {
+            showAlert('warning', 'Action blocked', 'Staff accounts cannot delete studios.');
+            return;
+        }
         if (!isDeleteConfirmed) {
             showAlert('warning', 'Confirmation Needed', `Please type "${selectedName}" exactly to confirm deletion.`);
             return;
@@ -302,6 +328,12 @@ export default function MyStudioScreen() {
                         ) : (
                             <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
                                 {studios.map((studio) => {
+                                    const staffPermissions = userRole === 'staff'
+                                        ? getStaffPermissions(staffAssignment?.access_level)
+                                        : null;
+                                    const canShowActions = !staffPermissions?.canViewOnly;
+                                const canManageBookings = !staffPermissions || staffPermissions.canManageBookings;
+                                const canEditListing = !staffPermissions || staffPermissions.canEditListing;
                                     const normalizedPermitStatus = normalizePermitStatus(studio.permit_status);
                                     const isRejected = normalizedPermitStatus === 'rejected';
                                     const isApproved = normalizedPermitStatus === 'approved';
@@ -367,31 +399,41 @@ export default function MyStudioScreen() {
                                                     </Text>
                                                 )}
 
-                                                <View style={[styles.actionRow, { borderColor: colors.border }]}>
-                                                    <View style={styles.actionLeft}>
-                                                        <TouchableOpacity activeOpacity={1}
-                                                            onPress={() => router.push({ pathname: '/manage_studio', params: { id: studio.id } })}
-                                                            style={[styles.manageBtn, { backgroundColor: colors.primary }]}
-                                                        >
-                                                            <Ionicons name="settings-outline" size={16} color="#FFF" />
-                                                            <Text style={styles.manageBtnText}>Manage</Text>
-                                                        </TouchableOpacity>
+                                                {canShowActions && (
+                                                    <View style={[styles.actionRow, { borderColor: colors.border }]}>
+                                                        <View style={styles.actionLeft}>
+                                                            {canManageBookings ? (
+                                                                <TouchableOpacity activeOpacity={1}
+                                                                    onPress={() => router.push({ pathname: '/manage_studio', params: { id: studio.id } })}
+                                                                    style={[styles.manageBtn, { backgroundColor: colors.primary }]}
+                                                                >
+                                                                    <Ionicons name="settings-outline" size={16} color="#FFF" />
+                                                                    <Text style={styles.manageBtnText}>Manage</Text>
+                                                                </TouchableOpacity>
+                                                            ) : null}
 
-                                                        <TouchableOpacity activeOpacity={1}
-                                                            onPress={() => router.push({ pathname: '/edit_studio', params: { id: studio.id } })}
-                                                            style={[styles.editBtn, { borderColor: colors.border }]}
-                                                        >
-                                                            <Ionicons name="pencil-outline" size={18} color={colors.text} style={styles.editBtnIcon} />
-                                                        </TouchableOpacity>
+                                                            {canEditListing ? (
+                                                                <>
+                                                                    <TouchableOpacity activeOpacity={1}
+                                                                        onPress={() => router.push({ pathname: '/edit_studio', params: { id: studio.id } })}
+                                                                        style={[styles.editBtn, { borderColor: colors.border }]}
+                                                                    >
+                                                                        <Ionicons name="pencil-outline" size={18} color={colors.text} style={styles.editBtnIcon} />
+                                                                    </TouchableOpacity>
+                                                                </>
+                                                            ) : null}
+                                                        </View>
+
+                                                        {!staffPermissions ? (
+                                                            <TouchableOpacity activeOpacity={1}
+                                                                onPress={() => confirmDelete(studio.id, studio.name)}
+                                                                style={styles.deleteBtn}
+                                                            >
+                                                                <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                                                            </TouchableOpacity>
+                                                        ) : null}
                                                     </View>
-
-                                                    <TouchableOpacity activeOpacity={1}
-                                                        onPress={() => confirmDelete(studio.id, studio.name)}
-                                                        style={styles.deleteBtn}
-                                                    >
-                                                        <Ionicons name="trash-outline" size={18} color="#EF4444" />
-                                                    </TouchableOpacity>
-                                                </View>
+                                                )}
                                             </View>
                                         </View>
                                     </View>

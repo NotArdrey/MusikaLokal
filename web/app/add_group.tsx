@@ -495,15 +495,6 @@ export default function AddGroupScreen() {
     else router.replace("/my_group");
   };
 
-  const handleCreateGroupPlaylistBeforeCreate = () => {
-    showAlert(
-      "info",
-      "Create Group First",
-      "Finish creating the group first. As soon as it is created, you can upload a playlist owned by the group.",
-      [{ text: "OK", onPress: () => undefined }],
-    );
-  };
-
   const createGroup = async () => {
     if (creating) return;
     setCreating(true);
@@ -649,12 +640,12 @@ export default function AddGroupScreen() {
         `"${groupName}" has been successfully created.`,
         [
           {
-            text: "Upload Group Playlist",
-            onPress: () => navigateToGroupPlaylistUpload(data.id),
-          },
-          {
             text: "Manage Group",
             onPress: () => navigateToManageGroup(data.id),
+          },
+          {
+            text: "Add Playlist",
+            onPress: () => navigateToGroupPlaylistUpload(data.id),
             style: "cancel",
           },
         ],
@@ -1771,30 +1762,24 @@ export default function AddGroupScreen() {
                   ]}
                 >
                   <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.reviewLabel}>Group Playlists</Text>
-                      <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
-                        Upload a playlist owned by this group after creation.
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      activeOpacity={1}
-                      onPress={handleCreateGroupPlaylistBeforeCreate}
+                    <View
                       style={{
-                        flexDirection: "row",
+                        width: 40,
+                        height: 40,
+                        borderRadius: 12,
                         alignItems: "center",
-                        gap: 6,
-                        paddingHorizontal: 12,
-                        paddingVertical: 9,
-                        borderRadius: 10,
-                        backgroundColor: colors.primary,
+                        justifyContent: "center",
+                        backgroundColor: colors.primary + "18",
                       }}
                     >
-                      <Ionicons name="cloud-upload-outline" size={14} color="#fff" />
-                      <Text style={{ color: "#fff", fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
-                        Upload
+                      <Ionicons name="musical-notes-outline" size={18} color={colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.reviewLabel}>Playlists (Optional)</Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
+                        Create the group now, then add a group-owned playlist from Manage Group whenever you're ready.
                       </Text>
-                    </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
 

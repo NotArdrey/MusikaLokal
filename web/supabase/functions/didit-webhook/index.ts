@@ -24,6 +24,8 @@ const corsHeaders = {
 }
 
 const WEBHOOK_SECRET_KEY = Deno.env.get('DIDIT_WEBHOOK_SECRET') || Deno.env.get('WEBHOOK_SECRET_KEY') || '';
+const MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON = 'MISSING_DOCUMENT_FINGERPRINT_RETRY_REQUIRED';
+const MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE = 'We could not read the document number needed to verify this ID. Please repeat identity verification with a clear, valid ID.';
 
 /**
  * Didit Webhook Handler with Signature Validation
@@ -265,6 +267,250 @@ function extractDocumentExpiry(idVerification: any): string | null {
     ]);
 
     return normalizeDateOnly(rawExpiry);
+}
+
+function escapeHtml(value: unknown) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+async function sendMissingDocumentFingerprintRetryEmail(
+    supabaseAdmin: any,
+    {
+        email,
+        displayName,
+        diditSessionId,
+    }: {
+        email: string,
+        displayName?: string,
+        diditSessionId?: string | null,
+    },
+) {
+    const recipientEmail = String(email || '').trim().toLowerCase();
+    if (!recipientEmail) return { sent: false, queued: false, provider: 'none', skipped: true, error: 'Missing recipient email' };
+
+    if (diditSessionId) {
+        const { data: existing } = await supabaseAdmin
+            .from('verification_sessions')
+            .select('verification_data')
+            .eq('session_ref', diditSessionId)
+            .maybeSingle();
+        const existingData = existing?.verification_data && typeof existing.verification_data === 'object'
+            ? existing.verification_data
+            : {};
+        if (existingData.missing_document_fingerprint_email_sent_at || existingData.missing_document_fingerprint_email_queued_at) {
+            return { sent: false, queued: false, provider: 'dedupe', skipped: true };
+        }
+    }
+
+    const safeName = escapeHtml(displayName || 'there');
+    const safeMessage = escapeHtml(MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE);
+    const subject = 'Identity Verification Retry Needed - MusikaLokal';
+    const html = `
+<h1>MusikaLokal</h1>
+<p>Hi ${safeName},</p>
+<p>${safeMessage}</p>
+<p>Please start identity verification again and use a clear, readable government ID. Make sure the document number is visible and not covered by glare, blur, cropping, or a finger.</p>
+<p>Your email is not blocked. You can retry registration with the same email address.</p>
+<p>Thank you,<br>MusikaLokal Team</p>`.trim();
+
+    const gmailDelivery = await sendEmailWithGmail({
+        to: recipientEmail,
+        subject,
+        html,
+        recipientName: displayName || 'User',
+        source: 'missing-document-fingerprint-retry',
+    });
+
+    if (gmailDelivery.sent) {
+        if (diditSessionId) {
+            await upsertVerificationSession(supabaseAdmin, diditSessionId, 'DECLINED', {
+                missing_document_fingerprint_email_sent_at: new Date().toISOString(),
+                missing_document_fingerprint_email_provider: gmailDelivery.provider,
+            });
+        }
+        return { sent: true, queued: false, provider: gmailDelivery.provider };
+    }
+
+    const gmailError = gmailDelivery.error || 'Gmail sender is not configured';
+    console.error('missing_document_fingerprint_retry_gmail_failed', {
+        provider: gmailDelivery.provider,
+        message: gmailError,
+    });
+
+    const { error: queueError } = await supabaseAdmin.from('email_notifications').insert({
+        recipient_email: recipientEmail,
+        recipient_name: displayName || 'User',
+        subject,
+        html_content: html,
+        template_type: 'identity_verification_retry_required',
+        status: 'pending',
+        created_at: new Date().toISOString(),
+    });
+
+    if (queueError) {
+        console.error('missing_document_fingerprint_retry_queue_failed', { message: queueError.message });
+        if (diditSessionId) {
+            await upsertVerificationSession(supabaseAdmin, diditSessionId, 'DECLINED', {
+                missing_document_fingerprint_email_error: `${gmailError}; ${queueError.message}`,
+            });
+        }
+        return { sent: false, queued: false, provider: 'email_notifications', error: `${gmailError}; ${queueError.message}` };
+    }
+
+    if (diditSessionId) {
+        await upsertVerificationSession(supabaseAdmin, diditSessionId, 'DECLINED', {
+            missing_document_fingerprint_email_queued_at: new Date().toISOString(),
+            missing_document_fingerprint_email_provider: 'email_notifications',
+        });
+    }
+    return { sent: false, queued: true, provider: 'email_notifications', error: `${gmailError}; queued in email_notifications` };
+}
+
+async function handleMissingDocumentFingerprintRetry(
+    supabaseAdmin: any,
+    {
+        userReference,
+        userEmail,
+        idVerification,
+        sessionId,
+        context,
+        warnings,
+        sessionMetadata,
+    }: {
+        userReference: string,
+        userEmail?: string,
+        idVerification: any,
+        sessionId: string | null,
+        context: string,
+        warnings?: any[],
+        sessionMetadata?: any,
+    },
+) {
+    const firstName = idVerification?.first_name || idVerification?.firstName || '';
+    const middleName = idVerification?.extra_fields?.middle_name || idVerification?.middle_name || idVerification?.middleName || '';
+    const lastName = idVerification?.last_name || idVerification?.lastName || idVerification?.extra_fields?.first_surname || '';
+    const secondSurname = idVerification?.extra_fields?.second_surname || '';
+    const identityNameBirthDate = prepareIdentityNameBirthDateDuplicateInput(idVerification);
+    const fullName = identityNameBirthDate.fullLegalName || [firstName, middleName, lastName, secondSurname].filter(Boolean).join(' ');
+    const documentType = idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID';
+    const documentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL';
+
+    console.warn('Missing verified document fingerprint; requiring verification retry.', {
+        userReference,
+        sessionId,
+        context,
+        documentType,
+        documentCountry,
+    });
+    let retryEmailRecipient = String(userEmail || sessionMetadata?.email || '').trim().toLowerCase();
+
+    if (sessionId) {
+        const { error: sessionError } = await upsertVerificationSession(
+            supabaseAdmin,
+            sessionId,
+            'DECLINED',
+            {
+                user_ref: userReference,
+                email: userEmail || sessionMetadata?.email || null,
+                full_name: fullName,
+                first_name: firstName,
+                middle_name: middleName,
+                last_name: lastName,
+                raw_data: sanitizeIdentityVerificationData(idVerification || {}),
+                document_country: documentCountry,
+                document_type: documentType,
+                verified_full_legal_name: identityNameBirthDate.fullLegalName,
+                normalized_full_legal_name: identityNameBirthDate.normalizedFullLegalName,
+                birth_date: identityNameBirthDate.birthDate,
+                id_document_expiry: extractDocumentExpiry(idVerification),
+                missing_document_fingerprint: true,
+                retry_required: true,
+                retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+                retry_message: MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE,
+                source_context: context,
+                warnings: sanitizeIdentityVerificationData(warnings || []),
+                declined_at: new Date().toISOString(),
+            },
+        );
+
+        if (sessionError) {
+            console.error('Failed to mark missing document fingerprint session as retry-required:', sessionError.message);
+        }
+    }
+
+    if (isUuid(userReference)) {
+        const { error: profileError } = await supabaseAdmin
+            .from('profiles')
+            .update({
+                is_verified: false,
+                verification_status: 'DECLINED',
+                didit_session_id: null,
+                id_verified_at: null,
+            })
+            .eq('id', userReference);
+
+        if (profileError) {
+            console.error('Failed to mark profile retry-required for missing document fingerprint:', profileError.message);
+        }
+
+        const { data: authUserData, error: authUserError } = await supabaseAdmin.auth.admin.getUserById(userReference);
+        if (authUserError) {
+            console.error('Failed to load auth user for missing document fingerprint decline:', authUserError.message);
+        } else if (authUserData?.user) {
+            retryEmailRecipient = retryEmailRecipient || String(authUserData.user.email || '').trim().toLowerCase();
+            const existingMetadata = authUserData.user.user_metadata || {};
+            const { error: authUpdateError } = await supabaseAdmin.auth.admin.updateUserById(userReference, {
+                user_metadata: {
+                    ...existingMetadata,
+                    is_verified: false,
+                    verification_status: 'DECLINED',
+                    retry_required: true,
+                    retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+                    didit_session_id: null,
+                },
+            });
+
+            if (authUpdateError) {
+                console.error('Failed to mark auth user retry-required for missing document fingerprint:', authUpdateError.message);
+            }
+        }
+
+        await sendMissingDocumentFingerprintRetryEmail(supabaseAdmin, {
+            email: retryEmailRecipient,
+            displayName: fullName,
+            diditSessionId: sessionId,
+        });
+
+        const { error: notificationError } = await supabaseAdmin
+            .from('notifications')
+            .insert({
+                user_id: userReference,
+                type: 'warning',
+                title: 'Identity Verification Retry Needed',
+                message: MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE,
+                meta: {
+                    verification_status: 'DECLINED',
+                    retry_required: true,
+                    retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+                    didit_session_id: sessionId,
+                },
+            });
+
+        if (notificationError) {
+            console.error('Failed to store missing document fingerprint retry notification:', notificationError.message);
+        }
+    } else {
+        await sendMissingDocumentFingerprintRetryEmail(supabaseAdmin, {
+            email: retryEmailRecipient,
+            displayName: fullName,
+            diditSessionId: sessionId,
+        });
+    }
 }
 
 serve(async (req) => {
@@ -622,7 +868,24 @@ serve(async (req) => {
             // 3. IN REVIEW: If manual review is required
             else if (isDiditReviewStatus(faceStatus) || isDiditReviewStatus(idStatus) || isDiditReviewStatus(livenessStatus)) {
                 console.log('Status is IN REVIEW');
-                await handleInReview(supabaseAdmin, finalUserReference, sessionId);
+                const reviewDocumentType = idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID';
+                const reviewDocumentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || '';
+                const reviewDocumentFingerprint = await buildIdentityDocumentFingerprint(idVerification, {
+                    documentType: reviewDocumentType,
+                    documentCountry: reviewDocumentCountry,
+                });
+
+                if (!reviewDocumentFingerprint) {
+                    await handleMissingDocumentFingerprintRetry(supabaseAdmin, {
+                        userReference: finalUserReference,
+                        userEmail,
+                        idVerification,
+                        sessionId,
+                        context: 'review_without_document_fingerprint',
+                    });
+                } else {
+                    await handleInReview(supabaseAdmin, finalUserReference, sessionId);
+                }
             }
             // 3b. Missing Face Match: ID-only approval is not enough for MusikaLokal identity verification.
             else if (idStatus === 'Approved' && !faceMatch) {
@@ -933,6 +1196,17 @@ async function handleApproved(
         hasDocumentFingerprint: Boolean(documentFingerprint),
         hasNameBirthDateDuplicateInput: identityNameBirthDate.hasNameBirthDate,
     });
+
+    if (!documentFingerprint) {
+        await handleMissingDocumentFingerprintRetry(supabaseAdmin, {
+            userReference,
+            userEmail,
+            idVerification,
+            sessionId,
+            context: 'approved_without_document_fingerprint',
+        });
+        return;
+    }
 
     // ALWAYS Store verification result in verification_sessions table
     // This provides a persistent record for both TEMP and Registered users.
@@ -1512,6 +1786,19 @@ async function handleDuplicateDetected(
         const rawRole = pendingSession?.verification_data?.signup_role || sessionMetadata?.signup_role || sessionMetadata?.role || '';
         resolvedRole = rawRole ? normalizeIdentityRole(rawRole) : '';
         resolvedEmail = resolvedEmail || pendingSession?.verification_data?.email || sessionMetadata?.email || '';
+    }
+
+    if (!documentFingerprint) {
+        await handleMissingDocumentFingerprintRetry(supabaseAdmin, {
+            userReference,
+            userEmail: resolvedEmail || userEmail,
+            idVerification,
+            sessionId,
+            context: 'duplicate_warning_without_document_fingerprint',
+            warnings,
+            sessionMetadata,
+        });
+        return;
     }
 
     let duplicateMatchCount = 1;

@@ -27,6 +27,47 @@ async function getProfileRole(supabaseAdmin: any, userId: string) {
   return typeof data?.role === "string" ? data.role.trim().toLowerCase() : null;
 }
 
+function isMissingTableError(error: any, tableName: string) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "").toLowerCase();
+  const normalizedTable = tableName.toLowerCase();
+
+  return (
+    (code === "42P01" && message.includes(normalizedTable)) ||
+    (code === "PGRST205" && message.includes(normalizedTable))
+  );
+}
+
+async function getProductionStaffAccessLevel(supabaseAdmin: any, teamId: string, userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("staff_listing_access")
+    .select("access_level")
+    .eq("staff_user_id", userId)
+    .eq("entity_type", "production")
+    .eq("production_team_id", teamId)
+    .is("revoked_at", null)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingTableError(error, "staff_listing_access")) return null;
+    throw error;
+  }
+
+  return data?.access_level ? Number(data.access_level) : null;
+}
+
+async function getProductionEditorAccess(supabaseAdmin: any, teamId: string, userId: string) {
+  const membership = await getTeamManagerMembership(supabaseAdmin, teamId, userId);
+  if (membership) return { role: membership.role || "manager", staff_access_level: null };
+
+  const staffAccessLevel = await getProductionStaffAccessLevel(supabaseAdmin, teamId, userId);
+  if (staffAccessLevel === 1) {
+    return { role: "staff_level_1", staff_access_level: staffAccessLevel };
+  }
+
+  return null;
+}
+
 async function getTeamManagerMembership(supabaseAdmin: any, teamId: string, userId: string) {
   const { data } = await supabaseAdmin
     .from("production_team_members")
@@ -1538,41 +1579,10 @@ serve(async (req: Request) => {
       if (existingTeamError) return jsonResponse({ error: existingTeamError.message }, 500);
       if (!existingTeam) return jsonResponse({ error: "Production team not found" }, 404);
 
-      let membership: any = null;
-      if (existingTeam.owner_id === authUser.id) {
-        const { error: ownerMembershipError } = await supabaseAdmin
-          .from("production_team_members")
-          .upsert({
-            team_id,
-            user_id: authUser.id,
-            role: "owner",
-          }, { onConflict: "team_id,user_id" });
+      const editorAccess = await getProductionEditorAccess(supabaseAdmin, team_id, authUser.id);
 
-        if (ownerMembershipError) {
-          console.error("[manage-production] Failed to repair owner membership before update", {
-            team_id,
-            user_id: authUser.id,
-            message: ownerMembershipError.message,
-            code: ownerMembershipError.code,
-            details: ownerMembershipError.details,
-            hint: ownerMembershipError.hint,
-          });
-        }
-      } else {
-        const { data: managerMembership, error: membershipError } = await supabaseAdmin
-          .from("production_team_members")
-          .select("role")
-          .eq("team_id", team_id)
-          .eq("user_id", authUser.id)
-          .in("role", ["owner", "manager"])
-          .maybeSingle();
-
-        if (membershipError) return jsonResponse({ error: membershipError.message }, 500);
-        membership = managerMembership;
-      }
-
-      if (existingTeam.owner_id !== authUser.id && !membership) {
-        return jsonResponse({ error: "Only team owners or managers can update this team" }, 403);
+      if (!editorAccess) {
+        return jsonResponse({ error: "Only team owners, managers, or level 1 staff can update this team" }, 403);
       }
 
       const { data: team, error: teamErr } = await supabaseAdmin
@@ -1642,16 +1652,8 @@ serve(async (req: Request) => {
       const { team_id, user_id, role } = params;
       if (!team_id || !user_id) return jsonResponse({ error: "team_id and user_id are required" }, 400);
 
-      // Verify caller is owner/manager
-      const { data: callerMember } = await supabaseAdmin
-        .from("production_team_members")
-        .select("role")
-        .eq("team_id", team_id)
-        .eq("user_id", authUser.id)
-        .in("role", ["owner", "manager"])
-        .maybeSingle();
-
-      if (!callerMember) return jsonResponse({ error: "Only team owners or managers can add members" }, 403);
+      const callerAccess = await getProductionEditorAccess(supabaseAdmin, team_id, authUser.id);
+      if (!callerAccess) return jsonResponse({ error: "Only team owners, managers, or level 1 staff can add members" }, 403);
 
       const memberRole = role || "member";
       if (!["owner", "manager", "member"].includes(memberRole)) {
@@ -1688,8 +1690,8 @@ serve(async (req: Request) => {
       if (teamError) return jsonResponse({ error: teamError.message }, 500);
       if (!team) return jsonResponse({ error: "Production team not found" }, 404);
 
-      const callerMember = await getTeamManagerMembership(supabaseAdmin, team_id, authUser.id);
-      if (!callerMember) return jsonResponse({ error: "Only team owners or managers can remove members" }, 403);
+      const callerMember = await getProductionEditorAccess(supabaseAdmin, team_id, authUser.id);
+      if (!callerMember) return jsonResponse({ error: "Only team owners, managers, or level 1 staff can remove members" }, 403);
 
       // Cannot remove the team owner
       const { data: targetMember } = await supabaseAdmin
@@ -1788,7 +1790,8 @@ serve(async (req: Request) => {
         .eq("user_id", authUser.id)
         .maybeSingle();
 
-      if (!membership) {
+      const staffAccessLevel = membership ? null : await getProductionStaffAccessLevel(supabaseAdmin, team_id, authUser.id);
+      if (!membership && !staffAccessLevel) {
         return jsonResponse({ error: "Only team members can view this roster" }, 403);
       }
 
@@ -1807,9 +1810,9 @@ serve(async (req: Request) => {
         return jsonResponse({ error: "team_id and profile_id are required" }, 400);
       }
 
-      const membership = await getTeamManagerMembership(supabaseAdmin, team_id, authUser.id);
+      const membership = await getProductionEditorAccess(supabaseAdmin, team_id, authUser.id);
       if (!membership) {
-        return jsonResponse({ error: "Only team owners or managers can update the roster" }, 403);
+        return jsonResponse({ error: "Only team owners, managers, or level 1 staff can update the roster" }, 403);
       }
 
       const { data: profile, error: profileError } = await supabaseAdmin
@@ -1857,9 +1860,9 @@ serve(async (req: Request) => {
         return jsonResponse({ error: "team_id and group_id are required" }, 400);
       }
 
-      const membership = await getTeamManagerMembership(supabaseAdmin, team_id, authUser.id);
+      const membership = await getProductionEditorAccess(supabaseAdmin, team_id, authUser.id);
       if (!membership) {
-        return jsonResponse({ error: "Only team owners or managers can update the roster" }, 403);
+        return jsonResponse({ error: "Only team owners, managers, or level 1 staff can update the roster" }, 403);
       }
 
       let groupResult: any;
@@ -1902,9 +1905,9 @@ serve(async (req: Request) => {
         return jsonResponse({ error: "team_id and roster_id are required" }, 400);
       }
 
-      const membership = await getTeamManagerMembership(supabaseAdmin, team_id, authUser.id);
+      const membership = await getProductionEditorAccess(supabaseAdmin, team_id, authUser.id);
       if (!membership) {
-        return jsonResponse({ error: "Only team owners or managers can update the roster" }, 403);
+        return jsonResponse({ error: "Only team owners, managers, or level 1 staff can update the roster" }, 403);
       }
 
       const { data: rosterEntry, error: rosterEntryError } = await supabaseAdmin
@@ -2183,6 +2186,25 @@ serve(async (req: Request) => {
 
       if (ownedTeamsError) return jsonResponse({ error: ownedTeamsError.message }, 500);
 
+      const userRole = await getProfileRole(supabaseAdmin, authUser.id);
+      let staffTeamRows: any[] = [];
+      if (userRole === "staff") {
+        const { data: staffAssignments, error: staffAssignmentsError } = await supabaseAdmin
+          .from("staff_listing_access")
+          .select("access_level, production_team:production_team_id(*)")
+          .eq("staff_user_id", authUser.id)
+          .eq("entity_type", "production")
+          .is("revoked_at", null);
+
+        if (staffAssignmentsError) {
+          if (!isMissingTableError(staffAssignmentsError, "staff_listing_access")) {
+            return jsonResponse({ error: staffAssignmentsError.message }, 500);
+          }
+        } else {
+          staffTeamRows = staffAssignments || [];
+        }
+      }
+
       const teamsById = new Map<string, any>();
       (memberships || []).forEach((membershipRow: any) => {
         const teamRecord = Array.isArray(membershipRow.production_teams)
@@ -2220,6 +2242,21 @@ serve(async (req: Request) => {
         teamsById.set(ownedTeam.id, {
           ...ownedTeam,
           member_role: "owner",
+        });
+      }
+
+      for (const staffRow of staffTeamRows) {
+        const teamRecord = Array.isArray(staffRow.production_team)
+          ? staffRow.production_team[0]
+          : staffRow.production_team;
+        if (!teamRecord?.id) continue;
+
+        teamsById.set(teamRecord.id, {
+          ...teamRecord,
+          member_role: `staff-level-${staffRow.access_level}`,
+          staff_access_level: Number(staffRow.access_level),
+          staff_can_edit: Number(staffRow.access_level) === 1,
+          staff_can_manage_bookings: Number(staffRow.access_level) <= 2,
         });
       }
 

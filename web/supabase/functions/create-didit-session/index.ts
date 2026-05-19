@@ -1,10 +1,12 @@
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { sendEmailWithGmail } from "../_shared/gmailEmail.ts";
 import {
   buildIdentityDocumentFingerprint,
   createSessionNonce,
   hashSessionNonce,
+  isUuid,
   normalizeIdentityEmail,
   sanitizeIdentityVerificationData,
   stripPrivateSessionFields,
@@ -27,6 +29,15 @@ function jsonResponse(payload: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 async function assertSessionNonce(
@@ -158,6 +169,10 @@ const FAILED_SESSION_STATUSES = new Set([
   "SUPERSEDED",
   "SUPERSEDED_APPROVED",
 ]);
+
+const MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON = "MISSING_DOCUMENT_FINGERPRINT_RETRY_REQUIRED";
+const MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE =
+  "We could not read the document number needed to verify this ID. Please repeat identity verification with a clear, valid ID.";
 
 function normalizeDiditStatus(value: unknown) {
   const normalized = String(value || "").trim().replace(/[\s-]+/g, "_").toUpperCase();
@@ -556,6 +571,197 @@ async function buildDiditSessionSyncData(
   };
 }
 
+function addMissingDocumentFingerprintRetryData(verificationData: Record<string, unknown> | null | undefined) {
+  return {
+    ...(verificationData && typeof verificationData === "object" ? verificationData : {}),
+    missing_document_fingerprint: true,
+    retry_required: true,
+    retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+    retry_message: MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE,
+    declined_at: new Date().toISOString(),
+  };
+}
+
+async function mergeVerificationSessionData(
+  client: any,
+  sessionRef: string,
+  updates: Record<string, unknown>,
+) {
+  if (!sessionRef) return;
+
+  const { data: existing } = await client
+    .from("verification_sessions")
+    .select("verification_data")
+    .eq("session_ref", sessionRef)
+    .maybeSingle();
+
+  const existingVerificationData =
+    existing?.verification_data && typeof existing.verification_data === "object"
+      ? existing.verification_data
+      : {};
+
+  await client
+    .from("verification_sessions")
+    .update({
+      verification_data: {
+        ...existingVerificationData,
+        ...updates,
+      },
+    })
+    .eq("session_ref", sessionRef);
+}
+
+async function sendMissingDocumentFingerprintRetryEmail(
+  client: any,
+  {
+    email,
+    displayName,
+    diditSessionId,
+  }: {
+    email: string,
+    displayName?: string,
+    diditSessionId?: string,
+  },
+) {
+  const recipientEmail = String(email || "").trim().toLowerCase();
+  if (!recipientEmail) return { sent: false, queued: false, provider: "none", skipped: true, error: "Missing recipient email" };
+
+  if (diditSessionId) {
+    const { data: existing } = await client
+      .from("verification_sessions")
+      .select("verification_data")
+      .eq("session_ref", diditSessionId)
+      .maybeSingle();
+    const existingData =
+      existing?.verification_data && typeof existing.verification_data === "object"
+        ? existing.verification_data
+        : {};
+    if (existingData.missing_document_fingerprint_email_sent_at || existingData.missing_document_fingerprint_email_queued_at) {
+      return { sent: false, queued: false, provider: "dedupe", skipped: true };
+    }
+  }
+
+  const safeName = escapeHtml(displayName || "there");
+  const safeMessage = escapeHtml(MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE);
+  const subject = "Identity Verification Retry Needed - MusikaLokal";
+  const html = `
+<h1>MusikaLokal</h1>
+<p>Hi ${safeName},</p>
+<p>${safeMessage}</p>
+<p>Please start identity verification again and use a clear, readable government ID. Make sure the document number is visible and not covered by glare, blur, cropping, or a finger.</p>
+<p>Your email is not blocked. You can retry registration with the same email address.</p>
+<p>Thank you,<br>MusikaLokal Team</p>`.trim();
+
+  const gmailDelivery = await sendEmailWithGmail({
+    to: recipientEmail,
+    subject,
+    html,
+    recipientName: displayName || "User",
+    source: "missing-document-fingerprint-retry",
+  });
+
+  if (gmailDelivery.sent) {
+    await mergeVerificationSessionData(client, String(diditSessionId || ""), {
+      missing_document_fingerprint_email_sent_at: new Date().toISOString(),
+      missing_document_fingerprint_email_provider: gmailDelivery.provider,
+    });
+    return { sent: true, queued: false, provider: gmailDelivery.provider };
+  }
+
+  const gmailError = gmailDelivery.error || "Gmail sender is not configured";
+  console.error("missing_document_fingerprint_retry_gmail_failed", {
+    provider: gmailDelivery.provider,
+    message: gmailError,
+  });
+
+  const { error: queueError } = await client.from("email_notifications").insert({
+    recipient_email: recipientEmail,
+    recipient_name: displayName || "User",
+    subject,
+    html_content: html,
+    template_type: "identity_verification_retry_required",
+    status: "pending",
+    created_at: new Date().toISOString(),
+  });
+
+  if (queueError) {
+    console.error("missing_document_fingerprint_retry_queue_failed", { message: queueError.message });
+    await mergeVerificationSessionData(client, String(diditSessionId || ""), {
+      missing_document_fingerprint_email_error: `${gmailError}; ${queueError.message}`,
+    });
+    return { sent: false, queued: false, provider: "email_notifications", error: `${gmailError}; ${queueError.message}` };
+  }
+
+  await mergeVerificationSessionData(client, String(diditSessionId || ""), {
+    missing_document_fingerprint_email_queued_at: new Date().toISOString(),
+    missing_document_fingerprint_email_provider: "email_notifications",
+  });
+  return { sent: false, queued: true, provider: "email_notifications", error: `${gmailError}; queued in email_notifications` };
+}
+
+async function markLinkedAccountDeclinedForMissingFingerprint(
+  supabaseAdmin: any,
+  userReference: unknown,
+  sessionId: string,
+) {
+  const userId = String(userReference || "").trim();
+  if (!isUuid(userId)) return;
+
+  const { error: profileError } = await supabaseAdmin
+    .from("profiles")
+    .update({
+      is_verified: false,
+      verification_status: "DECLINED",
+      didit_session_id: null,
+      id_verified_at: null,
+    })
+    .eq("id", userId);
+
+  if (profileError) {
+    console.error("Failed to mark linked profile declined for missing document fingerprint:", profileError.message);
+  }
+
+  const { data: authUserData, error: authUserError } = await supabaseAdmin.auth.admin.getUserById(userId);
+  if (authUserError) {
+    console.error("Failed to load auth user for missing document fingerprint decline:", authUserError.message);
+  } else if (authUserData?.user) {
+    const existingMetadata = authUserData.user.user_metadata || {};
+    const { error: authUpdateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+      user_metadata: {
+        ...existingMetadata,
+        is_verified: false,
+        verification_status: "DECLINED",
+        retry_required: true,
+        retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+        didit_session_id: null,
+      },
+    });
+
+    if (authUpdateError) {
+      console.error("Failed to mark linked auth user declined for missing document fingerprint:", authUpdateError.message);
+    }
+  }
+
+  const { error: notificationError } = await supabaseAdmin
+    .from("notifications")
+    .insert({
+      user_id: userId,
+      type: "warning",
+      title: "Identity Verification Retry Needed",
+      message: MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE,
+      meta: {
+        verification_status: "DECLINED",
+        retry_required: true,
+        retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+        didit_session_id: sessionId,
+      },
+    });
+
+  if (notificationError) {
+    console.error("Failed to store missing document fingerprint retry notification:", notificationError.message);
+  }
+}
+
 async function upsertVerificationSession(
   supabaseAdmin: any,
   sessionRef: string,
@@ -721,7 +927,7 @@ serve(async (req) => {
         const localStatusIsFinal = isFinalSessionStatus(storedStatus);
         const diditStatusIsFinal = isFinalSessionStatus(diditResolvedStatus);
         let syncedVerificationData = null;
-        const effectiveStatus = storedPendingReviewStillInProgress
+        let effectiveStatus = storedPendingReviewStillInProgress
           ? diditResolvedStatus
           : diditFailureOverridesLocal
           ? diditResolvedStatus
@@ -732,6 +938,7 @@ serve(async (req) => {
           : diditStatusIsFinal
             ? diditResolvedStatus
             : (storedStatus || diditResolvedStatus || 'PENDING');
+        let missingDocumentFingerprintRetryData: Record<string, unknown> | null = null;
 
         console.log("[didit] get_session status resolved", {
           sessionId: session_id,
@@ -775,10 +982,64 @@ serve(async (req) => {
             console.log('Synced final Didit session status from live API:', diditResolvedStatus);
           }
         }
+
+        if (effectiveStatus === 'APPROVED' || effectiveStatus === 'PENDING_REVIEW') {
+          const storedDocumentFingerprint = String(localSessionData.verification_data?.document_fingerprint || '').trim();
+          let syncedDocumentFingerprint = String(syncedVerificationData?.document_fingerprint || '').trim();
+
+          if (!storedDocumentFingerprint && !syncedDocumentFingerprint) {
+            syncedVerificationData = await buildDiditSessionSyncData(
+              rawDecisionData,
+              rawBaseData,
+              effectiveStatus,
+              localSessionData,
+            );
+            syncedDocumentFingerprint = String(syncedVerificationData?.document_fingerprint || '').trim();
+          }
+
+          if (!storedDocumentFingerprint && !syncedDocumentFingerprint) {
+            effectiveStatus = 'DECLINED';
+            missingDocumentFingerprintRetryData = addMissingDocumentFingerprintRetryData(syncedVerificationData);
+            const { error: missingFingerprintError } = await upsertVerificationSession(
+              supabaseAdmin,
+              String(session_id),
+              'DECLINED',
+              missingDocumentFingerprintRetryData,
+            );
+
+            if (missingFingerprintError) {
+              console.error('Failed to mark missing document fingerprint session as retry-required:', missingFingerprintError.message);
+            } else {
+              console.log('Marked Didit session as retry-required because document fingerprint was missing.');
+            }
+
+            await sendMissingDocumentFingerprintRetryEmail(supabaseAdmin, {
+              email: String(
+                missingDocumentFingerprintRetryData?.email ||
+                localSessionData.verification_data?.email ||
+                "",
+              ),
+              displayName: String(
+                missingDocumentFingerprintRetryData?.full_name ||
+                localSessionData.verification_data?.full_name ||
+                "",
+              ),
+              diditSessionId: String(session_id),
+            });
+
+            await markLinkedAccountDeclinedForMissingFingerprint(
+              supabaseAdmin,
+              missingDocumentFingerprintRetryData?.user_ref || localSessionData.verification_data?.user_ref,
+              String(session_id),
+            );
+          }
+        }
+
         const publicVerificationData = stripPrivateSessionFields(
           sanitizeIdentityVerificationData({
             ...(localSessionData.verification_data || {}),
             ...(syncedVerificationData || {}),
+            ...(missingDocumentFingerprintRetryData || {}),
           }),
         );
 
@@ -793,6 +1054,9 @@ serve(async (req) => {
             rawDiditStatus: rawBaseStatus || rawDecisionStatus || null,
             businessStatus: effectiveStatus,
             diditResolvedStatus: diditResolvedStatus || null,
+            retry_required: Boolean(publicVerificationData?.retry_required),
+            retry_reason: publicVerificationData?.retry_reason || null,
+            retry_message: publicVerificationData?.retry_message || null,
           },
           extracted_data: {
             ...sessionData.extracted_data,

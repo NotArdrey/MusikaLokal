@@ -1028,6 +1028,7 @@ export default function BookingsScreen() {
   const [userRole, setUserRole] = useState<string>(
     () => initialBookingsCacheRef.current?.userRole || "",
   );
+  const [staffBookingContext, setStaffBookingContext] = useState<any>(null);
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
   const [locallyReportedLateBookings, setLocallyReportedLateBookings] = useState<Record<string, boolean>>({});
   const [locallyReportedAccessIssueBookings, setLocallyReportedAccessIssueBookings] = useState<Record<string, boolean>>({});
@@ -1954,7 +1955,7 @@ export default function BookingsScreen() {
             .eq("id", targetUserId)
             .single();
 
-      const role = profile?.role || "";
+      let role = profile?.role || "";
       if (role) {
         setUserRole(role);
         // If venue owner, default to Applicants tab only once (avoid tab reset on auto-refresh)
@@ -2005,6 +2006,19 @@ export default function BookingsScreen() {
       const { data: bookings, error } = functionResult;
       if (!screenPayload && bookings) {
         queryClient.setQueryData(queryKeys.bookings.summary(targetUserId), bookings);
+      }
+
+      const returnedStaffContext = bookings?.staff_context || null;
+      setStaffBookingContext(returnedStaffContext);
+      if (bookings?.role && bookings.role !== role) {
+        role = bookings.role;
+        setUserRole(role);
+        if (role === "venue-owner" && !venueTabInitializedRef.current) {
+          setActiveTab("Applicants");
+          venueTabInitializedRef.current = true;
+        } else if (role !== "venue-owner") {
+          venueTabInitializedRef.current = false;
+        }
       }
 
       const fallbackBookings =
@@ -2894,6 +2908,10 @@ export default function BookingsScreen() {
   };
 
   const isReadOnlyBookingItem = (item: any) => {
+    if (staffBookingContext?.view_only === true) {
+      return true;
+    }
+
     const normalizedItemStatus = String(item?.raw_status || item?.status || "")
       .trim()
       .toLowerCase();
@@ -2916,7 +2934,9 @@ export default function BookingsScreen() {
   const showReadOnlyBookingAlert = () => {
     Alert.alert(
       "View Only",
-      "This application was submitted on your behalf. You can view the details, but actions are managed by the applicant or production team.",
+      staffBookingContext?.view_only === true
+        ? "This staff account has view-only access for this workspace."
+        : "This application was submitted on your behalf. You can view the details, but actions are managed by the applicant or production team.",
     );
   };
 

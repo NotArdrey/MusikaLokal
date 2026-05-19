@@ -23,6 +23,15 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { getAdminPageCacheKey, invalidateAdminPageCache, readAdminPageCache, writeAdminPageCache } from './_cache';
 import { getFriendlyDetailEntries, getFriendlyDetailImage } from './_formatters';
+import {
+  STAFF_ACCESS_LEVEL_LABELS,
+  STAFF_ENTITY_LABELS,
+  StaffAccessLevel,
+  StaffAssignment,
+  StaffEntityType,
+  normalizeStaffAccessLevel,
+  normalizeStaffEntityType,
+} from '../../src/utils/staffAccess';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -96,9 +105,9 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
 
 type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
 
-type UserRole = 'fan' | 'musician' | 'studio-owner' | 'venue-owner' | 'producer' | 'admin';
+type UserRole = 'fan' | 'musician' | 'studio-owner' | 'venue-owner' | 'producer' | 'admin' | 'staff';
 
-type UserFilter = 'all' | 'fan' | 'musicians' | 'studio-owner' | 'venue-owner' | 'producer';
+type UserFilter = 'all' | 'fan' | 'musicians' | 'studio-owner' | 'venue-owner' | 'producer' | 'staff';
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
@@ -125,6 +134,9 @@ interface UserEntry {
   is_verified: boolean;
   verification_status?: string | null;
   created_at: string;
+  staff_assignment?: StaffAssignment | null;
+  staff_assignment_label?: string | null;
+  staff_access_level_label?: string | null;
 }
 
 interface UserDetailsEntry {
@@ -143,7 +155,15 @@ type AdminAlertButton = {
   style?: 'default' | 'cancel' | 'destructive';
 };
 
-const userRoleOptions: UserRole[] = ['fan', 'musician', 'studio-owner', 'venue-owner', 'producer', 'admin'];
+type StaffTargetOption = {
+  id: string;
+  name: string;
+  meta?: string | null;
+};
+
+const userRoleOptions: UserRole[] = ['fan', 'musician', 'studio-owner', 'venue-owner', 'producer', 'admin', 'staff'];
+const staffEntityOptions: StaffEntityType[] = ['studio', 'venue', 'production'];
+const staffAccessLevelOptions: StaffAccessLevel[] = [1, 2, 3];
 
 const normalizeDelimitedList = (value: string) => {
   const seen = new Set<string>();
@@ -180,6 +200,7 @@ const userFilters: { value: UserFilter; label: string }[] = [
   { value: 'studio-owner', label: 'studio owner' },
   { value: 'venue-owner', label: 'venue owner' },
   { value: 'producer', label: 'producer' },
+  { value: 'staff', label: 'staff' },
 ];
 
 const USER_MANAGEMENT_HIDDEN_VERIFICATION_STATUSES = new Set(['DECLINED', 'PENDING_REVIEW']);
@@ -324,24 +345,63 @@ const getBooleanField = (
   return fallback;
 };
 
+const normalizeStaffAssignmentFromRecord = (record: Record<string, unknown>): StaffAssignment | null => {
+  const raw = record.staff_assignment;
+  if (!raw || typeof raw !== 'object') return null;
+
+  const assignment = raw as Record<string, unknown>;
+  const entityType = normalizeStaffEntityType(assignment.entity_type);
+  const accessLevel = normalizeStaffAccessLevel(assignment.access_level);
+  const id = getOptionalStringField(assignment, 'id');
+  const staffUserId = getOptionalStringField(assignment, 'staff_user_id');
+
+  if (!entityType || !accessLevel || !id || !staffUserId) return null;
+
+  const studioId = getOptionalStringField(assignment, 'studio_id');
+  const gigId = getOptionalStringField(assignment, 'gig_id');
+  const productionTeamId = getOptionalStringField(assignment, 'production_team_id');
+  const targetId =
+    getOptionalStringField(assignment, 'target_id') ||
+    (entityType === 'studio' ? studioId : entityType === 'venue' ? gigId : productionTeamId);
+
+  return {
+    id,
+    staff_user_id: staffUserId,
+    entity_type: entityType,
+    studio_id: studioId,
+    gig_id: gigId,
+    production_team_id: productionTeamId,
+    access_level: accessLevel,
+    target_id: targetId || null,
+    target_name: getOptionalStringField(assignment, 'target_name'),
+  };
+};
+
 const normalizeUserEntryFromDetails = (
   record: Record<string, unknown>,
   fallback: UserEntry,
-): UserEntry => ({
-  id: getOptionalStringField(record, 'id', fallback.id) || fallback.id,
-  full_name: getOptionalStringField(record, 'full_name', fallback.full_name) || '',
-  email: getOptionalStringField(record, 'email', fallback.email) || '',
-  role: getOptionalStringField(record, 'role', fallback.role) || fallback.role,
-  contact_number: getOptionalStringField(record, 'contact_number', fallback.contact_number),
-  address: getOptionalStringField(record, 'address', fallback.address),
-  location: getOptionalStringField(record, 'location', fallback.location),
-  bio: getOptionalStringField(record, 'bio', fallback.bio),
-  skills: getStringListField(record, 'skills', fallback.skills),
-  genres: getStringListField(record, 'genres', fallback.genres),
-  is_verified: getBooleanField(record, 'is_verified', Boolean(fallback.is_verified)),
-  verification_status: getOptionalStringField(record, 'verification_status', fallback.verification_status),
-  created_at: getOptionalStringField(record, 'created_at', fallback.created_at) || fallback.created_at,
-});
+): UserEntry => {
+  const staffAssignment = normalizeStaffAssignmentFromRecord(record) || fallback.staff_assignment || null;
+
+  return {
+    id: getOptionalStringField(record, 'id', fallback.id) || fallback.id,
+    full_name: getOptionalStringField(record, 'full_name', fallback.full_name) || '',
+    email: getOptionalStringField(record, 'email', fallback.email) || '',
+    role: getOptionalStringField(record, 'role', fallback.role) || fallback.role,
+    contact_number: getOptionalStringField(record, 'contact_number', fallback.contact_number),
+    address: getOptionalStringField(record, 'address', fallback.address),
+    location: getOptionalStringField(record, 'location', fallback.location),
+    bio: getOptionalStringField(record, 'bio', fallback.bio),
+    skills: getStringListField(record, 'skills', fallback.skills),
+    genres: getStringListField(record, 'genres', fallback.genres),
+    is_verified: getBooleanField(record, 'is_verified', Boolean(fallback.is_verified)),
+    verification_status: getOptionalStringField(record, 'verification_status', fallback.verification_status),
+    created_at: getOptionalStringField(record, 'created_at', fallback.created_at) || fallback.created_at,
+    staff_assignment: staffAssignment,
+    staff_assignment_label: getOptionalStringField(record, 'staff_assignment_label', fallback.staff_assignment_label),
+    staff_access_level_label: getOptionalStringField(record, 'staff_access_level_label', fallback.staff_access_level_label),
+  };
+};
 
 const styles = StyleSheet.create({
   booleanToggleButton: {
@@ -490,11 +550,11 @@ const styles = StyleSheet.create({
   filterChip: {
     borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
   },
   filterChipText: {
-    fontSize: 12,
+    fontSize: 13,
     fontFamily: 'Poppins_500Medium',
     textTransform: 'capitalize',
   },
@@ -502,16 +562,22 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 2,
   },
+  roleSelectorGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    paddingVertical: 4,
+  },
   fieldErrorText: {
     color: '#EF4444',
     fontSize: 11,
     fontFamily: 'Poppins_500Medium',
   },
   fieldGroup: {
-    gap: 6,
+    gap: 8,
   },
   fieldLabel: {
-    fontSize: 11,
+    fontSize: 12,
     fontFamily: 'Poppins_600SemiBold',
     textTransform: 'uppercase',
   },
@@ -520,9 +586,9 @@ const styles = StyleSheet.create({
   },
   formSection: {
     borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    gap: 10,
+    borderRadius: 14,
+    padding: 18,
+    gap: 14,
   },
   formSectionHeader: {
     flexDirection: 'row',
@@ -530,14 +596,14 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   formSectionIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
   },
   formSectionTitle: {
-    fontSize: 13,
+    fontSize: 15,
     fontFamily: 'Poppins_700Bold',
   },
   formLabel: {
@@ -553,16 +619,61 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
   },
+  staffAccessPanel: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 18,
+    gap: 16,
+  },
+  staffLevelGrid: {
+    gap: 10,
+  },
+  staffLevelButton: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    gap: 4,
+  },
+  staffLevelTitle: {
+    fontSize: 13,
+    fontFamily: 'Poppins_700Bold',
+  },
+  staffLevelText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+  },
+  staffTargetList: {
+    maxHeight: 220,
+  },
+  staffTargetListContent: {
+    gap: 8,
+  },
+  staffTargetOption: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 2,
+  },
+  staffTargetTitle: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  staffTargetMeta: {
+    fontSize: 11,
+    fontFamily: 'Poppins_400Regular',
+  },
   loadingText: {
     marginTop: 12,
     fontSize: 14,
     fontFamily: 'Poppins_400Regular',
   },
   modalActionsRow: {
-    marginTop: 4,
+    marginTop: 8,
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    gap: 8,
+    gap: 10,
   },
   modalBackdrop: {
     flex: 1,
@@ -572,26 +683,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   modalButton: {
-    minWidth: 108,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    minWidth: 132,
+    borderRadius: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
     alignItems: 'center',
     justifyContent: 'center',
   },
   modalButtonText: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 14,
     fontFamily: 'Poppins_600SemiBold',
   },
   modalCard: {
     width: '100%',
-    maxWidth: 560,
-    maxHeight: '92%',
-    borderRadius: 16,
+    maxWidth: 720,
+    maxHeight: '94%',
+    borderRadius: 18,
     borderWidth: 1,
-    padding: 16,
-    gap: 10,
+    padding: 22,
+    gap: 14,
   },
   modalCardLarge: {
     width: '100%',
@@ -619,10 +730,10 @@ const styles = StyleSheet.create({
   },
   modalInputCompact: {
     borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 13,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    fontSize: 14,
     fontFamily: 'Poppins_400Regular',
   },
   modalInputMultiline: {
@@ -638,7 +749,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 22,
     fontFamily: 'Poppins_700Bold',
   },
   modalDescription: {
@@ -727,11 +838,11 @@ const styles = StyleSheet.create({
     textTransform: 'capitalize',
   },
   userFormScroll: {
-    maxHeight: 560,
+    maxHeight: 680,
   },
   userFormScrollContent: {
-    gap: 10,
-    paddingBottom: 4,
+    gap: 14,
+    paddingBottom: 8,
   },
 });
 
@@ -776,6 +887,11 @@ export default function AdminUsersPage() {
   const [userFormEmailConfirmed, setUserFormEmailConfirmed] = useState(false);
   const [userFormSubmitting, setUserFormSubmitting] = useState(false);
   const [userFormSubmitAttempted, setUserFormSubmitAttempted] = useState(false);
+  const [staffFormEntityType, setStaffFormEntityType] = useState<StaffEntityType>('studio');
+  const [staffFormAccessLevel, setStaffFormAccessLevel] = useState<StaffAccessLevel>(1);
+  const [staffFormTargetId, setStaffFormTargetId] = useState('');
+  const [staffTargetOptions, setStaffTargetOptions] = useState<StaffTargetOption[]>([]);
+  const [staffTargetsLoading, setStaffTargetsLoading] = useState(false);
   const [userDetailsTarget, setUserDetailsTarget] = useState<UserDetailsEntry | null>(null);
   const [alertState, setAlertState] = useState<{
     visible: boolean;
@@ -820,12 +936,18 @@ export default function AdminUsersPage() {
       }
     }
 
+    if (userFormRole === 'staff' && !staffFormTargetId) {
+      errors.staffTarget = 'Select the studio, venue, or production team this staff member can access.';
+    }
+
     return errors;
   }, [
     userFormEmail,
     userFormFullName,
     userFormPassword,
     userFormConfirmPassword,
+    userFormRole,
+    staffFormTargetId,
     userModalMode,
   ]);
 
@@ -866,6 +988,56 @@ export default function AdminUsersPage() {
 
     return data;
   }, []);
+
+  const fetchStaffTargetOptions = useCallback(async () => {
+    if (userFormRole !== 'staff') {
+      setStaffTargetOptions([]);
+      return;
+    }
+
+    setStaffTargetsLoading(true);
+    try {
+      const table =
+        staffFormEntityType === 'studio'
+          ? 'studios'
+          : staffFormEntityType === 'venue'
+            ? 'gigs'
+            : 'production_teams';
+
+      const { data, error } = await supabase
+        .from(table)
+        .select('id, name, created_at')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+
+      const options = (data || [])
+        .map((item: any) => ({
+          id: String(item?.id || ''),
+          name: String(item?.name || 'Untitled'),
+          meta: item?.created_at ? `Created ${formatDateTime(item.created_at)}` : null,
+        }))
+        .filter((item) => item.id.length > 0);
+
+      setStaffTargetOptions(options);
+    } catch (error) {
+      console.warn('Failed to load staff target options', error);
+      setStaffTargetOptions([]);
+    } finally {
+      setStaffTargetsLoading(false);
+    }
+  }, [staffFormEntityType, userFormRole]);
+
+  useEffect(() => {
+    if (!userModalVisible || userFormRole !== 'staff') {
+      setStaffTargetOptions([]);
+      setStaffTargetsLoading(false);
+      return;
+    }
+
+    void fetchStaffTargetOptions();
+  }, [fetchStaffTargetOptions, userFormRole, userModalVisible]);
 
   const fetchUsers = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
@@ -945,6 +1117,11 @@ export default function AdminUsersPage() {
     setUserFormIsVerified(false);
     setUserFormEmailConfirmed(false);
     setUserFormSubmitAttempted(false);
+    setStaffFormEntityType('studio');
+    setStaffFormAccessLevel(1);
+    setStaffFormTargetId('');
+    setStaffTargetOptions([]);
+    setStaffTargetsLoading(false);
   }, []);
 
   const openCreateUserModal = useCallback(() => {
@@ -969,6 +1146,18 @@ export default function AdminUsersPage() {
     setUserFormConfirmPassword('');
     setUserFormIsVerified(Boolean(targetUser.is_verified));
     setUserFormEmailConfirmed(false);
+    const staffAssignment = targetUser.staff_assignment || null;
+    const staffEntityType = normalizeStaffEntityType(staffAssignment?.entity_type) || 'studio';
+    const staffAccessLevel = normalizeStaffAccessLevel(staffAssignment?.access_level) || 1;
+    setStaffFormEntityType(staffEntityType);
+    setStaffFormAccessLevel(staffAccessLevel);
+    setStaffFormTargetId(
+      staffEntityType === 'studio'
+        ? staffAssignment?.studio_id || staffAssignment?.target_id || ''
+        : staffEntityType === 'venue'
+          ? staffAssignment?.gig_id || staffAssignment?.target_id || ''
+          : staffAssignment?.production_team_id || staffAssignment?.target_id || '',
+    );
     setUserModalVisible(true);
   }, []);
 
@@ -1074,6 +1263,17 @@ export default function AdminUsersPage() {
     const skills = normalizeDelimitedList(userFormSkills);
     const genres = normalizeDelimitedList(userFormGenres);
     const nextPassword = userFormPassword.trim();
+    const staffAssignmentPayload = userFormRole === 'staff'
+      ? {
+        entity_type: staffFormEntityType,
+        access_level: staffFormAccessLevel,
+        target_id: staffFormTargetId,
+        studio_id: staffFormEntityType === 'studio' ? staffFormTargetId : null,
+        gig_id: staffFormEntityType === 'venue' ? staffFormTargetId : null,
+        production_team_id: staffFormEntityType === 'production' ? staffFormTargetId : null,
+      }
+      : null;
+    const shouldSendStaffAssignment = userFormRole === 'staff' || staffFormTargetId.length > 0;
 
     if (userFormHasErrors) {
       const missingFields = Object.values(userFormErrors);
@@ -1103,6 +1303,7 @@ export default function AdminUsersPage() {
           bio,
           isVerified: userFormIsVerified,
           emailConfirmed: userFormEmailConfirmed,
+          ...(staffAssignmentPayload ? { staffAssignment: staffAssignmentPayload } : {}),
         });
 
         showAlert('success', 'User created', `${fullName} was created as ${formatRoleLabel(userFormRole)}.`);
@@ -1123,6 +1324,7 @@ export default function AdminUsersPage() {
           genres,
           bio,
           isVerified: userFormIsVerified,
+          ...(shouldSendStaffAssignment ? { staffAssignment: staffAssignmentPayload } : {}),
           ...(nextPassword ? { password: nextPassword } : {}),
         });
 
@@ -1151,6 +1353,9 @@ export default function AdminUsersPage() {
     userModalMode,
     userFormPassword,
     userFormRole,
+    staffFormEntityType,
+    staffFormAccessLevel,
+    staffFormTargetId,
     userFormIsVerified,
     userFormEmailConfirmed,
     editingUserId,
@@ -1475,6 +1680,9 @@ export default function AdminUsersPage() {
                     <Text style={[styles.cardTitle, { color: colors.text }]}>{user.full_name || 'Unknown'}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>{user.email}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Role: {user.role}</Text>
+                    {user.staff_assignment_label ? (
+                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Staff Access: {user.staff_assignment_label}</Text>
+                    ) : null}
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Verified: {user.is_verified ? 'Yes' : 'No'}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Verification Status: {String(user.verification_status || 'PENDING').replace(/_/g, ' ')}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Joined: {formatDateTime(user.created_at)}</Text>
@@ -1629,7 +1837,7 @@ export default function AdminUsersPage() {
                   <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                     {userModalMode === 'create' ? 'Register as' : 'Role'}
                   </Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+                  <View style={styles.roleSelectorGrid}>
                     {userRoleOptions.map((role) => {
                       const active = userFormRole === role;
                       return (
@@ -1653,8 +1861,144 @@ export default function AdminUsersPage() {
                         </TouchableOpacity>
                       );
                     })}
-                  </ScrollView>
+                  </View>
                 </View>
+
+                {userFormRole === 'staff' ? (
+                  <View style={[styles.staffAccessPanel, { borderColor: colors.border, backgroundColor: isDark ? '#111827' : '#FFFFFF' }]}>
+                    <View style={styles.formSectionHeader}>
+                      <View style={[styles.formSectionIcon, { backgroundColor: `${colors.primary}18` }]}>
+                        <Ionicons name="key-outline" size={16} color={colors.primary} />
+                      </View>
+                      <Text style={[styles.formSectionTitle, { color: colors.text }]}>Staff Access</Text>
+                    </View>
+
+                    <View style={styles.fieldGroup}>
+                      <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Assign to</Text>
+                      <View style={styles.roleSelectorGrid}>
+                        {staffEntityOptions.map((entityType) => {
+                          const active = staffFormEntityType === entityType;
+                          return (
+                            <TouchableOpacity
+                              key={entityType}
+                              testID={`admin-user-staff-entity-${entityType}`}
+                              accessibilityLabel={`admin-user-staff-entity-${entityType}`}
+                              activeOpacity={1}
+                              onPress={() => {
+                                setStaffFormEntityType(entityType);
+                                setStaffFormTargetId('');
+                              }}
+                              style={[
+                                styles.filterChip,
+                                {
+                                  backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
+                                  borderColor: active ? colors.primary : colors.border,
+                                },
+                              ]}
+                            >
+                              <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                                {STAFF_ENTITY_LABELS[entityType]}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </View>
+
+                    <View style={styles.fieldGroup}>
+                      <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Access level</Text>
+                      <View style={styles.staffLevelGrid}>
+                        {staffAccessLevelOptions.map((level) => {
+                          const active = staffFormAccessLevel === level;
+                          return (
+                            <TouchableOpacity
+                              key={level}
+                              testID={`admin-user-staff-level-${level}`}
+                              accessibilityLabel={`admin-user-staff-level-${level}`}
+                              activeOpacity={1}
+                              onPress={() => setStaffFormAccessLevel(level)}
+                              style={[
+                                styles.staffLevelButton,
+                                {
+                                  backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
+                                  borderColor: active ? colors.primary : colors.border,
+                                },
+                              ]}
+                            >
+                              <Text style={[styles.staffLevelTitle, { color: active ? '#FFFFFF' : colors.text }]}>
+                                Level {level}
+                              </Text>
+                              <Text style={[styles.staffLevelText, { color: active ? '#E5E7EB' : colors.textSecondary }]}>
+                                {STAFF_ACCESS_LEVEL_LABELS[level].replace(`Level ${level} - `, '')}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </View>
+
+                    <View style={styles.fieldGroup}>
+                      <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
+                        {STAFF_ENTITY_LABELS[staffFormEntityType]} <Text style={styles.requiredMark}>*</Text>
+                      </Text>
+                      {staffTargetsLoading ? (
+                        <View style={styles.inlineLoader}>
+                          <ActivityIndicator size="small" color={colors.primary} />
+                        </View>
+                      ) : staffTargetOptions.length === 0 ? (
+                        <Text style={[styles.detailsEmptyText, { color: colors.textSecondary }]}>
+                          No {STAFF_ENTITY_LABELS[staffFormEntityType].toLowerCase()} records found.
+                        </Text>
+                      ) : (
+                        <ScrollView
+                          nestedScrollEnabled
+                          style={styles.staffTargetList}
+                          contentContainerStyle={styles.staffTargetListContent}
+                          showsVerticalScrollIndicator={false}
+                        >
+                          {staffFormTargetId && !staffTargetOptions.some((item) => item.id === staffFormTargetId) ? (
+                            <TouchableOpacity
+                              testID="admin-user-staff-target-current"
+                              accessibilityLabel="admin-user-staff-target-current"
+                              activeOpacity={1}
+                              style={[styles.staffTargetOption, { borderColor: colors.primary, backgroundColor: `${colors.primary}14` }]}
+                            >
+                              <Text style={[styles.staffTargetTitle, { color: colors.text }]}>Current assignment</Text>
+                              <Text style={[styles.staffTargetMeta, { color: colors.textSecondary }]}>{staffFormTargetId}</Text>
+                            </TouchableOpacity>
+                          ) : null}
+                          {staffTargetOptions.map((option) => {
+                            const active = staffFormTargetId === option.id;
+                            return (
+                              <TouchableOpacity
+                                key={option.id}
+                                testID={`admin-user-staff-target-${option.id}`}
+                                accessibilityLabel={`admin-user-staff-target-${option.id}`}
+                                activeOpacity={1}
+                                onPress={() => setStaffFormTargetId(option.id)}
+                                style={[
+                                  styles.staffTargetOption,
+                                  {
+                                    borderColor: active ? colors.primary : colors.border,
+                                    backgroundColor: active ? `${colors.primary}14` : (isDark ? '#0F172A' : '#F8FAFC'),
+                                  },
+                                ]}
+                              >
+                                <Text style={[styles.staffTargetTitle, { color: colors.text }]} numberOfLines={1}>{option.name}</Text>
+                                {option.meta ? (
+                                  <Text style={[styles.staffTargetMeta, { color: colors.textSecondary }]}>{option.meta}</Text>
+                                ) : null}
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </ScrollView>
+                      )}
+                      {userFormSubmitAttempted && userFormErrors.staffTarget ? (
+                        <Text style={styles.fieldErrorText}>{userFormErrors.staffTarget}</Text>
+                      ) : null}
+                    </View>
+                  </View>
+                ) : null}
               </View>
 
               <View style={[styles.formSection, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>

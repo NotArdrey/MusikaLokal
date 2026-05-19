@@ -729,6 +729,7 @@ export default function BookingsScreen() {
   });
   const [loading, setLoading] = useState(false);
   const [userRole, setUserRole] = useState<string>("");
+  const [staffBookingContext, setStaffBookingContext] = useState<any>(null);
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
   const [locallyReportedLateBookings, setLocallyReportedLateBookings] = useState<Record<string, boolean>>({});
   const [locallyReportedAccessIssueBookings, setLocallyReportedAccessIssueBookings] = useState<Record<string, boolean>>({});
@@ -1679,7 +1680,7 @@ export default function BookingsScreen() {
         .eq("id", targetUserId)
         .single();
 
-      const role = profile?.role || "";
+      let role = profile?.role || "";
       if (role) {
         setUserRole(role);
         // If venue owner, default to Applicants tab only once (avoid tab reset on auto-refresh)
@@ -1728,6 +1729,19 @@ export default function BookingsScreen() {
         debugLog("manage-bookings invoke error:", error);
       } else if (!bookings) {
         debugLog("manage-bookings returned empty payload for user", targetUserId);
+      }
+
+      const returnedStaffContext = bookings?.staff_context || null;
+      setStaffBookingContext(returnedStaffContext);
+      if (bookings?.role && bookings.role !== role) {
+        role = bookings.role;
+        setUserRole(role);
+        if (role === "venue-owner" && !venueTabInitializedRef.current) {
+          setActiveTab("Applicants");
+          venueTabInitializedRef.current = true;
+        } else if (role !== "venue-owner") {
+          venueTabInitializedRef.current = false;
+        }
       }
 
       const needsLocalFallback = !!error || !bookings;
@@ -2581,12 +2595,15 @@ export default function BookingsScreen() {
   };
 
   const isReadOnlyBookingItem = (item: any) =>
-    item?.type_id === "gig_application" && item?.viewer_can_act === false;
+    staffBookingContext?.view_only === true ||
+    item?.viewer_can_act === false;
 
   const showReadOnlyBookingAlert = () => {
     Alert.alert(
       "View Only",
-      "This application was submitted on your behalf. You can view the details, but actions are managed by the applicant or production team.",
+      staffBookingContext?.view_only === true
+        ? "This staff account has view-only access for this workspace."
+        : "This application was submitted on your behalf. You can view the details, but actions are managed by the applicant or production team.",
     );
   };
   const canRespondToConnectionRequest = (item: any) => {
@@ -3663,6 +3680,29 @@ export default function BookingsScreen() {
         "Amount:",
         balanceAmount,
       );
+
+      if (staffBookingContext) {
+        const { data, error } = await supabase.functions.invoke("manage-bookings", {
+          body: {
+            action: "clear_balance",
+            booking_id: bookingId,
+            owner_id: userId,
+            amount: balanceAmount,
+          },
+        });
+
+        if (error || data?.error) {
+          throw new Error(data?.error || error?.message || "Failed to clear balance");
+        }
+
+        Alert.alert(
+          "Balance Cleared",
+          `â‚±${balanceAmount?.toLocaleString()} has been marked as paid.`,
+        );
+        setModalVisible(false);
+        if (userId) fetchBookings(userId);
+        return;
+      }
 
       // 1. Get the booking and verify ownership
       const { data: booking, error: bookingError } = await supabase

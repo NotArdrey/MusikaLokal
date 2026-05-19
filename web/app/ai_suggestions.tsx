@@ -234,6 +234,8 @@ export default function AiSuggestionsScreen() {
                     .from('profiles')
                     .select('id, full_name, avatar_url, location, address, role')
                     .eq('role', 'musician')
+                    .eq('is_verified', true)
+                    .eq('verification_status', 'APPROVED')
                     .limit(30);
 
                 let groupQuery = supabase

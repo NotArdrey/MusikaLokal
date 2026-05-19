@@ -16,6 +16,14 @@ const corsHeaders = {
 };
 
 type ResourceType = "studio" | "venue" | "production";
+type RelatedActivityKind = "gig_application" | "booking_request" | "studio_booking";
+
+type RelatedActivityAction = {
+  key: string;
+  label: string;
+  next_status?: string;
+  tone: "primary" | "success" | "warning" | "danger";
+};
 
 type AuditContext = {
   actorUserId: string;
@@ -222,6 +230,421 @@ function buildGigRequirements(payload: Record<string, unknown>) {
 function ownerFromRelation(value: any) {
   if (Array.isArray(value)) return value[0] || null;
   return value || null;
+}
+
+function normalizeStatus(value: unknown) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function formatPerson(profile: any, fallbackId?: string | null) {
+  if (!profile) {
+    return {
+      id: fallbackId || null,
+      name: fallbackId ? "Unknown user" : null,
+      email: null,
+      role: null,
+    };
+  }
+
+  return {
+    id: profile.id || fallbackId || null,
+    name: profile.full_name || profile.email || profile.id || fallbackId || "Unknown user",
+    email: profile.email || null,
+    role: profile.role || null,
+  };
+}
+
+async function fetchProfilesByIds(client: any, ids: string[]) {
+  const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+  const profilesById = new Map<string, any>();
+  if (uniqueIds.length === 0) return profilesById;
+
+  const { data, error } = await client
+    .from("profiles")
+    .select("id, full_name, email, role")
+    .in("id", uniqueIds);
+
+  if (error) throw error;
+  for (const profile of data || []) {
+    if (profile?.id) profilesById.set(profile.id, profile);
+  }
+
+  return profilesById;
+}
+
+async function fetchGroupsByIds(client: any, ids: string[]) {
+  const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+  const groupsById = new Map<string, any>();
+  if (uniqueIds.length === 0) return groupsById;
+
+  const { data, error } = await client
+    .from("groups")
+    .select("id, name, owner_id, group_type")
+    .in("id", uniqueIds);
+
+  if (error) throw error;
+  for (const group of data || []) {
+    if (group?.id) groupsById.set(group.id, group);
+  }
+
+  return groupsById;
+}
+
+async function fetchGigsByIds(client: any, ids: string[]) {
+  const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+  const gigsById = new Map<string, any>();
+  if (uniqueIds.length === 0) return gigsById;
+
+  const { data, error } = await client
+    .from("gigs")
+    .select("id, organizer_id, name, location, event_date, budget, status")
+    .in("id", uniqueIds);
+
+  if (error) throw error;
+  for (const gig of data || []) {
+    if (gig?.id) gigsById.set(gig.id, gig);
+  }
+
+  return gigsById;
+}
+
+function getGigApplicationActions(row: any): RelatedActivityAction[] {
+  const status = normalizeStatus(row?.status);
+  const leaderStatus = normalizeStatus(row?.leader_approval_status);
+  const actions: RelatedActivityAction[] = [];
+
+  if (leaderStatus === "pending") {
+    actions.push(
+      { key: "approve_leader", label: "Approve", tone: "success" },
+      { key: "reject_leader", label: "Reject", tone: "danger" },
+    );
+    return actions;
+  }
+
+  if (status === "pending") {
+    return [
+      { key: "accept", label: "Accept", next_status: "accepted", tone: "success" },
+      { key: "decline", label: "Decline", next_status: "rejected", tone: "danger" },
+    ];
+  }
+
+  if (status === "accepted" || status === "approved") {
+    return [
+      { key: "complete", label: "Complete", next_status: "completed", tone: "success" },
+      { key: "fire", label: "Fire", next_status: "fired", tone: "danger" },
+      { key: "cancel", label: "Cancel", next_status: "cancelled", tone: "warning" },
+    ];
+  }
+
+  return actions;
+}
+
+function getBookingRequestActions(row: any): RelatedActivityAction[] {
+  return normalizeStatus(row?.status) === "pending"
+    ? [
+        { key: "accept", label: "Accept", next_status: "accepted", tone: "success" },
+        { key: "decline", label: "Decline", next_status: "declined", tone: "danger" },
+      ]
+    : [];
+}
+
+function getStudioBookingActions(row: any): RelatedActivityAction[] {
+  const status = normalizeStatus(row?.status);
+  if (status === "pending") {
+    return [
+      { key: "confirm", label: "Confirm", next_status: "confirmed", tone: "success" },
+      { key: "cancel", label: "Cancel", next_status: "cancelled", tone: "danger" },
+    ];
+  }
+
+  if (status === "confirmed" || status === "checked_in" || status === "pending_relocation") {
+    return [
+      { key: "complete", label: "Complete", next_status: "completed", tone: "success" },
+      { key: "cancel", label: "Cancel", next_status: "cancelled", tone: "danger" },
+    ];
+  }
+
+  return [];
+}
+
+function buildRequestTitle(row: any) {
+  const details = row?.event_details && typeof row.event_details === "object" ? row.event_details : {};
+  const requestKind = String(details.request_kind || details.request_details?.request_kind || "request")
+    .replace(/_/g, " ")
+    .trim();
+  const sender = details.sender_entity_name || "Sender";
+  const receiver = details.receiver_entity_name || "Receiver";
+  return `${requestKind || "Request"}: ${sender} to ${receiver}`;
+}
+
+function buildRelatedActivityRows(input: {
+  gigApplications: any[];
+  bookingRequests: any[];
+  studioBookings: any[];
+  profilesById: Map<string, any>;
+  groupsById: Map<string, any>;
+  gigsById: Map<string, any>;
+}) {
+  const activities: any[] = [];
+
+  for (const row of input.gigApplications) {
+    const applicant = formatPerson(input.profilesById.get(row.applicant_id), row.applicant_id);
+    const submittedBy = formatPerson(input.profilesById.get(row.submitted_by_user_id), row.submitted_by_user_id);
+    const group = row.group_id ? input.groupsById.get(row.group_id) : null;
+    const gig = input.gigsById.get(row.gig_id);
+    const performerSnapshot =
+      row.performer_snapshot && typeof row.performer_snapshot === "object"
+        ? row.performer_snapshot
+        : {};
+    const performerName =
+      group?.name ||
+      performerSnapshot.name ||
+      performerSnapshot.display_name ||
+      applicant.name ||
+      "Applicant";
+
+    activities.push({
+      kind: "gig_application",
+      id: row.id,
+      title: `Gig application from ${performerName}`,
+      status: row.status || "pending",
+      created_at: row.created_at || null,
+      updated_at: row.updated_at || null,
+      primary_person: applicant,
+      secondary_person: row.submitted_by_user_id && row.submitted_by_user_id !== row.applicant_id
+        ? submittedBy
+        : null,
+      group: group
+        ? {
+            id: group.id,
+            name: group.name,
+            group_type: group.group_type,
+          }
+        : null,
+      listing: gig
+        ? {
+            id: gig.id,
+            name: gig.name,
+            date: gig.event_date,
+            location: gig.location,
+            budget: gig.budget,
+            status: gig.status,
+          }
+        : null,
+      message: row.pitch_message || row.note || null,
+      note: row.note || null,
+      video_url: row.video_url || null,
+      cv_url: row.cv_url || null,
+      cancellation_reason: row.cancellation_reason || null,
+      slot_type: row.slot_type || (row.is_solo_application ? "solo" : null),
+      leader_approval_status: row.leader_approval_status || null,
+      production_team_id: row.production_team_id || null,
+      available_actions: getGigApplicationActions(row),
+    });
+  }
+
+  for (const row of input.bookingRequests) {
+    const details = row?.event_details && typeof row.event_details === "object" ? row.event_details : {};
+    const requestDetails =
+      details.request_details && typeof details.request_details === "object"
+        ? details.request_details
+        : {};
+    const sender = formatPerson(input.profilesById.get(row.sender_id), row.sender_id);
+    const receiver = formatPerson(input.profilesById.get(row.receiver_id), row.receiver_id);
+    const group = row.group_id ? input.groupsById.get(row.group_id) : null;
+
+    activities.push({
+      kind: "booking_request",
+      id: row.id,
+      title: buildRequestTitle(row),
+      status: row.status || "pending",
+      created_at: row.created_at || null,
+      updated_at: null,
+      primary_person: sender,
+      secondary_person: receiver,
+      group: group
+        ? {
+            id: group.id,
+            name: group.name,
+            group_type: group.group_type,
+          }
+        : null,
+      request_kind: details.request_kind || requestDetails.request_kind || null,
+      sender_entity_type: details.sender_entity_type || null,
+      sender_entity_name: details.sender_entity_name || null,
+      receiver_entity_type: details.receiver_entity_type || null,
+      receiver_entity_name: details.receiver_entity_name || null,
+      message: requestDetails.pitch_message || row.message || null,
+      note: requestDetails.application_context || null,
+      attachment_url: row.attachment_url || requestDetails.cv_url || requestDetails.contract_url || null,
+      studio_id: row.studio_id || null,
+      production_team_id: details.production_team_id || null,
+      event_details: details,
+      available_actions: getBookingRequestActions(row),
+    });
+  }
+
+  for (const row of input.studioBookings) {
+    const customer = formatPerson(input.profilesById.get(row.user_id), row.user_id);
+
+    activities.push({
+      kind: "studio_booking",
+      id: row.id,
+      title: `Studio booking by ${customer.name || "customer"}`,
+      status: row.status || "pending",
+      created_at: row.created_at || null,
+      updated_at: row.updated_at || null,
+      primary_person: customer,
+      secondary_person: null,
+      booking_date: row.booking_date || null,
+      start_time: row.start_time || null,
+      end_time: row.end_time || null,
+      session_type: row.session_type || null,
+      hours: row.hours ?? null,
+      final_price: row.final_price ?? null,
+      payment_status: row.payment_status || null,
+      payment_type: row.payment_type || null,
+      remaining_balance: row.remaining_balance ?? null,
+      notes: row.notes || null,
+      proof_url: row.proof_url || null,
+      cancellation_reason: row.cancellation_reason || null,
+      available_actions: getStudioBookingActions(row),
+    });
+  }
+
+  return activities.sort((a, b) =>
+    String(b.created_at || b.updated_at || "").localeCompare(String(a.created_at || a.updated_at || "")),
+  );
+}
+
+async function fetchAllStudioBookingsForStudio(client: any, studioId: string) {
+  const pageSize = 1000;
+  const rows: any[] = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const to = from + pageSize - 1;
+    const { data, error } = await client
+      .from("studio_bookings")
+      .select(
+        "id, user_id, studio_id, booking_date, start_time, end_time, base_rate, hours, subtotal, final_price, notes, status, created_at, updated_at, proof_url, reviewed_by_customer, reviewed_by_owner, cancellation_reason, check_in_time, payment_status, payment_amount, payment_type, remaining_balance, session_type",
+      )
+      .eq("studio_id", studioId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to);
+
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+  }
+
+  return rows;
+}
+
+async function fetchRelatedActivity(client: any, resourceType: ResourceType, resource: any) {
+  const rowId = resource?.id;
+  if (!rowId) return [];
+
+  let gigApplications: any[] = [];
+  let bookingRequests: any[] = [];
+  let studioBookings: any[] = [];
+
+  if (resourceType === "studio") {
+    const [bookingRows, requestsResult] = await Promise.all([
+      fetchAllStudioBookingsForStudio(client, rowId),
+      client
+        .from("booking_requests")
+        .select("id, created_at, sender_id, receiver_id, group_id, message, status, event_details, attachment_url, studio_id")
+        .eq("studio_id", rowId)
+        .order("created_at", { ascending: false })
+        .limit(50),
+    ]);
+
+    if (requestsResult.error) throw requestsResult.error;
+    studioBookings = bookingRows;
+    bookingRequests = requestsResult.data || [];
+  } else if (resourceType === "venue") {
+    const [applicationsResult, directRequestsResult, senderRequestsResult] = await Promise.all([
+      client
+        .from("gig_applications")
+        .select(
+          "id, applicant_id, group_id, gig_id, pitch_message, video_url, status, created_at, reviewed_by_applicant, reviewed_by_organizer, cancellation_reason, note, cv_url, is_solo_application, rejected_at, slot_type, submitted_by_user_id, leader_approval_status, leader_reviewed_at, production_team_id, production_roster_id, updated_at, performer_snapshot",
+        )
+        .eq("gig_id", rowId)
+        .order("created_at", { ascending: false })
+        .limit(75),
+      client
+        .from("booking_requests")
+        .select("id, created_at, sender_id, receiver_id, group_id, message, status, event_details, attachment_url, studio_id")
+        .contains("event_details", { listing_id: rowId })
+        .order("created_at", { ascending: false })
+        .limit(50),
+      client
+        .from("booking_requests")
+        .select("id, created_at, sender_id, receiver_id, group_id, message, status, event_details, attachment_url, studio_id")
+        .contains("event_details", { sender_entity_id: rowId })
+        .order("created_at", { ascending: false })
+        .limit(50),
+    ]);
+
+    if (applicationsResult.error) throw applicationsResult.error;
+    if (directRequestsResult.error) throw directRequestsResult.error;
+    if (senderRequestsResult.error) throw senderRequestsResult.error;
+    gigApplications = applicationsResult.data || [];
+    const requestsById = new Map<string, any>();
+    for (const row of [...(directRequestsResult.data || []), ...(senderRequestsResult.data || [])]) {
+      if (row?.id) requestsById.set(row.id, row);
+    }
+    bookingRequests = Array.from(requestsById.values());
+  } else {
+    const [applicationsResult, requestsResult] = await Promise.all([
+      client
+        .from("gig_applications")
+        .select(
+          "id, applicant_id, group_id, gig_id, pitch_message, video_url, status, created_at, reviewed_by_applicant, reviewed_by_organizer, cancellation_reason, note, cv_url, is_solo_application, rejected_at, slot_type, submitted_by_user_id, leader_approval_status, leader_reviewed_at, production_team_id, production_roster_id, updated_at, performer_snapshot",
+        )
+        .eq("production_team_id", rowId)
+        .order("created_at", { ascending: false })
+        .limit(75),
+      client
+        .from("booking_requests")
+        .select("id, created_at, sender_id, receiver_id, group_id, message, status, event_details, attachment_url, studio_id")
+        .contains("event_details", { production_team_id: rowId })
+        .order("created_at", { ascending: false })
+        .limit(75),
+    ]);
+
+    if (applicationsResult.error) throw applicationsResult.error;
+    if (requestsResult.error) throw requestsResult.error;
+    gigApplications = applicationsResult.data || [];
+    bookingRequests = requestsResult.data || [];
+  }
+
+  const profileIds = [
+    ...gigApplications.flatMap((row) => [row.applicant_id, row.submitted_by_user_id]),
+    ...bookingRequests.flatMap((row) => [row.sender_id, row.receiver_id]),
+    ...studioBookings.map((row) => row.user_id),
+  ].filter(Boolean);
+  const groupIds = [
+    ...gigApplications.map((row) => row.group_id),
+    ...bookingRequests.map((row) => row.group_id),
+  ].filter(Boolean);
+  const gigIds = gigApplications.map((row) => row.gig_id).filter(Boolean);
+
+  const [profilesById, groupsById, gigsById] = await Promise.all([
+    fetchProfilesByIds(client, profileIds),
+    fetchGroupsByIds(client, groupIds),
+    fetchGigsByIds(client, gigIds),
+  ]);
+
+  return buildRelatedActivityRows({
+    gigApplications,
+    bookingRequests,
+    studioBookings,
+    profilesById,
+    groupsById,
+    gigsById,
+  });
 }
 
 function matchesSearch(item: any, searchTerm: string) {
@@ -458,7 +881,13 @@ async function getResource(client: any, resourceType: ResourceType, id: string) 
         ? await fetchVenueRows(client, 1, [id])
         : await fetchProductionRows(client, 1, [id]);
 
-  return rows[0] || null;
+  const item = rows[0] || null;
+  if (!item) return null;
+
+  return {
+    ...item,
+    related_activity: await fetchRelatedActivity(client, resourceType, item),
+  };
 }
 
 async function replaceStudioChildren(client: any, studioId: string, payload: Record<string, unknown>) {
@@ -880,6 +1309,150 @@ async function deleteResource(client: any, resourceType: ResourceType, id: strin
   return jsonResponse({ success: true });
 }
 
+function parseRelatedActivityKind(value: unknown): RelatedActivityKind | null {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "gig_application") return "gig_application";
+  if (normalized === "booking_request") return "booking_request";
+  if (normalized === "studio_booking") return "studio_booking";
+  return null;
+}
+
+function getNegativeActionReason(params: Record<string, unknown>) {
+  return nullableText(params.reason) || "Updated by admin from Manage.";
+}
+
+async function updateGigApplicationActivity(client: any, id: string, action: string, params: Record<string, unknown>) {
+  const { data: existing, error: existingError } = await client
+    .from("gig_applications")
+    .select("id, status, leader_approval_status")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+  if (!existing) return jsonResponse({ error: "Application not found" }, 404);
+
+  const status = normalizeStatus(existing.status);
+  const leaderStatus = normalizeStatus(existing.leader_approval_status);
+  const updatePayload: Record<string, unknown> = {};
+
+  if (action === "approve_leader" || action === "reject_leader") {
+    if (leaderStatus !== "pending") {
+      return jsonResponse({ error: "This leader confirmation is no longer pending." }, 409);
+    }
+    updatePayload.leader_approval_status = action === "approve_leader" ? "approved" : "rejected";
+    updatePayload.leader_reviewed_at = new Date().toISOString();
+  } else if (action === "accept" || action === "decline") {
+    if (status !== "pending") {
+      return jsonResponse({ error: "Only pending applications can be accepted or declined." }, 409);
+    }
+    updatePayload.status = action === "accept" ? "accepted" : "rejected";
+    if (action === "decline") updatePayload.cancellation_reason = getNegativeActionReason(params);
+  } else if (action === "complete" || action === "fire" || action === "cancel") {
+    if (status !== "accepted" && status !== "approved") {
+      return jsonResponse({ error: "Only active applications can be completed, fired, or cancelled." }, 409);
+    }
+    updatePayload.status =
+      action === "complete" ? "completed" : action === "fire" ? "fired" : "cancelled";
+    if (action !== "complete") updatePayload.cancellation_reason = getNegativeActionReason(params);
+  } else {
+    return jsonResponse({ error: "Unsupported application action" }, 400);
+  }
+
+  const { data, error } = await client
+    .from("gig_applications")
+    .update(updatePayload)
+    .eq("id", id)
+    .select()
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return jsonResponse({ error: "Application was not updated" }, 404);
+  return jsonResponse({ success: true, data });
+}
+
+async function updateBookingRequestActivity(client: any, id: string, action: string) {
+  if (action !== "accept" && action !== "decline") {
+    return jsonResponse({ error: "Unsupported request action" }, 400);
+  }
+
+  const nextStatus = action === "accept" ? "accepted" : "declined";
+  const { data, error } = await client
+    .from("booking_requests")
+    .update({ status: nextStatus })
+    .eq("id", id)
+    .eq("status", "pending")
+    .select()
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return jsonResponse({ error: "This request is no longer pending." }, 409);
+  return jsonResponse({ success: true, data });
+}
+
+async function updateStudioBookingActivity(client: any, id: string, action: string, params: Record<string, unknown>) {
+  const { data: existing, error: existingError } = await client
+    .from("studio_bookings")
+    .select("id, status")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+  if (!existing) return jsonResponse({ error: "Booking not found" }, 404);
+
+  const status = normalizeStatus(existing.status);
+  const updatePayload: Record<string, unknown> = {};
+
+  if (action === "confirm") {
+    if (status !== "pending") return jsonResponse({ error: "Only pending bookings can be confirmed." }, 409);
+    updatePayload.status = "confirmed";
+  } else if (action === "complete") {
+    if (status !== "confirmed" && status !== "checked_in") {
+      return jsonResponse({ error: "Only active bookings can be completed." }, 409);
+    }
+    updatePayload.status = "completed";
+  } else if (action === "cancel") {
+    if (!["pending", "confirmed", "checked_in", "pending_relocation"].includes(status)) {
+      return jsonResponse({ error: "This booking can no longer be cancelled." }, 409);
+    }
+    updatePayload.status = "cancelled";
+    updatePayload.cancellation_reason = getNegativeActionReason(params);
+  } else {
+    return jsonResponse({ error: "Unsupported booking action" }, 400);
+  }
+
+  const { data, error } = await client
+    .from("studio_bookings")
+    .update(updatePayload)
+    .eq("id", id)
+    .select()
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return jsonResponse({ error: "Booking was not updated" }, 404);
+  return jsonResponse({ success: true, data });
+}
+
+async function updateRelatedActivity(client: any, params: Record<string, unknown>) {
+  const kind = parseRelatedActivityKind(params.kind ?? params.activity_kind ?? params.type_id);
+  const id = requiredText(params.id ?? params.activity_id, "activity id");
+  const action = String(params.activity_action ?? params.next_action ?? params.action_key ?? "")
+    .trim()
+    .toLowerCase();
+
+  if (!kind) return jsonResponse({ error: "Unsupported activity kind" }, 400);
+  if (!action) return jsonResponse({ error: "activity_action is required" }, 400);
+
+  if (kind === "gig_application") {
+    return await updateGigApplicationActivity(client, id, action, params);
+  }
+
+  if (kind === "booking_request") {
+    return await updateBookingRequestActivity(client, id, action);
+  }
+
+  return await updateStudioBookingActivity(client, id, action, params);
+}
+
 async function ownerOptions(client: any, params: Record<string, unknown>) {
   const resourceType = parseResourceType(params.resource_type ?? params.resourceType);
   const expectedRole =
@@ -989,6 +1562,10 @@ serve(async (req: Request) => {
         nullableText(params.reason) || "Deleted by admin.",
         admin.userId,
       );
+    }
+
+    if (action === "admin_update_related_activity") {
+      return await updateRelatedActivity(supabaseAdmin, params);
     }
 
     return jsonResponse({ error: `Unsupported action: ${action}` }, 400);

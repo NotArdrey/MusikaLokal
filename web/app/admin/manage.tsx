@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Linking,
   Modal,
   ScrollView,
@@ -14,8 +15,10 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { Calendar } from 'react-native-calendars';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
+import ImageUploader from '../../src/components/ImageUploader';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
@@ -24,6 +27,67 @@ import { getEdgeFunctionErrorMessage } from '../../src/utils/edgeFunctionErrors'
 type ResourceType = 'studio' | 'venue' | 'production';
 type ResourceFilter = 'all' | ResourceType;
 type EditorMode = 'create' | 'edit';
+type RelatedActivityKind = 'gig_application' | 'booking_request' | 'studio_booking';
+
+type RelatedActivityAction = {
+  key: string;
+  label: string;
+  next_status?: string;
+  tone: 'primary' | 'success' | 'warning' | 'danger';
+};
+
+type RelatedPerson = {
+  id?: string | null;
+  name?: string | null;
+  email?: string | null;
+  role?: string | null;
+};
+
+type AdminRelatedActivity = {
+  kind: RelatedActivityKind;
+  id: string;
+  title?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  primary_person?: RelatedPerson | null;
+  secondary_person?: RelatedPerson | null;
+  group?: { id?: string | null; name?: string | null; group_type?: string | null } | null;
+  listing?: {
+    id?: string | null;
+    name?: string | null;
+    date?: string | null;
+    location?: string | null;
+    budget?: number | null;
+    status?: string | null;
+  } | null;
+  request_kind?: string | null;
+  sender_entity_type?: string | null;
+  sender_entity_name?: string | null;
+  receiver_entity_type?: string | null;
+  receiver_entity_name?: string | null;
+  message?: string | null;
+  note?: string | null;
+  notes?: string | null;
+  video_url?: string | null;
+  cv_url?: string | null;
+  attachment_url?: string | null;
+  proof_url?: string | null;
+  cancellation_reason?: string | null;
+  leader_approval_status?: string | null;
+  booking_date?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  session_type?: string | null;
+  hours?: number | string | null;
+  final_price?: number | string | null;
+  payment_status?: string | null;
+  payment_type?: string | null;
+  remaining_balance?: number | string | null;
+  production_team_id?: string | null;
+  studio_id?: string | null;
+  available_actions?: RelatedActivityAction[];
+};
 
 type AdminResource = {
   id: string;
@@ -62,6 +126,7 @@ type AdminResource = {
   primary_image_url?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  related_activity?: AdminRelatedActivity[];
 };
 
 type OwnerOption = {
@@ -88,6 +153,8 @@ type EditorForm = {
   eventStartTime: string;
   eventEndTime: string;
   gigStatus: string;
+  experienceLevel: string;
+  musicianType: string;
   permitStatus: string;
   reapplicationCooldownDays: string;
   genres: string;
@@ -126,6 +193,8 @@ const resourceTabs: { key: ResourceFilter; label: string; icon: string }[] = [
 
 const studioTypeOptions = ['Rehearsal', 'Recording', 'Both'];
 const gigStatusOptions = ['open', 'closed', 'cancelled'];
+const experienceLevelOptions = ['Any', 'Beginner', 'Intermediate', 'Advanced', 'Professional'];
+const musicianTypeOptions = ['solo', 'group', 'both'];
 const permitStatusOptions = ['approved', 'pending_review', 'resubmitted', 'rejected'];
 
 const defaultForm = (resourceType: ResourceType = 'studio'): EditorForm => ({
@@ -142,9 +211,11 @@ const defaultForm = (resourceType: ResourceType = 'studio'): EditorForm => ({
   pax: '',
   budget: '',
   eventDate: '',
-  eventStartTime: '',
-  eventEndTime: '',
+  eventStartTime: '06:00 PM',
+  eventEndTime: '11:00 PM',
   gigStatus: 'open',
+  experienceLevel: 'Any',
+  musicianType: 'both',
   permitStatus: 'approved',
   reapplicationCooldownDays: '30',
   genres: '',
@@ -193,6 +264,19 @@ const formatDateTime = (value?: string | null) => {
   });
 };
 
+const todayKey = () => new Date().toISOString().slice(0, 10);
+
+const formatCalendarDate = (value?: string | null) => {
+  if (!value) return 'Select date';
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+};
+
 const listText = (value: unknown) => {
   if (Array.isArray(value)) {
     return value
@@ -209,6 +293,34 @@ const splitList = (value: string) => (
     .map((item) => item.trim())
     .filter(Boolean)
 );
+
+const uniqueList = (values: (string | null | undefined)[]) => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const normalized = String(value || '').trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+};
+
+const isImageUrl = (url?: string | null) => (
+  /^https?:\/\//i.test(String(url || '').trim()) || /^data:image\//i.test(String(url || '').trim())
+);
+
+const normalizeTimeForInput = (value: string, fallback: string) => {
+  const normalized = String(value || fallback).trim();
+  const match = normalized.match(/^(\d{1,2}:\d{2})(?:\s*(AM|PM))?$/i);
+  if (!match) return fallback;
+  const clock = match[1];
+  const period = (match[2] || fallback.split(' ')[1] || 'PM').toUpperCase();
+  return `${clock} ${period}`;
+};
+
+const getClockPart = (value: string, fallback: string) => normalizeTimeForInput(value, fallback).split(' ')[0];
+const getPeriodPart = (value: string, fallback: string) => normalizeTimeForInput(value, fallback).split(' ')[1] || 'PM';
 
 const valueText = (value: unknown): string => {
   if (value === null || value === undefined || value === '') return '-';
@@ -228,6 +340,22 @@ const valueText = (value: unknown): string => {
   return String(value);
 };
 
+const getOwnerRoleForResource = (resourceType: ResourceType) => (
+  resourceType === 'studio'
+    ? 'studio-owner'
+    : resourceType === 'venue'
+      ? 'venue-owner'
+      : 'producer'
+);
+
+const getDisplayOwnerName = (owner?: OwnerOption | null) => (
+  owner?.full_name || owner?.email || 'Selected owner'
+);
+
+const getDisplayOwnerMeta = (owner?: OwnerOption | null) => (
+  owner?.email || owner?.role || 'Owner selected'
+);
+
 const getResourceIcon = (resourceType: ResourceType) => (
   resourceType === 'studio'
     ? 'business-outline'
@@ -237,7 +365,6 @@ const getResourceIcon = (resourceType: ResourceType) => (
 );
 
 const getDetailSections = (resource: AdminResource): DetailSection[] => {
-  const ownerId = getResourceOwnerId(resource);
   const requirements = resource.requirements || {};
   const sections: DetailSection[] = [
     {
@@ -248,7 +375,6 @@ const getDetailSections = (resource: AdminResource): DetailSection[] => {
         { label: 'Status', value: getResourceStatus(resource) },
         { label: 'Created', value: formatDateTime(resource.created_at) },
         { label: 'Updated', value: formatDateTime(resource.updated_at) },
-        { label: 'Record ID', value: resource.id },
       ],
     },
     {
@@ -257,7 +383,6 @@ const getDetailSections = (resource: AdminResource): DetailSection[] => {
       rows: [
         { label: 'Name', value: resource.owner_name || 'Unknown owner' },
         { label: 'Email', value: resource.owner_email },
-        { label: 'Owner ID', value: ownerId },
       ],
     },
   ];
@@ -303,6 +428,7 @@ const getDetailSections = (resource: AdminResource): DetailSection[] => {
           { label: 'Event Date', value: formatDateTime(resource.event_date) },
           { label: 'Start Time', value: requirements.event_start_time },
           { label: 'End Time', value: requirements.event_end_time },
+          { label: 'Schedule Conditions', value: requirements.event_schedules },
           { label: 'Budget', value: money(resource.budget) },
           { label: 'Listing Status', value: resource.status },
           { label: 'Permit Status', value: resource.permit_status },
@@ -330,7 +456,7 @@ const getDetailSections = (resource: AdminResource): DetailSection[] => {
       rows: [
         { label: 'Applications', value: resource.open_production_applications === false ? 'Closed' : 'Open' },
         { label: 'Members', value: `${resource.member_count || 0} member(s)` },
-        { label: 'Logo URL', value: resource.logo_url },
+        { label: 'Logo', value: resource.logo_url ? 'Available' : '-' },
       ],
     });
   }
@@ -360,6 +486,97 @@ const getResourceLinks = (resource: AdminResource) => {
   (resource.documents || []).forEach((url, index) => pushLink(`Document ${index + 1}`, url, 'document-outline'));
 
   return links;
+};
+
+const getResourceImages = (resource: AdminResource) => {
+  const images = resource.resource_type === 'production'
+    ? uniqueList([resource.logo_url, resource.primary_image_url, ...(resource.images || [])])
+    : uniqueList([resource.primary_image_url, ...(resource.images || []), resource.logo_url]);
+
+  return images.filter(isImageUrl).map((url, index) => ({
+    url,
+    label: resource.resource_type === 'production' && index === 0 ? 'Logo' : `Image ${index + 1}`,
+  }));
+};
+
+const activityTypeLabels: Record<RelatedActivityKind, string> = {
+  gig_application: 'Application',
+  booking_request: 'Request',
+  studio_booking: 'Booking',
+};
+
+const activityTypeIcons: Record<RelatedActivityKind, string> = {
+  gig_application: 'person-add-outline',
+  booking_request: 'mail-open-outline',
+  studio_booking: 'calendar-outline',
+};
+
+const activityActionColors: Record<RelatedActivityAction['tone'], string> = {
+  primary: '#2563EB',
+  success: '#10B981',
+  warning: '#F59E0B',
+  danger: '#EF4444',
+};
+
+const normalizeStatusText = (value?: string | null) => (
+  String(value || '-').replace(/_/g, ' ')
+);
+
+const formatActivitySchedule = (activity: AdminRelatedActivity) => {
+  const date = activity.booking_date ? formatDate(activity.booking_date) : '-';
+  const start = activity.start_time || '';
+  const end = activity.end_time || '';
+  const time = [start, end].filter(Boolean).join(' - ');
+  return time ? `${date} | ${time}` : date;
+};
+
+const getActivityLinks = (activity: AdminRelatedActivity) => {
+  const links: { label: string; url: string; icon: string }[] = [];
+  const pushLink = (label: string, url?: string | null, icon = 'open-outline') => {
+    const normalized = String(url || '').trim();
+    if (normalized) links.push({ label, url: normalized, icon });
+  };
+
+  pushLink('Audition Video', activity.video_url, 'videocam-outline');
+  pushLink('CV', activity.cv_url, 'document-text-outline');
+  pushLink('Attachment', activity.attachment_url, 'attach-outline');
+  pushLink('Proof', activity.proof_url, 'receipt-outline');
+
+  return links;
+};
+
+const getActivityDetailRows = (activity: AdminRelatedActivity): DetailRow[] => {
+  const rows: DetailRow[] = [
+    { label: 'Type', value: activityTypeLabels[activity.kind] },
+    { label: 'Status', value: normalizeStatusText(activity.status) },
+    { label: 'Created', value: formatDateTime(activity.created_at) },
+  ];
+
+  if (activity.updated_at) rows.push({ label: 'Updated', value: formatDateTime(activity.updated_at) });
+  if (activity.primary_person?.name) rows.push({ label: 'Primary', value: activity.primary_person.name });
+  if (activity.primary_person?.email) rows.push({ label: 'Primary Email', value: activity.primary_person.email });
+  if (activity.secondary_person?.name) rows.push({ label: 'Secondary', value: activity.secondary_person.name });
+  if (activity.group?.name) rows.push({ label: 'Group', value: activity.group.name });
+  if (activity.listing?.name) rows.push({ label: 'Gig', value: activity.listing.name });
+  if (activity.listing?.date) rows.push({ label: 'Gig Date', value: formatDateTime(activity.listing.date) });
+  if (activity.listing?.location) rows.push({ label: 'Gig Location', value: activity.listing.location });
+  if (activity.request_kind) rows.push({ label: 'Request Kind', value: normalizeStatusText(activity.request_kind) });
+  if (activity.sender_entity_name) rows.push({ label: 'From', value: activity.sender_entity_name });
+  if (activity.receiver_entity_name) rows.push({ label: 'To', value: activity.receiver_entity_name });
+  if (activity.booking_date) rows.push({ label: 'Schedule', value: formatActivitySchedule(activity) });
+  if (activity.session_type) rows.push({ label: 'Session', value: normalizeStatusText(activity.session_type) });
+  if (activity.hours) rows.push({ label: 'Hours', value: activity.hours });
+  if (activity.final_price) rows.push({ label: 'Price', value: money(activity.final_price) });
+  if (activity.payment_status) rows.push({ label: 'Payment', value: normalizeStatusText(activity.payment_status) });
+  if (activity.payment_type) rows.push({ label: 'Payment Type', value: normalizeStatusText(activity.payment_type) });
+  if (activity.remaining_balance) rows.push({ label: 'Balance', value: money(activity.remaining_balance) });
+  if (activity.leader_approval_status) rows.push({ label: 'Leader Approval', value: normalizeStatusText(activity.leader_approval_status) });
+  if (activity.message) rows.push({ label: 'Message', value: activity.message });
+  if (activity.note) rows.push({ label: 'Note', value: activity.note });
+  if (activity.notes) rows.push({ label: 'Booking Notes', value: activity.notes });
+  if (activity.cancellation_reason) rows.push({ label: 'Reason', value: activity.cancellation_reason });
+
+  return rows;
 };
 
 const getResourceOwnerId = (resource: AdminResource) => resource.owner_id || resource.organizer_id || '';
@@ -398,9 +615,11 @@ const formFromResource = (resource: AdminResource): EditorForm => {
     pax: resource.pax == null ? '' : String(resource.pax),
     budget: resource.budget == null ? '' : String(resource.budget),
     eventDate: resource.event_date ? String(resource.event_date).slice(0, 10) : '',
-    eventStartTime: String(requirements.event_start_time || ''),
-    eventEndTime: String(requirements.event_end_time || ''),
+    eventStartTime: String(requirements.event_start_time || '06:00 PM'),
+    eventEndTime: String(requirements.event_end_time || '11:00 PM'),
     gigStatus: resource.status || 'open',
+    experienceLevel: String(requirements.experience_level || 'Any'),
+    musicianType: String(requirements.musician_type || 'both'),
     permitStatus: resource.permit_status || 'approved',
     reapplicationCooldownDays: resource.reapplication_cooldown_days == null
       ? '30'
@@ -424,7 +643,7 @@ const normalizeTestPart = (value: string) => (
 
 export default function AdminManagePage() {
   const { colors, isDark } = useTheme();
-  const { loading, isAdmin, roleResolved } = useAuth();
+  const { loading, isAdmin, roleResolved, userId: adminUserId } = useAuth();
   const { width } = useWindowDimensions();
   const isWide = width >= 1040;
 
@@ -439,6 +658,7 @@ export default function AdminManagePage() {
   const [editorMode, setEditorMode] = useState<EditorMode>('create');
   const [editingResource, setEditingResource] = useState<AdminResource | null>(null);
   const [form, setForm] = useState<EditorForm>(() => defaultForm('studio'));
+  const [eventCalendarVisible, setEventCalendarVisible] = useState(false);
   const [ownerOptions, setOwnerOptions] = useState<OwnerOption[]>([]);
   const [ownerSearch, setOwnerSearch] = useState('');
   const [alert, setAlert] = useState<{
@@ -523,12 +743,26 @@ export default function AdminManagePage() {
     return resources.filter((resource) => resource.resource_type === resourceFilter);
   }, [resourceFilter, resources]);
 
+  const selectedOwner = useMemo<OwnerOption | null>(() => {
+    const matched = ownerOptions.find((owner) => owner.id === form.ownerId);
+    if (matched) return matched;
+    if (!form.ownerId) return null;
+
+    return {
+      id: form.ownerId,
+      full_name: editingResource?.owner_name || null,
+      email: editingResource?.owner_email || null,
+      role: getOwnerRoleForResource(form.resourceType),
+    };
+  }, [editingResource?.owner_email, editingResource?.owner_name, form.ownerId, form.resourceType, ownerOptions]);
+
   const openCreateEditor = useCallback((resourceType: ResourceType) => {
     setDetailVisible(false);
     setDetailResource(null);
     setEditorMode('create');
     setEditingResource(null);
     setForm(defaultForm(resourceType));
+    setEventCalendarVisible(false);
     setOwnerSearch('');
     setOwnerOptions([]);
     setEditorVisible(true);
@@ -569,6 +803,7 @@ export default function AdminManagePage() {
       setEditorMode('edit');
       setEditingResource(detail);
       setForm(formFromResource(detail));
+      setEventCalendarVisible(false);
       setOwnerSearch('');
       setOwnerOptions([]);
       setEditorVisible(true);
@@ -587,6 +822,7 @@ export default function AdminManagePage() {
     if (busyKey === 'save') return;
     setEditorVisible(false);
     setEditingResource(null);
+    setEventCalendarVisible(false);
   }, [busyKey]);
 
   const closeDetails = useCallback(() => {
@@ -651,9 +887,17 @@ export default function AdminManagePage() {
         requirements: {
           genres: splitList(form.genres),
           instruments: splitList(form.instruments),
+          experience_level: form.experienceLevel === 'Any' ? null : form.experienceLevel,
           event_start_time: form.eventStartTime.trim() || null,
           event_end_time: form.eventEndTime.trim() || null,
-          musician_type: 'both',
+          event_schedules: form.eventDate.trim()
+            ? [{
+                date: form.eventDate.trim(),
+                start_time: form.eventStartTime.trim() || '06:00 PM',
+                end_time: form.eventEndTime.trim() || '11:00 PM',
+              }]
+            : [],
+          musician_type: form.musicianType || 'both',
         },
       };
     }
@@ -769,8 +1013,85 @@ export default function AdminManagePage() {
     });
   }, [performDelete]);
 
+  const performRelatedActivityAction = useCallback(async (
+    activity: AdminRelatedActivity,
+    action: RelatedActivityAction,
+  ) => {
+    if (!detailResource) return;
+
+    const key = `related:${activity.kind}:${activity.id}:${action.key}`;
+    setBusyKey(key);
+    try {
+      await invokeAdminManage({
+        action: 'admin_update_related_activity',
+        kind: activity.kind,
+        id: activity.id,
+        activity_action: action.key,
+        reason: `Updated by admin from Manage: ${action.label}`,
+      });
+
+      const refreshed = await invokeAdminManage({
+        action: 'admin_get_resource',
+        resource_type: detailResource.resource_type,
+        id: detailResource.id,
+      });
+      setDetailResource(refreshed || detailResource);
+      await fetchResources();
+      setAlert({
+        type: 'success',
+        title: 'Updated',
+        message: `${activityTypeLabels[activity.kind]} ${action.label.toLowerCase()} action completed.`,
+      });
+    } catch (error: any) {
+      setAlert({
+        type: 'error',
+        title: 'Unable to Update',
+        message: error?.message || 'The related activity could not be updated.',
+      });
+    } finally {
+      setBusyKey(null);
+    }
+  }, [detailResource, fetchResources, invokeAdminManage]);
+
+  const confirmRelatedActivityAction = useCallback((
+    activity: AdminRelatedActivity,
+    action: RelatedActivityAction,
+  ) => {
+    const destructive = action.tone === 'danger' || action.tone === 'warning';
+    const confirmText = action.key === 'cancel'
+      ? `Cancel ${activityTypeLabels[activity.kind]}`
+      : action.label;
+    setAlert({
+      type: destructive ? 'warning' : 'info',
+      title: `${action.label} ${activityTypeLabels[activity.kind]}`,
+      message: `${action.label} "${activity.title || 'this activity'}"?`,
+      forceModal: true,
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: confirmText,
+          style: destructive ? 'destructive' : 'default',
+          onPress: () => {
+            performRelatedActivityAction(activity, action);
+          },
+        },
+      ],
+    });
+  }, [performRelatedActivityAction]);
+
   const selectOwner = useCallback((owner: OwnerOption) => {
     setForm((current) => ({ ...current, ownerId: owner.id }));
+  }, []);
+
+  const updateVenueTime = useCallback((
+    field: 'eventStartTime' | 'eventEndTime',
+    clock: string,
+    period: string,
+  ) => {
+    setForm((current) => ({
+      ...current,
+      [field]: `${clock.trim()} ${period}`.trim(),
+    }));
   }, []);
 
   if (loading || !roleResolved) {
@@ -1049,7 +1370,7 @@ export default function AdminManagePage() {
                   {editorMode === 'create' ? 'New' : 'Edit'} {typeLabels[form.resourceType]}
                 </Text>
                 <Text numberOfLines={1} style={[styles.editorSubtitle, { color: colors.textSecondary }]}>
-                  {editorMode === 'edit' ? editingResource?.id : 'Admin managed record'}
+                  {editorMode === 'edit' ? `${typeLabels[form.resourceType]} details` : 'Admin managed record'}
                 </Text>
               </View>
               <TouchableOpacity
@@ -1080,6 +1401,7 @@ export default function AdminManagePage() {
                       ]}
                       onPress={() => {
                         updateForm(defaultForm(resourceType));
+                        setEventCalendarVisible(false);
                         setOwnerSearch('');
                       }}
                     >
@@ -1104,14 +1426,15 @@ export default function AdminManagePage() {
                 style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
               />
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.ownerRow}>
-                {ownerOptions.map((owner) => {
+                {ownerOptions.map((owner, index) => {
                   const active = form.ownerId === owner.id;
+                  const testLabel = owner.email || owner.full_name || owner.role || `owner-${index + 1}`;
                   return (
                     <TouchableOpacity
                       key={owner.id}
                       activeOpacity={0.82}
-                      testID={`admin-manage-owner-${normalizeTestPart(owner.email || owner.id)}`}
-                      accessibilityLabel={`admin-manage-owner-${normalizeTestPart(owner.email || owner.id)}`}
+                      testID={`admin-manage-owner-${normalizeTestPart(testLabel)}`}
+                      accessibilityLabel={`admin-manage-owner-${normalizeTestPart(testLabel)}`}
                       style={[
                         styles.ownerChip,
                         {
@@ -1122,24 +1445,22 @@ export default function AdminManagePage() {
                       onPress={() => selectOwner(owner)}
                     >
                       <Text numberOfLines={1} style={[styles.ownerName, { color: colors.text }]}>
-                        {owner.full_name || owner.email || owner.id}
+                        {getDisplayOwnerName(owner)}
                       </Text>
                       <Text numberOfLines={1} style={[styles.ownerEmail, { color: colors.textSecondary }]}>
-                        {owner.email || owner.role || owner.id}
+                        {getDisplayOwnerMeta(owner)}
                       </Text>
                     </TouchableOpacity>
                   );
                 })}
               </ScrollView>
-              <TextInput
-                testID="admin-manage-owner-id"
-                accessibilityLabel="admin-manage-owner-id"
-                value={form.ownerId}
-                onChangeText={(ownerId) => updateForm({ ownerId })}
-                placeholder="Owner user ID"
-                placeholderTextColor={colors.textSecondary}
-                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
-              />
+              {selectedOwner ? (
+                <SelectedOwnerCard owner={selectedOwner} colors={colors} />
+              ) : (
+                <Text style={[styles.ownerHint, { color: colors.textSecondary }]}>
+                  Search and select an owner before saving.
+                </Text>
+              )}
 
               <FieldLabel label="Name" colors={colors} />
               <TextInput
@@ -1221,19 +1542,94 @@ export default function AdminManagePage() {
                     <SmallField label="Cooldown Days" value={form.reapplicationCooldownDays} onChange={(reapplicationCooldownDays) => updateForm({ reapplicationCooldownDays })} colors={colors} />
                   </View>
                   <FieldLabel label="Event Date" colors={colors} />
-                  <TextInput
-                    value={form.eventDate}
-                    onChangeText={(eventDate) => updateForm({ eventDate })}
-                    placeholder="YYYY-MM-DD"
-                    placeholderTextColor={colors.textSecondary}
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
-                  />
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    testID="admin-manage-event-date-button"
+                    accessibilityLabel="admin-manage-event-date-button"
+                    style={[styles.datePickerButton, { borderColor: colors.border, backgroundColor: colors.card }]}
+                    onPress={() => setEventCalendarVisible((visible) => !visible)}
+                  >
+                    <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+                    <Text
+                      testID="admin-manage-event-date-display"
+                      accessibilityLabel="admin-manage-event-date-display"
+                      style={[styles.datePickerText, { color: form.eventDate ? colors.text : colors.textSecondary }]}
+                    >
+                      {formatCalendarDate(form.eventDate)}
+                    </Text>
+                  </TouchableOpacity>
+                  {eventCalendarVisible ? (
+                    <View
+                      testID="admin-manage-event-calendar"
+                      accessibilityLabel="admin-manage-event-calendar"
+                      style={[styles.calendarPanel, { borderColor: colors.border, backgroundColor: colors.card }]}
+                    >
+                      <Calendar
+                        current={form.eventDate || todayKey()}
+                        minDate={todayKey()}
+                        markedDates={form.eventDate ? {
+                          [form.eventDate]: { selected: true, selectedColor: colors.primary },
+                        } : {}}
+                        onDayPress={(day) => {
+                          updateForm({ eventDate: day.dateString });
+                          setEventCalendarVisible(false);
+                        }}
+                        theme={{
+                          selectedDayBackgroundColor: colors.primary,
+                          todayTextColor: colors.primary,
+                          arrowColor: colors.primary,
+                          calendarBackground: colors.card,
+                          dayTextColor: colors.text,
+                          monthTextColor: colors.text,
+                          textDisabledColor: colors.textSecondary,
+                        }}
+                      />
+                    </View>
+                  ) : null}
                   <View style={styles.twoColumn}>
-                    <SmallField label="Start Time" value={form.eventStartTime} onChange={(eventStartTime) => updateForm({ eventStartTime })} colors={colors} placeholder="06:00 PM" />
-                    <SmallField label="End Time" value={form.eventEndTime} onChange={(eventEndTime) => updateForm({ eventEndTime })} colors={colors} placeholder="11:00 PM" />
+                    <TimeField
+                      label="Start Time"
+                      value={form.eventStartTime}
+                      colors={colors}
+                      fallback="06:00 PM"
+                      testIDPrefix="admin-manage-event-start"
+                      onClockChange={(clock) => updateVenueTime('eventStartTime', clock, getPeriodPart(form.eventStartTime, '06:00 PM'))}
+                      onTogglePeriod={() => updateVenueTime(
+                        'eventStartTime',
+                        getClockPart(form.eventStartTime, '06:00 PM'),
+                        getPeriodPart(form.eventStartTime, '06:00 PM') === 'AM' ? 'PM' : 'AM',
+                      )}
+                    />
+                    <TimeField
+                      label="End Time"
+                      value={form.eventEndTime}
+                      colors={colors}
+                      fallback="11:00 PM"
+                      testIDPrefix="admin-manage-event-end"
+                      onClockChange={(clock) => updateVenueTime('eventEndTime', clock, getPeriodPart(form.eventEndTime, '11:00 PM'))}
+                      onTogglePeriod={() => updateVenueTime(
+                        'eventEndTime',
+                        getClockPart(form.eventEndTime, '11:00 PM'),
+                        getPeriodPart(form.eventEndTime, '11:00 PM') === 'AM' ? 'PM' : 'AM',
+                      )}
+                    />
                   </View>
                   <FieldLabel label="Gig Status" colors={colors} />
                   <OptionRow options={gigStatusOptions} value={form.gigStatus} colors={colors} onChange={(gigStatus) => updateForm({ gigStatus })} />
+                  <FieldLabel label="Experience Level" colors={colors} />
+                  <OptionRow
+                    options={experienceLevelOptions}
+                    value={form.experienceLevel}
+                    colors={colors}
+                    onChange={(experienceLevel) => updateForm({ experienceLevel })}
+                  />
+                  <FieldLabel label="Musician Type" colors={colors} />
+                  <OptionRow
+                    options={musicianTypeOptions}
+                    value={form.musicianType}
+                    colors={colors}
+                    onChange={(musicianType) => updateForm({ musicianType })}
+                  />
                   <FieldLabel label="Genres" colors={colors} />
                   <TextInput
                     value={form.genres}
@@ -1255,13 +1651,13 @@ export default function AdminManagePage() {
 
               {form.resourceType === 'production' ? (
                 <>
-                  <FieldLabel label="Logo URL" colors={colors} />
-                  <TextInput
-                    value={form.logoUrl}
-                    onChangeText={(logoUrl) => updateForm({ logoUrl })}
-                    placeholder="https://..."
-                    placeholderTextColor={colors.textSecondary}
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+                  <FieldLabel label="Logo" colors={colors} />
+                  <ImageUploader
+                    images={uniqueList([form.logoUrl]).filter(isImageUrl)}
+                    onImagesChange={(images) => updateForm({ logoUrl: images[0] || '' })}
+                    maxImages={1}
+                    userId={form.ownerId || adminUserId || 'admin-manage'}
+                    folder="production"
                   />
                   <View style={[styles.switchRow, { borderColor: colors.border, backgroundColor: colors.card }]}>
                     <View style={{ flex: 1 }}>
@@ -1287,32 +1683,37 @@ export default function AdminManagePage() {
                     colors={colors}
                     onChange={(permitStatus) => updateForm({ permitStatus })}
                   />
-                  <FieldLabel label="Image URLs" colors={colors} />
-                  <TextInput
-                    value={form.imageUrls}
-                    onChangeText={(imageUrls) => updateForm({ imageUrls })}
-                    placeholder="One URL per line"
-                    placeholderTextColor={colors.textSecondary}
-                    multiline
-                    style={[styles.input, styles.urlArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+                  <FieldLabel label="Images" colors={colors} />
+                  <ImageUploader
+                    images={splitList(form.imageUrls).filter(isImageUrl)}
+                    onImagesChange={(images) => updateForm({ imageUrls: images.join('\n') })}
+                    maxImages={10}
+                    userId={form.ownerId || adminUserId || 'admin-manage'}
+                    folder={form.resourceType === 'venue' ? 'gigs' : 'studios'}
                   />
-                  <FieldLabel label="Contract URL" colors={colors} />
-                  <TextInput
-                    value={form.contractUrl}
-                    onChangeText={(contractUrl) => updateForm({ contractUrl })}
-                    placeholder="https://..."
-                    placeholderTextColor={colors.textSecondary}
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+                  <DocumentLinkControl
+                    label="Contract"
+                    url={form.contractUrl}
+                    colors={colors}
+                    onOpenLink={openExternalLink}
+                    onClear={() => updateForm({ contractUrl: '' })}
                   />
-                  <FieldLabel label="Business Permit URL" colors={colors} />
-                  <TextInput
-                    value={form.businessPermitUrl}
-                    onChangeText={(businessPermitUrl) => updateForm({ businessPermitUrl })}
-                    placeholder="https://..."
-                    placeholderTextColor={colors.textSecondary}
-                    style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+                  <DocumentLinkControl
+                    label="Business Permit"
+                    url={form.businessPermitUrl}
+                    colors={colors}
+                    onOpenLink={openExternalLink}
+                    onClear={() => updateForm({ businessPermitUrl: '' })}
                   />
                 </>
+              ) : null}
+
+              {editorMode === 'edit' && editingResource ? (
+                <RelatedActivityPreview
+                  activities={editingResource.related_activity || []}
+                  colors={colors}
+                  isDark={isDark}
+                />
               ) : null}
             </ScrollView>
 
@@ -1396,6 +1797,12 @@ export default function AdminManagePage() {
                     />
                   ))}
 
+                  <ResourceImageGallery
+                    resource={detailResource}
+                    colors={colors}
+                    onOpenLink={openExternalLink}
+                  />
+
                   <View style={[styles.detailCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
                     <View style={styles.detailCardHeader}>
                       <Ionicons name="attach-outline" size={18} color={colors.primary} />
@@ -1423,6 +1830,15 @@ export default function AdminManagePage() {
                       </View>
                     )}
                   </View>
+
+                  <RelatedActivitySection
+                    activities={detailResource.related_activity || []}
+                    colors={colors}
+                    isDark={isDark}
+                    busyKey={busyKey}
+                    onAction={confirmRelatedActivityAction}
+                    onOpenLink={openExternalLink}
+                  />
                 </ScrollView>
 
                 <View style={styles.editorFooter}>
@@ -1490,6 +1906,138 @@ function FieldLabel({ label, colors }: { label: string; colors: any }) {
   return <Text style={[styles.fieldLabel, { color: colors.text }]}>{label}</Text>;
 }
 
+function SelectedOwnerCard({ owner, colors }: { owner: OwnerOption; colors: any }) {
+  return (
+    <View style={[styles.selectedOwnerCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+      <View style={[styles.selectedOwnerIcon, { backgroundColor: `${colors.primary}18` }]}>
+        <Ionicons name="person-circle-outline" size={19} color={colors.primary} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={1} style={[styles.selectedOwnerName, { color: colors.text }]}>
+          {getDisplayOwnerName(owner)}
+        </Text>
+        <Text numberOfLines={1} style={[styles.selectedOwnerMeta, { color: colors.textSecondary }]}>
+          {getDisplayOwnerMeta(owner)}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function DocumentLinkControl({
+  label,
+  url,
+  colors,
+  onOpenLink,
+  onClear,
+}: {
+  label: string;
+  url?: string | null;
+  colors: any;
+  onOpenLink: (url: string) => void;
+  onClear: () => void;
+}) {
+  const normalizedUrl = String(url || '').trim();
+  const hasFile = normalizedUrl.length > 0;
+
+  return (
+    <View style={[styles.documentControl, { borderColor: colors.border, backgroundColor: colors.card }]}>
+      <View style={[styles.documentIcon, { backgroundColor: `${colors.primary}18` }]}>
+        <Ionicons name="document-attach-outline" size={18} color={colors.primary} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[styles.documentLabel, { color: colors.text }]}>{label}</Text>
+        <Text numberOfLines={1} style={[styles.documentMeta, { color: colors.textSecondary }]}>
+          {hasFile ? 'Attached file' : `No ${label.toLowerCase()} attached.`}
+        </Text>
+      </View>
+      {hasFile ? (
+        <View style={styles.documentActions}>
+          <TouchableOpacity
+            activeOpacity={0.82}
+            style={[styles.documentActionButton, { borderColor: colors.border }]}
+            onPress={() => onOpenLink(normalizedUrl)}
+          >
+            <Ionicons name="open-outline" size={14} color={colors.primary} />
+            <Text style={[styles.documentActionText, { color: colors.primary }]}>Open</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.82}
+            style={[styles.documentActionButton, { borderColor: '#EF4444', backgroundColor: '#EF444414' }]}
+            onPress={onClear}
+          >
+            <Ionicons name="close-outline" size={14} color="#EF4444" />
+            <Text style={[styles.documentActionText, { color: '#EF4444' }]}>Clear</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+const isInviteActivity = (activity: AdminRelatedActivity) => (
+  String(activity.request_kind || '').trim().toLowerCase() === 'invite' ||
+  String(activity.title || '').trim().toLowerCase().includes('invite')
+);
+
+function RelatedActivityPreview({
+  activities,
+  colors,
+  isDark,
+}: {
+  activities: AdminRelatedActivity[];
+  colors: any;
+  isDark: boolean;
+}) {
+  const inviteCount = activities.filter(isInviteActivity).length;
+  const previewActivities = [...activities]
+    .sort((a, b) => Number(isInviteActivity(b)) - Number(isInviteActivity(a)))
+    .slice(0, 4);
+
+  return (
+    <View style={[styles.editorActivityCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+      <View style={styles.detailCardHeader}>
+        <View style={[styles.detailSectionIcon, { backgroundColor: isDark ? '#111827' : '#EFF6FF' }]}>
+          <Ionicons name="mail-open-outline" size={17} color={colors.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.detailCardTitle, { color: colors.text }]}>Invites & Activity</Text>
+          <Text style={[styles.relatedMeta, { color: colors.textSecondary }]}>
+            {inviteCount} invite(s) | {activities.length} total item(s)
+          </Text>
+        </View>
+      </View>
+
+      {previewActivities.length === 0 ? (
+        <Text style={[styles.detailEmpty, { color: colors.textSecondary }]}>
+          No related invites or applications yet.
+        </Text>
+      ) : (
+        <View style={styles.editorActivityList}>
+          {previewActivities.map((activity, index) => {
+            const label = isInviteActivity(activity)
+              ? 'Invite'
+              : activityTypeLabels[activity.kind] || 'Activity';
+            return (
+              <View
+                key={`${activity.kind}:${activity.id}`}
+                style={[styles.editorActivityItem, { borderColor: colors.border, backgroundColor: colors.background }]}
+              >
+                <Text numberOfLines={1} style={[styles.editorActivityTitle, { color: colors.text }]}>
+                  {activity.title || `${label} ${index + 1}`}
+                </Text>
+                <Text numberOfLines={1} style={[styles.editorActivityMeta, { color: colors.textSecondary }]}>
+                  {label} | {normalizeStatusText(activity.status)}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
+    </View>
+  );
+}
+
 function DetailSectionCard({
   section,
   colors,
@@ -1518,6 +2066,150 @@ function DetailSectionCard({
           </View>
         ))}
       </View>
+    </View>
+  );
+}
+
+function RelatedActivitySection({
+  activities,
+  colors,
+  isDark,
+  busyKey,
+  onAction,
+  onOpenLink,
+}: {
+  activities: AdminRelatedActivity[];
+  colors: any;
+  isDark: boolean;
+  busyKey: string | null;
+  onAction: (activity: AdminRelatedActivity, action: RelatedActivityAction) => void;
+  onOpenLink: (url: string) => void;
+}) {
+  return (
+    <View
+      testID="admin-manage-related-section"
+      accessibilityLabel="admin-manage-related-section"
+      style={[styles.detailCard, { borderColor: colors.border, backgroundColor: colors.card }]}
+    >
+      <View style={styles.detailCardHeader}>
+        <View style={[styles.detailSectionIcon, { backgroundColor: isDark ? '#111827' : '#EFF6FF' }]}>
+          <Ionicons name="swap-horizontal-outline" size={17} color={colors.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.detailCardTitle, { color: colors.text }]}>Applications, Invites & Bookings</Text>
+          <Text style={[styles.relatedMeta, { color: colors.textSecondary }]}>
+            {activities.length} related item(s)
+          </Text>
+        </View>
+      </View>
+
+      {activities.length === 0 ? (
+        <Text
+          testID="admin-manage-related-empty"
+          accessibilityLabel="admin-manage-related-empty"
+          style={[styles.detailEmpty, { color: colors.textSecondary }]}
+        >
+          No related applications, invites, or bookings yet.
+        </Text>
+      ) : (
+        <View style={styles.relatedList}>
+          {activities.map((activity) => {
+            const actionList = activity.available_actions || [];
+            const links = getActivityLinks(activity);
+            const testPart = `${activity.kind}-${activity.id}`;
+
+            return (
+              <View
+                key={testPart}
+                testID={`admin-manage-related-card-${testPart}`}
+                accessibilityLabel={`admin-manage-related-card-${testPart}`}
+                style={[styles.relatedCard, { borderColor: colors.border, backgroundColor: colors.background }]}
+              >
+                <View style={styles.relatedHeader}>
+                  <View style={[styles.relatedIcon, { backgroundColor: isDark ? '#1F2937' : '#F8FAFC' }]}>
+                    <Ionicons name={activityTypeIcons[activity.kind] as any} size={16} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text numberOfLines={2} style={[styles.relatedTitle, { color: colors.text }]}>
+                      {activity.title || activityTypeLabels[activity.kind]}
+                    </Text>
+                    <Text numberOfLines={1} style={[styles.relatedSubtitle, { color: colors.textSecondary }]}>
+                      {activityTypeLabels[activity.kind]} | {normalizeStatusText(activity.status)}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.detailRows}>
+                  {getActivityDetailRows(activity).map((row) => (
+                    <View key={`${activity.id}:${row.label}`} style={styles.detailRow}>
+                      <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{row.label}</Text>
+                      <Text selectable style={[styles.detailValue, { color: colors.text }]}>
+                        {valueText(row.value)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+
+                {links.length > 0 ? (
+                  <View style={styles.relatedLinks}>
+                    {links.map((link) => (
+                      <TouchableOpacity
+                        key={`${activity.id}:${link.label}:${link.url}`}
+                        activeOpacity={0.82}
+                        testID={`admin-manage-related-link-${normalizeTestPart(link.label)}-${activity.id}`}
+                        accessibilityLabel={`admin-manage-related-link-${normalizeTestPart(link.label)}-${activity.id}`}
+                        style={[styles.attachmentButton, { borderColor: colors.border, backgroundColor: colors.card }]}
+                        onPress={() => onOpenLink(link.url)}
+                      >
+                        <Ionicons name={link.icon as any} size={15} color={colors.primary} />
+                        <Text numberOfLines={1} style={[styles.attachmentText, { color: colors.text }]}>
+                          {link.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : null}
+
+                <View style={styles.relatedActions}>
+                  {actionList.length === 0 ? (
+                    <Text style={[styles.relatedNoActions, { color: colors.textSecondary }]}>No actions available</Text>
+                  ) : (
+                    actionList.map((activityAction) => {
+                      const isBusy = busyKey === `related:${activity.kind}:${activity.id}:${activityAction.key}`;
+                      const toneColor = activityActionColors[activityAction.tone];
+                      return (
+                        <TouchableOpacity
+                          key={`${activity.id}:${activityAction.key}`}
+                          activeOpacity={0.82}
+                          testID={`admin-manage-related-action-${activityAction.key}-${testPart}`}
+                          accessibilityLabel={`admin-manage-related-action-${activityAction.key}-${testPart}`}
+                          style={[
+                            styles.relatedActionButton,
+                            {
+                              borderColor: toneColor,
+                              backgroundColor: `${toneColor}14`,
+                            },
+                          ]}
+                          onPress={() => onAction(activity, activityAction)}
+                          disabled={Boolean(busyKey)}
+                        >
+                          {isBusy ? (
+                            <ActivityIndicator size="small" color={toneColor} />
+                          ) : (
+                            <Text style={[styles.relatedActionText, { color: toneColor }]}>
+                              {activityAction.label}
+                            </Text>
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })
+                  )}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 }
@@ -1583,6 +2275,101 @@ function SmallField({
         placeholderTextColor={colors.textSecondary}
         style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
       />
+    </View>
+  );
+}
+
+function TimeField({
+  label,
+  value,
+  colors,
+  fallback,
+  testIDPrefix,
+  onClockChange,
+  onTogglePeriod,
+}: {
+  label: string;
+  value: string;
+  colors: any;
+  fallback: string;
+  testIDPrefix: string;
+  onClockChange: (clock: string) => void;
+  onTogglePeriod: () => void;
+}) {
+  const normalized = normalizeTimeForInput(value, fallback);
+  const clock = getClockPart(normalized, fallback);
+  const period = getPeriodPart(normalized, fallback);
+
+  return (
+    <View style={{ flex: 1 }}>
+      <FieldLabel label={label} colors={colors} />
+      <View style={styles.timeInputRow}>
+        <TextInput
+          testID={`${testIDPrefix}-time`}
+          accessibilityLabel={`${testIDPrefix}-time`}
+          value={clock}
+          onChangeText={onClockChange}
+          placeholder={fallback.split(' ')[0]}
+          placeholderTextColor={colors.textSecondary}
+          style={[
+            styles.input,
+            styles.timeInput,
+            { color: colors.text, borderColor: colors.border, backgroundColor: colors.card },
+          ]}
+        />
+        <TouchableOpacity
+          activeOpacity={0.82}
+          testID={`${testIDPrefix}-period`}
+          accessibilityLabel={`${testIDPrefix}-period`}
+          style={[styles.periodButton, { borderColor: colors.border, backgroundColor: colors.card }]}
+          onPress={onTogglePeriod}
+        >
+          <Text style={[styles.periodText, { color: colors.primary }]}>{period}</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+function ResourceImageGallery({
+  resource,
+  colors,
+  onOpenLink,
+}: {
+  resource: AdminResource;
+  colors: any;
+  onOpenLink: (url: string) => void;
+}) {
+  const images = getResourceImages(resource);
+  if (images.length === 0) return null;
+
+  return (
+    <View
+      testID="admin-manage-image-gallery"
+      accessibilityLabel="admin-manage-image-gallery"
+      style={[styles.detailCard, { borderColor: colors.border, backgroundColor: colors.card }]}
+    >
+      <View style={styles.detailCardHeader}>
+        <Ionicons name="images-outline" size={18} color={colors.primary} />
+        <Text style={[styles.detailCardTitle, { color: colors.text }]}>Images</Text>
+      </View>
+      <View style={styles.imageGalleryGrid}>
+        {images.map((image, index) => (
+          <TouchableOpacity
+            key={`${image.url}:${index}`}
+            activeOpacity={0.82}
+            testID={`admin-manage-image-preview-${index + 1}`}
+            accessibilityLabel={`admin-manage-image-preview-${index + 1}`}
+            style={[styles.imageGalleryTile, { borderColor: colors.border, backgroundColor: colors.background }]}
+            onPress={() => onOpenLink(image.url)}
+          >
+            <Image source={{ uri: image.url }} style={styles.imageGalleryImage} resizeMode="cover" />
+            <View style={styles.imageGalleryMeta}>
+              <Text style={[styles.imageGalleryLabel, { color: colors.text }]}>{image.label}</Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </View>
     </View>
   );
 }
@@ -1774,6 +2561,37 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   attachmentText: { flex: 1, minWidth: 0, fontSize: 12, fontFamily: 'Poppins_600SemiBold' },
+  relatedMeta: { marginTop: 2, fontSize: 11, fontFamily: 'Poppins_400Regular' },
+  relatedList: { gap: 10 },
+  relatedCard: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    gap: 12,
+  },
+  relatedHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  relatedIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  relatedTitle: { fontSize: 13, lineHeight: 18, fontFamily: 'Poppins_700Bold' },
+  relatedSubtitle: { marginTop: 2, fontSize: 11, fontFamily: 'Poppins_500Medium', textTransform: 'capitalize' },
+  relatedLinks: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  relatedActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  relatedActionButton: {
+    minHeight: 34,
+    minWidth: 96,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  relatedActionText: { fontSize: 12, fontFamily: 'Poppins_700Bold' },
+  relatedNoActions: { fontSize: 12, fontFamily: 'Poppins_500Medium' },
   segmentedRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 14 },
   segmentButton: {
     minHeight: 34,
@@ -1796,7 +2614,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_400Regular',
   },
   textArea: { minHeight: 92, textAlignVertical: 'top' },
-  urlArea: { minHeight: 84, textAlignVertical: 'top' },
   ownerRow: { gap: 8, paddingVertical: 9 },
   ownerChip: {
     width: 210,
@@ -1806,6 +2623,25 @@ const styles = StyleSheet.create({
   },
   ownerName: { fontSize: 12, fontFamily: 'Poppins_700Bold' },
   ownerEmail: { marginTop: 2, fontSize: 11, fontFamily: 'Poppins_400Regular' },
+  ownerHint: { marginTop: 4, fontSize: 12, fontFamily: 'Poppins_400Regular' },
+  selectedOwnerCard: {
+    minHeight: 50,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  selectedOwnerIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectedOwnerName: { fontSize: 13, fontFamily: 'Poppins_700Bold' },
+  selectedOwnerMeta: { marginTop: 2, fontSize: 11, fontFamily: 'Poppins_400Regular' },
   optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   optionChip: {
     minHeight: 34,
@@ -1817,6 +2653,89 @@ const styles = StyleSheet.create({
   },
   optionText: { fontSize: 12, fontFamily: 'Poppins_600SemiBold', textTransform: 'capitalize' },
   twoColumn: { flexDirection: 'row', gap: 10 },
+  datePickerButton: {
+    minHeight: 42,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  datePickerText: { flex: 1, minWidth: 0, fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
+  calendarPanel: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  timeInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  timeInput: { flex: 1, minWidth: 0 },
+  periodButton: {
+    minHeight: 42,
+    minWidth: 58,
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  periodText: { fontSize: 12, fontFamily: 'Poppins_700Bold' },
+  imageGalleryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  imageGalleryTile: {
+    width: 190,
+    borderWidth: 1,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  imageGalleryImage: { width: '100%', height: 118, backgroundColor: '#E5E7EB' },
+  imageGalleryMeta: { padding: 9, gap: 4 },
+  imageGalleryLabel: { fontSize: 12, fontFamily: 'Poppins_700Bold' },
+  documentControl: {
+    marginTop: 12,
+    minHeight: 58,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  documentIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  documentLabel: { fontSize: 13, fontFamily: 'Poppins_700Bold' },
+  documentMeta: { marginTop: 2, fontSize: 11, fontFamily: 'Poppins_400Regular' },
+  documentActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' },
+  documentActionButton: {
+    minHeight: 32,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  documentActionText: { fontSize: 11, fontFamily: 'Poppins_700Bold' },
+  editorActivityCard: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    gap: 12,
+  },
+  editorActivityList: { gap: 8 },
+  editorActivityItem: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+  },
+  editorActivityTitle: { fontSize: 12, fontFamily: 'Poppins_700Bold' },
+  editorActivityMeta: { marginTop: 2, fontSize: 11, fontFamily: 'Poppins_500Medium', textTransform: 'capitalize' },
   switchRow: {
     marginTop: 14,
     borderRadius: 8,

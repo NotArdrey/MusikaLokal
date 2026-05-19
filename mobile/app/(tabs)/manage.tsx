@@ -10,6 +10,7 @@ import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { resolveRoleManageRoute } from '../../src/utils/roleRouting';
+import { fetchActiveStaffAssignment } from '../../src/utils/staffAccess';
 
 export default function ManageScreen() {
     const { colors } = useTheme();
@@ -41,7 +42,7 @@ export default function ManageScreen() {
 
             // Try to get role from context first, or fetch directly
             if (userRole) {
-                handleRedirect(userRole);
+                void handleRedirect(userRole);
             } else {
                 // Fallback: Fetch role directly from DB
                 fetchRoleAndRedirect();
@@ -70,7 +71,7 @@ export default function ManageScreen() {
 
             if (data?.role) {
                 setFetchedRole(data.role);
-                handleRedirect(data.role);
+                void handleRedirect(data.role);
             } else {
                 setLoading(false);
             }
@@ -79,7 +80,27 @@ export default function ManageScreen() {
         }
     };
 
-    const handleRedirect = (role: string) => {
+    const handleRedirect = async (role: string) => {
+        if (role === 'staff' && userId) {
+            try {
+                const assignment = await fetchActiveStaffAssignment(supabase, userId);
+                if (assignment?.entity_type === 'studio') {
+                    router.replace('/my_studio');
+                    return;
+                }
+                if (assignment?.entity_type === 'venue') {
+                    router.replace('/my_venue');
+                    return;
+                }
+                if (assignment?.entity_type === 'production') {
+                    router.replace('/my_production');
+                    return;
+                }
+            } catch {
+                // Fall through to the generic manage fallback.
+            }
+        }
+
         const destination = resolveRoleManageRoute(role);
 
         if (destination !== '/manage') {

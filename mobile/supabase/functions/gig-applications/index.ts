@@ -27,6 +27,29 @@ const ALLOWED_ORGANIZER_STATUSES = new Set(['accepted', 'approved', 'rejected', 
 const ALLOWED_LEADER_DECISIONS = new Set(['approved', 'rejected'])
 const ACTIVE_GIG_APPLICATION_STATUSES = ['pending', 'accepted', 'approved']
 
+async function getVenueStaffAccessLevel(client: any, userId: string, gigId: string): Promise<number | null> {
+    if (!userId || !gigId) return null
+
+    const { data, error } = await client
+        .from('staff_listing_access')
+        .select('access_level')
+        .eq('staff_user_id', userId)
+        .eq('entity_type', 'venue')
+        .eq('gig_id', gigId)
+        .is('revoked_at', null)
+        .maybeSingle()
+
+    if (error) {
+        const message = String(error?.message || '').toLowerCase()
+        const code = String(error?.code || '').toLowerCase()
+        if (code === '42p01' || message.includes('staff_listing_access')) return null
+        throw error
+    }
+
+    const level = Number(data?.access_level)
+    return level === 1 || level === 2 || level === 3 ? level : null
+}
+
 const GIG_APPLICATION_SELECT = `
     *,
     applicant:profiles!applicant_id(id, full_name, avatar_url, role, bio, location),
@@ -382,7 +405,8 @@ Deno.serve(async (req: Request) => {
                 })
             }
 
-            if (gigRecord.organizer_id !== effectiveUserId) {
+            const venueStaffAccessLevel = await getVenueStaffAccessLevel(supabaseAdmin, effectiveUserId, gigId)
+            if (gigRecord.organizer_id !== effectiveUserId && !(venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2)) {
                 return new Response(JSON.stringify({ error: 'Forbidden' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 403,
@@ -701,7 +725,16 @@ Deno.serve(async (req: Request) => {
 
             if (appError) throw appError;
 
-            if (!appDetails || appDetails.gig?.organizer_id !== effectiveUserId) {
+            const venueStaffAccessLevel = appDetails?.gig_id
+                ? await getVenueStaffAccessLevel(supabaseAdmin, effectiveUserId, appDetails.gig_id)
+                : null
+            if (
+                !appDetails ||
+                (
+                    appDetails.gig?.organizer_id !== effectiveUserId &&
+                    !(venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2)
+                )
+            ) {
                 return new Response(JSON.stringify({ error: 'Forbidden' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 403,

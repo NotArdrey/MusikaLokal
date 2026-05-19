@@ -16,6 +16,7 @@ import { useAuth, useRequireAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../../src/utils/actionError';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
+import { getStaffPermissions } from '../../src/utils/staffAccess';
 
 type TeamRecord = {
   id: string;
@@ -24,6 +25,7 @@ type TeamRecord = {
   logo_url: string | null;
   owner_id: string;
   member_role: string;
+  staff_access_level?: number | null;
   created_at: string;
 };
 
@@ -216,9 +218,16 @@ export default function MyProductionScreen() {
           ) : (
             teams.map((team) => {
               const isOwnerTeam = team.member_role === 'owner';
-              const canEdit = !isMusicianView && (team.member_role === 'owner' || team.member_role === 'manager');
-              const canDelete = !isMusicianView && team.member_role === 'owner';
+              const staffPermissions = team.staff_access_level ? getStaffPermissions(team.staff_access_level) : null;
+              const canShowActions = !staffPermissions?.canViewOnly;
+              const canEdit = !isMusicianView && (
+                team.member_role === 'owner' ||
+                team.member_role === 'manager' ||
+                Boolean(staffPermissions?.canEditListing)
+              );
+              const canDelete = !isMusicianView && !staffPermissions && team.member_role === 'owner';
               const canOnlyViewAndChat = isMusicianView && !isOwnerTeam;
+              const showManageAsView = canOnlyViewAndChat || Boolean(staffPermissions && !staffPermissions.canEditListing);
 
               return (
                 <View
@@ -253,6 +262,7 @@ export default function MyProductionScreen() {
                       {team.description || 'No description added yet.'}
                     </Text>
 
+                    {canShowActions ? (
                     <View style={[styles.actionRow, { borderColor: colors.border }]}> 
                       <View style={styles.actionLeft}>
                         <TouchableOpacity
@@ -262,8 +272,8 @@ export default function MyProductionScreen() {
                           onPress={() => router.push({ pathname: '/production_team', params: { teamId: team.id } })}
                           style={[styles.manageBtn, { backgroundColor: colors.primary }]}
                         >
-                          <Ionicons name={canOnlyViewAndChat ? 'eye-outline' : 'settings-outline'} size={18} color="#FFF" />
-                          <Text style={styles.manageBtnText}>{canOnlyViewAndChat ? 'View' : 'Manage'}</Text>
+                          <Ionicons name={showManageAsView ? 'eye-outline' : 'settings-outline'} size={18} color="#FFF" />
+                          <Text style={styles.manageBtnText}>{showManageAsView ? 'View' : 'Manage'}</Text>
                         </TouchableOpacity>
 
                         {canOnlyViewAndChat ? (
@@ -313,6 +323,7 @@ export default function MyProductionScreen() {
                         </TouchableOpacity>
                       ) : null}
                     </View>
+                    ) : null}
                   </View>
                 </View>
               );

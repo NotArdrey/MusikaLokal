@@ -177,7 +177,9 @@ serve(async (req: Request) => {
       if (table === "profiles") {
         query = query
           .select("id, full_name, avatar_url, address, created_at, role, show_gig_statuses")
-          .eq("role", "musician");
+          .eq("role", "musician")
+          .eq("is_verified", true)
+          .eq("verification_status", "APPROVED");
       }
 
       if (queryText.length > 0) {

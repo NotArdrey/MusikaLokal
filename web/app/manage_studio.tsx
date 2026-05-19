@@ -27,6 +27,7 @@ import {
     openNavigationDirections,
 } from "../src/utils/navigation";
 import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
+import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 
 const CUSTOM_DATE_PREVIEW_LIMIT = 5;
 const STUDIO_TABS = ["About", "Setup", "Bookings", "Review"];
@@ -260,8 +261,37 @@ export default function StudioDetailsScreen() {
 
       if (profileError) throw profileError;
 
-      if (profile?.role !== "studio-owner") {
-        Alert.alert("Unauthorized", "Only studio owners can access this page.");
+      const studioId = Array.isArray(id) ? id[0] : id;
+      if (!studioId) {
+        Alert.alert("Error", "Invalid studio ID");
+        router.replace("/feed");
+        return;
+      }
+
+      let canManageStudio = false;
+      if (profile?.role === "studio-owner") {
+        const { data: ownedStudio, error: ownedStudioError } = await supabase
+          .from("studios")
+          .select("id")
+          .eq("id", studioId)
+          .eq("owner_id", user.id)
+          .maybeSingle();
+
+        if (ownedStudioError) throw ownedStudioError;
+        canManageStudio = !!ownedStudio?.id;
+      }
+
+      if (!canManageStudio && profile?.role === "staff") {
+        const assignment = await fetchActiveStaffAssignment(supabase, user.id);
+        const permissions = getStaffPermissions(assignment?.access_level);
+        canManageStudio =
+          assignment?.entity_type === "studio" &&
+          assignment.studio_id === studioId &&
+          permissions.canManageBookings;
+      }
+
+      if (!canManageStudio) {
+        Alert.alert("Unauthorized", "Only the studio owner or assigned Level 1/2 staff can access this page.");
         router.replace("/feed");
         return;
       }
@@ -294,7 +324,6 @@ export default function StudioDetailsScreen() {
         .from('studios')
         .select('*')
         .eq('id', studioId)
-        .eq('owner_id', userId)
         .single();
 
       const { data: legacyStudio, error: legacyStudioError } = await supabase

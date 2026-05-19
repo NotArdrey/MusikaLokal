@@ -54,6 +54,7 @@ import { usePageLoadLogger } from "../utils/loadTimeLogger";
 import { bottomSheetSpringConfig } from "../utils/motion";
 import { isFanUserRole } from "../utils/roleRouting";
 import { getSmoothTabIndex, setSmoothTab } from "../utils/smoothTabs";
+import { fetchActiveStaffAssignment, getStaffPermissions } from "../utils/staffAccess";
 import CustomAlert from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
 import ReportModal from "./ReportModal";
@@ -398,10 +399,36 @@ const ListingDetailsSheet = forwardRef<
   const [loading, setLoading] = useState(false);
   const [group, setGroup] = useState<any>(null);
   const latestListingIdRef = useRef(listingId);
+  const [staffAssignment, setStaffAssignment] = useState<any>(null);
   const [isFavorited, setIsFavorited] = useState(false);
   const [favoriteCount, setFavoriteCount] = useState(0);
   const [modalVisible, setModalVisible] = useState(false);
   const [bookingNotes, setBookingNotes] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadStaffAssignment = async () => {
+      if (userRole !== "staff" || !userId) {
+        setStaffAssignment(null);
+        return;
+      }
+
+      try {
+        const assignment = await fetchActiveStaffAssignment(supabase, userId);
+        if (!cancelled) setStaffAssignment(assignment);
+      } catch (error) {
+        console.warn("Failed to load staff listing assignment", error);
+        if (!cancelled) setStaffAssignment(null);
+      }
+    };
+
+    void loadStaffAssignment();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, userRole]);
 
   // Application State (for Gig applications)
   const [pitchMessage, setPitchMessage] = useState("");
@@ -966,7 +993,23 @@ const ListingDetailsSheet = forwardRef<
     group?.organizer_id ||
     (normalizedListingType === "artist" ? group?.id || null : null);
   const isOwnListing = !!userId && !!listingOwnerId && listingOwnerId === userId;
-  const showReportButton = !!group && !isOwnListing && !isGuest;
+  const staffTargetMatchesListing =
+    !!group &&
+    (
+      (staffAssignment?.entity_type === "studio" &&
+        normalizedListingType === "studio" &&
+        staffAssignment.studio_id === group.id) ||
+      (staffAssignment?.entity_type === "venue" &&
+        (normalizedListingType === "gig" || normalizedListingType === "venue") &&
+        staffAssignment.gig_id === group.id) ||
+      (staffAssignment?.entity_type === "production" &&
+        (normalizedListingType === "production" || normalizedListingType === "production_team") &&
+        staffAssignment.production_team_id === group.id)
+    );
+  const isStaffViewOnlyListing =
+    staffTargetMatchesListing &&
+    getStaffPermissions(staffAssignment?.access_level).canViewOnly;
+  const showReportButton = !!group && !isOwnListing && !isGuest && !isStaffViewOnlyListing;
 
   const submitReport = async (reason: string, details?: string) => {
     if (!userId) {
@@ -4081,13 +4124,13 @@ const ListingDetailsSheet = forwardRef<
               styles={styles}
               isFavorited={isFavorited}
               favoriteCount={favoriteCount}
-              showFavoriteButton={!isGuest}
+              showFavoriteButton={!isGuest && !isStaffViewOnlyListing}
               showReportButton={showReportButton}
               onClose={() => (ref as any)?.current?.dismiss()}
               onToggleFavorite={toggleFavorite}
               onReport={handleReport}
               onShare={handleShare}
-              onChat={isGuest || isFan ? undefined : openListingChat}
+              onChat={isGuest || isFan || isStaffViewOnlyListing ? undefined : openListingChat}
             />
 
             {/* TABS SELECTOR */}

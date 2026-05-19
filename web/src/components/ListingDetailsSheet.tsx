@@ -42,6 +42,7 @@ import { useListingSheetEffects } from "../hooks/useListingSheetEffects";
 import { useProfileCompletion } from "../hooks/useProfileCompletion";
 import { submitListingRequest, uploadListingRequestDocument } from "../utils/listingRequests";
 import { isFanUserRole } from "../utils/roleRouting";
+import { fetchActiveStaffAssignment, getStaffPermissions } from "../utils/staffAccess";
 import CustomAlert from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
 import ReportModal from "./ReportModal";
@@ -282,6 +283,7 @@ const ListingDetailsSheet = forwardRef<
   const { isProfileComplete } = useProfileCompletion();
   const [loading, setLoading] = useState(false);
   const [group, setGroup] = useState<any>(null);
+  const [staffAssignment, setStaffAssignment] = useState<any>(null);
   const [isFavorited, setIsFavorited] = useState(false);
   const [favoriteCount, setFavoriteCount] = useState(0);
   const [modalVisible, setModalVisible] = useState(false);
@@ -301,6 +303,31 @@ const ListingDetailsSheet = forwardRef<
       bottomSheetRef.current?.dismiss();
     }
   }, [isWebDesktop, onDismiss]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadStaffAssignment = async () => {
+      if (userRole !== "staff" || !userId) {
+        setStaffAssignment(null);
+        return;
+      }
+
+      try {
+        const assignment = await fetchActiveStaffAssignment(supabase, userId);
+        if (!cancelled) setStaffAssignment(assignment);
+      } catch (error) {
+        console.warn("Failed to load staff listing assignment", error);
+        if (!cancelled) setStaffAssignment(null);
+      }
+    };
+
+    void loadStaffAssignment();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, userRole]);
 
   React.useImperativeHandle(ref, () => ({
     present: () => {
@@ -2691,7 +2718,23 @@ const ListingDetailsSheet = forwardRef<
     ? group?.id || null
     : group?.owner_id || group?.organizer_id || null;
   const isOwnListing = !!userId && !!listingOwnerId && listingOwnerId === userId;
-  const showReportButton = !!group && !isOwnListing && !isGuest;
+  const staffTargetMatchesListing =
+    !!group &&
+    (
+      (staffAssignment?.entity_type === "studio" &&
+        normalizedListingType === "studio" &&
+        staffAssignment.studio_id === group.id) ||
+      (staffAssignment?.entity_type === "venue" &&
+        (normalizedListingType === "gig" || normalizedListingType === "venue") &&
+        staffAssignment.gig_id === group.id) ||
+      (staffAssignment?.entity_type === "production" &&
+        (normalizedListingType === "production" || normalizedListingType === "production_team") &&
+        staffAssignment.production_team_id === group.id)
+    );
+  const isStaffViewOnlyListing =
+    staffTargetMatchesListing &&
+    getStaffPermissions(staffAssignment?.access_level).canViewOnly;
+  const showReportButton = !!group && !isOwnListing && !isGuest && !isStaffViewOnlyListing;
   const isGroupListing = group?.type === "Group";
   const effectiveUserRole = userRole || currentUserRole;
   const isFan = isFanUserRole(effectiveUserRole);
@@ -3716,13 +3759,13 @@ const ListingDetailsSheet = forwardRef<
         styles={styles}
         isFavorited={isFavorited}
         favoriteCount={favoriteCount}
-        showFavoriteButton={!isGuest}
+        showFavoriteButton={!isGuest && !isStaffViewOnlyListing}
         showReportButton={showReportButton}
         onClose={dismissSelf}
         onToggleFavorite={toggleFavorite}
         onReport={handleReport}
         onShare={handleShare}
-        onChat={isGuest || isFan ? undefined : openListingChat}
+        onChat={isGuest || isFan || isStaffViewOnlyListing ? undefined : openListingChat}
       />
 
       {/* TABS SELECTOR */}

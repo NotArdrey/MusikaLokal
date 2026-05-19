@@ -12,6 +12,7 @@ import Navbar from '../src/components/navbar';
 import Skeleton from '../src/components/Skeleton';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { getStaffPermissions } from '../src/utils/staffAccess';
 
 type TeamRecord = {
   id: string;
@@ -20,6 +21,7 @@ type TeamRecord = {
   logo_url: string | null;
   owner_id: string;
   member_role: string;
+  staff_access_level?: number | null;
   created_at: string;
 };
 
@@ -209,9 +211,16 @@ export default function MyProductionScreen() {
               <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
                 {teams.map((team) => {
                   const isOwnerTeam = team.member_role === 'owner';
-                  const canEdit = !isMusicianView && (team.member_role === 'owner' || team.member_role === 'manager');
-                  const canDelete = !isMusicianView && team.member_role === 'owner';
+                  const staffPermissions = team.staff_access_level ? getStaffPermissions(team.staff_access_level) : null;
+                  const canShowActions = !staffPermissions?.canViewOnly;
+                  const canEdit = !isMusicianView && (
+                    team.member_role === 'owner' ||
+                    team.member_role === 'manager' ||
+                    Boolean(staffPermissions?.canEditListing)
+                  );
+                  const canDelete = !isMusicianView && !staffPermissions && team.member_role === 'owner';
                   const canOnlyViewAndChat = isMusicianView && !isOwnerTeam;
+                  const showManageAsView = canOnlyViewAndChat || Boolean(staffPermissions && !staffPermissions.canEditListing);
 
                   return (
                     <View key={team.id} style={[styles.gridItem, isWebDesktop && styles.gridItemWeb]}>
@@ -239,14 +248,15 @@ export default function MyProductionScreen() {
                             {team.description || 'No description added yet.'}
                           </Text>
 
+                          {canShowActions ? (
                           <View style={[styles.actionRow, { borderColor: colors.border }]}>
                             <View style={styles.actionLeft}>
                               <TouchableOpacity activeOpacity={1}
                                 onPress={() => router.push({ pathname: '/production_team', params: { teamId: team.id } })}
                                 style={[styles.manageBtn, { backgroundColor: colors.primary }]}
                               >
-                                <Ionicons name={canOnlyViewAndChat ? 'eye-outline' : 'settings-outline'} size={16} color="#FFF" />
-                                <Text style={styles.manageBtnText}>{canOnlyViewAndChat ? 'View' : 'Manage'}</Text>
+                                <Ionicons name={showManageAsView ? 'eye-outline' : 'settings-outline'} size={16} color="#FFF" />
+                                <Text style={styles.manageBtnText}>{showManageAsView ? 'View' : 'Manage'}</Text>
                               </TouchableOpacity>
 
                               {canOnlyViewAndChat ? (
@@ -287,6 +297,7 @@ export default function MyProductionScreen() {
                               </TouchableOpacity>
                             ) : null}
                           </View>
+                          ) : null}
                         </View>
                       </View>
                     </View>

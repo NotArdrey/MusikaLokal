@@ -57,6 +57,7 @@ const base64ToUint8Array = (base64: string): Uint8Array => {
 
 import { useLocalSearchParams } from "expo-router";
 import { supabase } from "../lib/supabase";
+import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 
 // Helper function to format time input
 const formatTimeInput = (text: string): string => {
@@ -964,11 +965,42 @@ export default function EditStudioScreen() {
 
       if (profileError) throw profileError;
 
-      if (profile?.role !== "studio-owner") {
+      const studioId = Array.isArray(id) ? id[0] : id;
+      if (!studioId) {
+        showAlert("warning", "Invalid Studio", "Invalid studio ID. Please try again.");
+        router.replace("/feed");
+        return;
+      }
+
+      const isStudioOwner = profile?.role === "studio-owner";
+      let canEditStudio = false;
+
+      if (isStudioOwner) {
+        const { data: ownedStudio, error: ownedStudioError } = await supabase
+          .from("studios")
+          .select("id")
+          .eq("id", studioId)
+          .eq("owner_id", user.id)
+          .maybeSingle();
+
+        if (ownedStudioError) throw ownedStudioError;
+        canEditStudio = !!ownedStudio?.id;
+      }
+
+      if (!canEditStudio && profile?.role === "staff") {
+        const assignment = await fetchActiveStaffAssignment(supabase, user.id);
+        const permissions = getStaffPermissions(assignment?.access_level);
+        canEditStudio =
+          assignment?.entity_type === "studio" &&
+          assignment.studio_id === studioId &&
+          permissions.canEditListing;
+      }
+
+      if (!canEditStudio) {
         showAlert(
           "warning",
           "Unauthorized",
-          "Only studio owners can edit studios.",
+          "Only the studio owner or assigned Level 1 staff can edit this studio.",
         );
         router.replace("/feed");
         return;
@@ -1248,7 +1280,6 @@ export default function EditStudioScreen() {
         .from('studios')
         .select('*')
         .eq('id', studioId)
-        .eq('owner_id', user.id)
         .single();
 
       const [
@@ -3338,7 +3369,6 @@ export default function EditStudioScreen() {
           permit_reviewed_at: null,
         })
         .eq('id', studioId)
-        .eq('owner_id', user.id)
         .select()
         .single();
 

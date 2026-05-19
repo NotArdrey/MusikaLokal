@@ -88,6 +88,23 @@ const PASSWORD_REQUIREMENTS = [
     { key: 'spaces', label: 'No spaces', test: (value: string) => !/\s/.test(value) },
 ];
 
+const getVerificationRetryMessage = (payload: any) => {
+    const retryRequired = Boolean(
+        payload?.retryRequired ||
+        payload?.retry_required ||
+        payload?.verification_data?.retry_required ||
+        payload?.extracted_data?.retry_required
+    );
+    const message =
+        payload?.retryMessage ||
+        payload?.retry_message ||
+        payload?.verification_data?.retry_message ||
+        payload?.extracted_data?.retry_message ||
+        (retryRequired ? payload?.error : '');
+
+    return retryRequired && typeof message === 'string' ? message.trim() : '';
+};
+
 const getPasswordRequirementState = (value: string) => PASSWORD_REQUIREMENTS.map((requirement) => ({
     ...requirement,
     met: requirement.test(value),
@@ -210,6 +227,50 @@ const getEmailDeliveryFromInvokeError = (error: any) => {
         } catch {
             return null;
         }
+    }
+
+    return null;
+};
+
+const parseJsonPayload = (value: any) => {
+    if (!value) return null;
+    if (typeof value === 'object' && !Array.isArray(value)) return value;
+    if (typeof value !== 'string') return null;
+
+    try {
+        return JSON.parse(value);
+    } catch {
+        return null;
+    }
+};
+
+const getJsonPayloadFromInvokeError = async (error: any) => {
+    const responsePayload = parseJsonPayload(error?.responseBody);
+    if (responsePayload) return responsePayload;
+
+    const response = error?.context;
+    if (response?.clone) {
+        try {
+            return await response.clone().json();
+        } catch {
+            // Fall through to the raw body reader below.
+        }
+    }
+
+    if (response?.body?.getReader) {
+        try {
+            const reader = response.body.getReader();
+            const result = await reader.read();
+            const text = new TextDecoder().decode(result.value);
+            return parseJsonPayload(text);
+        } catch {
+            // Fall through to message parsing.
+        }
+    }
+
+    if (typeof error?.message === 'string') {
+        const jsonMatch = error.message.match(/\{.*\}/);
+        return parseJsonPayload(jsonMatch?.[0]);
     }
 
     return null;
@@ -549,6 +610,7 @@ export default function SignupScreen() {
 
                     // Check status - supports robust checking of nested data
                     const status = sessionData?.status || sessionData?.verification_data?.status;
+                    const retryMessage = getVerificationRetryMessage(sessionData);
                     console.log(`Session Status Check (Attempt ${retries + 1}):`, status);
 
                     // 1. SUCCESS
@@ -580,8 +642,8 @@ export default function SignupScreen() {
                         let message = 'Your identity could not be verified. Please try again.';
 
                         if (status === 'DECLINED' || status === 'Declined') {
-                            title = 'Invalid I.D.';
-                            message = 'Your I.D. was declined or does not match. Please try again with a valid government-issued I.D.';
+                            title = retryMessage ? 'Verification Retry Needed' : 'Invalid I.D.';
+                            message = retryMessage || 'Your I.D. was declined or does not match. Please try again with a valid government-issued I.D.';
                         } else if (status === 'ABANDONED' || status === 'Abandoned') {
                             title = 'Verification Incomplete';
                             message = 'You did not complete the verification process. Please try again.';
@@ -624,6 +686,7 @@ export default function SignupScreen() {
                     // FunctionsHttpError is thrown when the Edge Function returns non-2xx status
                     let errorStatus = null;
                     let errorMessage = e?.message || 'Unknown error';
+                    let errorRetryMessage = '';
 
                     // Try multiple ways to extract error details
                     try {
@@ -634,6 +697,7 @@ export default function SignupScreen() {
                             const text = new TextDecoder().decode(result.value);
                             const errorJson = JSON.parse(text);
                             errorStatus = errorJson?.status || errorJson?.verification_data?.status;
+                            errorRetryMessage = getVerificationRetryMessage(errorJson);
                         }
                     } catch { /* ignore parse errors */ }
 
@@ -645,6 +709,7 @@ export default function SignupScreen() {
                             if (jsonMatch) {
                                 const parsed = JSON.parse(jsonMatch[0]);
                                 errorStatus = parsed?.status || errorStatus;
+                                errorRetryMessage = getVerificationRetryMessage(parsed) || errorRetryMessage;
                             }
                         }
                     } catch { /* ignore parse errors */ }
@@ -668,8 +733,8 @@ export default function SignupScreen() {
                         let title = 'Verification Failed';
                         let message = 'Please try again.';
                         if (errorStatus === 'DECLINED' || errorStatus === 'Declined') {
-                            title = 'Invalid I.D.';
-                            message = 'Your I.D. was declined. Please try again with a valid government-issued I.D.';
+                            title = errorRetryMessage ? 'Verification Retry Needed' : 'Invalid I.D.';
+                            message = errorRetryMessage || 'Your I.D. was declined. Please try again with a valid government-issued I.D.';
                         }
 
                         setStep('details');
@@ -1036,6 +1101,20 @@ export default function SignupScreen() {
                 },
             } as any);
         } catch (authErr: any) {
+            const retryPayload = await getJsonPayloadFromInvokeError(authErr);
+            const retryMessage = getVerificationRetryMessage(retryPayload);
+            if (retryMessage) {
+                setVerificationUrl('');
+                setSessionId('');
+                setSessionNonce('');
+                setTempSessionRef('');
+                await AsyncStorage.removeItem('signup_current_session');
+                router.setParams({ verified: '', check_verification: '' });
+                setStep('details');
+                Alert.alert('Verification Retry Needed', retryMessage);
+                return;
+            }
+
             Alert.alert('Creation Failed', authErr?.message || 'Unable to create your account right now.');
         } finally {
             setLoading(false);
@@ -1636,6 +1715,20 @@ export default function SignupScreen() {
                 diditSessionId: refToLink,
                 platform: Platform.OS,
             });
+            const retryPayload = await getJsonPayloadFromInvokeError(authErr);
+            const retryMessage = getVerificationRetryMessage(retryPayload);
+            if (retryMessage) {
+                setVerificationUrl('');
+                setSessionId('');
+                setSessionNonce('');
+                setTempSessionRef('');
+                await AsyncStorage.removeItem('signup_current_session');
+                router.setParams({ verified: '', check_verification: '' });
+                setStep('details');
+                Alert.alert('Verification Retry Needed', retryMessage);
+                return;
+            }
+
             // Handle "User already registered" specifically
             if (authErr?.message?.includes('already registered') || authErr?.status === 422) {
                 logDiditEmailFlow('auth.signUp.accountAlreadyRegistered', {
@@ -2130,6 +2223,7 @@ export default function SignupScreen() {
                 });
 
                 const status = sessionData?.status || sessionData?.verification_data?.status;
+                const retryMessage = getVerificationRetryMessage(sessionData);
                 console.log('Manual status check result:', status);
 
                 if (status === 'Approved' || status === 'APPROVED') {
@@ -2151,6 +2245,9 @@ export default function SignupScreen() {
                     if (status === 'ABANDONED' || status === 'Abandoned') {
                         title = 'Verification Incomplete';
                         message = 'You did not complete the verification. Please try again.';
+                    } else if (retryMessage) {
+                        title = 'Verification Retry Needed';
+                        message = retryMessage;
                     }
 
                     setStep('details');

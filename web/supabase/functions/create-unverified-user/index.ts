@@ -29,6 +29,8 @@ const corsHeaders = {
 
 const allowedSignupRoles = new Set(['fan', 'musician'])
 const PASSWORD_REQUIREMENT_ERROR = 'Password must be at least 8 characters and include uppercase, lowercase, a number, a symbol, and no spaces.'
+const MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON = 'MISSING_DOCUMENT_FINGERPRINT_RETRY_REQUIRED'
+const MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE = 'We could not read the document number needed to verify this ID. Please repeat identity verification with a clear, valid ID.'
 
 function getPasswordValidationError(value: unknown) {
     const password = String(value || '')
@@ -44,6 +46,104 @@ function getPasswordValidationError(value: unknown) {
     }
 
     return ''
+}
+
+async function markDiditSessionRetryRequiredForMissingFingerprint(
+    client: any,
+    sessionRef: string,
+    verificationData: Record<string, unknown> = {},
+) {
+    if (!sessionRef) return
+
+    const existingVerificationData = verificationData && typeof verificationData === 'object'
+        ? verificationData
+        : {}
+
+    await client
+        .from('verification_sessions')
+        .update({
+            status: 'DECLINED',
+            verification_data: {
+                ...existingVerificationData,
+                missing_document_fingerprint: true,
+                retry_required: true,
+                retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+                retry_message: MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE,
+                declined_at: new Date().toISOString(),
+            },
+        })
+        .eq('session_ref', sessionRef)
+}
+
+async function markExistingSignupAccountDeclinedForMissingFingerprint(
+    client: any,
+    email: string,
+    role: string,
+    diditSessionId: string,
+) {
+    const normalizedEmail = String(email || '').trim().toLowerCase()
+    if (!normalizedEmail) return
+
+    const existingUser = await findAuthUserByEmail(client, normalizedEmail)
+    if (!existingUser || existingUser.email_confirmed_at) return
+
+    const { data: existingProfile } = await client
+        .from('profiles')
+        .select('role')
+        .eq('id', existingUser.id)
+        .maybeSingle()
+
+    const existingRole = String(existingProfile?.role || existingUser.user_metadata?.role || '').trim().toLowerCase()
+    if (existingRole && role && existingRole !== role) return
+
+    const { error: profileError } = await client
+        .from('profiles')
+        .update({
+            is_verified: false,
+            verification_status: 'DECLINED',
+            didit_session_id: null,
+            id_verified_at: null,
+        })
+        .eq('id', existingUser.id)
+
+    if (profileError) {
+        console.error('missing_fingerprint_profile_decline_failed', profileError)
+    }
+
+    const { error: authUpdateError } = await client.auth.admin.updateUserById(existingUser.id, {
+        user_metadata: {
+            ...(existingUser.user_metadata || {}),
+            role: role || existingRole || existingUser.user_metadata?.role || null,
+            is_verified: false,
+            verification_status: 'DECLINED',
+            retry_required: true,
+            retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+            didit_session_id: null,
+        },
+    })
+
+    if (authUpdateError) {
+        console.error('missing_fingerprint_auth_decline_failed', authUpdateError)
+    }
+
+    const { error: notificationError } = await client
+        .from('notifications')
+        .insert({
+            user_id: existingUser.id,
+            type: 'warning',
+            title: 'Identity Verification Retry Needed',
+            message: MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE,
+            meta: {
+                verification_status: 'DECLINED',
+                retry_required: true,
+                retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+                didit_session_id: diditSessionId,
+            },
+        })
+
+    if (notificationError) {
+        console.error('missing_fingerprint_notification_failed', notificationError)
+    }
 }
 
 async function deleteRowsByIds(client: any, table: string, column: string, ids: string[]) {
@@ -154,6 +254,121 @@ function escapeHtml(value: unknown) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;')
+}
+
+async function mergeVerificationSessionData(
+    client: any,
+    sessionRef: string,
+    updates: Record<string, unknown>,
+) {
+    if (!sessionRef) return
+
+    const { data: existing } = await client
+        .from('verification_sessions')
+        .select('verification_data')
+        .eq('session_ref', sessionRef)
+        .maybeSingle()
+
+    const existingVerificationData = existing?.verification_data && typeof existing.verification_data === 'object'
+        ? existing.verification_data
+        : {}
+
+    await client
+        .from('verification_sessions')
+        .update({
+            verification_data: {
+                ...existingVerificationData,
+                ...updates,
+            },
+        })
+        .eq('session_ref', sessionRef)
+}
+
+async function sendMissingDocumentFingerprintRetryEmail(
+    client: any,
+    {
+        email,
+        displayName,
+        diditSessionId,
+    }: {
+        email: string,
+        displayName?: string,
+        diditSessionId?: string,
+    },
+) {
+    const recipientEmail = String(email || '').trim().toLowerCase()
+    if (!recipientEmail) return { sent: false, queued: false, provider: 'none', skipped: true, error: 'Missing recipient email' }
+
+    if (diditSessionId) {
+        const { data: existing } = await client
+            .from('verification_sessions')
+            .select('verification_data')
+            .eq('session_ref', diditSessionId)
+            .maybeSingle()
+        const existingData = existing?.verification_data && typeof existing.verification_data === 'object'
+            ? existing.verification_data
+            : {}
+        if (existingData.missing_document_fingerprint_email_sent_at || existingData.missing_document_fingerprint_email_queued_at) {
+            return { sent: false, queued: false, provider: 'dedupe', skipped: true }
+        }
+    }
+
+    const safeName = escapeHtml(displayName || 'there')
+    const safeMessage = escapeHtml(MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE)
+    const subject = 'Identity Verification Retry Needed - MusikaLokal'
+    const html = `
+<h1>MusikaLokal</h1>
+<p>Hi ${safeName},</p>
+<p>${safeMessage}</p>
+<p>Please start identity verification again and use a clear, readable government ID. Make sure the document number is visible and not covered by glare, blur, cropping, or a finger.</p>
+<p>Your email is not blocked. You can retry registration with the same email address.</p>
+<p>Thank you,<br>MusikaLokal Team</p>`.trim()
+
+    const gmailDelivery = await sendEmailWithGmail({
+        to: recipientEmail,
+        subject,
+        html,
+        recipientName: displayName || 'User',
+        source: 'missing-document-fingerprint-retry',
+    })
+
+    if (gmailDelivery.sent) {
+        await mergeVerificationSessionData(client, String(diditSessionId || ''), {
+            missing_document_fingerprint_email_sent_at: new Date().toISOString(),
+            missing_document_fingerprint_email_provider: gmailDelivery.provider,
+        })
+        return { sent: true, queued: false, provider: gmailDelivery.provider }
+    }
+
+    const gmailError = gmailDelivery.error || 'Gmail sender is not configured'
+    console.error('missing_document_fingerprint_retry_gmail_failed', {
+        provider: gmailDelivery.provider,
+        message: gmailError,
+    })
+
+    const { error: queueError } = await client.from('email_notifications').insert({
+        recipient_email: recipientEmail,
+        recipient_name: displayName || 'User',
+        subject,
+        html_content: html,
+        template_type: 'identity_verification_retry_required',
+        status: 'pending',
+        created_at: new Date().toISOString(),
+    })
+
+    if (queueError) {
+        console.error('missing_document_fingerprint_retry_queue_failed', { message: queueError.message })
+        await mergeVerificationSessionData(client, String(diditSessionId || ''), {
+            missing_document_fingerprint_email_error: `${gmailError}; ${queueError.message}`,
+        })
+        return { sent: false, queued: false, provider: 'email_notifications', error: `${gmailError}; ${queueError.message}` }
+    }
+
+    await mergeVerificationSessionData(client, String(diditSessionId || ''), {
+        missing_document_fingerprint_email_queued_at: new Date().toISOString(),
+        missing_document_fingerprint_email_provider: 'email_notifications',
+    })
+    return { sent: false, queued: true, provider: 'email_notifications', error: `${gmailError}; queued in email_notifications` }
 }
 
 function getConfirmationRedirect(rawRedirectTo: unknown) {
@@ -651,6 +866,53 @@ serve(async (req) => {
                 documentCountry: diditVerificationData?.document_country,
             },
         )
+
+        if ((approvedByDidit || pendingByDidit) && !documentFingerprint) {
+            await markDiditSessionRetryRequiredForMissingFingerprint(supabaseAdmin, diditSessionId, {
+                ...(sessionData?.verification_data && typeof sessionData.verification_data === 'object' ? sessionData.verification_data : {}),
+                ...(diditVerificationData && typeof diditVerificationData === 'object' ? stripPrivateSessionFields(diditVerificationData) : {}),
+                document_country: diditVerificationData?.document_country || 'PHL',
+                document_type: selectedDocumentType,
+                document_type_key: selectedDocumentTypeKey,
+                source_session_status: resolvedDiditStatus,
+            })
+
+            await markExistingSignupAccountDeclinedForMissingFingerprint(
+                supabaseAdmin,
+                normalizedEmail,
+                normalizedRole,
+                diditSessionId,
+            )
+
+            const retryEmail = await sendMissingDocumentFingerprintRetryEmail(supabaseAdmin, {
+                email: normalizedEmail,
+                displayName: fallbackName,
+                diditSessionId,
+            })
+
+            await markRegistrationAttempt(supabaseAdmin, registrationAttemptId, {
+                success: false,
+                didit_session_id: diditSessionId,
+                metadata: {
+                    role: normalizedRole,
+                    verification_status: 'DECLINED',
+                    retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+                    retry_email_sent: Boolean(retryEmail.sent),
+                    retry_email_queued: Boolean(retryEmail.queued),
+                    retry_email_provider: retryEmail.provider || null,
+                },
+            })
+
+            return new Response(JSON.stringify({
+                error: MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE,
+                status: 'DECLINED',
+                retryRequired: true,
+                retryReason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+            }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 400,
+            })
+        }
 
         if (documentFingerprint) {
             const revokedOrphanClaimCount = await revokeOrphanSameRoleIdentityClaims(supabaseAdmin, {

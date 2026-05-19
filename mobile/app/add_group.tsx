@@ -558,15 +558,6 @@ export default function AddGroupScreen() {
     );
   }, []);
 
-  const handleCreatePlaylist = useCallback(() => {
-    showAlert(
-      "info",
-      "Create Group First",
-      "Finish creating the group first. As soon as it is created, you can upload a playlist owned by the group.",
-      [{ text: "OK", onPress: () => undefined }],
-    );
-  }, [showAlert]);
-
   const navigateToGroupPlaylistUpload = useCallback((groupId: string) => {
     router.replace({
       pathname: "/create_playlist",
@@ -951,12 +942,12 @@ export default function AddGroupScreen() {
         message: successMessage,
         buttons: [
           {
-            text: "Upload Group Playlist",
-            onPress: () => navigateToGroupPlaylistUpload(data.id),
-          },
-          {
             text: "Manage Group",
             onPress: () => navigateToManageGroup(data.id),
+          },
+          {
+            text: "Add Playlist",
+            onPress: () => navigateToGroupPlaylistUpload(data.id),
             style: "cancel",
           },
         ],
@@ -2113,11 +2104,9 @@ export default function AddGroupScreen() {
                     selectedPlaylistIds={selectedPlaylistIds}
                     loading={loadingPlaylists}
                     onTogglePlaylist={handleTogglePlaylist}
-                    onCreatePlaylist={handleCreatePlaylist}
-                    title="Group Playlists"
-                    subtitle="Link personal playlists now. Group-owned playlist upload becomes available as soon as this group is created."
-                    emptyMessage="You can link an existing personal playlist here or upload a group playlist after creating the group."
-                    createButtonLabel="Upload Group Playlist"
+                    title="Playlists (Optional)"
+                    subtitle="Optional. Link personal playlists now, or skip this and add a group-owned playlist later from Manage Group."
+                    emptyMessage="No playlists selected. You can create the group now and add playlists later from Manage Group."
                     disabled={creating}
                   />
                 </View>

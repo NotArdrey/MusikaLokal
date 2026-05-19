@@ -64,6 +64,18 @@ function normalizeRole(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
+function normalizeVerificationStatus(value: unknown) {
+  return typeof value === "string" ? value.trim().toUpperCase() : "";
+}
+
+function isApprovedProfile(profile: any) {
+  return profile?.is_verified === true && normalizeVerificationStatus(profile?.verification_status) === "APPROVED";
+}
+
+function canExposePostAuthor(post: any, uid: string) {
+  return post?.author_id === uid || isApprovedProfile(post?.author);
+}
+
 function normalizeVisibility(value: unknown) {
   const visibility = typeof value === "string" ? value.trim().toLowerCase() : "public";
   return POST_VISIBILITIES.has(visibility) ? visibility : "public";
@@ -1005,7 +1017,7 @@ Deno.serve(async (req: Request) => {
       const shouldPersonalize = params?.personalize !== false && Boolean(uid);
       const includeEntityCards = params?.include_entities === true;
       const feedPostSelect =
-        "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(id, post_id, media_type, storage_path, thumbnail_path, is_cover, mime_type, width, height, duration_seconds, display_order, safety_status, safety_metadata)";
+        "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role, is_verified, verification_status), media:post_media(id, post_id, media_type, storage_path, thumbnail_path, is_cover, mime_type, width, height, duration_seconds, display_order, safety_status, safety_metadata)";
       const cursorCreatedAt =
         typeof cursor === "string" && cursor.trim().length > 0
           ? cursor.trim()
@@ -1225,6 +1237,8 @@ Deno.serve(async (req: Request) => {
                   .from("profiles")
                   .select("id, full_name, avatar_url, address, location, role, created_at")
                   .eq("role", "musician")
+                  .eq("is_verified", true)
+                  .eq("verification_status", "APPROVED")
                   .in("id", followedProfileIds),
               )
             : emptyResult(),
@@ -1294,7 +1308,7 @@ Deno.serve(async (req: Request) => {
         ].some((result: any) => resultRows(result).length >= sourceLimit);
 
         mixedRows = [
-          ...resultRows(postsResult).map(normalizePostFeedItem),
+          ...resultRows(postsResult).filter((post: any) => canExposePostAuthor(post, uid)).map(normalizePostFeedItem),
           ...resultRows(artistsResult).map(normalizeArtistFeedCard),
           ...resultRows(groupsByOwnerResult).map(normalizeGroupFeedCard),
           ...resultRows(followedGroupsResult).map(normalizeGroupFeedCard),
@@ -1306,7 +1320,9 @@ Deno.serve(async (req: Request) => {
         let artistsQuery = supabaseAdmin
           .from("profiles")
           .select("id, full_name, avatar_url, address, location, role, created_at")
-          .eq("role", "musician");
+          .eq("role", "musician")
+          .eq("is_verified", true)
+          .eq("verification_status", "APPROVED");
         if (uid) {
           artistsQuery = artistsQuery.neq("id", uid);
         }
@@ -1385,7 +1401,7 @@ Deno.serve(async (req: Request) => {
         ].some((result: any) => resultRows(result).length >= sourceLimit);
 
         mixedRows = [
-          ...resultRows(postsResult).map(normalizePostFeedItem),
+          ...resultRows(postsResult).filter((post: any) => canExposePostAuthor(post, uid)).map(normalizePostFeedItem),
           ...resultRows(artistsResult).map(normalizeArtistFeedCard),
           ...resultRows(groupsResult).map(normalizeGroupFeedCard),
           ...resultRows(studiosResult).map(normalizeStudioFeedCard),
@@ -2008,6 +2024,8 @@ Deno.serve(async (req: Request) => {
           ? supabaseAdmin
               .from("profiles")
               .select("id, full_name, avatar_url, role")
+              .eq("is_verified", true)
+              .eq("verification_status", "APPROVED")
               .in("id", followedProfileIds)
           : Promise.resolve({ data: [] }),
         followedGroupIds.length > 0

@@ -47,6 +47,7 @@ const base64ToUint8Array = (base64: string): Uint8Array => {
 
 import { useLocalSearchParams } from "expo-router";
 import { supabase } from "../lib/supabase";
+import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 
 // Helper function to format time input
 const formatTimeInput = (text: string): string => {
@@ -429,8 +430,39 @@ export default function EditGigScreen() {
 
       if (profileError) throw profileError;
 
-      if (profile?.role !== "venue-owner") {
-        showAlert("error", "Unauthorized", "Only venue owners can edit gigs.");
+      const gigId = Array.isArray(id) ? id[0] : id;
+      if (!gigId) {
+        showAlert("error", "Error", "Invalid gig ID");
+        router.replace("/feed");
+        return;
+      }
+
+      const isVenueOwner = profile?.role === "venue-owner";
+      let canEditGig = false;
+
+      if (isVenueOwner) {
+        const { data: ownedGig, error: ownedGigError } = await supabase
+          .from("gigs")
+          .select("id")
+          .eq("id", gigId)
+          .eq("organizer_id", user.id)
+          .maybeSingle();
+
+        if (ownedGigError) throw ownedGigError;
+        canEditGig = !!ownedGig?.id;
+      }
+
+      if (!canEditGig && profile?.role === "staff") {
+        const assignment = await fetchActiveStaffAssignment(supabase, user.id);
+        const permissions = getStaffPermissions(assignment?.access_level);
+        canEditGig =
+          assignment?.entity_type === "venue" &&
+          assignment.gig_id === gigId &&
+          permissions.canEditListing;
+      }
+
+      if (!canEditGig) {
+        showAlert("error", "Unauthorized", "Only the venue owner or assigned Level 1 staff can edit this gig.");
         router.replace("/feed");
         return;
       }
@@ -513,7 +545,6 @@ export default function EditGigScreen() {
         .from('gigs')
         .select('*')
         .eq('id', gigId)
-        .eq('organizer_id', user.id)
         .single();
 
       const [
@@ -942,8 +973,7 @@ export default function EditGigScreen() {
             contract_url: payload.contract_url,
             business_permit_url: payload.business_permit_url,
           })
-          .eq("id", gigId)
-          .eq("organizer_id", user.id);
+          .eq("id", gigId);
 
         if (refsError) {
           throw new Error(`Failed to update gig file references: ${refsError.message}`);
@@ -1024,8 +1054,7 @@ export default function EditGigScreen() {
             permit_reviewed_by: null,
             permit_reviewed_at: null,
           })
-          .eq("id", gigId)
-          .eq("organizer_id", user.id);
+          .eq("id", gigId);
 
         if (permitStatusError) {
           throw new Error(`Failed to update permit status: ${permitStatusError.message}`);

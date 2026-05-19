@@ -304,7 +304,9 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                 .select(
                   "id, full_name, avatar_url, address, created_at, role, show_gig_statuses",
                 )
-                .eq("role", "musician");
+                .eq("role", "musician")
+                .eq("is_verified", true)
+                .eq("verification_status", "APPROVED");
             }
 
             if (searchQuery.trim().length > 0) {

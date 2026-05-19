@@ -3218,7 +3218,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                   <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                     {userModalMode === 'create' ? 'Register as' : 'Role'}
                   </Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+                  <View style={styles.roleSelectorGrid}>
                     {userRoleOptions.map((role) => {
                       const active = userFormRole === role;
                       return (
@@ -3240,7 +3240,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                         </TouchableOpacity>
                       );
                     })}
-                  </ScrollView>
+                  </View>
                 </View>
               </View>
 
@@ -4049,6 +4049,12 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_600SemiBold',
   },
   filterRow: {
+    gap: 8,
+    paddingVertical: 2,
+  },
+  roleSelectorGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     paddingVertical: 2,
   },

@@ -2725,6 +2725,8 @@ export default function FeedScreen() {
           .from("profiles")
           .select("id, full_name, avatar_url, address, role, created_at")
           .eq("role", "musician")
+          .eq("is_verified", true)
+          .eq("verification_status", "APPROVED")
           .neq("id", resolvedUserId)
           .order("created_at", { ascending: false })
           .limit(24),
@@ -2764,7 +2766,10 @@ export default function FeedScreen() {
           supabase
             .from("profiles")
             .select("id, full_name, avatar_url, address, role, created_at")
-          .neq("id", resolvedUserId)
+            .eq("role", "musician")
+            .eq("is_verified", true)
+            .eq("verification_status", "APPROVED")
+            .neq("id", resolvedUserId)
             .order("created_at", { ascending: false })
             .limit(24),
         ]);
@@ -3083,6 +3088,8 @@ export default function FeedScreen() {
         ? supabase
             .from("profiles")
             .select("id, full_name, avatar_url, address, role, created_at")
+            .eq("is_verified", true)
+            .eq("verification_status", "APPROVED")
             .in("id", followedProfileIds)
         : Promise.resolve(emptyQueryResult),
       followedGroupIds.length > 0
@@ -3148,6 +3155,11 @@ export default function FeedScreen() {
     }
 
     const followedProfiles = followedProfilesResult.data || [];
+    const visibleFollowedProfileIds = new Set(
+      followedProfiles
+        .map((profile: any) => profile?.id)
+        .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+    );
     const followedProfilesById = new Map<string, any>(
       followedProfiles
         .filter((profile: any) => typeof profile?.id === "string")
@@ -3294,10 +3306,18 @@ export default function FeedScreen() {
           .filter((profile: any) => normalizeFeedUserRole(profile?.role) === "musician")
           .map(toProfileCard),
         ...(followedGroupsResult.data || []).map(toGroupCard),
-        ...(ownedGroupsResult.data || []).map(toGroupCard),
-        ...(studiosResult.data || []).map(toStudioCard),
-        ...(gigsResult.data || []).map(toGigCard),
-        ...(teamsResult.data || []).map(toTeamCard),
+        ...(ownedGroupsResult.data || [])
+          .filter((item: any) => visibleFollowedProfileIds.has(item?.owner_id))
+          .map(toGroupCard),
+        ...(studiosResult.data || [])
+          .filter((item: any) => visibleFollowedProfileIds.has(item?.owner_id))
+          .map(toStudioCard),
+        ...(gigsResult.data || [])
+          .filter((item: any) => visibleFollowedProfileIds.has(item?.organizer_id))
+          .map(toGigCard),
+        ...(teamsResult.data || [])
+          .filter((item: any) => visibleFollowedProfileIds.has(item?.owner_id))
+          .map(toTeamCard),
       ]),
     ).slice(0, AI_CARD_LIMIT);
     const entities = latestEntityCards.length > 0 ? latestEntityCards : fallbackEntities;

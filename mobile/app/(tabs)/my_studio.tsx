@@ -11,8 +11,9 @@ import Modal, { normalizeConfirmationInput } from '../../src/components/modal';
 import Navbar from '../../src/components/navbar';
 import Skeleton from '../../src/components/Skeleton';
 import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
-import { useRequireAuth } from '../../src/context/AuthContext';
+import { useAuth, useRequireAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
+import { StaffAssignment, fetchActiveStaffAssignment, getStaffPermissions } from '../../src/utils/staffAccess';
 import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../../src/utils/actionError';
 import { isE2EFixtureMode } from '../../src/utils/e2eFixtures';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
@@ -32,6 +33,7 @@ export default function MyStudioScreen() {
     const { colors, isDark } = useTheme();
     const { contentBottomPadding } = useBottomBarClearance(24);
     const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+    const { userRole } = useAuth();
     const params = useLocalSearchParams<{ refresh?: string }>();
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
     const [modalVisible, setModalVisible] = useState(false);
@@ -39,6 +41,7 @@ export default function MyStudioScreen() {
     const [selectedName, setSelectedName] = useState('');
     const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
     const [studios, setStudios] = useState<any[]>([]);
+    const [staffAssignment, setStaffAssignment] = useState<StaffAssignment | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -64,11 +67,26 @@ export default function MyStudioScreen() {
         if (!userId) return;
         setLoadError(null);
         try {
-            const { data: baseStudios, error: baseError } = await supabase
+            const activeStaffAssignment = userRole === 'staff'
+                ? await fetchActiveStaffAssignment(supabase, userId)
+                : null;
+            setStaffAssignment(activeStaffAssignment);
+
+            if (userRole === 'staff' && (!activeStaffAssignment || activeStaffAssignment.entity_type !== 'studio' || !activeStaffAssignment.studio_id)) {
+                setStudios([]);
+                return;
+            }
+
+            let studioQuery = supabase
                 .from('studios')
                 .select('id, owner_id, name, description, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
-                .eq('owner_id', userId)
                 .order('created_at', { ascending: false });
+
+            studioQuery = activeStaffAssignment?.entity_type === 'studio' && activeStaffAssignment.studio_id
+                ? studioQuery.eq('id', activeStaffAssignment.studio_id)
+                : studioQuery.eq('owner_id', userId);
+
+            const { data: baseStudios, error: baseError } = await studioQuery;
 
             if (baseError) throw baseError;
 
@@ -142,7 +160,7 @@ export default function MyStudioScreen() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [showAlert, userId]);
+    }, [showAlert, userId, userRole]);
 
     useFocusEffect(
         useCallback(() => {
@@ -175,11 +193,15 @@ export default function MyStudioScreen() {
     useEffect(() => {
         if (!isAuthenticated || !userId) return;
 
+        const realtimeFilter = staffAssignment?.entity_type === 'studio' && staffAssignment.studio_id
+            ? `id=eq.${staffAssignment.studio_id}`
+            : `owner_id=eq.${userId}`;
+
         const channel = supabase
             .channel(`my-studio-listings:${userId}`)
             .on(
                 'postgres_changes',
-                { event: '*', schema: 'public', table: 'studios', filter: `owner_id=eq.${userId}` },
+                { event: '*', schema: 'public', table: 'studios', filter: realtimeFilter },
                 () => {
                     void fetchStudios();
                 }
@@ -189,7 +211,7 @@ export default function MyStudioScreen() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [isAuthenticated, userId, fetchStudios]);
+    }, [isAuthenticated, userId, fetchStudios, staffAssignment]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -216,6 +238,10 @@ export default function MyStudioScreen() {
 
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;
+        if (userRole === 'staff') {
+            showAlert('warning', 'Action blocked', 'Staff accounts cannot delete studios.');
+            return;
+        }
         if (!isDeleteConfirmed) {
             showAlert('warning', 'Confirmation Needed', `Please type "${selectedName}" exactly to confirm deletion.`);
             return;
@@ -363,8 +389,14 @@ export default function MyStudioScreen() {
                                     },
                                 ]}
                             >
-                                {(() => {
-                                    const normalizedPermitStatus = normalizePermitStatus(studio.permit_status);
+                            {(() => {
+                                const staffPermissions = userRole === 'staff'
+                                    ? getStaffPermissions(staffAssignment?.access_level)
+                                    : null;
+                                const canShowActions = !staffPermissions?.canViewOnly;
+                                const canManageBookings = !staffPermissions || staffPermissions.canManageBookings;
+                                const canEditListing = !staffPermissions || staffPermissions.canEditListing;
+                                const normalizedPermitStatus = normalizePermitStatus(studio.permit_status);
                                     const isRejected = normalizedPermitStatus === 'rejected';
                                     const isApproved = normalizedPermitStatus === 'approved';
                                     const isResubmitted = normalizedPermitStatus === 'resubmitted';
@@ -423,8 +455,10 @@ export default function MyStudioScreen() {
                                         </Text>
                                     )}
 
+                                    {canShowActions ? (
                                     <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                         <View style={styles.actionLeft}>
+                                            {canManageBookings ? (
                                             <TouchableOpacity
                                                 activeOpacity={1}
                                                 testID={`mobile-studio-manage-${studio.id}`}
@@ -435,7 +469,10 @@ export default function MyStudioScreen() {
                                                 <Ionicons name="settings-outline" size={18} color="#FFF" />
                                                 <Text style={styles.manageBtnText}>Manage</Text>
                                             </TouchableOpacity>
+                                            ) : null}
 
+                                            {canEditListing ? (
+                                            <>
                                             {isRejected ? (
                                                 <TouchableOpacity
                                                     activeOpacity={1}
@@ -467,8 +504,11 @@ export default function MyStudioScreen() {
                                                     <Ionicons name="pencil-outline" size={20} color={colors.text} style={styles.editBtnIcon} />
                                                 </TouchableOpacity>
                                             )}
+                                            </>
+                                            ) : null}
                                         </View>
 
+                                        {!staffPermissions ? (
                                         <TouchableOpacity
                                             activeOpacity={1}
                                             testID={`mobile-studio-delete-${studio.id}`}
@@ -478,7 +518,9 @@ export default function MyStudioScreen() {
                                         >
                                             <Ionicons name="trash-outline" size={20} color="#EF4444" />
                                         </TouchableOpacity>
+                                        ) : null}
                                     </View>
+                                    ) : null}
                                 </View>
                                         </>
                                     );

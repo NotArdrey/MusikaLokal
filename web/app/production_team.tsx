@@ -27,6 +27,7 @@ import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth, useRequireAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { ProductionInviteTarget, sendProductionTeamInvites } from "../src/utils/productionTeamInvites";
+import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 
 const IS_WEB = Platform.OS === "web";
 
@@ -38,6 +39,9 @@ interface Team {
   owner_id: string;
   member_role: string;
   open_production_applications?: boolean;
+  staff_access_level?: number | null;
+  staff_can_edit?: boolean;
+  staff_can_manage_bookings?: boolean;
   created_at: string;
 }
 
@@ -357,9 +361,24 @@ export default function ProductionTeamScreen() {
         .eq("user_id", userId)
         .maybeSingle();
 
+      const staffAssignment = userRole === "staff" && userId
+        ? await fetchActiveStaffAssignment(supabase, userId)
+        : null;
+      const isAssignedStaff =
+        staffAssignment?.entity_type === "production" &&
+        staffAssignment.production_team_id === teamId;
+      const staffPermissions = isAssignedStaff
+        ? getStaffPermissions(staffAssignment?.access_level)
+        : null;
+
       setSelectedTeam({
         ...data,
-        member_role: data.owner_id === userId ? "owner" : membershipData?.role || "viewer",
+        member_role: data.owner_id === userId
+          ? "owner"
+          : membershipData?.role || (isAssignedStaff ? `staff-level-${staffAssignment?.access_level}` : "viewer"),
+        staff_access_level: isAssignedStaff ? staffAssignment?.access_level || null : null,
+        staff_can_edit: Boolean(staffPermissions?.canEditListing),
+        staff_can_manage_bookings: Boolean(staffPermissions?.canManageBookings),
         open_production_applications:
           typeof data.open_production_applications === "boolean"
             ? data.open_production_applications
@@ -373,7 +392,7 @@ export default function ProductionTeamScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [fetchTeamMembers, requestedTab, userId]);
+  }, [fetchTeamMembers, requestedTab, userId, userRole]);
 
   useFocusEffect(
     useCallback(() => {
@@ -645,9 +664,13 @@ export default function ProductionTeamScreen() {
   // Team detail view
   if (selectedTeam) {
     const tabs = PRODUCTION_TABS;
+    const selectedStaffPermissions = selectedTeam.staff_access_level
+      ? getStaffPermissions(selectedTeam.staff_access_level)
+      : null;
     const canManage =
       selectedTeam.member_role === "owner" ||
-      selectedTeam.member_role === "manager";
+      selectedTeam.member_role === "manager" ||
+      Boolean(selectedStaffPermissions?.canEditListing);
 
     return (
       <>

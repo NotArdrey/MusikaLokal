@@ -55,6 +55,8 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
             const { data, error } = await supabase
                 .from('profiles')
                 .select('id, full_name, avatar_url, role')
+                .eq('is_verified', true)
+                .eq('verification_status', 'APPROVED')
                 .neq('id', currentUserId)
                 .ilike('full_name', `%${query}%`)
                 .limit(20);
@@ -160,6 +162,8 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
                 const { data: profiles } = await supabase
                     .from('profiles')
                     .select('id, full_name, avatar_url, role')
+                    .eq('is_verified', true)
+                    .eq('verification_status', 'APPROVED')
                     .in('id', otherUserIds);
 
                 setRecentUsers(profiles || []);

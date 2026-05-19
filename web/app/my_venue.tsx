@@ -13,6 +13,7 @@ import Skeleton from '../src/components/Skeleton';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { formatDashedNumericDate } from '../src/utils/friendlyDateTime';
+import { StaffAssignment, fetchActiveStaffAssignment, getStaffPermissions } from '../src/utils/staffAccess';
 
 const DEFAULT_GIG_IMAGE = 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop';
 const JOINED_GIG_APPLICATION_STATUSES = ['accepted', 'approved', 'completed'];
@@ -105,6 +106,7 @@ export default function MyVenueScreen() {
     const [selectedName, setSelectedName] = useState('');
     const [cancellationReason, setCancellationReason] = useState('');
     const [gigs, setGigs] = useState<any[]>([]);
+    const [staffAssignment, setStaffAssignment] = useState<StaffAssignment | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -129,6 +131,15 @@ export default function MyVenueScreen() {
         if (!userId) return;
         try {
             let baseGigs: any[] = [];
+            const activeStaffAssignment = userRole === 'staff'
+                ? await fetchActiveStaffAssignment(supabase, userId)
+                : null;
+            setStaffAssignment(activeStaffAssignment);
+
+            if (userRole === 'staff' && (!activeStaffAssignment || activeStaffAssignment.entity_type !== 'venue' || !activeStaffAssignment.gig_id)) {
+                setGigs([]);
+                return;
+            }
 
             if (isMusicianView) {
                 const { data: bookingPayload, error: bookingPayloadError } = await supabase.functions.invoke('manage-bookings', {
@@ -215,11 +226,16 @@ export default function MyVenueScreen() {
                 if (joinedGigsError) throw joinedGigsError;
                 baseGigs = joinedGigs || [];
             } else {
-                const { data, error: baseError } = await supabase
+                let gigsQuery = supabase
                     .from('gigs')
                     .select('id, organizer_id, name, location, budget, description, event_date, status, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
-                    .eq('organizer_id', userId)
                     .order('created_at', { ascending: false });
+
+                gigsQuery = activeStaffAssignment?.entity_type === 'venue' && activeStaffAssignment.gig_id
+                    ? gigsQuery.eq('id', activeStaffAssignment.gig_id)
+                    : gigsQuery.eq('organizer_id', userId);
+
+                const { data, error: baseError } = await gigsQuery;
 
                 if (baseError) throw baseError;
                 baseGigs = data || [];
@@ -296,7 +312,7 @@ export default function MyVenueScreen() {
                     permit_status: normalizedPermitStatus,
                     permit_rejection_reason: gig.permit_rejection_reason || null,
                     permit_reviewed_at: gig.permit_reviewed_at || null,
-                    is_owner: gig.organizer_id === userId,
+                    is_owner: gig.organizer_id === userId || activeStaffAssignment?.gig_id === gig.id,
                 };
             }));
         } catch (e) {
@@ -305,7 +321,7 @@ export default function MyVenueScreen() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [isMusicianView, userId]);
+    }, [isMusicianView, userId, userRole]);
 
     useFocusEffect(
         useCallback(() => {
@@ -325,11 +341,15 @@ export default function MyVenueScreen() {
     useEffect(() => {
         if (!isAuthenticated || !userId || isMusicianView) return;
 
+        const realtimeFilter = staffAssignment?.entity_type === 'venue' && staffAssignment.gig_id
+            ? `id=eq.${staffAssignment.gig_id}`
+            : `organizer_id=eq.${userId}`;
+
         const channel = supabase
             .channel(`my-venue-listings:${userId}`)
             .on(
                 'postgres_changes',
-                { event: '*', schema: 'public', table: 'gigs', filter: `organizer_id=eq.${userId}` },
+                { event: '*', schema: 'public', table: 'gigs', filter: realtimeFilter },
                 () => {
                     fetchGigs();
                 }
@@ -339,7 +359,7 @@ export default function MyVenueScreen() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [isAuthenticated, userId, fetchGigs, isMusicianView]);
+    }, [isAuthenticated, userId, fetchGigs, isMusicianView, staffAssignment]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -362,6 +382,10 @@ export default function MyVenueScreen() {
 
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;
+        if (userRole === 'staff') {
+            showAlert('warning', 'Action blocked', 'Staff accounts cannot delete venues.');
+            return;
+        }
         const reason = normalizeVisibleInput(cancellationReason);
         if (!reason) {
             showAlert('warning', 'Cancellation Reason Required', 'Please provide a cancellation reason before deleting this gig.');
@@ -479,11 +503,17 @@ export default function MyVenueScreen() {
                         ) : (
                             <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
                                 {gigs.map((gig) => {
+                                    const staffPermissions = userRole === 'staff'
+                                        ? getStaffPermissions(staffAssignment?.access_level)
+                                        : null;
+                                    const canShowActions = !staffPermissions?.canViewOnly;
+                                    const canManageBookings = !staffPermissions || staffPermissions.canManageBookings;
+                                    const canEditVenue = !staffPermissions || staffPermissions.canEditListing;
                                     const normalizedPermitStatus = normalizePermitStatus(gig.permit_status);
                                     const isRejected = normalizedPermitStatus === 'rejected';
                                     const isApproved = normalizedPermitStatus === 'approved';
                                     const isResubmitted = normalizedPermitStatus === 'resubmitted';
-                                    const canManageGig = !isMusicianView || gig.is_owner === true;
+                                    const canManageGig = (!isMusicianView || gig.is_owner === true) && canManageBookings;
 
                                     const permitStatusLabel = isRejected
                                         ? 'Rejected'
@@ -558,6 +588,7 @@ export default function MyVenueScreen() {
                                                     </Text>
                                                 )}
 
+                                                {canShowActions ? (
                                                 <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                                     <View style={styles.actionLeft}>
                                                         <TouchableOpacity activeOpacity={1}
@@ -575,24 +606,24 @@ export default function MyVenueScreen() {
                                                             <Text style={styles.manageBtnText}>{canManageGig ? 'Manage' : 'View'}</Text>
                                                         </TouchableOpacity>
 
-                                                        {canManageGig ? (
+                                                        {canEditVenue ? (
                                                             <TouchableOpacity activeOpacity={1}
                                                                 onPress={() => router.push({ pathname: '/edit_gig', params: { id: gig.id } })}
                                                                 style={[styles.editBtn, { borderColor: colors.border }]}
                                                             >
                                                                 <Ionicons name="pencil-outline" size={18} color={colors.text} style={styles.editBtnIcon} />
                                                             </TouchableOpacity>
-                                                        ) : (
+                                                        ) : !staffPermissions ? (
                                                             <TouchableOpacity activeOpacity={1}
                                                                 onPress={() => handleOpenGigChat(gig)}
                                                                 style={[styles.editBtn, { borderColor: colors.border }]}
                                                             >
                                                                 <Ionicons name="chatbubble-outline" size={18} color={colors.text} style={styles.editBtnIcon} />
                                                             </TouchableOpacity>
-                                                        )}
+                                                        ) : null}
                                                     </View>
 
-                                                    {canManageGig ? (
+                                                    {canManageGig && !staffPermissions ? (
                                                         <TouchableOpacity activeOpacity={1}
                                                             onPress={() => confirmDelete(gig.id, gig.name)}
                                                             style={styles.deleteBtn}
@@ -601,6 +632,7 @@ export default function MyVenueScreen() {
                                                         </TouchableOpacity>
                                                     ) : null}
                                                 </View>
+                                                ) : null}
                                             </View>
                                         </View>
                                     </View>

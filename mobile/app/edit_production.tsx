@@ -14,6 +14,7 @@ import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
 import { ProductionInviteTarget, sendProductionTeamInvites } from '../src/utils/productionTeamInvites';
+import { getStaffPermissions } from '../src/utils/staffAccess';
 
 const readFunctionErrorBody = async (error: any) => {
   const response = error?.context;
@@ -38,6 +39,7 @@ type TeamRecord = {
   logo_url: string | null;
   owner_id: string;
   member_role: string;
+  staff_access_level?: number | null;
   created_at: string;
 };
 
@@ -124,8 +126,15 @@ export default function EditProductionScreen() {
         throw new Error('Production team not found.');
       }
 
-      if (existingTeam.member_role !== 'owner' && existingTeam.member_role !== 'manager') {
-        throw new Error('Only team owners or managers can edit this production team.');
+      const staffPermissions = existingTeam.staff_access_level
+        ? getStaffPermissions(existingTeam.staff_access_level)
+        : null;
+      if (
+        existingTeam.member_role !== 'owner' &&
+        existingTeam.member_role !== 'manager' &&
+        !staffPermissions?.canEditListing
+      ) {
+        throw new Error('Only team owners, managers, or assigned Level 1 staff can edit this production team.');
       }
 
       setTeam(existingTeam);
@@ -145,8 +154,8 @@ export default function EditProductionScreen() {
   }, [invokeProduction, teamId]);
 
   useEffect(() => {
-    if (userRole && userRole !== 'producer') {
-      setAlert({ type: 'warning', title: 'Production Only', message: 'Only production users can edit production teams.' });
+    if (userRole && userRole !== 'producer' && userRole !== 'staff') {
+      setAlert({ type: 'warning', title: 'Production Only', message: 'Only production users or assigned Level 1 staff can edit production teams.' });
       router.replace('/manage');
       return;
     }

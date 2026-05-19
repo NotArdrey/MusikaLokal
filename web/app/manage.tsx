@@ -8,6 +8,7 @@ import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { resolveRoleManageRoute } from '../src/utils/roleRouting';
+import { fetchActiveStaffAssignment } from '../src/utils/staffAccess';
 
 export default function ManageScreen() {
     const { colors, isDark } = useTheme();
@@ -65,7 +66,7 @@ export default function ManageScreen() {
 
             // Try to get role from context first, or fetch directly
             if (userRole) {
-                handleRedirect(userRole);
+                void handleRedirect(userRole);
             } else {
                 // Fallback: Fetch role directly from DB
                 fetchRoleAndRedirect();
@@ -99,7 +100,7 @@ export default function ManageScreen() {
             if (data?.role) {
                 console.log('✅ Manage - Role fetched:', data.role);
                 setFetchedRole(data.role);
-                handleRedirect(data.role);
+                void handleRedirect(data.role);
             } else {
                 console.log('⚠️ Manage - No role data found');
                 setLoading(false);
@@ -110,7 +111,27 @@ export default function ManageScreen() {
         }
     };
 
-    const handleRedirect = (role: string) => {
+    const handleRedirect = async (role: string) => {
+        if (role === 'staff' && userId) {
+            try {
+                const assignment = await fetchActiveStaffAssignment(supabase, userId);
+                if (assignment?.entity_type === 'studio') {
+                    router.replace('/my_studio');
+                    return;
+                }
+                if (assignment?.entity_type === 'venue') {
+                    router.replace('/my_venue');
+                    return;
+                }
+                if (assignment?.entity_type === 'production') {
+                    router.replace('/my_production');
+                    return;
+                }
+            } catch (error) {
+                console.log('Manage - Error fetching staff assignment:', error);
+            }
+        }
+
         const destination = resolveRoleManageRoute(role, { adminRoute: '/admin' });
 
         if (destination !== '/manage') {

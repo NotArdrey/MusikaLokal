@@ -29,6 +29,7 @@ const allowedRoles = new Set([
   "venue-owner",
   "producer",
   "admin",
+  "staff",
 ]);
 
 const roleAliases: Record<string, string> = {
@@ -342,6 +343,88 @@ function normalizeStringList(raw: unknown): string[] {
   return items;
 }
 
+async function loadTargetNames(
+  client: any,
+  table: string,
+  ids: string[],
+) {
+  const uniqueIds = Array.from(new Set(ids.map((id) => String(id || "").trim()).filter(Boolean)));
+  const names = new Map<string, string>();
+  if (uniqueIds.length === 0) return names;
+
+  const { data, error } = await client
+    .from(table)
+    .select("id, name")
+    .in("id", uniqueIds);
+
+  if (error) throw error;
+
+  for (const row of data || []) {
+    if (row?.id) names.set(String(row.id), String(row.name || ""));
+  }
+
+  return names;
+}
+
+async function attachStaffAssignments(client: any, profiles: any[]) {
+  const items = Array.isArray(profiles) ? profiles : [];
+  const staffIds = items
+    .filter((profile) => String(profile?.role || "").trim().toLowerCase() === "staff")
+    .map((profile) => String(profile?.id || "").trim())
+    .filter(Boolean);
+
+  if (staffIds.length === 0) return items;
+
+  const { data, error } = await client
+    .from("staff_listing_access")
+    .select("id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level, created_at, updated_at")
+    .in("staff_user_id", staffIds)
+    .is("revoked_at", null);
+
+  if (error) {
+    if (isMissingTableError(error, "staff_listing_access")) return items;
+    throw error;
+  }
+
+  const assignments = data || [];
+  const studioNames = await loadTargetNames(client, "studios", assignments.map((item: any) => item?.studio_id));
+  const gigNames = await loadTargetNames(client, "gigs", assignments.map((item: any) => item?.gig_id));
+  const productionNames = await loadTargetNames(client, "production_teams", assignments.map((item: any) => item?.production_team_id));
+
+  const assignmentsByUser = new Map<string, any>();
+  for (const assignment of assignments) {
+    const staffUserId = String(assignment?.staff_user_id || "");
+    const entityType = normalizeStaffEntityType(assignment?.entity_type);
+    const targetId = getStaffAssignmentTargetId(assignment);
+    const targetName =
+      entityType === "studio"
+        ? studioNames.get(String(targetId || ""))
+        : entityType === "venue"
+          ? gigNames.get(String(targetId || ""))
+          : entityType === "production"
+            ? productionNames.get(String(targetId || ""))
+            : null;
+
+    const hydratedAssignment = {
+      ...assignment,
+      target_id: targetId,
+      target_name: targetName || null,
+    };
+
+    assignmentsByUser.set(staffUserId, hydratedAssignment);
+  }
+
+  return items.map((profile) => {
+    const assignment = assignmentsByUser.get(String(profile?.id || "")) || null;
+    return {
+      ...profile,
+      staff_assignment: assignment,
+      staff_assignment_label: getStaffAssignmentLabel(assignment),
+      staff_access_level_label: assignment?.access_level ? `Level ${assignment.access_level}` : null,
+    };
+  });
+}
+
 async function attachProfileLists(client: any, profiles: any[]) {
   const items = Array.isArray(profiles) ? profiles : [];
   const profileIds = items
@@ -375,11 +458,13 @@ async function attachProfileLists(client: any, profiles: any[]) {
     if (genre) genresByProfile.get(profileId)?.push(genre);
   }
 
-  return items.map((profile) => ({
+  const hydratedProfiles = items.map((profile) => ({
     ...profile,
     skills: skillsByProfile.get(String(profile?.id || "")) || [],
     genres: genresByProfile.get(String(profile?.id || "")) || [],
   }));
+
+  return attachStaffAssignments(client, hydratedProfiles);
 }
 
 async function replaceProfileList(
@@ -401,6 +486,174 @@ async function replaceProfileList(
 
   const { error: insertError } = await client.from(table).insert(payload);
   if (insertError) throw insertError;
+}
+
+function isMissingTableError(error: any, tableName: string) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "").toLowerCase();
+  const normalizedTable = tableName.toLowerCase();
+
+  return (
+    (code === "42P01" && message.includes(normalizedTable)) ||
+    (code === "PGRST205" && message.includes(normalizedTable))
+  );
+}
+
+type StaffEntityType = "studio" | "venue" | "production";
+type StaffAccessLevel = 1 | 2 | 3;
+
+type NormalizedStaffAssignment = {
+  entity_type: StaffEntityType;
+  access_level: StaffAccessLevel;
+  studio_id: string | null;
+  gig_id: string | null;
+  production_team_id: string | null;
+};
+
+const staffEntityTypes = new Set(["studio", "venue", "production"]);
+
+function normalizeStaffEntityType(raw: unknown): StaffEntityType | null {
+  const entityType = String(raw || "").trim().toLowerCase();
+  return staffEntityTypes.has(entityType) ? entityType as StaffEntityType : null;
+}
+
+function normalizeStaffAccessLevel(raw: unknown): StaffAccessLevel | null {
+  const level = Number(raw);
+  return level === 1 || level === 2 || level === 3 ? level as StaffAccessLevel : null;
+}
+
+function normalizeStaffAssignment(raw: any): NormalizedStaffAssignment | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const entityType = normalizeStaffEntityType(raw.entity_type || raw.entityType);
+  const accessLevel = normalizeStaffAccessLevel(raw.access_level || raw.accessLevel);
+  const targetId = String(raw.target_id || raw.targetId || "").trim();
+
+  if (!entityType || !accessLevel) return null;
+
+  const studioId = String(raw.studio_id || raw.studioId || "").trim();
+  const gigId = String(raw.gig_id || raw.gigId || "").trim();
+  const productionTeamId = String(raw.production_team_id || raw.productionTeamId || "").trim();
+
+  if (entityType === "studio") {
+    const id = studioId || targetId;
+    return id ? { entity_type: entityType, access_level: accessLevel, studio_id: id, gig_id: null, production_team_id: null } : null;
+  }
+
+  if (entityType === "venue") {
+    const id = gigId || targetId;
+    return id ? { entity_type: entityType, access_level: accessLevel, studio_id: null, gig_id: id, production_team_id: null } : null;
+  }
+
+  const id = productionTeamId || targetId;
+  return id ? { entity_type: entityType, access_level: accessLevel, studio_id: null, gig_id: null, production_team_id: id } : null;
+}
+
+function getStaffAssignmentTargetId(assignment: any): string | null {
+  const entityType = normalizeStaffEntityType(assignment?.entity_type);
+  if (entityType === "studio") return assignment?.studio_id || null;
+  if (entityType === "venue") return assignment?.gig_id || null;
+  if (entityType === "production") return assignment?.production_team_id || null;
+  return null;
+}
+
+function getStaffAssignmentLabel(assignment: any) {
+  const entityType = normalizeStaffEntityType(assignment?.entity_type);
+  const targetName = String(assignment?.target_name || "").trim();
+  const targetId = getStaffAssignmentTargetId(assignment);
+  const level = normalizeStaffAccessLevel(assignment?.access_level);
+
+  if (!entityType || !targetId || !level) return null;
+
+  const entityLabel = entityType === "venue" ? "Venue" : entityType === "production" ? "Production" : "Studio";
+  return `${entityLabel}: ${targetName || targetId} (Level ${level})`;
+}
+
+async function assertStaffAccessTableReady(client: any) {
+  const { error } = await client
+    .from("staff_listing_access")
+    .select("id")
+    .limit(1);
+
+  if (!error) return;
+  if (isMissingTableError(error, "staff_listing_access")) {
+    throw new Error("Staff access migration is not applied yet.");
+  }
+  throw error;
+}
+
+async function validateStaffAssignmentTarget(
+  client: any,
+  assignment: NormalizedStaffAssignment,
+) {
+  const target =
+    assignment.entity_type === "studio"
+      ? { table: "studios", id: assignment.studio_id, label: "studio" }
+      : assignment.entity_type === "venue"
+        ? { table: "gigs", id: assignment.gig_id, label: "venue" }
+        : { table: "production_teams", id: assignment.production_team_id, label: "production team" };
+
+  if (!target.id) {
+    throw new Error(`Select a ${target.label} for this staff user.`);
+  }
+
+  const { data, error } = await client
+    .from(target.table)
+    .select("id, name")
+    .eq("id", target.id)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data?.id) {
+    throw new Error(`The selected ${target.label} no longer exists.`);
+  }
+
+  return data;
+}
+
+async function revokeStaffAssignments(client: any, staffUserId: string) {
+  await assertStaffAccessTableReady(client);
+
+  const { error } = await client
+    .from("staff_listing_access")
+    .update({ revoked_at: new Date().toISOString() })
+    .eq("staff_user_id", staffUserId)
+    .is("revoked_at", null);
+
+  if (error) throw error;
+}
+
+async function replaceStaffAssignment(
+  client: any,
+  staffUserId: string,
+  assignment: NormalizedStaffAssignment,
+  actorId: string,
+) {
+  await assertStaffAccessTableReady(client);
+  const target = await validateStaffAssignmentTarget(client, assignment);
+  await revokeStaffAssignments(client, staffUserId);
+
+  const { data, error } = await client
+    .from("staff_listing_access")
+    .insert({
+      staff_user_id: staffUserId,
+      entity_type: assignment.entity_type,
+      studio_id: assignment.studio_id,
+      gig_id: assignment.gig_id,
+      production_team_id: assignment.production_team_id,
+      access_level: assignment.access_level,
+      created_by: actorId,
+    })
+    .select("id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level, created_at, updated_at")
+    .maybeSingle();
+
+  if (error) throw error;
+
+  return {
+    ...data,
+    target_id: getStaffAssignmentTargetId(data),
+    target_name: target?.name || null,
+  };
 }
 
 async function deleteRowsByIds(client: any, table: string, column: string, ids: string[]) {
@@ -2260,9 +2513,14 @@ serve(async (req: Request) => {
       const bio = normalizeTextField(body?.bio);
       const skills = normalizeStringList(body?.skills);
       const genres = normalizeStringList(body?.genres);
+      const staffAssignment = role === "staff" ? normalizeStaffAssignment(body?.staffAssignment) : null;
 
       if (!email || !password || !role) {
         return jsonResponse({ error: "Missing required fields" }, 400);
+      }
+
+      if (role === "staff" && !staffAssignment) {
+        return jsonResponse({ error: "Select a staff target and access level." }, 400);
       }
 
       if (!fullName) {
@@ -2324,10 +2582,21 @@ serve(async (req: Request) => {
           replaceProfileList(client, "profile_skills", "skill", userId, skills),
           replaceProfileList(client, "profile_genres", "genre", userId, genres),
         ]);
+
+        if (staffAssignment) {
+          await replaceStaffAssignment(client, userId, staffAssignment, actorId);
+        }
       } catch (listError) {
+        if (role === "staff") {
+          try {
+            await client.from("staff_listing_access").delete().eq("staff_user_id", userId);
+          } catch {
+            // The profile/auth cleanup below is the important rollback path.
+          }
+        }
         await client.from("profiles").delete().eq("id", userId);
         await client.auth.admin.deleteUser(userId);
-        const message = listError instanceof Error ? listError.message : "Unable to save profile lists";
+        const message = listError instanceof Error ? listError.message : "Unable to save profile details";
         return jsonResponse({ error: message }, 400);
       }
 
@@ -2348,6 +2617,10 @@ serve(async (req: Request) => {
       const maybeSkills = body?.skills;
       const maybeGenres = body?.genres;
       const maybePassword = body?.password;
+      const hasStaffAssignmentUpdate = Object.prototype.hasOwnProperty.call(body || {}, "staffAssignment");
+      const normalizedStaffAssignment = hasStaffAssignmentUpdate
+        ? normalizeStaffAssignment(body?.staffAssignment)
+        : null;
 
       if (!userId) {
         return jsonResponse({ error: "Missing userId" }, 400);
@@ -2361,7 +2634,7 @@ serve(async (req: Request) => {
       }
 
       let existingProfileForUpdate: Record<string, unknown> | null = null;
-      if (maybeIsVerified !== undefined || maybeRole !== undefined) {
+      if (maybeIsVerified !== undefined || maybeRole !== undefined || hasStaffAssignmentUpdate) {
         const { data: existingProfile, error: existingProfileError } = await client
           .from("profiles")
           .select("role, email, is_verified, verification_status")
@@ -2517,8 +2790,13 @@ serve(async (req: Request) => {
       }
 
       const hasListUpdates = maybeSkills !== undefined || maybeGenres !== undefined;
+      const targetRole = String(profileUpdates.role ?? existingProfileForUpdate?.["role"] ?? "").trim().toLowerCase();
 
-      if (Object.keys(profileUpdates).length === 0 && !hasListUpdates && !hasPasswordUpdate) {
+      if (targetRole === "staff" && (maybeRole !== undefined || hasStaffAssignmentUpdate) && !normalizedStaffAssignment) {
+        return jsonResponse({ error: "Select a staff target and access level." }, 400);
+      }
+
+      if (Object.keys(profileUpdates).length === 0 && !hasListUpdates && !hasPasswordUpdate && !hasStaffAssignmentUpdate) {
         return jsonResponse({ error: "No updates provided" }, 400);
       }
 
@@ -2606,8 +2884,14 @@ serve(async (req: Request) => {
             ? replaceProfileList(client, "profile_genres", "genre", userId, normalizeStringList(maybeGenres))
             : Promise.resolve(),
         ]);
+
+        if (targetRole === "staff" && hasStaffAssignmentUpdate && normalizedStaffAssignment) {
+          await replaceStaffAssignment(client, userId, normalizedStaffAssignment, actorId);
+        } else if (targetRole !== "staff" && (hasStaffAssignmentUpdate || profileUpdates.role !== undefined)) {
+          await revokeStaffAssignments(client, userId);
+        }
       } catch (listError) {
-        const message = listError instanceof Error ? listError.message : "Unable to save profile lists";
+        const message = listError instanceof Error ? listError.message : "Unable to save profile details";
         return jsonResponse({ error: message }, 400);
       }
 

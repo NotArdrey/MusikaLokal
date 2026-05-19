@@ -44,13 +44,13 @@ const USERS_SECTION_ITEMS: {
         {
             key: 'users_list',
             label: 'User Management',
-            description: 'Create, edit, verify, and manage user accounts',
+            description: 'Manage accounts and roles',
             icon: 'people-outline',
         },
         {
             key: 'identity_reviews',
             label: 'Identity Reviews',
-            description: 'Manual identity verification queue',
+            description: 'Manual verification queue',
             icon: 'id-card-outline',
         },
     ];
@@ -64,13 +64,13 @@ const REPORTS_SECTION_ITEMS: {
         {
             key: 'reports_list',
             label: 'User Reports',
-            description: 'Moderation queue for reported users and listings',
+            description: 'Reported users and listings',
             icon: 'document-text-outline',
         },
         {
             key: 'booking_incidents',
             label: 'Booking Incidents',
-            description: 'Disputes, refund reviews, and booking escalations',
+            description: 'Disputes and refund reviews',
             icon: 'alert-circle-outline',
         },
     ];
@@ -148,7 +148,7 @@ export default function SidebarNav() {
 
     const usersSubmenuHeight = usersRotateAnim.interpolate({
         inputRange: [0, 1],
-        outputRange: [0, 250],
+        outputRange: [0, 156],
     });
     const usersSubmenuMarginTop = usersRotateAnim.interpolate({
         inputRange: [0, 1],
@@ -166,7 +166,7 @@ export default function SidebarNav() {
 
     const submenuHeight = rotateAnim.interpolate({
         inputRange: [0, 1],
-        outputRange: [0, 250], // ~60 per item * 2 + 8px gap + padding
+        outputRange: [0, 156],
     });
     const submenuMarginTop = rotateAnim.interpolate({
         inputRange: [0, 1],
@@ -207,10 +207,9 @@ export default function SidebarNav() {
     useEffect(() => {
         const nextAdminTab = resolveAdminTab(pathname);
         setActiveUsersSection(resolveUsersSection(pathname));
-
-        if (nextAdminTab === 'users') {
-            setUsersMenuExpanded(true);
-        }
+        setActiveReportsSection(resolveReportsSection(getBrowserSearch()));
+        setUsersMenuExpanded(nextAdminTab === 'users');
+        setReportsMenuExpanded(nextAdminTab === 'reports');
     }, [pathname]);
 
     const fetchUnreadCount = useCallback(async (userId: string) => {
@@ -516,16 +515,16 @@ export default function SidebarNav() {
             return 'manage';
         }
         return 'feed';
-    }, [isAdminContext, activeAdminTab, pathname]);
+    }, [isAdminContext, activeAdminTab, isFan, pathname]);
 
     const navItems = useMemo(() => {
         if (isAdminContext) {
             return [
                 { id: 'dashboard', icon: 'stats-chart', label: 'Dashboard', route: '/admin' },
                 { id: 'users', icon: 'people', label: 'Users', route: '/admin/users' },
-                { id: 'reports', icon: 'shield-checkmark', label: 'Reports', route: '/admin/reports' },
-                { id: 'stations', icon: 'radio', label: 'Stations', route: '/admin/stations' },
                 { id: 'manage', icon: 'briefcase', label: 'Manage', route: '/admin/manage' },
+                { id: 'stations', icon: 'radio', label: 'Stations', route: '/admin/stations' },
+                { id: 'reports', icon: 'shield-checkmark', label: 'Reports', route: '/admin/reports' },
                 { id: 'audit', icon: 'time', label: 'Audit', route: '/admin/audit' },
             ];
         }
@@ -1003,6 +1002,10 @@ export default function SidebarNav() {
 
                         if (item.id === 'users') {
                             const showUsersSubmenu = usersMenuExpanded;
+                            const parentIconColor = isActive ? colors.primary : (isDark ? '#CBD5E1' : '#64748B');
+                            const toggleIconColor = showUsersSubmenu
+                                ? (isActive ? colors.primary : (isDark ? '#94A3B8' : '#64748B'))
+                                : (isDark ? 'rgba(148,163,184,0.52)' : '#94A3B8');
 
                             return (
                                 <View key={item.id} style={styles.navGroup}>
@@ -1027,9 +1030,9 @@ export default function SidebarNav() {
                                         >
                                             <Ionicons
                                                 name={isActive ? item.icon as any : `${item.icon}-outline` as any}
-                                                size={22}
-                                                color={isActive ? colors.primary : colors.textSecondary}
-                                                style={{ width: 30 }}
+                                                size={20}
+                                                color={parentIconColor}
+                                                style={styles.navIcon}
                                             />
                                             <View style={styles.navTextBlock}>
                                                 <Text
@@ -1058,8 +1061,8 @@ export default function SidebarNav() {
                                             <Animated.View style={{ transform: [{ rotate: usersChevronRotation }] }}>
                                                 <Ionicons
                                                     name="chevron-down"
-                                                    size={18}
-                                                    color={showUsersSubmenu ? colors.primary : colors.textSecondary}
+                                                    size={15}
+                                                    color={toggleIconColor}
                                                 />
                                             </Animated.View>
                                         </TouchableOpacity>
@@ -1079,6 +1082,9 @@ export default function SidebarNav() {
                                     >
                                         {USERS_SECTION_ITEMS.map((subItem) => {
                                             const subActive = activeUsersSection === subItem.key && isActive;
+                                            const childIconColor = subActive
+                                                ? colors.primary
+                                                : (isDark ? 'rgba(148,163,184,0.62)' : '#94A3B8');
 
                                             return (
                                                 <TouchableOpacity
@@ -1097,12 +1103,18 @@ export default function SidebarNav() {
                                                     onPress={() => handleUsersNavigation(subItem.key)}
                                                     activeOpacity={1}
                                                 >
+                                                    <View
+                                                        style={[
+                                                            styles.subNavActiveRail,
+                                                            { backgroundColor: subActive ? colors.primary : 'transparent' },
+                                                        ]}
+                                                    />
                                                     <View style={styles.subNavItemMain}>
                                                         <Ionicons
                                                             name={subItem.icon as any}
-                                                            size={18}
-                                                            color={subActive ? colors.primary : colors.textSecondary}
-                                                            style={{ width: 24 }}
+                                                            size={16}
+                                                            color={childIconColor}
+                                                            style={styles.subNavIcon}
                                                         />
                                                         <View style={styles.subNavTextBlock}>
                                                             <Text
@@ -1121,16 +1133,6 @@ export default function SidebarNav() {
                                                             </Text>
                                                         </View>
                                                     </View>
-
-                                                    <View
-                                                        style={[
-                                                            styles.subNavStatusDot,
-                                                            {
-                                                                backgroundColor: subActive ? colors.primary : 'transparent',
-                                                                borderColor: subActive ? colors.primary : colors.border,
-                                                            },
-                                                        ]}
-                                                    />
                                                 </TouchableOpacity>
                                             );
                                         })}
@@ -1141,6 +1143,10 @@ export default function SidebarNav() {
 
                         if (item.id === 'reports') {
                             const showReportsSubmenu = reportsMenuExpanded;
+                            const parentIconColor = isActive ? colors.primary : (isDark ? '#CBD5E1' : '#64748B');
+                            const toggleIconColor = showReportsSubmenu
+                                ? (isActive ? colors.primary : (isDark ? '#94A3B8' : '#64748B'))
+                                : (isDark ? 'rgba(148,163,184,0.52)' : '#94A3B8');
 
                             return (
                                 <View key={item.id} style={styles.navGroup}>
@@ -1165,9 +1171,9 @@ export default function SidebarNav() {
                                         >
                                             <Ionicons
                                                 name={isActive ? item.icon as any : `${item.icon}-outline` as any}
-                                                size={22}
-                                                color={isActive ? colors.primary : colors.textSecondary}
-                                                style={{ width: 30 }}
+                                                size={20}
+                                                color={parentIconColor}
+                                                style={styles.navIcon}
                                             />
                                             <View style={styles.navTextBlock}>
                                                 <Text
@@ -1196,8 +1202,8 @@ export default function SidebarNav() {
                                             <Animated.View style={{ transform: [{ rotate: chevronRotation }] }}>
                                                 <Ionicons
                                                     name="chevron-down"
-                                                    size={18}
-                                                    color={showReportsSubmenu ? colors.primary : colors.textSecondary}
+                                                    size={15}
+                                                    color={toggleIconColor}
                                                 />
                                             </Animated.View>
                                         </TouchableOpacity>
@@ -1217,6 +1223,9 @@ export default function SidebarNav() {
                                     >
                                         {REPORTS_SECTION_ITEMS.map((subItem) => {
                                             const subActive = activeReportsSection === subItem.key && isActive;
+                                            const childIconColor = subActive
+                                                ? colors.primary
+                                                : (isDark ? 'rgba(148,163,184,0.62)' : '#94A3B8');
 
                                             return (
                                                 <TouchableOpacity
@@ -1235,12 +1244,18 @@ export default function SidebarNav() {
                                                     onPress={() => handleReportsNavigation(subItem.key)}
                                                     activeOpacity={1}
                                                 >
+                                                    <View
+                                                        style={[
+                                                            styles.subNavActiveRail,
+                                                            { backgroundColor: subActive ? colors.primary : 'transparent' },
+                                                        ]}
+                                                    />
                                                     <View style={styles.subNavItemMain}>
                                                         <Ionicons
                                                             name={subItem.icon as any}
-                                                            size={18}
-                                                            color={subActive ? colors.primary : colors.textSecondary}
-                                                            style={{ width: 24 }}
+                                                            size={16}
+                                                            color={childIconColor}
+                                                            style={styles.subNavIcon}
                                                         />
                                                         <View style={styles.subNavTextBlock}>
                                                             <Text
@@ -1259,16 +1274,6 @@ export default function SidebarNav() {
                                                             </Text>
                                                         </View>
                                                     </View>
-
-                                                    <View
-                                                        style={[
-                                                            styles.subNavStatusDot,
-                                                            {
-                                                                backgroundColor: subActive ? colors.primary : 'transparent',
-                                                                borderColor: subActive ? colors.primary : colors.border,
-                                                            },
-                                                        ]}
-                                                    />
                                                 </TouchableOpacity>
                                             );
                                         })}
@@ -1292,9 +1297,9 @@ export default function SidebarNav() {
                             >
                                 <Ionicons
                                     name={isActive ? item.icon as any : `${item.icon}-outline` as any}
-                                    size={22}
-                                    color={isActive ? colors.primary : colors.textSecondary}
-                                    style={{ width: 30 }}
+                                    size={20}
+                                    color={isActive ? colors.primary : (isDark ? '#CBD5E1' : '#64748B')}
+                                    style={styles.navIcon}
                                 />
                                 <Text
                                     style={[
@@ -1616,19 +1621,19 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
     },
     navGroup: {
-        marginBottom: 6,
+        marginBottom: 8,
     },
     navItemRow: {
         flexDirection: 'row',
         alignItems: 'stretch',
-        borderRadius: 12,
+        borderRadius: 8,
     },
     navItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 14,
-        paddingHorizontal: 18,
-        borderRadius: 12,
+        paddingVertical: 13,
+        paddingHorizontal: 16,
+        borderRadius: 8,
     },
     navItemMain: {
         flex: 1,
@@ -1637,10 +1642,13 @@ const styles = StyleSheet.create({
         flex: 1,
         minWidth: 0,
     },
+    navIcon: {
+        width: 28,
+    },
     navLabel: {
-        fontSize: 16,
+        fontSize: 15,
         fontFamily: 'Poppins_500Medium',
-        marginLeft: 10,
+        marginLeft: 9,
     },
     navMetaLabel: {
         fontSize: 12,
@@ -1649,30 +1657,35 @@ const styles = StyleSheet.create({
         marginTop: 2,
     },
     navToggleButton: {
-        width: 42,
+        width: 40,
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 12,
+        borderRadius: 8,
         alignSelf: 'stretch',
     },
     subNavContainer: {
-        marginLeft: 26,
-        marginTop: 8,
-        paddingLeft: 18,
-        paddingRight: 4,
-        paddingTop: 2,
-        gap: 8,
+        marginLeft: 22,
+        marginTop: 6,
+        paddingLeft: 14,
+        paddingRight: 2,
+        paddingTop: 1,
+        gap: 6,
         borderLeftWidth: 1,
     },
     subNavItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        minHeight: 56,
-        borderRadius: 12,
+        minHeight: 62,
+        borderRadius: 8,
         borderWidth: 1,
-        paddingVertical: 10,
-        paddingHorizontal: 12,
+        paddingVertical: 8,
+        paddingHorizontal: 10,
+        gap: 10,
+    },
+    subNavActiveRail: {
+        width: 3,
+        height: 28,
+        borderRadius: 999,
     },
     subNavItemMain: {
         flexDirection: 'row',
@@ -1684,24 +1697,21 @@ const styles = StyleSheet.create({
         flex: 1,
         minWidth: 0,
     },
+    subNavIcon: {
+        width: 20,
+        marginTop: 1,
+    },
     subNavLabel: {
-        fontSize: 14,
+        fontSize: 13,
         fontFamily: 'Poppins_500Medium',
-        marginLeft: 8,
+        marginLeft: 7,
     },
     subNavDescription: {
         fontSize: 11,
         fontFamily: 'Poppins_400Regular',
-        marginLeft: 8,
+        marginLeft: 7,
         marginTop: 2,
         lineHeight: 16,
-    },
-    subNavStatusDot: {
-        width: 10,
-        height: 10,
-        borderRadius: 999,
-        borderWidth: 1,
-        marginLeft: 10,
     },
     footer: {
         padding: 24,

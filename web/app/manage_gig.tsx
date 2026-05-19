@@ -30,6 +30,7 @@ import {
 } from "../src/utils/navigation";
 import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 import { ProductionInviteTarget } from "../src/utils/productionTeamInvites";
+import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 import { sendVenueGigInvites } from "../src/utils/venueGigInvites";
 
 const { width: screenWidth } = Dimensions.get("window");
@@ -271,18 +272,28 @@ export default function GigDetailsScreen() {
 
       if (ownedGigError) throw ownedGigError;
 
-      const ownsGig = !!ownedGig?.id && profile?.role === "venue-owner";
-      const canViewAcceptedGig = ownsGig ? true : await hasAcceptedGigAccess(user.id, gigId);
+      let canManageAssignedGig = !!ownedGig?.id && profile?.role === "venue-owner";
 
-      if (!ownsGig && !canViewAcceptedGig) {
+      if (!canManageAssignedGig && profile?.role === "staff") {
+        const assignment = await fetchActiveStaffAssignment(supabase, user.id);
+        const permissions = getStaffPermissions(assignment?.access_level);
+        canManageAssignedGig =
+          assignment?.entity_type === "venue" &&
+          assignment.gig_id === gigId &&
+          permissions.canManageBookings;
+      }
+
+      const canViewAcceptedGig = canManageAssignedGig ? true : await hasAcceptedGigAccess(user.id, gigId);
+
+      if (!canManageAssignedGig && !canViewAcceptedGig) {
         Alert.alert("Unauthorized", "You can only view gigs you manage or have been accepted for.");
         router.replace("/feed");
         return;
       }
 
-      setCanManageGig(ownsGig);
+      setCanManageGig(canManageAssignedGig);
       setAuthorized(true);
-      fetchData(user.id, ownsGig);
+      fetchData(user.id, canManageAssignedGig);
     } catch (e) {
       console.error("Authorization check failed:", e);
       router.replace("/feed");
@@ -339,7 +350,6 @@ export default function GigDetailsScreen() {
         throw gigError;
       }
       if (!gigData) throw new Error("Gig not found");
-      if (canManage && gigData.organizer_id !== userId) throw new Error("Unauthorized");
       if (requirementsError) throw requirementsError;
       if (mediaError) throw mediaError;
 

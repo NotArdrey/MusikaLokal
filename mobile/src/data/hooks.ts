@@ -17,6 +17,10 @@ export type PaginatedResponse<T> = {
   [key: string]: unknown;
 };
 
+const isApprovedProfile = (profile: any) =>
+  profile?.is_verified === true &&
+  String(profile?.verification_status || "").toUpperCase() === "APPROVED";
+
 export const useHomeDataQuery = (params: {
   enabled?: boolean;
   isGuest: boolean;
@@ -200,7 +204,7 @@ export const useFeedQuery = <TItem = any>(params: {
         let query = supabase
           .from("feed_posts")
           .select(
-            "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role), media:post_media(id, post_id, media_type, storage_path, mime_type, width, height, duration_seconds, display_order)",
+            "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role, is_verified, verification_status), media:post_media(id, post_id, media_type, storage_path, mime_type, width, height, duration_seconds, display_order)",
           )
           .eq("visibility", "public")
           .eq("is_hidden", false)
@@ -224,10 +228,14 @@ export const useFeedQuery = <TItem = any>(params: {
         }
 
         const rows = data || [];
-        const items = rows.slice(0, params.limit) as TItem[];
+        const visibleRows = rows.filter((row: any) => isApprovedProfile(row?.author));
+        const items = visibleRows.slice(0, params.limit) as TItem[];
+        const cursorRow = visibleRows.length > 0
+          ? visibleRows[Math.min(visibleRows.length, params.limit) - 1]
+          : rows[Math.min(rows.length, params.limit) - 1];
         const nextCursor =
           rows.length > params.limit
-            ? (items[items.length - 1] as any)?.created_at || null
+            ? (cursorRow as any)?.created_at || null
             : null;
 
         logLoadTime("PostgREST:feed_posts", "complete", {
