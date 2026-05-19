@@ -96,21 +96,9 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
 
 type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
 
-type AuditEntityFilter = 'all' | 'studio' | 'gig' | 'payment';
+type AuditEntityFilter = string;
 
-type AuditActionFilter =
-  | 'all'
-  | 'approved'
-  | 'rejected'
-  | 'submitted'
-  | 'resubmitted'
-  | 'payment_paid'
-  | 'payment_partial'
-  | 'payment_pending'
-  | 'payment_failed'
-  | 'payment_cancelled'
-  | 'payment_refunded'
-  | 'payment_refund_pending';
+type AuditActionFilter = string;
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
@@ -137,13 +125,30 @@ interface AuditEntry {
   booking_status?: string | null;
   booking_id?: string | null;
   reference?: string | null;
+  source?: string | null;
+  changed_fields_count?: number;
   created_at: string;
 }
 
-const auditEntityTypes: AuditEntityFilter[] = ['all', 'studio', 'gig', 'payment'];
-
-const auditActions: AuditActionFilter[] = [
+const baseAuditEntityTypes: AuditEntityFilter[] = [
   'all',
+  'studio',
+  'gig',
+  'group',
+  'profiles',
+  'reports',
+  'stations',
+  'feed_posts',
+  'products',
+  'studio_bookings',
+  'payment',
+];
+
+const baseAuditActions: AuditActionFilter[] = [
+  'all',
+  'create',
+  'update',
+  'delete',
   'approved',
   'rejected',
   'submitted',
@@ -156,6 +161,96 @@ const auditActions: AuditActionFilter[] = [
   'payment_refunded',
   'payment_refund_pending',
 ];
+
+const auditActionLabels: Record<string, string> = {
+  all: 'All activity',
+  create: 'Added',
+  update: 'Updated',
+  delete: 'Removed',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  submitted: 'Submitted for review',
+  resubmitted: 'Submitted again',
+  hide: 'Hidden',
+  restore: 'Shown again',
+  read: 'Marked as read',
+  unread: 'Marked as unread',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+  pending: 'Waiting',
+  active: 'Activated',
+  inactive: 'Deactivated',
+  payment_paid: 'Payment completed',
+  payment_partial: 'Partially paid',
+  payment_pending: 'Waiting for payment',
+  payment_failed: 'Payment failed',
+  payment_cancelled: 'Payment cancelled',
+  payment_refunded: 'Payment refunded',
+  payment_refund_pending: 'Refund in progress',
+  verification_approved: 'Verification approved',
+  verification_rejected: 'Verification rejected',
+  verification_pending: 'Verification pending',
+};
+
+const auditEntityLabels: Record<string, string> = {
+  all: 'All areas',
+  profile: 'User account',
+  profiles: 'User accounts',
+  profile_skills: 'User skills',
+  profile_genres: 'User genres',
+  profile_portfolio_urls: 'Portfolio links',
+  studio: 'Studio',
+  studios: 'Studios',
+  studio_bookings: 'Bookings',
+  studio_booking_slots: 'Booking time slots',
+  studio_settings: 'Studio settings',
+  studio_operating_hours: 'Studio hours',
+  studio_date_overrides: 'Studio date changes',
+  studio_media: 'Studio photos',
+  studio_types: 'Studio types',
+  studio_amenities: 'Studio amenities',
+  studio_instruments: 'Studio instruments',
+  gig: 'Gig',
+  gigs: 'Gigs',
+  gig_applications: 'Gig applications',
+  gig_requirements: 'Gig requirements',
+  gig_media: 'Gig media',
+  group: 'Group',
+  groups: 'Groups',
+  group_members: 'Group members',
+  group_media: 'Group media',
+  group_roster_members: 'Group roster',
+  reports: 'Reports',
+  feed_posts: 'Feed posts',
+  post_comments: 'Post comments',
+  post_reactions: 'Post reactions',
+  products: 'Marketplace products',
+  product_media: 'Product photos',
+  product_variants: 'Product options',
+  stations: 'Radio stations',
+  playlists: 'Playlists',
+  playlist_items: 'Playlist tracks',
+  notifications: 'Notifications',
+  wallets: 'Wallets',
+  wallet_transactions: 'Wallet transactions',
+  payout_methods: 'Payout methods',
+  withdrawal_requests: 'Withdrawal requests',
+  payment: 'Payments',
+  permit: 'Permits',
+  permit_audit_log: 'Permit reviews',
+  manual_identity_reviews: 'Identity reviews',
+  identity_document_claims: 'Identity documents',
+};
+
+const auditSourceLabels: Record<string, string> = {
+  client: 'App action',
+  database: 'Saved automatically',
+  service_role: 'Server action',
+  'permit-management': 'Permit review',
+  'safe-delete-rpc': 'Safe removal process',
+  edge_function: 'Server action',
+  system: 'System',
+};
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return '-';
@@ -179,10 +274,64 @@ const formatCurrency = (value?: number | null) => {
   })}`;
 };
 
+const formatTitleWords = (value?: string | null) => {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ');
+
+  if (!normalized) return '-';
+
+  return normalized.replace(/\w\S*/g, (word) => (
+    `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`
+  ));
+};
+
 const formatAuditAction = (value?: string | null) => {
   const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return '-';
+  if (auditActionLabels[normalized]) return auditActionLabels[normalized];
   if (normalized.startsWith('payment_')) return normalizePaymentActionLabel(normalized);
-  return normalized ? normalized.replace(/_/g, ' ') : '-';
+  return formatTitleWords(normalized);
+};
+
+const formatAuditEntityType = (value?: string | null) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return '-';
+  return auditEntityLabels[normalized] || formatTitleWords(normalized);
+};
+
+const formatAuditSource = (value?: string | null) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return '-';
+  return auditSourceLabels[normalized] || formatTitleWords(normalized);
+};
+
+const formatStatusLabel = (value?: string | null) => {
+  const normalized = String(value || '').trim();
+  return normalized ? formatTitleWords(normalized) : '-';
+};
+
+const formatAuditNotes = (value?: string | null) => {
+  const normalized = String(value || '').trim();
+  if (!normalized) return '';
+
+  const lower = normalized.toLowerCase();
+  if (lower.startsWith('source:')) return '';
+
+  if (lower === 'existing studio deletion audit') {
+    return 'Saved from the studio removal record.';
+  }
+
+  if (lower === 'existing gig deletion audit') {
+    return 'Saved from the gig removal record.';
+  }
+
+  if (lower === 'existing group deletion audit') {
+    return 'Saved from the group removal record.';
+  }
+
+  return normalized;
 };
 
 const getErrorMessage = async (error: unknown, fallback: string) => {
@@ -323,8 +472,8 @@ export default function AdminAuditPage() {
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
   const [auditSearch, setAuditSearch] = useState('');
-  const [auditActionFilter, setAuditActionFilter] = useState<(typeof auditActions)[number]>('all');
-  const [auditEntityFilter, setAuditEntityFilter] = useState<(typeof auditEntityTypes)[number]>('all');
+  const [auditActionFilter, setAuditActionFilter] = useState<AuditActionFilter>('all');
+  const [auditEntityFilter, setAuditEntityFilter] = useState<AuditEntityFilter>('all');
   const [alertState, setAlertState] = useState<{
     visible: boolean;
     type: AlertType;
@@ -405,29 +554,40 @@ export default function AdminAuditPage() {
       let rawItems: any[] = [];
 
       try {
-        const { data, error } = await supabase.functions.invoke<any>('permit-management', {
-          body: {
-            action: 'fetch_audit',
-            limit: 200,
-          },
+        const { data, error } = await supabase.rpc('admin_audit_feed', {
+          p_limit: 300,
+          p_offset: 0,
         });
 
         if (error) throw error;
-        if (data?.error) throw new Error(String(data.error));
 
-        rawItems = Array.isArray(data?.items) ? data.items : [];
+        rawItems = Array.isArray(data) ? data : [];
       } catch {
-        const { data: fallbackRows, error: fallbackError } = await supabase
-          .from('permit_audit_log')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(200);
+        try {
+          const { data, error } = await supabase.functions.invoke<any>('permit-management', {
+            body: {
+              action: 'fetch_audit',
+              limit: 200,
+            },
+          });
 
-        if (fallbackError) throw fallbackError;
-        rawItems = Array.isArray(fallbackRows) ? fallbackRows : [];
+          if (error) throw error;
+          if (data?.error) throw new Error(String(data.error));
+
+          rawItems = Array.isArray(data?.items) ? data.items : [];
+        } catch {
+          const { data: fallbackRows, error: fallbackError } = await supabase
+            .from('permit_audit_log')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(200);
+
+          if (fallbackError) throw fallbackError;
+          rawItems = Array.isArray(fallbackRows) ? fallbackRows : [];
+        }
       }
 
-      const mappedPermitItems = await mapAuditRows(rawItems);
+      const mappedDatabaseItems = await mapAuditRows(rawItems);
       let paymentAuditItems: AuditEntry[] = [];
 
       try {
@@ -466,7 +626,7 @@ export default function AdminAuditPage() {
         paymentAuditItems = [];
       }
 
-      const mappedItems = [...mappedPermitItems, ...paymentAuditItems].sort(
+      const mappedItems = [...mappedDatabaseItems, ...paymentAuditItems].sort(
         (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
       );
       setAuditEntries(mappedItems);
@@ -474,7 +634,7 @@ export default function AdminAuditPage() {
     } catch (error) {
       if (!options?.silent) {
         const message = await getErrorMessage(error, 'Unable to fetch audit entries.');
-        showAlert('error', 'Failed to load audit log', message);
+        showAlert('error', 'Failed to load activity history', message);
         setAuditEntries([]);
       }
     } finally {
@@ -526,6 +686,10 @@ export default function AdminAuditPage() {
     return auditEntries.filter((entry) => {
       const action = String(entry.action || '').trim().toLowerCase();
       const entityType = String(entry.entity_type || '').trim().toLowerCase();
+      const friendlyAction = formatAuditAction(entry.action).toLowerCase();
+      const friendlyEntityType = formatAuditEntityType(entry.entity_type).toLowerCase();
+      const friendlySource = formatAuditSource(entry.source).toLowerCase();
+      const friendlyNotes = formatAuditNotes(entry.admin_notes).toLowerCase();
 
       if (auditActionFilter !== 'all' && action !== auditActionFilter) {
         return false;
@@ -541,24 +705,48 @@ export default function AdminAuditPage() {
         String(entry.entity_name || '').toLowerCase().includes(query) ||
         String(entry.action || '').toLowerCase().includes(query) ||
         String(entry.entity_type || '').toLowerCase().includes(query) ||
+        friendlyAction.includes(query) ||
+        friendlyEntityType.includes(query) ||
         String(entry.performer_name || '').toLowerCase().includes(query) ||
         String(entry.rejection_reason || '').toLowerCase().includes(query) ||
         String(entry.admin_notes || '').toLowerCase().includes(query) ||
+        friendlyNotes.includes(query) ||
         String(entry.payment_status || '').toLowerCase().includes(query) ||
         String(entry.booking_status || '').toLowerCase().includes(query) ||
         String(entry.booking_id || '').toLowerCase().includes(query) ||
         String(entry.reference || '').toLowerCase().includes(query) ||
+        String(entry.source || '').toLowerCase().includes(query) ||
+        friendlySource.includes(query) ||
+        String(entry.changed_fields_count || '').toLowerCase().includes(query) ||
         String(entry.amount || '').toLowerCase().includes(query) ||
         String(entry.created_at || '').toLowerCase().includes(query)
       );
     });
   }, [auditEntries, auditSearch, auditActionFilter, auditEntityFilter]);
 
+  const auditActions = useMemo(() => {
+    const actions = new Set(baseAuditActions);
+    auditEntries.forEach((entry) => {
+      const action = String(entry.action || '').trim().toLowerCase();
+      if (action) actions.add(action);
+    });
+    return Array.from(actions);
+  }, [auditEntries]);
+
+  const auditEntityTypes = useMemo(() => {
+    const entityTypes = new Set(baseAuditEntityTypes);
+    auditEntries.forEach((entry) => {
+      const entityType = String(entry.entity_type || '').trim().toLowerCase();
+      if (entityType) entityTypes.add(entityType);
+    });
+    return Array.from(entityTypes);
+  }, [auditEntries]);
+
   if (loading || !roleResolved || initializingAudit) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading audit log...</Text>
+        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading activity history...</Text>
       </View>
     );
   }
@@ -611,7 +799,7 @@ export default function AdminAuditPage() {
           <TextInput
             value={auditSearch}
             onChangeText={setAuditSearch}
-            placeholder="Search audit log"
+            placeholder="Search activity history"
             placeholderTextColor={colors.textSecondary}
             style={[
               styles.searchInput,
@@ -640,7 +828,7 @@ export default function AdminAuditPage() {
                   ]}
                 >
                   <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {status.replace(/_/g, ' ')}
+                    {formatAuditAction(status)}
                   </Text>
                 </TouchableOpacity>
               );
@@ -664,7 +852,7 @@ export default function AdminAuditPage() {
                   ]}
                 >
                   <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {entity}
+                    {formatAuditEntityType(entity)}
                   </Text>
                 </TouchableOpacity>
               );
@@ -676,45 +864,70 @@ export default function AdminAuditPage() {
               <ActivityIndicator size="small" color={colors.primary} />
             </View>
           ) : filteredAuditEntries.length === 0 ? (
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No audit entries found.</Text>
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No activity found.</Text>
           ) : (
             <View style={styles.sectionGap}>
-              {filteredAuditEntries.map((entry) => (
-                <View
-                  key={entry.id}
-                  testID={`admin-audit-card-${entry.id}`}
-                  accessibilityLabel={`admin-audit-card-${entry.id}`}
-                  style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-                > 
-                  <Text style={[styles.cardTitle, { color: colors.text }]}>{entry.entity_name || 'Unknown entity'}</Text>
-                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Action: {formatAuditAction(entry.action)}</Text>
-                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Type: {entry.entity_type}</Text>
-                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>By: {entry.performer_name || 'System'}</Text>
-                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>At: {formatDateTime(entry.created_at)}</Text>
-                  {entry.entity_type === 'payment' && (
-                    <>
+              {filteredAuditEntries.map((entry) => {
+                const changedCount = Number(entry.changed_fields_count || 0);
+                const notes = formatAuditNotes(entry.admin_notes);
+
+                return (
+                  <View
+                    key={entry.id}
+                    testID={`admin-audit-card-${entry.id}`}
+                    accessibilityLabel={`admin-audit-card-${entry.id}`}
+                    style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  >
+                    <Text style={[styles.cardTitle, { color: colors.text }]}>{entry.entity_name || 'Unknown item'}</Text>
+                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                      What happened: {formatAuditAction(entry.action)}
+                    </Text>
+                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                      Area: {formatAuditEntityType(entry.entity_type)}
+                    </Text>
+                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                      Done by: {entry.performer_name || 'System'}
+                    </Text>
+                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                      When: {formatDateTime(entry.created_at)}
+                    </Text>
+                    {!!entry.source && (
                       <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
-                        Payment: {entry.payment_status || '-'} | Booking: {entry.booking_status || '-'}
+                        Saved from: {formatAuditSource(entry.source)}
                       </Text>
-                      {!!entry.booking_id && (
-                        <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Booking ID: {entry.booking_id}</Text>
-                      )}
+                    )}
+                    {changedCount > 0 && (
                       <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
-                        Amount: {formatCurrency(entry.amount)} | Refund: {formatCurrency(entry.refund_amount)}
+                        Details updated: {changedCount} {changedCount === 1 ? 'item' : 'items'}
                       </Text>
-                      {!!entry.reference && (
-                        <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Ref: {entry.reference}</Text>
-                      )}
-                    </>
-                  )}
-                  {!!entry.rejection_reason && (
-                    <Text style={[styles.cardMeta, { color: '#EF4444' }]}>Reason: {entry.rejection_reason}</Text>
-                  )}
-                  {!!entry.admin_notes && (
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Notes: {entry.admin_notes}</Text>
-                  )}
-                </View>
-              ))}
+                    )}
+                    {entry.entity_type === 'payment' && (
+                      <>
+                        <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                          Payment status: {formatStatusLabel(entry.payment_status)} | Booking status: {formatStatusLabel(entry.booking_status)}
+                        </Text>
+                        {!!entry.booking_id && (
+                          <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                            Booking reference: {entry.booking_id}
+                          </Text>
+                        )}
+                        <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                          Paid amount: {formatCurrency(entry.amount)} | Refunded: {formatCurrency(entry.refund_amount)}
+                        </Text>
+                        {!!entry.reference && (
+                          <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reference: {entry.reference}</Text>
+                        )}
+                      </>
+                    )}
+                    {!!entry.rejection_reason && (
+                      <Text style={[styles.cardMeta, { color: '#EF4444' }]}>Reason: {entry.rejection_reason}</Text>
+                    )}
+                    {!!notes && (
+                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Admin note: {notes}</Text>
+                    )}
+                  </View>
+                );
+              })}
             </View>
           )}
         </View>

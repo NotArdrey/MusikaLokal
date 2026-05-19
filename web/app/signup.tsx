@@ -76,6 +76,25 @@ const getDocumentOptionByKey = (key: string) => {
     return PH_DOCUMENT_OPTIONS.find((option) => option.key === key) ?? PH_DOCUMENT_OPTIONS[0];
 };
 
+const PASSWORD_REQUIREMENT_HINT = 'Use at least 8 characters with uppercase, lowercase, a number, and a symbol.';
+const PASSWORD_REQUIREMENT_ERROR = 'Password must be at least 8 characters and include uppercase, lowercase, a number, and a symbol.';
+
+const getPasswordValidationError = (value: string) => {
+    if (
+        value.length < 8 ||
+        !/[A-Z]/.test(value) ||
+        !/[a-z]/.test(value) ||
+        !/[0-9]/.test(value) ||
+        !/[^A-Za-z0-9\s]/.test(value)
+    ) {
+        return PASSWORD_REQUIREMENT_ERROR;
+    }
+
+    return '';
+};
+
+const isPasswordStrongEnough = (value: string) => !getPasswordValidationError(value);
+
 const getLocalDateInputValue = (date = new Date()) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -336,7 +355,7 @@ export default function SignupScreen() {
     const isDetailsStepReady =
         isAllowedSignupRole(selectedRole) &&
         emailRegex.test(email.trim()) &&
-        password.length >= 6 &&
+        isPasswordStrongEnough(password) &&
         password === confirmPassword &&
         Boolean(selectedDocumentOption?.key);
     const isManualReviewReady = !selectedDocumentOption.diditSupported &&
@@ -1128,8 +1147,9 @@ export default function SignupScreen() {
 
         if (!password) {
             newErrors.password = 'Required';
-        } else if (password.length < 6) {
-            newErrors.password = 'Min 6 characters';
+        } else {
+            const passwordError = getPasswordValidationError(password);
+            if (passwordError) newErrors.password = passwordError;
         }
 
         if (!selectedDocumentOption?.key) {
@@ -1819,7 +1839,11 @@ export default function SignupScreen() {
                         <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={authIconColor} />
                     </TouchableOpacity>
                 </View>
-                {errors.password && <Text style={{ color: 'red', fontSize: 12 }}>{errors.password}</Text>}
+                {errors.password ? (
+                    <Text style={{ color: 'red', fontSize: 12 }}>{errors.password}</Text>
+                ) : !isPasswordStrongEnough(password) ? (
+                    <Text style={[styles.passwordRequirementText, authSecondaryTextStyle]}>{PASSWORD_REQUIREMENT_HINT}</Text>
+                ) : null}
 
                 {/* Confirm */}
                 <View style={[styles.inputContainer, isWebDesktop ? styles.webCompactInputContainer : null, authInputContainerStyle, errors.confirmPassword ? { borderColor: 'red' } : null]}>
@@ -2584,6 +2608,7 @@ const styles = StyleSheet.create({
     formSection: { gap: 0, marginTop: 0, marginBottom: 20 },
     webFormSection: { marginBottom: 14 },
     formGap: { gap: 14 },
+    passwordRequirementText: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
     backLink: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, gap: 4 },
     documentSectionContainer: { gap: 8, marginTop: 2 },
     documentSectionTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold' },

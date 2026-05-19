@@ -1,0 +1,87 @@
+{
+  "generated_at": "2026-05-19T03:22:24.671Z",
+  "mode": "delete",
+  "protected_buckets": [
+    "identity-manual",
+    "public-assets"
+  ],
+  "scanned": {
+    "storage_objects": 754,
+    "public_tables": 92,
+    "public_rows": 656,
+    "referenced_objects": 61
+  },
+  "deletion_candidates": {
+    "count": 639,
+    "bytes": 981986366,
+    "by_bucket": [
+      {
+        "bucket": "documents",
+        "count": 283,
+        "bytes": 833482953
+      },
+      {
+        "bucket": "listings",
+        "count": 300,
+        "bytes": 125590380
+      },
+      {
+        "bucket": "avatars",
+        "count": 26,
+        "bytes": 12998673
+      },
+      {
+        "bucket": "chat-attachments",
+        "count": 9,
+        "bytes": 6540943
+      },
+      {
+        "bucket": "portfolio",
+        "count": 20,
+        "bytes": 2861399
+      },
+      {
+        "bucket": "post-media",
+        "count": 1,
+        "bytes": 512018
+      }
+    ]
+  },
+  "deleted": {
+    "count": 639,
+    "bytes": 981986366,
+    "by_bucket": [
+      {
+        "bucket": "documents",
+        "count": 283,
+        "bytes": 833482953
+      },
+      {
+        "bucket": "listings",
+        "count": 300,
+        "bytes": 125590380
+      },
+      {
+        "bucket": "avatars",
+        "count": 26,
+        "bytes": 12998673
+      },
+      {
+        "bucket": "chat-attachments",
+        "count": 9,
+        "bytes": 6540943
+      },
+      {
+        "bucket": "portfolio",
+        "count": 20,
+        "bytes": 2861399
+      },
+      {
+        "bucket": "post-media",
+        "count": 1,
+        "bytes": 512018
+      }
+    ]
+  },
+  "failed": []
+}

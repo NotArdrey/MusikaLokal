@@ -169,7 +169,7 @@ export default function ForgetPasswordScreen() {
                        <Text style={{ marginLeft: 8, fontSize: 16, fontFamily: 'Poppins_500Medium', color: colors.text }}>Back</Text>
                      </TouchableOpacity>
                      <Image
-                       source={require("../assets/images/Musika-lokal-logo-theme.png")}
+                       source={require("../assets/images/musika-lokal-logo-modern-wordmark.png")}
                        style={styles.webFormLogo}
                        resizeMode="contain"
                      />

@@ -23,7 +23,11 @@ const GROQ_MODEL_CANDIDATES = [
     "openai/gpt-oss-20b",
 ];
 const GROQ_RETRYABLE_STATUS_CODES = new Set([403, 404, 408, 409, 429, 498, 500, 502, 503, 504]);
-const LOCAL_ONLY_MODE = true;
+const isEnabledEnvFlag = (value?: string) =>
+    ["1", "true", "yes", "on"].includes((value || "").trim().toLowerCase());
+const LOCAL_ONLY_MODE = isEnabledEnvFlag(
+    Deno.env.get("HOME_FEED_LOCAL_ONLY") || Deno.env.get("AI_LOCAL_ONLY"),
+);
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";

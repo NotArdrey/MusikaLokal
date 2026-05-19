@@ -73,3 +73,8 @@ appId: ${APP_ID}
     timeout: 60000
 - tapOn:
     id: "custom-alert-button-create"
+- extendedWaitUntil:
+    visible: "Success!"
+    timeout: 60000
+- tapOn:
+    id: "app-modal-confirm-button"

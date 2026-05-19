@@ -23,6 +23,22 @@ const corsHeaders = {
 const IDENTITY_BUCKET = "identity-manual";
 const MAX_IMAGE_BYTES = 7 * 1024 * 1024;
 const allowedSignupRoles = new Set(["fan", "musician"]);
+const PASSWORD_REQUIREMENT_ERROR = "Password must be at least 8 characters and include uppercase, lowercase, a number, and a symbol.";
+
+function getPasswordValidationError(value: unknown) {
+  const password = String(value || "");
+  if (
+    password.length < 8 ||
+    !/[A-Z]/.test(password) ||
+    !/[a-z]/.test(password) ||
+    !/[0-9]/.test(password) ||
+    !/[^A-Za-z0-9\s]/.test(password)
+  ) {
+    return PASSWORD_REQUIREMENT_ERROR;
+  }
+
+  return "";
+}
 
 function getDefaultDisplayNameForRole(role: unknown) {
   return String(role || "").trim().toLowerCase() === "fan" ? "Fan" : "Musician";
@@ -288,6 +304,11 @@ async function ensurePendingReviewAuthUser(
     return authUserData.user;
   }
 
+  const passwordValidationError = getPasswordValidationError(payload.password);
+  if (passwordValidationError) {
+    throw new Error(passwordValidationError);
+  }
+
   const existingUser = await findAuthUserByEmail(supabaseAdmin, payload.email);
   if (existingUser) {
     const { data: existingProfile } = await supabaseAdmin
@@ -324,9 +345,7 @@ async function ensurePendingReviewAuthUser(
       },
     };
 
-    if (payload.password && payload.password.length >= 6) {
-      updatePayload.password = payload.password;
-    }
+    updatePayload.password = payload.password;
 
     const { data: updatedUserData, error: updateUserError } = await supabaseAdmin.auth.admin.updateUserById(
       existingUser.id,
@@ -338,10 +357,6 @@ async function ensurePendingReviewAuthUser(
     }
 
     return updatedUserData.user;
-  }
-
-  if (!payload.password || payload.password.length < 6) {
-    throw new Error("Password must be at least 6 characters.");
   }
 
   const fallbackName = payload.fullName || payload.email.split("@")[0] || getDefaultDisplayNameForRole(role);

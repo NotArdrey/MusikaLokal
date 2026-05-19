@@ -29,8 +29,6 @@ appId: ${APP_ID}
     id: "mobile-edit-production-save-button"
 - waitForAnimationToEnd:
     timeout: 2000
-- tapOn:
-    id: "mobile-edit-production-save-button"
 - extendedWaitUntil:
     visible: "Production Team Updated"
     timeout: 60000

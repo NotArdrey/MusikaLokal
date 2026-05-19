@@ -142,6 +142,7 @@ const logFeedInvokeError = (
 
 const FEED_PAGE_SIZE = 12;
 const AI_CARD_LIMIT = 20;
+const AI_RECOMMENDATION_TIMEOUT_MS = 2500;
 const FEED_FOCUS_REFRESH_COOLDOWN_MS = 30000;
 const PESO_SIGN = "\u20B1";
 const POST_MEDIA_BUCKET = "post-media";
@@ -190,6 +191,15 @@ type PostComposerMedia = {
 
 const feedScreenCache = createFeedCache(getGroqModelInfo().modelLabel);
 let feedScreenCacheIdentity = "guest";
+
+const withAiRecommendationTimeout = async <T,>(promise: Promise<T>): Promise<T | null> =>
+  Promise.race([
+    promise,
+    new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), AI_RECOMMENDATION_TIMEOUT_MS);
+    }),
+  ]);
+
 const FEED_FALLBACK_IMAGES: Record<string, string[]> = {
   Artist: [
     "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=900&q=75",
@@ -239,6 +249,43 @@ const ensureFeedCardImage = <T extends { id?: string | null; type?: string; imag
     image: primaryImage,
     images: validImages.length > 0 ? validImages : [primaryImage],
   };
+};
+
+const normalizeAiRecommendationCard = (item: any) => {
+  const type = typeof item?.type === "string" && item.type.trim().length > 0
+    ? item.type.trim()
+    : "Group";
+  const isGroup = type.toLowerCase() === "group";
+  const isGig = type.toLowerCase() === "gig";
+  const ownerId = typeof item?.owner_id === "string" ? item.owner_id : null;
+  const organizerId = typeof item?.organizer_id === "string" ? item.organizer_id : null;
+  const targetId = isGroup ? item?.id : isGig ? organizerId : ownerId;
+
+  return ensureFeedCardImage({
+    ...item,
+    __feedKind: "ai_card",
+    id: item?.id,
+    type,
+    name: item?.name || `Recommended ${type}`,
+    image: typeof item?.image === "string" ? item.image : null,
+    images: Array.isArray(item?.images) ? item.images : [],
+    rating: Number(item?.rating || 0),
+    review_count: Number(item?.review_count || 0),
+    location: item?.location || "",
+    genre: item?.genre || "",
+    created_at: item?.created_at || null,
+    updated_at: item?.updated_at || item?.created_at || null,
+    owner_id: ownerId,
+    organizer_id: organizerId,
+    rate: item?.rate?.toString?.() || null,
+    hourly_rate: item?.hourly_rate?.toString?.() || null,
+    budget: item?.budget?.toString?.() || null,
+    similarity: Number(item?.similarity || 0),
+    aiReason: typeof item?.aiReason === "string" ? item.aiReason : "",
+    aiScore: Number(item?.aiScore || 0),
+    social_follow_target_id: typeof targetId === "string" && targetId.length > 0 ? targetId : null,
+    social_follow_target_type: isGroup ? "group" : "profile",
+  });
 };
 
 const getFeedItemCreatedTime = (item: any) => {
@@ -2533,6 +2580,57 @@ export default function FeedScreen() {
     setIsAiCardsLoading(true);
 
     try {
+      try {
+        const aiInvokeResult = await withAiRecommendationTimeout(
+          supabase.functions.invoke("home-feed", {
+            body: {
+              action: "for-you",
+              limit: AI_CARD_LIMIT,
+              userId: resolvedUserId,
+            },
+          }),
+        );
+
+        if (!aiInvokeResult) {
+          logLoadTime("Feed", "home-feed-ai-timeout", {
+            timeoutMs: AI_RECOMMENDATION_TIMEOUT_MS,
+          });
+        } else if (aiInvokeResult.error) {
+          logFeedInvokeError("home-feed:for-you", aiInvokeResult.error, {
+            action: "for-you",
+            userId: resolvedUserId,
+          });
+        } else {
+          const recommendations = Array.isArray(aiInvokeResult.data?.recommendations)
+            ? aiInvokeResult.data.recommendations
+            : Array.isArray(aiInvokeResult.data?.aiRecommendations)
+              ? aiInvokeResult.data.aiRecommendations
+              : [];
+          const cards = recommendations
+            .map(normalizeAiRecommendationCard)
+            .filter((card: any) => typeof card?.id === "string" && card.id.length > 0)
+            .slice(0, AI_CARD_LIMIT);
+
+          if (cards.length > 0) {
+            return {
+              cards,
+              provider: normalizeAiFeedProvider(aiInvokeResult.data?.aiProvider || aiInvokeResult.data?.provider || groqModelLabel),
+              message: normalizeAiFeedMessage(
+                aiInvokeResult.data?.message ||
+                (aiInvokeResult.data?.aiPowered
+                  ? "AI-ranked For You feed is active."
+                  : "Showing profile-ranked recommendations."),
+              ),
+            };
+          }
+        }
+      } catch (aiError: any) {
+        logFeedInvokeError("home-feed:for-you", aiError, {
+          action: "for-you",
+          userId: resolvedUserId,
+        });
+      }
+
       // Primary queries with strict filters (matching Home)
       const [groupsResult, studiosResult, gigsResult, artistsResult, teamsResult, viewerProfileResult] = await Promise.all([
         supabase

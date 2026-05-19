@@ -57,6 +57,10 @@ const makeFutureManilaDate = (daysFromNow: number) => (
   formatManilaDateTime(new Date(Date.now() + daysFromNow * 24 * 60 * 60 * 1000)).date
 );
 
+const makeMobileInputToken = (prefix: string, suffix: string) => (
+  `${prefix}${makeRunId(suffix).replace(/[^a-z0-9]/gi, '')}`
+);
+
 const configureStudioForDeterministicBooking = async (studioId: string, bookingDate: string) => {
   const admin = getSupabaseAdmin();
 
@@ -310,11 +314,11 @@ test.describe('mobile visible CRUD flows', () => {
     });
     const customerWallet = await seedE2EWallet(customer.id, 75);
     const ownerWallet = await seedE2EWallet(owner.id, 1250);
-    const studioName = `studio-refund-${makeRunId('studio-refund')}`;
-    const studioDescription = `Studio-refund-description-${makeRunId('studio-refund')}`;
+    const studioName = makeMobileInputToken('StudioRefund', 'studio-refund');
+    const studioDescription = makeMobileInputToken('StudioRefundDescription', 'studio-refund');
     const bookingDate = makeFutureManilaDate(6);
     const bookingNotes = `E2E musician booking ${makeRunId('studio-refund-booking')}`;
-    const reason = `Owner refund reason ${makeRunId('studio-refund-cancel')}`;
+    const reason = makeMobileInputToken('OwnerRefundReason', 'studio-refund-cancel');
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: owner.email,
