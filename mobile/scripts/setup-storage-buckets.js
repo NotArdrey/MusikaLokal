@@ -22,13 +22,19 @@ const buckets = [
   { id: "avatars", name: "avatars", public: true },
   { id: "portfolio", name: "portfolio", public: true },
   { id: "listings", name: "listings", public: true },
+  { id: "playlist-assets", name: "playlist-assets", public: true },
   { id: "documents", name: "documents", public: false },
 ];
 
-const getAllowedMimeTypes = (bucket) =>
-  bucket.public
+const getAllowedMimeTypes = (bucket) => {
+  if (bucket.id === "playlist-assets") {
+    return ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/heic", "image/heif", "video/mp4", "video/quicktime", "video/webm", "audio/mpeg", "audio/mp3"];
+  }
+
+  return bucket.public
     ? ["image/png", "image/jpeg", "image/jpg", "image/gif", "video/mp4", "video/quicktime"]
     : ["application/pdf", "image/png", "image/jpeg", "image/jpg", "audio/mpeg", "audio/mp3"];
+};
 
 async function setupBuckets() {
   const { data: existingBuckets, error: listError } = await supabase.storage.listBuckets();

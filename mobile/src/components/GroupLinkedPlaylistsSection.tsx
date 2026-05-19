@@ -8,8 +8,10 @@ type GroupLinkedPlaylistsSectionProps = {
   playlists: any[];
   loading: boolean;
   onPlaylistPress: (playlistId: string) => void;
+  onCreatePlaylist?: () => void;
   title?: string;
   emptyMessage?: string;
+  createButtonLabel?: string;
 };
 
 export default function GroupLinkedPlaylistsSection({
@@ -18,28 +20,55 @@ export default function GroupLinkedPlaylistsSection({
   playlists,
   loading,
   onPlaylistPress,
+  onCreatePlaylist,
   title = "Playlists",
   emptyMessage = "No playlists linked yet.",
+  createButtonLabel = "Upload Playlist",
 }: GroupLinkedPlaylistsSectionProps) {
   return (
     <View style={{ gap: 12 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Text style={{ color: colors.text, fontSize: 18, fontFamily: "Poppins_600SemiBold" }}>
-          {title}
-        </Text>
-        {playlists.length > 0 ? (
-          <View
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+          <Text style={{ color: colors.text, fontSize: 18, fontFamily: "Poppins_600SemiBold", flexShrink: 1 }}>
+            {title}
+          </Text>
+          {playlists.length > 0 ? (
+            <View
+              style={{
+                backgroundColor: colors.primary + "18",
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 999,
+              }}
+            >
+              <Text style={{ color: colors.primary, fontSize: 10, fontFamily: "Poppins_600SemiBold" }}>
+                {playlists.length}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        {onCreatePlaylist ? (
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={onCreatePlaylist}
+            disabled={loading}
             style={{
-              backgroundColor: colors.primary + "18",
-              paddingHorizontal: 8,
-              paddingVertical: 3,
-              borderRadius: 999,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              paddingHorizontal: 11,
+              paddingVertical: 7,
+              borderRadius: 10,
+              backgroundColor: loading ? colors.border : colors.primary,
+              opacity: loading ? 0.65 : 1,
             }}
           >
-            <Text style={{ color: colors.primary, fontSize: 10, fontFamily: "Poppins_600SemiBold" }}>
-              {playlists.length}
+            <Ionicons name="cloud-upload-outline" size={14} color="#fff" />
+            <Text style={{ color: "#fff", fontSize: 11, fontFamily: "Poppins_600SemiBold" }}>
+              {createButtonLabel}
             </Text>
-          </View>
+          </TouchableOpacity>
         ) : null}
       </View>
 

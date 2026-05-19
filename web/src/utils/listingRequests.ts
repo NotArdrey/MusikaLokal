@@ -96,6 +96,11 @@ const createListingRequestFallback = async (payload: ListingRequestPayload) => {
     .single();
 
   if (error) {
+    const unavailableMessage = getForeignKeyUnavailableMessage(error, payload);
+    if (unavailableMessage) {
+      throw createUnavailableError(unavailableMessage);
+    }
+
     throw error;
   }
 
@@ -199,6 +204,112 @@ const isProductionTeamApplicationPayload = (payload: ListingRequestPayload) => {
     payload.receiverEntityType === "production_team" &&
     String(extraMeta.request_kind || "").trim().toLowerCase() === "application"
   );
+};
+
+const getListingRequestKind = (payload: ListingRequestPayload) =>
+  String(normalizeExtraMeta(payload.extraMeta).request_kind || "")
+    .trim()
+    .toLowerCase();
+
+const createUnavailableError = (message: string) =>
+  Object.assign(new Error(message), { code: "LISTING_TARGET_UNAVAILABLE" });
+
+const getForeignKeyUnavailableMessage = (
+  error: any,
+  payload: Pick<ListingRequestPayload, "groupId" | "studioId">,
+) => {
+  const errorText = [
+    error?.code,
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.constraint,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (error?.code !== "23503") {
+    return null;
+  }
+
+  if (payload.groupId && errorText.includes("group_id")) {
+    return "This group is no longer available. It may have been deleted by the owner. Please refresh and choose another group.";
+  }
+
+  if (payload.studioId && errorText.includes("studio_id")) {
+    return "This studio or venue is no longer available. It may have been deleted by the owner. Please refresh and choose another listing.";
+  }
+
+  return null;
+};
+
+const ensureListingRequestTargetsAvailable = async (payload: ListingRequestPayload) => {
+  const requestKind = getListingRequestKind(payload);
+
+  if (payload.groupId) {
+    const { data, error } = await supabase
+      .from("groups")
+      .select("id, open_group_applications")
+      .eq("id", payload.groupId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      throw createUnavailableError(
+        payload.receiverEntityType === "group"
+          ? "This group is no longer available. It may have been deleted by the owner. Please refresh and choose another group."
+          : "The selected group is no longer available. Please refresh and choose another group.",
+      );
+    }
+
+    if (
+      payload.receiverEntityType === "group" &&
+      requestKind === "application" &&
+      data.open_group_applications === false
+    ) {
+      throw createUnavailableError("This group is not accepting applications right now.");
+    }
+  }
+
+  if (payload.studioId) {
+    const { data, error } = await supabase
+      .from("studios")
+      .select("id")
+      .eq("id", payload.studioId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      throw createUnavailableError(
+        "This studio or venue is no longer available. It may have been deleted by the owner. Please refresh and choose another listing.",
+      );
+    }
+  }
+
+  if (payload.productionTeamId) {
+    const { data, error } = await supabase
+      .from("production_teams")
+      .select("id")
+      .eq("id", payload.productionTeamId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      throw createUnavailableError(
+        "This production team is no longer available. It may have been deleted by the owner. Please refresh and choose another team.",
+      );
+    }
+  }
 };
 
 export const uploadListingRequestDocument = async (
@@ -323,6 +434,8 @@ export const submitListingRequest = async ({
     routeParams: normalizedRouteParams,
     extraMeta: extraMeta || null,
   };
+
+  await ensureListingRequestTargetsAvailable(body);
 
   const { data, error } = await supabase.functions.invoke("manage-production", {
     body,

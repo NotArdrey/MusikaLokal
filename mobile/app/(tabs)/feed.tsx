@@ -1706,7 +1706,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     ? isCurrentStation
       ? currentTrack?.title || getStationNowPlayingTitle(displayStation, currentSlotIndex)
       : getStationNowPlayingTitle(displayStation, 0)
-    : "Check back for live rotations";
+    : "Check back for live stations";
   const rotationSummary = hasDisplayStation
     ? hasBroadcastStream
       ? "Live stream"
@@ -3864,15 +3864,37 @@ export default function FeedScreen() {
       setMediaBusy(true);
       setMediaStatus("Checking media...");
       const prepared: PostComposerMedia[] = [];
+      const blockedReasons: string[] = [];
       for (const asset of assets) {
-        prepared.push(await preparePostComposerMedia(asset));
+        try {
+          prepared.push(await preparePostComposerMedia(asset));
+        } catch (error: any) {
+          const reason = typeof error?.message === "string" && error.message.trim().length > 0
+            ? error.message.trim()
+            : "This media could not be attached.";
+          blockedReasons.push(reason);
+        }
       }
 
-      setPostMedia((current) => {
-        const merged = [...current, ...prepared].slice(0, MAX_POST_MEDIA_ITEMS);
-        const hasCover = merged.some((item) => item.is_cover);
-        return merged.map((item, index) => ({ ...item, is_cover: hasCover ? item.is_cover : index === 0 }));
-      });
+      if (prepared.length > 0) {
+        setPostMedia((current) => {
+          const merged = [...current, ...prepared].slice(0, MAX_POST_MEDIA_ITEMS);
+          const hasCover = merged.some((item) => item.is_cover);
+          return merged.map((item, index) => ({ ...item, is_cover: hasCover ? item.is_cover : index === 0 }));
+        });
+      }
+
+      if (blockedReasons.length > 0) {
+        const firstReason = blockedReasons[0] || "This media could not be attached.";
+        const blockedLabel = blockedReasons.length === 1 ? "1 media item was blocked" : `${blockedReasons.length} media items were blocked`;
+        setAlert({
+          type: prepared.length > 0 ? "warning" : "error",
+          title: prepared.length > 0 ? "Some media blocked" : "Media blocked",
+          message: prepared.length > 0
+            ? `${blockedLabel}. Approved media was attached. ${firstReason}`
+            : firstReason,
+        });
+      }
     } catch (error: any) {
       setAlert({
         type: "error",
@@ -4461,6 +4483,7 @@ export default function FeedScreen() {
           onFollow={handleFollow}
           onOpenListing={openListingDetails}
           onOpenPost={openPostDetails}
+          onOpenPostOptions={openPostOptions}
           onOpenProduct={openProductDetails}
           onOpenProfile={openProfileDetails}
           onOpenProductionTeam={openProductionTeamDetails}
@@ -4632,9 +4655,12 @@ export default function FeedScreen() {
 
     return (
       <ScrollView
-        style={[styles.feedViewport, { marginBottom: feedBottomSpacer }]}
+        style={styles.feedViewport}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.feedSkeletonContent}
+        contentContainerStyle={[
+          styles.feedSkeletonContent,
+          { paddingBottom: feedBottomSpacer + 20 },
+        ]}
       >
         <View style={[styles.feedSkeletonSearchWrap, { backgroundColor: cardBg }]}>
           <Skeleton width="100%" height={48} borderRadius={16} />
@@ -4794,11 +4820,10 @@ export default function FeedScreen() {
       tab,
     ],
   );
-  const feedViewportStyle = useMemo(
-    () => ({ marginBottom: feedBottomSpacer }),
+  const feedContentContainerStyle = useMemo(
+    () => ({ paddingBottom: feedBottomSpacer }),
     [feedBottomSpacer],
   );
-  const feedContentContainerStyle = useMemo(() => ({ paddingBottom: 0 }), []);
   const optionsTargetIsPost = postOptionsTarget ? postOptionsTarget.__feedKind !== "ai_card" : false;
   const optionsTargetIsOwn = postOptionsTarget ? isOwnFeedReportTarget(postOptionsTarget, resolvedUserId) : false;
   const optionsTargetLabel = postOptionsTarget ? getFeedReportTypeLabel(postOptionsTarget) : "Post";
@@ -4851,7 +4876,7 @@ export default function FeedScreen() {
         renderFeedSkeleton()
       ) : feedItems.length === 0 ? (
         <ScrollView
-          style={[styles.feedViewport, feedViewportStyle]}
+          style={styles.feedViewport}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={feedContentContainerStyle}
           scrollIndicatorInsets={{ bottom: feedBottomSpacer }}
@@ -4863,7 +4888,7 @@ export default function FeedScreen() {
         </ScrollView>
       ) : (
         <FlatList
-            style={[styles.feedViewport, feedViewportStyle]}
+            style={styles.feedViewport}
             data={feedItems}
             keyExtractor={feedKeyExtractor}
             renderItem={renderPost}

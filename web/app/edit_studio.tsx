@@ -4497,6 +4497,18 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
 
           {renderInput("Description", description, setDescription, true)}
 
+          {renderSectionHeader("Visuals", "image")}
+          <ImageUploader
+            images={selectedImages}
+            onImagesChange={setSelectedImages}
+            thumbnailIndex={thumbnailIndex}
+            onThumbnailChange={setThumbnailIndex}
+            maxImages={10}
+            bucketName="listings"
+            userId={id as string}
+            folder="studios"
+          />
+
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
               Location
@@ -6682,18 +6694,6 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 renderWeeklyScheduleDurationCard(daySchedule, dayIndex)}
             </View>
           ))}
-
-          {renderSectionHeader("Visuals", "image")}
-          <ImageUploader
-            images={selectedImages}
-            onImagesChange={setSelectedImages}
-            thumbnailIndex={thumbnailIndex}
-            onThumbnailChange={setThumbnailIndex}
-            maxImages={10}
-            bucketName="listings"
-            userId={id as string}
-            folder="studios"
-          />
 
           <View style={styles.footerActions}>
             <TouchableOpacity

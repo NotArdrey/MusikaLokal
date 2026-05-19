@@ -28,7 +28,7 @@ const corsHeaders = {
 }
 
 const allowedSignupRoles = new Set(['fan', 'musician'])
-const PASSWORD_REQUIREMENT_ERROR = 'Password must be at least 8 characters and include uppercase, lowercase, a number, and a symbol.'
+const PASSWORD_REQUIREMENT_ERROR = 'Password must be at least 8 characters and include uppercase, lowercase, a number, a symbol, and no spaces.'
 
 function getPasswordValidationError(value: unknown) {
     const password = String(value || '')
@@ -37,7 +37,8 @@ function getPasswordValidationError(value: unknown) {
         !/[A-Z]/.test(password) ||
         !/[a-z]/.test(password) ||
         !/[0-9]/.test(password) ||
-        !/[^A-Za-z0-9\s]/.test(password)
+        !/[^A-Za-z0-9\s]/.test(password) ||
+        /\s/.test(password)
     ) {
         return PASSWORD_REQUIREMENT_ERROR
     }
@@ -164,10 +165,30 @@ function normalizeVerificationStatus(value: unknown) {
     return String(value || '').trim().replace(/[\s-]+/g, '_').toUpperCase()
 }
 
+function normalizeDiditSignupStatus(value: unknown) {
+    const normalized = normalizeVerificationStatus(value)
+    if (['DECLINED', 'REJECTED', 'DENIED'].includes(normalized)) return 'DECLINED'
+    if (['ABANDONED', 'EXPIRED', 'CANCELLED', 'CANCELED'].includes(normalized)) return 'ABANDONED'
+    if ([
+        'PENDING_REVIEW',
+        'PENDING_REVIEW_REQUIRED',
+        'IN_REVIEW',
+        'REVIEW',
+        'MANUAL_REVIEW',
+        'PENDING_MANUAL_REVIEW',
+    ].includes(normalized)) return 'PENDING_REVIEW'
+    if (normalized === 'APPROVED') return 'APPROVED'
+    if (['NOT_STARTED', 'IN_PROGRESS', 'PENDING', 'PROCESSING', 'SUBMITTED', 'CREATED', 'STARTED'].includes(normalized)) return 'PENDING'
+    return normalized
+}
+
 function findDecisionObject(source: any) {
     const candidates = [
         source?.decision,
         source?.verification_data?.decision,
+        source?.verification_data,
+        source?.extracted_data?.decision,
+        source?.extracted_data,
         source?.details?.decision,
         source,
     ]
@@ -182,7 +203,7 @@ function findDecisionObject(source: any) {
 function resolveSourceVerificationStatus(source: any) {
     if (!source || typeof source !== 'object') return ''
 
-    return normalizeVerificationStatus(
+    return normalizeDiditSignupStatus(
         source.status ||
         source.verification_status ||
         source.verification_data?.status ||
@@ -193,36 +214,49 @@ function resolveSourceVerificationStatus(source: any) {
 }
 
 function shouldReviewMissingFaceMatch(sourceStatus: unknown) {
-    const normalized = normalizeVerificationStatus(sourceStatus)
+    const normalized = normalizeDiditSignupStatus(sourceStatus)
     return normalized === 'PENDING_REVIEW'
 }
 
 function resolveDiditFaceRequiredStatus(source: any) {
     const decision = findDecisionObject(source)
-    if (!decision) return ''
+    if (!decision) return resolveSourceVerificationStatus(source)
 
     const sourceStatus = resolveSourceVerificationStatus(source)
     const idVerification = decision.id_verifications?.[0]
     const faceMatch = decision.face_matches?.[0]
-    const idStatus = normalizeVerificationStatus(idVerification?.status)
-    const faceStatus = normalizeVerificationStatus(faceMatch?.status)
+    const idStatus = normalizeDiditSignupStatus(idVerification?.status)
+    const faceStatus = normalizeDiditSignupStatus(faceMatch?.status)
 
-    if (idStatus === 'DECLINED' || faceStatus === 'DECLINED') return 'DECLINED'
-    if (idStatus === 'ABANDONED' || faceStatus === 'ABANDONED') return 'ABANDONED'
+    if (isFailedDiditSignupStatus(idStatus)) return idStatus
+    if (isFailedDiditSignupStatus(faceStatus)) return faceStatus
     if (idStatus === 'APPROVED' && !faceMatch) {
-        return shouldReviewMissingFaceMatch(sourceStatus) ? 'PENDING_REVIEW' : 'PENDING'
+        return 'PENDING'
     }
     if (idStatus === 'PENDING_REVIEW' || faceStatus === 'PENDING_REVIEW') return 'PENDING_REVIEW'
     if (idStatus === 'APPROVED' && faceStatus === 'APPROVED') return 'APPROVED'
 
-    return sourceStatus || normalizeVerificationStatus(decision.status)
+    return sourceStatus || normalizeDiditSignupStatus(decision.status)
+}
+
+function isFailedDiditSignupStatus(value: unknown) {
+    return ['DECLINED', 'ABANDONED'].includes(normalizeDiditSignupStatus(value))
+}
+
+function resolveDiditSignupStatus(...values: unknown[]) {
+    const statuses = values.map(normalizeDiditSignupStatus).filter(Boolean)
+    return statuses.find(isFailedDiditSignupStatus)
+        || statuses.find((status) => status === 'PENDING_REVIEW' || status === 'IN_REVIEW' || status === 'PENDING_REVIEW_REQUIRED')
+        || statuses.find((status) => status === 'APPROVED')
+        || statuses[0]
+        || ''
 }
 
 async function fetchLiveDiditFaceRequiredStatus(diditSessionId: string) {
     const diditApiKey = Deno.env.get('DIDIT_API_KEY') || ''
     if (!diditApiKey || !diditSessionId) return ''
 
-    let resolvedStatus = ''
+    const statuses: string[] = []
 
     for (const url of [
         `https://verification.didit.me/v3/session/${diditSessionId}/decision/`,
@@ -239,8 +273,8 @@ async function fetchLiveDiditFaceRequiredStatus(diditSessionId: string) {
             const payload = await response.json()
             const status = resolveDiditFaceRequiredStatus(payload)
             if (status) {
-                resolvedStatus = status
-                if (status !== 'PENDING') break
+                statuses.push(status)
+                if (isFailedDiditSignupStatus(status)) break
             }
         } catch (error) {
             console.error('live_didit_face_status_lookup_failed', {
@@ -250,7 +284,7 @@ async function fetchLiveDiditFaceRequiredStatus(diditSessionId: string) {
         }
     }
 
-    return resolvedStatus
+    return resolveDiditSignupStatus(...statuses)
 }
 
 function buildDeferredEmailDelivery(identityStatus: string) {
@@ -560,16 +594,16 @@ serve(async (req) => {
         }
 
         const sessionData = await getValidatedDiditSession(supabaseAdmin, diditSessionId, sessionNonce)
-        const localDiditStatus = String(sessionData?.status || '').toUpperCase()
+        const localDiditStatus = normalizeDiditSignupStatus(sessionData?.status)
         const liveFaceRequiredStatus = await fetchLiveDiditFaceRequiredStatus(diditSessionId)
         const localFaceRequiredStatus = resolveDiditFaceRequiredStatus(sessionData?.verification_data)
-        resolvedDiditStatus = liveFaceRequiredStatus || localFaceRequiredStatus || localDiditStatus
+        resolvedDiditStatus = resolveDiditSignupStatus(liveFaceRequiredStatus, localFaceRequiredStatus, localDiditStatus)
 
         if (resolvedDiditStatus === 'APPROVED' && !liveFaceRequiredStatus && !localFaceRequiredStatus) {
             resolvedDiditStatus = 'PENDING_REVIEW'
         }
 
-        if (localDiditStatus === 'APPROVED' && resolvedDiditStatus !== 'APPROVED') {
+        if (resolvedDiditStatus && resolvedDiditStatus !== localDiditStatus && (isFailedDiditSignupStatus(resolvedDiditStatus) || localDiditStatus === 'APPROVED')) {
             await supabaseAdmin
                 .from('verification_sessions')
                 .update({

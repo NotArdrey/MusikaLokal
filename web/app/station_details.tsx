@@ -108,7 +108,7 @@ export default function StationDetailsScreen() {
           <View style={styles.metaRow}>
             <View style={[styles.badge, { backgroundColor: statusColors[stationStatus] + "20" }]}>
               <Text style={{ color: statusColors[stationStatus], fontSize: 12, fontWeight: "600", textTransform: "capitalize" }}>
-                {stationStatus === "live" ? (hasBroadcastStream ? "Live Stream" : "Live Rotation") : "Offline"}
+                {stationStatus === "live" ? (hasBroadcastStream ? "Live Stream" : "Station Queue") : "Offline"}
               </Text>
             </View>
             {station.genre && <View style={[styles.badge, { backgroundColor: colors.primary + "18" }]}><Text style={{ color: colors.primary, fontSize: 12 }}>{station.genre}</Text></View>}
@@ -119,7 +119,7 @@ export default function StationDetailsScreen() {
               ? "Real continuous broadcast. Everyone hears the same stream timeline."
               : liveSlots.length > 0
                 ? "Shared playlist radio. The app keeps listeners on the same station timeline."
-                : "No playlist rotation or live stream is available yet."}
+                : "No station queue or live stream is available yet."}
           </Text>
 
           {canTuneIn && (
@@ -157,7 +157,7 @@ export default function StationDetailsScreen() {
             </TouchableOpacity>
           )}
 
-          <Text style={{ color: colors.text, fontSize: moderateScale(16), fontWeight: "700", marginTop: 24, marginBottom: 12 }}>Schedule</Text>
+          <Text style={{ color: colors.text, fontSize: moderateScale(16), fontWeight: "700", marginTop: 24, marginBottom: 12 }}>Station Queue</Text>
           {slots.length > 0 ? slots.map((slot: any) => (
             <View key={slot.id} style={[styles.slotCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
               <View style={styles.slotTime}>
@@ -165,12 +165,12 @@ export default function StationDetailsScreen() {
                 <Text style={{ color: colors.primary, fontSize: 13, fontWeight: "600", marginLeft: 6 }}>
                   {slot.starts_at ? new Date(slot.starts_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : `Position ${(slot.position || 0) + 1}`}
                   {" - "}
-                  {slot.ends_at ? new Date(slot.ends_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "rotation"}
+                  {slot.ends_at ? new Date(slot.ends_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "queue"}
                 </Text>
               </View>
               <Text style={{ color: colors.text, fontSize: 14, fontWeight: "600", marginTop: 6 }}>{slot.playlist?.title || slot.label || "Untitled Playlist"}</Text>
             </View>
-          )) : <Text style={{ color: colors.textSecondary, textAlign: "center", marginTop: 20 }}>No schedule slots yet</Text>}
+          )) : <Text style={{ color: colors.textSecondary, textAlign: "center", marginTop: 20 }}>No station playlists yet</Text>}
           <View style={{ height: 100 }} />
         </View>
       </ScrollView>

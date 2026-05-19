@@ -44,6 +44,7 @@ export type LiveStationCursor = {
 };
 
 const KNOWN_RADIO_MEDIA_BUCKETS = [
+  "playlist-assets",
   "post-media",
   "posts",
   "images",
@@ -53,8 +54,105 @@ const KNOWN_RADIO_MEDIA_BUCKETS = [
 ];
 
 const DEFAULT_SIGNED_URL_SECONDS = 24 * 60 * 60;
+const DEFAULT_LIVE_TRACK_DURATION_SECONDS = 180;
 
 let playerSetupPromise: Promise<void> | null = null;
+
+type StorageObjectReference = {
+  bucket: string;
+  path: string;
+};
+
+const decodeStoragePath = (value: string) =>
+  value
+    .split("/")
+    .map((part) => {
+      try {
+        return decodeURIComponent(part);
+      } catch {
+        return part;
+      }
+    })
+    .join("/");
+
+const parseSupabaseStorageObjectReference = (
+  value: unknown,
+  fallbackBucket?: string,
+): StorageObjectReference | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const storageUrlMatch = trimmed.match(
+    /(?:^|\/)storage\/v1\/object\/(?:public|sign|authenticated)\/([^/?#]+)\/([^?#]+)/i,
+  );
+
+  if (storageUrlMatch) {
+    return {
+      bucket: decodeURIComponent(storageUrlMatch[1]),
+      path: decodeStoragePath(storageUrlMatch[2]),
+    };
+  }
+
+  const normalized = trimmed.replace(/^\/+/, "").split(/[?#]/)[0];
+  const parts = normalized.split("/");
+  const directBucket = parts[0];
+
+  if (parts.length > 1 && KNOWN_RADIO_MEDIA_BUCKETS.includes(directBucket)) {
+    return {
+      bucket: directBucket,
+      path: parts.slice(1).join("/"),
+    };
+  }
+
+  if (fallbackBucket && normalized) {
+    return {
+      bucket: fallbackBucket,
+      path: normalized,
+    };
+  }
+
+  return null;
+};
+
+const createSignedStorageUrl = async (storageRef: StorageObjectReference) => {
+  try {
+    const { data, error } = await supabase.storage
+      .from(storageRef.bucket)
+      .createSignedUrl(storageRef.path, DEFAULT_SIGNED_URL_SECONDS);
+
+    if (data?.signedUrl) {
+      return data.signedUrl;
+    }
+
+    if (error) {
+      console.warn("Radio signed storage URL error:", {
+        bucket: storageRef.bucket,
+        message: error.message,
+      });
+    }
+  } catch (error: any) {
+    console.warn("Radio signed storage URL error:", {
+      bucket: storageRef.bucket,
+      message: error?.message || String(error),
+    });
+  }
+
+  return "";
+};
+
+const resolveStorageAudioUri = async (value: unknown, fallbackBucket?: string) => {
+  const storageRef = parseSupabaseStorageObjectReference(value, fallbackBucket);
+
+  if (storageRef) {
+    const signedUrl = await createSignedStorageUrl(storageRef);
+    if (signedUrl) {
+      return signedUrl;
+    }
+  }
+
+  return resolveRadioMediaUrl(value);
+};
 
 const normalizeRelativeSupabaseStorageUrl = (value: string) => {
   const trimmed = value.trim();
@@ -215,6 +313,11 @@ export const buildStationBroadcastTrack = (stationData: any): RadioQueueTrack | 
 };
 
 const getStationAnchorTimestampMs = (stationData: any) => {
+  const liveAnchorMs = readTimestampMs(stationData?.live_anchor_at);
+  if (liveAnchorMs !== null) {
+    return liveAnchorMs;
+  }
+
   const stationSlots = Array.isArray(stationData?.live_slots)
     ? stationData.live_slots
     : Array.isArray(stationData?.slots)
@@ -223,13 +326,12 @@ const getStationAnchorTimestampMs = (stationData: any) => {
 
   const slotTimestamps = stationSlots.length > 0
     ? stationSlots
-        .flatMap((slot: any) => [slot?.updated_at, slot?.created_at, slot?.starts_at])
+        .flatMap((slot: any) => [slot?.updated_at, slot?.created_at])
         .map(readTimestampMs)
         .filter((value: number | null): value is number => value !== null)
     : [];
 
   const stationTimestamps = [
-    stationData?.live_anchor_at,
     stationData?.updated_at,
     stationData?.created_at,
   ]
@@ -254,16 +356,9 @@ const resolveAudioUri = async (item: any) => {
     .find(Boolean) || "";
 
   if (storagePath) {
-    const { data, error } = await supabase.storage
-      .from("playlist-assets")
-      .createSignedUrl(storagePath, DEFAULT_SIGNED_URL_SECONDS);
-
-    if (data?.signedUrl) {
-      return data.signedUrl;
-    }
-
-    if (error) {
-      console.warn("Radio resolveAudioUri signed URL error:", error.message);
+    const resolvedStorageUrl = await resolveStorageAudioUri(storagePath, "playlist-assets");
+    if (resolvedStorageUrl) {
+      return resolvedStorageUrl;
     }
   }
 
@@ -285,13 +380,13 @@ const resolveAudioUri = async (item: any) => {
   ];
 
   for (const candidate of directCandidates) {
-    const resolved = resolveRadioMediaUrl(candidate);
+    const resolved = await resolveStorageAudioUri(candidate);
     if (resolved) {
       return resolved;
     }
   }
 
-  return storagePath ? resolveRadioMediaUrl(`playlist-assets/${storagePath}`) : "";
+  return storagePath ? await resolveStorageAudioUri(storagePath, "playlist-assets") : "";
 };
 
 const buildStationQueueEntries = (stationData: any): RadioQueueEntry[] => {
@@ -473,15 +568,9 @@ export const getLiveStationCursor = (
     };
   }
 
-  const trackDurations = fullQueue.map((track) => normalizeDurationSeconds(track.duration));
-  if (trackDurations.some((duration) => duration === undefined)) {
-    return {
-      queueIndex: 0,
-      positionSeconds: 0,
-      isSynchronized: false,
-    };
-  }
-  const resolvedTrackDurations = trackDurations as number[];
+  const resolvedTrackDurations = fullQueue.map(
+    (track) => normalizeDurationSeconds(track.duration) ?? DEFAULT_LIVE_TRACK_DURATION_SECONDS,
+  );
 
   const anchorTimestampMs = getStationAnchorTimestampMs(stationData);
   if (!anchorTimestampMs) {

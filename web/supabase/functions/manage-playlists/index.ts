@@ -14,6 +14,10 @@ const MAX_STATION_ROTATION_INTERVAL_MINUTES = 120;
 const DEFAULT_STATION_CONCURRENT_SLOT_LIMIT = 4;
 const MAX_STATION_CONCURRENT_SLOT_LIMIT = 4;
 const ADMIN_STATION_SOURCE_PLAYLIST_LIMIT = 500;
+const PLAYLIST_AUDIO_SIGNED_URL_SECONDS = 24 * 60 * 60;
+const KNOWN_PLAYLIST_AUDIO_BUCKETS = new Set(["documents", "playlist-assets"]);
+const KNOWN_PLAYLIST_STORAGE_BUCKETS = new Set(["documents", "playlist-assets", "post-media"]);
+const PLAYLIST_ASSET_BUCKET = "playlist-assets";
 
 function jsonResponse(body: any, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -158,9 +162,17 @@ function getStationConcurrentSlotLimit(station: any) {
   );
 }
 
-function getStationRotationBaseTimestampMs(station: any, slots: any[]) {
+function getStationQueueAnchorTimestampMs(station: any, slots: any[]) {
   const slotTimestamps = slots
-    .flatMap((slot: any) => [slot?.updated_at, slot?.created_at, slot?.starts_at])
+    .flatMap((slot: any) => [
+      slot?.updated_at,
+      slot?.created_at,
+      slot?.playlist?.updated_at,
+      slot?.playlist?.created_at,
+      ...(Array.isArray(slot?.playlist?.items)
+        ? slot.playlist.items.flatMap((item: any) => [item?.updated_at, item?.created_at])
+        : []),
+    ])
     .map(readTimestampMs)
     .filter((value): value is number => value !== null);
 
@@ -217,6 +229,83 @@ function resolveManagedProfileId(
   }
 
   return uid;
+}
+
+async function getGroupOwnerId(supabaseAdmin: any, groupId: string) {
+  const { data: group, error } = await supabaseAdmin
+    .from("groups")
+    .select("id, owner_id")
+    .eq("id", groupId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return typeof group?.owner_id === "string" ? group.owner_id : null;
+}
+
+async function assertCanManageGroup(supabaseAdmin: any, groupId: string, uid: string, requesterRole: string | null) {
+  const ownerId = await getGroupOwnerId(supabaseAdmin, groupId);
+
+  if (!ownerId) {
+    throw new Error("Group not found");
+  }
+
+  if (ownerId !== uid && requesterRole !== "admin") {
+    throw new Error("Only the group owner can manage group playlists.");
+  }
+
+  return ownerId;
+}
+
+async function canManagePlaylist(supabaseAdmin: any, playlist: any, uid: string, requesterRole: string | null) {
+  if (requesterRole === "admin") {
+    return true;
+  }
+
+  const ownerGroupId = typeof playlist?.owner_group_id === "string"
+    ? playlist.owner_group_id
+    : "";
+  if (ownerGroupId) {
+    const ownerId = await getGroupOwnerId(supabaseAdmin, ownerGroupId);
+    return ownerId === uid;
+  }
+
+  return playlist?.creator_id === uid;
+}
+
+async function linkPlaylistToGroup(supabaseAdmin: any, groupId: string, playlistId: string) {
+  const { data: lastLink, error: lastLinkError } = await supabaseAdmin
+    .from("group_playlists")
+    .select("position")
+    .eq("group_id", groupId)
+    .order("position", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (lastLinkError) {
+    throw lastLinkError;
+  }
+
+  const nextPosition = Number.isFinite(Number(lastLink?.position))
+    ? Number(lastLink.position) + 1
+    : 0;
+
+  const { error } = await supabaseAdmin
+    .from("group_playlists")
+    .upsert(
+      {
+        group_id: groupId,
+        playlist_id: playlistId,
+        position: nextPosition,
+      },
+      { onConflict: "group_id,playlist_id" },
+    );
+
+  if (error) {
+    throw error;
+  }
 }
 
 async function transferManagedProfileStationsToAdmin(
@@ -833,82 +922,30 @@ async function upsertStationFromSource(
   };
 }
 
-function isSlotScheduledForNow(slot: any, nowMs: number) {
-  const startMs = readTimestampMs(slot?.starts_at);
-  const endMs = readTimestampMs(slot?.ends_at);
-
-  if (startMs === null && endMs === null) {
-    return false;
-  }
-
-  if (startMs !== null && nowMs < startMs) {
-    return false;
-  }
-
-  if (endMs !== null && nowMs >= endMs) {
-    return false;
-  }
-
-  return true;
-}
-
-function getWrappedSlotWindow(slots: any[], startIndex: number, limit: number) {
-  if (slots.length === 0 || limit <= 0) {
-    return [];
-  }
-
-  const normalizedStart = ((startIndex % slots.length) + slots.length) % slots.length;
-  const liveSlots = [];
-
-  for (let offset = 0; offset < Math.min(limit, slots.length); offset += 1) {
-    liveSlots.push(slots[(normalizedStart + offset) % slots.length]);
-  }
-
-  return liveSlots;
-}
-
 function getStationLiveSlotState(station: any, slots: any[]) {
-  const normalizedSlots = slots.filter((slot: any) => slot?.is_active !== false);
+  const normalizedSlots = (slots || [])
+    .map((slot: any, originalIndex: number) => ({ slot, originalIndex }))
+    .filter(({ slot }) => slot?.is_active !== false)
+    .sort((left, right) => {
+      const leftPosition = Number(left.slot?.position);
+      const rightPosition = Number(right.slot?.position);
+      const leftOrder = Number.isFinite(leftPosition) ? leftPosition : left.originalIndex;
+      const rightOrder = Number.isFinite(rightPosition) ? rightPosition : right.originalIndex;
+      return leftOrder === rightOrder
+        ? left.originalIndex - right.originalIndex
+        : leftOrder - rightOrder;
+    })
+    .map(({ slot }) => slot);
   const rotationIntervalMinutes = getStationRotationIntervalMinutes(station);
-  const concurrentSlotLimit = getStationConcurrentSlotLimit(station);
+  const concurrentSlotLimit = normalizedSlots.length || getStationConcurrentSlotLimit(station);
   const nowMs = Date.now();
 
-  if (normalizedSlots.length === 0) {
-    return {
-      concurrentSlotLimit,
-      liveAnchorAt: station?.updated_at || station?.created_at || new Date(nowMs).toISOString(),
-      liveSlots: [],
-      rotationIntervalMinutes,
-    };
-  }
-
-  const scheduledSlots = normalizedSlots.filter((slot: any) => isSlotScheduledForNow(slot, nowMs));
-  if (scheduledSlots.length > 0) {
-    const limitedScheduledSlots = scheduledSlots.slice(0, concurrentSlotLimit);
-    const scheduleAnchorMs = limitedScheduledSlots
-      .map((slot: any) => readTimestampMs(slot?.starts_at))
-      .filter((value): value is number => value !== null)
-      .sort((left, right) => right - left)[0] ?? nowMs;
-
-    return {
-      concurrentSlotLimit,
-      liveAnchorAt: new Date(scheduleAnchorMs).toISOString(),
-      liveSlots: limitedScheduledSlots,
-      rotationIntervalMinutes,
-    };
-  }
-
-  const baseTimestampMs = getStationRotationBaseTimestampMs(station, normalizedSlots) ?? nowMs;
-  const intervalMs = rotationIntervalMinutes * 60 * 1000;
-  const elapsedIntervals = baseTimestampMs >= nowMs
-    ? 0
-    : Math.floor((nowMs - baseTimestampMs) / intervalMs);
-  const windowStartIndex = (elapsedIntervals * concurrentSlotLimit) % normalizedSlots.length;
+  const baseTimestampMs = getStationQueueAnchorTimestampMs(station, normalizedSlots) ?? nowMs;
 
   return {
     concurrentSlotLimit,
-    liveAnchorAt: new Date(baseTimestampMs + (elapsedIntervals * intervalMs)).toISOString(),
-    liveSlots: getWrappedSlotWindow(normalizedSlots, windowStartIndex, concurrentSlotLimit),
+    liveAnchorAt: new Date(baseTimestampMs).toISOString(),
+    liveSlots: normalizedSlots,
     rotationIntervalMinutes,
   };
 }
@@ -936,6 +973,114 @@ function createGroupedRowMap(rows: any[], keyName: string, orderedKeys: string[]
   }
 
   return grouped;
+}
+
+function decodeStoragePath(value: string) {
+  return value
+    .split("/")
+    .map((part) => {
+      try {
+        return decodeURIComponent(part);
+      } catch (_) {
+        return part;
+      }
+    })
+    .join("/");
+}
+
+function parseStorageObjectReference(
+  value: unknown,
+  knownBuckets: Set<string> = KNOWN_PLAYLIST_AUDIO_BUCKETS,
+): { bucket: string; path: string } | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed) return null;
+
+  const storageUrlMatch = trimmed.match(
+    /(?:^|\/)storage\/v1\/object\/(?:public|sign|authenticated)\/([^/?#]+)\/([^?#]+)/i,
+  );
+
+  if (storageUrlMatch) {
+    return {
+      bucket: decodeURIComponent(storageUrlMatch[1]),
+      path: decodeStoragePath(storageUrlMatch[2]),
+    };
+  }
+
+  const normalized = trimmed.replace(/^\/+/, "").split(/[?#]/)[0];
+  const parts = normalized.split("/");
+  const bucket = parts[0];
+
+  if (parts.length > 1 && knownBuckets.has(bucket)) {
+    return {
+      bucket,
+      path: parts.slice(1).join("/"),
+    };
+  }
+
+  return null;
+}
+
+function addStorageRef(
+  refs: Map<string, Set<string>>,
+  bucket: string,
+  path: unknown,
+) {
+  const cleanPath = typeof path === "string" ? path.trim().replace(/^\/+/, "") : "";
+  if (!bucket || !cleanPath) return;
+
+  const paths = refs.get(bucket) || new Set<string>();
+  paths.add(cleanPath);
+  refs.set(bucket, paths);
+}
+
+function addParsedStorageRef(
+  refs: Map<string, Set<string>>,
+  value: unknown,
+) {
+  const storageRef = parseStorageObjectReference(value, KNOWN_PLAYLIST_STORAGE_BUCKETS);
+  if (!storageRef) return;
+  addStorageRef(refs, storageRef.bucket, storageRef.path);
+}
+
+async function removePlaylistStorageRefs(
+  supabaseAdmin: any,
+  refs: Map<string, Set<string>>,
+) {
+  for (const [bucket, paths] of refs.entries()) {
+    const uniquePaths = [...paths].filter(Boolean);
+    for (let index = 0; index < uniquePaths.length; index += 100) {
+      const chunk = uniquePaths.slice(index, index + 100);
+      const { error } = await supabaseAdmin.storage.from(bucket).remove(chunk);
+      if (error) {
+        console.warn("manage-playlists storage cleanup failed", {
+          bucket,
+          count: chunk.length,
+          message: error.message,
+        });
+      }
+    }
+  }
+}
+
+async function getSignedPlaylistAudioUrl(supabaseAdmin: any, audioUrl: unknown) {
+  const storageRef = parseStorageObjectReference(audioUrl);
+  if (!storageRef) {
+    return audioUrl;
+  }
+
+  const { data, error } = await supabaseAdmin.storage
+    .from(storageRef.bucket)
+    .createSignedUrl(storageRef.path, PLAYLIST_AUDIO_SIGNED_URL_SECONDS);
+
+  if (error || !data?.signedUrl) {
+    console.warn("Unable to sign playlist audio URL:", {
+      bucket: storageRef.bucket,
+      message: error?.message || "No signed URL returned",
+    });
+    return audioUrl;
+  }
+
+  return data.signedUrl;
 }
 
 async function attachPlaylistItemsToSlots(supabaseAdmin: any, slots: any[], itemLimit?: number) {
@@ -976,7 +1121,10 @@ async function attachPlaylistItemsToSlots(supabaseAdmin: any, slots: any[], item
       continue;
     }
 
-    current.push(item);
+    current.push({
+      ...item,
+      audio_url: await getSignedPlaylistAudioUrl(supabaseAdmin, item?.audio_url),
+    });
     itemsByPlaylistId.set(playlistId, current);
   }
 
@@ -996,7 +1144,7 @@ async function fetchStationSlotsByStation(supabaseAdmin: any, stationIds: string
 
   const { data: slots, error } = await supabaseAdmin
     .from("station_playlist_slots")
-    .select("*, playlist:playlists!playlist_id(id, title, cover_image_url, track_count)")
+    .select("*, playlist:playlists!playlist_id(id, title, cover_image_url, track_count, created_at, updated_at)")
     .in("station_id", uniqueStationIds)
     .order("station_id", { ascending: true })
     .order("position", { ascending: true });
@@ -1144,12 +1292,23 @@ Deno.serve(async (req: Request) => {
     // ── create_playlist ─────────────────────────────────────────────
     if (action === "create_playlist") {
       const { title, description, visibility, genre, cover_image_url, items } = params;
+      const ownerGroupId = normalizeProfileId(params.owner_group_id || params.group_id);
       if (!title) return jsonResponse({ error: "title is required" }, 400);
+
+      if (ownerGroupId) {
+        try {
+          await assertCanManageGroup(supabaseAdmin, ownerGroupId, uid, requesterRole);
+        } catch (groupError: any) {
+          const message = groupError?.message || "Unable to manage this group.";
+          return jsonResponse({ error: message }, message === "Group not found" ? 404 : 403);
+        }
+      }
 
       const { data: playlist, error: plErr } = await supabaseAdmin
         .from("playlists")
         .insert({
           creator_id: uid,
+          owner_group_id: ownerGroupId,
           title,
           description: description || null,
           visibility: visibility || "public",
@@ -1160,6 +1319,14 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (plErr) return jsonResponse({ error: plErr.message }, 500);
+
+      if (ownerGroupId) {
+        try {
+          await linkPlaylistToGroup(supabaseAdmin, ownerGroupId, playlist.id);
+        } catch (linkError: any) {
+          return jsonResponse({ error: linkError?.message || "Playlist created, but it could not be linked to the group." }, 500);
+        }
+      }
 
       // Bulk insert items if provided
       if (items && Array.isArray(items) && items.length > 0) {
@@ -1195,12 +1362,16 @@ Deno.serve(async (req: Request) => {
 
       const { data: existing } = await supabaseAdmin
         .from("playlists")
-        .select("creator_id")
+        .select("creator_id, owner_group_id, cover_image_url")
         .eq("id", playlist_id)
         .single();
 
       if (!existing) return jsonResponse({ error: "Playlist not found" }, 404);
-      if (existing.creator_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (!(await canManagePlaylist(supabaseAdmin, existing, uid, requesterRole))) {
+        return jsonResponse({ error: "Forbidden" }, 403);
+      }
+
+      const oldCoverImageUrl = existing.cover_image_url || null;
 
       const allowed = ["title", "description", "visibility", "genre", "cover_image_url", "is_featured"];
       const patch: Record<string, any> = {};
@@ -1216,6 +1387,14 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (error) return jsonResponse({ error: error.message }, 500);
+
+      const nextCoverImageUrl = "cover_image_url" in patch ? patch.cover_image_url || null : oldCoverImageUrl;
+      if (oldCoverImageUrl && oldCoverImageUrl !== nextCoverImageUrl) {
+        const refs = new Map<string, Set<string>>();
+        addParsedStorageRef(refs, oldCoverImageUrl);
+        await removePlaylistStorageRefs(supabaseAdmin, refs);
+      }
+
       return jsonResponse({ success: true, data });
     }
 
@@ -1226,12 +1405,37 @@ Deno.serve(async (req: Request) => {
 
       const { data: existing } = await supabaseAdmin
         .from("playlists")
-        .select("creator_id")
+        .select("creator_id, owner_group_id, cover_image_url")
         .eq("id", playlist_id)
         .single();
 
       if (!existing) return jsonResponse({ error: "Playlist not found" }, 404);
-      if (existing.creator_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (!(await canManagePlaylist(supabaseAdmin, existing, uid, requesterRole))) {
+        return jsonResponse({ error: "Forbidden" }, 403);
+      }
+
+      const storageRefs = new Map<string, Set<string>>();
+      addParsedStorageRef(storageRefs, existing.cover_image_url);
+
+      const { data: playlistItemsForCleanup } = await supabaseAdmin
+        .from("playlist_items")
+        .select("audio_url, teaser:playlist_teaser_assets!teaser_asset_id(storage_path)")
+        .eq("playlist_id", playlist_id);
+
+      for (const item of playlistItemsForCleanup || []) {
+        addParsedStorageRef(storageRefs, item?.audio_url);
+        const teaser = Array.isArray(item?.teaser) ? item.teaser[0] : item?.teaser;
+        addStorageRef(storageRefs, PLAYLIST_ASSET_BUCKET, teaser?.storage_path);
+      }
+
+      const { data: teaserAssetsForCleanup } = await supabaseAdmin
+        .from("playlist_teaser_assets")
+        .select("storage_path")
+        .eq("playlist_id", playlist_id);
+
+      for (const asset of teaserAssetsForCleanup || []) {
+        addStorageRef(storageRefs, PLAYLIST_ASSET_BUCKET, asset?.storage_path);
+      }
 
       let { error } = await supabaseAdmin.from("playlists").delete().eq("id", playlist_id);
       const shouldRetryWithItemCleanup = error && /constraint|foreign key|referenced|trigger|tuple|cascade/i.test(error.message || "");
@@ -1280,6 +1484,8 @@ Deno.serve(async (req: Request) => {
         }, 500);
       }
 
+      await removePlaylistStorageRefs(supabaseAdmin, storageRefs);
+
       return jsonResponse({ success: true });
     }
 
@@ -1302,9 +1508,26 @@ Deno.serve(async (req: Request) => {
         .eq("playlist_id", playlist_id)
         .order("position");
 
+      const { data: teaserAssets } = await supabaseAdmin
+        .from("playlist_teaser_assets")
+        .select("*")
+        .eq("playlist_id", playlist_id)
+        .order("created_at", { ascending: false });
+
+      const { data: externalLinks } = await supabaseAdmin
+        .from("external_platform_links")
+        .select("*")
+        .eq("linked_playlist_id", playlist_id)
+        .order("created_at", { ascending: false });
+
       return jsonResponse({
         success: true,
-        data: { ...playlist, items: items || [] },
+        data: {
+          ...playlist,
+          items: items || [],
+          teaser_assets: teaserAssets || [],
+          external_links: externalLinks || [],
+        },
       });
     }
 
@@ -1314,6 +1537,7 @@ Deno.serve(async (req: Request) => {
         .from("playlists")
         .select("*")
         .eq("creator_id", uid)
+        .is("owner_group_id", null)
         .order("created_at", { ascending: false });
 
       if (error) return jsonResponse({ error: error.message }, 500);
@@ -1329,7 +1553,8 @@ Deno.serve(async (req: Request) => {
       let query = supabaseAdmin
         .from("playlists")
         .select("*")
-        .eq("creator_id", user_id);
+        .eq("creator_id", user_id)
+        .is("owner_group_id", null);
 
       // Non-owners only see public playlists
       if (!isOwnProfile) {
@@ -1367,8 +1592,8 @@ Deno.serve(async (req: Request) => {
       const { playlist_id, title, artist_name, duration_seconds, teaser_asset_id, external_link_id, audio_url } = params;
       if (!playlist_id || !title) return jsonResponse({ error: "playlist_id and title are required" }, 400);
 
-      const { data: pl } = await supabaseAdmin.from("playlists").select("creator_id").eq("id", playlist_id).single();
-      if (!pl || pl.creator_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      const { data: pl } = await supabaseAdmin.from("playlists").select("creator_id, owner_group_id").eq("id", playlist_id).single();
+      if (!pl || !(await canManagePlaylist(supabaseAdmin, pl, uid, requesterRole))) return jsonResponse({ error: "Forbidden" }, 403);
 
       // Get next position
       const { data: lastItem } = await supabaseAdmin
@@ -1424,11 +1649,11 @@ Deno.serve(async (req: Request) => {
 
       const { data: pl } = await supabaseAdmin
         .from("playlists")
-        .select("creator_id")
+        .select("creator_id, owner_group_id")
         .eq("id", item.playlist_id)
         .single();
 
-      if (!pl || pl.creator_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (!pl || !(await canManagePlaylist(supabaseAdmin, pl, uid, requesterRole))) return jsonResponse({ error: "Forbidden" }, 403);
 
       let normalizedDuration: number | null;
       let normalizedAudioUrl: string | null;
@@ -1465,13 +1690,13 @@ Deno.serve(async (req: Request) => {
       if (playlist_id) {
         const { data: pl, error: playlistError } = await supabaseAdmin
           .from("playlists")
-          .select("creator_id")
+          .select("creator_id, owner_group_id")
           .eq("id", playlist_id)
           .maybeSingle();
 
         if (playlistError) return jsonResponse({ error: playlistError.message }, 500);
         if (!pl) return jsonResponse({ error: "Playlist not found" }, 404);
-        if (pl.creator_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+        if (!(await canManagePlaylist(supabaseAdmin, pl, uid, requesterRole))) return jsonResponse({ error: "Forbidden" }, 403);
 
         const { data: deletedItem, error: deleteError } = await supabaseAdmin
           .from("playlist_items")
@@ -1493,8 +1718,8 @@ Deno.serve(async (req: Request) => {
 
       if (!item) return jsonResponse({ error: "Item not found" }, 404);
 
-      const { data: pl } = await supabaseAdmin.from("playlists").select("creator_id").eq("id", item.playlist_id).single();
-      if (!pl || pl.creator_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      const { data: pl } = await supabaseAdmin.from("playlists").select("creator_id, owner_group_id").eq("id", item.playlist_id).single();
+      if (!pl || !(await canManagePlaylist(supabaseAdmin, pl, uid, requesterRole))) return jsonResponse({ error: "Forbidden" }, 403);
 
       const { error } = await supabaseAdmin.from("playlist_items").delete().eq("id", item_id);
       if (error) return jsonResponse({ error: error.message }, 500);
@@ -1506,8 +1731,8 @@ Deno.serve(async (req: Request) => {
       const { playlist_id, asset_type, storage_path, mime_type, duration_seconds, file_size_bytes } = params;
       if (!playlist_id || !storage_path) return jsonResponse({ error: "playlist_id and storage_path are required" }, 400);
 
-      const { data: pl } = await supabaseAdmin.from("playlists").select("creator_id").eq("id", playlist_id).single();
-      if (!pl || pl.creator_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      const { data: pl } = await supabaseAdmin.from("playlists").select("creator_id, owner_group_id").eq("id", playlist_id).single();
+      if (!pl || !(await canManagePlaylist(supabaseAdmin, pl, uid, requesterRole))) return jsonResponse({ error: "Forbidden" }, 403);
 
       const { data, error } = await supabaseAdmin
         .from("playlist_teaser_assets")
@@ -1865,7 +2090,10 @@ Deno.serve(async (req: Request) => {
 
       return jsonResponse({
         success: true,
-        data: decorateStationWithLiveRotation(station, enrichedSlots),
+        data: {
+          ...decorateStationWithLiveRotation(station, enrichedSlots),
+          __queueReady: true,
+        },
       });
     }
 
@@ -1959,7 +2187,7 @@ Deno.serve(async (req: Request) => {
 
       const enriched = stationRows.map((st: any) => ({
         ...decorateStationWithLiveRotation(st, slotsByStationId.get(st.id) || []),
-        __queueReady: shouldIncludeItems,
+        __queueReady: false,
       }));
 
       return jsonResponse({ success: true, data: enriched });

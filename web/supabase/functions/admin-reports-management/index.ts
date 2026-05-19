@@ -23,6 +23,7 @@ type ReportModerationAction =
   | "manual_review";
 
 type ReportEscalationStatus = "none" | "manual_review";
+type ReportTargetAccountAction = "none" | "mark_unverified";
 
 const reportModerationActions = new Set<ReportModerationAction>([
   "none",
@@ -86,6 +87,12 @@ function parseReportModerationAction(rawValue: unknown): ReportModerationAction 
 function parseReportEscalationStatus(rawValue: unknown): ReportEscalationStatus | null {
   const value = String(rawValue || "").trim().toLowerCase() as ReportEscalationStatus;
   if (reportEscalationStatuses.has(value)) return value;
+  return null;
+}
+
+function parseReportTargetAccountAction(rawValue: unknown): ReportTargetAccountAction | null {
+  const value = String(rawValue || "none").trim().toLowerCase();
+  if (value === "none" || value === "mark_unverified") return value;
   return null;
 }
 
@@ -351,6 +358,48 @@ async function fetchReportTargetDetails(client: any, rawTargetType: unknown, raw
   };
 }
 
+async function markTargetAccountUnverified(client: any, userId: string) {
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId) {
+    return { error: "Reported account is unavailable." };
+  }
+
+  const { data: existingAuth, error: existingAuthError } = await client.auth.admin.getUserById(normalizedUserId);
+  if (existingAuthError || !existingAuth?.user) {
+    return { error: "Reported auth account was not found." };
+  }
+
+  const existingMetadata = (existingAuth.user.user_metadata || {}) as Record<string, unknown>;
+  const nextMetadata = {
+    ...existingMetadata,
+    is_verified: false,
+    verification_status: "PENDING_REVIEW",
+  };
+
+  const { error: authUpdateError } = await client.auth.admin.updateUserById(normalizedUserId, {
+    user_metadata: nextMetadata,
+  });
+
+  if (authUpdateError) {
+    return { error: authUpdateError.message };
+  }
+
+  const { error: profileUpdateError } = await client
+    .from("profiles")
+    .update({
+      is_verified: false,
+      verification_status: "PENDING_REVIEW",
+      id_verified_at: null,
+    })
+    .eq("id", normalizedUserId);
+
+  if (profileUpdateError) {
+    return { error: profileUpdateError.message };
+  }
+
+  return { error: null };
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -566,10 +615,11 @@ serve(async (req: Request) => {
       const moderationAction = hasModerationActionParam
         ? parseReportModerationAction(params.moderationAction)
         : ("none" as ReportModerationAction);
+      const targetAccountAction = parseReportTargetAccountAction(params.targetAccountAction);
       const moderationNotes = normalizeText(params.moderationNotes, 2000);
       const escalationReason = normalizeText(params.escalationReason, 500);
 
-      if (!reportId || !nextStatus || !moderationAction) {
+      if (!reportId || !nextStatus || !moderationAction || !targetAccountAction) {
         return jsonResponse({ error: "Missing required fields" }, 400);
       }
 
@@ -589,6 +639,37 @@ serve(async (req: Request) => {
       if (existingReportError) throw existingReportError;
       if (!existingReport) {
         return jsonResponse({ error: "Report not found" }, 404);
+      }
+
+      const reporterId = String(existingReport.reporter_id || "").trim();
+      let targetOwnerId = "";
+
+      try {
+        const targetDetails = await fetchReportTargetDetails(
+          client,
+          existingReport.target_type,
+          existingReport.target_id,
+        );
+
+        const normalizedTargetType = String(existingReport.target_type || "").trim().toLowerCase();
+        if (normalizedTargetType === "profile" || normalizedTargetType === "user") {
+          targetOwnerId = String(existingReport.target_id || "").trim();
+        } else {
+          targetOwnerId = String(targetDetails?.owner_profile?.id || "").trim();
+        }
+      } catch {
+        targetOwnerId = "";
+      }
+
+      if (targetAccountAction === "mark_unverified") {
+        if (!targetOwnerId) {
+          return jsonResponse({ error: "Reported account is unavailable." }, 400);
+        }
+
+        const accountActionResult = await markTargetAccountUnverified(client, targetOwnerId);
+        if (accountActionResult.error) {
+          return jsonResponse({ error: accountActionResult.error }, 400);
+        }
       }
 
       const nowIso = new Date().toISOString();
@@ -669,26 +750,6 @@ serve(async (req: Request) => {
         return jsonResponse({ error: "Report not found" }, 404);
       }
 
-      const reporterId = String(existingReport.reporter_id || "").trim();
-      let targetOwnerId = "";
-
-      try {
-        const targetDetails = await fetchReportTargetDetails(
-          client,
-          existingReport.target_type,
-          existingReport.target_id,
-        );
-
-        const normalizedTargetType = String(existingReport.target_type || "").trim().toLowerCase();
-        if (normalizedTargetType === "profile" || normalizedTargetType === "user") {
-          targetOwnerId = String(existingReport.target_id || "").trim();
-        } else {
-          targetOwnerId = String(targetDetails?.owner_profile?.id || "").trim();
-        }
-      } catch {
-        targetOwnerId = "";
-      }
-
       const recipients = new Set<string>();
 
       if (moderationAction === "warn_reporter" || moderationAction === "warn_both") {
@@ -734,6 +795,7 @@ serve(async (req: Request) => {
                 target_id: existingReport.target_id,
                 next_status: nextStatus,
                 moderation_action: moderationAction,
+                target_account_action: targetAccountAction,
                 event_type: eventType,
               },
             });
@@ -755,6 +817,7 @@ serve(async (req: Request) => {
             updatedReport.escalation_status !== undefined
               ? updatedReport.escalation_status
               : (moderationAction === "manual_review" ? "manual_review" : "none"),
+          target_account_action: targetAccountAction,
         },
         usedLegacy,
       });

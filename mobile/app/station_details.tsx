@@ -161,32 +161,6 @@ export default function StationDetailsScreen() {
 
   useEffect(() => { fetchStation(); }, [fetchStation]);
 
-  useEffect(() => {
-    if (!station?.id || station?.is_active === false) {
-      return undefined;
-    }
-
-    const intervalMinutes = Math.min(
-      Math.max(Math.round(Number(station?.rotation_interval_minutes) || 15), 5),
-      120,
-    );
-    const intervalMs = intervalMinutes * 60 * 1000;
-    const anchorMs = Date.parse(station?.live_anchor_at || station?.updated_at || station?.created_at || "");
-    const nowMs = Date.now();
-    const nextRefreshMs = Number.isFinite(anchorMs)
-      ? (() => {
-          const elapsedIntervals = anchorMs >= nowMs ? 0 : Math.floor((nowMs - anchorMs) / intervalMs);
-          return Math.max((anchorMs + ((elapsedIntervals + 1) * intervalMs)) - nowMs + 1000, 1000);
-        })()
-      : intervalMs;
-
-    const timeoutId = setTimeout(() => {
-      void fetchStation();
-    }, nextRefreshMs);
-
-    return () => clearTimeout(timeoutId);
-  }, [fetchStation, station?.created_at, station?.id, station?.is_active, station?.live_anchor_at, station?.rotation_interval_minutes, station?.updated_at]);
-
   const fetchOwnerPlaylists = useCallback(async () => {
     const targetProfileId = typeof station?.managed_profile_id === "string" && station.managed_profile_id.trim().length > 0
       ? station.managed_profile_id.trim()
@@ -288,7 +262,7 @@ export default function StationDetailsScreen() {
         body: { action: "add_station_slot", station_id, playlist_id: playlistId },
       });
       if (data?.success) {
-        emitToast({ type: "success", title: "Added", message: "Playlist added to station rotation." });
+        emitToast({ type: "success", title: "Added", message: "Playlist added to the station queue." });
         fetchStation();
       } else {
         setAlert({ type: "error", title: "Error", message: data?.error || "Failed to add slot" });
@@ -307,7 +281,7 @@ export default function StationDetailsScreen() {
         body: { action: "remove_station_slot", slot_id: slotId },
       });
       if (data?.success) {
-        emitToast({ type: "success", title: "Removed", message: "Playlist removed from rotation." });
+        emitToast({ type: "success", title: "Removed", message: "Playlist removed from the station queue." });
         fetchStation();
       } else {
         setAlert({ type: "error", title: "Error", message: data?.error || "Failed to remove slot" });
@@ -402,12 +376,6 @@ export default function StationDetailsScreen() {
     ? station.live_slots
     : slots;
   const liveSlotIds = new Set(liveSlots.map((slot: any) => slot.id));
-  const rotationIntervalMinutes = Number.isFinite(Number(station.rotation_interval_minutes))
-    ? Math.max(Math.round(Number(station.rotation_interval_minutes)), 1)
-    : 15;
-  const concurrentSlotLimit = Number.isFinite(Number(station.concurrent_slot_limit))
-    ? Math.max(Math.round(Number(station.concurrent_slot_limit)), 1)
-    : 4;
   const existingPlaylistIds = new Set(slots.map((s: any) => s.playlist_id));
   const canSkipTrack = isActiveStation && queueLength > 1;
   const playerTrackTitle = isActiveStation
@@ -462,7 +430,7 @@ export default function StationDetailsScreen() {
                 {stationStatus === "live"
                   ? hasBroadcastStream
                     ? "Live Stream"
-                    : "Live Rotation"
+                    : "Station Queue"
                   : "Offline"}
               </Text>
             </View>
@@ -476,7 +444,7 @@ export default function StationDetailsScreen() {
             </Text>
           ) : slots.length > 0 && (
             <Text style={[styles.rotationSummary, { color: colors.textSecondary }]}>
-              Shared playlist radio. The app keeps listeners on the same station timeline and rotates up to {Math.min(concurrentSlotLimit, slots.length)} playlists every {rotationIntervalMinutes} minutes.
+              Shared playlist radio. The app plays every station playlist in order and keeps listeners on the same full-queue timeline.
             </Text>
           )}
         </View>
@@ -532,11 +500,11 @@ export default function StationDetailsScreen() {
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <View style={{ flex: 1, paddingRight: 12 }}>
               <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
-              Rotation ({slots.length} {slots.length === 1 ? "playlist" : "playlists"})
+              Station Queue ({slots.length} {slots.length === 1 ? "playlist" : "playlists"})
               </Text>
               {slots.length > 0 && (
                 <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}> 
-                  {liveSlots.length} on air now. The live lineup advances every {rotationIntervalMinutes} minutes.
+                  {liveSlots.length} queued for shared playback. The queue loops after the final track.
                 </Text>
               )}
             </View>
@@ -584,7 +552,7 @@ export default function StationDetailsScreen() {
             ))
           ) : (
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              {canManageStation ? "No playlists in rotation yet. Tap Add to get started." : "No playlists scheduled yet"}
+              {canManageStation ? "No playlists in the station queue yet. Tap Add to get started." : "No station playlists yet"}
             </Text>
           )}
         </View>
@@ -647,7 +615,7 @@ export default function StationDetailsScreen() {
               onChangeText={setEditGenre}
             />
 
-            <Text style={[styles.modalLabel, { color: colors.text }]}>Rotation Interval (minutes)</Text>
+            <Text style={[styles.modalLabel, { color: colors.text }]}>Station Interval (minutes)</Text>
             <TextInput
               style={[styles.modalInput, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.background }]}
               placeholder="15"
@@ -656,7 +624,7 @@ export default function StationDetailsScreen() {
               onChangeText={setEditRotationIntervalMinutes}
               keyboardType="number-pad"
             />
-            <Text style={[styles.modalHelper, { color: colors.textSecondary }]}>Only admins can change this. Range: 5 to 120 minutes.</Text>
+            <Text style={[styles.modalHelper, { color: colors.textSecondary }]}>Legacy station setting. Playlist radio now syncs by the full queue duration.</Text>
 
             <Text style={[styles.modalLabel, { color: colors.text }]}>Continuous Stream URL</Text>
             <TextInput
@@ -725,7 +693,7 @@ export default function StationDetailsScreen() {
         </View>
       </Modal>
 
-      {/* Manage Music Modal – toggle playlists on/off for station rotation */}
+      {/* Manage Music Modal - toggle playlists on/off for the station queue */}
       <Modal visible={addSlotModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: "75%" }]}>

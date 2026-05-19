@@ -49,6 +49,30 @@ interface UseApplicationSubmissionActionParams {
   closeSheet: () => void;
 }
 
+const GIG_UNAVAILABLE_MESSAGE =
+  "This gig is no longer available. It may have been deleted or closed by the venue owner. Please refresh and choose another gig.";
+const GROUP_UNAVAILABLE_MESSAGE =
+  "This group is no longer available. It may have been deleted by the owner. Please refresh and choose another group.";
+
+const isDeletedGigApplicationError = (error: any) => {
+  const errorText = [
+    error?.code,
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.constraint,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return (
+    error?.code === "23503" &&
+    errorText.includes("gig_applications") &&
+    errorText.includes("gig_id")
+  );
+};
+
 export const useApplicationSubmissionAction = ({
   userId,
   userRole,
@@ -79,6 +103,114 @@ export const useApplicationSubmissionAction = ({
   closeSheet,
 }: UseApplicationSubmissionActionParams) => {
   const submissionInFlightRef = useRef(false);
+
+  const showGigUnavailableAlert = useCallback(() => {
+    setHasExistingApplication(false);
+    setExistingApplicationStatus(null);
+    setAlertConfig({
+      type: "warning",
+      title: "Gig Unavailable",
+      message: GIG_UNAVAILABLE_MESSAGE,
+    });
+    setAlertVisible(true);
+    setTimeout(() => {
+      closeSheet();
+    }, 600);
+  }, [
+    closeSheet,
+    setAlertConfig,
+    setAlertVisible,
+    setExistingApplicationStatus,
+    setHasExistingApplication,
+  ]);
+
+  const ensureGigIsStillAvailable = useCallback(async () => {
+    if (group?.type !== "Gig" || !listingId) {
+      return true;
+    }
+
+    const { data, error } = await supabase
+      .from("gigs")
+      .select("id, status")
+      .eq("id", listingId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Error checking gig availability:", error);
+      return true;
+    }
+
+    if (!data) {
+      showGigUnavailableAlert();
+      return false;
+    }
+
+    if (data.status && String(data.status).toLowerCase() !== "open") {
+      setAlertConfig({
+        type: "error",
+        title: "Applications Closed",
+        message: "This gig is no longer accepting applications.",
+      });
+      setAlertVisible(true);
+      return false;
+    }
+
+    return true;
+  }, [
+    group?.type,
+    listingId,
+    setAlertConfig,
+    setAlertVisible,
+    showGigUnavailableAlert,
+  ]);
+
+  const ensureGroupListingIsStillAvailable = useCallback(async () => {
+    if (group?.type !== "Group" || !listingId) {
+      return true;
+    }
+
+    const { data, error } = await supabase
+      .from("groups")
+      .select("id, open_group_applications")
+      .eq("id", listingId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Error checking group availability:", error);
+      return true;
+    }
+
+    if (!data) {
+      setAlertConfig({
+        type: "warning",
+        title: "Group Unavailable",
+        message: GROUP_UNAVAILABLE_MESSAGE,
+      });
+      setAlertVisible(true);
+      setTimeout(() => {
+        closeSheet();
+      }, 600);
+      return false;
+    }
+
+    if (data.open_group_applications !== true) {
+      setAlertConfig({
+        type: "error",
+        title: "Applications Closed",
+        message: "This group is not accepting applications right now.",
+      });
+      setAlertVisible(true);
+      return false;
+    }
+
+    return true;
+  }, [
+    closeSheet,
+    group?.type,
+    listingId,
+    setAlertConfig,
+    setAlertVisible,
+  ]);
 
   const formatSlotLabel = (slotType: "solo" | "duo" | "band" | null) => {
     if (slotType === "solo") return "Solo";
@@ -162,6 +294,18 @@ export const useApplicationSubmissionAction = ({
         : null;
       const needsLeaderApproval =
         !!selectedGroupId && !!selectedGroup && selectedGroup.owner_id !== userId;
+
+      if (isGroupListing) {
+        const groupIsStillAvailable = await ensureGroupListingIsStillAvailable();
+        if (!groupIsStillAvailable) {
+          return;
+        }
+      } else {
+        const gigIsStillAvailable = await ensureGigIsStillAvailable();
+        if (!gigIsStillAvailable) {
+          return;
+        }
+      }
 
       if (cvFile) {
         try {
@@ -308,7 +452,7 @@ export const useApplicationSubmissionAction = ({
               p_item_vector: group.embedding,
               p_weight: 0.4,
             });
-          } catch (e) {
+          } catch {
           }
         }
 
@@ -337,7 +481,7 @@ export const useApplicationSubmissionAction = ({
       }
 
       if (isProducerGigFlow) {
-        const { data, error } = await supabase.functions.invoke("gig-applications", {
+        const { error } = await supabase.functions.invoke("gig-applications", {
           body: {
             action: "submit_production_gig_application",
             userId,
@@ -357,8 +501,10 @@ export const useApplicationSubmissionAction = ({
             type: "error",
             title: "Submission Failed",
             message:
-              error.message ||
-              "Failed to submit production application. Please try again.",
+              String(error.message || "").toLowerCase().includes("gig not found")
+                ? GIG_UNAVAILABLE_MESSAGE
+                : error.message ||
+                  "Failed to submit production application. Please try again.",
           });
           setAlertVisible(true);
           return;
@@ -374,7 +520,7 @@ export const useApplicationSubmissionAction = ({
               p_item_vector: group.embedding,
               p_weight: 0.4,
             });
-          } catch (e) {
+          } catch {
           }
         }
 
@@ -475,6 +621,8 @@ export const useApplicationSubmissionAction = ({
               ? "This group has already applied to this gig."
               : "You already have an active application for this gig.",
           });
+        } else if (isDeletedGigApplicationError(error)) {
+          showGigUnavailableAlert();
         } else {
           setAlertConfig({
             type: "error",
@@ -574,7 +722,7 @@ export const useApplicationSubmissionAction = ({
             p_item_vector: group.embedding,
             p_weight: 0.4,
           });
-        } catch (e) {
+        } catch {
         }
       }
 
@@ -616,6 +764,8 @@ export const useApplicationSubmissionAction = ({
     closeSheet,
     cvFile,
     cvUrl,
+    ensureGigIsStillAvailable,
+    ensureGroupListingIsStillAvailable,
     group,
     listingId,
     pitchMessage,
@@ -623,6 +773,7 @@ export const useApplicationSubmissionAction = ({
     selectedGroupId,
     selectedProductionRosterId,
     selectedProductionTeamId,
+    selectedSlotType,
     setAlertConfig,
     setAlertVisible,
     setCvFile,
@@ -633,6 +784,7 @@ export const useApplicationSubmissionAction = ({
     setPitchMessage,
     setVideoUrl,
     uploadDocument,
+    showGigUnavailableAlert,
     invokeListingsCrudAction,
     userGroups,
     userId,
@@ -674,6 +826,11 @@ export const useApplicationSubmissionAction = ({
           message: "This group is not accepting applications right now.",
         });
         setAlertVisible(true);
+        return;
+      }
+
+      const groupIsStillAvailable = await ensureGroupListingIsStillAvailable();
+      if (!groupIsStillAvailable) {
         return;
       }
 
@@ -732,6 +889,11 @@ export const useApplicationSubmissionAction = ({
         message: `This group has already applied via ${groupApplicationBy}. Only one application per group is allowed.`,
       });
       setAlertVisible(true);
+      return;
+    }
+
+    const gigIsStillAvailable = await ensureGigIsStillAvailable();
+    if (!gigIsStillAvailable) {
       return;
     }
 
@@ -971,6 +1133,8 @@ export const useApplicationSubmissionAction = ({
     group,
     groupAlreadyApplied,
     groupApplicationBy,
+    ensureGigIsStillAvailable,
+    ensureGroupListingIsStillAvailable,
     listingId,
     pitchMessage,
     processApplicationSubmission,
@@ -982,6 +1146,7 @@ export const useApplicationSubmissionAction = ({
     setAlertConfig,
     setAlertVisible,
     requestConfirmation,
+    userGroups,
     userId,
     userRole,
     videoUrl,

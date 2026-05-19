@@ -601,6 +601,7 @@ export default function PlaylistDetailsScreen() {
       if (newTrackAudioFile) {
         logAddTrackModal("copyright_check_upload_start", {
           fileName: newTrackAudioFile.name,
+          traceId: newTrackAudioFile.debugTraceId || null,
           mimeType: newTrackAudioFile.mimeType,
           sizeBytes: newTrackAudioFile.sizeBytes,
         });
@@ -612,6 +613,7 @@ export default function PlaylistDetailsScreen() {
 
         logAddTrackModal("copyright_check_upload_passed", {
           storagePath: upload.storagePath,
+          traceId: newTrackAudioFile.debugTraceId || null,
           uploadedDurationSeconds: upload.durationSeconds,
           hasPublicUrl: Boolean(upload.publicUrl),
         });
@@ -737,6 +739,7 @@ export default function PlaylistDetailsScreen() {
         playlistId: playlist?.id || null,
         editingTrackId,
         name: audioFile.name,
+        traceId: audioFile.debugTraceId || null,
         mimeType: audioFile.mimeType,
         sizeBytes: audioFile.sizeBytes,
         durationSeconds: audioFile.durationSeconds,

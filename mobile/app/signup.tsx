@@ -88,17 +88,25 @@ const getDocumentOptionByKey = (key: string) => {
 };
 
 const DEFAULT_SIGNUP_DOCUMENT_KEY = isE2EFixtureMode() ? 'health_insurance' : PH_DOCUMENT_OPTIONS[0].key;
-const PASSWORD_REQUIREMENT_HINT = 'Use at least 8 characters with uppercase, lowercase, a number, and a symbol.';
-const PASSWORD_REQUIREMENT_ERROR = 'Password must be at least 8 characters and include uppercase, lowercase, a number, and a symbol.';
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_REQUIREMENT_HINT = 'Use 8+ characters with uppercase, lowercase, a number, a symbol, and no spaces.';
+const PASSWORD_REQUIREMENT_ERROR = 'Password must be at least 8 characters and include uppercase, lowercase, a number, a symbol, and no spaces.';
+const PASSWORD_REQUIREMENTS = [
+    { key: 'length', label: `At least ${PASSWORD_MIN_LENGTH} characters`, test: (value: string) => value.length >= PASSWORD_MIN_LENGTH },
+    { key: 'upper', label: 'One uppercase letter', test: (value: string) => /[A-Z]/.test(value) },
+    { key: 'lower', label: 'One lowercase letter', test: (value: string) => /[a-z]/.test(value) },
+    { key: 'number', label: 'One number', test: (value: string) => /[0-9]/.test(value) },
+    { key: 'symbol', label: 'One symbol', test: (value: string) => /[^A-Za-z0-9\s]/.test(value) },
+    { key: 'spaces', label: 'No spaces', test: (value: string) => !/\s/.test(value) },
+];
+
+const getPasswordRequirementState = (value: string) => PASSWORD_REQUIREMENTS.map((requirement) => ({
+    ...requirement,
+    met: requirement.test(value),
+}));
 
 const getPasswordValidationError = (value: string) => {
-    if (
-        value.length < 8 ||
-        !/[A-Z]/.test(value) ||
-        !/[a-z]/.test(value) ||
-        !/[0-9]/.test(value) ||
-        !/[^A-Za-z0-9\s]/.test(value)
-    ) {
+    if (!getPasswordRequirementState(value).every((requirement) => requirement.met)) {
         return PASSWORD_REQUIREMENT_ERROR;
     }
 
@@ -343,9 +351,25 @@ const isTerminalDiditFlowStatus = (status: unknown) => (
     isSupersededVerificationStatus(status)
 );
 
+const getDiditDecisionCandidates = (sessionData: any) => [
+    sessionData?.decision,
+    sessionData?.verification_data?.decision,
+    sessionData?.verification_data,
+    sessionData?.extracted_data?.decision,
+    sessionData?.extracted_data,
+    sessionData,
+].filter(Boolean);
+
+const firstDiditArray = (sessionData: any, key: string) => {
+    for (const candidate of getDiditDecisionCandidates(sessionData)) {
+        if (Array.isArray(candidate?.[key])) return candidate[key];
+    }
+    return [];
+};
+
 const diditSessionHasApprovedFaceMatch = (sessionData: any) => {
-    const faceMatch = sessionData?.face_matches?.[0] || sessionData?.decision?.face_matches?.[0];
-    const idVerification = sessionData?.id_verifications?.[0] || sessionData?.decision?.id_verifications?.[0];
+    const faceMatch = firstDiditArray(sessionData, 'face_matches')[0];
+    const idVerification = firstDiditArray(sessionData, 'id_verifications')[0];
 
     return {
         hasFaceMatch: Boolean(faceMatch),
@@ -354,6 +378,48 @@ const diditSessionHasApprovedFaceMatch = (sessionData: any) => {
         approved: normalizeDiditFlowStatus(idVerification?.status) === 'APPROVED' &&
             normalizeDiditFlowStatus(faceMatch?.status) === 'APPROVED',
     };
+};
+
+const getDiditFlowStatusFromSession = (sessionData: any) => {
+    const decisionCandidates = getDiditDecisionCandidates(sessionData);
+    const idVerification = firstDiditArray(sessionData, 'id_verifications')[0];
+    const faceMatch = firstDiditArray(sessionData, 'face_matches')[0];
+    const idStatus = normalizeDiditFlowStatus(idVerification?.status);
+    const faceStatus = normalizeDiditFlowStatus(faceMatch?.status);
+    const sourceStatuses = [
+        sessionData?.status,
+        sessionData?.verification_data?.status,
+        sessionData?.businessStatus,
+        sessionData?.diditResolvedStatus,
+        sessionData?.rawDiditStatus,
+        sessionData?.verification_status,
+        sessionData?.verification_data?.businessStatus,
+        sessionData?.verification_data?.diditResolvedStatus,
+        sessionData?.verification_data?.rawDiditStatus,
+        ...decisionCandidates.map((candidate) => candidate?.status),
+    ].map(normalizeDiditFlowStatus).filter(Boolean);
+    const statuses = [idStatus, faceStatus, ...sourceStatuses].filter(Boolean);
+
+    const failedStatus = statuses.find(isFailedDiditFlowStatus);
+    if (failedStatus) return failedStatus;
+
+    if (idStatus === 'APPROVED' && faceStatus === 'APPROVED') {
+        return 'APPROVED';
+    }
+
+    if (idStatus === 'PENDING_REVIEW' || faceStatus === 'PENDING_REVIEW') {
+        return 'PENDING_REVIEW';
+    }
+
+    if (idStatus === 'APPROVED' && faceStatus !== 'APPROVED') {
+        return 'PENDING';
+    }
+
+    return sourceStatuses.find(isPendingReviewDiditFlowStatus) ||
+        sourceStatuses.find(isApprovedDiditFlowStatus) ||
+        sourceStatuses[0] ||
+        statuses[0] ||
+        '';
 };
 
 const logSignupFlow = (stage: string, payload: Record<string, unknown> = {}) => {
@@ -365,8 +431,9 @@ const logSignupFlow = (stage: string, payload: Record<string, unknown> = {}) => 
 };
 
 const logSignupFlowError = (stage: string, error: unknown, payload: Record<string, unknown> = {}) => {
-    console.error(`${SIGNUP_FLOW_LOG_PREFIX} ${stage}`, {
+    console.log(`${SIGNUP_FLOW_LOG_PREFIX} ${stage}`, {
         debugVersion: SIGNUP_FLOW_DEBUG_VERSION,
+        level: 'error',
         timestamp: new Date().toISOString(),
         ...payload,
         error: summarizeErrorForDiditEmailLog(error),
@@ -686,7 +753,7 @@ export default function SignupScreen() {
                         }
                         return;
                     }
-                    const s = data?.status || data?.verification_data?.status;
+                    const s = getDiditFlowStatusFromSession(data);
                     if (pollAttempt <= 3 || pollAttempt % 20 === 0 || isTerminalDiditFlowStatus(s)) {
                         logSignupFlow('backgroundPoll.result', {
                             attempt: pollAttempt,
@@ -695,8 +762,13 @@ export default function SignupScreen() {
                             invokeData: summarizeSignupInvokeData(data),
                         });
                     }
-                    // If we detect a final status, manually trigger the completion flow
-                    if (isTerminalDiditFlowStatus(s)) {
+                    // Only leave the Didit WebView automatically for clear pass/fail states.
+                    // PENDING_REVIEW can appear while Face Match is still being prepared.
+                    if (
+                        isApprovedDiditFlowStatus(s) ||
+                        isFailedDiditFlowStatus(s) ||
+                        isSupersededVerificationStatus(s)
+                    ) {
                         diditStatusPollFinalizedRef.current = true;
                         logSignupFlow('backgroundPoll.finalStatusDetected', {
                             attempt: pollAttempt,
@@ -787,7 +859,7 @@ export default function SignupScreen() {
                     }
 
                     // Check status - supports robust checking of nested data
-                    const status = sessionData?.status || sessionData?.verification_data?.status;
+                    const status = getDiditFlowStatusFromSession(sessionData);
                     logSignupFlow('returnCheck.invoke.result', {
                         attempt: retries + 1,
                         sessionId: summarizeSessionRefForLog(refToCheck),
@@ -906,7 +978,7 @@ export default function SignupScreen() {
                             const result = await reader.read();
                             const text = new TextDecoder().decode(result.value);
                             const errorJson = JSON.parse(text);
-                            errorStatus = errorJson?.status || errorJson?.verification_data?.status;
+                            errorStatus = getDiditFlowStatusFromSession(errorJson);
                         }
                     } catch { /* ignore parse errors */ }
 
@@ -917,7 +989,7 @@ export default function SignupScreen() {
                             const jsonMatch = e.message.match(/\{.*\}/);
                             if (jsonMatch) {
                                 const parsed = JSON.parse(jsonMatch[0]);
-                                errorStatus = parsed?.status || errorStatus;
+                                errorStatus = getDiditFlowStatusFromSession(parsed) || errorStatus;
                             }
                         }
                     } catch { /* ignore parse errors */ }
@@ -1124,6 +1196,22 @@ export default function SignupScreen() {
         };
     }, [colors.primary, manualIdExpiration]);
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const passwordRequirementState = useMemo(() => getPasswordRequirementState(password), [password]);
+    const passwordStrengthScore = passwordRequirementState.filter((requirement) => requirement.met).length;
+    const passwordStrengthPercent = (passwordStrengthScore / PASSWORD_REQUIREMENTS.length) * 100;
+    const passwordStrengthLabel = passwordStrengthScore === PASSWORD_REQUIREMENTS.length
+        ? 'Strong'
+        : passwordStrengthScore >= 4
+            ? 'Almost there'
+            : passwordStrengthScore >= 2
+                ? 'Weak'
+                : 'Too weak';
+    const passwordStrengthColor = passwordStrengthScore === PASSWORD_REQUIREMENTS.length
+        ? '#16A34A'
+        : passwordStrengthScore >= 4
+            ? '#D97706'
+            : '#DC2626';
+    const showPasswordGuidance = Boolean(password) || Boolean(errors.password);
     const isDetailsStepReady =
         isAllowedSignupRole(selectedRole) &&
         emailRegex.test(email.trim()) &&
@@ -2126,6 +2214,44 @@ export default function SignupScreen() {
             });
         }
 
+        const diditStatus = getDiditFlowStatusFromSession(diditSessionData);
+        if (isFailedDiditFlowStatus(diditStatus) || isSupersededVerificationStatus(diditStatus)) {
+            logDiditEmailFlow('finishAccountCreation.blocked', {
+                reason: 'didit_final_failure',
+                diditSessionId: refToLink,
+                email: maskEmailForLog(email),
+                status: diditStatus || null,
+                platform: Platform.OS,
+            });
+            setLoading(false);
+            setVerificationUrl('');
+            setSessionId('');
+            setSessionNonce('');
+            setTempSessionRef('');
+            await AsyncStorage.removeItem('signup_current_session');
+            router.setParams({ verified: '', check_verification: '' });
+            setStep('details');
+
+            Alert.alert(
+                diditStatus === 'ABANDONED' ? 'Verification Incomplete' : 'Invalid I.D.',
+                diditStatus === 'ABANDONED'
+                    ? 'You did not complete the verification process. Please try again.'
+                    : 'Your I.D. was declined or does not match. Please try again with a valid government-issued I.D.',
+            );
+            return;
+        }
+
+        if (isPendingReviewDiditFlowStatus(diditStatus)) {
+            logDiditEmailFlow('finishAccountCreation.pendingReview', {
+                diditSessionId: refToLink,
+                email: maskEmailForLog(email),
+                status: diditStatus || null,
+                platform: Platform.OS,
+            });
+            await finishAccountCreationPendingReview(refToLink);
+            return;
+        }
+
         const faceMatchCheck = diditSessionHasApprovedFaceMatch(diditSessionData);
         if (!faceMatchCheck.approved) {
             logDiditEmailFlow('finishAccountCreation.blocked', {
@@ -2512,8 +2638,46 @@ export default function SignupScreen() {
                 </View>
                 {errors.password ? (
                     <Text style={{ color: 'red', fontSize: 12 }}>{errors.password}</Text>
-                ) : !isPasswordStrongEnough(password) ? (
+                ) : !showPasswordGuidance ? (
                     <Text style={[styles.passwordRequirementText, themeStyles.textSecondary]}>{PASSWORD_REQUIREMENT_HINT}</Text>
+                ) : null}
+                {showPasswordGuidance ? (
+                    <View style={[styles.passwordStrengthCard, themeStyles.inputContainer]}>
+                        <View style={styles.passwordStrengthHeader}>
+                            <Text style={[styles.passwordStrengthTitle, themeStyles.text]}>Password strength</Text>
+                            <Text style={[styles.passwordStrengthLabel, { color: passwordStrengthColor }]}>{passwordStrengthLabel}</Text>
+                        </View>
+                        <View style={[styles.passwordMeterTrack, { backgroundColor: isDark ? '#111827' : '#E5E7EB' }]}>
+                            <View
+                                style={[
+                                    styles.passwordMeterFill,
+                                    {
+                                        width: `${passwordStrengthPercent}%`,
+                                        backgroundColor: passwordStrengthColor,
+                                    },
+                                ]}
+                            />
+                        </View>
+                        <View style={styles.passwordChecklist}>
+                            {passwordRequirementState.map((requirement) => (
+                                <View key={requirement.key} style={styles.passwordChecklistItem}>
+                                    <Ionicons
+                                        name={requirement.met ? 'checkmark-circle' : 'ellipse-outline'}
+                                        size={15}
+                                        color={requirement.met ? '#16A34A' : colors.textSecondary}
+                                    />
+                                    <Text
+                                        style={[
+                                            styles.passwordChecklistText,
+                                            requirement.met ? { color: isDark ? '#86EFAC' : '#15803D' } : themeStyles.textSecondary,
+                                        ]}
+                                    >
+                                        {requirement.label}
+                                    </Text>
+                                </View>
+                            ))}
+                        </View>
+                    </View>
                 ) : null}
 
                 {/* Confirm */}
@@ -2533,7 +2697,25 @@ export default function SignupScreen() {
                         <Ionicons name={showConfirmPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
                     </TouchableOpacity>
                 </View>
-                {errors.confirmPassword && <Text style={{ color: 'red', fontSize: 12 }}>{errors.confirmPassword}</Text>}
+                {errors.confirmPassword ? (
+                    <Text style={{ color: 'red', fontSize: 12 }}>{errors.confirmPassword}</Text>
+                ) : confirmPassword ? (
+                    <View style={styles.confirmPasswordHintRow}>
+                        <Ionicons
+                            name={password === confirmPassword ? 'checkmark-circle' : 'alert-circle-outline'}
+                            size={15}
+                            color={password === confirmPassword ? '#16A34A' : '#D97706'}
+                        />
+                        <Text
+                            style={[
+                                styles.confirmPasswordHintText,
+                                { color: password === confirmPassword ? (isDark ? '#86EFAC' : '#15803D') : '#D97706' },
+                            ]}
+                        >
+                            {password === confirmPassword ? 'Passwords match' : 'Passwords must match'}
+                        </Text>
+                    </View>
+                ) : null}
 
                 <View style={styles.documentSectionContainer}>
                     <Text style={[styles.documentSectionTitle, themeStyles.text]}>Select your ID type (Philippines)</Text>
@@ -2734,7 +2916,7 @@ export default function SignupScreen() {
                     throw new Error(String(sessionData.error));
                 }
 
-                const status = sessionData?.status || sessionData?.verification_data?.status;
+                const status = getDiditFlowStatusFromSession(sessionData);
                 logSignupFlow('manualStatusCheck.invoke.result', {
                     sessionId: summarizeSessionRefForLog(refToCheck),
                     status: status ?? null,
@@ -3295,6 +3477,17 @@ const styles = StyleSheet.create({
     },
     formGap: { gap: 16 },
     passwordRequirementText: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
+    passwordStrengthCard: { borderWidth: 1, borderRadius: 16, padding: 14, gap: 10 },
+    passwordStrengthHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+    passwordStrengthTitle: { fontSize: 13, lineHeight: 18, fontFamily: 'Poppins_600SemiBold' },
+    passwordStrengthLabel: { fontSize: 12, lineHeight: 16, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
+    passwordMeterTrack: { height: 7, borderRadius: 999, overflow: 'hidden' },
+    passwordMeterFill: { height: '100%', borderRadius: 999 },
+    passwordChecklist: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    passwordChecklistItem: { width: '48%', minWidth: 140, flexDirection: 'row', alignItems: 'center', gap: 6 },
+    passwordChecklistText: { flex: 1, fontSize: 11, lineHeight: 15, fontFamily: 'Poppins_400Regular' },
+    confirmPasswordHintRow: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 18 },
+    confirmPasswordHintText: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_500Medium' },
     backLink: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, gap: 4 },
     documentSectionContainer: { gap: 8, marginTop: 4 },
     documentSectionTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold' },

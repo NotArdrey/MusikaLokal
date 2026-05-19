@@ -161,6 +161,23 @@ export default function GroupDetailsScreen() {
     });
   };
 
+  const handleCreateGroupPlaylist = () => {
+    const groupId = String(group?.id || (Array.isArray(id) ? id[0] : id) || "").trim();
+    if (!groupId) {
+      showAlert("warning", "Group Unavailable", "Open this group again before uploading a group playlist.");
+      return;
+    }
+
+    router.push({
+      pathname: "/create_playlist",
+      params: {
+        owner_group_id: groupId,
+        return_to: "manage_group",
+        return_group_id: groupId,
+      },
+    });
+  };
+
   // Role-based access control
   useEffect(() => {
     checkAuthorization();
@@ -1126,8 +1143,10 @@ export default function GroupDetailsScreen() {
                   playlists={groupPlaylists}
                   loading={loadingGroupPlaylists}
                   onPlaylistPress={handlePlaylistPress}
-                  title="Featured Playlists"
-                  emptyMessage="Link playlists from Edit Group to feature them on this profile."
+                  onCreatePlaylist={handleCreateGroupPlaylist}
+                  title="Group Playlists"
+                  emptyMessage="Upload a group playlist or link playlists from Edit Group to feature them on this profile."
+                  createButtonLabel="Upload Group Playlist"
                 />
 
                 <View>

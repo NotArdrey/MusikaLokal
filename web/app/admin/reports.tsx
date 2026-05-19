@@ -107,6 +107,8 @@ type ReportEscalationFilter = 'all' | ReportEscalationStatus;
 
 type ReportModerationAction = 'none' | 'warn_reporter' | 'warn_target_owner' | 'warn_both' | 'manual_review';
 
+type ReportTargetAccountAction = 'none' | 'mark_unverified';
+
 type BookingIncidentFilter =
   | 'all'
   | 'open'
@@ -210,6 +212,8 @@ const reportStatuses: ReportFilter[] = ['all', 'pending', 'resolved', 'dismissed
 const reportEscalationFilters: ReportEscalationFilter[] = ['all', 'none', 'manual_review'];
 
 const reportModerationActions: ReportModerationAction[] = ['none', 'warn_reporter', 'warn_target_owner', 'warn_both', 'manual_review'];
+
+const reportTargetAccountActions: ReportTargetAccountAction[] = ['none', 'mark_unverified'];
 
 const incidentStatuses: BookingIncidentFilter[] = [
   'all',
@@ -748,6 +752,7 @@ export default function AdminReportsPage() {
   const [reportModerationTarget, setReportModerationTarget] = useState<ReportEntry | null>(null);
   const [reportModerationStatus, setReportModerationStatus] = useState<ReportStatus>('resolved');
   const [reportModerationAction, setReportModerationAction] = useState<ReportModerationAction>('none');
+  const [reportTargetAccountAction, setReportTargetAccountAction] = useState<ReportTargetAccountAction>('none');
   const [reportModerationNotes, setReportModerationNotes] = useState('');
   const [reportEscalationReason, setReportEscalationReason] = useState('');
   const [reportModerationSubmitting, setReportModerationSubmitting] = useState(false);
@@ -1039,12 +1044,14 @@ export default function AdminReportsPage() {
       reportId,
       nextStatus,
       moderationAction = 'none',
+      targetAccountAction = 'none',
       moderationNotes = '',
       escalationReason = '',
     }: {
       reportId: string;
       nextStatus: ReportStatus;
       moderationAction?: ReportModerationAction;
+      targetAccountAction?: ReportTargetAccountAction;
       moderationNotes?: string;
       escalationReason?: string;
     }) => {
@@ -1056,6 +1063,7 @@ export default function AdminReportsPage() {
             reportId,
             nextStatus,
             moderationAction,
+            targetAccountAction,
             moderationNotes: moderationNotes.trim() || null,
             escalationReason: escalationReason.trim() || null,
           },
@@ -1066,8 +1074,9 @@ export default function AdminReportsPage() {
 
         const moderationLabel = moderationAction.replace(/_/g, ' ');
         const statusLabel = nextStatus.replace(/_/g, ' ');
+        const accountActionLabel = targetAccountAction === 'mark_unverified' ? ' Marked reported account for review.' : '';
         invalidateAdminPageCache();
-        showAlert('success', 'Report updated', `Status set to ${statusLabel}. Action: ${moderationLabel}.`);
+        showAlert('success', 'Report updated', `Status set to ${statusLabel}. Action: ${moderationLabel}.${accountActionLabel}`);
         await fetchReports();
         return true;
       } catch (error) {
@@ -1091,6 +1100,7 @@ export default function AdminReportsPage() {
       setReportModerationTarget(targetReport);
       setReportModerationStatus(presetStatus || defaultStatus);
       setReportModerationAction(presetAction || 'none');
+      setReportTargetAccountAction('none');
       setReportModerationNotes('');
       setReportEscalationReason('');
     },
@@ -1102,6 +1112,7 @@ export default function AdminReportsPage() {
     setReportModerationTarget(null);
     setReportModerationStatus('resolved');
     setReportModerationAction('none');
+    setReportTargetAccountAction('none');
     setReportModerationNotes('');
     setReportEscalationReason('');
   }, [reportModerationSubmitting]);
@@ -1120,6 +1131,7 @@ export default function AdminReportsPage() {
         reportId: reportModerationTarget.id,
         nextStatus: reportModerationStatus,
         moderationAction: reportModerationAction,
+        targetAccountAction: reportTargetAccountAction,
         moderationNotes: reportModerationNotes,
         escalationReason: reportEscalationReason,
       });
@@ -1128,6 +1140,7 @@ export default function AdminReportsPage() {
         setReportModerationTarget(null);
         setReportModerationStatus('resolved');
         setReportModerationAction('none');
+        setReportTargetAccountAction('none');
         setReportModerationNotes('');
         setReportEscalationReason('');
       }
@@ -1139,6 +1152,7 @@ export default function AdminReportsPage() {
     reportModerationNotes,
     reportModerationStatus,
     reportModerationTarget,
+    reportTargetAccountAction,
     reportEscalationReason,
     moderateReport,
     showAlert,
@@ -1697,18 +1711,6 @@ export default function AdminReportsPage() {
                       </>
                     )}
                   </TouchableOpacity>
-
-                  <TouchableOpacity
-                    testID={`admin-report-moderate-${report.id}`}
-                    accessibilityLabel={`admin-report-moderate-${report.id}`}
-                    activeOpacity={1}
-                    disabled={reportActionLoadingId === report.id}
-                    onPress={() => openReportModerationModal(report)}
-                    style={[styles.smallActionButton, { borderColor: colors.border, opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
-                  >
-                    <Ionicons name="construct-outline" size={14} color={colors.text} />
-                    <Text style={[styles.smallActionText, { color: colors.text }]}>Moderate</Text>
-                  </TouchableOpacity>
                 </View>
 
                 <View style={styles.cardActionsRow}>
@@ -1719,7 +1721,7 @@ export default function AdminReportsPage() {
                         accessibilityLabel={`admin-report-resolve-${report.id}`}
                         activeOpacity={1}
                         disabled={reportActionLoadingId === report.id}
-                        onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'resolved' })}
+                        onPress={() => openReportModerationModal(report, 'resolved')}
                         style={[styles.smallActionButtonFilled, { backgroundColor: '#16A34A', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
                       >
                         <Text style={styles.smallActionTextFilled}>Resolve</Text>
@@ -2310,6 +2312,34 @@ export default function AdminReportsPage() {
                   >
                     <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
                       {action.replace(/_/g, ' ')}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <Text style={[styles.formLabel, { color: colors.textSecondary }]}>Reported Account Action</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+              {reportTargetAccountActions.map((accountAction) => {
+                const active = reportTargetAccountAction === accountAction;
+                const label = accountAction === 'mark_unverified' ? 'mark unverified' : 'none';
+                return (
+                  <TouchableOpacity
+                    testID={`admin-report-account-action-${accountAction}`}
+                    accessibilityLabel={`admin-report-account-action-${accountAction}`}
+                    key={accountAction}
+                    activeOpacity={1}
+                    onPress={() => setReportTargetAccountAction(accountAction)}
+                    style={[
+                      styles.filterChip,
+                      {
+                        backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
+                        borderColor: active ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                      {label}
                     </Text>
                   </TouchableOpacity>
                 );

@@ -48,7 +48,16 @@ test.describe('admin reports moderation CRUD', () => {
     await expect(reportCard).toBeVisible({ timeout: 45_000 });
 
     await page.getByTestId(`admin-report-resolve-${report.id}`).click();
+    await expect(page.getByTestId('admin-report-moderation-modal')).toBeVisible();
+    await page.getByTestId('admin-report-account-action-mark_unverified').click();
+    await page.getByTestId('admin-report-moderation-apply-button').click();
     await expectDbRecord<any>('reports', 'id', report.id, (record) => record.status === 'resolved');
+    await expectDbRecord<any>(
+      'profiles',
+      'id',
+      target.id,
+      (record) => record.is_verified === false && record.verification_status === 'PENDING_REVIEW',
+    );
 
     await page.getByTestId(`admin-report-reopen-${report.id}`).click();
     await expectDbRecord<any>('reports', 'id', report.id, (record) => record.status === 'pending');

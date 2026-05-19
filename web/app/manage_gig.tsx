@@ -1947,7 +1947,6 @@ export default function GigDetailsScreen() {
                 <Ionicons name="close" size={18} color={colors.text} />
               </TouchableOpacity>
             </View>
-
             <ScrollView
               style={styles.invitePopupBody}
               contentContainerStyle={styles.invitePopupBodyContent}

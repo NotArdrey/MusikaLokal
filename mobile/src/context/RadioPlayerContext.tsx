@@ -20,7 +20,6 @@ import {
   buildStationBroadcastTrack,
   ensureRadioPlayerSetup,
   getLiveStationCursor,
-  getStationBroadcastStreamUrl,
   type RadioQueueTrack,
   updateRadioPlayerCapabilities,
 } from "../audio/radioTrackPlayer";
@@ -40,36 +39,6 @@ const RADIO_MINI_PLAYER_DEBUG_LOGS = __DEV__;
 const logRadioMiniPlayerDebug = (event: string, payload: Record<string, unknown>) => {
   if (RADIO_MINI_PLAYER_DEBUG_LOGS) {
   }
-};
-
-const clampRotationIntervalMinutes = (value: unknown) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return 15;
-  }
-
-  return Math.min(Math.max(Math.round(parsed), 5), 120);
-};
-
-const getNextRotationRefreshDelayMs = (stationData: any) => {
-  const intervalMs = clampRotationIntervalMinutes(stationData?.rotation_interval_minutes) * 60 * 1000;
-  const anchorMs = Date.parse(stationData?.live_anchor_at || stationData?.updated_at || stationData?.created_at || "");
-  const nowMs = Date.now();
-
-  if (!Number.isFinite(anchorMs)) {
-    return intervalMs;
-  }
-
-  const elapsedIntervals = anchorMs >= nowMs ? 0 : Math.floor((nowMs - anchorMs) / intervalMs);
-  return Math.max((anchorMs + ((elapsedIntervals + 1) * intervalMs)) - nowMs + 1000, 1000);
-};
-
-type RadioQueueEntry = {
-  slotIndex: number;
-  itemIndex: number;
-  slot: any;
-  playlist: any;
-  item: any;
 };
 
 const normalizeQueueIndex = (queueLength: number, index: number) => {
@@ -823,50 +792,6 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       return nextStation;
     });
   }, []);
-
-  useEffect(() => {
-    if (!activeStation?.id || fullQueueRef.current.length === 0 || activeStation?.is_active === false) {
-      return undefined;
-    }
-
-    if (getStationBroadcastStreamUrl(activeStation)) {
-      return undefined;
-    }
-
-    const timeoutId = setTimeout(() => {
-      const stationId = activeStation.id;
-
-      void (async () => {
-        const requestId = beginPlaybackRequest();
-
-        try {
-          const refreshedStation = await fetchStationDetails(stationId);
-          if (!refreshedStation || !isPlaybackRequestCurrent(requestId)) {
-            return;
-          }
-
-          const queue = await buildStationQueue(refreshedStation);
-          if (!isPlaybackRequestCurrent(requestId) || queue.length === 0) {
-            return;
-          }
-
-          const liveCursor = getLiveStationCursor(refreshedStation, queue);
-          await applyPlayerQueue(
-            refreshedStation,
-            queue,
-            liveCursor.queueIndex,
-            playWhenReadyRef.current,
-            requestId,
-            liveCursor.positionSeconds,
-          );
-        } catch (error) {
-          console.warn("Radio live rotation refresh error:", error);
-        }
-      })();
-    }, getNextRotationRefreshDelayMs(activeStation));
-
-    return () => clearTimeout(timeoutId);
-  }, [activeStation, applyPlayerQueue, beginPlaybackRequest, fetchStationDetails, isPlaybackRequestCurrent]);
 
   useEffect(() => {
     if (!isTrackPlayerAvailable) {

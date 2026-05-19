@@ -45,7 +45,7 @@ export default function ProductionInviteSection({
   disabled = false,
   title = "Invite Musicians, Duo, or Group",
   description = "Search for performers to invite after you save this production team. Accepted invites will add them to your production roster, and recipients can respond from Bookings > Pending.",
-  searchPlaceholder = "Search musician, duo, or group",
+  searchPlaceholder = "Search musician",
   messagePlaceholder = "Add optional context for the invite",
 }: ProductionInviteSectionProps) {
   const { colors, isDark } = useTheme();
@@ -296,9 +296,9 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    height: 24,
+    height: "100%",
     fontSize: 15,
-    lineHeight: 20,
+    lineHeight: 22,
     includeFontPadding: false,
     padding: 0,
     textAlignVertical: "center",

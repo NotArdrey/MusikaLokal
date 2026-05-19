@@ -11,6 +11,7 @@ export type LinkedGroupPlaylist = {
   cover_image_url?: string | null;
   track_count?: number | null;
   creator_id?: string | null;
+  owner_group_id?: string | null;
 };
 
 const normalizeLinkedPlaylist = (row: any): LinkedGroupPlaylist | null => {
@@ -37,6 +38,26 @@ export const fetchUserOwnedPlaylists = async (creatorId: string) => {
     .from("playlists")
     .select("*")
     .eq("creator_id", normalizedCreatorId)
+    .is("owner_group_id", null)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+};
+
+export const fetchGroupOwnedPlaylists = async (groupId: string) => {
+  const normalizedGroupId = String(groupId || "").trim();
+  if (!normalizedGroupId) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from("playlists")
+    .select("*")
+    .eq("owner_group_id", normalizedGroupId)
     .order("created_at", { ascending: false });
 
   if (error) {

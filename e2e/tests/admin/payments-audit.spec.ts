@@ -181,6 +181,22 @@ test.describe('admin payment transactions and audit', () => {
     expect(content).toContain('MusikaLokal Payment Transactions');
     expect(content).toContain('Payment Paid');
     expect(content).toContain('&#39;=E2E-FORMULA-GUARD');
+
+    await expect(page.getByText('Excel Export Ready')).toBeVisible();
+    await page.getByTestId('custom-alert-button-ok').click();
+
+    const pdfDownloadPromise = page.waitForEvent('download');
+    await page.getByTestId('admin-payment-transactions-export-pdf-button').click();
+    const pdfDownload = await pdfDownloadPromise;
+
+    expect(pdfDownload.suggestedFilename()).toMatch(/^musikalokal-payment-transactions-\d{4}-\d{2}-\d{2}\.pdf$/);
+    const pdfPath = await pdfDownload.path();
+    expect(pdfPath).toBeTruthy();
+
+    const pdfContent = await fs.readFile(pdfPath as string, 'utf8');
+    expect(pdfContent).toContain('%PDF-1.4');
+    expect(pdfContent).toContain('MusikaLokal Payment Transactions');
+    expect(pdfContent).toContain('Payment Paid');
   });
 
   test('shows payment paid, partial, pending, failed, cancelled, refunded, and refund-pending audit entries', async ({ page }) => {

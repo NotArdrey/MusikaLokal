@@ -195,9 +195,9 @@ export default function CreateStationScreen() {
                   <Ionicons name="radio" size={40} color={colors.primary} />
                 </View>
                 <Text style={[styles.heroText, { color: colors.textSecondary }]}>
-                  {isEditing
-                    ? "Update your station details below."
-                    : "Create a station and add playlists to build a rotation."}
+                    {isEditing
+                      ? "Update your station details below."
+                      : "Create a station and add playlists to build a shared queue."}
                 </Text>
               </View>
 
@@ -230,7 +230,7 @@ export default function CreateStationScreen() {
                 onChangeText={setGenre}
               />
 
-              <Text style={[styles.label, { color: colors.text }]}>Rotation Interval</Text>
+              <Text style={[styles.label, { color: colors.text }]}>Station Interval</Text>
               <TextInput
                 style={[styles.input, { color: colors.text, borderColor: borderCol, backgroundColor: cardBg }]}
                 placeholder="15"
@@ -240,7 +240,7 @@ export default function CreateStationScreen() {
                 keyboardType="number-pad"
               />
               <Text style={[styles.helperText, { color: colors.textSecondary }]}>
-                How often the live lineup changes. Allowed range: 5 to 120 minutes.
+                Legacy station setting. Playlist radio now syncs by the full queue duration.
               </Text>
 
               <Text style={[styles.label, { color: colors.text }]}>Continuous Stream URL</Text>

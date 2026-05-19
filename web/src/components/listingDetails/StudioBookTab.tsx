@@ -31,6 +31,8 @@ type RecordingDurationStatus = {
 type RecordingDurationIssue = RecordingDurationStatus & { bookingIndex: number };
 
 const HOURS_EPSILON = 1e-9;
+const STUDIO_UNAVAILABLE_MESSAGE =
+  "This studio or venue is no longer available. It may have been deleted by the owner. Please refresh and choose another listing.";
 
 const debugLog = (...args: unknown[]) => {
   if (__DEV__) {
@@ -187,6 +189,25 @@ const StudioBookTab = ({
     originalIndex: number;
   } | null>(null);
   const isEditingBooking = Boolean(editingBookingDraft);
+
+  const ensureStudioStillAvailable = React.useCallback(async () => {
+    if (!group?.id) {
+      return false;
+    }
+
+    const { data, error } = await supabase
+      .from("studios")
+      .select("id")
+      .eq("id", group.id)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("[StudioBookTab] Could not verify studio before booking", error);
+      return true;
+    }
+
+    return Boolean(data);
+  }, [group?.id, supabase]);
 
   const parsePositiveInteger = (value: unknown): number | null => {
     const parsed = Number(value);
@@ -681,6 +702,25 @@ const StudioBookTab = ({
       normalized.includes("outside operating hours") ||
       normalized.includes("weekly schedule")
     );
+  };
+
+  const getReadableBookingSubmissionError = (message: string): string => {
+    const rawMessage = message || "Failed to create bookings";
+    const normalizedMessage = rawMessage.toLowerCase();
+
+    if (
+      normalizedMessage.includes("studio not found") ||
+      (normalizedMessage.includes("foreign key") && normalizedMessage.includes("studio_id")) ||
+      normalizedMessage.includes("studio_bookings_studio_id_fkey")
+    ) {
+      return STUDIO_UNAVAILABLE_MESSAGE;
+    }
+
+    if (rawMessage.includes("no_overlapping_bookings") || rawMessage.includes("exclusion constraint")) {
+      return "This time slot was just taken by another booking. Please select a different time or refresh and try again.";
+    }
+
+    return rawMessage;
   };
 
   const slotsOverlap = (
@@ -2114,6 +2154,15 @@ const StudioBookTab = ({
                     const bookingAccessToken = auth.accessToken;
 
                     setLoading(true);
+                    const studioStillAvailable = await ensureStudioStillAvailable();
+                    if (!studioStillAvailable) {
+                      setLoading(false);
+                      showAlert("warning", "Studio Unavailable", STUDIO_UNAVAILABLE_MESSAGE);
+                      setModalVisible(false);
+                      (sheetRef as any)?.current?.dismiss();
+                      return;
+                    }
+
                     const results = [];
                     const errors = [];
 
@@ -2388,7 +2437,9 @@ const StudioBookTab = ({
                     setLoading(false);
 
                     if (errors.length > 0 && results.length === 0) {
-                      let errorMsg = errors[0].error?.message || "Failed to create bookings";
+                      let errorMsg = getReadableBookingSubmissionError(
+                        errors[0].error?.message || "Failed to create bookings",
+                      );
                       const normalizedErrorMsg = String(errorMsg).toLowerCase();
 
                       if (errorMsg.includes("no_overlapping_bookings") || errorMsg.includes("exclusion constraint")) {
@@ -2396,7 +2447,9 @@ const StudioBookTab = ({
                           "This time slot was just booked by someone else. Please select a different time slot or refresh and try again.";
                       }
 
-                      if (normalizedErrorMsg.includes("advance booking")) {
+                      if (errorMsg === STUDIO_UNAVAILABLE_MESSAGE) {
+                        showAlert("warning", "Studio Unavailable", errorMsg);
+                      } else if (normalizedErrorMsg.includes("advance booking")) {
                         showAlert("warning", "Advance Booking Required", errorMsg);
                       } else if (
                         normalizedErrorMsg.includes("cannot create a booking in the past") ||

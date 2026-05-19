@@ -268,6 +268,31 @@ const buildPaymentExcelRows = (transactions: AdminPaymentTransaction[]) => {
   }));
 };
 
+const downloadWebBlob = (blob: Blob, fileName: string) => {
+  const globalAny = globalThis as any;
+  const documentRef = globalAny.document;
+  const urlApi = globalAny.URL || globalAny.webkitURL;
+
+  if (!documentRef || !urlApi?.createObjectURL) {
+    return false;
+  }
+
+  const url = urlApi.createObjectURL(blob);
+  const anchor = documentRef.createElement('a');
+
+  anchor.href = url;
+  anchor.download = fileName;
+  documentRef.body.appendChild(anchor);
+  anchor.click();
+  documentRef.body.removeChild(anchor);
+
+  if (urlApi.revokeObjectURL) {
+    urlApi.revokeObjectURL(url);
+  }
+
+  return true;
+};
+
 export const downloadPaymentTransactionsExcel = (
   transactions: AdminPaymentTransaction[],
   options?: {
@@ -278,10 +303,8 @@ export const downloadPaymentTransactionsExcel = (
   if (Platform.OS !== 'web') return false;
 
   const globalAny = globalThis as any;
-  const documentRef = globalAny.document;
-  const urlApi = globalAny.URL || globalAny.webkitURL;
 
-  if (!documentRef || !globalAny.Blob || !urlApi?.createObjectURL) {
+  if (!globalAny.Blob) {
     return false;
   }
 
@@ -330,18 +353,253 @@ export const downloadPaymentTransactionsExcel = (
   const blob = new globalAny.Blob([workbookHtml], {
     type: 'application/vnd.ms-excel;charset=utf-8;',
   });
-  const url = urlApi.createObjectURL(blob);
-  const anchor = documentRef.createElement('a');
+  return downloadWebBlob(blob, fileName);
+};
 
-  anchor.href = url;
-  anchor.download = fileName;
-  documentRef.body.appendChild(anchor);
-  anchor.click();
-  documentRef.body.removeChild(anchor);
+const PDF_PAGE_WIDTH = 842;
+const PDF_PAGE_HEIGHT = 595;
+const PDF_MARGIN = 36;
 
-  if (urlApi.revokeObjectURL) {
-    urlApi.revokeObjectURL(url);
+const pdfColumns: {
+  header: string;
+  key: string;
+  width: number;
+  align?: 'left' | 'right';
+}[] = [
+  { header: 'Event', key: 'Event Date', width: 88 },
+  { header: 'Action', key: 'Action', width: 82 },
+  { header: 'Customer', key: 'Customer', width: 120 },
+  { header: 'Studio', key: 'Studio', width: 110 },
+  { header: 'Amount', key: 'Amount', width: 65, align: 'right' },
+  { header: 'Refund', key: 'Refund Amount', width: 65, align: 'right' },
+  { header: 'Net', key: 'Net Amount', width: 65, align: 'right' },
+  { header: 'Booking ID', key: 'Booking ID', width: 175 },
+];
+
+const cleanPdfText = (value: unknown) => {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[^\x20-\x7E]/g, '?');
+};
+
+const escapePdfText = (value: unknown) => (
+  cleanPdfText(value)
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+);
+
+const formatPdfNumber = (value: number) => {
+  const fixed = value.toFixed(2);
+  return fixed.endsWith('.00') ? fixed.slice(0, -3) : fixed;
+};
+
+const estimatePdfTextWidth = (text: string, fontSize: number) => text.length * fontSize * 0.48;
+
+const wrapPdfText = (value: unknown, maxWidth: number, fontSize: number) => {
+  const text = cleanPdfText(value);
+  if (!text) return [''];
+
+  const maxChars = Math.max(4, Math.floor(maxWidth / (fontSize * 0.48)));
+  const lines: string[] = [];
+  let currentLine = '';
+
+  text.split(' ').forEach((word) => {
+    const chunks = word.length <= maxChars
+      ? [word]
+      : word.match(new RegExp(`.{1,${maxChars}}`, 'g')) || [word];
+
+    chunks.forEach((chunk) => {
+      const candidate = currentLine ? `${currentLine} ${chunk}` : chunk;
+      if (candidate.length <= maxChars) {
+        currentLine = candidate;
+      } else {
+        if (currentLine) lines.push(currentLine);
+        currentLine = chunk;
+      }
+    });
+  });
+
+  if (currentLine) lines.push(currentLine);
+  return lines.slice(0, 4);
+};
+
+const pdfTextCommand = (
+  text: unknown,
+  x: number,
+  y: number,
+  fontSize: number,
+  fontName = 'F1',
+) => `0 0 0 rg BT /${fontName} ${formatPdfNumber(fontSize)} Tf ${formatPdfNumber(x)} ${formatPdfNumber(PDF_PAGE_HEIGHT - y)} Td (${escapePdfText(text)}) Tj ET\n`;
+
+const pdfRectCommand = (
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  fillColor?: string,
+) => {
+  const rect = `${formatPdfNumber(x)} ${formatPdfNumber(PDF_PAGE_HEIGHT - y - height)} ${formatPdfNumber(width)} ${formatPdfNumber(height)} re`;
+  return fillColor ? `${fillColor} rg ${rect} f\n` : `${rect} S\n`;
+};
+
+const buildPdfBytes = (pages: string[]) => {
+  const objects: string[] = [];
+  const pageIds: number[] = [];
+  const fontRegularId = 3;
+  const fontBoldId = 4;
+
+  objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+  objects[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+  objects[4] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>';
+
+  pages.forEach((content, index) => {
+    const contentId = 5 + index * 2;
+    const pageId = contentId + 1;
+    pageIds.push(pageId);
+    objects[contentId] = `<< /Length ${content.length} >>\nstream\n${content}endstream`;
+    objects[pageId] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_PAGE_WIDTH} ${PDF_PAGE_HEIGHT}] /Resources << /Font << /F1 ${fontRegularId} 0 R /F2 ${fontBoldId} 0 R >> >> /Contents ${contentId} 0 R >>`;
+  });
+
+  objects[2] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`;
+
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+
+  for (let index = 1; index < objects.length; index += 1) {
+    offsets[index] = pdf.length;
+    pdf += `${index} 0 obj\n${objects[index]}\nendobj\n`;
   }
 
-  return true;
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+
+  for (let index = 1; index < objects.length; index += 1) {
+    pdf += `${String(offsets[index]).padStart(10, '0')} 00000 n \n`;
+  }
+
+  pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+  const bytes = new Uint8Array(pdf.length);
+  for (let index = 0; index < pdf.length; index += 1) {
+    bytes[index] = pdf.charCodeAt(index) & 0xff;
+  }
+  return bytes;
+};
+
+const buildPaymentTransactionsPdf = (
+  transactions: AdminPaymentTransaction[],
+  options?: {
+    dateRangeLabel?: string;
+    statusLabel?: string;
+  },
+) => {
+  const rows = buildPaymentExcelRows(transactions);
+  const subtitle = [
+    options?.dateRangeLabel,
+    options?.statusLabel && options.statusLabel !== 'All' ? options.statusLabel : null,
+    `${rows.length} transaction${rows.length === 1 ? '' : 's'}`,
+  ].filter(Boolean).join(' | ');
+  const generatedAt = `Generated ${formatExcelTimestamp(new Date().toISOString())}`;
+  const pages: string[] = [];
+  let page = '';
+  let pageNumber = 0;
+  let y = PDF_MARGIN;
+
+  const addPage = () => {
+    pageNumber += 1;
+    page = '';
+    y = PDF_MARGIN;
+    page += pdfTextCommand('MusikaLokal Payment Transactions', PDF_MARGIN, y, 16, 'F2');
+    y += 18;
+    page += pdfTextCommand(subtitle, PDF_MARGIN, y, 9, 'F1');
+    page += pdfTextCommand(generatedAt, PDF_PAGE_WIDTH - PDF_MARGIN - 145, y, 9, 'F1');
+    y += 22;
+  };
+
+  const closePage = () => {
+    page += pdfTextCommand(`Page ${pageNumber}`, PDF_PAGE_WIDTH - PDF_MARGIN - 42, PDF_PAGE_HEIGHT - 22, 8, 'F1');
+    pages.push(page);
+  };
+
+  const drawHeader = () => {
+    let x = PDF_MARGIN;
+    page += pdfRectCommand(PDF_MARGIN, y - 3, PDF_PAGE_WIDTH - PDF_MARGIN * 2, 18, '0.90 0.94 1');
+    page += '0.72 0.78 0.86 RG 0.5 w\n';
+
+    pdfColumns.forEach((column) => {
+      page += pdfTextCommand(column.header, x + 4, y + 8, 8, 'F2');
+      page += pdfRectCommand(x, y - 3, column.width, 18);
+      x += column.width;
+    });
+
+    y += 18;
+  };
+
+  addPage();
+  drawHeader();
+
+  rows.forEach((row) => {
+    const wrappedCells = pdfColumns.map((column) => (
+      wrapPdfText((row as Record<string, string>)[column.key], column.width - 8, 7)
+    ));
+    const rowHeight = Math.max(20, Math.max(...wrappedCells.map((lines) => lines.length)) * 9 + 8);
+
+    if (y + rowHeight > PDF_PAGE_HEIGHT - PDF_MARGIN) {
+      closePage();
+      addPage();
+      drawHeader();
+    }
+
+    let x = PDF_MARGIN;
+    page += '0.80 0.84 0.90 RG 0.35 w\n';
+
+    pdfColumns.forEach((column, columnIndex) => {
+      const lines = wrappedCells[columnIndex];
+      page += pdfRectCommand(x, y, column.width, rowHeight);
+
+      lines.forEach((line, lineIndex) => {
+        const textX = column.align === 'right'
+          ? x + column.width - 4 - estimatePdfTextWidth(line, 7)
+          : x + 4;
+        page += pdfTextCommand(line, Math.max(x + 4, textX), y + 12 + lineIndex * 9, 7, 'F1');
+      });
+
+      x += column.width;
+    });
+
+    y += rowHeight;
+  });
+
+  if (rows.length === 0) {
+    page += pdfTextCommand('No payment transactions match this filter.', PDF_MARGIN, y + 14, 9, 'F1');
+  }
+
+  closePage();
+  return buildPdfBytes(pages);
+};
+
+export const downloadPaymentTransactionsPdf = (
+  transactions: AdminPaymentTransaction[],
+  options?: {
+    dateRangeLabel?: string;
+    statusLabel?: string;
+  },
+) => {
+  if (Platform.OS !== 'web') return false;
+
+  const globalAny = globalThis as any;
+
+  if (!globalAny.Blob || typeof globalAny.Uint8Array === 'undefined') {
+    return false;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const fileName = `musikalokal-payment-transactions-${today}.pdf`;
+  const blob = new globalAny.Blob([buildPaymentTransactionsPdf(transactions, options)], {
+    type: 'application/pdf',
+  });
+
+  return downloadWebBlob(blob, fileName);
 };

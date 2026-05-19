@@ -219,7 +219,7 @@ test.describe('web report buttons with admin moderation', () => {
     await expect(page.getByTestId('admin-report-details-modal')).toBeVisible({ timeout: 45_000 });
     await page.getByTestId('admin-report-details-close-button').click();
 
-    await page.getByTestId(`admin-report-moderate-${firstReport.id}`).click();
+    await page.getByTestId(`admin-report-resolve-${firstReport.id}`).click();
     await expect(page.getByTestId('admin-report-moderation-modal')).toBeVisible({ timeout: 15_000 });
     await page.getByTestId('admin-report-moderation-status-resolved').click();
     await page.getByTestId('admin-report-moderation-action-warn_both').click();
