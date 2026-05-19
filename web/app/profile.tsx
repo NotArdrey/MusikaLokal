@@ -29,14 +29,19 @@ import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import ProfileAvatar from "../src/components/ProfileAvatar";
+import CachedImage from "../src/components/CachedImage";
+import PostDetailsModal from "../src/components/PostDetailsModal";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { emitToast } from "../src/events/toastBus";
 import { screenUploadsWithAi } from "../src/services/uploadSafetyScreen";
 import { isFanUserRole } from "../src/utils/roleRouting";
 
-const GRID_GAP = 8;
+const GRID_GAP = 4;
 const NUM_COLUMNS = 3;
 const GRID_PADDING = 24;
+const PROFILE_WEB_MAX_WIDTH = 935;
+const PROFILE_WEB_PAGE_PADDING = 40;
 const DRAWER_WIDTH = 320;
 const DRAWER_OPEN_ANIMATION_MS = 320;
 const DRAWER_CLOSE_ANIMATION_MS = 240;
@@ -123,6 +128,199 @@ const EMPTY_BOOKMARKS = {
   studios: [] as any[],
   gigs: [] as any[],
   musicians: [] as any[],
+};
+
+type ProfileTabKey = "about" | "posts" | "gigs" | "bookmarks" | "playlists";
+
+type ProfileConnectionItem = {
+  id: string;
+  full_name: string;
+  avatar_url: string | null;
+  role: string | null;
+  target_type: "profile" | "group";
+};
+
+const PROFILE_POSTS_CACHE_TTL_MS = 30000;
+const PROFILE_PLAYLISTS_CACHE_TTL_MS = 30000;
+const PLAYLIST_GENRES = ["Pop", "Rock", "Hip-Hop", "R&B", "Jazz", "Classical", "Electronic", "OPM", "Indie", "Other"];
+const profilePostsCache = new Map<string, { posts: any[]; fetchedAt: number }>();
+const profilePlaylistsCache = new Map<string, { playlists: any[]; fetchedAt: number }>();
+
+const sanitizeAvatarUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const lower = trimmed.toLowerCase();
+  if (lower === "null" || lower === "undefined") return null;
+
+  if (trimmed.startsWith("/storage/v1/") || trimmed.startsWith("storage/v1/")) {
+    const normalizedPath = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+    const envBase = (process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
+    return envBase ? `${envBase.replace(/\/$/, "")}${normalizedPath}` : normalizedPath;
+  }
+
+  return trimmed;
+};
+
+const buildSocialFollowKey = (type?: string | null, id?: string | null) => {
+  const normalizedType = type === "group" ? "group" : "profile";
+  const normalizedId = typeof id === "string" ? id.trim() : "";
+  return normalizedId ? `${normalizedType}:${normalizedId}` : "";
+};
+
+const uniqueConnectionItems = (items: ProfileConnectionItem[]) => {
+  const seenKeys = new Set<string>();
+  return items.filter((item) => {
+    const key = `${item.target_type}:${item.id}`;
+    if (!item.id || seenKeys.has(key)) return false;
+    seenKeys.add(key);
+    return true;
+  });
+};
+
+const normalizeFollowerProfile = (row: any): ProfileConnectionItem | null => {
+  const follower = row?.follower || row;
+  const id =
+    typeof follower?.id === "string" && follower.id.trim().length > 0
+      ? follower.id.trim()
+      : typeof row?.follower_id === "string"
+        ? row.follower_id.trim()
+        : "";
+
+  if (!id) return null;
+
+  return {
+    id,
+    full_name:
+      typeof follower?.full_name === "string" && follower.full_name.trim().length > 0
+        ? follower.full_name.trim()
+        : "MusikaLokal User",
+    avatar_url: sanitizeAvatarUrl(follower?.avatar_url),
+    role: typeof follower?.role === "string" ? follower.role : null,
+    target_type: "profile",
+  };
+};
+
+const normalizeFollowingProfile = (row: any): ProfileConnectionItem | null => {
+  const followedType = row?.followed_type === "group" ? "group" : "profile";
+  const followed = followedType === "group" ? row?.followed_group : row?.followed;
+  const id =
+    typeof followed?.id === "string" && followed.id.trim().length > 0
+      ? followed.id.trim()
+      : typeof row?.followed_id === "string"
+        ? row.followed_id.trim()
+        : "";
+
+  if (!id) return null;
+
+  const groupImages = Array.isArray(followed?.images) ? followed.images : [];
+  const groupImage = groupImages.find((item: any) => typeof item === "string" && item.trim().length > 0);
+
+  return {
+    id,
+    full_name:
+      followedType === "group"
+        ? typeof followed?.name === "string" && followed.name.trim().length > 0
+          ? followed.name.trim()
+          : "MusikaLokal Group"
+        : typeof followed?.full_name === "string" && followed.full_name.trim().length > 0
+          ? followed.full_name.trim()
+          : "MusikaLokal User",
+    avatar_url: sanitizeAvatarUrl(followed?.avatar_url || groupImage),
+    role:
+      followedType === "group"
+        ? typeof followed?.group_type === "string" && followed.group_type.trim().length > 0
+          ? followed.group_type
+          : "group"
+        : typeof followed?.role === "string"
+          ? followed.role
+          : null,
+    target_type: followedType,
+  };
+};
+
+const fetchProfileFollowersDirect = async (targetId: string): Promise<ProfileConnectionItem[]> => {
+  const { data: followRows, error } = await supabase
+    .from("follows")
+    .select("id, follower_id, followed_id, followed_type, created_at")
+    .eq("followed_id", targetId)
+    .eq("followed_type", "profile")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+
+  const followerIds = Array.from(
+    new Set(
+      (followRows || [])
+        .map((row: any) => row?.follower_id)
+        .filter((value: any): value is string => typeof value === "string" && value.trim().length > 0),
+    ),
+  );
+
+  const { data: profiles } = followerIds.length > 0
+    ? await supabase.from("profiles").select("id, full_name, avatar_url, role").in("id", followerIds)
+    : { data: [] };
+
+  const profileById = new Map((profiles || []).map((profile: any) => [profile.id, profile]));
+
+  return uniqueConnectionItems(
+    (followRows || [])
+      .map((row: any) => normalizeFollowerProfile({ ...row, follower: profileById.get(row?.follower_id) || null }))
+      .filter((item: ProfileConnectionItem | null): item is ProfileConnectionItem => Boolean(item)),
+  );
+};
+
+const fetchProfileFollowingDirect = async (targetId: string): Promise<ProfileConnectionItem[]> => {
+  const { data: followRows, error } = await supabase
+    .from("follows")
+    .select("id, followed_id, followed_type, created_at")
+    .eq("follower_id", targetId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+
+  const followedProfileIds = Array.from(
+    new Set(
+      (followRows || [])
+        .filter((row: any) => row?.followed_type !== "group")
+        .map((row: any) => row?.followed_id)
+        .filter((value: any): value is string => typeof value === "string" && value.trim().length > 0),
+    ),
+  );
+  const followedGroupIds = Array.from(
+    new Set(
+      (followRows || [])
+        .filter((row: any) => row?.followed_type === "group")
+        .map((row: any) => row?.followed_id)
+        .filter((value: any): value is string => typeof value === "string" && value.trim().length > 0),
+    ),
+  );
+
+  const [{ data: followedProfiles }, { data: followedGroups }] = await Promise.all([
+    followedProfileIds.length > 0
+      ? supabase.from("profiles").select("id, full_name, avatar_url, role").in("id", followedProfileIds)
+      : Promise.resolve({ data: [] }),
+    followedGroupIds.length > 0
+      ? supabase.from("groups_with_stats").select("id, name, images, group_type, genre, location, owner_id").in("id", followedGroupIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const profileById = new Map((followedProfiles || []).map((profile: any) => [profile.id, profile]));
+  const groupById = new Map((followedGroups || []).map((group: any) => [group.id, group]));
+
+  return uniqueConnectionItems(
+    (followRows || [])
+      .map((row: any) => {
+        const followedType = row?.followed_type === "group" ? "group" : "profile";
+        return normalizeFollowingProfile({
+          ...row,
+          followed_type: followedType,
+          followed: followedType === "profile" ? profileById.get(row?.followed_id) || null : null,
+          followed_group: followedType === "group" ? groupById.get(row?.followed_id) || null : null,
+        });
+      })
+      .filter((item: ProfileConnectionItem | null): item is ProfileConnectionItem => Boolean(item)),
+  );
 };
 
 const logProfileMedia = (event: string, details?: Record<string, unknown>) => {
@@ -556,9 +754,12 @@ export default function ProfileScreen() {
   const { width: winWidth } = useWindowDimensions();
   const isWebDesktop = Platform.OS === "web" && winWidth >= 768;
 
+  const profileContentWidth = isWebDesktop
+    ? Math.min(PROFILE_WEB_MAX_WIDTH, Math.max(320, winWidth - PROFILE_WEB_PAGE_PADDING))
+    : winWidth;
   const gridContainerWidth = isWebDesktop
-    ? Math.min(winWidth, 1120) - GRID_PADDING * 2
-    : winWidth - GRID_PADDING * 2;
+    ? profileContentWidth
+    : profileContentWidth - GRID_PADDING * 2;
   const ITEM_SIZE = Math.floor(
     (gridContainerWidth - GRID_GAP * (NUM_COLUMNS - 1)) / NUM_COLUMNS
   );
@@ -595,8 +796,10 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<any>(null);
   const isFan = isFanUserRole(userRole || profile?.role);
   const [loading, setLoading] = useState(true);
+  const [profilePosts, setProfilePosts] = useState<any[]>([]);
+  const [loadingProfilePosts, setLoadingProfilePosts] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
-  const [gigStats, setGigStats] = useState({ active: 0, upcoming: 0, done: 0 });
+  const [, setGigStats] = useState({ active: 0, upcoming: 0, done: 0 });
   const [gigTimeline, setGigTimeline] = useState<{
     active: any[];
     upcoming: any[];
@@ -607,12 +810,32 @@ export default function ProfileScreen() {
   const [gigSearchQuery, setGigSearchQuery] = useState("");
   const [updatingGigVisibility, setUpdatingGigVisibility] = useState(false);
   const [supportsGigVisibilityPreference, setSupportsGigVisibilityPreference] = useState(true);
-  const [activeTab, setActiveTab] = useState<"about" | "gigs" | "bookmarks">("about");
+  const [activeTab, setActiveTab] = useState<ProfileTabKey>("about");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isMenuMounted, setIsMenuMounted] = useState(false);
   const [isMenuTouchable, setIsMenuTouchable] = useState(false);
   const drawerProgress = useRef(new Animated.Value(0)).current;
   const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "musicians">("all");
+  const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
+  const [loadingPlaylists, setLoadingPlaylists] = useState(false);
+  const [playlistActionId, setPlaylistActionId] = useState<string | null>(null);
+  const [isProfileFollowing, setIsProfileFollowing] = useState(false);
+  const [isProfileFollowBusy, setIsProfileFollowBusy] = useState(false);
+  const [profileFollowerCount, setProfileFollowerCount] = useState(0);
+  const [profileFollowingCount, setProfileFollowingCount] = useState(0);
+  const [profileFollowers, setProfileFollowers] = useState<ProfileConnectionItem[]>([]);
+  const [profileFollowing, setProfileFollowing] = useState<ProfileConnectionItem[]>([]);
+  const [loadingProfileFollowers, setLoadingProfileFollowers] = useState(false);
+  const [followListModal, setFollowListModal] = useState<"followers" | "following" | null>(null);
+  const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+  const [createPlaylistModalVisible, setCreatePlaylistModalVisible] = useState(false);
+  const [playlistTitle, setPlaylistTitle] = useState("");
+  const [playlistDescription, setPlaylistDescription] = useState("");
+  const [playlistGenre, setPlaylistGenre] = useState("");
+  const [playlistVisibility, setPlaylistVisibility] = useState<"public" | "private" | "unlisted">("public");
+  const [creatingPlaylist, setCreatingPlaylist] = useState(false);
+  const profilePostsFetchInFlightRef = useRef<string | null>(null);
+  const profilePlaylistsFetchInFlightRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (loading) return;
@@ -919,12 +1142,160 @@ export default function ProfileScreen() {
     }
   };
 
+  const fetchPlaylists = useCallback(async (targetUserId: string) => {
+    if (!targetUserId) {
+      setUserPlaylists([]);
+      setLoadingPlaylists(false);
+      return;
+    }
+
+    const cached = profilePlaylistsCache.get(targetUserId);
+    if (cached && Date.now() - cached.fetchedAt < PROFILE_PLAYLISTS_CACHE_TTL_MS) {
+      setUserPlaylists(cached.playlists);
+      setLoadingPlaylists(false);
+      return;
+    }
+
+    if (profilePlaylistsFetchInFlightRef.current === targetUserId) return;
+
+    profilePlaylistsFetchInFlightRef.current = targetUserId;
+    setLoadingPlaylists(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-playlists", {
+        body: { action: "list_user_playlists", user_id: targetUserId },
+      });
+      if (error) throw error;
+      const playlists = Array.isArray(data?.data) ? data.data : Array.isArray(data?.playlists) ? data.playlists : [];
+      profilePlaylistsCache.set(targetUserId, { playlists, fetchedAt: Date.now() });
+      setUserPlaylists(playlists);
+    } catch (error) {
+      console.warn("Profile playlists fetch failed", error);
+      setUserPlaylists([]);
+    } finally {
+      if (profilePlaylistsFetchInFlightRef.current === targetUserId) {
+        profilePlaylistsFetchInFlightRef.current = null;
+      }
+      setLoadingPlaylists(false);
+    }
+  }, []);
+
+  const fetchProfilePosts = useCallback(async (targetId: string) => {
+    if (!targetId || isGuest) {
+      setProfilePosts([]);
+      return;
+    }
+
+    const cached = profilePostsCache.get(targetId);
+    if (cached && Date.now() - cached.fetchedAt < PROFILE_POSTS_CACHE_TTL_MS) {
+      setProfilePosts(cached.posts);
+      setLoadingProfilePosts(false);
+      return;
+    }
+
+    if (profilePostsFetchInFlightRef.current === targetId) return;
+
+    profilePostsFetchInFlightRef.current = targetId;
+    setLoadingProfilePosts(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+        body: { action: "get_user_posts", target_user_id: targetId, limit: 12 },
+      });
+      if (error) throw error;
+
+      const rows = Array.isArray(data?.data) ? data.data : [];
+      const nextPosts = rows.map((post: any) => {
+        const media = Array.isArray(post?.media)
+          ? post.media.map((item: any) => ({
+              ...item,
+              preview_url: sanitizeAvatarUrl(
+                item?.thumbnail_url ||
+                  item?.thumbnail_path ||
+                  item?.url ||
+                  item?.storage_path ||
+                  item?.public_url,
+              ) || "",
+            }))
+          : [];
+        const cover = media.find((item: any) => item?.is_cover) || media[0] || null;
+
+        return {
+          ...post,
+          body: post?.body ?? post?.content ?? "",
+          media,
+          preview_url: cover?.preview_url || "",
+        };
+      });
+
+      profilePostsCache.set(targetId, { posts: nextPosts, fetchedAt: Date.now() });
+      setProfilePosts(nextPosts);
+    } catch (error) {
+      console.warn("Profile posts fetch failed", error);
+      setProfilePosts([]);
+    } finally {
+      if (profilePostsFetchInFlightRef.current === targetId) {
+        profilePostsFetchInFlightRef.current = null;
+      }
+      setLoadingProfilePosts(false);
+    }
+  }, [isGuest]);
+
+  const refreshProfileFollowLists = useCallback(async (targetId: string) => {
+    if (!targetId || isGuest) {
+      setProfileFollowers([]);
+      setProfileFollowing([]);
+      setProfileFollowerCount(0);
+      setProfileFollowingCount(0);
+      return;
+    }
+
+    setLoadingProfileFollowers(true);
+    try {
+      const [followers, following] = await Promise.all([
+        fetchProfileFollowersDirect(targetId),
+        fetchProfileFollowingDirect(targetId),
+      ]);
+      setProfileFollowers(followers);
+      setProfileFollowing(following);
+      setProfileFollowerCount(followers.length);
+      setProfileFollowingCount(following.length);
+    } catch (error) {
+      console.warn("Profile follow lists fetch failed", error);
+    } finally {
+      setLoadingProfileFollowers(false);
+    }
+  }, [isGuest]);
+
+  const loadProfileFollowState = useCallback(async (targetId: string) => {
+    if (!targetId || !currentUserId || isGuest || targetId === currentUserId) {
+      setIsProfileFollowing(false);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+        body: { action: "get_following" },
+      });
+      if (error) throw error;
+      const followKey = buildSocialFollowKey("profile", targetId);
+      const nextFollowingKeys = new Set<string>(
+        (Array.isArray(data?.data) ? data.data : [])
+          .map((row: any) => buildSocialFollowKey(row?.followed_type, row?.followed_id))
+          .filter(Boolean),
+      );
+      setIsProfileFollowing(nextFollowingKeys.has(followKey));
+    } catch {
+      setIsProfileFollowing(false);
+    }
+  }, [currentUserId, isGuest]);
+
   // Refresh profile data every time the screen comes into focus
   useFocusEffect(
     useCallback(() => {
       if (!authLoading) {
         fetchProfile();
       }
+      // fetchProfile intentionally reads the latest route/auth/profile helpers on focus.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [params.userId, authLoading, currentUserId, isGuest]),
   );
 
@@ -978,6 +1349,12 @@ export default function ProfileScreen() {
           setGigTimeline({ active: [], upcoming: [], done: [] });
           setBookmarkedListings(EMPTY_BOOKMARKS);
           setLoadingBookmarks(false);
+          setProfilePosts([]);
+          setUserPlaylists([]);
+          setProfileFollowerCount(0);
+          setProfileFollowingCount(0);
+          setProfileFollowers([]);
+          setProfileFollowing([]);
           setProfile({
             full_name: "Guest User",
             role: null,
@@ -1143,12 +1520,212 @@ export default function ProfileScreen() {
       });
 
       await fetchBookmarkedListings(targetId, !!ownership && !isGuest);
+      void fetchPlaylists(targetId);
+      void fetchProfilePosts(targetId);
+      void refreshProfileFollowLists(targetId);
+      void loadProfileFollowState(targetId);
     } catch (e) {
       console.log("Error fetching profile:", e);
     } finally {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (activeTab !== "posts") return;
+    const targetId = profile?.id || normalizedParamUserId || currentUserId || "";
+    if (!targetId) {
+      setProfilePosts([]);
+      return;
+    }
+    void fetchProfilePosts(targetId);
+  }, [activeTab, currentUserId, fetchProfilePosts, normalizedParamUserId, profile?.id]);
+
+  const viewedProfileId = typeof profile?.id === "string" ? profile.id.trim() : "";
+  const canFollowProfile =
+    Boolean(currentUserId) &&
+    !isGuest &&
+    !isOwner &&
+    viewedProfileId.length > 0 &&
+    viewedProfileId !== currentUserId;
+
+  const openFollowListModal = useCallback((nextModal: "followers" | "following") => {
+    setFollowListModal(nextModal);
+    const targetId = viewedProfileId || normalizedParamUserId || currentUserId || "";
+    if (targetId) void refreshProfileFollowLists(targetId);
+  }, [currentUserId, normalizedParamUserId, refreshProfileFollowLists, viewedProfileId]);
+
+  const openFollowListItem = (item: ProfileConnectionItem) => {
+    setFollowListModal(null);
+    if (!item.id) return;
+
+    if (item.target_type === "group") {
+      router.push({ pathname: "/group_details" as any, params: { id: item.id } });
+      return;
+    }
+
+    router.push({ pathname: "/profile" as any, params: { userId: item.id } });
+  };
+
+  const formatFollowerRole = (role?: string | null) => {
+    if (!role) return "Profile";
+    if (role === "group") return "Group";
+    if (role === "studio-owner") return "Studio Owner";
+    if (role === "venue-owner") return "Venue Owner";
+    return role.replace("-", " ").replace(/\b\w/g, (char) => char.toUpperCase());
+  };
+
+  const handleProfileFollowToggle = useCallback(async () => {
+    if (!canFollowProfile || !viewedProfileId || isProfileFollowBusy) return;
+
+    const wasFollowing = isProfileFollowing;
+    const previousFollowerCount = profileFollowerCount;
+    setIsProfileFollowBusy(true);
+    setIsProfileFollowing(!wasFollowing);
+    setProfileFollowerCount((prev) => Math.max(0, prev + (wasFollowing ? -1 : 1)));
+
+    try {
+      const { error } = await supabase.functions.invoke("manage-social-feed", {
+        body: {
+          action: wasFollowing ? "unfollow" : "follow",
+          target_id: viewedProfileId,
+          target_type: "profile",
+        },
+      });
+      if (error) throw error;
+
+      emitToast({ type: "success", title: wasFollowing ? "Unfollowed" : "Following", message: "" });
+      void refreshProfileFollowLists(viewedProfileId);
+    } catch (error: any) {
+      setIsProfileFollowing(wasFollowing);
+      setProfileFollowerCount(previousFollowerCount);
+      emitToast({ type: "error", title: "Follow failed", message: error?.message || "Please try again." });
+    } finally {
+      setIsProfileFollowBusy(false);
+    }
+  }, [
+    canFollowProfile,
+    isProfileFollowBusy,
+    isProfileFollowing,
+    profileFollowerCount,
+    refreshProfileFollowLists,
+    viewedProfileId,
+  ]);
+
+  const openCreatePlaylist = useCallback(() => {
+    setPlaylistTitle("");
+    setPlaylistDescription("");
+    setPlaylistGenre("");
+    setPlaylistVisibility("public");
+    setCreatePlaylistModalVisible(true);
+  }, []);
+
+  const closeCreatePlaylistModal = useCallback(() => {
+    if (creatingPlaylist) return;
+    setCreatePlaylistModalVisible(false);
+  }, [creatingPlaylist]);
+
+  const handleCreatePlaylistFromModal = useCallback(async () => {
+    const trimmedTitle = playlistTitle.trim();
+    if (!trimmedTitle) {
+      showAlert("error", "Playlist Title Required", "Add a title before creating your playlist.");
+      return;
+    }
+
+    try {
+      setCreatingPlaylist(true);
+      const { data, error } = await supabase.functions.invoke("manage-playlists", {
+        body: {
+          action: "create_playlist",
+          title: trimmedTitle,
+          description: playlistDescription.trim(),
+          genre: playlistGenre,
+          visibility: playlistVisibility,
+        },
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || "Failed to create playlist.");
+
+      const createdPlaylist = data?.data || data?.playlist || null;
+      const targetUserId = viewedProfileId || currentUserId || normalizedParamUserId || "";
+      if (targetUserId) profilePlaylistsCache.delete(targetUserId);
+      if (createdPlaylist?.id) {
+        setUserPlaylists((prev) => [createdPlaylist, ...prev]);
+      } else if (targetUserId) {
+        void fetchPlaylists(targetUserId);
+      }
+
+      setCreatePlaylistModalVisible(false);
+      setActiveTab("playlists");
+      emitToast({ type: "success", title: "Playlist Created", message: `${trimmedTitle} is ready.` });
+    } catch (error: any) {
+      showAlert("error", "Create Playlist Failed", error?.message || "Please try again.");
+    } finally {
+      setCreatingPlaylist(false);
+    }
+  }, [
+    currentUserId,
+    fetchPlaylists,
+    normalizedParamUserId,
+    playlistDescription,
+    playlistGenre,
+    playlistTitle,
+    playlistVisibility,
+    viewedProfileId,
+  ]);
+
+  const handleDeletePlaylist = async (playlistId: string, playlistTitle: string) => {
+    if (!playlistId) return;
+    try {
+      setPlaylistActionId(playlistId);
+      const { data, error } = await supabase.functions.invoke("manage-playlists", {
+        body: { action: "delete_playlist", playlist_id: playlistId },
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || "Failed to delete playlist.");
+
+      const targetUserId = viewedProfileId || currentUserId || normalizedParamUserId || "";
+      if (targetUserId) profilePlaylistsCache.delete(targetUserId);
+      setUserPlaylists((prev) => prev.filter((playlist) => playlist.id !== playlistId));
+      emitToast({ type: "success", title: "Playlist Deleted", message: `${playlistTitle || "Playlist"} was removed.` });
+    } catch (error: any) {
+      showAlert("warning", "Delete Failed", error?.message || "Failed to delete playlist.");
+    } finally {
+      setPlaylistActionId(null);
+    }
+  };
+
+  const promptDeletePlaylist = (playlist: any) => {
+    showAlert(
+      "warning",
+      "Delete Playlist",
+      `Delete "${playlist?.title || "this playlist"}"? This cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => void handleDeletePlaylist(playlist.id, playlist.title || "Playlist"),
+        },
+      ],
+    );
+  };
+
+  const profileTabOrder = useMemo(
+    () => [
+      "about",
+      "posts",
+      ...(profile?.role === "musician" && profile?.show_gig_statuses !== false ? ["gigs"] : []),
+      ...(isOwner && !isGuest ? ["bookmarks"] : []),
+      "playlists",
+    ] as ProfileTabKey[],
+    [isGuest, isOwner, profile?.role, profile?.show_gig_statuses],
+  );
+
+  useEffect(() => {
+    if (profileTabOrder.includes(activeTab)) return;
+    setActiveTab(profileTabOrder[0] ?? "about");
+  }, [activeTab, profileTabOrder]);
 
   const MENU_ITEMS = [
     { label: "Edit Profile", icon: "person-outline", route: "/edit_profile" },
@@ -1793,7 +2370,9 @@ export default function ProfileScreen() {
               </View>
 
               {isOwner && (
-                <TouchableOpacity activeOpacity={1}
+                <TouchableOpacity
+                  activeOpacity={1}
+                  onPress={() => router.push("/edit_profile" as any)}
                   style={[
                     styles.editIconBtn,
                     { backgroundColor: colors.primary },
@@ -1839,6 +2418,35 @@ export default function ProfileScreen() {
               ))}
             </View>
 
+            {canFollowProfile ? (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                disabled={isProfileFollowBusy}
+                onPress={() => void handleProfileFollowToggle()}
+                style={[
+                  styles.profileFollowBtn,
+                  {
+                    backgroundColor: isProfileFollowing ? surfaceBackground : colors.primary,
+                    borderColor: isProfileFollowing ? borderSoft : colors.primary,
+                    opacity: isProfileFollowBusy ? 0.72 : 1,
+                  },
+                ]}
+              >
+                {isProfileFollowBusy ? (
+                  <ActivityIndicator size="small" color={isProfileFollowing ? colors.textSecondary : "#FFFFFF"} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.profileFollowBtnText,
+                      { color: isProfileFollowing ? colors.textSecondary : "#FFFFFF" },
+                    ]}
+                  >
+                    {isProfileFollowing ? "Following" : "Follow"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            ) : null}
+
             {isOwner && profile?.role === "musician" && supportsGigVisibilityPreference && (
               <View
                 style={[
@@ -1867,42 +2475,48 @@ export default function ProfileScreen() {
             <View style={styles.statsContainer}>
               <View style={styles.statItem}>
                 <Text style={[styles.statValue, { color: colors.text }]}>
-                  {profile?.rating
-                    ? `${Math.round(profile.rating * 20)}%`
-                    : "N/A"}
+                  {profilePosts.length}
                 </Text>
                 <Text
                   style={[styles.statLabel, { color: colors.textSecondary }]}
                 >
-                  Rating
+                  Posts
                 </Text>
               </View>
               <View
                 style={[styles.statDivider, { backgroundColor: colors.border }]}
               />
-              <View style={styles.statItem}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => openFollowListModal("followers")}
+                style={styles.statItem}
+              >
                 <Text style={[styles.statValue, { color: colors.text }]}>
-                  {profile?.review_count || 0}
+                  {profileFollowerCount}
                 </Text>
                 <Text
                   style={[styles.statLabel, { color: colors.textSecondary }]}
                 >
-                  Reviews
+                  Followers
                 </Text>
-              </View>
+              </TouchableOpacity>
               <View
                 style={[styles.statDivider, { backgroundColor: colors.border }]}
               />
-              <View style={styles.statItem}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => openFollowListModal("following")}
+                style={styles.statItem}
+              >
                 <Text style={[styles.statValue, { color: colors.text }]}>
-                  {profile?.role === "musician" ? gigStats.active : "-"}
+                  {profileFollowingCount}
                 </Text>
                 <Text
                   style={[styles.statLabel, { color: colors.textSecondary }]}
                 >
-                  Active
+                  Following
                 </Text>
-              </View>
+              </TouchableOpacity>
             </View>
 
             {/* Bio Section */}
@@ -1916,21 +2530,33 @@ export default function ProfileScreen() {
 
             {/* TAB NAVIGATION */}
             <View style={[styles.tabContainer, { borderBottomColor: borderSoft }]}>
-              <TouchableOpacity activeOpacity={1} onPress={() => setActiveTab("about")} style={[styles.tabButton, activeTab === "about" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
-                <Ionicons name="grid-outline" size={24} color={activeTab === "about" ? colors.text : colors.textSecondary} />
-              </TouchableOpacity>
+              {profileTabOrder.map((tab) => {
+                const isActive = activeTab === tab;
+                const icon =
+                  tab === "posts"
+                    ? "newspaper-outline"
+                    : tab === "gigs"
+                      ? "mic-outline"
+                      : tab === "bookmarks"
+                        ? "bookmark-outline"
+                        : tab === "playlists"
+                          ? "musical-notes-outline"
+                          : "grid-outline";
 
-              {profile?.role === "musician" && profile?.show_gig_statuses !== false && (
-                <TouchableOpacity activeOpacity={1} onPress={() => setActiveTab("gigs")} style={[styles.tabButton, activeTab === "gigs" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
-                  <Ionicons name="mic-outline" size={24} color={activeTab === "gigs" ? colors.text : colors.textSecondary} />
-                </TouchableOpacity>
-              )}
-
-              {isOwner && !isGuest && (
-                <TouchableOpacity activeOpacity={1} onPress={() => setActiveTab("bookmarks")} style={[styles.tabButton, activeTab === "bookmarks" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
-                  <Ionicons name="bookmark-outline" size={24} color={activeTab === "bookmarks" ? colors.text : colors.textSecondary} />
-                </TouchableOpacity>
-              )}
+                return (
+                  <TouchableOpacity
+                    key={tab}
+                    activeOpacity={0.85}
+                    onPress={() => setActiveTab(tab)}
+                    style={[styles.tabButton, isActive && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}
+                  >
+                    <Ionicons name={icon as any} size={20} color={isActive ? colors.text : colors.textSecondary} />
+                    <Text style={[styles.tabButtonLabel, { color: isActive ? colors.text : colors.textSecondary }]}>
+                      {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             <SmoothTabTransition activeKey={activeTab} style={styles.profileTabTransition}>
@@ -2095,6 +2721,147 @@ export default function ProfileScreen() {
                 )}
                 </View>
               )}
+
+              {activeTab === "posts" && (
+                <View style={styles.profileTabContent}>
+                  <View style={[styles.profilePostsSection, { backgroundColor: surfaceBackground, borderColor: borderSoft }]}>
+                    <View style={styles.profilePostsHeader}>
+                      <Text style={[styles.profilePostsTitle, { color: colors.text }]}>Posts</Text>
+                      {loadingProfilePosts ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+                    </View>
+                    {!loadingProfilePosts && profilePosts.length === 0 ? (
+                      <Text style={[styles.profilePostsEmpty, { color: colors.textSecondary }]}>
+                        {isOwner ? "Your posts will appear here." : "No posts to show yet."}
+                      </Text>
+                    ) : (
+                      profilePosts.map((post) => {
+                        const hasVideoMedia = post.media?.some((item: any) => ["video", "teaser_clip"].includes(item.media_type));
+
+                        return (
+                          <TouchableOpacity
+                            key={post.id}
+                            activeOpacity={0.78}
+                            accessibilityRole="button"
+                            onPress={() => setSelectedPostId(String(post.id))}
+                            style={[styles.profilePostCard, { borderColor: borderSoft }]}
+                          >
+                            {post.preview_url ? (
+                              <View style={styles.profilePostPreviewWrap}>
+                                <CachedImage uri={post.preview_url} style={styles.profilePostPreview} width={84} height={84} />
+                                {hasVideoMedia ? (
+                                  <View style={styles.profilePostVideoBadge}>
+                                    <Ionicons name="play" size={12} color="#FFFFFF" />
+                                  </View>
+                                ) : null}
+                              </View>
+                            ) : (
+                              <View style={[styles.profilePostPreviewFallback, { backgroundColor: pageCardBackground }]}>
+                                <Ionicons name="newspaper-outline" size={24} color={colors.textSecondary} />
+                              </View>
+                            )}
+                            <View style={styles.profilePostBody}>
+                              <Text style={[styles.profilePostText, { color: colors.text }]} numberOfLines={3}>
+                                {post.body || "Media post"}
+                              </Text>
+                              <View style={styles.profilePostMetaRow}>
+                                <Text style={[styles.profilePostMeta, { color: colors.textSecondary }]}>
+                                  {new Date(post.created_at).toLocaleDateString()}
+                                </Text>
+                                <Text style={[styles.profilePostMeta, { color: colors.textSecondary }]}>
+                                  {Number(post.reaction_count || 0)} likes
+                                </Text>
+                                <Text style={[styles.profilePostMeta, { color: colors.textSecondary }]}>
+                                  {Number(post.comment_count || 0)} comments
+                                </Text>
+                              </View>
+                            </View>
+                            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} style={styles.profilePostOpenIcon} />
+                          </TouchableOpacity>
+                        );
+                      })
+                    )}
+                  </View>
+                </View>
+              )}
+
+              {activeTab === "playlists" && (
+                <View style={styles.profileTabContent}>
+                  <View style={[styles.playlistsSection, { backgroundColor: surfaceBackground, borderColor: borderSoft }]}>
+                    <View style={styles.playlistsHeader}>
+                      <View>
+                        <Text style={[styles.profilePostsTitle, { color: colors.text }]}>Playlists</Text>
+                        <Text style={[styles.playlistsHint, { color: colors.textSecondary }]}>
+                          Open a playlist to view tracks and station details.
+                        </Text>
+                      </View>
+                      <View style={styles.playlistsHeaderActions}>
+                        {loadingPlaylists ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+                        {isOwner && !isGuest ? (
+                          <TouchableOpacity activeOpacity={0.85} onPress={openCreatePlaylist} style={[styles.createPlaylistBtn, { backgroundColor: colors.primary }]}>
+                            <Ionicons name="add" size={16} color="#fff" />
+                            <Text style={styles.createPlaylistText}>Create</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    </View>
+
+                    {!loadingPlaylists && userPlaylists.length === 0 ? (
+                      <View style={[styles.playlistEmptyState, { borderColor: borderSoft, backgroundColor: pageCardBackground }]}>
+                        <Ionicons name="musical-notes-outline" size={28} color={colors.textSecondary} />
+                        <Text style={[styles.playlistEmptyTitle, { color: colors.text }]}>
+                          {isOwner && !isGuest ? "No playlists yet" : "No playlists to show"}
+                        </Text>
+                        <Text style={[styles.playlistEmptyText, { color: colors.textSecondary }]}>
+                          {isOwner && !isGuest
+                            ? "Create your first playlist to build your profile rotation."
+                            : "This profile has not shared any playlists yet."}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={styles.playlistsList}>
+                        {userPlaylists.map((playlist: any) => {
+                          const trackCount = Number(playlist.track_count ?? playlist.items_count ?? playlist.items?.length ?? 0);
+                          const isBusy = playlistActionId === playlist.id;
+                          return (
+                            <View key={playlist.id} style={[styles.playlistCard, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}>
+                              <TouchableOpacity
+                                activeOpacity={0.82}
+                                onPress={() => router.push({ pathname: "/playlist_details" as any, params: { playlist_id: playlist.id } })}
+                                style={styles.playlistMain}
+                              >
+                                <View style={[styles.playlistIconWrap, { backgroundColor: colors.primary + "22" }]}>
+                                  <Ionicons name="musical-notes" size={20} color={colors.primary} />
+                                </View>
+                                <View style={styles.playlistBody}>
+                                  <Text numberOfLines={1} style={[styles.playlistTitle, { color: colors.text }]}>{playlist.title || "Untitled Playlist"}</Text>
+                                  <Text style={[styles.playlistMeta, { color: colors.textSecondary }]}>
+                                    {trackCount} track{trackCount === 1 ? "" : "s"} {" • "} {playlist.visibility === "private" ? "Private" : "Public"}
+                                  </Text>
+                                </View>
+                                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                              </TouchableOpacity>
+                              {isOwner && !isGuest ? (
+                                <TouchableOpacity
+                                  activeOpacity={0.85}
+                                  disabled={isBusy}
+                                  onPress={() => promptDeletePlaylist(playlist)}
+                                  style={styles.playlistDeleteBtn}
+                                >
+                                  {isBusy ? (
+                                    <ActivityIndicator size="small" color="#EF4444" />
+                                  ) : (
+                                    <Ionicons name="trash-outline" size={15} color="#EF4444" />
+                                  )}
+                                </TouchableOpacity>
+                              ) : null}
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </View>
+                </View>
+              )}
             </SmoothTabTransition>
 
           </View>
@@ -2106,30 +2873,45 @@ export default function ProfileScreen() {
               style={[
                 styles.mediaSection,
                 isWebDesktop && styles.mediaSectionWeb,
-                isWebDesktop && styles.webSectionCard,
-                { backgroundColor: isWebDesktop ? pageCardBackground : "transparent", borderColor: borderSoft },
+                {
+                  backgroundColor: isWebDesktop ? "transparent" : "transparent",
+                  borderColor: isWebDesktop ? "transparent" : borderSoft,
+                },
               ]}
             >
-            <View style={styles.mediaSectionHeader}>
-              <View style={styles.mediaSectionHeading}>
+            <View
+              style={[
+                styles.mediaSectionHeader,
+                isWebDesktop && styles.mediaSectionHeaderWeb,
+                isWebDesktop && { borderTopColor: borderSoft },
+              ]}
+            >
+              <View style={[styles.mediaSectionHeading, isWebDesktop && styles.mediaSectionHeadingWeb]}>
                 <View
                   style={[
                     styles.mediaSectionIconWrap,
+                    isWebDesktop && styles.mediaSectionIconWrapWeb,
                     { backgroundColor: isDark ? "rgba(79,70,229,0.18)" : "#E0E7FF" },
+                    isWebDesktop && { backgroundColor: "transparent" },
                   ]}
                 >
-                  <Ionicons name="images-outline" size={18} color={colors.primary} />
+                  <Ionicons name="grid-outline" size={isWebDesktop ? 13 : 18} color={isWebDesktop ? colors.text : colors.primary} />
                 </View>
-                <View style={styles.mediaSectionTextWrap}>
-                  <Text style={[styles.sectionTitle, { color: colors.text }]}>Media</Text>
-                  <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
+                <View style={[styles.mediaSectionTextWrap, isWebDesktop && styles.mediaSectionTextWrapWeb]}>
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.sectionTitle, isWebDesktop && styles.sectionTitleWeb, { color: colors.text }]}
+                  >
+                    Media
+                  </Text>
+                  <Text style={[styles.sectionSubtitle, isWebDesktop && styles.sectionSubtitleWeb, { color: colors.textSecondary }]}>
                     {mediaSummary}
                   </Text>
                 </View>
               </View>
 
-              <View style={styles.mediaSectionActions}>
-                {portfolioCount > 0 && (
+              <View style={[styles.mediaSectionActions, isWebDesktop && styles.mediaSectionActionsWeb]}>
+                {portfolioCount > 0 && !isWebDesktop && (
                   <View
                     style={[
                       styles.mediaCountBadge,
@@ -2152,6 +2934,7 @@ export default function ProfileScreen() {
                     activeOpacity={1}
                     style={[
                       styles.addMediaBtn,
+                      isWebDesktop && styles.addMediaBtnWeb,
                       {
                         backgroundColor: uploading
                           ? colors.textSecondary
@@ -2210,37 +2993,12 @@ export default function ProfileScreen() {
                   style={[styles.emptyMediaSubtext, { color: colors.muted }]}
                 >
                   {isOwner
-                    ? "Share your best work!"
+                    ? "Use the Add Media button above to share your best work."
                     : "This profile hasn't added media yet"}
                 </Text>
-                {isOwner && (
-                  <TouchableOpacity
-                    onPress={addMediaToPortfolio}
-                    disabled={uploading}
-                    activeOpacity={1}
-                    style={[
-                      styles.uploadBtn,
-                      {
-                        backgroundColor: uploading
-                          ? colors.textSecondary
-                          : colors.primary,
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name="cloud-upload-outline"
-                      size={18}
-                      color="#fff"
-                      style={{ marginRight: 8 }}
-                    />
-                    <Text style={styles.uploadBtnText}>
-                      {uploading ? "Uploading..." : "Add Media"}
-                    </Text>
-                  </TouchableOpacity>
-                )}
               </View>
             ) : (
-              <View style={styles.mediaGrid}>
+              <View style={[styles.mediaGrid, isWebDesktop && styles.mediaGridWeb]}>
                 {profile.portfolio_urls.map((url: string, i: number) => {
                   const mediaType = getProfileMediaType(url);
                   const isVideoItem = mediaType === "video";
@@ -2249,7 +3007,11 @@ export default function ProfileScreen() {
                   return (
                     <TouchableOpacity
                       key={url}
-                      style={[styles.gridItem, { width: ITEM_SIZE, height: ITEM_SIZE }]}
+                      style={[
+                        styles.gridItem,
+                        isWebDesktop && styles.gridItemWeb,
+                        { width: ITEM_SIZE, height: ITEM_SIZE },
+                      ]}
                       onPress={() => openMediaViewer(url)}
                       activeOpacity={1}
                     >
@@ -2257,6 +3019,7 @@ export default function ProfileScreen() {
                         <View
                           style={[
                             styles.gridVideoPlaceholder,
+                            isWebDesktop && styles.gridVideoPlaceholderWeb,
                             { backgroundColor: isDark ? "#0F172A" : "#E2E8F0" },
                           ]}
                         >
@@ -2267,6 +3030,7 @@ export default function ProfileScreen() {
                         <View
                           style={[
                             styles.gridDocumentPlaceholder,
+                            isWebDesktop && styles.gridDocumentPlaceholderWeb,
                             { backgroundColor: isDark ? "#0F172A" : "#E2E8F0" },
                           ]}
                         >
@@ -2278,11 +3042,12 @@ export default function ProfileScreen() {
                       ) : (
                         <Image
                           source={{ uri: url }}
-                          style={styles.gridImage}
+                          style={[styles.gridImage, isWebDesktop && styles.gridImageWeb]}
                           resizeMode="cover"
                         />
                       )}
 
+                      {!isWebDesktop && (
                       <View style={styles.gridMeta}>
                         <View style={styles.mediaTypePill}>
                           <Ionicons
@@ -2295,6 +3060,7 @@ export default function ProfileScreen() {
                           </Text>
                         </View>
                       </View>
+                      )}
 
                       {isOwner && (
                         <TouchableOpacity
@@ -2303,7 +3069,7 @@ export default function ProfileScreen() {
                             event?.stopPropagation?.();
                             confirmRemoveMedia(url);
                           }}
-                          style={styles.mediaRemoveBtn}
+                          style={[styles.mediaRemoveBtn, isWebDesktop && styles.mediaRemoveBtnWeb]}
                         >
                           <Ionicons name="trash-outline" size={14} color="#fff" />
                         </TouchableOpacity>
@@ -2322,6 +3088,223 @@ export default function ProfileScreen() {
             uri={selectedMedia}
             onClose={() => setMediaModalVisible(false)}
           />
+          <PostDetailsModal
+            visible={Boolean(selectedPostId)}
+            postId={selectedPostId}
+            onClose={() => setSelectedPostId(null)}
+            onPostDeleted={(postId) => {
+              setProfilePosts((prev) => prev.filter((post) => post.id !== postId));
+              setSelectedPostId(null);
+            }}
+            onReactionChanged={(postId, hasReaction, reactionCount) => {
+              setProfilePosts((prev) =>
+                prev.map((post) =>
+                  post.id === postId
+                    ? { ...post, has_reaction: hasReaction, reaction_count: reactionCount }
+                    : post,
+                ),
+              );
+            }}
+            onCommentChanged={(postId, commentCount) => {
+              setProfilePosts((prev) =>
+                prev.map((post) =>
+                  post.id === postId ? { ...post, comment_count: commentCount } : post,
+                ),
+              );
+            }}
+          />
+          <Modal
+            visible={Boolean(followListModal)}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setFollowListModal(null)}
+          >
+            <View style={styles.followModalOverlay}>
+              <View style={[styles.followModalCard, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}>
+                <View style={styles.followModalHeader}>
+                  <View>
+                    <Text style={[styles.followModalTitle, { color: colors.text }]}>
+                      {followListModal === "following" ? "Following" : "Followers"}
+                    </Text>
+                    <Text style={[styles.followModalCount, { color: colors.textSecondary }]}>
+                      {followListModal === "following" ? profileFollowingCount : profileFollowerCount} profiles
+                    </Text>
+                  </View>
+                  <TouchableOpacity activeOpacity={0.85} onPress={() => setFollowListModal(null)} style={[styles.followModalClose, { backgroundColor: surfaceBackground }]}>
+                    <Ionicons name="close" size={18} color={colors.text} />
+                  </TouchableOpacity>
+                </View>
+                <ScrollView style={styles.followModalList} contentContainerStyle={styles.followModalListContent}>
+                  {loadingProfileFollowers ? (
+                    <View style={styles.followModalLoading}>
+                      <ActivityIndicator size="small" color={colors.primary} />
+                      <Text style={[styles.followModalEmptyText, { color: colors.textSecondary }]}>Loading...</Text>
+                    </View>
+                  ) : (followListModal === "following" ? profileFollowing : profileFollowers).length === 0 ? (
+                    <Text style={[styles.followModalEmptyText, { color: colors.textSecondary }]}>
+                      {followListModal === "following" ? "Not following anyone yet." : "No followers yet."}
+                    </Text>
+                  ) : (
+                    (followListModal === "following" ? profileFollowing : profileFollowers).map((item) => (
+                      <TouchableOpacity
+                        key={`${item.target_type}:${item.id}`}
+                        activeOpacity={0.85}
+                        onPress={() => openFollowListItem(item)}
+                        style={[styles.followModalItem, { borderColor: borderSoft }]}
+                      >
+                        <ProfileAvatar
+                          uri={item.avatar_url}
+                          style={styles.followModalAvatar}
+                          backgroundColor={surfaceBackground}
+                          iconColor={colors.textSecondary}
+                        />
+                        <View style={styles.followModalItemBody}>
+                          <Text numberOfLines={1} style={[styles.followModalName, { color: colors.text }]}>{item.full_name}</Text>
+                          <Text style={[styles.followModalRole, { color: colors.textSecondary }]}>{formatFollowerRole(item.role)}</Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    ))
+                  )}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
+          <Modal
+            visible={createPlaylistModalVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={closeCreatePlaylistModal}
+          >
+            <View style={styles.playlistModalOverlay}>
+              <View style={[styles.playlistModalCard, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}>
+                <View style={styles.playlistModalHeader}>
+                  <View>
+                    <Text style={[styles.playlistModalTitle, { color: colors.text }]}>Create Playlist</Text>
+                    <Text style={[styles.playlistModalSubtitle, { color: colors.textSecondary }]}>
+                      Build a new playlist for your profile rotation.
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={closeCreatePlaylistModal}
+                    disabled={creatingPlaylist}
+                    style={[styles.followModalClose, { backgroundColor: surfaceBackground }]}
+                  >
+                    <Ionicons name="close" size={18} color={colors.text} />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.playlistModalBody}>
+                  <Text style={[styles.playlistModalLabel, { color: colors.text }]}>Title *</Text>
+                  <TextInput
+                    value={playlistTitle}
+                    onChangeText={setPlaylistTitle}
+                    placeholder="Playlist title"
+                    placeholderTextColor={colors.textSecondary}
+                    maxLength={100}
+                    style={[styles.playlistModalInput, { color: colors.text, backgroundColor: surfaceBackground, borderColor: borderSoft }]}
+                  />
+
+                  <Text style={[styles.playlistModalLabel, { color: colors.text }]}>Description</Text>
+                  <TextInput
+                    value={playlistDescription}
+                    onChangeText={setPlaylistDescription}
+                    placeholder="Describe the playlist"
+                    placeholderTextColor={colors.textSecondary}
+                    multiline
+                    maxLength={500}
+                    style={[
+                      styles.playlistModalInput,
+                      styles.playlistModalTextArea,
+                      { color: colors.text, backgroundColor: surfaceBackground, borderColor: borderSoft },
+                    ]}
+                  />
+
+                  <Text style={[styles.playlistModalLabel, { color: colors.text }]}>Genre</Text>
+                  <View style={styles.playlistGenreWrap}>
+                    {PLAYLIST_GENRES.map((genre) => {
+                      const selected = playlistGenre === genre;
+                      return (
+                        <TouchableOpacity
+                          key={genre}
+                          activeOpacity={0.85}
+                          onPress={() => setPlaylistGenre(selected ? "" : genre)}
+                          style={[
+                            styles.playlistGenreChip,
+                            {
+                              backgroundColor: selected ? colors.primary : surfaceBackground,
+                              borderColor: selected ? colors.primary : borderSoft,
+                            },
+                          ]}
+                        >
+                          <Text style={[styles.playlistGenreText, { color: selected ? "#fff" : colors.textSecondary }]}>
+                            {genre}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+
+                  <Text style={[styles.playlistModalLabel, { color: colors.text }]}>Visibility</Text>
+                  <View style={styles.playlistVisibilityRow}>
+                    {(["public", "private", "unlisted"] as const).map((visibility) => {
+                      const selected = playlistVisibility === visibility;
+                      return (
+                        <TouchableOpacity
+                          key={visibility}
+                          activeOpacity={0.85}
+                          onPress={() => setPlaylistVisibility(visibility)}
+                          style={[
+                            styles.playlistVisibilityBtn,
+                            {
+                              backgroundColor: selected ? colors.primary : surfaceBackground,
+                              borderColor: selected ? colors.primary : borderSoft,
+                            },
+                          ]}
+                        >
+                          <Text style={[styles.playlistVisibilityText, { color: selected ? "#fff" : colors.text }]}>
+                            {visibility.charAt(0).toUpperCase() + visibility.slice(1)}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                <View style={[styles.playlistModalFooter, { borderTopColor: borderSoft }]}>
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={closeCreatePlaylistModal}
+                    disabled={creatingPlaylist}
+                    style={[styles.playlistModalCancelBtn, { borderColor: borderSoft }]}
+                  >
+                    <Text style={[styles.playlistModalCancelText, { color: colors.textSecondary }]}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    activeOpacity={playlistTitle.trim() ? 0.85 : 1}
+                    onPress={() => void handleCreatePlaylistFromModal()}
+                    disabled={creatingPlaylist || !playlistTitle.trim()}
+                    style={[
+                      styles.playlistModalSubmitBtn,
+                      {
+                        backgroundColor: playlistTitle.trim() ? colors.primary : surfaceBackground,
+                        opacity: creatingPlaylist || !playlistTitle.trim() ? 0.65 : 1,
+                      },
+                    ]}
+                  >
+                    {creatingPlaylist ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={[styles.playlistModalSubmitText, { color: playlistTitle.trim() ? "#fff" : colors.textSecondary }]}>
+                        Create Playlist
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
           <Modal
             visible={uploading}
             transparent={true}
@@ -2428,17 +3411,446 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   tabContainer: {
     flexDirection: "row",
-    paddingHorizontal: 16,
-    paddingTop: 8,
+    width: "100%",
+    maxWidth: 560,
+    alignSelf: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingTop: 10,
     borderBottomWidth: 1,
-    marginBottom: 16,
+    marginTop: 8,
+    marginBottom: 20,
   },
   tabButton: {
-    flex: 1,
+    flex: 0,
+    minWidth: 96,
     alignItems: "center",
-    paddingVertical: 12,
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+    paddingVertical: 11,
+    paddingHorizontal: 8,
     borderBottomWidth: 2,
     borderBottomColor: "transparent",
+  },
+  tabButtonLabel: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
+    textTransform: "capitalize",
+  },
+  profileFollowBtn: {
+    minWidth: 128,
+    minHeight: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+    marginBottom: 18,
+  },
+  profileFollowBtnText: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 13,
+  },
+  profileTabContent: {
+    width: "100%",
+    maxWidth: 760,
+    alignSelf: "center",
+    paddingHorizontal: 12,
+    paddingBottom: 24,
+  },
+  profilePostsSection: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 18,
+    gap: 10,
+  },
+  profilePostsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  profilePostsTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 16,
+  },
+  profilePostsEmpty: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+    paddingVertical: 28,
+    textAlign: "center",
+  },
+  profilePostCard: {
+    borderTopWidth: 1,
+    paddingTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  profilePostPreviewWrap: {
+    width: 84,
+    height: 84,
+    borderRadius: 12,
+    overflow: "hidden",
+    position: "relative",
+    backgroundColor: "#0F172A",
+  },
+  profilePostPreview: {
+    width: "100%",
+    height: "100%",
+  },
+  profilePostVideoBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(15,23,42,0.75)",
+  },
+  profilePostPreviewFallback: {
+    width: 84,
+    height: 84,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profilePostBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: 8,
+  },
+  profilePostText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  profilePostMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  profilePostMeta: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+  },
+  profilePostOpenIcon: {
+    marginLeft: 4,
+  },
+  playlistsSection: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 18,
+    gap: 16,
+  },
+  playlistsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  playlistsHint: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  playlistsHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  createPlaylistBtn: {
+    minHeight: 36,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  createPlaylistText: {
+    color: "#fff",
+    fontFamily: "Poppins_700Bold",
+    fontSize: 12,
+  },
+  playlistEmptyState: {
+    minHeight: 170,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+  playlistEmptyTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 14,
+    marginTop: 10,
+  },
+  playlistEmptyText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+    marginTop: 4,
+  },
+  playlistsList: {
+    gap: 10,
+  },
+  playlistCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  playlistMain: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    minWidth: 0,
+  },
+  playlistIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  playlistBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  playlistTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 14,
+  },
+  playlistMeta: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  playlistDeleteBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(239,68,68,0.14)",
+  },
+  followModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(2,6,23,0.68)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  followModalCard: {
+    width: "100%",
+    maxWidth: 460,
+    maxHeight: "78%",
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  followModalHeader: {
+    padding: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  followModalTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 18,
+  },
+  followModalCount: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  followModalClose: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  followModalList: {
+    maxHeight: 420,
+  },
+  followModalListContent: {
+    paddingHorizontal: 18,
+    paddingBottom: 18,
+    gap: 8,
+  },
+  followModalLoading: {
+    minHeight: 110,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  followModalEmptyText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+    textAlign: "center",
+    paddingVertical: 24,
+  },
+  followModalItem: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  followModalAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  followModalItemBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  followModalName: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 13,
+  },
+  followModalRole: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    marginTop: 2,
+  },
+  playlistModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(2,6,23,0.72)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  playlistModalCard: {
+    width: "100%",
+    maxWidth: 560,
+    borderRadius: 22,
+    borderWidth: 1,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.28,
+    shadowRadius: 30,
+    elevation: 20,
+  },
+  playlistModalHeader: {
+    paddingHorizontal: 22,
+    paddingTop: 20,
+    paddingBottom: 16,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 16,
+  },
+  playlistModalTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 20,
+    lineHeight: 26,
+  },
+  playlistModalSubtitle: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 3,
+  },
+  playlistModalBody: {
+    paddingHorizontal: 22,
+    paddingBottom: 20,
+  },
+  playlistModalLabel: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 12,
+    marginTop: 12,
+    marginBottom: 7,
+  },
+  playlistModalInput: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+  },
+  playlistModalTextArea: {
+    minHeight: 92,
+    textAlignVertical: "top",
+  },
+  playlistGenreWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  playlistGenreChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  playlistGenreText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 11,
+  },
+  playlistVisibilityRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  playlistVisibilityBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 12,
+    minHeight: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+  },
+  playlistVisibilityText: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 12,
+  },
+  playlistModalFooter: {
+    borderTopWidth: 1,
+    padding: 16,
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+  },
+  playlistModalCancelBtn: {
+    minWidth: 112,
+    minHeight: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  playlistModalCancelText: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 13,
+  },
+  playlistModalSubmitBtn: {
+    minWidth: 152,
+    minHeight: 42,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  playlistModalSubmitText: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 13,
   },
 
   flex1: {
@@ -2463,10 +3875,10 @@ const styles = StyleSheet.create({
     paddingBottom: 220,
   },
   scrollContentWeb: {
-    maxWidth: 1120,
+    maxWidth: PROFILE_WEB_MAX_WIDTH,
     alignSelf: "center",
     width: "100%",
-    paddingTop: 12,
+    paddingTop: 28,
   },
   profileTabTransition: {
     width: "100%",
@@ -2487,20 +3899,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   headerProfileWeb: {
-    marginHorizontal: 24,
-    paddingTop: 28,
-    paddingBottom: 24,
-    marginBottom: 16,
+    marginHorizontal: 0,
+    paddingTop: 42,
+    paddingBottom: 30,
+    marginBottom: 18,
   },
   avatarWrapper: {
     position: "relative",
   },
   avatarContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 104,
+    height: 104,
+    borderRadius: 52,
     overflow: "hidden",
-    marginBottom: 16,
+    marginBottom: 14,
     borderWidth: 4,
   },
   avatarImage: {
@@ -2520,14 +3932,15 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   nameText: {
-    fontSize: 24,
-    marginBottom: 4,
+    fontSize: 26,
+    lineHeight: 34,
+    marginBottom: 6,
     textAlign: "center",
     fontFamily: "Poppins_700Bold",
   },
   roleText: {
-    fontSize: 14,
-    marginBottom: 16,
+    fontSize: 13,
+    marginBottom: 14,
     textAlign: "center",
     fontFamily: "Poppins_400Regular",
   },
@@ -2536,7 +3949,7 @@ const styles = StyleSheet.create({
     gap: 8,
     flexWrap: "wrap",
     justifyContent: "center",
-    marginBottom: 28,
+    marginBottom: 20,
   },
   genreTag: {
     paddingHorizontal: 16,
@@ -2571,12 +3984,13 @@ const styles = StyleSheet.create({
   statsContainer: {
     flexDirection: "row",
     width: "100%",
+    maxWidth: 620,
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 14,
     borderRadius: 16,
     backgroundColor: "rgba(0,0,0,0.02)",
-    marginBottom: 24,
+    marginBottom: 20,
   },
   statItem: {
     alignItems: "center",
@@ -2585,11 +3999,11 @@ const styles = StyleSheet.create({
   },
   statValue: {
     fontFamily: "Poppins_700Bold",
-    fontSize: 22,
+    fontSize: 20,
   },
   statLabel: {
     fontFamily: "Poppins_500Medium",
-    fontSize: 13,
+    fontSize: 12,
     marginTop: 4,
   },
   statDivider: {
@@ -2737,9 +4151,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   bioContainer: {
-    marginTop: 20,
+    marginTop: 6,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 10,
     width: "100%",
   },
   bioText: {
@@ -2795,9 +4209,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   mediaSectionWeb: {
-    marginHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 24,
+    marginHorizontal: 0,
+    marginTop: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
     marginBottom: 16,
   },
   mediaSectionHeader: {
@@ -2808,11 +4223,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     marginBottom: 16,
   },
+  mediaSectionHeaderWeb: {
+    minHeight: 52,
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 0,
+    marginBottom: 12,
+    borderTopWidth: 1,
+  },
   mediaSectionHeading: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+  },
+  mediaSectionHeadingWeb: {
+    flex: 1,
+    justifyContent: "center",
+    gap: 6,
+    marginLeft: 104,
   },
   mediaSectionIconWrap: {
     width: 40,
@@ -2821,12 +4250,30 @@ const styles = StyleSheet.create({
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
+  mediaSectionIconWrapWeb: {
+    width: 16,
+    height: 16,
+    borderRadius: 0,
+  },
   mediaSectionTextWrap: {
     flex: 1,
+  },
+  mediaSectionTextWrapWeb: {
+    flex: 0,
+    minWidth: 58,
+    alignItems: "center" as const,
   },
   sectionTitle: {
     fontSize: 20,
     fontFamily: "Poppins_600SemiBold",
+  },
+  sectionTitleWeb: {
+    fontSize: 12,
+    letterSpacing: 1.2,
+    textTransform: "uppercase" as const,
+    fontFamily: "Poppins_700Bold",
+    textAlign: "center" as const,
+    width: 58,
   },
   sectionSubtitle: {
     marginTop: 2,
@@ -2834,10 +4281,17 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontFamily: "Poppins_400Regular",
   },
+  sectionSubtitleWeb: {
+    display: "none" as const,
+  },
   mediaSectionActions: {
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: 8,
+  },
+  mediaSectionActionsWeb: {
+    minWidth: 104,
+    justifyContent: "flex-end" as const,
   },
   mediaCountBadge: {
     minWidth: 34,
@@ -2861,15 +4315,21 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
   },
+  addMediaBtnWeb: {
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
   addMediaBtnText: {
     color: "#fff",
     fontSize: 12,
     fontFamily: "Poppins_600SemiBold",
   },
   emptyMedia: {
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 48,
+    minHeight: 224,
+    paddingVertical: 42,
     marginHorizontal: 24,
     paddingHorizontal: 24,
     borderWidth: 2,
@@ -2892,7 +4352,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 13,
     fontFamily: "Poppins_400Regular",
-    textAlign: "left",
+    textAlign: "center",
   },
   uploadBtn: {
     marginTop: 16,
@@ -2914,10 +4374,18 @@ const styles = StyleSheet.create({
     gap: GRID_GAP,
     paddingHorizontal: GRID_PADDING,
   },
+  mediaGridWeb: {
+    paddingHorizontal: 0,
+    gap: GRID_GAP,
+  },
   gridItem: {
     position: "relative",
     borderRadius: 12,
     overflow: "hidden",
+  },
+  gridItemWeb: {
+    borderRadius: 0,
+    backgroundColor: "#0B1220",
   },
   gridImage: {
     width: "100%",
@@ -2925,11 +4393,17 @@ const styles = StyleSheet.create({
     backgroundColor: "#1a1a1a",
     borderRadius: 12,
   },
+  gridImageWeb: {
+    borderRadius: 0,
+  },
   gridVideoPlaceholder: {
     flex: 1,
     alignItems: "center" as const,
     justifyContent: "center" as const,
     gap: 8,
+  },
+  gridVideoPlaceholderWeb: {
+    borderRadius: 0,
   },
   gridVideoPlaceholderText: {
     color: "rgba(255,255,255,0.82)",
@@ -2942,6 +4416,11 @@ const styles = StyleSheet.create({
     justifyContent: "center" as const,
     gap: 8,
     padding: 12,
+  },
+  gridDocumentPlaceholderWeb: {
+    borderRadius: 0,
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.18)",
   },
   gridDocumentExtension: {
     fontSize: 12,
@@ -2980,6 +4459,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(239,68,68,0.92)",
+  },
+  mediaRemoveBtnWeb: {
+    top: 10,
+    right: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(15,23,42,0.72)",
   },
   modalContainer: {
     flex: 1,

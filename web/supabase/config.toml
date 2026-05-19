@@ -27,7 +27,7 @@ verify_jwt = false
 [functions.manage-production]
 verify_jwt = false
 [functions.manage-notifications]
-verify_jwt = false
+verify_jwt = true
 [functions.manage-listings]
 verify_jwt = false
 [functions.manage-details]

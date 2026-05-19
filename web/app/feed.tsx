@@ -33,36 +33,6 @@ import { useRadioPlayer } from "../src/context/RadioPlayerContext";
 
 type FeedTab = "for_you" | "following";
 
-type ForYouTabIconProps = {
-  active: boolean;
-  primaryColor: string;
-  mutedColor: string;
-};
-
-function ForYouTabIcon({ active, primaryColor, mutedColor }: ForYouTabIconProps) {
-  const iconColor = active ? "#FFFFFF" : mutedColor;
-
-  return (
-    <View
-      style={[
-        styles.forYouTabIcon,
-        {
-          borderColor: active ? "#FFFFFF" : mutedColor,
-          backgroundColor: active ? "rgba(255,255,255,0.18)" : "transparent",
-        },
-      ]}
-    >
-      <View style={[styles.forYouTabIconCenter, { backgroundColor: active ? "#FFFFFF" : primaryColor }]} />
-      <Ionicons
-        name={active ? "sparkles" : "sparkles-outline"}
-        size={12}
-        color={iconColor}
-        style={styles.forYouTabIconSparkle}
-      />
-    </View>
-  );
-}
-
 type LiveRadioCardProps = {
   borderColor: string;
   cardColor: string;
@@ -181,6 +151,25 @@ const getStationNowPlayingTitle = (station: any, slotIndex = 0) => {
   return firstItem?.title || slot?.playlist?.title || slot?.label || "Local artist spotlight";
 };
 
+const getStationArtworkUrl = (station: any) => {
+  const candidates = [
+    station?.artwork_url,
+    station?.cover_url,
+    station?.image_url,
+    station?.image,
+    station?.thumbnail_url,
+    station?.creator?.avatar_url,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+
+  return "";
+};
+
 const LiveRadioCard = React.memo(function LiveRadioCard({
   borderColor,
   cardColor,
@@ -289,6 +278,21 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
           : "Play";
   const playIcon = isCurrentStation && isPlaying ? "pause" : "play";
   const badgeLabel = loadingStation ? "..." : canTuneIn ? "LIVE" : "OFF";
+  const stationArtworkUrl = getStationArtworkUrl(displayStation);
+  const stationCreator =
+    typeof displayStation?.creator?.full_name === "string" && displayStation.creator.full_name.trim()
+      ? displayStation.creator.full_name.trim()
+      : "";
+  const nowPlayingLine = loadingStation
+    ? "Loading rotation"
+    : stationCreator
+      ? `${nowPlayingTitle} | ${stationCreator}`
+      : nowPlayingTitle;
+  const stationMetaLine = hasBroadcastStream
+    ? "Live stream"
+    : stationSlotCount > 0 || stationPlayableTrackCount > 0
+      ? `${stationSlotCount || 1} slot | ${stationPlayableTrackCount || stationTrackCount || 0} playable tracks`
+      : rotationSummary;
 
   const handlePlayPress = useCallback(async () => {
     if (!displayStation || loadingStation || isTuneInLoading) return;
@@ -336,43 +340,31 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
         },
       ]}
     >
+      <View style={[styles.liveRadioArtworkFrame, { backgroundColor: primaryColor + "1F" }]}>
+        {stationArtworkUrl ? (
+          <CachedImage uri={stationArtworkUrl} style={styles.liveRadioArtwork} width={70} height={70} />
+        ) : (
+          <Ionicons name="radio" size={26} color={primaryColor} />
+        )}
+      </View>
+
       <View style={styles.liveRadioContent}>
-        <View style={styles.liveRadioTitleRow}>
-          <View style={[styles.liveRadioIcon, { backgroundColor: primaryColor + "1A" }]}>
-            <Ionicons name="radio" size={18} color={primaryColor} />
-          </View>
-          <Text style={[styles.liveRadioTitle, { color: textColor }]} numberOfLines={1}>
-            Live Radio
+        <View style={styles.liveRadioEyebrowRow}>
+          <View style={[styles.liveRadioLiveDot, { backgroundColor: primaryColor }]} />
+          <Text style={[styles.liveRadioEyebrow, { color: primaryColor }]} numberOfLines={1}>
+            {badgeLabel === "LIVE" ? "LIVE RADIO" : "RADIO"}
           </Text>
-          <View style={[styles.liveRadioBadge, !canTuneIn && styles.liveRadioBadgeMuted]}>
-            <View style={styles.liveRadioBadgeDot} />
-            <Text style={styles.liveRadioBadgeText}>{badgeLabel}</Text>
-          </View>
         </View>
 
         <Text style={[styles.liveRadioStation, { color: textColor }]} numberOfLines={1}>
           {loadingStation ? "Finding live stations..." : stationName}
         </Text>
         <Text style={[styles.liveRadioSubtitle, { color: mutedTextColor }]} numberOfLines={2}>
-          {stationSubtitle}
+          {nowPlayingLine || stationSubtitle}
         </Text>
-
-        <View style={styles.liveRadioMetaRow}>
-          <View style={styles.liveRadioNowPlaying}>
-            <Text style={[styles.liveRadioMetaLabel, { color: mutedTextColor }]} numberOfLines={1}>
-              Now playing
-            </Text>
-            <Text style={[styles.liveRadioMetaValue, { color: textColor }]} numberOfLines={1}>
-              {loadingStation ? "Loading rotation" : nowPlayingTitle}
-            </Text>
-          </View>
-          <View style={styles.liveRadioListeners}>
-            <Ionicons name={stationTrackCount > 0 ? "musical-notes-outline" : "headset-outline"} size={14} color={mutedTextColor} />
-            <Text style={[styles.liveRadioListenerText, { color: mutedTextColor }]} numberOfLines={1}>
-              {rotationSummary}
-            </Text>
-          </View>
-        </View>
+        <Text style={[styles.liveRadioMetaText, { color: mutedTextColor }]} numberOfLines={1}>
+          {stationMetaLine}
+        </Text>
       </View>
 
       <TouchableOpacity
@@ -392,9 +384,8 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
         {loadingStation || isTuneInLoading ? (
           <ActivityIndicator size="small" color="#FFFFFF" />
         ) : (
-          <Ionicons name={playIcon} size={16} color="#FFFFFF" />
+          <Ionicons name={playIcon} size={24} color="#FFFFFF" />
         )}
-        <Text style={styles.liveRadioPlayText}>{playButtonLabel}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -450,8 +441,10 @@ const resolveFeedMediaUrl = (value: unknown) => {
   if (directParts.length > 1) {
     const directBucket = directParts[0];
     const directPath = directParts.slice(1).join("/");
-    const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
-    if (data?.publicUrl) return data.publicUrl;
+    if (KNOWN_FEED_MEDIA_BUCKETS.includes(directBucket)) {
+      const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
+      if (data?.publicUrl) return data.publicUrl;
+    }
   }
 
   for (const bucket of KNOWN_FEED_MEDIA_BUCKETS) {
@@ -469,6 +462,13 @@ const normalizeFeedPost = (post: any) => {
     ? post.media.map((item: any) => ({
         ...item,
         url: resolveFeedMediaUrl(item?.url || item?.storage_path || item?.public_url),
+        thumbnail_url: resolveFeedMediaUrl(
+          item?.thumbnail_url ||
+            item?.thumbnail_path ||
+            item?.url ||
+            item?.storage_path ||
+            item?.public_url,
+        ),
       }))
     : [];
 
@@ -542,10 +542,19 @@ const formatCompactPostType = (value: unknown) => {
 
 const formatFeedPrice = (amount: number, suffix = "") => `${PESO_SIGN}${amount.toLocaleString()}${suffix}`;
 
+const formatFeedCountLabel = (count: number, singular: string, plural = `${singular}s`) =>
+  `${count} ${count === 1 ? singular : plural}`;
+
 const getWebFeedMediaUrls = (item: any) => {
   const mediaUrls = Array.isArray(item?.media)
     ? item.media
-        .map((media: any) => resolveFeedMediaUrl(media?.url || media?.storage_path || media?.public_url))
+        .map((media: any) => resolveFeedMediaUrl(
+          media?.thumbnail_url ||
+            media?.thumbnail_path ||
+            media?.url ||
+            media?.storage_path ||
+            media?.public_url,
+        ))
         .filter((value: string) => value.length > 0)
     : [];
   if (mediaUrls.length > 0) return Array.from(new Set(mediaUrls));
@@ -583,10 +592,26 @@ const SocialMediaGallery = React.memo(function SocialMediaGallery({
     imageHeight: number,
     extraStyle?: any,
   ) => (
-    <View key={`${uri}-${index}`} style={[styles.socialGalleryCell, extraStyle]}>
+    <View
+      key={`${uri}-${index}`}
+      style={[
+        styles.socialGalleryCell,
+        {
+          width: imageWidth,
+          height: imageHeight,
+        },
+        extraStyle,
+      ]}
+    >
       <CachedImage
         uri={uri}
-        style={styles.socialGalleryImage}
+        style={[
+          styles.socialGalleryImage,
+          {
+            width: imageWidth,
+            height: imageHeight,
+          },
+        ]}
         width={Math.round(imageWidth)}
         height={Math.round(imageHeight)}
       />
@@ -645,7 +670,11 @@ const SocialMediaGallery = React.memo(function SocialMediaGallery({
   }
 
   return (
-    <TouchableOpacity activeOpacity={0.92} onPress={onPress} style={styles.socialMediaWrap}>
+    <TouchableOpacity
+      activeOpacity={0.92}
+      onPress={onPress}
+      style={[styles.socialMediaWrap, { width: mediaWidth }]}
+    >
       {galleryContent}
     </TouchableOpacity>
   );
@@ -773,6 +802,52 @@ const getSocialPrimaryCtaLabel = (item: any, listingId: string) => {
   return listingId ? "View Studio" : "View Post";
 };
 
+const getSocialHeaderBadge = (item: any) => {
+  if (item?.__feedKind === "ai_card") {
+    return typeof item?.type === "string" && item.type.trim().length > 0
+      ? item.type.trim()
+      : "Recommended";
+  }
+
+  if (item?.visibility === "followers") return "Followers";
+  if (item?.visibility === "public") return "Public";
+
+  return formatCompactPostType(item?.post_type);
+};
+
+const getSocialSuggestionQuickInfo = (item: any) => {
+  const quickInfo: { icon: keyof typeof Ionicons.glyphMap; label: string; color?: string }[] = [];
+  const similarity = Number(item?.similarity || 0);
+  const rating = Number(item?.rating || 0);
+  const reviewCount = Number(item?.review_count || 0);
+  const location = typeof item?.location === "string" ? item.location.trim() : "";
+  const genre = typeof item?.genre === "string" ? item.genre.trim() : "";
+
+  if (similarity > 0) {
+    quickInfo.push({
+      icon: "sparkles-outline",
+      label: `${Math.round(similarity * 100)}% match`,
+      color: "#7C3AED",
+    });
+  }
+
+  if (rating > 0) {
+    quickInfo.push({
+      icon: "star",
+      label: reviewCount > 0 ? `${rating.toFixed(1)} (${reviewCount})` : rating.toFixed(1),
+      color: "#F59E0B",
+    });
+  }
+
+  if (location) {
+    quickInfo.push({ icon: "location-outline", label: location });
+  } else if (genre) {
+    quickInfo.push({ icon: "radio-outline", label: genre });
+  }
+
+  return quickInfo.slice(0, 3);
+};
+
 type SocialPostCardProps = {
   item: any;
   borderColor: string;
@@ -784,6 +859,8 @@ type SocialPostCardProps = {
   currentUserId: string | null;
   onOpenPost: (postId: string) => void;
   onOpenStudio: (studioId: string) => void;
+  onToggleReaction: (post: any) => void;
+  onSharePost: (post: any) => void;
   onRequestDelete: (postId: string) => void;
 };
 
@@ -798,6 +875,8 @@ const SocialPostCard = React.memo(function SocialPostCard({
   currentUserId,
   onOpenPost,
   onOpenStudio,
+  onToggleReaction,
+  onSharePost,
   onRequestDelete,
 }: SocialPostCardProps) {
   const isSuggestion = item?.__feedKind === "ai_card";
@@ -807,6 +886,12 @@ const SocialPostCard = React.memo(function SocialPostCard({
   const avatarUri = useMemo(() => getSocialAvatarUri(item), [item]);
   const listingId = getLinkedStudioId(item);
   const primaryCtaLabel = getSocialPrimaryCtaLabel(item, listingId);
+  const headerBadge = getSocialHeaderBadge(item);
+  const suggestionQuickInfo = useMemo(() => getSocialSuggestionQuickInfo(item), [item]);
+  const reactionCount = getPositiveInteger(item?.reaction_count || item?.like_count || item?.likes);
+  const commentCount = getPositiveInteger(item?.comment_count || item?.comments);
+  const shareCount = getPositiveInteger(item?.share_count || item?.shares);
+  const hasReaction = Boolean(item?.my_reaction || item?.user_reaction);
 
   const handleOpenPost = useCallback(() => {
     if (isSuggestion && listingId) {
@@ -826,6 +911,30 @@ const SocialPostCard = React.memo(function SocialPostCard({
       onOpenPost(item.id);
     },
     [item?.id, listingId, onOpenPost, onOpenStudio],
+  );
+
+  const handleToggleReaction = useCallback(
+    (event?: any) => {
+      event?.stopPropagation?.();
+      onToggleReaction(item);
+    },
+    [item, onToggleReaction],
+  );
+
+  const handleOpenComments = useCallback(
+    (event?: any) => {
+      event?.stopPropagation?.();
+      onOpenPost(item.id);
+    },
+    [item?.id, onOpenPost],
+  );
+
+  const handleShare = useCallback(
+    (event?: any) => {
+      event?.stopPropagation?.();
+      onSharePost(item);
+    },
+    [item, onSharePost],
   );
 
   const isOwner = !isSuggestion && !!currentUserId && item?.author_id === currentUserId;
@@ -893,47 +1002,59 @@ const SocialPostCard = React.memo(function SocialPostCard({
           </View>
         </View>
 
-        {!isSuggestion ? <View style={styles.socialMenuWrap}>
-          <TouchableOpacity
-            activeOpacity={0.78}
-            accessibilityRole="button"
-            accessibilityLabel="More options"
-            onPress={handleMenuPress}
-            style={styles.socialMenuButton}
-          >
-            <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
-          {menuOpen && isOwner && (
-            <>
-              <Pressable
-                style={styles.socialMenuBackdrop}
-                onPress={(e) => {
-                  e?.stopPropagation?.();
-                  setMenuOpen(false);
-                }}
-              />
-              <View
-                style={[
-                  styles.socialMenuPopover,
-                  {
-                    backgroundColor: cardColor,
-                    borderColor,
-                    shadowOpacity: isDark ? 0 : 0.18,
-                  },
-                ]}
+        <View style={styles.socialHeaderActions}>
+          {headerBadge ? (
+            <View style={[styles.socialHeaderBadgeChip, { backgroundColor: colors.primary + "12" }]}>
+              <Text style={[styles.socialHeaderBadgeText, { color: colors.primary }]} numberOfLines={1}>
+                {headerBadge}
+              </Text>
+            </View>
+          ) : null}
+
+          {!isSuggestion ? (
+            <View style={styles.socialMenuWrap}>
+              <TouchableOpacity
+                activeOpacity={0.78}
+                accessibilityRole="button"
+                accessibilityLabel="More options"
+                onPress={handleMenuPress}
+                style={styles.socialMenuButton}
               >
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  onPress={handleSelectDelete}
-                  style={styles.socialMenuItem}
-                >
-                  <Ionicons name="trash-outline" size={16} color="#ef4444" />
-                  <Text style={[styles.socialMenuItemText, { color: "#ef4444" }]}>Delete</Text>
-                </TouchableOpacity>
-              </View>
-            </>
-          )}
-        </View> : null}
+                <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+              {menuOpen && isOwner && (
+                <>
+                  <Pressable
+                    style={styles.socialMenuBackdrop}
+                    onPress={(e) => {
+                      e?.stopPropagation?.();
+                      setMenuOpen(false);
+                    }}
+                  />
+                  <View
+                    style={[
+                      styles.socialMenuPopover,
+                      {
+                        backgroundColor: cardColor,
+                        borderColor,
+                        shadowOpacity: isDark ? 0 : 0.18,
+                      },
+                    ]}
+                  >
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onPress={handleSelectDelete}
+                      style={styles.socialMenuItem}
+                    >
+                      <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                      <Text style={[styles.socialMenuItemText, { color: "#ef4444" }]}>Delete</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </View>
+          ) : null}
+        </View>
       </View>
 
       <Text style={[styles.socialCaption, { color: colors.text }]} numberOfLines={3}>
@@ -963,14 +1084,124 @@ const SocialPostCard = React.memo(function SocialPostCard({
         </View>
       ) : null}
 
+      {isSuggestion && suggestionQuickInfo.length > 0 ? (
+        <View style={[styles.socialQuickInfoRow, { borderTopColor: borderColor }]}>
+          {suggestionQuickInfo.map((info, index) => (
+            <View
+              key={`${info.icon}-${info.label}`}
+              style={[
+                styles.socialQuickInfoItem,
+                index === 0 && styles.socialQuickInfoItemStart,
+                index === suggestionQuickInfo.length - 1 && styles.socialQuickInfoItemEnd,
+              ]}
+            >
+              <Ionicons
+                name={info.icon}
+                size={14}
+                color={info.color || colors.primary}
+              />
+              <Text style={[styles.socialQuickInfoText, { color: colors.textSecondary }]} numberOfLines={1}>
+                {info.label}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {!isSuggestion ? (
+        <View style={[styles.socialStatsRow, { borderTopColor: borderColor }]}>
+          <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
+            {formatFeedCountLabel(reactionCount, "like")}
+          </Text>
+          <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
+            {formatFeedCountLabel(commentCount, "comment")}
+          </Text>
+          <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
+            {formatFeedCountLabel(shareCount, "share")}
+          </Text>
+        </View>
+      ) : null}
+
+      {!isSuggestion ? (
+        <View style={[styles.socialActionRow, { borderTopColor: borderColor, borderBottomColor: borderColor }]}>
+          <TouchableOpacity
+            activeOpacity={0.78}
+            accessibilityRole="button"
+            accessibilityLabel={hasReaction ? "Unlike post" : "Like post"}
+            onPress={handleToggleReaction}
+            style={styles.socialActionButton}
+          >
+            <Ionicons
+              name={hasReaction ? "heart" : "heart-outline"}
+              size={19}
+              color={hasReaction ? "#EF4444" : colors.textSecondary}
+            />
+            <Text style={[styles.socialActionText, { color: hasReaction ? "#EF4444" : colors.textSecondary }]}>
+              Like
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.78}
+            accessibilityRole="button"
+            accessibilityLabel="Comment on post"
+            onPress={handleOpenComments}
+            style={styles.socialActionButton}
+          >
+            <Ionicons name="chatbubble-outline" size={18} color={colors.textSecondary} />
+            <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Comment</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.78}
+            accessibilityRole="button"
+            accessibilityLabel="Share post"
+            onPress={handleShare}
+            style={styles.socialActionButton}
+          >
+            <Ionicons name="share-social-outline" size={18} color={colors.textSecondary} />
+            <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Share</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {isSuggestion ? (
       <View style={styles.socialCtaRow}>
-        <TouchableOpacity activeOpacity={0.78} onPress={handleOpenCta} style={styles.socialPrimaryCta}>
-          <Text style={[styles.socialPrimaryCtaText, { color: colors.primary }]}>
+        <TouchableOpacity
+          activeOpacity={0.78}
+          onPress={handleOpenCta}
+          style={[
+            styles.socialPrimaryCta,
+            isSuggestion
+              ? { backgroundColor: colors.primary }
+              : {
+                  backgroundColor: isDark ? "#0F172A" : "#F8FAFC",
+                  borderColor,
+                  borderWidth: 1,
+                },
+          ]}
+        >
+          <Text style={[styles.socialPrimaryCtaText, { color: isSuggestion ? "#FFFFFF" : colors.primary }]}>
             {primaryCtaLabel}
           </Text>
-          <Ionicons name="chevron-forward" size={15} color={colors.primary} />
+          <Ionicons name="chevron-forward" size={15} color={isSuggestion ? "#FFFFFF" : colors.primary} />
         </TouchableOpacity>
+        {isSuggestion ? (
+          <TouchableOpacity
+            activeOpacity={1}
+            style={[
+              styles.socialSecondaryCta,
+              {
+                borderColor,
+                backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
+              },
+            ]}
+          >
+            <Text style={[styles.socialSecondaryCtaText, { color: colors.textSecondary }]}>
+              Following
+            </Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
+      ) : null}
     </TouchableOpacity>
   );
 });
@@ -987,12 +1218,54 @@ const logFeedInvokeError = (scope: string, error: any, extra: Record<string, unk
   });
 };
 
+const readFunctionErrorMessage = async (error: any, fallback: string) => {
+  const context = error?.context;
+  if (context && typeof context.clone === "function") {
+    try {
+      const payload = await context.clone().json();
+      const message = payload?.error || payload?.message;
+      if (typeof message === "string" && message.trim()) {
+        return message.trim();
+      }
+    } catch {
+      // Fall through to the generic client error.
+    }
+  }
+
+  const message = error?.message;
+  return typeof message === "string" && message.trim() ? message.trim() : fallback;
+};
+
 export default function FeedScreen() {
   const { colors, isDark } = useTheme();
   const { session, isGuest } = useAuth();
   const { width } = useWindowDimensions();
-  const params = useLocalSearchParams<{ reopenListingId?: string }>();
+  const params = useLocalSearchParams<{
+    reopenListingId?: string;
+    listingId?: string;
+    listing_id?: string;
+    listingType?: string;
+    listing_type?: string;
+    gig_id?: string;
+    studio_id?: string;
+    postId?: string;
+    post_id?: string;
+  }>();
   const isWebDesktop = Platform.OS === "web" && width >= 768;
+  const feedColors = useMemo(
+    () =>
+      isWebDesktop
+        ? {
+            ...colors,
+            background: "#1E293B",
+            surface: "#1E293B",
+            border: "#334155",
+            text: "#F8FAFC",
+            textSecondary: "#A8B3C5",
+          }
+        : colors,
+    [colors, isWebDesktop],
+  );
 
   const [tab, setTab] = useState<FeedTab>("for_you");
   const [posts, setPosts] = useState<any[]>([]);
@@ -1012,9 +1285,9 @@ export default function FeedScreen() {
   const [hasMore, setHasMore] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
 
-  const bg = isWebDesktop ? (isDark ? "#0F172A" : "#F1F5F9") : colors.background;
-  const cardBg = isWebDesktop ? (isDark ? "#1E293B" : "#FFFFFF") : colors.surface;
-  const borderCol = isWebDesktop ? (isDark ? "#334155" : "#E2E8F0") : colors.border;
+  const bg = isWebDesktop ? "#1E293B" : feedColors.background;
+  const cardBg = isWebDesktop ? "#1E293B" : feedColors.surface;
+  const borderCol = isWebDesktop ? "#334155" : feedColors.border;
 
   const canCreatePost = !!session && !isGuest && (normalizeVisibleInput(postBody).length > 0 || selectedMedia.length > 0);
 
@@ -1175,20 +1448,79 @@ export default function FeedScreen() {
   }, [pendingReopenListingId, presentListingDetailsWithRetry, selectedListingId]);
 
   useEffect(() => {
-    const reopenListingId = Array.isArray(params.reopenListingId)
-      ? params.reopenListingId[0]
-      : params.reopenListingId;
+    const firstRouteParam = (value?: string | string[]) => Array.isArray(value) ? value[0] : value;
+    const listingType = (firstRouteParam(params.listingType) || firstRouteParam(params.listing_type) || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_");
+    const reopenListingId =
+      firstRouteParam(params.reopenListingId) ||
+      firstRouteParam(params.studio_id) ||
+      firstRouteParam(params.gig_id) ||
+      firstRouteParam(params.listingId) ||
+      firstRouteParam(params.listing_id);
 
     if (!reopenListingId || reopenListingId.length === 0) return;
+
+    if (listingType === "production_team" || listingType === "production") {
+      router.push({ pathname: "/production_team", params: { teamId: reopenListingId } } as any);
+      try {
+        router.setParams({
+          reopenListingId: undefined as any,
+          listingId: undefined as any,
+          listing_id: undefined as any,
+          listingType: undefined as any,
+          listing_type: undefined as any,
+          gig_id: undefined as any,
+          studio_id: undefined as any,
+        });
+      } catch {
+        // The production page still opens even if this router state cannot clear params.
+      }
+      return;
+    }
 
     openListingDetails(reopenListingId);
 
     try {
-      router.setParams({ reopenListingId: undefined as any });
+      router.setParams({
+        reopenListingId: undefined as any,
+        listingId: undefined as any,
+        listing_id: undefined as any,
+        listingType: undefined as any,
+        listing_type: undefined as any,
+        gig_id: undefined as any,
+        studio_id: undefined as any,
+      });
     } catch {
       // Older router states may not accept clearing params here; the listing still opens.
     }
-  }, [openListingDetails, params.reopenListingId]);
+  }, [
+    openListingDetails,
+    params.gig_id,
+    params.listingId,
+    params.listingType,
+    params.listing_id,
+    params.listing_type,
+    params.reopenListingId,
+    params.studio_id,
+  ]);
+
+  useEffect(() => {
+    const routePostId = Array.isArray(params.postId)
+      ? params.postId[0]
+      : params.postId || (Array.isArray(params.post_id) ? params.post_id[0] : params.post_id);
+
+    if (!routePostId || routePostId.length === 0) return;
+
+    setOpenPostId(routePostId);
+
+    try {
+      router.setParams({ postId: undefined as any, post_id: undefined as any });
+    } catch {
+      // The post modal still opens even if this router state cannot clear params.
+    }
+  }, [params.postId, params.post_id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -1241,21 +1573,35 @@ export default function FeedScreen() {
 
     try {
       const userId = session?.user?.id;
-      let uploadedMedia: { storage_path: string; media_type: string; mime_type: string }[] = [];
+      let uploadedMedia: {
+        storage_path: string;
+        media_type: "image" | "video";
+        mime_type: string;
+        is_cover: boolean;
+        safety_status: "passed";
+        safety_context: string;
+        safety_checked_at: string;
+        safety_metadata: Record<string, unknown>;
+      }[] = [];
 
       if (selectedMedia.length > 0 && userId) {
         for (const item of selectedMedia) {
           const ext = (item.file.name.split(".").pop() || "bin").toLowerCase();
           const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext}`;
-          const path = `${userId}/${filename}`;
+          const path = `${userId}/posts/${filename}`;
           const { error: upErr } = await supabase.storage
             .from("post-media")
             .upload(path, item.file, { contentType: item.file.type, upsert: false });
           if (upErr) throw upErr;
           uploadedMedia.push({
-            storage_path: `post-media/${path}`,
+            storage_path: path,
             media_type: item.file.type.startsWith("video") ? "video" : "image",
             mime_type: item.file.type,
+            is_cover: uploadedMedia.length === 0,
+            safety_status: "passed",
+            safety_context: "social_post_media",
+            safety_checked_at: new Date().toISOString(),
+            safety_metadata: { client_screened: false },
           });
         }
       }
@@ -1265,11 +1611,13 @@ export default function FeedScreen() {
           action: "create_post",
           content,
           visibility: postVisibility,
-          ...(uploadedMedia.length > 0 ? { media: uploadedMedia } : {}),
+          media: uploadedMedia,
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        throw new Error(await readFunctionErrorMessage(error, "Failed to create post."));
+      }
 
       if (data?.success) {
         emitToast({ type: "success", title: "Posted!", message: "Your post is live." });
@@ -1323,7 +1671,7 @@ export default function FeedScreen() {
   };
 
   const contentWidth = useMemo(
-    () => (isWebDesktop ? Math.min(width - 64, 720) : width),
+    () => (isWebDesktop ? Math.min(width - 80, 640) : width),
     [isWebDesktop, width],
   );
   const mediaWidth = useMemo(() => Math.max(240, contentWidth - 28), [contentWidth]);
@@ -1363,6 +1711,112 @@ export default function FeedScreen() {
   const handleModalPostDeleted = useCallback((postId: string) => {
     setPosts((current) => current.filter((p) => p.id !== postId));
   }, []);
+
+  const handleTogglePostReaction = useCallback(
+    async (post: any) => {
+      const postId = typeof post?.id === "string" ? post.id : "";
+      if (!postId) return;
+      if (!session || isGuest) {
+        emitToast({ type: "info", title: "Sign in required", message: "Log in to like posts." });
+        return;
+      }
+
+      const hadReaction = Boolean(post?.my_reaction || post?.user_reaction);
+      const currentCount = getPositiveInteger(post?.reaction_count || post?.like_count || post?.likes);
+      const nextCount = hadReaction ? Math.max(currentCount - 1, 0) : currentCount + 1;
+      const nextReaction = hadReaction ? null : "like";
+
+      setPosts((current) =>
+        current.map((p) =>
+          p.id === postId
+            ? {
+                ...p,
+                my_reaction: nextReaction,
+                user_reaction: nextReaction,
+                reaction_count: nextCount,
+                like_count: nextCount,
+              }
+            : p,
+        ),
+      );
+
+      try {
+        const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+          body: hadReaction
+            ? { action: "remove_reaction", post_id: postId }
+            : { action: "react_to_post", post_id: postId, reaction_type: "like" },
+        });
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.error || "Could not update reaction.");
+      } catch (e: any) {
+        setPosts((current) =>
+          current.map((p) =>
+            p.id === postId
+              ? {
+                  ...p,
+                  my_reaction: hadReaction ? "like" : null,
+                  user_reaction: hadReaction ? "like" : null,
+                  reaction_count: currentCount,
+                  like_count: currentCount,
+                }
+              : p,
+          ),
+        );
+        emitToast({ type: "error", title: "Like failed", message: e?.message || "Could not update this post." });
+      }
+    },
+    [isGuest, session],
+  );
+
+  const handleSharePost = useCallback(
+    async (post: any) => {
+      const postId = typeof post?.id === "string" ? post.id : "";
+      if (!postId) return;
+
+      const shareUrl =
+        Platform.OS === "web" && typeof window !== "undefined"
+          ? `${window.location.origin}/feed?postId=${encodeURIComponent(postId)}`
+          : `https://musikalokal.app/feed?postId=${encodeURIComponent(postId)}`;
+      const shareTitle = `${getSocialDisplayName(post)} on MusikaLokal`;
+      const shareText = getSocialCaption(post);
+
+      try {
+        const webNavigator = Platform.OS === "web" && typeof navigator !== "undefined" ? navigator : null;
+        if (webNavigator?.share) {
+          await webNavigator.share({ title: shareTitle, text: shareText, url: shareUrl });
+        } else if (webNavigator?.clipboard?.writeText) {
+          await webNavigator.clipboard.writeText(shareUrl);
+          emitToast({ type: "success", title: "Link copied", message: "Post link copied to clipboard." });
+        } else {
+          emitToast({ type: "info", title: "Share link", message: shareUrl });
+        }
+      } catch (e: any) {
+        if (e?.name === "AbortError") return;
+        emitToast({ type: "error", title: "Share failed", message: e?.message || "Could not share this post." });
+        return;
+      }
+
+      if (!session || isGuest) return;
+
+      try {
+        const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+          body: { action: "share_post", post_id: postId },
+        });
+        if (error) throw error;
+        const shareCount = getPositiveInteger(data?.data?.share_count);
+        setPosts((current) =>
+          current.map((p) =>
+            p.id === postId
+              ? { ...p, share_count: shareCount || getPositiveInteger(p?.share_count || p?.shares) + 1 }
+              : p,
+          ),
+        );
+      } catch (e: any) {
+        console.error("Share count update failed:", e);
+      }
+    },
+    [isGuest, session],
+  );
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -1414,17 +1868,19 @@ export default function FeedScreen() {
         item={item}
         borderColor={borderCol}
         cardColor={cardBg}
-        colors={colors}
+        colors={feedColors}
         isDark={isDark}
         mediaWidth={mediaWidth}
         currentUserId={session?.user?.id || null}
         onOpenPost={openPostDetails}
         onOpenStudio={openStudioDetails}
+        onToggleReaction={handleTogglePostReaction}
+        onSharePost={handleSharePost}
         onRequestDelete={requestDeletePost}
         width={contentWidth}
       />
     ),
-    [borderCol, cardBg, colors, contentWidth, isDark, mediaWidth, openPostDetails, openStudioDetails, requestDeletePost, session?.user?.id],
+    [borderCol, cardBg, feedColors, contentWidth, handleSharePost, handleTogglePostReaction, isDark, mediaWidth, openPostDetails, openStudioDetails, requestDeletePost, session?.user?.id],
   );
 
   return (
@@ -1438,58 +1894,51 @@ export default function FeedScreen() {
               data={feedItems}
               keyExtractor={getFeedItemListKey}
               renderItem={renderPost}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={feedColors.primary} />}
               onEndReached={loadMore}
               onEndReachedThreshold={0.35}
               contentContainerStyle={[styles.listContent, isWebDesktop && styles.listContentWeb]}
               ListHeaderComponent={
                 <View style={[styles.headerBlock, { width: contentWidth }]}>
                   {/* Search trigger row (mobile parity) */}
-                  <View style={styles.searchRow}>
-                    <TouchableOpacity
-                      activeOpacity={1}
-                      onPress={() => router.push("/discover")}
-                      style={[
-                        styles.searchTrigger,
-                        { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
-                      ]}
-                    >
-                      <Ionicons name="search" size={20} color={colors.textSecondary} />
-                      <Text
-                        style={[styles.searchTriggerText, { color: colors.textSecondary }]}
-                        numberOfLines={1}
+                  <View style={styles.searchBand}>
+                    <View style={styles.searchRow}>
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        onPress={() => router.push("/discover")}
+                        style={[
+                          styles.searchTrigger,
+                          { backgroundColor: "#3A465A" },
+                        ]}
                       >
-                        Search musicians, studios, gigs
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      activeOpacity={1}
-                      onPress={() => router.push("/discover")}
-                      style={[
-                        styles.searchFilterBtn,
-                        { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="Open search filters"
-                    >
-                      <Ionicons name="options-outline" size={20} color={colors.textSecondary} />
-                    </TouchableOpacity>
+                        <Ionicons name="search" size={24} color={feedColors.textSecondary} />
+                        <Text
+                          style={[styles.searchTriggerText, { color: feedColors.textSecondary }]}
+                          numberOfLines={1}
+                        >
+                          Search musicians, studios, gigs
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        onPress={() => router.push("/discover")}
+                        style={[
+                          styles.searchFilterBtn,
+                          { backgroundColor: "#3A465A" },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Open search filters"
+                      >
+                        <Ionicons name="options-outline" size={24} color={feedColors.textSecondary} />
+                      </TouchableOpacity>
+                    </View>
                   </View>
-
-                  <LiveRadioCard
-                    borderColor={borderCol}
-                    cardColor={isDark ? "#111827" : "#F8FAFC"}
-                    isDark={isDark}
-                    primaryColor={colors.primary}
-                    textColor={colors.text}
-                    mutedTextColor={colors.textSecondary}
-                  />
 
                   {/* "What's on your mind" trigger (opens modal, mobile parity) */}
                   <View
                     style={[
                       styles.composerTriggerCard,
-                      { backgroundColor: cardBg, borderColor: borderCol, shadowOpacity: isDark ? 0 : 0.06 },
+                      { backgroundColor: "#0F172A", borderColor: borderCol, shadowOpacity: 0 },
                     ]}
                   >
                     <View style={styles.composerTriggerTopRow}>
@@ -1500,10 +1949,10 @@ export default function FeedScreen() {
                           <View
                             style={[
                               styles.fbComposerAvatarFallback,
-                              { backgroundColor: colors.primary + "22" },
+                              { backgroundColor: feedColors.primary + "22" },
                             ]}
                           >
-                            <Ionicons name="person" size={20} color={colors.primary} />
+                            <Ionicons name="person" size={22} color={feedColors.primary} />
                           </View>
                         )}
                       </View>
@@ -1515,57 +1964,54 @@ export default function FeedScreen() {
                         }}
                         style={[
                           styles.composerTriggerInput,
-                          { backgroundColor: isDark ? "#0F172A" : "#F1F5F9" },
+                          { backgroundColor: "#3A465A" },
                         ]}
                       >
-                        <Text style={[styles.composerTriggerText, { color: colors.textSecondary }]} numberOfLines={1}>
+                        <Text style={[styles.composerTriggerText, { color: feedColors.textSecondary }]} numberOfLines={1}>
                           {session && !isGuest
-                            ? `What's on your mind, ${composerName}?`
+                            ? "What's on your mind?"
                             : "Sign in to post and view your feed."}
                         </Text>
                       </TouchableOpacity>
-                    </View>
-
-                    <View style={[styles.fbComposerDivider, { backgroundColor: borderCol }]} />
-
-                    <View style={styles.composerTriggerActions}>
                       <TouchableOpacity
                         activeOpacity={!session || isGuest ? 1 : 0.78}
-                        style={styles.composerTriggerActionBtn}
                         onPress={() => {
                           if (!session || isGuest) return;
                           setShowCreate(true);
                           setTimeout(() => handlePickMedia(), 50);
                         }}
                         disabled={!session || isGuest}
+                        style={[styles.composerMediaIconButton, { backgroundColor: feedColors.primary + "12" }]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Add media"
                       >
-                        <Ionicons name="image" size={18} color="#22C55E" />
-                        <Text style={[styles.fbComposerActionText, { color: colors.textSecondary }]}>
-                          Photo/video
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        activeOpacity={!session || isGuest ? 1 : 0.78}
-                        style={styles.composerTriggerActionBtn}
-                        onPress={() => {
-                          if (!session || isGuest) return;
-                          setShowCreate(true);
-                        }}
-                        disabled={!session || isGuest}
-                      >
-                        <Ionicons name="happy-outline" size={18} color="#F59E0B" />
-                        <Text style={[styles.fbComposerActionText, { color: colors.textSecondary }]}>
-                          Feeling
-                        </Text>
+                        <Ionicons name="images-outline" size={25} color={feedColors.primary} />
                       </TouchableOpacity>
                     </View>
                   </View>
 
+                  <LiveRadioCard
+                    borderColor={borderCol}
+                    cardColor="#0F172A"
+                    isDark
+                    primaryColor={feedColors.primary}
+                    textColor={feedColors.text}
+                    mutedTextColor={feedColors.textSecondary}
+                  />
+
                   {/* Sliding pill tab bar (mobile parity) */}
-                  <View style={[styles.pillTabRow, { backgroundColor: isDark ? "#1E293B" : "#F1F5F9" }]}>
+                  <View
+                    style={[
+                      styles.pillTabRow,
+                      {
+                        backgroundColor: "#1E293B",
+                        borderColor: borderCol,
+                      },
+                    ]}
+                  >
                     {[
-                      { key: "for_you", label: "For You", icon: "for_you" as const },
-                      { key: "following", label: "Following", icon: "people-outline" as const },
+                      { key: "for_you", label: "For You" },
+                      { key: "following", label: "Following" },
                     ].map((item) => {
                       const active = tab === item.key;
                       return (
@@ -1574,27 +2020,14 @@ export default function FeedScreen() {
                           activeOpacity={1}
                           style={[
                             styles.pillTabButton,
-                            active && { backgroundColor: cardBg, shadowOpacity: isDark ? 0 : 0.08 },
+                            active && { borderBottomColor: "#FFFFFF" },
                           ]}
                           onPress={() => setTab(item.key as FeedTab)}
                         >
-                          {item.icon === "for_you" ? (
-                            <ForYouTabIcon
-                              active={active}
-                              primaryColor={colors.primary}
-                              mutedColor={colors.textSecondary}
-                            />
-                          ) : (
-                            <Ionicons
-                              name="people-outline"
-                              size={18}
-                              color={active ? colors.primary : colors.textSecondary}
-                            />
-                          )}
                           <Text
                             style={[
                               styles.pillTabText,
-                              { color: active ? colors.primary : colors.textSecondary },
+                              { color: active ? "#FFFFFF" : feedColors.textSecondary },
                             ]}
                           >
                             {item.label}
@@ -1607,19 +2040,54 @@ export default function FeedScreen() {
               }
               ListEmptyComponent={
                 loading ? (
-                  <ActivityIndicator size="large" color={colors.primary} style={styles.loading} />
+                  <ActivityIndicator size="large" color={feedColors.primary} style={styles.loading} />
                 ) : (
-                  <View style={[styles.emptyWrap, { width: contentWidth }]}>
-                    <Ionicons name="newspaper-outline" size={46} color={colors.textSecondary} />
-                    <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                      {session && !isGuest ? "No posts yet" : "Sign in to view the feed"}
+                  <View
+                    style={[
+                      styles.emptyStateContainer,
+                      {
+                        width: contentWidth,
+                        backgroundColor: cardBg,
+                        borderColor: borderCol,
+                        shadowOpacity: 0,
+                      },
+                    ]}
+                  >
+                    <View style={[styles.emptyIconCircle, { backgroundColor: feedColors.primary + "12" }]}>
+                      <Ionicons
+                        name={session && !isGuest ? "sparkles-outline" : "lock-closed-outline"}
+                        size={34}
+                        color={feedColors.primary}
+                      />
+                    </View>
+                    <Text style={[styles.emptyTitle, { color: feedColors.text }]}>
+                      {session && !isGuest ? "Your feed is warming up" : "Sign in to unlock the feed"}
                     </Text>
+                    <Text style={[styles.emptySubtitle, { color: feedColors.textSecondary }]}>
+                      {session && !isGuest
+                        ? "Follow local artists, studios, and creators to start shaping a feed that looks more like your music world."
+                        : "Join MusikaLokal to post updates, discover local talent, and build a personalized For You stream."}
+                    </Text>
+                    <TouchableOpacity
+                      activeOpacity={0.78}
+                      onPress={() => router.push(session && !isGuest ? "/discover" : "/")}
+                      style={[styles.emptyActionBtn, { backgroundColor: feedColors.primary }]}
+                    >
+                      <Ionicons
+                        name={session && !isGuest ? "compass-outline" : "log-in-outline"}
+                        size={16}
+                        color="#FFFFFF"
+                      />
+                      <Text style={styles.emptyActionBtnText}>
+                        {session && !isGuest ? "Explore Musicians" : "Sign In"}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
                 )
               }
               ListFooterComponent={
                 loadingMore ? (
-                  <ActivityIndicator size="small" color={colors.primary} style={styles.footerLoader} />
+                  <ActivityIndicator size="small" color={feedColors.primary} style={styles.footerLoader} />
                 ) : (
                   <View style={{ height: 80 }} />
                 )
@@ -1789,12 +2257,12 @@ export default function FeedScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  listContent: { padding: 16, alignItems: "center" },
-  listContentWeb: { paddingTop: 4 },
-  headerBlock: { gap: 12, marginBottom: 12 },
+  listContent: { paddingHorizontal: 0, paddingBottom: 24, alignItems: "center" },
+  listContentWeb: { paddingTop: 18 },
+  headerBlock: { gap: 12, marginBottom: 14 },
   liveRadioCard: {
     borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: 14,
     padding: 14,
     flexDirection: "row",
     alignItems: "center",
@@ -1803,133 +2271,67 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowRadius: 12,
   },
+  liveRadioArtworkFrame: {
+    width: 46,
+    height: 46,
+    borderRadius: 10,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  liveRadioArtwork: {
+    width: 46,
+    height: 46,
+    borderRadius: 10,
+  },
   liveRadioContent: {
     flex: 1,
     minWidth: 0,
   },
-  liveRadioTitleRow: {
+  liveRadioEyebrowRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginBottom: 8,
+    gap: 6,
+    marginBottom: 5,
   },
-  liveRadioIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
+  liveRadioLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
-  liveRadioTitle: {
-    flex: 1,
-    fontSize: 13,
+  liveRadioEyebrow: {
+    fontSize: 10,
+    lineHeight: 12,
     fontFamily: "Poppins_700Bold",
-  },
-  liveRadioBadge: {
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: "#EF4444",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  liveRadioBadgeMuted: {
-    backgroundColor: "#64748B",
-  },
-  liveRadioBadgeDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: "#FFFFFF",
-  },
-  liveRadioBadgeText: {
-    color: "#FFFFFF",
-    fontSize: 9,
-    fontFamily: "Poppins_700Bold",
+    textTransform: "uppercase",
   },
   liveRadioStation: {
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: 20,
+    lineHeight: 25,
     fontFamily: "Poppins_700Bold",
   },
   liveRadioSubtitle: {
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: 15,
+    lineHeight: 20,
     marginTop: 2,
     fontFamily: "Poppins_400Regular",
   },
-  liveRadioMetaRow: {
-    marginTop: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  liveRadioNowPlaying: {
-    flex: 1,
-    minWidth: 0,
-  },
-  liveRadioMetaLabel: {
-    fontSize: 10,
-    fontFamily: "Poppins_500Medium",
-  },
-  liveRadioMetaValue: {
+  liveRadioMetaText: {
+    marginTop: 7,
     fontSize: 12,
-    marginTop: 1,
-    fontFamily: "Poppins_600SemiBold",
-  },
-  liveRadioListeners: {
-    maxWidth: 104,
-    borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-    backgroundColor: "rgba(124,58,237,0.10)",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-  },
-  liveRadioListenerText: {
-    flexShrink: 1,
-    fontSize: 10,
+    lineHeight: 16,
     fontFamily: "Poppins_600SemiBold",
   },
   liveRadioPlayButton: {
-    minWidth: 88,
-    minHeight: 42,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    flexDirection: "row",
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-  },
-  liveRadioPlayText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontFamily: "Poppins_700Bold",
   },
   tabRow: { flexDirection: "row", gap: 10 },
   tabButton: { flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: 10, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
   tabText: { fontSize: 14, fontFamily: "Poppins_600SemiBold" },
-  forYouTabIcon: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1.5,
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-  },
-  forYouTabIconCenter: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-  },
-  forYouTabIconSparkle: {
-    position: "absolute",
-    top: -4,
-    right: -5,
-  },
   composer: { borderWidth: 1, borderRadius: 14, padding: 12 },
   composerInput: { minHeight: 82, fontSize: 14, lineHeight: 20, textAlignVertical: "top" },
   composerFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 10 },
@@ -1939,17 +2341,14 @@ const styles = StyleSheet.create({
   postButtonText: { color: "#FFFFFF", fontFamily: "Poppins_600SemiBold", fontSize: 13 },
   pageWrap: { flex: 1 },
   pageWrapWeb: {
-    flexDirection: "row",
     alignSelf: "center",
     justifyContent: "center",
     width: "100%",
-    maxWidth: 1240,
-    alignItems: "flex-start",
-    paddingHorizontal: 20,
+    maxWidth: 840,
+    paddingHorizontal: 28,
     paddingTop: 0,
-    gap: 24,
   },
-  centerColumn: { flex: 1, width: "100%", maxWidth: 720, alignSelf: "center" },
+  centerColumn: { flex: 1, width: "100%", maxWidth: 640, alignSelf: "center" },
   rightRail: {
     width: 300,
     gap: 14,
@@ -2085,12 +2484,13 @@ const styles = StyleSheet.create({
   fbTabText: { fontSize: 14, fontFamily: "Poppins_600SemiBold" },
   socialPostCard: {
     borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: 14,
     padding: 12,
+    paddingBottom: 14,
     marginBottom: 12,
     shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 14,
     elevation: 2,
   },
   socialPostHeader: {
@@ -2120,32 +2520,56 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  socialHeaderActions: {
+    minHeight: 28,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    alignSelf: "flex-start",
+    gap: 6,
+    flexShrink: 0,
+    marginTop: 1,
+  },
+  socialHeaderBadgeChip: {
+    height: 28,
+    maxWidth: 96,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  socialHeaderBadgeText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: "Poppins_700Bold",
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
   socialName: {
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 18,
+    lineHeight: 23,
     fontFamily: "Poppins_700Bold",
   },
   socialMetaRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    marginTop: 2,
+    marginTop: 1,
   },
   socialMetaText: {
     flexShrink: 1,
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 13,
+    lineHeight: 18,
     fontFamily: "Poppins_400Regular",
   },
   socialMetaDot: {
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 11,
+    lineHeight: 16,
     fontFamily: "Poppins_700Bold",
   },
   socialMenuButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2182,14 +2606,14 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
   },
   socialCaption: {
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 21,
     fontFamily: "Poppins_400Regular",
     marginTop: 10,
   },
   socialMediaWrap: {
     marginTop: 10,
-    borderRadius: 14,
+    borderRadius: 10,
     overflow: "hidden",
     position: "relative",
     backgroundColor: "rgba(124,58,237,0.08)",
@@ -2214,6 +2638,7 @@ const styles = StyleSheet.create({
   socialGalleryImage: {
     width: "100%",
     height: "100%",
+    borderRadius: 10,
   },
   socialGalleryMoreOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -2249,13 +2674,43 @@ const styles = StyleSheet.create({
     gap: 7,
     marginTop: 10,
   },
+  socialQuickInfoRow: {
+    marginTop: 12,
+    paddingTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderTopWidth: 1,
+    gap: 10,
+  },
+  socialQuickInfoItem: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  socialQuickInfoItemStart: {
+    justifyContent: "flex-start",
+  },
+  socialQuickInfoItemEnd: {
+    justifyContent: "flex-end",
+  },
+  socialQuickInfoText: {
+    flexShrink: 1,
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: "Poppins_700Bold",
+  },
   socialBadgeChip: {
     borderRadius: 999,
     paddingHorizontal: 9,
     paddingVertical: 5,
   },
   socialBadgeText: {
-    fontSize: 10,
+    fontSize: 12,
+    lineHeight: 16,
     fontFamily: "Poppins_700Bold",
   },
   socialPriceChip: {
@@ -2266,14 +2721,18 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(124,58,237,0.05)",
   },
   socialPriceText: {
-    fontSize: 10,
+    fontSize: 12,
+    lineHeight: 16,
     fontFamily: "Poppins_700Bold",
   },
   socialActionRow: {
     flexDirection: "row",
     alignItems: "center",
+    marginTop: 8,
+    paddingVertical: 4,
     minHeight: 40,
-    paddingTop: 4,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
   },
   socialActionButton: {
     flex: 1,
@@ -2290,21 +2749,51 @@ const styles = StyleSheet.create({
   },
   socialCtaRow: {
     flexDirection: "row",
-    justifyContent: "flex-end",
-    paddingTop: 5,
+    justifyContent: "space-between",
+    gap: 10,
+    paddingTop: 12,
   },
   socialPrimaryCta: {
-    minHeight: 34,
+    flex: 1,
+    minHeight: 40,
     borderRadius: 10,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 2,
+    gap: 4,
   },
   socialPrimaryCtaText: {
-    fontSize: 12,
+    fontSize: 15,
+    lineHeight: 20,
     fontFamily: "Poppins_700Bold",
+  },
+  socialSecondaryCta: {
+    minWidth: 112,
+    minHeight: 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  socialSecondaryCtaText: {
+    fontSize: 14,
+    lineHeight: 19,
+    fontFamily: "Poppins_700Bold",
+  },
+  socialStatsRow: {
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  socialStatsText: {
+    flex: 1,
+    fontSize: 12,
+    fontFamily: "Poppins_500Medium",
+    textAlign: "center",
   },
   loading: { marginTop: 40 },
   emptyWrap: { minHeight: 260, alignItems: "center", justifyContent: "center" },
@@ -2314,12 +2803,18 @@ const styles = StyleSheet.create({
   searchRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 10,
+  },
+  searchBand: {
+    marginHorizontal: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    backgroundColor: "#1E293B",
   },
   searchTrigger: {
     flex: 1,
     height: 48,
-    borderRadius: 16,
+    borderRadius: 14,
     paddingHorizontal: 16,
     flexDirection: "row",
     alignItems: "center",
@@ -2327,24 +2822,25 @@ const styles = StyleSheet.create({
   },
   searchTriggerText: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 16,
+    lineHeight: 22,
     fontFamily: "Poppins_500Medium",
   },
   searchFilterBtn: {
     width: 48,
     height: 48,
-    borderRadius: 16,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
   },
   // Mobile-parity composer trigger card
   composerTriggerCard: {
     borderWidth: 1,
-    borderRadius: 16,
-    padding: 14,
+    borderRadius: 14,
+    padding: 12,
     shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 20,
   },
   composerTriggerTopRow: {
     flexDirection: "row",
@@ -2355,18 +2851,26 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 40,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 9,
     borderRadius: 999,
     justifyContent: "center",
   },
   composerTriggerText: {
-    fontSize: 14,
+    fontSize: 16,
+    lineHeight: 22,
     fontFamily: "Poppins_400Regular",
+  },
+  composerMediaIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
   },
   composerTriggerActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 8,
   },
   composerTriggerActionBtn: {
     flex: 1,
@@ -2374,29 +2878,36 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: "rgba(148,163,184,0.08)",
   },
   // Mobile-parity sliding pill tab bar
   pillTabRow: {
     flexDirection: "row",
-    borderRadius: 999,
-    padding: 4,
-    gap: 4,
+    marginHorizontal: 0,
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    minHeight: 54,
+    gap: 0,
+    borderWidth: 0,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
   },
   pillTabButton: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    paddingVertical: 10,
-    borderRadius: 999,
+    paddingVertical: 0,
+    borderRadius: 0,
+    borderBottomWidth: 3,
+    borderBottomColor: "transparent",
     shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 10,
   },
-  pillTabText: { fontSize: 14, fontFamily: "Poppins_600SemiBold" },
+  pillTabText: { fontSize: 16, lineHeight: 22, fontFamily: "Poppins_700Bold" },
   // Create post modal (mobile parity)
   createModalOverlay: {
     flex: 1,
@@ -2469,5 +2980,55 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderTopWidth: 1,
+  },
+  emptyStateContainer: {
+    minHeight: 320,
+    borderWidth: 1,
+    borderRadius: 22,
+    paddingHorizontal: 26,
+    paddingVertical: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 10 },
+    shadowRadius: 24,
+    marginTop: 4,
+  },
+  emptyIconCircle: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 18,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    lineHeight: 26,
+    fontFamily: "Poppins_700Bold",
+    textAlign: "center",
+  },
+  emptySubtitle: {
+    marginTop: 10,
+    fontSize: 13,
+    lineHeight: 20,
+    fontFamily: "Poppins_400Regular",
+    textAlign: "center",
+    maxWidth: 420,
+  },
+  emptyActionBtn: {
+    marginTop: 20,
+    minHeight: 42,
+    borderRadius: 999,
+    paddingHorizontal: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  emptyActionBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontFamily: "Poppins_700Bold",
   },
 });

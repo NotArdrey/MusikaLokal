@@ -76,10 +76,13 @@ const resolveWebPort = () => {
   }
 };
 
-const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-const child = spawn(npxCommand, ['expo', 'start', '--web', '--port', resolveWebPort()], {
+const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const child = spawn(npmCommand, ['run', 'dev', '--', '--port', resolveWebPort()], {
   cwd: resolve(repoRoot, 'web'),
-  env: childEnv,
+  env: {
+    ...childEnv,
+    CI: childEnv.CI || '1',
+  },
   shell: process.platform === 'win32',
   stdio: 'inherit',
 });

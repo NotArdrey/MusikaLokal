@@ -80,7 +80,7 @@ function launchDevTerminals(projectRoot, request) {
     {
       name: "MusikaLokal Mobile",
       cwd: mobileDir,
-      command: buildPowerShellCommand("npx expo start", skipInstall),
+      command: buildPowerShellCommand("npm run start", skipInstall),
     },
     {
       name: "MusikaLokal Web",

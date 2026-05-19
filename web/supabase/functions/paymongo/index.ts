@@ -1194,7 +1194,12 @@ serve(async (req: Request) => {
               ? `Downpayment received for ${fullBooking.studio?.name}. Pay the remaining balance in your Pending bookings.`
               : `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`,
             image: studioImage,
-            meta: { booking_id: fullBooking.id },
+            meta: {
+              booking_id: fullBooking.id,
+              status: isDownpayment ? "partial" : "paid",
+              payment_status: isDownpayment ? "partial" : "paid",
+              event_type: isDownpayment ? "studio_booking_downpayment" : "studio_booking_paid",
+            },
           });
 
           // Notify studio owner
@@ -1208,6 +1213,9 @@ serve(async (req: Request) => {
               meta: {
                 booking_id: fullBooking.id,
                 studio_id: fullBooking.studio_id,
+                status: isDownpayment ? "partial" : "paid",
+                payment_status: isDownpayment ? "partial" : "paid",
+                event_type: isDownpayment ? "studio_booking_downpayment" : "studio_booking_paid",
               },
             });
           }
@@ -1401,7 +1409,12 @@ serve(async (req: Request) => {
                     title: musicianTitle,
                     message: musicianMessage,
                     image: studioImage,
-                    meta: { booking_id: fullBooking.id },
+                    meta: {
+                      booking_id: fullBooking.id,
+                      status: isDownpayment ? "partial" : "paid",
+                      payment_status: isDownpayment ? "partial" : "paid",
+                      event_type: isDownpayment ? "studio_booking_downpayment" : "studio_booking_paid",
+                    },
                   });
 
                   // Notify studio owner
@@ -1417,7 +1430,12 @@ serve(async (req: Request) => {
                       title: ownerTitle,
                       message: ownerMessage,
                       image: userAvatar,
-                      meta: { booking_id: fullBooking.id },
+                      meta: {
+                        booking_id: fullBooking.id,
+                        status: isDownpayment ? "partial" : "paid",
+                        payment_status: isDownpayment ? "partial" : "paid",
+                        event_type: isDownpayment ? "studio_booking_downpayment" : "studio_booking_paid",
+                      },
                     });
                   }
                 }
@@ -1624,7 +1642,12 @@ serve(async (req: Request) => {
               title: notificationTitle,
               message: notificationMessage,
               image: studioImage,
-              meta: { booking_id: booking.id },
+              meta: {
+                booking_id: booking.id,
+                status: isDownpayment ? "partial" : "paid",
+                payment_status: isDownpayment ? "partial" : "paid",
+                event_type: isDownpayment ? "studio_booking_downpayment" : "studio_booking_paid",
+              },
             });
 
             if (booking.studio?.owner_id) {
@@ -1637,7 +1660,12 @@ serve(async (req: Request) => {
                 title: isDownpayment ? "Downpayment Received" : "New Paid Booking",
                 message: ownerMessage,
                 image: studioImage,
-                meta: { booking_id: booking.id },
+                meta: {
+                  booking_id: booking.id,
+                  status: isDownpayment ? "partial" : "paid",
+                  payment_status: isDownpayment ? "partial" : "paid",
+                  event_type: isDownpayment ? "studio_booking_downpayment" : "studio_booking_paid",
+                },
               });
             }
           }
@@ -1774,7 +1802,12 @@ serve(async (req: Request) => {
               title: "Payment Failed",
               message: `Your payment for ${booking.studio?.name} failed. Please try again.`,
               image: booking.studio?.images?.[0] || null,
-              meta: { booking_id: booking.id },
+              meta: {
+                booking_id: booking.id,
+                status: "failed",
+                payment_status: "failed",
+                event_type: "studio_booking_payment_failed",
+              },
             });
           }
         }
@@ -1817,7 +1850,12 @@ serve(async (req: Request) => {
               title: "Refund Completed",
               message: `Your refund of ₱${refundAmount.toLocaleString()} for ${bookingWithLegacy.studio?.name} has been processed.`,
               image: bookingWithLegacy.studio?.images?.[0] || null,
-              meta: { booking_id: bookingId },
+              meta: {
+                booking_id: bookingId,
+                status: "cancelled",
+                payment_status: "refunded",
+                event_type: "studio_booking_refunded",
+              },
             });
           }
         }
@@ -2080,7 +2118,13 @@ serve(async (req: Request) => {
             type: "warning",
             title: "Manual Refund Required",
             message: `A booking at ${booking.studio?.name} requires a manual refund of ₱${refundAmount.toLocaleString()}.`,
-            meta: { booking_id: booking.id, refund_amount: refundAmount },
+            meta: {
+              booking_id: booking.id,
+              refund_amount: refundAmount,
+              status: "cancelled",
+              payment_status: "refund_pending",
+              event_type: "studio_booking_refund_pending",
+            },
           });
         }
 
@@ -2136,7 +2180,13 @@ serve(async (req: Request) => {
           type: "success",
           title: "Refund Processed",
           message: `Your refund of ₱${refundAmount.toLocaleString()} (${refundPercentage}%) for ${booking.studio?.name} has been processed.`,
-          meta: { booking_id: booking.id, refund_amount: refundAmount },
+          meta: {
+            booking_id: booking.id,
+            refund_amount: refundAmount,
+            status: "cancelled",
+            payment_status: "refunded",
+            event_type: "studio_booking_refunded",
+          },
         });
 
         // Notify studio owner
@@ -2146,7 +2196,13 @@ serve(async (req: Request) => {
             type: "info",
             title: "Booking Cancelled & Refunded",
             message: `A booking at ${booking.studio?.name} was cancelled. Refund of ₱${refundAmount.toLocaleString()} processed.`,
-            meta: { booking_id: booking.id, refund_amount: refundAmount },
+            meta: {
+              booking_id: booking.id,
+              refund_amount: refundAmount,
+              status: "cancelled",
+              payment_status: "refunded",
+              event_type: "studio_booking_refunded",
+            },
           });
         }
 

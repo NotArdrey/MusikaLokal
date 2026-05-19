@@ -20,19 +20,31 @@ serve(async (req: Request) => {
             Deno.env.get('SUPABASE_URL') ?? '',
             // @ts-ignore
             Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-            { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
+            { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } }
         )
 
         const { action, ...params } = await req.json()
 
+        const {
+            data: { user },
+            error: authError,
+        } = await supabaseClient.auth.getUser()
+
+        if (authError || !user?.id) {
+            return new Response(JSON.stringify({ error: 'Authentication required' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 401,
+            })
+        }
+
+        const authenticatedUserId = user.id
+
         // 0. UNREAD COUNT
         if (action === 'unread_count') {
-            const { userId } = params
-
             const { count, error } = await supabaseClient
                 .from('notifications')
                 .select('*', { count: 'exact', head: true })
-                .eq('user_id', userId)
+                .eq('user_id', authenticatedUserId)
                 .eq('read', false)
 
             if (error) throw error
@@ -45,13 +57,13 @@ serve(async (req: Request) => {
 
         // 1. FETCH NOTIFICATIONS
         if (action === 'fetch') {
-            const { userId, limit, cursor } = params
+            const { limit, cursor } = params
             const pageSize = Math.max(1, Math.min(Number(limit) || 30, 60))
 
             let query = supabaseClient
                 .from('notifications')
                 .select('*')
-                .eq('user_id', userId)
+                .eq('user_id', authenticatedUserId)
                 .order('created_at', { ascending: false })
                 .limit(pageSize + 1)
 
@@ -73,7 +85,7 @@ serve(async (req: Request) => {
             const { count: unreadCount, error: unreadError } = await supabaseClient
                 .from('notifications')
                 .select('id', { count: 'exact', head: true })
-                .eq('user_id', userId)
+                .eq('user_id', authenticatedUserId)
                 .eq('read', false)
 
             if (unreadError) throw unreadError
@@ -93,14 +105,14 @@ serve(async (req: Request) => {
 
         // 2. MARK AS READ (Single or All)
         if (action === 'mark_read') {
-            const { notificationId, userId, all } = params
+            const { notificationId, all } = params
 
             let query = supabaseClient.from('notifications').update({ read: true })
 
             if (all) {
-                query = query.eq('user_id', userId)
+                query = query.eq('user_id', authenticatedUserId)
             } else {
-                query = query.eq('id', notificationId)
+                query = query.eq('id', notificationId).eq('user_id', authenticatedUserId)
             }
 
             const { data, error } = await query.select()
@@ -115,12 +127,12 @@ serve(async (req: Request) => {
 
         // 3. CREATE NOTIFICATION (Helper for demo/testing)
         if (action === 'create') {
-            const { userId, title, message, type, image, meta } = params
+            const { title, message, type, image, meta } = params
 
             const { data, error } = await supabaseClient
                 .from('notifications')
                 .insert([{
-                    user_id: userId,
+                    user_id: authenticatedUserId,
                     title,
                     message,
                     type: type || 'info',

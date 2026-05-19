@@ -5,32 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="1228764b-191d-4dd6-88c7-52fb0268941f" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/caches/deviceStreaming.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/caches/deviceStreaming.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/mobile/app/_layout.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/mobile/app/_layout.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/mobile/app/feed.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/mobile/app/feed.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/mobile/app/marketplace.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/mobile/app/marketplace.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/mobile/app/my_group.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/mobile/app/my_group.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/mobile/app/my_production.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/mobile/app/my_production.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/mobile/app/my_studio.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/mobile/app/my_studio.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/mobile/app/my_venue.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/mobile/app/my_venue.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/mobile/lib/supabase.ts" beforeDir="false" afterPath="$PROJECT_DIR$/mobile/lib/supabase.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/mobile/src/components/header.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/mobile/src/components/header.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/bookings.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/bookings.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/manage_gig.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/manage_gig.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/my_group.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/my_group.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/my_production.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/my_production.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/my_studio.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/my_studio.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/my_venue.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/my_venue.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/production_team.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/production_team.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app/shop.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/app/shop.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/expo-web-dev-8082.err.log" beforeDir="false" afterPath="$PROJECT_DIR$/web/expo-web-dev-8082.err.log" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/expo-web-dev-8082.out.log" beforeDir="false" afterPath="$PROJECT_DIR$/web/expo-web-dev-8082.out.log" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/src/components/ProductionInviteSection.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/src/components/ProductionInviteSection.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/src/context/TopToastContext.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/web/src/context/TopToastContext.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/src/hooks/useApplicationSubmissionAction.ts" beforeDir="false" afterPath="$PROJECT_DIR$/web/src/hooks/useApplicationSubmissionAction.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/src/utils/notificationNavigation.ts" beforeDir="false" afterPath="$PROJECT_DIR$/web/src/utils/notificationNavigation.ts" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

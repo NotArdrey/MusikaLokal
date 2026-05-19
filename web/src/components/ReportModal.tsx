@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
     ActivityIndicator,
     Modal,
+    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -124,7 +126,7 @@ export default function ReportModal({
 }: ReportModalProps) {
     const { colors, isDark } = useTheme();
     const insets = useSafeAreaInsets();
-    const { height } = useWindowDimensions();
+    const { height, width } = useWindowDimensions();
     const [selectedReason, setSelectedReason] = useState<string | null>(null);
     const [details, setDetails] = useState('');
     const [submitting, setSubmitting] = useState(false);
@@ -176,37 +178,29 @@ export default function ReportModal({
     const borderSelected = '#6366F1';
     const accent = colors.primary;
     const isSubmitDisabled = submitting || !selectedReason || (isOtherReason && !trimmedDetails);
-    const sheetMaxHeight = Math.min(
-        720,
-        Math.max(320, height - Math.max(insets.top, 12) - 16),
+    const modalWidth = Math.min(Math.max(width - 32, 280), 560);
+    const modalMaxHeight = Math.min(
+        680,
+        Math.max(320, height - Math.max(insets.top + insets.bottom + 48, 96)),
     );
-    const reasonsMaxHeight = Math.max(150, Math.min(420, sheetMaxHeight - 280));
+    const reasonsMaxHeight = Math.max(150, Math.min(360, modalMaxHeight - 280));
 
-    return (
-        <Modal
-            visible={visible}
-            transparent
-            animationType="slide"
-            onRequestClose={handleClose}
-            statusBarTranslucent
-        >
-            <Pressable style={[styles.overlay, { backgroundColor: overlayBg }]} onPress={handleClose}>
-                <Pressable
-                    testID="report-modal"
-                    accessibilityLabel="report-modal"
-                    style={[
-                        styles.sheet,
-                        {
-                            backgroundColor: cardBg,
-                            maxHeight: sheetMaxHeight,
-                            paddingBottom: Math.max(insets.bottom, 14) + 6,
-                        },
-                    ]}
-                    onPress={() => {}} // prevent closing when tapping inside
-                >
-                    {/* Handle */}
-                    <View style={styles.handle} />
-
+    const modalContent = (
+        <Pressable style={[styles.overlay, { backgroundColor: overlayBg }]} onPress={handleClose}>
+            <Pressable
+                testID="report-modal"
+                accessibilityLabel="report-modal"
+                style={[
+                    styles.sheet,
+                    {
+                        backgroundColor: cardBg,
+                        width: modalWidth,
+                        maxHeight: modalMaxHeight,
+                        paddingBottom: 18,
+                    },
+                ]}
+                onPress={() => {}} // prevent closing when tapping inside
+            >
                     {submitted ? (
                         /* ── Success State ── */
                         <View style={styles.successContainer}>
@@ -376,24 +370,65 @@ export default function ReportModal({
                             </View>
                         </>
                     )}
-                </Pressable>
             </Pressable>
-            <CustomAlert
-                visible={feedbackVisible}
-                type="warning"
-                title="Reason Required"
-                message="Please select a reason before submitting your report."
-                forceModal
-                onClose={() => setFeedbackVisible(false)}
-            />
+        </Pressable>
+    );
+
+    const feedbackAlert = (
+        <CustomAlert
+            visible={feedbackVisible}
+            type="warning"
+            title="Reason Required"
+            message="Please select a reason before submitting your report."
+            forceModal
+            onClose={() => setFeedbackVisible(false)}
+        />
+    );
+
+    if (Platform.OS === 'web') {
+        if (!visible && !feedbackVisible) return null;
+
+        const webModal = (
+            <View style={styles.webModalRoot} pointerEvents="box-none">
+                {visible ? modalContent : null}
+                {feedbackAlert}
+            </View>
+        );
+
+        return typeof document !== 'undefined' && document.body
+            ? createPortal(webModal, document.body)
+            : webModal;
+    }
+
+    return (
+        <Modal
+            visible={visible}
+            transparent
+            animationType="fade"
+            onRequestClose={handleClose}
+            statusBarTranslucent
+        >
+            {modalContent}
+            {feedbackAlert}
         </Modal>
     );
 }
 
 const styles = StyleSheet.create({
+    webModalRoot: {
+        position: 'fixed' as any,
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        zIndex: 2147483647,
+    } as any,
     overlay: {
         flex: 1,
-        justifyContent: 'flex-end',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 24,
     },
     errorText: {
         fontSize: 13,
@@ -401,24 +436,15 @@ const styles = StyleSheet.create({
         marginTop: 10,
     },
     sheet: {
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
+        borderRadius: 24,
         paddingHorizontal: 18,
-        paddingTop: 10,
+        paddingTop: 16,
         overflow: 'hidden',
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: -4 },
-        shadowOpacity: 0.18,
-        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 18 },
+        shadowOpacity: 0.28,
+        shadowRadius: 28,
         elevation: 20,
-    },
-    handle: {
-        width: 44,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: '#9CA3AF',
-        alignSelf: 'center',
-        marginBottom: 12,
     },
     headerRow: {
         flexDirection: 'row',

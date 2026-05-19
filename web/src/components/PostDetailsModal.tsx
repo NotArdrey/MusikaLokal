@@ -20,7 +20,18 @@ import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
 import ProfileAvatar from "./ProfileAvatar";
 
-const KNOWN_FEED_MEDIA_BUCKETS = ["post-media", "feed-media", "media", "public", "user-uploads"];
+const KNOWN_FEED_MEDIA_BUCKETS = [
+  "post-media",
+  "posts",
+  "images",
+  "listings",
+  "documents",
+  "avatars",
+  "feed-media",
+  "media",
+  "public",
+  "user-uploads",
+];
 
 const resolvePostMediaUrl = (value: unknown) => {
   if (typeof value !== "string") return "";
@@ -34,8 +45,10 @@ const resolvePostMediaUrl = (value: unknown) => {
   if (directParts.length > 1) {
     const directBucket = directParts[0];
     const directPath = directParts.slice(1).join("/");
-    const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
-    if (data?.publicUrl) return data.publicUrl;
+    if (KNOWN_FEED_MEDIA_BUCKETS.includes(directBucket)) {
+      const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
+      if (data?.publicUrl) return data.publicUrl;
+    }
   }
 
   for (const bucket of KNOWN_FEED_MEDIA_BUCKETS) {
@@ -44,6 +57,41 @@ const resolvePostMediaUrl = (value: unknown) => {
   }
 
   return normalized;
+};
+
+const normalizePostMediaItems = (rawPost: any) => {
+  const sourceItems = Array.isArray(rawPost?.media)
+    ? rawPost.media
+    : Array.isArray(rawPost?.post_media)
+      ? rawPost.post_media
+      : [];
+  const normalized = sourceItems
+    .map((item: any) => {
+      const url = resolvePostMediaUrl(
+        item?.url ||
+          item?.media_url ||
+          item?.public_url ||
+          item?.storage_path ||
+          item?.thumbnail_url ||
+          item?.thumbnail_path,
+      );
+      return url ? { ...item, url } : null;
+    })
+    .filter(Boolean);
+
+  if (normalized.length > 0) return normalized;
+
+  const fallbackUrls = [
+    rawPost?.image,
+    rawPost?.image_url,
+    rawPost?.media_url,
+    rawPost?.thumbnail_url,
+    ...(Array.isArray(rawPost?.images) ? rawPost.images : []),
+  ]
+    .map(resolvePostMediaUrl)
+    .filter(Boolean);
+
+  return Array.from(new Set(fallbackUrls)).map((url, index) => ({ id: `fallback-${index}`, url }));
 };
 
 const formatTimestamp = (raw: string | null | undefined) => {
@@ -80,7 +128,7 @@ export default function PostDetailsModal({
 }: Props) {
   const { colors, isDark } = useTheme();
   const { session, userId } = useAuth();
-  const { height } = useWindowDimensions();
+  const { height, width } = useWindowDimensions();
 
   const [post, setPost] = useState<any>(null);
   const [comments, setComments] = useState<any[]>([]);
@@ -88,11 +136,51 @@ export default function PostDetailsModal({
   const [commentText, setCommentText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+  const [currentProfileAvatar, setCurrentProfileAvatar] = useState("");
 
   const cardBg = isDark ? "#1E293B" : "#FFFFFF";
   const borderCol = isDark ? "#334155" : "#E2E8F0";
   const subtleBg = isDark ? "#0F172A" : "#F1F5F9";
   const bubbleBg = isDark ? "#334155" : "#F1F5F9";
+  const sessionAvatar =
+    ((session?.user?.user_metadata as any)?.avatar_url ||
+      (session?.user?.user_metadata as any)?.picture ||
+      "") as string;
+  const currentUserAvatar = currentProfileAvatar || sessionAvatar;
+  const modalMediaWidth = useMemo(
+    () => Math.min(Math.max(width - 104, 280), 640),
+    [width],
+  );
+  const modalMediaHeight = Math.round(modalMediaWidth * 0.68);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!visible || !userId) {
+      setCurrentProfileAvatar("");
+      return;
+    }
+
+    const loadCurrentProfileAvatar = async () => {
+      try {
+        const { data } = await supabase
+          .from("profiles")
+          .select("avatar_url")
+          .eq("id", userId)
+          .maybeSingle();
+        if (!cancelled) {
+          setCurrentProfileAvatar(typeof data?.avatar_url === "string" ? data.avatar_url : "");
+        }
+      } catch {
+        if (!cancelled) setCurrentProfileAvatar("");
+      }
+    };
+
+    void loadCurrentProfileAvatar();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, visible]);
 
   const fetchPost = useCallback(async () => {
     if (!postId) return;
@@ -118,12 +206,7 @@ export default function PostDetailsModal({
           author_name: rawPost?.author_name ?? rawPost?.author?.full_name ?? "User",
           author_avatar: rawPost?.author_avatar ?? rawPost?.author?.avatar_url ?? "",
           my_reaction: rawPost?.my_reaction ?? rawPost?.user_reaction ?? null,
-          media: Array.isArray(rawPost?.media)
-            ? rawPost.media.map((item: any) => ({
-                ...item,
-                url: resolvePostMediaUrl(item?.url || item?.storage_path || item?.public_url),
-              }))
-            : [],
+          media: normalizePostMediaItems(rawPost),
         };
 
         setPost(normalizedPost);
@@ -331,9 +414,15 @@ export default function PostDetailsModal({
                       <CachedImage
                         key={`${m.id || i}`}
                         uri={m.url}
-                        style={styles.mediaImg}
-                        width={320}
-                        height={240}
+                        style={[
+                          styles.mediaImg,
+                          {
+                            width: modalMediaWidth,
+                            height: modalMediaHeight,
+                          },
+                        ]}
+                        width={Math.round(modalMediaWidth)}
+                        height={modalMediaHeight}
                       />
                     ) : null,
                   )}
@@ -428,7 +517,7 @@ export default function PostDetailsModal({
 
           <View style={[styles.footer, { borderTopColor: borderCol, backgroundColor: cardBg }]}>
             <ProfileAvatar
-              uri={(session?.user?.user_metadata as any)?.avatar_url}
+              uri={currentUserAvatar}
               style={styles.footerAvatar}
               backgroundColor={isDark ? "#374151" : "#E5E7EB"}
               iconColor={colors.textSecondary}
@@ -552,8 +641,8 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     paddingBottom: 12,
   },
-  mediaScroll: { paddingHorizontal: 16, gap: 8 },
-  mediaImg: { width: 320, height: 240, borderRadius: 10, marginRight: 8 },
+  mediaScroll: { paddingHorizontal: 16, paddingBottom: 12, gap: 8 },
+  mediaImg: { borderRadius: 10, marginRight: 8, backgroundColor: "#0F172A" },
   countsRow: {
     flexDirection: "row",
     alignItems: "center",

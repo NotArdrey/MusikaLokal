@@ -22,7 +22,18 @@ import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 
-const KNOWN_FEED_MEDIA_BUCKETS = ["post-media", "feed-media", "media", "public", "user-uploads"];
+const KNOWN_FEED_MEDIA_BUCKETS = [
+  "post-media",
+  "posts",
+  "images",
+  "listings",
+  "documents",
+  "avatars",
+  "feed-media",
+  "media",
+  "public",
+  "user-uploads",
+];
 
 const resolvePostMediaUrl = (value: unknown) => {
   if (typeof value !== "string") return "";
@@ -36,8 +47,10 @@ const resolvePostMediaUrl = (value: unknown) => {
   if (directParts.length > 1) {
     const directBucket = directParts[0];
     const directPath = directParts.slice(1).join("/");
-    const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
-    if (data?.publicUrl) return data.publicUrl;
+    if (KNOWN_FEED_MEDIA_BUCKETS.includes(directBucket)) {
+      const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
+      if (data?.publicUrl) return data.publicUrl;
+    }
   }
 
   for (const bucket of KNOWN_FEED_MEDIA_BUCKETS) {
@@ -117,7 +130,14 @@ export default function PostDetailsScreen() {
           media: Array.isArray(rawPost?.media)
             ? rawPost.media.map((item: any) => ({
                 ...item,
-                url: resolvePostMediaUrl(item?.url || item?.storage_path || item?.public_url),
+                url: resolvePostMediaUrl(
+                  item?.url ||
+                    item?.media_url ||
+                    item?.public_url ||
+                    item?.storage_path ||
+                    item?.thumbnail_url ||
+                    item?.thumbnail_path,
+                ),
               }))
             : [],
         };

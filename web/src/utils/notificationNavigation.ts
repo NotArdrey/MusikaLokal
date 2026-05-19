@@ -39,6 +39,102 @@ const readStringId = (...values: unknown[]) => {
   return undefined;
 };
 
+const normalizeListingType = (...values: unknown[]) =>
+  readStringId(...values)
+    ?.trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+const normalizeActivityTab = (...values: unknown[]) => {
+  const normalized = readStringId(...values)?.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  if (!normalized) return undefined;
+
+  if (normalized === "active musicians") return "Active Musicians";
+
+  const titled = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  return ["Pending", "Upcoming", "Ongoing", "Review", "History", "Applicants"].includes(titled)
+    ? titled
+    : undefined;
+};
+
+const includesAny = (value: string, needles: string[]) =>
+  needles.some((needle) => value.includes(needle));
+
+const inferActivityTabFromNotification = (
+  record: Record<string, unknown>,
+  meta: Record<string, unknown>,
+  notificationType?: string,
+  explicitParams?: NotificationRouteParams,
+) => {
+  const explicitTab = normalizeActivityTab(explicitParams?.tab, meta.tab, record.tab);
+  if (explicitTab) return explicitTab;
+
+  const status = readStringId(
+    meta.status,
+    record.status,
+    meta.booking_status,
+    meta.bookingStatus,
+    meta.application_status,
+    meta.applicationStatus,
+    meta.payment_status,
+    meta.paymentStatus,
+  )?.toLowerCase() || "";
+  const eventType = (notificationType || "").toLowerCase();
+  const sourceTable = readStringId(meta.source_table, meta.sourceTable, record.source_table, record.sourceTable)?.toLowerCase() || "";
+  const title = readStringId(record.title, meta.title)?.toLowerCase() || "";
+  const message = readStringId(record.message, meta.message)?.toLowerCase() || "";
+  const combined = `${eventType} ${status} ${sourceTable} ${title} ${message}`;
+
+  if (
+    includesAny(combined, [
+      "cancelled",
+      "canceled",
+      "declined",
+      "rejected",
+      "resigned",
+      "fired",
+      "refunded",
+      "removed from gig",
+      "gig cancelled",
+      "booking cancelled",
+    ])
+  ) {
+    return "History";
+  }
+
+  if (
+    includesAny(combined, [
+      "payment successful",
+      "payment received",
+      "paid",
+      "confirmed",
+      "accepted",
+      "reserved",
+      "reservation",
+      "downpayment",
+      "partially_paid",
+      "moved to upcoming",
+      "upcoming",
+    ])
+  ) {
+    return "Upcoming";
+  }
+
+  if (includesAny(combined, ["ongoing", "in_progress", "in progress", "happening now"])) {
+    return "Ongoing";
+  }
+
+  if (includesAny(combined, ["completed", "review"])) {
+    return "Review";
+  }
+
+  if (includesAny(combined, ["pending", "booking request", "new booking request", "request created", "awaiting"])) {
+    return "Pending";
+  }
+
+  return undefined;
+};
+
 const readNotificationEventType = (
   record: Record<string, unknown>,
   meta: Record<string, unknown>,
@@ -207,6 +303,62 @@ export const resolveNotificationNavigationTarget = (
     || normalizeNotificationRouteParams(meta.route_params)
     || normalizeNotificationRouteParams(meta.params);
   const notificationType = readNotificationEventType(record, meta);
+  const activityTab = inferActivityTabFromNotification(record, meta, notificationType, explicitParams);
+  const postId = readStringId(record.post_id, record.postId, meta.post_id, meta.postId, explicitParams?.post_id, explicitParams?.postId);
+  const teamId = readStringId(
+    record.team_id,
+    record.teamId,
+    record.production_team_id,
+    record.productionTeamId,
+    meta.team_id,
+    meta.teamId,
+    meta.production_team_id,
+    meta.productionTeamId,
+    explicitParams?.teamId,
+    explicitParams?.team_id,
+    explicitParams?.production_team_id,
+    explicitParams?.productionTeamId,
+  );
+  const gigId = readStringId(
+    record.gig_id,
+    record.gigId,
+    meta.gig_id,
+    meta.gigId,
+    explicitParams?.gig_id,
+    explicitParams?.gigId,
+  );
+  const studioId = readStringId(
+    record.studio_id,
+    record.studioId,
+    meta.studio_id,
+    meta.studioId,
+    explicitParams?.studio_id,
+    explicitParams?.studioId,
+  );
+  const listingId = readStringId(
+    record.listing_id,
+    record.listingId,
+    meta.listing_id,
+    meta.listingId,
+    explicitParams?.reopenListingId,
+    explicitParams?.listing_id,
+    explicitParams?.listingId,
+    explicitParams?.id,
+  );
+  const listingType = normalizeListingType(
+    record.listing_type,
+    record.listingType,
+    meta.listing_type,
+    meta.listingType,
+    explicitParams?.listing_type,
+    explicitParams?.listingType,
+    meta.display_listing_type,
+    meta.displayListingType,
+  );
+
+  if (explicitPath === "/post_details" && postId) {
+    return { pathname: "/feed", params: { postId } };
+  }
 
   if (isProductionTeamInviteNotification(notificationType, record, meta)) {
     return { pathname: "/bookings", params: { tab: "Pending" } };
@@ -215,6 +367,27 @@ export const resolveNotificationNavigationTarget = (
   const bookingRequestTarget = resolveBookingRequestNotificationTarget(notificationType, record, meta);
   if (bookingRequestTarget) {
     return bookingRequestTarget;
+  }
+
+  const bookingId = readStringId(
+    record.booking_id,
+    record.bookingId,
+    meta.booking_id,
+    meta.bookingId,
+    explicitParams?.booking_id,
+    explicitParams?.bookingId,
+  );
+  const isActivityNotification = Boolean(
+    bookingId ||
+      activityTab ||
+      notificationType?.includes("booking") ||
+      notificationType?.includes("application") ||
+      notificationType === "contract_renewal" ||
+      explicitPath === "/bookings",
+  );
+
+  if (isActivityNotification && activityTab) {
+    return { pathname: "/bookings", params: { tab: activityTab } };
   }
 
   if (isGigApplicationNotification(notificationType, record, meta)) {
@@ -234,6 +407,21 @@ export const resolveNotificationNavigationTarget = (
     return { pathname: "/manage_gig", params };
   }
 
+  if (explicitPath === "/feed") {
+    if (postId) {
+      return { pathname: "/feed", params: { postId } };
+    }
+
+    if (teamId || (listingId && (listingType === "production_team" || listingType === "production"))) {
+      return { pathname: "/production_team", params: { teamId: teamId || listingId! } };
+    }
+
+    const feedListingId = explicitParams?.reopenListingId || gigId || studioId || listingId;
+    if (feedListingId && (!listingType || ["gig", "studio", "venue"].includes(listingType))) {
+      return { pathname: "/feed", params: { reopenListingId: feedListingId } };
+    }
+  }
+
   if (explicitPath) {
     return explicitParams
       ? { pathname: explicitPath, params: explicitParams }
@@ -244,28 +432,12 @@ export const resolveNotificationNavigationTarget = (
     return { pathname: "/notifications" };
   }
 
-  const teamId = readStringId(
-    record.team_id,
-    record.teamId,
-    record.production_team_id,
-    record.productionTeamId,
-    meta.team_id,
-    meta.teamId,
-    meta.production_team_id,
-    meta.productionTeamId,
-  );
   if (teamId) {
     return { pathname: "/production_team", params: { teamId } };
   }
 
-  const bookingId = readStringId(
-    record.booking_id,
-    record.bookingId,
-    meta.booking_id,
-    meta.bookingId,
-  );
   if (bookingId || notificationType === "contract_renewal") {
-    return { pathname: "/bookings" };
+    return { pathname: "/bookings", params: { tab: activityTab || "Pending" } };
   }
 
   const orderId = readStringId(record.order_id, record.orderId, meta.order_id, meta.orderId);
@@ -288,9 +460,8 @@ export const resolveNotificationNavigationTarget = (
     return { pathname: "/product_details", params: { product_id: productId } };
   }
 
-  const postId = readStringId(record.post_id, record.postId, meta.post_id, meta.postId);
   if (postId) {
-    return { pathname: "/post_details", params: { post_id: postId } };
+    return { pathname: "/feed", params: { postId } };
   }
 
   const groupId = readStringId(record.group_id, record.groupId, meta.group_id, meta.groupId);
@@ -298,38 +469,18 @@ export const resolveNotificationNavigationTarget = (
     return { pathname: "/group_details", params: { id: groupId } };
   }
 
-  const gigId = readStringId(
-    record.gig_id,
-    record.gigId,
-    meta.gig_id,
-    meta.gigId,
-  );
   if (gigId) {
     return { pathname: "/feed", params: { reopenListingId: gigId } };
   }
 
-  const studioId = readStringId(
-    record.studio_id,
-    record.studioId,
-    meta.studio_id,
-    meta.studioId,
-  );
   if (studioId) {
     return { pathname: "/feed", params: { reopenListingId: studioId } };
   }
 
-  const listingId = readStringId(
-    record.listing_id,
-    record.listingId,
-    meta.listing_id,
-    meta.listingId,
-  );
-  const listingType = readStringId(
-    record.listing_type,
-    record.listingType,
-    meta.listing_type,
-    meta.listingType,
-  )?.toLowerCase();
+  if (listingId && (listingType === "production_team" || listingType === "production")) {
+    return { pathname: "/production_team", params: { teamId: listingId } };
+  }
+
   if (listingId && (listingType === "gig" || listingType === "studio" || listingType === "venue")) {
     return { pathname: "/feed", params: { reopenListingId: listingId } };
   }

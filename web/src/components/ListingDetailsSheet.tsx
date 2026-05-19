@@ -1745,6 +1745,7 @@ const ListingDetailsSheet = forwardRef<
 
               if (productionTeamData?.id) {
                 setGroup(null);
+                dismissSelf();
                 router.push({
                   pathname: "/production_team",
                   params: { teamId: productionTeamData.id },

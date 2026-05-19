@@ -77,7 +77,7 @@ Assert-PackageExists -PackageDir $WebDir -Label "Web"
 
 if (-not $Combined) {
   if (Request-SeparateVSCodeTerminals) {
-    Write-Host "Mobile terminal: npx expo start"
+    Write-Host "Mobile terminal: npm run start"
     Write-Host "Web terminal: npm run dev"
     return
   }

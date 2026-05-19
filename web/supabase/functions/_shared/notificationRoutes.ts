@@ -42,6 +42,69 @@ const readEventType = (...values: unknown[]) => {
   return null;
 };
 
+const normalizeListingType = (...values: unknown[]) =>
+  readString(...values)
+    ?.trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_") || null;
+
+const normalizeActivityTab = (...values: unknown[]) => {
+  const normalized = readString(...values)?.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  if (!normalized) return null;
+
+  if (normalized === "active musicians") return "Active Musicians";
+
+  const titled = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  return ["Pending", "Upcoming", "Ongoing", "Review", "History", "Applicants"].includes(titled)
+    ? titled
+    : null;
+};
+
+const includesAny = (value: string, needles: string[]) =>
+  needles.some((needle) => value.includes(needle));
+
+const inferActivityTab = (
+  meta: Record<string, unknown>,
+  eventType: string | null,
+) => {
+  const explicitTab = normalizeActivityTab(meta.tab, isRecord(meta.route_params) ? meta.route_params.tab : null);
+  if (explicitTab) return explicitTab;
+
+  const status = readString(
+    meta.status,
+    meta.booking_status,
+    meta.bookingStatus,
+    meta.application_status,
+    meta.applicationStatus,
+    meta.payment_status,
+    meta.paymentStatus,
+  )?.toLowerCase() || "";
+  const sourceTable = readString(meta.source_table, meta.sourceTable)?.toLowerCase() || "";
+  const combined = `${eventType || ""} ${status} ${sourceTable}`;
+
+  if (includesAny(combined, ["cancelled", "canceled", "declined", "rejected", "resigned", "fired", "refunded"])) {
+    return "History";
+  }
+
+  if (includesAny(combined, ["paid", "confirmed", "accepted", "reserved", "reservation", "downpayment", "partially_paid", "upcoming"])) {
+    return "Upcoming";
+  }
+
+  if (includesAny(combined, ["ongoing", "in_progress", "in progress", "happening now"])) {
+    return "Ongoing";
+  }
+
+  if (includesAny(combined, ["completed", "review"])) {
+    return "Review";
+  }
+
+  if (includesAny(combined, ["pending", "booking_request", "booking request", "request_created", "awaiting"])) {
+    return "Pending";
+  }
+
+  return null;
+};
+
 const normalizePathname = (value: unknown) => {
   const pathname = readString(value);
   if (!pathname) {
@@ -91,6 +154,7 @@ const inferNotificationRoute = (
   );
   const senderEntityType = readString(meta.sender_entity_type, meta.senderEntityType)?.toLowerCase();
   const requestKind = readString(meta.request_kind, meta.requestKind)?.toLowerCase();
+  const activityTab = inferActivityTab(meta, eventType);
 
   if (eventType?.includes("booking_request")) {
     const status = readString(meta.status)?.toLowerCase();
@@ -162,11 +226,11 @@ const inferNotificationRoute = (
 
   const bookingId = readString(meta.booking_id, meta.bookingId);
   if (bookingId) {
-    return { pathname: "/bookings" };
+    return { pathname: "/bookings", routeParams: { tab: activityTab || "Pending" } };
   }
 
   if (eventType === "contract_renewal") {
-    return { pathname: "/bookings" };
+    return { pathname: "/bookings", routeParams: { tab: activityTab || "Pending" } };
   }
 
   const orderId = readString(meta.order_id, meta.orderId);
@@ -214,6 +278,38 @@ const inferNotificationRoute = (
     };
   }
 
+  const gigId = readString(meta.gig_id, meta.gigId);
+  if (gigId) {
+    return {
+      pathname: "/feed",
+      routeParams: { reopenListingId: gigId },
+    };
+  }
+
+  const studioId = readString(meta.studio_id, meta.studioId);
+  if (studioId) {
+    return {
+      pathname: "/feed",
+      routeParams: { reopenListingId: studioId },
+    };
+  }
+
+  const listingId = readString(meta.listing_id, meta.listingId);
+  const listingType = normalizeListingType(meta.listing_type, meta.listingType, meta.display_listing_type, meta.displayListingType);
+  if (listingId && (listingType === "production_team" || listingType === "production")) {
+    return {
+      pathname: "/production_team",
+      routeParams: { teamId: listingId },
+    };
+  }
+
+  if (listingId && (listingType === "gig" || listingType === "studio" || listingType === "venue")) {
+    return {
+      pathname: "/feed",
+      routeParams: { reopenListingId: listingId },
+    };
+  }
+
   if (eventType === "follow") {
     const followerId = readString(meta.follower_id, meta.followerId, meta.actor_id, meta.actorId);
     if (followerId) {
@@ -248,6 +344,20 @@ export function withNotificationRouteMeta(
 
     if (explicitParams) {
       nextMeta.route_params = explicitParams;
+    } else if (explicitPath === "/bookings") {
+      const eventType = readEventType(
+        nextMeta.event_type,
+        nextMeta.eventType,
+        nextMeta.notification_type,
+        nextMeta.notificationType,
+        nextMeta.type,
+      );
+      const activityTab = inferActivityTab(nextMeta, eventType);
+      if (activityTab) {
+        nextMeta.route_params = { tab: activityTab };
+      } else {
+        delete nextMeta.route_params;
+      }
     } else {
       delete nextMeta.route_params;
     }
@@ -262,6 +372,20 @@ export function withNotificationRouteMeta(
     const existingParams = normalizeRouteParams(nextMeta.route_params);
     if (existingParams) {
       nextMeta.route_params = existingParams;
+    } else if (existingPath === "/bookings") {
+      const eventType = readEventType(
+        nextMeta.event_type,
+        nextMeta.eventType,
+        nextMeta.notification_type,
+        nextMeta.notificationType,
+        nextMeta.type,
+      );
+      const activityTab = inferActivityTab(nextMeta, eventType);
+      if (activityTab) {
+        nextMeta.route_params = { tab: activityTab };
+      } else {
+        delete nextMeta.route_params;
+      }
     } else {
       delete nextMeta.route_params;
     }
