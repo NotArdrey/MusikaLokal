@@ -13,12 +13,16 @@ import {
   View,
 } from 'react-native';
 import Header from '../../src/components/header';
+import CustomAlert from '../../src/components/CustomAlert';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { getEdgeFunctionErrorMessage } from '../../src/utils/edgeFunctionErrors';
 
 type StationFilter = 'all' | 'live' | 'offline' | 'featured';
+type StationRowAction = 'active' | 'featured' | 'delete';
+
+const getStationBusyKey = (stationId: string, action: StationRowAction) => `station:${stationId}:${action}`;
 
 const getProfileName = (profile: any) => {
   const name = typeof profile?.full_name === 'string' ? profile.full_name.trim() : '';
@@ -85,6 +89,7 @@ export default function AdminStationsPage() {
   const [nowPlayingTitle, setNowPlayingTitle] = useState('');
   const [nowPlayingArtist, setNowPlayingArtist] = useState('');
   const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<string[]>([]);
+  const [deleteTargetStation, setDeleteTargetStation] = useState<{ id: string; name: string } | null>(null);
 
   const invokePlaylistAction = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke('manage-playlists', { body });
@@ -308,7 +313,8 @@ export default function AdminStationsPage() {
     stationId: string,
     patch: { is_active?: boolean; is_featured?: boolean },
   ) => {
-    setBusyKey(stationId);
+    const actionKey = 'is_active' in patch ? 'active' : 'featured';
+    setBusyKey(getStationBusyKey(stationId, actionKey));
     try {
       await invokePlaylistAction({ action: 'update_station', station_id: stationId, ...patch });
       await fetchData();
@@ -321,7 +327,7 @@ export default function AdminStationsPage() {
   }, [fetchData, invokePlaylistAction]);
 
   const performDeleteStation = useCallback(async (stationId: string) => {
-    setBusyKey(stationId);
+    setBusyKey(getStationBusyKey(stationId, 'delete'));
     try {
       await invokePlaylistAction({ action: 'delete_station', station_id: stationId });
       await fetchData();
@@ -333,21 +339,29 @@ export default function AdminStationsPage() {
     }
   }, [fetchData, invokePlaylistAction]);
 
-  const deleteStation = useCallback((stationId: string) => {
+  const deleteStation = useCallback((station: any) => {
+    const stationId = typeof station?.id === 'string' ? station.id : '';
+    if (!stationId) return;
+
     if (process.env.EXPO_PUBLIC_E2E === '1') {
       void performDeleteStation(stationId);
       return;
     }
 
-    Alert.alert('Delete station?', 'This removes the station and its playlist queue from the user feed.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => void performDeleteStation(stationId),
-      },
-    ]);
+    setDeleteTargetStation({
+      id: stationId,
+      name: String(station?.name || 'this station'),
+    });
   }, [performDeleteStation]);
+
+  const closeDeleteStationAlert = useCallback(() => {
+    setDeleteTargetStation(null);
+  }, []);
+
+  const confirmDeleteStation = useCallback(() => {
+    if (!deleteTargetStation?.id) return;
+    void performDeleteStation(deleteTargetStation.id);
+  }, [deleteTargetStation?.id, performDeleteStation]);
 
   const autoCreateStations = useCallback(async () => {
     if (loadingData) return;
@@ -526,7 +540,10 @@ export default function AdminStationsPage() {
 
             {visibleStations.map((item) => {
               const owner = getStationOwner(item);
-              const isBusy = busyKey === item.id;
+              const activeBusy = busyKey === getStationBusyKey(item.id, 'active');
+              const featuredBusy = busyKey === getStationBusyKey(item.id, 'featured');
+              const deleteBusy = busyKey === getStationBusyKey(item.id, 'delete');
+              const stationActionBusy = activeBusy || featuredBusy || deleteBusy;
               const isLive = item.is_active !== false;
               const source = sourceByStationId.get(item.id);
 
@@ -578,12 +595,13 @@ export default function AdminStationsPage() {
                   testID={`admin-station-toggle-active-${item.id}`}
                   accessibilityLabel={`admin-station-toggle-active-${item.id}`}
                   activeOpacity={1}
-                  disabled={isBusy}
-                  style={[styles.actionBtn, { backgroundColor: isLive ? '#EF444420' : '#22C55E20' }]}
+                  disabled={stationActionBusy}
+                  style={[styles.actionBtn, { backgroundColor: isLive ? '#EF444420' : '#22C55E20', opacity: stationActionBusy && !activeBusy ? 0.55 : 1 }]}
                   onPress={() => updateStationFlag(item.id, { is_active: !isLive })}
                 >
+                  {activeBusy ? <ActivityIndicator size="small" color={isLive ? '#EF4444' : '#22C55E'} /> : null}
                   <Text style={{ color: isLive ? '#EF4444' : '#22C55E', fontSize: 12, fontWeight: '700' }}>
-                    {isBusy ? 'Saving...' : isLive ? 'Deactivate' : 'Activate'}
+                    {activeBusy ? (isLive ? 'Deactivating...' : 'Activating...') : isLive ? 'Deactivate' : 'Activate'}
                   </Text>
                 </TouchableOpacity>
 
@@ -591,12 +609,13 @@ export default function AdminStationsPage() {
                   testID={`admin-station-toggle-featured-${item.id}`}
                   accessibilityLabel={`admin-station-toggle-featured-${item.id}`}
                   activeOpacity={1}
-                  disabled={isBusy}
-                  style={[styles.actionBtn, { backgroundColor: item.is_featured ? '#F59E0B20' : colors.primary + '18' }]}
+                  disabled={stationActionBusy}
+                  style={[styles.actionBtn, { backgroundColor: item.is_featured ? '#F59E0B20' : colors.primary + '18', opacity: stationActionBusy && !featuredBusy ? 0.55 : 1 }]}
                   onPress={() => updateStationFlag(item.id, { is_featured: !item.is_featured })}
                 >
+                  {featuredBusy ? <ActivityIndicator size="small" color={item.is_featured ? '#D97706' : colors.primary} /> : null}
                   <Text style={{ color: item.is_featured ? '#D97706' : colors.primary, fontSize: 12, fontWeight: '700' }}>
-                    {item.is_featured ? 'Unfeature' : 'Feature'}
+                    {featuredBusy ? (item.is_featured ? 'Unfeaturing...' : 'Featuring...') : item.is_featured ? 'Unfeature' : 'Feature'}
                   </Text>
                 </TouchableOpacity>
 
@@ -626,11 +645,14 @@ export default function AdminStationsPage() {
                   testID={`admin-station-delete-${item.id}`}
                   accessibilityLabel={`admin-station-delete-${item.id}`}
                   activeOpacity={1}
-                  disabled={isBusy}
-                  style={[styles.actionBtn, { backgroundColor: '#EF444420' }]}
-                  onPress={() => deleteStation(item.id)}
+                  disabled={stationActionBusy}
+                  style={[styles.actionBtn, { backgroundColor: '#EF444420', opacity: stationActionBusy && !deleteBusy ? 0.55 : 1 }]}
+                  onPress={() => deleteStation(item)}
                 >
-                  <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '700' }}>Delete</Text>
+                  {deleteBusy ? <ActivityIndicator size="small" color="#EF4444" /> : null}
+                  <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '700' }}>
+                    {deleteBusy ? 'Deleting...' : 'Delete'}
+                  </Text>
                 </TouchableOpacity>
               </View>
                 </View>
@@ -1004,6 +1026,19 @@ export default function AdminStationsPage() {
           </View>
         </View>
       </Modal>
+
+      <CustomAlert
+        visible={!!deleteTargetStation}
+        forceModal
+        type="warning"
+        title="Delete station?"
+        message={`Delete ${deleteTargetStation?.name || 'this station'}? This removes the station and its playlist queue from the user feed.`}
+        onClose={closeDeleteStationAlert}
+        buttons={[
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Delete', style: 'destructive', onPress: confirmDeleteStation },
+        ]}
+      />
     </View>
   );
 }
@@ -1078,8 +1113,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 7,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
   },
   errorBanner: {
     borderWidth: 1,

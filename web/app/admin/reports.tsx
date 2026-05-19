@@ -1711,18 +1711,6 @@ export default function AdminReportsPage() {
                       </>
                     )}
                   </TouchableOpacity>
-
-                  <TouchableOpacity
-                    testID={`admin-report-moderate-${report.id}`}
-                    accessibilityLabel={`admin-report-moderate-${report.id}`}
-                    activeOpacity={1}
-                    disabled={reportActionLoadingId === report.id}
-                    onPress={() => openReportModerationModal(report)}
-                    style={[styles.smallActionButton, { borderColor: colors.border, opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
-                  >
-                    <Ionicons name="construct-outline" size={14} color={colors.text} />
-                    <Text style={[styles.smallActionText, { color: colors.text }]}>Moderate</Text>
-                  </TouchableOpacity>
                 </View>
 
                 <View style={styles.cardActionsRow}>
