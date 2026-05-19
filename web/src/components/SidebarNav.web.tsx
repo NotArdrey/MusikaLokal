@@ -677,11 +677,11 @@ export default function SidebarNav() {
         return (
             <>
                 <View style={[styles.sidebarContainer, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderRightColor: colors.border }]}>
-                    <View style={styles.logoSection}>
-                        <View style={styles.logoFrame}>
+                    <View style={[styles.logoSection, styles.sidebarLogoSection]}>
+                        <View style={[styles.logoFrame, styles.sidebarLogoFrame]}>
                             <Image
                                 source={require('../../assets/images/musika-lokal-logo-modern-wordmark.png')}
-                                style={styles.logoImage}
+                                style={[styles.logoImage, styles.sidebarLogoImage]}
                                 resizeMode="contain"
                             />
                         </View>
@@ -985,11 +985,11 @@ export default function SidebarNav() {
     return (
         <>
             <View style={[styles.sidebarContainer, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderRightColor: colors.border }]}>
-                <View style={styles.logoSection}>
-                    <View style={styles.logoFrame}>
+                <View style={[styles.logoSection, styles.sidebarLogoSection]}>
+                    <View style={[styles.logoFrame, styles.sidebarLogoFrame]}>
                         <Image
                             source={require('../../assets/images/musika-lokal-logo-modern-wordmark.png')}
-                            style={styles.logoImage}
+                            style={[styles.logoImage, styles.sidebarLogoImage]}
                             resizeMode="contain"
                         />
                     </View>
@@ -1585,6 +1585,9 @@ const styles = StyleSheet.create({
         gap: 0,
         minWidth: 54,
     },
+    sidebarLogoSection: {
+        justifyContent: 'center',
+    },
     logoFrame: {
         width: 38,
         height: 50,
@@ -1595,6 +1598,16 @@ const styles = StyleSheet.create({
         width: 58,
         height: 58,
         marginLeft: -13,
+    },
+    sidebarLogoFrame: {
+        width: 56,
+        height: 72,
+    },
+    sidebarLogoImage: {
+        width: 86,
+        height: 86,
+        marginLeft: -19,
+        marginTop: -3,
     },
     navContainer: {
         flex: 1,

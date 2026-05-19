@@ -4296,6 +4296,18 @@ export default function EditStudioScreen() {
 
           {renderInput("Description", description, setDescription, true)}
 
+          {renderSectionHeader("Visuals", "image")}
+          <ImageUploader
+            images={selectedImages}
+            onImagesChange={setSelectedImages}
+            thumbnailIndex={thumbnailIndex}
+            onThumbnailChange={setThumbnailIndex}
+            maxImages={10}
+            bucketName="listings"
+            userId={id as string}
+            folder="studios"
+          />
+
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
               Location
@@ -6480,18 +6492,6 @@ export default function EditStudioScreen() {
                 renderWeeklyScheduleDurationCard(daySchedule, dayIndex)}
             </View>
           ))}
-
-          {renderSectionHeader("Visuals", "image")}
-          <ImageUploader
-            images={selectedImages}
-            onImagesChange={setSelectedImages}
-            thumbnailIndex={thumbnailIndex}
-            onThumbnailChange={setThumbnailIndex}
-            maxImages={10}
-            bucketName="listings"
-            userId={id as string}
-            folder="studios"
-          />
 
           <View style={styles.footerActions}>
             <TouchableOpacity

@@ -223,6 +223,22 @@ function resolveDiditVerificationUrl(diditData: any) {
   return sessionToken ? `https://verify.didit.me/session/${encodeURIComponent(sessionToken)}` : "";
 }
 
+const FINAL_SESSION_STATUSES = new Set([
+  "APPROVED",
+  "DECLINED",
+  "ABANDONED",
+  "PENDING_REVIEW",
+  "SUPERSEDED",
+  "SUPERSEDED_APPROVED",
+]);
+
+const FAILED_SESSION_STATUSES = new Set([
+  "DECLINED",
+  "ABANDONED",
+  "SUPERSEDED",
+  "SUPERSEDED_APPROVED",
+]);
+
 function normalizeDiditStatus(value: unknown) {
   const normalized = String(value || "").trim().replace(/[\s-]+/g, "_").toUpperCase();
   if (!normalized) return "";
@@ -243,6 +259,14 @@ function normalizeDiditStatus(value: unknown) {
   }
 
   return normalized;
+}
+
+function isFinalSessionStatus(value: unknown) {
+  return FINAL_SESSION_STATUSES.has(normalizeDiditStatus(value));
+}
+
+function isFailedDiditStatus(value: unknown) {
+  return FAILED_SESSION_STATUSES.has(normalizeDiditStatus(value));
 }
 
 function findDecisionObject(source: any) {
@@ -295,6 +319,27 @@ function resolveDecisionStatus(decision: any, sourceStatus: unknown = "") {
   if (idStatus === "APPROVED" && faceStatus === "APPROVED") return "APPROVED";
 
   return normalizeDiditStatus(decision.status);
+}
+
+function resolveDiditStatusFromSource(source: any) {
+  if (!source || typeof source !== "object") return "";
+
+  const fallbackStatus = resolveSourceStatus(source);
+  const decisionStatus = resolveDecisionStatus(findDecisionObject(source), fallbackStatus);
+  if (decisionStatus) return decisionStatus;
+
+  return fallbackStatus === "APPROVED" ? "PENDING" : fallbackStatus;
+}
+
+function resolveDiditSessionStatus(...sources: any[]) {
+  const statuses = sources.map(resolveDiditStatusFromSource).filter(Boolean);
+  return (
+    statuses.find(isFailedDiditStatus) ||
+    statuses.find((status) => normalizeDiditStatus(status) === "PENDING_REVIEW") ||
+    statuses.find(isFinalSessionStatus) ||
+    statuses[0] ||
+    ""
+  );
 }
 
 function isReusableDiditSessionStatus(value: unknown) {
@@ -476,34 +521,57 @@ serve(async (req) => {
           if (localData) {
             // Read the ACTUAL status from the database - DO NOT hardcode 'Approved'
             // The webhook now stores all statuses: APPROVED, DECLINED, ABANDONED, PENDING_REVIEW
+            const localStatus = normalizeDiditStatus(localData.status) || 'PENDING';
             const rawDecisionStatus = resolveSourceStatus(rawDecisionData);
             const rawBaseStatus = resolveSourceStatus(rawBaseData);
-            const diditDecisionStatus = resolveDecisionStatus(
-              findDecisionObject(sessionData),
-              resolveSourceStatus(sessionData),
-            );
-            const storedStatus = diditDecisionStatus || (normalizeDiditStatus(localData.status) === 'APPROVED' ? 'PENDING' : localData.status) || 'PENDING';
+            const diditResolvedStatus = resolveDiditSessionStatus(rawDecisionData, rawBaseData, sessionData);
+            const diditFailureOverridesLocal = isFailedDiditStatus(diditResolvedStatus);
+            const diditRequiresReview = diditResolvedStatus === 'PENDING_REVIEW' && localStatus === 'APPROVED';
+            const localStatusIsFinal = isFinalSessionStatus(localStatus);
+            const diditStatusIsFinal = isFinalSessionStatus(diditResolvedStatus);
+            const effectiveStatus = diditFailureOverridesLocal
+              ? diditResolvedStatus
+              : diditRequiresReview
+                ? diditResolvedStatus
+                : localStatusIsFinal
+                  ? localStatus
+                  : diditStatusIsFinal
+                    ? diditResolvedStatus
+                    : (localStatus || diditResolvedStatus || 'PENDING');
             console.log("[didit] get_session status resolved", {
               sessionId: session_id,
-              storedStatus: localData.status || null,
+              storedStatus: localStatus,
               rawDecisionStatus: rawDecisionStatus || null,
               rawBaseStatus: rawBaseStatus || null,
-              diditResolvedStatus: diditDecisionStatus || null,
-              effectiveStatus: storedStatus,
+              diditResolvedStatus: diditResolvedStatus || null,
+              effectiveStatus,
+              diditFailureOverridesLocal,
+              diditRequiresReview,
             });
+
+            if ((diditFailureOverridesLocal || diditRequiresReview || (!localStatusIsFinal && diditStatusIsFinal)) && diditResolvedStatus && diditResolvedStatus !== localStatus) {
+              const { error: statusSyncError } = await supabaseAdmin
+                .from('verification_sessions')
+                .update({ status: diditResolvedStatus })
+                .eq('session_ref', String(session_id));
+
+              if (statusSyncError) {
+                console.error('Failed to sync Didit final status:', statusSyncError.message);
+              }
+            }
 
             // Merge local data (extracted by webhook) into sessionData
             sessionData = {
               ...sessionData,
-              status: storedStatus, // Use the ACTUAL status from database
+              status: effectiveStatus, // Use the ACTUAL status from database/live Didit
               rawDiditStatus: rawBaseStatus || rawDecisionStatus || null,
-              businessStatus: storedStatus,
-              diditResolvedStatus: diditDecisionStatus || null,
+              businessStatus: effectiveStatus,
+              diditResolvedStatus: diditResolvedStatus || null,
               verification_data: {
-                status: storedStatus, // Also include in verification_data for frontend compatibility
+                status: effectiveStatus, // Also include in verification_data for frontend compatibility
                 rawDiditStatus: rawBaseStatus || rawDecisionStatus || null,
-                businessStatus: storedStatus,
-                diditResolvedStatus: diditDecisionStatus || null,
+                businessStatus: effectiveStatus,
+                diditResolvedStatus: diditResolvedStatus || null,
               },
               extracted_data: {
                 ...sessionData.extracted_data,

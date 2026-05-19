@@ -45,6 +45,8 @@ type RecordingDurationStatus = {
 type RecordingDurationIssue = RecordingDurationStatus & { bookingIndex: number };
 
 const HOURS_EPSILON = 1e-9;
+const STUDIO_UNAVAILABLE_MESSAGE =
+  "This studio or venue is no longer available. It may have been deleted by the owner. Please refresh and choose another listing.";
 
 const supabaseUrl =
   Constants.expoConfig?.extra?.supabaseUrl ||
@@ -207,6 +209,25 @@ const StudioBookTab = ({
     originalIndex: number;
   } | null>(null);
   const isEditingBooking = Boolean(editingBookingDraft);
+
+  const ensureStudioStillAvailable = React.useCallback(async () => {
+    if (!group?.id) {
+      return false;
+    }
+
+    const { data, error } = await supabase
+      .from("studios")
+      .select("id")
+      .eq("id", group.id)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("[StudioBookTab] Could not verify studio before booking", error);
+      return true;
+    }
+
+    return Boolean(data);
+  }, [group?.id, supabase]);
 
   const parsePositiveInteger = (value: unknown): number | null => {
     const parsed = Number(value);
@@ -803,6 +824,14 @@ const StudioBookTab = ({
       return "This time slot was just taken by another booking. Please select a different time or refresh and try again.";
     }
 
+    if (
+      normalizedMessage.includes("studio not found") ||
+      (normalizedMessage.includes("foreign key") && normalizedMessage.includes("studio_id")) ||
+      normalizedMessage.includes("studio_bookings_studio_id_fkey")
+    ) {
+      return STUDIO_UNAVAILABLE_MESSAGE;
+    }
+
     if (normalizedMessage.includes("invalid time slot:") || normalizedMessage === "invalid time slot") {
       return "One of the selected time slots is invalid. Please double-check your schedule and try again.";
     }
@@ -837,6 +866,8 @@ const StudioBookTab = ({
 
     if (normalizedRawMessage.includes("advance booking")) {
       showAlert("warning", "Advance Notice Required", errorMsg);
+    } else if (errorMsg === STUDIO_UNAVAILABLE_MESSAGE) {
+      showAlert("warning", "Studio Unavailable", errorMsg);
     } else if (
       normalizedRawMessage.includes("cannot create a booking in the past") ||
       normalizedRawMessage.includes("bookings can only be made up to") ||
@@ -2315,6 +2346,15 @@ const StudioBookTab = ({
                     const bookingAccessToken = auth.accessToken;
 
                     setLoading(true);
+                    const studioStillAvailable = await ensureStudioStillAvailable();
+                    if (!studioStillAvailable) {
+                      setLoading(false);
+                      showAlert("warning", "Studio Unavailable", STUDIO_UNAVAILABLE_MESSAGE);
+                      setModalVisible(false);
+                      (sheetRef as any)?.current?.dismiss();
+                      return;
+                    }
+
                     const results = [];
                     const errors = [];
                     const preflightRequests: {

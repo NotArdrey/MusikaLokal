@@ -16,6 +16,7 @@ import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import ImageUploader from "../src/components/ImageUploader";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
@@ -32,6 +33,11 @@ import {
 } from "../src/utils/e2eFixtures";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const PLAYLIST_COVER_BUCKET = "post-media";
+const PLAYLIST_COVER_FOLDER = "playlist-covers";
+const COPYRIGHT_MATCH_PATTERN = /this (?:audio|track) appears to match|appears to be copyrighted|permission to share/i;
+const EXPECTED_UPLOAD_FEEDBACK_PATTERN =
+  /(blocked by safety screening|safety check|copyright check|appears to match|appears to be copyrighted|permission to share|please upload music you own|licensed to share|playlist tracks must be|tracks must be|only mp3)/i;
 const moderateScale = (size: number, factor = 0.3) => {
   const scaled = Math.max((SCREEN_WIDTH / 375) * size, size * 0.85);
   return size + (scaled - size) * factor;
@@ -89,10 +95,50 @@ const getFriendlyUploadErrorMessage = (error: any) => {
   return message || "Please choose an MP3 file that is 5 minutes or less.";
 };
 
+const isExpectedUploadFeedback = (message: string) =>
+  EXPECTED_UPLOAD_FEEDBACK_PATTERN.test(message);
+
+const formatUploadFeedbackMessage = (message: string) =>
+  message.replace(/^.+? was blocked by safety screening\.\s*/i, "").trim() || message;
+
+const logCreatePlaylistMp3 = (event: string, payload: Record<string, unknown> = {}) => {
+  console.log("[CreatePlaylist][MP3]", event, payload);
+};
+
+const logCreatePlaylistMp3Error = (
+  event: string,
+  error: unknown,
+  payload: Record<string, unknown> = {},
+) => {
+  const err = error as any;
+  const message = err?.message || String(error);
+  const expectedFeedback = isExpectedUploadFeedback(message);
+  const log = expectedFeedback
+    ? (...args: Parameters<typeof console.warn>) => console.warn(...args)
+    : (...args: Parameters<typeof console.error>) => console.error(...args);
+
+  log("[CreatePlaylist][MP3]", event, {
+    message,
+    name: err?.name || null,
+    status: err?.status || null,
+    code: err?.code || null,
+    details: err?.details || null,
+    expectedFeedback,
+    ...payload,
+  });
+};
+
 export default function CreatePlaylistScreen() {
   const { colors } = useTheme();
-  const { loading: authLoading, isGuest } = useAuth();
-  const params = useLocalSearchParams<{ edit_id?: string | string[]; return_to?: string | string[]; return_user_id?: string | string[] }>();
+  const { loading: authLoading, isGuest, userId } = useAuth();
+  const params = useLocalSearchParams<{
+    edit_id?: string | string[];
+    return_to?: string | string[];
+    return_user_id?: string | string[];
+    owner_group_id?: string | string[];
+    group_id?: string | string[];
+    return_group_id?: string | string[];
+  }>();
   const editId = useMemo(() => {
     const raw = Array.isArray(params.edit_id) ? params.edit_id[0] : params.edit_id;
     return typeof raw === "string" ? raw.trim() : "";
@@ -105,12 +151,24 @@ export default function CreatePlaylistScreen() {
     const raw = Array.isArray(params.return_user_id) ? params.return_user_id[0] : params.return_user_id;
     return typeof raw === "string" ? raw.trim() : "";
   }, [params.return_user_id]);
+  const groupPlaylistOwnerId = useMemo(() => {
+    const ownerGroupParam = params.owner_group_id || params.group_id;
+    const raw = Array.isArray(ownerGroupParam) ? ownerGroupParam[0] : ownerGroupParam;
+    return typeof raw === "string" ? raw.trim() : "";
+  }, [params.group_id, params.owner_group_id]);
+  const returnGroupId = useMemo(() => {
+    const raw = Array.isArray(params.return_group_id) ? params.return_group_id[0] : params.return_group_id;
+    return typeof raw === "string" ? raw.trim() : "";
+  }, [params.return_group_id]);
   const isEditing = editId.length > 0;
+  const isGroupPlaylistCreate = !isEditing && groupPlaylistOwnerId.length > 0;
+  const screenTitle = isEditing ? "Edit Playlist" : isGroupPlaylistCreate ? "Upload Group Playlist" : "Create Playlist";
   const { contentBottomPadding } = useBottomBarClearance(24);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [genre, setGenre] = useState("");
+  const [coverImages, setCoverImages] = useState<string[]>([]);
   const [visibility, setVisibility] = useState<"public" | "private">("public");
   const [trackDrafts, setTrackDrafts] = useState<PlaylistDraftTrack[]>([]);
   const [saving, setSaving] = useState(false);
@@ -191,6 +249,7 @@ export default function CreatePlaylistScreen() {
           setTitle(data.data.title || "");
           setDescription(data.data.description || "");
           setGenre(data.data.genre || "");
+          setCoverImages(data.data.cover_image_url ? [data.data.cover_image_url] : []);
           setVisibility(data.data.visibility || "public");
         }
       } catch (e: any) {
@@ -233,32 +292,82 @@ export default function CreatePlaylistScreen() {
   }, []);
 
   const handlePickTrackAudio = useCallback(async (trackId: string) => {
+    const startedAt = Date.now();
+    logCreatePlaylistMp3("pick_pressed", {
+      trackId,
+      currentTrackCount: trackDrafts.length,
+    });
+
     try {
       if (isE2EFixtureMode()) {
         setTrackAudioFile(trackId, createE2EPlaylistAudioFixture());
+        logCreatePlaylistMp3("pick_e2e_fixture_applied", {
+          trackId,
+          elapsedMs: Date.now() - startedAt,
+        });
         return;
       }
 
       setUploadingTrackAudioId(trackId);
       setAudioUploadMessage("Preparing MP3...");
       const audioFile = await pickPlaylistAudioFile();
-      if (!audioFile) return;
+      if (!audioFile) {
+        logCreatePlaylistMp3("pick_cancelled", {
+          trackId,
+          elapsedMs: Date.now() - startedAt,
+        });
+        return;
+      }
+
+      logCreatePlaylistMp3("pick_file_ready", {
+        trackId,
+        traceId: audioFile.debugTraceId || null,
+        name: audioFile.name,
+        mimeType: audioFile.mimeType,
+        sizeBytes: audioFile.sizeBytes,
+        durationSeconds: audioFile.durationSeconds,
+        extension: audioFile.extension,
+        elapsedMs: Date.now() - startedAt,
+      });
 
       setAudioUploadMessage("Checking MP3...");
+      logCreatePlaylistMp3("copyright_check_start", {
+        trackId,
+        traceId: audioFile.debugTraceId || null,
+        name: audioFile.name,
+      });
       await ensurePlaylistAudioPassesCopyrightScreening(audioFile);
+      logCreatePlaylistMp3("copyright_check_done", {
+        trackId,
+        traceId: audioFile.debugTraceId || null,
+        elapsedMs: Date.now() - startedAt,
+      });
       setTrackAudioFile(trackId, audioFile);
     } catch (error: any) {
+      const pickerErrorMessage = getFriendlyUploadErrorMessage(error);
+      const displayMessage = isExpectedUploadFeedback(pickerErrorMessage)
+        ? formatUploadFeedbackMessage(pickerErrorMessage)
+        : pickerErrorMessage;
+
+      logCreatePlaylistMp3Error("pick_or_check_failed", error, {
+        trackId,
+        elapsedMs: Date.now() - startedAt,
+      });
       setAlert({
         type: "warning",
-        title: "Upload MP3",
-        message: getFriendlyUploadErrorMessage(error),
+        title: COPYRIGHT_MATCH_PATTERN.test(pickerErrorMessage) ? "Copyright Match Found" : "Upload MP3",
+        message: displayMessage,
         forceModal: true,
       });
     } finally {
       setUploadingTrackAudioId(null);
       setAudioUploadMessage(null);
+      logCreatePlaylistMp3("pick_flow_finished", {
+        trackId,
+        elapsedMs: Date.now() - startedAt,
+      });
     }
-  }, [setTrackAudioFile]);
+  }, [setTrackAudioFile, trackDrafts.length]);
 
   const prepareDraftTrackPayloads = useCallback(async (): Promise<DraftTrackPayload[]> => {
     const items = trackDrafts
@@ -285,6 +394,33 @@ export default function CreatePlaylistScreen() {
     }));
   }, [trackDrafts]);
 
+  const returnToGroupScreen = useCallback((fallbackPlaylistId?: string) => {
+    const groupId = returnGroupId || groupPlaylistOwnerId;
+
+    if (returnTo === "manage_group" && groupId) {
+      router.replace({
+        pathname: "/manage_group",
+        params: { id: groupId, refresh: Date.now().toString() },
+      });
+      return;
+    }
+
+    if (returnTo === "edit_group" && groupId) {
+      router.replace({
+        pathname: "/edit_group",
+        params: { id: groupId, refresh: Date.now().toString() },
+      });
+      return;
+    }
+
+    if (fallbackPlaylistId) {
+      router.replace({ pathname: "/playlist_details", params: { playlist_id: fallbackPlaylistId } });
+      return;
+    }
+
+    router.back();
+  }, [groupPlaylistOwnerId, returnGroupId, returnTo]);
+
   const handleSave = async () => {
     if (!title.trim()) {
       setAlert({ type: "warning", title: "Missing Title", message: "Please enter a playlist title." });
@@ -307,6 +443,7 @@ export default function CreatePlaylistScreen() {
         title: title.trim(),
         description: description.trim() || null,
         genre: genre.trim() || null,
+        cover_image_url: coverImages[0] || null,
         visibility,
       };
       if (isEditing) {
@@ -315,6 +452,8 @@ export default function CreatePlaylistScreen() {
         }
 
         body.playlist_id = editId;
+      } else if (groupPlaylistOwnerId) {
+        body.owner_group_id = groupPlaylistOwnerId;
       }
 
       const { data, error } = await supabase.functions.invoke("manage-playlists", { body });
@@ -337,10 +476,28 @@ export default function CreatePlaylistScreen() {
                 if (isE2EFixtureMode()) {
                   sourceUrl = track.audio_file.uri;
                 } else {
+                  const uploadStartedAt = Date.now();
                   setUploadingTrackAudioId(track.id);
                   setAudioUploadMessage(`Uploading ${track.title}...`);
+                  logCreatePlaylistMp3("save_upload_start", {
+                    trackId: track.id,
+                    traceId: track.audio_file.debugTraceId || null,
+                    playlistId,
+                    title: track.title,
+                    fileName: track.audio_file.name,
+                    sizeBytes: track.audio_file.sizeBytes,
+                    durationSeconds: track.audio_file.durationSeconds,
+                  });
                   const upload = await uploadPlaylistAudioFile(track.audio_file, playlistId);
                   sourceUrl = upload.publicUrl;
+                  logCreatePlaylistMp3("save_upload_done", {
+                    trackId: track.id,
+                    traceId: track.audio_file.debugTraceId || null,
+                    playlistId,
+                    storagePath: upload.storagePath,
+                    durationSeconds: upload.durationSeconds,
+                    elapsedMs: Date.now() - uploadStartedAt,
+                  });
                 }
               }
 
@@ -362,6 +519,12 @@ export default function CreatePlaylistScreen() {
                 throw itemError;
               }
             } catch (trackError: any) {
+              logCreatePlaylistMp3Error("save_track_failed", trackError, {
+                trackId: track.id,
+                title: track.title,
+                traceId: track.audio_file?.debugTraceId || null,
+                playlistId,
+              });
               failedTracks.push({
                 title: track.title,
                 reason: typeof trackError?.message === "string" ? trackError.message : undefined,
@@ -371,16 +534,25 @@ export default function CreatePlaylistScreen() {
 
           if (failedTracks.length > 0) {
             const firstReason = failedTracks.find((track) => track.reason)?.reason;
+            const displayReason = firstReason && isExpectedUploadFeedback(firstReason)
+              ? formatUploadFeedbackMessage(firstReason)
+              : firstReason;
             setAlert({
               type: "warning",
-              title: "Track Upload Feedback",
-              message: firstReason || `${failedTracks.length} track${failedTracks.length === 1 ? "" : "s"} could not be uploaded.`,
+              title: firstReason && COPYRIGHT_MATCH_PATTERN.test(firstReason)
+                ? "Copyright Match Found"
+                : "Track Upload Feedback",
+              message: displayReason || `${failedTracks.length} track${failedTracks.length === 1 ? "" : "s"} could not be uploaded.`,
               forceModal: true,
               buttons: [
                 {
-                  text: "View Playlist",
+                  text: isGroupPlaylistCreate ? "Back to Group" : "View Playlist",
                   onPress: () => {
-                    router.replace({ pathname: "/playlist_details", params: { playlist_id: playlistId } });
+                    if (isGroupPlaylistCreate) {
+                      returnToGroupScreen(playlistId);
+                    } else {
+                      router.replace({ pathname: "/playlist_details", params: { playlist_id: playlistId } });
+                    }
                   },
                 },
               ],
@@ -403,6 +575,8 @@ export default function CreatePlaylistScreen() {
           } else {
             router.back();
           }
+        } else if (isGroupPlaylistCreate) {
+          returnToGroupScreen(data.data?.id);
         } else if (data.data?.id) {
           router.replace({ pathname: "/playlist_details", params: { playlist_id: data.data.id } });
         } else {
@@ -433,7 +607,7 @@ export default function CreatePlaylistScreen() {
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title={isEditing ? "Edit Playlist" : "Create Playlist"} onBackPress={() => router.back()} />
+        <Header title={screenTitle} onBackPress={() => router.back()} />
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
@@ -448,9 +622,21 @@ export default function CreatePlaylistScreen() {
       accessibilityLabel="mobile-create-playlist-page"
       style={[styles.container, { backgroundColor: colors.background }]}
     >
-      <Header title={isEditing ? "Edit Playlist" : "Create Playlist"} onBackPress={() => router.back()} />
+      <Header title={screenTitle} onBackPress={() => router.back()} />
 
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
+        <Text style={[styles.label, { color: colors.text }]}>Album Cover</Text>
+        {userId ? (
+          <ImageUploader
+            images={coverImages}
+            onImagesChange={(images) => setCoverImages(images.slice(0, 1))}
+            maxImages={1}
+            bucketName={PLAYLIST_COVER_BUCKET}
+            userId={userId}
+            folder={PLAYLIST_COVER_FOLDER}
+          />
+        ) : null}
+
         <Text style={[styles.label, { color: colors.text }]}>Title *</Text>
         <TextInput
           testID="mobile-playlist-title-input"
@@ -653,7 +839,9 @@ export default function CreatePlaylistScreen() {
           {saving ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={[styles.saveBtnText, { color: isSaveReady ? "#FFFFFF" : colors.textSecondary }]}>{isEditing ? "Update Playlist" : "Create Playlist"}</Text>
+            <Text style={[styles.saveBtnText, { color: isSaveReady ? "#FFFFFF" : colors.textSecondary }]}>
+              {isEditing ? "Update Playlist" : isGroupPlaylistCreate ? "Create Group Playlist" : "Create Playlist"}
+            </Text>
           )}
         </TouchableOpacity>
 

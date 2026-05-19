@@ -29,6 +29,10 @@ const moderateScale = (size: number, factor = 0.3) => {
   return size + (scaled - size) * factor;
 };
 
+const getPlaylistCoverUrl = (playlist: any) => (
+  playlist?.cover_url || playlist?.cover_image_url || ""
+);
+
 export default function PlaylistDetailsScreen() {
   const { colors, isDark } = useTheme();
   const { userId, isGuest } = useAuth();
@@ -53,7 +57,10 @@ export default function PlaylistDetailsScreen() {
     try {
       const { data } = await supabase.functions.invoke("manage-playlists", { body: { action: "get_playlist_details", playlist_id } });
       if (data?.data) {
-        setPlaylist(data.data);
+        setPlaylist({
+          ...data.data,
+          cover_url: getPlaylistCoverUrl(data.data),
+        });
         setItems(data.data.items || []);
         setTeaserAssets(data.data.teaser_assets || []);
         setExternalLinks(data.data.external_links || []);
@@ -151,7 +158,7 @@ export default function PlaylistDetailsScreen() {
       <Header title="Playlist" onBackPress={() => router.back()} rightComponent={reportHeaderAction} />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={isWebDesktop ? { alignItems: "center" } : undefined}>
         <View style={isWebDesktop ? { width: "100%", maxWidth: 700, paddingHorizontal: 16 } : { paddingHorizontal: 16 }}>
-          {playlist.cover_url && <CachedImage uri={playlist.cover_url } style={styles.cover} />}
+          {getPlaylistCoverUrl(playlist) ? <CachedImage uri={getPlaylistCoverUrl(playlist)} style={styles.cover} /> : null}
           <Text style={{ color: colors.text, fontSize: moderateScale(20), fontWeight: "800", marginTop: 16 }}>{playlist.title}</Text>
           {playlist.description && <Text style={{ color: colors.textSecondary, fontSize: moderateScale(13), marginTop: 6 }}>{playlist.description}</Text>}
           <View style={styles.metaRow}>

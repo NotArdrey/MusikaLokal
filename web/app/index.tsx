@@ -718,6 +718,7 @@ const styles = StyleSheet.create({
     width: 86,
     height: 112,
     overflow: 'hidden',
+    alignSelf: 'center',
     marginBottom: 18,
   },
   webFormLogo: {

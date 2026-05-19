@@ -68,7 +68,7 @@ export interface BuildAvailableSlotsResult {
 
 const DISABLED_TEXT_DARK = "#4B5563";
 const DISABLED_TEXT_LIGHT = "#D1D5DB";
-const OVERRIDE_DOT = "#F59E0B";
+const AVAILABLE_DOT = "#10B981";
 type ScheduleSessionType = "rehearsal" | "recording" | "both";
 
 const toDateString = (date: Date) =>
@@ -120,8 +120,8 @@ export const normalizeStudioType = (
   return null;
 };
 
-const getDotColor = (isOverride: boolean | undefined, primaryColor: string) =>
-  isOverride ? OVERRIDE_DOT : primaryColor;
+const getDotColor = (_isOverride: boolean | undefined, _primaryColor: string) =>
+  AVAILABLE_DOT;
 
 const normalizeScheduleSessionType = (
   value: unknown,

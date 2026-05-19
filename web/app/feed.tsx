@@ -363,7 +363,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
               Now playing
             </Text>
             <Text style={[styles.liveRadioMetaValue, { color: textColor }]} numberOfLines={1}>
-              {loadingStation ? "Loading rotation" : nowPlayingTitle}
+              {loadingStation ? "Loading queue" : nowPlayingTitle}
             </Text>
           </View>
           <View style={styles.liveRadioListeners}>

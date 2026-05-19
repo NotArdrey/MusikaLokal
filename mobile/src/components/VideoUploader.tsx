@@ -9,6 +9,8 @@ import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
 const ALLOWED_VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'webm', 'm4v']);
+const VIDEO_UPLOAD_RECOVERY_CHECKS = 3;
+const VIDEO_UPLOAD_RECOVERY_DELAY_MS = 1200;
 
 const sanitizeVideoExtension = (rawExt?: string | null): string => {
   const cleaned = (rawExt || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -83,48 +85,203 @@ const readStorageUploadError = (status: number, body: string): string => {
   }
 };
 
+const delay = async (ms: number) => {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+};
+
+const isTimeoutUploadError = (error: unknown): boolean => {
+  const message = String((error as any)?.message || error || '').toLowerCase();
+  return (
+    message === 'timeout' ||
+    message.includes('timeout') ||
+    message.includes('timed out') ||
+    message.includes('socket closed') ||
+    message.includes('network request failed')
+  );
+};
+
+const isDuplicateStorageError = (error: unknown): boolean => {
+  const message = String((error as any)?.message || error || '').toLowerCase();
+  const status = Number((error as any)?.statusCode || (error as any)?.status || 0);
+  return status === 409 || message.includes('already exists') || message.includes('duplicate');
+};
+
+const getStoragePathParts = (fileName: string) => {
+  const normalized = fileName.replace(/^\/+/, '');
+  const lastSlashIndex = normalized.lastIndexOf('/');
+
+  if (lastSlashIndex < 0) {
+    return { directory: '', baseName: normalized };
+  }
+
+  return {
+    directory: normalized.slice(0, lastSlashIndex),
+    baseName: normalized.slice(lastSlashIndex + 1),
+  };
+};
+
+const storageObjectExists = async (bucketName: string, fileName: string): Promise<boolean> => {
+  const { directory, baseName } = getStoragePathParts(fileName);
+
+  try {
+    const { data, error } = await supabase.storage
+      .from(bucketName)
+      .list(directory, {
+        limit: 20,
+        search: baseName,
+      });
+
+    if (error || !data) {
+      return false;
+    }
+
+    return data.some((item) => item.name === baseName);
+  } catch {
+    return false;
+  }
+};
+
+const waitForStorageObject = async (bucketName: string, fileName: string): Promise<boolean> => {
+  for (let attempt = 0; attempt < VIDEO_UPLOAD_RECOVERY_CHECKS; attempt += 1) {
+    if (attempt > 0) {
+      await delay(VIDEO_UPLOAD_RECOVERY_DELAY_MS);
+    }
+
+    if (await storageObjectExists(bucketName, fileName)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const base64ToUint8Array = (base64: string): Uint8Array => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const lookup = new Uint8Array(256);
+  for (let i = 0; i < chars.length; i += 1) {
+    lookup[chars.charCodeAt(i)] = i;
+  }
+
+  let bufferLength = base64.length * 0.75;
+  if (base64.endsWith('==')) bufferLength -= 2;
+  else if (base64.endsWith('=')) bufferLength -= 1;
+
+  const bytes = new Uint8Array(Math.floor(bufferLength));
+  let p = 0;
+
+  for (let i = 0; i < base64.length; i += 4) {
+    const e1 = lookup[base64.charCodeAt(i)];
+    const e2 = lookup[base64.charCodeAt(i + 1)];
+    const e3 = lookup[base64.charCodeAt(i + 2)];
+    const e4 = lookup[base64.charCodeAt(i + 3)];
+
+    if (p < bytes.length) bytes[p++] = (e1 << 2) | (e2 >> 4);
+    if (p < bytes.length) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
+    if (p < bytes.length) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
+  }
+
+  return bytes;
+};
+
+const uploadVideoWithSupabaseClient = async (input: {
+  assetUri: string;
+  bucketName: string;
+  fileName: string;
+  mimeType: string;
+}): Promise<{ path: string }> => {
+  const body =
+    Platform.OS === 'web'
+      ? await (await fetch(input.assetUri)).arrayBuffer()
+      : base64ToUint8Array(
+        await FileSystem.readAsStringAsync(input.assetUri, {
+          encoding: 'base64',
+        }),
+      );
+
+  const { data, error } = await supabase.storage
+    .from(input.bucketName)
+    .upload(input.fileName, body, {
+      contentType: input.mimeType,
+      upsert: false,
+    });
+
+  if (error) {
+    if (isDuplicateStorageError(error) && await waitForStorageObject(input.bucketName, input.fileName)) {
+      return { path: input.fileName };
+    }
+
+    throw error;
+  }
+
+  return { path: data.path };
+};
+
 const uploadVideoFile = async (input: {
   accessToken: string;
   assetUri: string;
   bucketName: string;
   fileName: string;
   mimeType: string;
+  onMessage?: (message: string) => void;
+  onProgress?: (progress: number) => void;
 }): Promise<{ path: string }> => {
   if (Platform.OS !== 'web') {
     const baseUrl = supabaseUrl.replace(/\/+$/, '');
     const uploadUrl = `${baseUrl}/storage/v1/object/${encodeURIComponent(input.bucketName)}/${encodeStoragePath(input.fileName)}`;
-    const uploadResponse = await FileSystem.uploadAsync(uploadUrl, input.assetUri, {
-      httpMethod: 'POST',
-      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-      headers: {
-        Authorization: `Bearer ${input.accessToken}`,
-        apikey: supabaseAnonKey,
-        'Content-Type': input.mimeType,
-        'x-upsert': 'false',
-      },
-    });
 
-    if (uploadResponse.status < 200 || uploadResponse.status >= 300) {
-      throw new Error(readStorageUploadError(uploadResponse.status, uploadResponse.body || ''));
+    try {
+      const uploadTask = FileSystem.createUploadTask(
+        uploadUrl,
+        input.assetUri,
+        {
+          httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+          headers: {
+            Authorization: `Bearer ${input.accessToken}`,
+            apikey: supabaseAnonKey,
+            'Content-Type': input.mimeType,
+            'x-upsert': 'false',
+          },
+        },
+        ({ totalBytesExpectedToSend, totalBytesSent }) => {
+          if (totalBytesExpectedToSend > 0) {
+            input.onProgress?.(
+              Math.min(99, Math.max(1, Math.round((totalBytesSent / totalBytesExpectedToSend) * 100))),
+            );
+          }
+        },
+      );
+
+      const uploadResponse = await uploadTask.uploadAsync();
+
+      if (!uploadResponse) {
+        throw new Error('Video upload was cancelled.');
+      }
+
+      if (uploadResponse.status < 200 || uploadResponse.status >= 300) {
+        throw new Error(readStorageUploadError(uploadResponse.status, uploadResponse.body || ''));
+      }
+
+      return { path: input.fileName };
+    } catch (error) {
+      if (!isTimeoutUploadError(error)) {
+        throw error;
+      }
+
+      input.onMessage?.('Checking upload status...');
+      if (await waitForStorageObject(input.bucketName, input.fileName)) {
+        return { path: input.fileName };
+      }
+
+      input.onMessage?.('Retrying upload...');
+      input.onProgress?.(0);
+      return uploadVideoWithSupabaseClient(input);
     }
-
-    return { path: input.fileName };
   }
 
-  const response = await fetch(input.assetUri);
-  const arrayBuffer = await response.arrayBuffer();
-  const { data, error } = await supabase.storage
-    .from(input.bucketName)
-    .upload(input.fileName, arrayBuffer, {
-      contentType: input.mimeType,
-      upsert: false,
-    });
-
-  if (error) {
-    throw error;
-  }
-
-  return { path: data.path };
+  return uploadVideoWithSupabaseClient(input);
 };
 
 interface VideoUploaderProps {
@@ -220,6 +377,8 @@ export default function VideoUploader({
           bucketName,
           fileName,
           mimeType,
+          onMessage: setUploadMessage,
+          onProgress: setUploadProgress,
         });
 
         // Get public URL
@@ -228,11 +387,15 @@ export default function VideoUploader({
           .getPublicUrl(data.path);
 
         debugLog('Video uploaded successfully:', urlData.publicUrl);
+        setUploadProgress(100);
         onVideoChange(urlData.publicUrl);
         showAlert('success', 'Success', 'Video uploaded successfully!');
       } catch (e: any) {
-        console.error('Error uploading video:', e);
-        const message = e.message || 'Failed to upload video';
+        console.warn('Error uploading video:', e);
+        const rawMessage = e.message || 'Failed to upload video';
+        const message = isTimeoutUploadError(e)
+          ? 'The upload took too long on this connection. Please try again with a stronger connection or a shorter video.'
+          : rawMessage;
         showAlert('error', 'Upload failed', message);
       } finally {
         setUploading(false);

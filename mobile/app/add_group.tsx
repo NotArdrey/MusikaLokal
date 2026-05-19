@@ -559,7 +559,30 @@ export default function AddGroupScreen() {
   }, []);
 
   const handleCreatePlaylist = useCallback(() => {
-    router.push("/create_playlist");
+    showAlert(
+      "info",
+      "Create Group First",
+      "Finish creating the group first. As soon as it is created, you can upload a playlist owned by the group.",
+      [{ text: "OK", onPress: () => undefined }],
+    );
+  }, [showAlert]);
+
+  const navigateToGroupPlaylistUpload = useCallback((groupId: string) => {
+    router.replace({
+      pathname: "/create_playlist",
+      params: {
+        owner_group_id: groupId,
+        return_to: "manage_group",
+        return_group_id: groupId,
+      },
+    });
+  }, []);
+
+  const navigateToManageGroup = useCallback((groupId: string) => {
+    router.replace({
+      pathname: "/manage_group",
+      params: { id: groupId, refresh: String(Date.now()) },
+    });
   }, []);
 
   const getLeaderIndex = () =>
@@ -916,13 +939,29 @@ export default function AddGroupScreen() {
         }
       }
 
+      const successMessage = [playlistLinkWarning || `"${groupName}" has been successfully created.`, inviteSummaryMessage]
+        .filter(Boolean)
+        .join("\n\n");
+
       setNewGroupId(data.id);
-      setSuccessModalMessage(
-        [playlistLinkWarning || `"${groupName}" has been successfully created.`, inviteSummaryMessage]
-          .filter(Boolean)
-          .join("\n\n"),
-      );
-      setModalVisible(true);
+      setSuccessModalMessage(successMessage);
+      setAlertConfig({
+        type: "success",
+        title: "Group Created",
+        message: successMessage,
+        buttons: [
+          {
+            text: "Upload Group Playlist",
+            onPress: () => navigateToGroupPlaylistUpload(data.id),
+          },
+          {
+            text: "Manage Group",
+            onPress: () => navigateToManageGroup(data.id),
+            style: "cancel",
+          },
+        ],
+      });
+      setAlertVisible(true);
     } catch (e: any) {
       logActionError("add_group.create_failed", e);
       showAlert(
@@ -2075,9 +2114,10 @@ export default function AddGroupScreen() {
                     loading={loadingPlaylists}
                     onTogglePlaylist={handleTogglePlaylist}
                     onCreatePlaylist={handleCreatePlaylist}
-                    title="Linked Playlists"
-                    subtitle="Select the playlists that should appear on this group profile. Any linked playlist will show up on the manage page and listing details."
-                    emptyMessage="Create a playlist first, then come back here to link it to this group."
+                    title="Group Playlists"
+                    subtitle="Link personal playlists now. Group-owned playlist upload becomes available as soon as this group is created."
+                    emptyMessage="You can link an existing personal playlist here or upload a group playlist after creating the group."
+                    createButtonLabel="Upload Group Playlist"
                     disabled={creating}
                   />
                 </View>

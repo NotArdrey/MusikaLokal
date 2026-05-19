@@ -23,7 +23,7 @@ const corsHeaders = {
 const IDENTITY_BUCKET = "identity-manual";
 const MAX_IMAGE_BYTES = 7 * 1024 * 1024;
 const allowedSignupRoles = new Set(["fan", "musician"]);
-const PASSWORD_REQUIREMENT_ERROR = "Password must be at least 8 characters and include uppercase, lowercase, a number, and a symbol.";
+const PASSWORD_REQUIREMENT_ERROR = "Password must be at least 8 characters and include uppercase, lowercase, a number, a symbol, and no spaces.";
 
 function getPasswordValidationError(value: unknown) {
   const password = String(value || "");
@@ -32,7 +32,8 @@ function getPasswordValidationError(value: unknown) {
     !/[A-Z]/.test(password) ||
     !/[a-z]/.test(password) ||
     !/[0-9]/.test(password) ||
-    !/[^A-Za-z0-9\s]/.test(password)
+    !/[^A-Za-z0-9\s]/.test(password) ||
+    /\s/.test(password)
   ) {
     return PASSWORD_REQUIREMENT_ERROR;
   }

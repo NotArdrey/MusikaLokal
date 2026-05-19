@@ -25,7 +25,7 @@ const corsHeaders = {
 }
 
 const allowedSignupRoles = new Set(['fan', 'musician'])
-const PASSWORD_REQUIREMENT_ERROR = 'Password must be at least 8 characters and include uppercase, lowercase, a number, and a symbol.'
+const PASSWORD_REQUIREMENT_ERROR = 'Password must be at least 8 characters and include uppercase, lowercase, a number, a symbol, and no spaces.'
 
 function getPasswordValidationError(value: unknown) {
     const password = String(value || '')
@@ -34,7 +34,8 @@ function getPasswordValidationError(value: unknown) {
         !/[A-Z]/.test(password) ||
         !/[a-z]/.test(password) ||
         !/[0-9]/.test(password) ||
-        !/[^A-Za-z0-9\s]/.test(password)
+        !/[^A-Za-z0-9\s]/.test(password) ||
+        /\s/.test(password)
     ) {
         return PASSWORD_REQUIREMENT_ERROR
     }
@@ -105,6 +106,124 @@ function getConfirmationRedirect(rawRedirectTo: unknown) {
 
 function normalizeVerificationStatus(value: unknown) {
     return String(value || '').trim().replace(/[\s-]+/g, '_').toUpperCase()
+}
+
+function normalizeDiditSignupStatus(value: unknown) {
+    const normalized = normalizeVerificationStatus(value)
+    if (['DECLINED', 'REJECTED', 'DENIED'].includes(normalized)) return 'DECLINED'
+    if (['ABANDONED', 'EXPIRED', 'CANCELLED', 'CANCELED'].includes(normalized)) return 'ABANDONED'
+    if ([
+        'PENDING_REVIEW',
+        'PENDING_REVIEW_REQUIRED',
+        'IN_REVIEW',
+        'REVIEW',
+        'MANUAL_REVIEW',
+        'PENDING_MANUAL_REVIEW',
+    ].includes(normalized)) return 'PENDING_REVIEW'
+    if (normalized === 'APPROVED') return 'APPROVED'
+    if (['NOT_STARTED', 'IN_PROGRESS', 'PENDING', 'PROCESSING', 'SUBMITTED', 'CREATED', 'STARTED'].includes(normalized)) return 'PENDING'
+    return normalized
+}
+
+function isFailedDiditSignupStatus(value: unknown) {
+    return ['DECLINED', 'ABANDONED'].includes(normalizeDiditSignupStatus(value))
+}
+
+function findDecisionObject(source: any) {
+    const candidates = [
+        source?.decision,
+        source?.verification_data?.decision,
+        source?.details?.decision,
+        source,
+    ]
+
+    return candidates.find((candidate) => (
+        candidate &&
+        typeof candidate === 'object' &&
+        (Array.isArray(candidate.id_verifications) || Array.isArray(candidate.face_matches))
+    )) || null
+}
+
+function resolveSourceVerificationStatus(source: any) {
+    if (!source || typeof source !== 'object') return ''
+
+    return normalizeDiditSignupStatus(
+        source.status ||
+        source.verification_status ||
+        source.verification_data?.status ||
+        source.session?.status ||
+        source.result?.status ||
+        source.decision?.status,
+    )
+}
+
+function shouldReviewMissingFaceMatch(sourceStatus: unknown) {
+    return normalizeDiditSignupStatus(sourceStatus) === 'PENDING_REVIEW'
+}
+
+function resolveDiditFaceRequiredStatus(source: any) {
+    const decision = findDecisionObject(source)
+    if (!decision) return resolveSourceVerificationStatus(source)
+
+    const sourceStatus = resolveSourceVerificationStatus(source)
+    const idVerification = decision.id_verifications?.[0]
+    const faceMatch = decision.face_matches?.[0]
+    const idStatus = normalizeDiditSignupStatus(idVerification?.status)
+    const faceStatus = normalizeDiditSignupStatus(faceMatch?.status)
+
+    if (isFailedDiditSignupStatus(idStatus)) return idStatus
+    if (isFailedDiditSignupStatus(faceStatus)) return faceStatus
+    if (idStatus === 'APPROVED' && !faceMatch) {
+        return shouldReviewMissingFaceMatch(sourceStatus) ? 'PENDING_REVIEW' : 'PENDING'
+    }
+    if (idStatus === 'PENDING_REVIEW' || faceStatus === 'PENDING_REVIEW') return 'PENDING_REVIEW'
+    if (idStatus === 'APPROVED' && faceStatus === 'APPROVED') return 'APPROVED'
+
+    return sourceStatus || normalizeDiditSignupStatus(decision.status)
+}
+
+function resolveDiditSignupStatus(...values: unknown[]) {
+    const statuses = values.map(normalizeDiditSignupStatus).filter(Boolean)
+    return statuses.find(isFailedDiditSignupStatus)
+        || statuses.find((status) => status === 'PENDING_REVIEW')
+        || statuses.find((status) => status === 'APPROVED')
+        || statuses[0]
+        || ''
+}
+
+async function fetchLiveDiditFaceRequiredStatus(diditSessionId: string) {
+    const diditApiKey = Deno.env.get('DIDIT_API_KEY') || ''
+    if (!diditApiKey || !diditSessionId) return ''
+
+    const statuses: string[] = []
+
+    for (const url of [
+        `https://verification.didit.me/v3/session/${diditSessionId}/decision/`,
+        `https://verification.didit.me/v3/session/${diditSessionId}`,
+    ]) {
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json', 'x-api-key': diditApiKey },
+            })
+
+            if (!response.ok) continue
+
+            const payload = await response.json()
+            const status = resolveDiditFaceRequiredStatus(payload)
+            if (status) {
+                statuses.push(status)
+                if (isFailedDiditSignupStatus(status)) break
+            }
+        } catch (error) {
+            console.error('live_didit_face_status_lookup_failed', {
+                diditSessionId,
+                message: error instanceof Error ? error.message : String(error),
+            })
+        }
+    }
+
+    return resolveDiditSignupStatus(...statuses)
 }
 
 function buildDeferredEmailDelivery(identityStatus: string) {
@@ -457,10 +576,10 @@ serve(async (req) => {
                             const decision = decisionPayload?.decision || decisionPayload
                             const idVerification = decision?.id_verifications?.[0] || decisionPayload?.id_verifications?.[0]
                             const faceMatch = decision?.face_matches?.[0] || decisionPayload?.face_matches?.[0]
-                            const idStatus = idVerification?.status
-                            const faceStatus = faceMatch?.status
+                            const idStatus = normalizeDiditSignupStatus(idVerification?.status)
+                            const faceStatus = normalizeDiditSignupStatus(faceMatch?.status)
 
-                            if (idStatus === 'Approved' && faceStatus === 'Approved') {
+                            if (idStatus === 'APPROVED' && faceStatus === 'APPROVED') {
                                 sessionData = {
                                     status: 'APPROVED',
                                     verification_data: {
@@ -470,16 +589,18 @@ serve(async (req) => {
                                         document_country: idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || null,
                                     },
                                 }
-                            } else if (idStatus === 'Approved' && !faceMatch) {
-                                const sourceStatus = normalizeVerificationStatus(decisionPayload?.status || decision?.status)
+                            } else if (idStatus === 'APPROVED' && !faceMatch) {
+                                const sourceStatus = normalizeDiditSignupStatus(decisionPayload?.status || decision?.status)
                                 sessionData = {
                                     status: sourceStatus === 'PENDING_REVIEW'
                                         ? 'PENDING_REVIEW'
                                         : 'PENDING',
                                     verification_data: { email: normalizedEmail },
                                 }
-                            } else if (idStatus === 'In Review' || faceStatus === 'In Review' || idStatus === 'Pending Review' || faceStatus === 'Pending Review') {
+                            } else if (idStatus === 'PENDING_REVIEW' || faceStatus === 'PENDING_REVIEW') {
                                 sessionData = { status: 'PENDING_REVIEW', verification_data: { email: normalizedEmail } }
+                            } else if (isFailedDiditSignupStatus(idStatus) || isFailedDiditSignupStatus(faceStatus)) {
+                                sessionData = { status: resolveDiditSignupStatus(idStatus, faceStatus), verification_data: { email: normalizedEmail } }
                             }
                         }
                     } catch (diditError) {
@@ -488,8 +609,29 @@ serve(async (req) => {
                 }
             }
 
-            const resolvedDiditStatus = normalizeVerificationStatus(sessionData?.status)
+            const localDiditStatus = normalizeDiditSignupStatus(sessionData?.status)
+            const liveFaceRequiredStatus = await fetchLiveDiditFaceRequiredStatus(String(diditSessionId || ''))
+            const localFaceRequiredStatus = resolveDiditFaceRequiredStatus(sessionData?.verification_data)
+            let resolvedDiditStatus = resolveDiditSignupStatus(liveFaceRequiredStatus, localFaceRequiredStatus, localDiditStatus)
+            if (resolvedDiditStatus === 'APPROVED' && !liveFaceRequiredStatus && !localFaceRequiredStatus) {
+                resolvedDiditStatus = 'PENDING_REVIEW'
+            }
+            if (sessionData && resolvedDiditStatus && resolvedDiditStatus !== localDiditStatus && (isFailedDiditSignupStatus(resolvedDiditStatus) || resolvedDiditStatus === 'PENDING_REVIEW')) {
+                const { error: diditStatusSyncError } = await supabaseAdmin
+                    .from('verification_sessions')
+                    .update({ status: resolvedDiditStatus })
+                    .eq('session_ref', diditSessionId)
+
+                if (diditStatusSyncError) {
+                    console.error('didit_status_sync_failed_before_signup', {
+                        diditSessionId,
+                        resolvedDiditStatus,
+                        message: diditStatusSyncError.message,
+                    })
+                }
+            }
             const hasApprovedFaceMatch =
+                resolvedDiditStatus === 'APPROVED' ||
                 sessionData?.verification_data?.face_matches?.[0]?.status === 'Approved' ||
                 sessionData?.verification_data?.face_matches?.[0]?.status === 'APPROVED'
             if (approvedByDidit && resolvedDiditStatus !== 'APPROVED') {

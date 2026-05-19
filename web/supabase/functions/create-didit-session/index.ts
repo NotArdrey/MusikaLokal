@@ -152,6 +152,13 @@ const FINAL_SESSION_STATUSES = new Set([
   "SUPERSEDED_APPROVED",
 ]);
 
+const FAILED_SESSION_STATUSES = new Set([
+  "DECLINED",
+  "ABANDONED",
+  "SUPERSEDED",
+  "SUPERSEDED_APPROVED",
+]);
+
 function normalizeDiditStatus(value: unknown) {
   const normalized = String(value || "").trim().replace(/[\s-]+/g, "_").toUpperCase();
   if (!normalized) return "";
@@ -176,6 +183,10 @@ function normalizeDiditStatus(value: unknown) {
 
 function isFinalSessionStatus(value: unknown) {
   return FINAL_SESSION_STATUSES.has(normalizeDiditStatus(value));
+}
+
+function isFailedDiditStatus(value: unknown) {
+  return FAILED_SESSION_STATUSES.has(normalizeDiditStatus(value));
 }
 
 function findDecisionObject(source: any) {
@@ -242,7 +253,13 @@ function resolveDiditStatusFromSource(source: any) {
 
 function resolveDiditSessionStatus(...sources: any[]) {
   const statuses = sources.map(resolveDiditStatusFromSource).filter(Boolean);
-  return statuses.find(isFinalSessionStatus) || statuses[0] || "";
+  return (
+    statuses.find(isFailedDiditStatus) ||
+    statuses.find((status) => normalizeDiditStatus(status) === "PENDING_REVIEW") ||
+    statuses.find(isFinalSessionStatus) ||
+    statuses[0] ||
+    ""
+  );
 }
 
 function firstNonEmptyString(values: any[]) {
@@ -690,12 +707,15 @@ serve(async (req) => {
         const rawDecisionStatus = resolveSourceStatus(rawDecisionData);
         const rawBaseStatus = resolveSourceStatus(rawBaseData);
         const diditResolvedStatus = resolveDiditSessionStatus(rawDecisionData, rawBaseData, sessionData);
+        const diditFailureOverridesLocal = isFailedDiditStatus(diditResolvedStatus);
         const diditRequiresReview = diditResolvedStatus === 'PENDING_REVIEW' && storedStatus === 'APPROVED';
         const storedPendingReviewStillInProgress = storedStatus === 'PENDING_REVIEW' && diditResolvedStatus === 'PENDING';
         const localStatusIsFinal = isFinalSessionStatus(storedStatus);
         const diditStatusIsFinal = isFinalSessionStatus(diditResolvedStatus);
         let syncedVerificationData = null;
         const effectiveStatus = storedPendingReviewStillInProgress
+          ? diditResolvedStatus
+          : diditFailureOverridesLocal
           ? diditResolvedStatus
           : diditRequiresReview
           ? diditResolvedStatus
@@ -712,6 +732,7 @@ serve(async (req) => {
           rawBaseStatus: rawBaseStatus || null,
           diditResolvedStatus: diditResolvedStatus || null,
           effectiveStatus,
+          diditFailureOverridesLocal,
           diditRequiresReview,
           storedPendingReviewStillInProgress,
         });
@@ -726,7 +747,7 @@ serve(async (req) => {
           }
         }
 
-        if ((!localStatusIsFinal || diditRequiresReview) && diditStatusIsFinal && diditResolvedStatus !== storedStatus) {
+        if ((diditFailureOverridesLocal || !localStatusIsFinal || diditRequiresReview) && diditStatusIsFinal && diditResolvedStatus !== storedStatus) {
           syncedVerificationData = await buildDiditSessionSyncData(
             rawDecisionData,
             rawBaseData,

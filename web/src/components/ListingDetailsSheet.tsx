@@ -2279,7 +2279,7 @@ const ListingDetailsSheet = forwardRef<
         if (availableCount > 0) {
           marked[dateStr] = {
             marked: true,
-            dotColor: daySchedule.isOverride ? "#F59E0B" : colors.primary, // Orange for overrides
+            dotColor: "#10B981",
           };
         } else {
           // Fully Booked

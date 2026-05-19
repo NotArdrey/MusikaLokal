@@ -339,7 +339,7 @@ export default function AdminStationsPage() {
       return;
     }
 
-    Alert.alert('Delete station?', 'This removes the station and its playlist rotation from the user feed.', [
+    Alert.alert('Delete station?', 'This removes the station and its playlist queue from the user feed.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -561,7 +561,7 @@ export default function AdminStationsPage() {
                   {item.slot_count} playlist{item.slot_count === 1 ? '' : 's'}
                 </Text>
                 <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                  {item.rotation_interval_minutes || 15} min rotation
+                  Full playlist queue
                 </Text>
                 {item.stream_url ? (
                   <Text style={{ color: item.stream_status === 'live' ? '#22C55E' : colors.textSecondary, fontSize: 12, fontWeight: '700' }}>
@@ -871,7 +871,7 @@ export default function AdminStationsPage() {
                 />
               </View>
               <View style={styles.halfField}>
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Rotation minutes</Text>
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Station interval</Text>
                 <TextInput
                   testID="admin-station-rotation-input"
                   accessibilityLabel="admin-station-rotation-input"

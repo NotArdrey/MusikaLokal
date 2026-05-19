@@ -495,6 +495,15 @@ export default function AddGroupScreen() {
     else router.replace("/my_group");
   };
 
+  const handleCreateGroupPlaylistBeforeCreate = () => {
+    showAlert(
+      "info",
+      "Create Group First",
+      "Finish creating the group first. As soon as it is created, you can upload a playlist owned by the group.",
+      [{ text: "OK", onPress: () => undefined }],
+    );
+  };
+
   const createGroup = async () => {
     if (creating) return;
     setCreating(true);
@@ -634,7 +643,22 @@ export default function AddGroupScreen() {
       }
 
       setNewGroupId(data.id);
-      setModalVisible(true);
+      showAlert(
+        "success",
+        "Group Created",
+        `"${groupName}" has been successfully created.`,
+        [
+          {
+            text: "Upload Group Playlist",
+            onPress: () => navigateToGroupPlaylistUpload(data.id),
+          },
+          {
+            text: "Manage Group",
+            onPress: () => navigateToManageGroup(data.id),
+            style: "cancel",
+          },
+        ],
+      );
       console.log("Group Created");
     } catch (e: any) {
       console.log("Error creating group:", e);
@@ -647,10 +671,28 @@ export default function AddGroupScreen() {
   const handleSuccessRedirect = () => {
     setModalVisible(false);
     if (newGroupId) {
-      router.replace({ pathname: "/manage_group", params: { id: newGroupId } });
+      navigateToManageGroup(newGroupId);
     } else {
       router.replace("/my_group");
     }
+  };
+
+  const navigateToGroupPlaylistUpload = (groupId: string) => {
+    router.replace({
+      pathname: "/create_playlist",
+      params: {
+        owner_group_id: groupId,
+        return_to: "manage_group",
+        return_group_id: groupId,
+      },
+    });
+  };
+
+  const navigateToManageGroup = (groupId: string) => {
+    router.replace({
+      pathname: "/manage_group",
+      params: { id: groupId, refresh: String(Date.now()) },
+    });
   };
 
   // Show loading while checking authorization
@@ -1190,7 +1232,7 @@ export default function AddGroupScreen() {
             {step === 2 && (
               <View>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  Who's in the {isDuoGroupType(groupType) ? "duo" : "band"}?
+                  Who is in the {isDuoGroupType(groupType) ? "duo" : "band"}?
                 </Text>
                 <Text
                   style={{
@@ -1716,6 +1758,43 @@ export default function AddGroupScreen() {
                         </View>
                       ))}
                     </View>
+                  </View>
+                </View>
+
+                <View
+                  style={[
+                    styles.reviewContainer,
+                    {
+                      marginTop: 16,
+                      backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
+                    },
+                  ]}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.reviewLabel}>Group Playlists</Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>
+                        Upload a playlist owned by this group after creation.
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      onPress={handleCreateGroupPlaylistBeforeCreate}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                        paddingHorizontal: 12,
+                        paddingVertical: 9,
+                        borderRadius: 10,
+                        backgroundColor: colors.primary,
+                      }}
+                    >
+                      <Ionicons name="cloud-upload-outline" size={14} color="#fff" />
+                      <Text style={{ color: "#fff", fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
+                        Upload
+                      </Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
 

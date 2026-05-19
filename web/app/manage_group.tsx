@@ -23,6 +23,7 @@ import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { getGroupMembersLabel, isGroupLeaderMember } from "../src/utils/groupMembers";
+import { fetchGroupLinkedPlaylists } from "../src/utils/groupPlaylists";
 import {
     hasValidCoordinates,
     openNavigationDirections,
@@ -53,7 +54,7 @@ export default function GroupDetailsScreen() {
       : "#D8E3F2"
     : colors.border;
   const { isSystemLocked, showLockAlert } = useAuth();
-  const { id, tab } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[] }>();
+  const { id, tab, refresh } = useLocalSearchParams<{ id?: string | string[]; tab?: string | string[]; refresh?: string | string[] }>();
   const requestedTab = Array.isArray(tab) ? tab[0] : tab;
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState(
@@ -75,6 +76,8 @@ export default function GroupDetailsScreen() {
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
   const [applications, setApplications] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
+  const [groupPlaylists, setGroupPlaylists] = useState<any[]>([]);
+  const [loadingGroupPlaylists, setLoadingGroupPlaylists] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -121,6 +124,32 @@ export default function GroupDetailsScreen() {
     }
   };
 
+  const handleCreateGroupPlaylist = () => {
+    const groupId = String(group?.id || (Array.isArray(id) ? id[0] : id) || "").trim();
+    if (!groupId) {
+      showAlert("warning", "Group Unavailable", "Open this group again before uploading a group playlist.");
+      return;
+    }
+
+    router.push({
+      pathname: "/create_playlist",
+      params: {
+        owner_group_id: groupId,
+        return_to: "manage_group",
+        return_group_id: groupId,
+      },
+    });
+  };
+
+  const handlePlaylistPress = (playlistId: string) => {
+    if (!playlistId) return;
+
+    router.push({
+      pathname: "/playlist_details",
+      params: { playlist_id: playlistId },
+    });
+  };
+
   // Role-based access control
   useEffect(() => {
     checkAuthorization();
@@ -130,6 +159,38 @@ export default function GroupDetailsScreen() {
     if (!authorized || !currentUserId || !id) return;
     fetchData(currentUserId);
   }, [authorized, currentUserId, id]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (!group?.id) {
+      setGroupPlaylists([]);
+      setLoadingGroupPlaylists(false);
+      return () => {
+        isActive = false;
+      };
+    }
+
+    setLoadingGroupPlaylists(true);
+    fetchGroupLinkedPlaylists(group.id)
+      .then((playlistRows) => {
+        if (!isActive) return;
+        setGroupPlaylists(playlistRows);
+      })
+      .catch((playlistError) => {
+        if (!isActive) return;
+        console.log("[manage_group] Failed to fetch group playlists:", playlistError);
+        setGroupPlaylists([]);
+      })
+      .finally(() => {
+        if (!isActive) return;
+        setLoadingGroupPlaylists(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [group?.id, refresh]);
 
   useEffect(() => {
     if (!authorized || !currentUserId) return;
@@ -771,6 +832,142 @@ export default function GroupDetailsScreen() {
                       {group?.group_type || "N/A"}
                     </Text>
                   </View>
+                </View>
+
+                <View>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+                      <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                        Group Playlists
+                      </Text>
+                      {groupPlaylists.length > 0 ? (
+                        <View
+                          style={{
+                            backgroundColor: colors.primary + "18",
+                            paddingHorizontal: 8,
+                            paddingVertical: 3,
+                            borderRadius: 999,
+                          }}
+                        >
+                          <Text style={{ color: colors.primary, fontSize: 10, fontFamily: "Poppins_600SemiBold" }}>
+                            {groupPlaylists.length}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      disabled={loadingGroupPlaylists}
+                      onPress={handleCreateGroupPlaylist}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 6,
+                        paddingHorizontal: 12,
+                        paddingVertical: 9,
+                        borderRadius: 10,
+                        backgroundColor: loadingGroupPlaylists ? colors.border : colors.primary,
+                        opacity: loadingGroupPlaylists ? 0.65 : 1,
+                      }}
+                    >
+                      <Ionicons name="cloud-upload-outline" size={14} color="#fff" />
+                      <Text style={{ color: "#fff", fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
+                        Upload Group Playlist
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {loadingGroupPlaylists ? (
+                    <View
+                      style={[
+                        styles.infoCard,
+                        {
+                          backgroundColor: colors.surface,
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 10,
+                        },
+                      ]}
+                    >
+                      <ActivityIndicator size="small" color={colors.primary} />
+                      <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular" }}>
+                        Loading playlists...
+                      </Text>
+                    </View>
+                  ) : groupPlaylists.length > 0 ? (
+                    <View style={{ gap: 10 }}>
+                      {groupPlaylists.map((playlist: any) => {
+                        const playlistId = String(playlist?.playlist_id || playlist?.id || "").trim();
+                        if (!playlistId) return null;
+                        const itemCount = Number(playlist?.track_count || playlist?.item_count || 0);
+
+                        return (
+                          <TouchableOpacity
+                            key={playlistId}
+                            activeOpacity={1}
+                            onPress={() => handlePlaylistPress(playlistId)}
+                            style={{
+                              borderRadius: 14,
+                              borderWidth: 1,
+                              borderColor: colors.border,
+                              backgroundColor: colors.surface,
+                              padding: 14,
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 12,
+                            }}
+                          >
+                            <View
+                              style={{
+                                width: 42,
+                                height: 42,
+                                borderRadius: 12,
+                                backgroundColor: colors.primary + "18",
+                                alignItems: "center",
+                                justifyContent: "center",
+                              }}
+                            >
+                              <Ionicons name="musical-notes-outline" size={18} color={colors.primary} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text
+                                numberOfLines={1}
+                                style={{ color: colors.text, fontSize: 14, fontFamily: "Poppins_600SemiBold" }}
+                              >
+                                {playlist.title || "Untitled Playlist"}
+                              </Text>
+                              {playlist.genre ? (
+                                <Text style={{ marginTop: 2, color: colors.textSecondary, fontSize: 12 }}>
+                                  {playlist.genre}
+                                </Text>
+                              ) : null}
+                              <Text style={{ marginTop: 3, color: colors.textSecondary, fontSize: 11 }}>
+                                {itemCount} track{itemCount === 1 ? "" : "s"}
+                              </Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  ) : (
+                    <View
+                      style={[
+                        styles.infoCard,
+                        {
+                          backgroundColor: colors.surface,
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                        },
+                      ]}
+                    >
+                      <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, lineHeight: 18 }}>
+                        Upload a group playlist or link playlists from Edit Group to feature them here.
+                      </Text>
+                    </View>
+                  )}
                 </View>
 
                 <View>

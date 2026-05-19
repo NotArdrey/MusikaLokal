@@ -45,6 +45,7 @@ import {
 import { bottomSheetSpringConfig } from "../src/utils/motion";
 import {
   fetchGroupLinkedPlaylists,
+  fetchGroupOwnedPlaylists,
   fetchUserOwnedPlaylists,
   syncGroupLinkedPlaylists,
 } from "../src/utils/groupPlaylists";
@@ -381,12 +382,23 @@ export default function EditGroupScreen() {
 
     setLoadingPlaylists(true);
     try {
-      const [playlistRows, linkedPlaylists] = await Promise.all([
+      const [playlistRows, groupOwnedRows, linkedPlaylists] = await Promise.all([
         fetchUserOwnedPlaylists(currentUserId),
+        fetchGroupOwnedPlaylists(groupId),
         fetchGroupLinkedPlaylists(groupId),
       ]);
 
-      setOwnedPlaylists(playlistRows);
+      const playlistById = new Map<string, any>();
+      [...groupOwnedRows, ...playlistRows, ...linkedPlaylists].forEach((playlist: any) => {
+        const playlistId = String(playlist?.id || playlist?.playlist_id || "").trim();
+        if (!playlistId || playlistById.has(playlistId)) {
+          return;
+        }
+
+        playlistById.set(playlistId, { ...playlist, id: playlistId });
+      });
+
+      setOwnedPlaylists(Array.from(playlistById.values()));
       setSelectedPlaylistIds(
         linkedPlaylists.map((playlist) => playlist.playlist_id),
       );
@@ -427,8 +439,21 @@ export default function EditGroupScreen() {
   }, []);
 
   const handleCreatePlaylist = useCallback(() => {
-    router.push("/create_playlist");
-  }, []);
+    const groupId = Array.isArray(id) ? id[0] : id;
+    if (!groupId) {
+      showAlert("warning", "Group Unavailable", "Open this group again before uploading a group playlist.");
+      return;
+    }
+
+    router.push({
+      pathname: "/create_playlist",
+      params: {
+        owner_group_id: groupId,
+        return_to: "edit_group",
+        return_group_id: groupId,
+      },
+    });
+  }, [id, showAlert]);
 
   useEffect(() => {
     const backSubscription = BackHandler.addEventListener(
@@ -2337,9 +2362,10 @@ export default function EditGroupScreen() {
             loading={loadingPlaylists}
             onTogglePlaylist={handleTogglePlaylist}
             onCreatePlaylist={handleCreatePlaylist}
-            title="Linked Playlists"
-            subtitle="Choose the playlists that should appear on this group profile. Linked playlists show up on the manage page and listing details."
-            emptyMessage="Create a playlist first, then return here to link it to the group."
+            title="Group Playlists"
+            subtitle="Upload playlists owned by this group or link your personal playlists to the group profile."
+            emptyMessage="Upload a group playlist or link one of your personal playlists here."
+            createButtonLabel="Upload Group Playlist"
             disabled={saving}
           />
 

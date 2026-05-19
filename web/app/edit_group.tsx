@@ -149,6 +149,23 @@ export default function EditGroupScreen() {
     router.replace("/my_group");
   }, [id, normalizedReturnTab]);
 
+  const handleUploadGroupPlaylist = useCallback(() => {
+    const groupId = Array.isArray(id) ? id[0] : id;
+    if (!groupId) {
+      showAlert("warning", "Group Unavailable", "Open this group again before uploading a group playlist.");
+      return;
+    }
+
+    router.push({
+      pathname: "/create_playlist",
+      params: {
+        owner_group_id: groupId,
+        return_to: "edit_group",
+        return_group_id: groupId,
+      },
+    });
+  }, [id, showAlert]);
+
   const isMissingRelationError = (error: any, relationName: string) => {
     const message = String(error?.message || "").toLowerCase();
     return error?.code === "42P01" && message.includes(relationName.toLowerCase());
@@ -1610,6 +1627,34 @@ export default function EditGroupScreen() {
             safetyContext="edit_group_images"
           />
 
+          {renderSectionHeader("Group Playlists", "musical-notes")}
+          <View
+            style={[
+              styles.playlistUploadCard,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: isDark ? "#374151" : "#E5E7EB",
+              },
+            ]}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.playlistUploadTitle, { color: colors.text }]}>
+                Upload a playlist owned by this group
+              </Text>
+              <Text style={[styles.playlistUploadSubtitle, { color: colors.textSecondary }]}>
+                The playlist will belong to this group or duo and appear on the manage page.
+              </Text>
+            </View>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={handleUploadGroupPlaylist}
+              style={[styles.playlistUploadButton, { backgroundColor: colors.primary }]}
+            >
+              <Ionicons name="cloud-upload-outline" size={16} color="#fff" />
+              <Text style={styles.playlistUploadButtonText}>Upload Group Playlist</Text>
+            </TouchableOpacity>
+          </View>
+
           {renderSectionHeader(groupMembersLabel, "person")}
 
           {/* Add Members Section */}
@@ -2550,6 +2595,40 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,
+  },
+  playlistUploadCard: {
+    flexDirection: IS_WEB ? "row" : "column",
+    alignItems: IS_WEB ? "center" : "stretch",
+    justifyContent: "space-between",
+    gap: 14,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 20,
+  },
+  playlistUploadTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 14,
+  },
+  playlistUploadSubtitle: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  playlistUploadButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  playlistUploadButtonText: {
+    color: "#fff",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
   },
   searchContainer: {
     flexDirection: "row",

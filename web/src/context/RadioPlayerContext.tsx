@@ -53,6 +53,7 @@ type RadioPlayerContextValue = {
 
 const KNOWN_RADIO_MEDIA_BUCKETS = ["post-media", "posts", "images", "listings", "documents", "avatars"];
 const DEFAULT_SIGNED_URL_SECONDS = 24 * 60 * 60;
+const DEFAULT_LIVE_TRACK_DURATION_SECONDS = 180;
 
 const RadioPlayerContext = createContext<RadioPlayerContextValue | undefined>(undefined);
 
@@ -185,6 +186,11 @@ const buildStationBroadcastTrack = (stationData: any): RadioQueueTrack | null =>
 };
 
 const getStationAnchorTimestampMs = (stationData: any) => {
+  const liveAnchorMs = readTimestampMs(stationData?.live_anchor_at);
+  if (liveAnchorMs !== null) {
+    return liveAnchorMs;
+  }
+
   const stationSlots = Array.isArray(stationData?.live_slots)
     ? stationData.live_slots
     : Array.isArray(stationData?.slots)
@@ -192,29 +198,16 @@ const getStationAnchorTimestampMs = (stationData: any) => {
       : [];
 
   const slotTimestamps = stationSlots
-    .flatMap((slot: any) => [slot?.updated_at, slot?.created_at, slot?.starts_at])
+    .flatMap((slot: any) => [slot?.updated_at, slot?.created_at])
     .map(readTimestampMs)
     .filter((value: number | null): value is number => value !== null);
 
-  const stationTimestamps = [stationData?.live_anchor_at, stationData?.updated_at, stationData?.created_at]
+  const stationTimestamps = [stationData?.updated_at, stationData?.created_at]
     .map(readTimestampMs)
     .filter((value): value is number => value !== null);
 
   const timestamps = [...slotTimestamps, ...stationTimestamps];
   return timestamps.length > 0 ? Math.max(...timestamps) : null;
-};
-
-const getNextRotationRefreshDelayMs = (stationData: any) => {
-  const parsed = Number(stationData?.rotation_interval_minutes);
-  const intervalMinutes = Number.isFinite(parsed) ? Math.min(Math.max(Math.round(parsed), 5), 120) : 15;
-  const intervalMs = intervalMinutes * 60 * 1000;
-  const anchorMs = Date.parse(stationData?.live_anchor_at || stationData?.updated_at || stationData?.created_at || "");
-  const nowMs = Date.now();
-
-  if (!Number.isFinite(anchorMs)) return intervalMs;
-
-  const elapsedIntervals = anchorMs >= nowMs ? 0 : Math.floor((nowMs - anchorMs) / intervalMs);
-  return Math.max((anchorMs + ((elapsedIntervals + 1) * intervalMs)) - nowMs + 1000, 1000);
 };
 
 const getStationSlots = (stationData: any) => {
@@ -293,15 +286,12 @@ const buildStationQueue = async (stationData: any): Promise<RadioQueueTrack[]> =
 const getLiveStationCursor = (stationData: any, fullQueue: RadioQueueTrack[]) => {
   if (fullQueue.length === 0) return { queueIndex: 0, positionSeconds: 0, isSynchronized: false };
 
-  const durations = fullQueue.map((track) => normalizeDurationSeconds(track.duration));
-  if (durations.some((duration) => duration === undefined)) {
-    return { queueIndex: 0, positionSeconds: 0, isSynchronized: false };
-  }
-
   const anchorTimestampMs = getStationAnchorTimestampMs(stationData);
   if (!anchorTimestampMs) return { queueIndex: 0, positionSeconds: 0, isSynchronized: false };
 
-  const resolvedDurations = durations as number[];
+  const resolvedDurations = fullQueue.map(
+    (track) => normalizeDurationSeconds(track.duration) ?? DEFAULT_LIVE_TRACK_DURATION_SECONDS,
+  );
   const loopDurationSeconds = resolvedDurations.reduce((sum, duration) => sum + duration, 0);
   if (loopDurationSeconds <= 0) return { queueIndex: 0, positionSeconds: 0, isSynchronized: false };
 
@@ -647,40 +637,6 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       audio.removeEventListener("pause", handlePause);
     };
   }, [ensureAudio, playQueueIndex]);
-
-  useEffect(() => {
-    if (!activeStation?.id || queueRef.current.length === 0 || activeStation?.is_active === false) {
-      return undefined;
-    }
-
-    if (getStationBroadcastStreamUrl(activeStation)) {
-      return undefined;
-    }
-
-    const timeoutId = setTimeout(() => {
-      const stationId = activeStation.id;
-
-      void (async () => {
-        try {
-          const refreshedStation = await fetchStationDetails(stationId);
-          if (!refreshedStation) return;
-
-          const queue = await buildStationQueue(refreshedStation);
-          if (queue.length === 0) return;
-
-          const liveCursor = getLiveStationCursor(refreshedStation, queue);
-          activeStationRef.current = refreshedStation;
-          queueRef.current = queue;
-          setQueueState(refreshedStation, queue, liveCursor.queueIndex);
-          await playQueueIndex(liveCursor.queueIndex, isPlaying, liveCursor.positionSeconds);
-        } catch (error) {
-          console.warn("Radio live rotation refresh error:", error);
-        }
-      })();
-    }, getNextRotationRefreshDelayMs(activeStation));
-
-    return () => clearTimeout(timeoutId);
-  }, [activeStation, fetchStationDetails, isPlaying, playQueueIndex, setQueueState]);
 
   const value = useMemo<RadioPlayerContextValue>(() => ({
     activeStation,

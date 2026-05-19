@@ -1967,7 +1967,7 @@ export default function GigDetailsScreen() {
               disabled={sendingInvites}
               title="Invite Musicians, Duo, or Group"
               description="Search performers to invite to this gig. Recipients can respond from Bookings > Pending."
-              searchPlaceholder="Search musician, duo, or group"
+              searchPlaceholder="Search musician"
               messagePlaceholder="Add optional gig details for the invite"
             />
 

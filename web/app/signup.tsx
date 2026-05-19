@@ -76,17 +76,25 @@ const getDocumentOptionByKey = (key: string) => {
     return PH_DOCUMENT_OPTIONS.find((option) => option.key === key) ?? PH_DOCUMENT_OPTIONS[0];
 };
 
-const PASSWORD_REQUIREMENT_HINT = 'Use at least 8 characters with uppercase, lowercase, a number, and a symbol.';
-const PASSWORD_REQUIREMENT_ERROR = 'Password must be at least 8 characters and include uppercase, lowercase, a number, and a symbol.';
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_REQUIREMENT_HINT = 'Use 8+ characters with uppercase, lowercase, a number, a symbol, and no spaces.';
+const PASSWORD_REQUIREMENT_ERROR = 'Password must be at least 8 characters and include uppercase, lowercase, a number, a symbol, and no spaces.';
+const PASSWORD_REQUIREMENTS = [
+    { key: 'length', label: `At least ${PASSWORD_MIN_LENGTH} characters`, test: (value: string) => value.length >= PASSWORD_MIN_LENGTH },
+    { key: 'upper', label: 'One uppercase letter', test: (value: string) => /[A-Z]/.test(value) },
+    { key: 'lower', label: 'One lowercase letter', test: (value: string) => /[a-z]/.test(value) },
+    { key: 'number', label: 'One number', test: (value: string) => /[0-9]/.test(value) },
+    { key: 'symbol', label: 'One symbol', test: (value: string) => /[^A-Za-z0-9\s]/.test(value) },
+    { key: 'spaces', label: 'No spaces', test: (value: string) => !/\s/.test(value) },
+];
+
+const getPasswordRequirementState = (value: string) => PASSWORD_REQUIREMENTS.map((requirement) => ({
+    ...requirement,
+    met: requirement.test(value),
+}));
 
 const getPasswordValidationError = (value: string) => {
-    if (
-        value.length < 8 ||
-        !/[A-Z]/.test(value) ||
-        !/[a-z]/.test(value) ||
-        !/[0-9]/.test(value) ||
-        !/[^A-Za-z0-9\s]/.test(value)
-    ) {
+    if (!getPasswordRequirementState(value).every((requirement) => requirement.met)) {
         return PASSWORD_REQUIREMENT_ERROR;
     }
 
@@ -352,6 +360,22 @@ export default function SignupScreen() {
         };
     }, [colors.primary, manualIdExpiration]);
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const passwordRequirementState = useMemo(() => getPasswordRequirementState(password), [password]);
+    const passwordStrengthScore = passwordRequirementState.filter((requirement) => requirement.met).length;
+    const passwordStrengthPercent = (passwordStrengthScore / PASSWORD_REQUIREMENTS.length) * 100;
+    const passwordStrengthLabel = passwordStrengthScore === PASSWORD_REQUIREMENTS.length
+        ? 'Strong'
+        : passwordStrengthScore >= 4
+            ? 'Almost there'
+            : passwordStrengthScore >= 2
+                ? 'Weak'
+                : 'Too weak';
+    const passwordStrengthColor = passwordStrengthScore === PASSWORD_REQUIREMENTS.length
+        ? '#16A34A'
+        : passwordStrengthScore >= 4
+            ? '#D97706'
+            : '#DC2626';
+    const showPasswordGuidance = Boolean(password) || Boolean(errors.password);
     const isDetailsStepReady =
         isAllowedSignupRole(selectedRole) &&
         emailRegex.test(email.trim()) &&
@@ -1841,8 +1865,46 @@ export default function SignupScreen() {
                 </View>
                 {errors.password ? (
                     <Text style={{ color: 'red', fontSize: 12 }}>{errors.password}</Text>
-                ) : !isPasswordStrongEnough(password) ? (
+                ) : !showPasswordGuidance ? (
                     <Text style={[styles.passwordRequirementText, authSecondaryTextStyle]}>{PASSWORD_REQUIREMENT_HINT}</Text>
+                ) : null}
+                {showPasswordGuidance ? (
+                    <View style={[styles.passwordStrengthCard, themeStyles.inputContainer]}>
+                        <View style={styles.passwordStrengthHeader}>
+                            <Text style={[styles.passwordStrengthTitle, authTextStyle]}>Password strength</Text>
+                            <Text style={[styles.passwordStrengthLabel, { color: passwordStrengthColor }]}>{passwordStrengthLabel}</Text>
+                        </View>
+                        <View style={[styles.passwordMeterTrack, { backgroundColor: isDark ? '#111827' : '#E5E7EB' }]}>
+                            <View
+                                style={[
+                                    styles.passwordMeterFill,
+                                    {
+                                        width: `${passwordStrengthPercent}%`,
+                                        backgroundColor: passwordStrengthColor,
+                                    },
+                                ]}
+                            />
+                        </View>
+                        <View style={styles.passwordChecklist}>
+                            {passwordRequirementState.map((requirement) => (
+                                <View key={requirement.key} style={styles.passwordChecklistItem}>
+                                    <Ionicons
+                                        name={requirement.met ? 'checkmark-circle' : 'ellipse-outline'}
+                                        size={15}
+                                        color={requirement.met ? '#16A34A' : authIconColor}
+                                    />
+                                    <Text
+                                        style={[
+                                            styles.passwordChecklistText,
+                                            requirement.met ? { color: isDark ? '#86EFAC' : '#15803D' } : authSecondaryTextStyle,
+                                        ]}
+                                    >
+                                        {requirement.label}
+                                    </Text>
+                                </View>
+                            ))}
+                        </View>
+                    </View>
                 ) : null}
 
                 {/* Confirm */}
@@ -1860,7 +1922,25 @@ export default function SignupScreen() {
                         <Ionicons name={showConfirmPassword ? "eye-off-outline" : "eye-outline"} size={20} color={authIconColor} />
                     </TouchableOpacity>
                 </View>
-                {errors.confirmPassword && <Text style={{ color: 'red', fontSize: 12 }}>{errors.confirmPassword}</Text>}
+                {errors.confirmPassword ? (
+                    <Text style={{ color: 'red', fontSize: 12 }}>{errors.confirmPassword}</Text>
+                ) : confirmPassword ? (
+                    <View style={styles.confirmPasswordHintRow}>
+                        <Ionicons
+                            name={password === confirmPassword ? 'checkmark-circle' : 'alert-circle-outline'}
+                            size={15}
+                            color={password === confirmPassword ? '#16A34A' : '#D97706'}
+                        />
+                        <Text
+                            style={[
+                                styles.confirmPasswordHintText,
+                                { color: password === confirmPassword ? (isDark ? '#86EFAC' : '#15803D') : '#D97706' },
+                            ]}
+                        >
+                            {password === confirmPassword ? 'Passwords match' : 'Passwords must match'}
+                        </Text>
+                    </View>
+                ) : null}
                 </View>
             </View>
 
@@ -2609,6 +2689,17 @@ const styles = StyleSheet.create({
     webFormSection: { marginBottom: 14 },
     formGap: { gap: 14 },
     passwordRequirementText: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
+    passwordStrengthCard: { borderWidth: 1, borderRadius: 16, padding: 14, gap: 10 },
+    passwordStrengthHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+    passwordStrengthTitle: { fontSize: 13, lineHeight: 18, fontFamily: 'Poppins_600SemiBold' },
+    passwordStrengthLabel: { fontSize: 12, lineHeight: 16, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
+    passwordMeterTrack: { height: 7, borderRadius: 999, overflow: 'hidden' },
+    passwordMeterFill: { height: '100%', borderRadius: 999 },
+    passwordChecklist: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    passwordChecklistItem: { width: '48%', minWidth: 148, flexDirection: 'row', alignItems: 'center', gap: 6 },
+    passwordChecklistText: { flex: 1, fontSize: 11, lineHeight: 15, fontFamily: 'Poppins_400Regular' },
+    confirmPasswordHintRow: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 18 },
+    confirmPasswordHintText: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_500Medium' },
     backLink: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, gap: 4 },
     documentSectionContainer: { gap: 8, marginTop: 2 },
     documentSectionTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold' },

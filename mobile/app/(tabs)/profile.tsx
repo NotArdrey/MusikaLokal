@@ -61,6 +61,7 @@ import {
 } from "../../src/context/BottomOverlayContext";
 import CachedImage from "../../src/components/CachedImage";
 import { emitToast } from "../../src/events/toastBus";
+import { resolveRadioMediaUrl } from "../../src/audio/radioTrackPlayer";
 import { useTheme } from "../../src/context/ThemeContext";
 import { screenUploadsWithAi } from "../../src/services/uploadSafetyScreen";
 import { buildSocialFollowKey } from "../../src/utils/socialFollow";
@@ -421,6 +422,75 @@ const profileStationCache = new Map<string, {
   station: any | null;
   fetchedAt: number;
 }>();
+
+const getProfileStationSlots = (station: any) => {
+  if (Array.isArray(station?.live_slots) && station.live_slots.length > 0) {
+    return station.live_slots;
+  }
+
+  return Array.isArray(station?.slots) ? station.slots : [];
+};
+
+const hasProfileStationHydratedSlots = (station: any) => (
+  Array.isArray(station?.live_slots) || Array.isArray(station?.slots)
+);
+
+const getProfileStationSlotCount = (station: any, fallbackCount = 0) => {
+  const rawCount =
+    station?.live_slot_count ??
+    station?.slot_count ??
+    station?.slot_playlist_ids?.length;
+  const parsedCount = Number(rawCount);
+
+  if (Number.isFinite(parsedCount)) {
+    return parsedCount;
+  }
+
+  const slotCount = getProfileStationSlots(station).length;
+  return slotCount > 0 ? slotCount : fallbackCount;
+};
+
+const hasProfileStationBroadcastStream = (station: any) => (
+  typeof station?.stream_url === "string" &&
+  station.stream_url.trim().length > 0 &&
+  station?.stream_status === "live" &&
+  station?.is_active !== false
+);
+
+const hasProfileStationPlayableItem = (item: any) => {
+  const storagePath = typeof item?.teaser?.storage_path === "string" && item.teaser.storage_path.trim().length > 0;
+  const teaserFilePath = typeof item?.teaser?.file_path === "string" && item.teaser.file_path.trim().length > 0;
+  const itemStoragePath = typeof item?.storage_path === "string" && item.storage_path.trim().length > 0;
+
+  if (storagePath || teaserFilePath || itemStoragePath) {
+    return true;
+  }
+
+  const directCandidates = [
+    item?.audio_url,
+    item?.audioUrl,
+    item?.public_url,
+    item?.publicUrl,
+    item?.signed_url,
+    item?.signedUrl,
+    item?.url,
+    item?.teaser?.audio_url,
+    item?.teaser?.audioUrl,
+    item?.teaser?.public_url,
+    item?.teaser?.publicUrl,
+    item?.teaser?.signed_url,
+    item?.teaser?.signedUrl,
+    item?.teaser?.url,
+  ];
+
+  return directCandidates.some((candidate) => Boolean(resolveRadioMediaUrl(candidate)));
+};
+
+const getProfileStationPlayableTrackCount = (station: any) =>
+  getProfileStationSlots(station).reduce((total: number, slot: any) => {
+    const items = Array.isArray(slot?.playlist?.items) ? slot.playlist.items : [];
+    return total + items.filter(hasProfileStationPlayableItem).length;
+  }, 0);
 
 const sanitizeAvatarUrl = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
@@ -940,7 +1010,7 @@ export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
   const { loading: authLoading, userId: currentUserId, isGuest, userRole } = useAuth();
   const { activeStation } = useRadioPlayerPresence();
-  const { isPlaying } = useRadioPlayerPlayback();
+  const { isPlaying, loadingStationId } = useRadioPlayerPlayback();
   const { togglePlayPause, tuneIn } = useRadioPlayerActions();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
@@ -983,6 +1053,7 @@ export default function ProfileScreen() {
   const [userStation, setUserStation] = useState<any>(null);
   const [loadingStation, setLoadingStation] = useState(false);
   const [radioPlaylistIds, setRadioPlaylistIds] = useState<Set<string>>(new Set());
+  const [stationActionBusy, setStationActionBusy] = useState(false);
   const [togglingRadio, setTogglingRadio] = useState<string | null>(null);
   const [playlistActionId, setPlaylistActionId] = useState<string | null>(null);
   const [isProfileFollowing, setIsProfileFollowing] = useState(false);
@@ -2854,12 +2925,7 @@ export default function ProfileScreen() {
       : isOwner
         ? "Add photos, videos, and documents that show your sound, setup, or stage presence."
         : "No portfolio uploads yet.";
-  const stationSlotCount = Number(
-    userStation?.slot_count ??
-      userStation?.slot_playlist_ids?.length ??
-      radioPlaylistIds.size ??
-      0,
-  );
+  const stationSlotCount = getProfileStationSlotCount(userStation, radioPlaylistIds.size);
   const hasStation = Boolean(userStation?.id);
   const stationArtworkUrl =
     profileAvatarUrl ||
@@ -2885,15 +2951,23 @@ export default function ProfileScreen() {
       : Array.isArray(profile?.genres) && typeof profile.genres[0] === "string"
         ? profile.genres[0]
         : "";
-  const stationHasLiveStream =
-    typeof userStation?.stream_url === "string" &&
-    userStation.stream_url.trim().length > 0 &&
-    userStation?.stream_status === "live";
-  const stationIsLive = hasStation && userStation?.is_active !== false && (stationSlotCount > 0 || stationHasLiveStream);
+  const stationHasHydratedSlots = hasProfileStationHydratedSlots(userStation);
+  const stationPlayableTrackCount = stationHasHydratedSlots
+    ? getProfileStationPlayableTrackCount(userStation)
+    : 0;
+  const stationHasPlayablePlaylistTracks = stationHasHydratedSlots
+    ? stationPlayableTrackCount > 0
+    : stationSlotCount > 0;
+  const stationHasLiveStream = hasProfileStationBroadcastStream(userStation);
+  const stationIsLive = hasStation && userStation?.is_active !== false && (stationHasPlayablePlaylistTracks || stationHasLiveStream);
   const stationIsCurrentSource = Boolean(
     hasStation && activeStation?.id && activeStation.id === userStation?.id,
   );
   const canPlayStationFromProfile = stationIsLive;
+  const isStationActionLoading = Boolean(
+    stationActionBusy ||
+    (hasStation && userStation?.id && loadingStationId === userStation.id),
+  );
   const loadProfileFollowState = useCallback(async () => {
     if (!canFollowProfile || !profileFollowKey) {
       setIsProfileFollowing(false);
@@ -3017,11 +3091,13 @@ export default function ProfileScreen() {
       ? "Tap the station card to listen live, then use the station controls to curate what stays on air."
       : "Tap the station card to listen live, or open any playlist card to view its tracks."
     : canManageStations
-      ? "Admins can create a station and curate the live rotation for this profile."
+      ? "Admins can create a station and curate the live queue for this profile."
       : isOwner && !isGuest
         ? "Stations are managed by admins. Contact an admin to create or update your radio station."
       : "Tap any playlist card to open it.";
-  const stationPrimaryLabel = !hasStation
+  const stationPrimaryLabel = isStationActionLoading
+    ? "Tuning In"
+    : !hasStation
     ? canManageStations
       ? "Create Station"
       : "Admin Managed"
@@ -3139,7 +3215,60 @@ export default function ProfileScreen() {
     }
   };
 
+  const cacheHydratedProfileStation = (station: any) => {
+    const cacheTargetId = viewedProfileId || currentUserId || normalizedParamUserId || "";
+    const nextRadioPlaylistIds = Array.isArray(station?.slot_playlist_ids)
+      ? station.slot_playlist_ids
+      : [];
+
+    setUserStation(station);
+    setRadioPlaylistIds(new Set(nextRadioPlaylistIds));
+
+    if (cacheTargetId) {
+      profileStationCache.set(cacheTargetId, {
+        station,
+        radioPlaylistIds: nextRadioPlaylistIds,
+        fetchedAt: Date.now(),
+      });
+    }
+  };
+
+  const hydrateStationForProfilePlayback = async () => {
+    if (!userStation?.id) {
+      return null;
+    }
+
+    if (userStation.__queueReady === true || hasProfileStationHydratedSlots(userStation)) {
+      return userStation;
+    }
+
+    const { data, error } = await supabase.functions.invoke("manage-playlists", {
+      body: {
+        action: "get_station_details",
+        station_id: userStation.id,
+      },
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const hydratedStation = data?.data
+      ? {
+        ...data.data,
+        __queueReady: true,
+      }
+      : userStation;
+
+    cacheHydratedProfileStation(hydratedStation);
+    return hydratedStation;
+  };
+
   const handleStationPrimaryAction = async () => {
+    if (isStationActionLoading) {
+      return;
+    }
+
     if (!hasStation) {
       openStationScreen();
       return;
@@ -3150,15 +3279,40 @@ export default function ProfileScreen() {
       return;
     }
 
+    setStationActionBusy(true);
     try {
       if (stationIsCurrentSource) {
         await togglePlayPause();
         return;
       }
 
-      await tuneIn(userStation);
-    } catch (stationError) {
-      openStationScreen();
+      const playableStation = await hydrateStationForProfilePlayback();
+      const canTuneIn = Boolean(
+        playableStation &&
+        (
+          hasProfileStationBroadcastStream(playableStation) ||
+          getProfileStationPlayableTrackCount(playableStation) > 0
+        ),
+      );
+
+      if (!canTuneIn) {
+        emitToast({
+          type: "info",
+          title: "Station offline",
+          message: "This station needs a live stream or at least one playable playlist track before it can play.",
+        });
+        return;
+      }
+
+      await tuneIn(playableStation);
+    } catch (stationError: any) {
+      emitToast({
+        type: "error",
+        title: "Radio unavailable",
+        message: stationError?.message || "Unable to start this station right now.",
+      });
+    } finally {
+      setStationActionBusy(false);
     }
   };
 
@@ -3677,6 +3831,7 @@ export default function ProfileScreen() {
                   >
                     <TouchableOpacity
                       activeOpacity={1}
+                      disabled={isStationActionLoading}
                       onPress={() => void handleStationPrimaryAction()}
                       style={{ paddingHorizontal: 14, paddingTop: 14, paddingBottom: 12 }}
                     >
@@ -3730,11 +3885,15 @@ export default function ProfileScreen() {
                           </Text>
                         </View>
 
-                        <Ionicons
-                          name={canPlayStationFromProfile && stationIsCurrentSource && isPlaying ? "pause-circle" : "play-circle"}
-                          size={30}
-                          color={canPlayStationFromProfile ? colors.primary : colors.textSecondary}
-                        />
+                        {isStationActionLoading ? (
+                          <ActivityIndicator size="small" color={colors.primary} />
+                        ) : (
+                          <Ionicons
+                            name={canPlayStationFromProfile && stationIsCurrentSource && isPlaying ? "pause-circle" : "play-circle"}
+                            size={30}
+                            color={canPlayStationFromProfile ? colors.primary : colors.textSecondary}
+                          />
+                        )}
                       </View>
 
                       <Text style={{ fontSize: 11, color: colors.textSecondary, lineHeight: 17, marginTop: 12 }}>
@@ -3742,13 +3901,14 @@ export default function ProfileScreen() {
                           ? "Tap this card to start listening live. Open the station screen anytime for more controls."
                             : canManageStations
                               ? "This station is ready to manage, but it needs at least one playlist on air before listeners can tune in."
-                            : "Open the station to browse its rotation and live details."}
+                            : "Open the station to browse its queue and live details."}
                       </Text>
                     </TouchableOpacity>
 
                     <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 14, paddingBottom: 14 }}>
                       <TouchableOpacity
                         activeOpacity={1}
+                        disabled={isStationActionLoading}
                         onPress={() => void handleStationPrimaryAction()}
                         style={{
                           flex: 1,
@@ -3762,11 +3922,15 @@ export default function ProfileScreen() {
                           paddingHorizontal: 12,
                         }}
                       >
-                        <Ionicons
-                          name={canPlayStationFromProfile && stationIsCurrentSource && isPlaying ? "pause" : canPlayStationFromProfile ? "radio" : "open-outline"}
-                          size={16}
-                          color={canPlayStationFromProfile ? "#fff" : colors.text}
-                        />
+                        {isStationActionLoading ? (
+                          <ActivityIndicator size="small" color={canPlayStationFromProfile ? "#fff" : colors.primary} />
+                        ) : (
+                          <Ionicons
+                            name={canPlayStationFromProfile && stationIsCurrentSource && isPlaying ? "pause" : canPlayStationFromProfile ? "radio" : "open-outline"}
+                            size={16}
+                            color={canPlayStationFromProfile ? "#fff" : colors.text}
+                          />
+                        )}
                         <Text style={{ color: canPlayStationFromProfile ? "#fff" : colors.text, fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
                           {stationPrimaryLabel}
                         </Text>
@@ -4035,32 +4199,9 @@ export default function ProfileScreen() {
 
                     <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular", textAlign: "center", lineHeight: 18, marginTop: 6 }}>
                       {isOwner && !isGuest
-                        ? "Create your first playlist to start building your station rotation and featured profile section."
+                        ? "Your playlists will appear here once they are added to your profile."
                         : "This profile has not shared any playlists yet."}
                     </Text>
-
-                    {isOwner && !isGuest && (
-                      <TouchableOpacity
-                        activeOpacity={1}
-                        onPress={openCreatePlaylist}
-                        style={{
-                          marginTop: 16,
-                          minHeight: 42,
-                          paddingHorizontal: 16,
-                          borderRadius: 12,
-                          backgroundColor: colors.primary,
-                          flexDirection: "row",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: 8,
-                        }}
-                      >
-                        <Ionicons name="add" size={16} color="#fff" />
-                        <Text style={{ color: "#fff", fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
-                          Create Playlist
-                        </Text>
-                      </TouchableOpacity>
-                    )}
                   </View>
                 )}
               </View>

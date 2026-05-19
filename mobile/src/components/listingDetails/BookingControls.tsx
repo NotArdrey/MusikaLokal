@@ -50,6 +50,7 @@ const toLocalDateKey = (value: Date) => {
 };
 
 const BOOKING_LOOKAHEAD_DAYS = 90;
+const BOOKING_CALENDAR_AVAILABLE_COLOR = "#10B981";
 
 const addLocalDays = (value: Date, days: number) => {
   const next = new Date(value);
@@ -377,11 +378,11 @@ const BookingControls = ({
               ...markedDates,
               [selectedDate]: {
                 selected: true,
-                selectedColor: colors.primary,
+                selectedColor: BOOKING_CALENDAR_AVAILABLE_COLOR,
                 selectedTextColor: "#FFFFFF",
                 customStyles: {
                   container: {
-                    backgroundColor: colors.primary,
+                    backgroundColor: BOOKING_CALENDAR_AVAILABLE_COLOR,
                     elevation: 2,
                   },
                   text: {
@@ -415,12 +416,12 @@ const BookingControls = ({
               backgroundColor: "transparent",
               calendarBackground: "transparent",
               textSectionTitleColor: colors.textSecondary,
-              selectedDayBackgroundColor: colors.primary,
+              selectedDayBackgroundColor: BOOKING_CALENDAR_AVAILABLE_COLOR,
               selectedDayTextColor: "#FFFFFF",
               todayTextColor: colors.primary,
               dayTextColor: colors.text,
               textDisabledColor: isDark ? "#4B5563" : "#D1D5DB",
-              dotColor: colors.primary,
+              dotColor: BOOKING_CALENDAR_AVAILABLE_COLOR,
               selectedDotColor: "#FFFFFF",
               arrowColor: colors.primary,
               monthTextColor: colors.text,
