@@ -273,6 +273,9 @@ function findDecisionObject(source: any) {
   const candidates = [
     source?.decision,
     source?.verification_data?.decision,
+    source?.verification_data,
+    source?.extracted_data?.decision,
+    source?.extracted_data,
     source?.details?.decision,
     source,
   ];
@@ -313,7 +316,7 @@ function resolveDecisionStatus(decision: any, sourceStatus: unknown = "") {
   if (idStatus === "DECLINED" || faceStatus === "DECLINED") return "DECLINED";
   if (idStatus === "ABANDONED" || faceStatus === "ABANDONED") return "ABANDONED";
   if (idStatus === "APPROVED" && !faceMatch) {
-    return shouldReviewMissingFaceMatch(sourceStatus) ? "PENDING_REVIEW" : "PENDING";
+    return "PENDING";
   }
   if (idStatus === "PENDING_REVIEW" || faceStatus === "PENDING_REVIEW") return "PENDING_REVIEW";
   if (idStatus === "APPROVED" && faceStatus === "APPROVED") return "APPROVED";

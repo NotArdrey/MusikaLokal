@@ -133,6 +133,9 @@ function findDecisionObject(source: any) {
     const candidates = [
         source?.decision,
         source?.verification_data?.decision,
+        source?.verification_data,
+        source?.extracted_data?.decision,
+        source?.extracted_data,
         source?.details?.decision,
         source,
     ]
@@ -174,7 +177,7 @@ function resolveDiditFaceRequiredStatus(source: any) {
     if (isFailedDiditSignupStatus(idStatus)) return idStatus
     if (isFailedDiditSignupStatus(faceStatus)) return faceStatus
     if (idStatus === 'APPROVED' && !faceMatch) {
-        return shouldReviewMissingFaceMatch(sourceStatus) ? 'PENDING_REVIEW' : 'PENDING'
+        return 'PENDING'
     }
     if (idStatus === 'PENDING_REVIEW' || faceStatus === 'PENDING_REVIEW') return 'PENDING_REVIEW'
     if (idStatus === 'APPROVED' && faceStatus === 'APPROVED') return 'APPROVED'

@@ -193,6 +193,9 @@ function findDecisionObject(source: any) {
   const candidates = [
     source?.decision,
     source?.verification_data?.decision,
+    source?.verification_data,
+    source?.extracted_data?.decision,
+    source?.extracted_data,
     source?.details?.decision,
     source,
   ];
@@ -233,7 +236,7 @@ function resolveDecisionStatus(decision: any, sourceStatus: unknown = "") {
   if (idStatus === "DECLINED" || faceStatus === "DECLINED") return "DECLINED";
   if (idStatus === "ABANDONED" || faceStatus === "ABANDONED") return "ABANDONED";
   if (idStatus === "APPROVED" && !faceMatch) {
-    return shouldReviewMissingFaceMatch(sourceStatus) ? "PENDING_REVIEW" : "PENDING";
+    return "PENDING";
   }
   if (idStatus === "PENDING_REVIEW" || faceStatus === "PENDING_REVIEW") return "PENDING_REVIEW";
   if (idStatus === "APPROVED" && faceStatus === "APPROVED") return "APPROVED";
@@ -496,6 +499,7 @@ async function buildDiditSessionSyncData(
   resolvedStatus: string,
   localSessionData: any,
 ) {
+  const decision = findDecisionObject(rawDecisionData) || findDecisionObject(rawBaseData);
   const idVerification = extractDiditIdVerification(rawDecisionData, rawBaseData);
   const firstName = firstNonEmptyString([idVerification?.first_name, idVerification?.firstName]);
   const middleName = firstNonEmptyString([idVerification?.extra_fields?.middle_name, idVerification?.middle_name, idVerification?.middleName]);
@@ -538,6 +542,10 @@ async function buildDiditSessionSyncData(
     first_name: firstName,
     middle_name: middleName,
     last_name: lastName,
+    features: sanitizeIdentityVerificationData(rawDecisionData?.features || rawBaseData?.features || decision?.features),
+    face_matches: sanitizeIdentityVerificationData(decision?.face_matches),
+    liveness_checks: sanitizeIdentityVerificationData(decision?.liveness_checks),
+    id_verifications: sanitizeIdentityVerificationData(decision?.id_verifications),
     raw_data: sanitizeIdentityVerificationData(idVerification || rawDecisionData || rawBaseData || {}),
     document_fingerprint: documentFingerprint,
     document_country: documentCountry,

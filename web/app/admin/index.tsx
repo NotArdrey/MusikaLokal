@@ -33,6 +33,7 @@ import type {
 } from './_payments';
 import {
   downloadPaymentTransactionsExcel,
+  downloadPaymentTransactionsPdf,
   fetchAdminPaymentTransactions,
   getPaymentStatusColor,
   normalizePaymentActionLabel,
@@ -1125,6 +1126,7 @@ export default function AdminDashboardPage() {
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<AdminPaymentStatusFilter>('all');
   const [paymentTransactionsLoading, setPaymentTransactionsLoading] = useState(false);
   const [paymentExporting, setPaymentExporting] = useState(false);
+  const [paymentPdfExporting, setPaymentPdfExporting] = useState(false);
   const [withdrawals, setWithdrawals] = useState<AdminWithdrawalEntry[]>([]);
   const [withdrawalTotals, setWithdrawalTotals] = useState<WithdrawalTotals>(defaultWithdrawalTotals);
   const [withdrawalStatusFilter, setWithdrawalStatusFilter] = useState<WithdrawalStatusFilter>('all');
@@ -1537,7 +1539,7 @@ export default function AdminDashboardPage() {
   }, []);
 
   const handleExportPaymentTransactions = useCallback(async () => {
-    if (paymentExporting) return;
+    if (paymentExporting || paymentPdfExporting) return;
 
     try {
       setPaymentExporting(true);
@@ -1577,6 +1579,53 @@ export default function AdminDashboardPage() {
     dashboardDateRange,
     dashboardSearchQuery,
     paymentExporting,
+    paymentPdfExporting,
+    paymentStatusFilter,
+    showAlert,
+  ]);
+
+  const handleExportPaymentTransactionsPdf = useCallback(async () => {
+    if (paymentExporting || paymentPdfExporting) return;
+
+    try {
+      setPaymentPdfExporting(true);
+
+      const result = await fetchAdminPaymentTransactions({
+        status: paymentStatusFilter,
+        searchQuery: dashboardSearchQuery,
+        dateRange: dashboardDateRange,
+        limit: 1000,
+      });
+
+      if (result.transactions.length === 0) {
+        showAlert('info', 'No Payments to Export', 'No payment transactions match the current filters.');
+        return;
+      }
+
+      const statusLabel = PAYMENT_STATUS_FILTERS.find((filter) => filter.key === paymentStatusFilter)?.label || 'All';
+      const downloaded = downloadPaymentTransactionsPdf(result.transactions, {
+        dateRangeLabel: DASHBOARD_DATE_RANGE_LABELS[dashboardDateRange],
+        statusLabel,
+      });
+
+      if (!downloaded) {
+        showAlert('info', 'Export Available on Web', 'Open the admin dashboard in a browser to download the PDF file.');
+        return;
+      }
+
+      showAlert('success', 'PDF Export Ready', `${result.transactions.length} payment transaction(s) exported.`);
+    } catch (error) {
+      void getErrorMessage(error, 'Unable to export payment transactions.').then((message) => {
+        showAlert('error', 'Export Failed', message);
+      });
+    } finally {
+      setPaymentPdfExporting(false);
+    }
+  }, [
+    dashboardDateRange,
+    dashboardSearchQuery,
+    paymentExporting,
+    paymentPdfExporting,
     paymentStatusFilter,
     showAlert,
   ]);
@@ -1997,8 +2046,8 @@ export default function AdminDashboardPage() {
                 <TouchableOpacity
                   testID="admin-payment-transactions-export-button"
                   accessibilityLabel="admin-payment-transactions-export-button"
-                  activeOpacity={paymentExporting ? 1 : 0.88}
-                  disabled={paymentExporting}
+                  activeOpacity={paymentExporting || paymentPdfExporting ? 1 : 0.88}
+                  disabled={paymentExporting || paymentPdfExporting}
                   onPress={() => void handleExportPaymentTransactions()}
                   style={[
                     styles.dashboardActionButton,
@@ -2015,6 +2064,28 @@ export default function AdminDashboardPage() {
                     <Ionicons name="download-outline" size={15} color="#FFFFFF" />
                   )}
                   <Text style={[styles.dashboardActionText, { color: '#FFFFFF' }]}>Export Excel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  testID="admin-payment-transactions-export-pdf-button"
+                  accessibilityLabel="admin-payment-transactions-export-pdf-button"
+                  activeOpacity={paymentExporting || paymentPdfExporting ? 1 : 0.88}
+                  disabled={paymentExporting || paymentPdfExporting}
+                  onPress={() => void handleExportPaymentTransactionsPdf()}
+                  style={[
+                    styles.dashboardActionButton,
+                    {
+                      backgroundColor: isDark ? '#1E1B4B' : '#EEF2FF',
+                      borderColor: colors.primary,
+                      opacity: paymentPdfExporting ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  {paymentPdfExporting ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Ionicons name="document-text-outline" size={15} color={colors.primary} />
+                  )}
+                  <Text style={[styles.dashboardActionText, { color: colors.primary }]}>Export PDF</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   testID="admin-payment-transactions-view-all-button"

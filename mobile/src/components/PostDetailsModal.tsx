@@ -2,6 +2,10 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Keyboard,
+  type KeyboardEvent,
+  LayoutAnimation,
+  Platform,
   Share,
   StyleSheet,
   ScrollView,
@@ -11,7 +15,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets, type Edge } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
@@ -111,6 +115,7 @@ type CachedPostDetails = {
 
 const POST_DETAILS_CACHE_TTL_MS = 60_000;
 const postDetailsCache = new Map<string, CachedPostDetails>();
+const ANDROID_KEYBOARD_ANIMATION_MS = 180;
 
 const normalizePostDetailsPayload = (rawPost: any) => {
   const normalizedComments = Array.isArray(rawPost?.comments)
@@ -191,6 +196,8 @@ export default function PostDetailsModal({
   const [postOptionsVisible, setPostOptionsVisible] = useState(false);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [keyboardAvoidingResetKey, setKeyboardAvoidingResetKey] = useState(0);
 
   const cardBg = isDark ? "#1E293B" : "#FFFFFF";
   const borderCol = isDark ? "#334155" : "#E2E8F0";
@@ -259,6 +266,29 @@ export default function PostDetailsModal({
     }
   }, [postId]);
 
+  const animateKeyboardLayoutChange = useCallback((event: KeyboardEvent) => {
+    if (Platform.OS === "android") {
+      LayoutAnimation.configureNext({
+        duration: ANDROID_KEYBOARD_ANIMATION_MS,
+        update: {
+          type: LayoutAnimation.Types.easeInEaseOut,
+        },
+      });
+      return;
+    }
+
+    try {
+      Keyboard.scheduleLayoutAnimation(event);
+    } catch {
+      LayoutAnimation.configureNext({
+        duration: event.duration || ANDROID_KEYBOARD_ANIMATION_MS,
+        update: {
+          type: LayoutAnimation.Types.easeInEaseOut,
+        },
+      });
+    }
+  }, []);
+
   useEffect(() => {
     if (!visible || !postId) return;
     const cached = postDetailsCache.get(postId);
@@ -271,6 +301,34 @@ export default function PostDetailsModal({
     setDeleteConfirmVisible(false);
     void fetchPost(true);
   }, [fetchPost, postId, visible]);
+
+  useEffect(() => {
+    if (!visible) {
+      setIsKeyboardVisible(false);
+      return;
+    }
+
+    const keyboardShowEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const keyboardHideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const showSub = Keyboard.addListener(keyboardShowEvent, (event) => {
+      animateKeyboardLayoutChange(event);
+      setIsKeyboardVisible(true);
+    });
+
+    const hideSub = Keyboard.addListener(keyboardHideEvent, (event) => {
+      animateKeyboardLayoutChange(event);
+      setIsKeyboardVisible(false);
+      if (Platform.OS === "android") {
+        setKeyboardAvoidingResetKey((currentKey) => currentKey + 1);
+      }
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [animateKeyboardLayoutChange, visible]);
 
   const handleReaction = async () => {
     if (!post) return;
@@ -476,6 +534,14 @@ export default function PostDetailsModal({
   const modalMaxHeight = useMemo(() => Math.min(height - 72, 760), [height]);
   const isOwner = post?.author_id === userId;
   const canSubmitComment = commentText.trim().length > 0;
+  const footerBottomPadding = (() => {
+    if (Platform.OS === "ios") {
+      return isKeyboardVisible ? 16 : Math.max(insets.bottom, 8) + 4;
+    }
+
+    return isKeyboardVisible ? 0 : 8;
+  })();
+  const footerSafeAreaEdges: Edge[] = Platform.OS === "android" && !isKeyboardVisible ? ["bottom"] : [];
 
   return (
     <BottomModal
@@ -483,6 +549,8 @@ export default function PostDetailsModal({
       onClose={onClose}
       closeOnBackdropPress
       keyboardAvoiding
+      keyboardAvoidingResetKey={Platform.OS === "android" ? keyboardAvoidingResetKey : "ios"}
+      keyboardVerticalOffset={Platform.OS === "android" ? -Math.max(insets.bottom, 0) : 0}
       overlayLabel="FeedPostDetailsModal"
       contentContainerStyle={[styles.sheet, { backgroundColor: cardBg, maxHeight: modalMaxHeight }]}
     >
@@ -663,52 +731,57 @@ export default function PostDetailsModal({
             )}
           </ScrollView>
 
-          <View
-            style={[
-              styles.footer,
-              {
-                borderTopColor: borderCol,
-                backgroundColor: cardBg,
-                paddingBottom: Math.max(24, insets.bottom + 10),
-              },
-            ]}
+          <SafeAreaView
+            edges={footerSafeAreaEdges}
+            style={{ backgroundColor: cardBg }}
           >
-            <ProfileAvatar
-              uri={(session?.user?.user_metadata as any)?.avatar_url}
-              style={styles.footerAvatarFallback}
-              backgroundColor={isDark ? "#374151" : "#E5E7EB"}
-              iconColor={colors.textSecondary}
-            />
-            <View style={[styles.footerInputWrap, { backgroundColor: bubbleBg }]}>
-              <TextInput
-                style={[styles.footerInput, { color: colors.text }]}
-                placeholder="Write a comment..."
-                placeholderTextColor={colors.textSecondary}
-                value={commentText}
-                onChangeText={setCommentText}
-                multiline
-                maxLength={1000}
-                editable={Boolean(session && post)}
+            <View
+              style={[
+                styles.footer,
+                {
+                  borderTopColor: borderCol,
+                  backgroundColor: cardBg,
+                  paddingBottom: footerBottomPadding,
+                },
+              ]}
+            >
+              <ProfileAvatar
+                uri={(session?.user?.user_metadata as any)?.avatar_url}
+                style={styles.footerAvatarFallback}
+                backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+                iconColor={colors.textSecondary}
               />
-              <TouchableOpacity
-                activeOpacity={submitting || !canSubmitComment ? 1 : 0.78}
-                onPress={handleAddComment}
-                disabled={submitting || !canSubmitComment}
-                style={styles.footerSendBtn}
-                accessibilityLabel="Send comment"
-              >
-                {submitting ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
-                ) : (
-                  <Ionicons
-                    name="send"
-                    size={18}
-                    color={canSubmitComment ? colors.primary : colors.textSecondary}
-                  />
-                )}
-              </TouchableOpacity>
+              <View style={[styles.footerInputWrap, { backgroundColor: bubbleBg }]}>
+                <TextInput
+                  style={[styles.footerInput, { color: colors.text }]}
+                  placeholder="Write a comment..."
+                  placeholderTextColor={colors.textSecondary}
+                  value={commentText}
+                  onChangeText={setCommentText}
+                  multiline
+                  maxLength={1000}
+                  editable={Boolean(session && post)}
+                />
+                <TouchableOpacity
+                  activeOpacity={submitting || !canSubmitComment ? 1 : 0.78}
+                  onPress={handleAddComment}
+                  disabled={submitting || !canSubmitComment}
+                  style={styles.footerSendBtn}
+                  accessibilityLabel="Send comment"
+                >
+                  {submitting ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Ionicons
+                      name="send"
+                      size={18}
+                      color={canSubmitComment ? colors.primary : colors.textSecondary}
+                    />
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          </SafeAreaView>
         </>
       )}
 

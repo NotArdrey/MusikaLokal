@@ -1555,7 +1555,7 @@ export default function AiSuggestionsScreen() {
 
                 {/* Refresh Button */}
                 <TouchableOpacity activeOpacity={1}
-                    onPress={fetchSuggestions}
+                    onPress={isAIPowered ? () => setStep('preferences') : fetchSuggestions}
                     disabled={loading}
                     style={[styles.secondaryButton, { borderColor: badgeColor, backgroundColor: badgeColor + '10', opacity: loading ? 0.6 : 1 }]}
                 >

@@ -27,6 +27,7 @@ type BottomModalProps = {
   closeOnBackdropPress?: boolean;
   contentContainerStyle?: StyleProp<ViewStyle>;
   keyboardAvoiding?: boolean;
+  keyboardAvoidingResetKey?: React.Key;
   keyboardVerticalOffset?: number;
   navigationBarTranslucent?: boolean;
   overlayLabel?: string;
@@ -43,6 +44,7 @@ export default function BottomModal({
   closeOnBackdropPress = false,
   contentContainerStyle,
   keyboardAvoiding = false,
+  keyboardAvoidingResetKey,
   keyboardVerticalOffset = 0,
   navigationBarTranslucent = true,
   overlayLabel = "BottomModal",
@@ -181,6 +183,7 @@ export default function BottomModal({
         ) : null}
         {keyboardAvoiding ? (
           <KeyboardAvoidingView
+            key={keyboardAvoidingResetKey}
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             keyboardVerticalOffset={keyboardVerticalOffset}
             pointerEvents="box-none"

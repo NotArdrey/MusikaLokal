@@ -351,9 +351,25 @@ const isTerminalDiditFlowStatus = (status: unknown) => (
     isSupersededVerificationStatus(status)
 );
 
+const getDiditDecisionCandidates = (sessionData: any) => [
+    sessionData?.decision,
+    sessionData?.verification_data?.decision,
+    sessionData?.verification_data,
+    sessionData?.extracted_data?.decision,
+    sessionData?.extracted_data,
+    sessionData,
+].filter(Boolean);
+
+const firstDiditArray = (sessionData: any, key: string) => {
+    for (const candidate of getDiditDecisionCandidates(sessionData)) {
+        if (Array.isArray(candidate?.[key])) return candidate[key];
+    }
+    return [];
+};
+
 const diditSessionHasApprovedFaceMatch = (sessionData: any) => {
-    const faceMatch = sessionData?.face_matches?.[0] || sessionData?.decision?.face_matches?.[0];
-    const idVerification = sessionData?.id_verifications?.[0] || sessionData?.decision?.id_verifications?.[0];
+    const faceMatch = firstDiditArray(sessionData, 'face_matches')[0];
+    const idVerification = firstDiditArray(sessionData, 'id_verifications')[0];
 
     return {
         hasFaceMatch: Boolean(faceMatch),
@@ -365,12 +381,12 @@ const diditSessionHasApprovedFaceMatch = (sessionData: any) => {
 };
 
 const getDiditFlowStatusFromSession = (sessionData: any) => {
-    const decision = sessionData?.decision || sessionData?.verification_data?.decision || sessionData;
-    const idVerification = decision?.id_verifications?.[0];
-    const faceMatch = decision?.face_matches?.[0];
-    const statuses = [
-        idVerification?.status,
-        faceMatch?.status,
+    const decisionCandidates = getDiditDecisionCandidates(sessionData);
+    const idVerification = firstDiditArray(sessionData, 'id_verifications')[0];
+    const faceMatch = firstDiditArray(sessionData, 'face_matches')[0];
+    const idStatus = normalizeDiditFlowStatus(idVerification?.status);
+    const faceStatus = normalizeDiditFlowStatus(faceMatch?.status);
+    const sourceStatuses = [
         sessionData?.status,
         sessionData?.verification_data?.status,
         sessionData?.businessStatus,
@@ -380,16 +396,30 @@ const getDiditFlowStatusFromSession = (sessionData: any) => {
         sessionData?.verification_data?.businessStatus,
         sessionData?.verification_data?.diditResolvedStatus,
         sessionData?.verification_data?.rawDiditStatus,
-        decision?.status,
+        ...decisionCandidates.map((candidate) => candidate?.status),
     ].map(normalizeDiditFlowStatus).filter(Boolean);
+    const statuses = [idStatus, faceStatus, ...sourceStatuses].filter(Boolean);
 
-    return (
-        statuses.find(isFailedDiditFlowStatus) ||
-        statuses.find(isPendingReviewDiditFlowStatus) ||
-        statuses.find(isApprovedDiditFlowStatus) ||
+    const failedStatus = statuses.find(isFailedDiditFlowStatus);
+    if (failedStatus) return failedStatus;
+
+    if (idStatus === 'APPROVED' && faceStatus === 'APPROVED') {
+        return 'APPROVED';
+    }
+
+    if (idStatus === 'PENDING_REVIEW' || faceStatus === 'PENDING_REVIEW') {
+        return 'PENDING_REVIEW';
+    }
+
+    if (idStatus === 'APPROVED' && faceStatus !== 'APPROVED') {
+        return 'PENDING';
+    }
+
+    return sourceStatuses.find(isPendingReviewDiditFlowStatus) ||
+        sourceStatuses.find(isApprovedDiditFlowStatus) ||
+        sourceStatuses[0] ||
         statuses[0] ||
-        ''
-    );
+        '';
 };
 
 const logSignupFlow = (stage: string, payload: Record<string, unknown> = {}) => {
@@ -401,8 +431,9 @@ const logSignupFlow = (stage: string, payload: Record<string, unknown> = {}) => 
 };
 
 const logSignupFlowError = (stage: string, error: unknown, payload: Record<string, unknown> = {}) => {
-    console.error(`${SIGNUP_FLOW_LOG_PREFIX} ${stage}`, {
+    console.log(`${SIGNUP_FLOW_LOG_PREFIX} ${stage}`, {
         debugVersion: SIGNUP_FLOW_DEBUG_VERSION,
+        level: 'error',
         timestamp: new Date().toISOString(),
         ...payload,
         error: summarizeErrorForDiditEmailLog(error),
@@ -731,8 +762,13 @@ export default function SignupScreen() {
                             invokeData: summarizeSignupInvokeData(data),
                         });
                     }
-                    // If we detect a final status, manually trigger the completion flow
-                    if (isTerminalDiditFlowStatus(s)) {
+                    // Only leave the Didit WebView automatically for clear pass/fail states.
+                    // PENDING_REVIEW can appear while Face Match is still being prepared.
+                    if (
+                        isApprovedDiditFlowStatus(s) ||
+                        isFailedDiditFlowStatus(s) ||
+                        isSupersededVerificationStatus(s)
+                    ) {
                         diditStatusPollFinalizedRef.current = true;
                         logSignupFlow('backgroundPoll.finalStatusDetected', {
                             attempt: pollAttempt,
