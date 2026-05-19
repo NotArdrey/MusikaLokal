@@ -213,6 +213,8 @@ const logProfileMedia = (event: string, details?: Record<string, unknown>) => {
   });
 };
 
+const isRemoteHttpUrl = (value: string | null | undefined) => /^https?:\/\//i.test(String(value || "").trim());
+
 type ProfileVideoThumbnailProps = {
   uri: string;
   isDark: boolean;
@@ -234,6 +236,13 @@ const ProfileVideoThumbnail = ({
 
     setThumbnailUri(null);
     setThumbnailFailed(false);
+
+    if (isRemoteHttpUrl(uri)) {
+      setThumbnailFailed(true);
+      return () => {
+        isMounted = false;
+      };
+    }
 
     VideoThumbnails.getThumbnailAsync(uri, {
       time: 1000,
@@ -4545,7 +4554,10 @@ export default function ProfileScreen() {
           <InAppMediaViewer
             visible={mediaModalVisible}
             uri={selectedMedia}
-            onClose={() => setMediaModalVisible(false)}
+            onClose={() => {
+              setMediaModalVisible(false);
+              setSelectedMedia(null);
+            }}
           />
           <Modal
             visible={uploading}

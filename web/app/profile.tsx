@@ -355,6 +355,8 @@ const logProfileMedia = (event: string, details?: Record<string, unknown>) => {
   });
 };
 
+const isRemoteHttpUrl = (value: string | null | undefined) => /^https?:\/\//i.test(String(value || "").trim());
+
 const WEB_VIDEO_THUMBNAIL_TIME_SECONDS = 1;
 const WEB_VIDEO_THUMBNAIL_TIMEOUT_MS = 8000;
 
@@ -481,7 +483,7 @@ const ProfileVideoThumbnail = ({
     setThumbnailUri(null);
     setThumbnailFailed(false);
 
-    if (Platform.OS !== "web") {
+    if (Platform.OS !== "web" || isRemoteHttpUrl(uri)) {
       setThumbnailFailed(true);
       return () => {
         isMounted = false;
@@ -3366,7 +3368,10 @@ export default function ProfileScreen() {
           <InAppMediaViewer
             visible={mediaModalVisible}
             uri={selectedMedia}
-            onClose={() => setMediaModalVisible(false)}
+            onClose={() => {
+              setMediaModalVisible(false);
+              setSelectedMedia(null);
+            }}
           />
           <PostDetailsModal
             visible={Boolean(selectedPostId)}

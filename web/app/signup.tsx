@@ -12,7 +12,7 @@ import { ActivityIndicator, Dimensions, Image, KeyboardAvoidingView, Modal as RN
 import { Calendar } from 'react-native-calendars';
 import type { DateData } from 'react-native-calendars';
 import { WebView } from 'react-native-webview';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import AuthMusicHero from '../src/components/AuthMusicHero';
 import { emitToast } from '../src/events/toastBus';
@@ -114,34 +114,6 @@ const resolveVideoMimeType = (asset: ImagePicker.ImagePickerAsset, originalName:
     return 'video/mp4';
 };
 
-const base64ToUint8Array = (base64: string): Uint8Array => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-    const lookup = new Uint8Array(256);
-    for (let i = 0; i < chars.length; i += 1) {
-        lookup[chars.charCodeAt(i)] = i;
-    }
-
-    const normalized = base64.replace(/\s/g, '');
-    let bufferLength = normalized.length * 0.75;
-    if (normalized.endsWith('==')) bufferLength -= 2;
-    else if (normalized.endsWith('=')) bufferLength -= 1;
-
-    const bytes = new Uint8Array(Math.floor(bufferLength));
-    let p = 0;
-    for (let i = 0; i < normalized.length; i += 4) {
-        const e1 = lookup[normalized.charCodeAt(i)];
-        const e2 = lookup[normalized.charCodeAt(i + 1)];
-        const e3 = lookup[normalized.charCodeAt(i + 2)];
-        const e4 = lookup[normalized.charCodeAt(i + 3)];
-
-        if (p < bytes.length) bytes[p++] = (e1 << 2) | (e2 >> 4);
-        if (p < bytes.length) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
-        if (p < bytes.length) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
-    }
-
-    return bytes;
-};
-
 const getVideoAssetSizeBytes = async (asset: ImagePicker.ImagePickerAsset) => {
     const directSize = Number((asset as any)?.fileSize || 0);
     if (Number.isFinite(directSize) && directSize > 0) return directSize;
@@ -167,8 +139,80 @@ const getSignedVideoUploadBody = async (asset: ImagePicker.ImagePickerAsset) => 
         return await (await fetch(asset.uri)).arrayBuffer();
     }
 
-    const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: 'base64' });
-    return base64ToUint8Array(base64);
+    return null;
+};
+
+const encodeStoragePath = (path: string) => {
+    return path.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+};
+
+const buildSignedVideoUploadUrl = (upload: any) => {
+    const signedUrl = String(upload?.signedUrl || '').trim();
+    if (signedUrl) {
+        if (/^https?:\/\//i.test(signedUrl)) return signedUrl;
+        const baseUrl = supabaseUrl.replace(/\/+$/, '');
+        return `${baseUrl}${signedUrl.startsWith('/') ? signedUrl : `/${signedUrl}`}`;
+    }
+
+    const baseUrl = supabaseUrl.replace(/\/+$/, '');
+    const bucketName = String(upload?.bucketName || '').trim();
+    const path = String(upload?.path || '').trim();
+    const token = String(upload?.token || '').trim();
+    return `${baseUrl}/storage/v1/object/upload/sign/${encodeURIComponent(bucketName)}/${encodeStoragePath(path)}?token=${encodeURIComponent(token)}`;
+};
+
+const readSignedVideoUploadError = (status: number, body?: string) => {
+    let message = `Video upload failed with status ${status}.`;
+
+    try {
+        const parsed = JSON.parse(body || '{}');
+        message = parsed?.message || parsed?.error || message;
+    } catch {
+        if (body) message = body;
+    }
+
+    return message;
+};
+
+const uploadMusicianVideoToSignedUrl = async (
+    upload: any,
+    asset: ImagePicker.ImagePickerAsset,
+    mimeType: string,
+) => {
+    if (Platform.OS === 'web') {
+        const uploadBody = await getSignedVideoUploadBody(asset);
+        if (!uploadBody) {
+            throw new Error('Could not read the selected video. Please try another file.');
+        }
+
+        const { error } = await supabase.storage
+            .from(upload.bucketName)
+            .uploadToSignedUrl(upload.path, upload.token, uploadBody as any, {
+                contentType: mimeType,
+            });
+
+        if (error) {
+            throw error;
+        }
+
+        return;
+    }
+
+    const uploadResult = await FileSystem.uploadAsync(buildSignedVideoUploadUrl(upload), asset.uri, {
+        httpMethod: 'PUT',
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        headers: {
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${supabaseAnonKey}`,
+            'Content-Type': mimeType,
+            'cache-control': 'max-age=3600',
+            'x-upsert': 'false',
+        },
+    });
+
+    if (uploadResult.status < 200 || uploadResult.status >= 300) {
+        throw new Error(readSignedVideoUploadError(uploadResult.status, uploadResult.body));
+    }
 };
 
 const PASSWORD_MIN_LENGTH = 8;
@@ -1207,16 +1251,7 @@ export default function SignupScreen() {
                 throw new Error('The server did not return a valid upload slot.');
             }
 
-            const uploadBody = await getSignedVideoUploadBody(asset);
-            const { error: uploadError } = await supabase.storage
-                .from(upload.bucketName)
-                .uploadToSignedUrl(upload.path, upload.token, uploadBody as any, {
-                    contentType: mimeType,
-                });
-
-            if (uploadError) {
-                throw uploadError;
-            }
+            await uploadMusicianVideoToSignedUrl(upload, asset, mimeType);
 
             setMusicianVideoProof({
                 uploadId: upload.uploadId,
