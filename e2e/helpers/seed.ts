@@ -129,7 +129,11 @@ export async function seedE2EGroup(ownerId: string, suffix = 'group') {
   return data;
 }
 
-export async function seedE2EPlaylistWithTrack(creatorId: string, suffix = 'playlist') {
+export async function seedE2EPlaylistWithTrack(
+  creatorId: string,
+  suffix = 'playlist',
+  options: { visibility?: 'public' | 'unlisted' | 'promotional' } = {},
+) {
   const runId = makeRunId(suffix);
   const { data: playlist, error: playlistError } = await getSupabaseAdmin()
     .from('playlists')
@@ -138,7 +142,7 @@ export async function seedE2EPlaylistWithTrack(creatorId: string, suffix = 'play
       title: `E2E Playlist ${runId}`,
       description: `E2E seeded playlist ${runId}`,
       genre: 'OPM',
-      visibility: 'public',
+      visibility: options.visibility || 'public',
     })
     .select('*')
     .single();

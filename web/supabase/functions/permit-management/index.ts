@@ -1064,14 +1064,29 @@ serve(async (req: Request) => {
       let paymongoLinkedPaymentEvents = 0;
 
       const bookingSlotCounter = new Map<string, number>();
+      const eligibleBookingPayments = new Map<
+        string,
+        {
+          activityDate: unknown;
+          activityTsMs: number | null;
+        }
+      >();
 
       for (const booking of bookingRows as any[]) {
+        const bookingId = String(booking?.id || "").trim();
         const activityDate = booking?.paid_at || booking?.created_at || booking?.booking_date;
         const paymentStatus = String(booking?.payment_status || "").trim().toLowerCase();
         const amount = toNumber(booking?.payment_amount) || toNumber(booking?.final_price);
 
         if (["paid", "partial", "refunded", "refund_pending"].includes(paymentStatus)) {
           allTimeGrossBookingRevenue += amount;
+
+          if (bookingId) {
+            eligibleBookingPayments.set(bookingId, {
+              activityDate,
+              activityTsMs: toTimestampMs(activityDate),
+            });
+          }
         }
 
         if (["refunded", "refund_pending"].includes(paymentStatus)) {
@@ -1139,28 +1154,28 @@ serve(async (req: Request) => {
       ]);
 
       for (const transaction of walletTransactionRows as any[]) {
-        if (!isInRange(transaction?.created_at, rangeStartMs)) continue;
-
         const type = String(transaction?.type || "").trim().toLowerCase();
         const status = String(transaction?.status || "").trim().toLowerCase();
         const referenceType = String(transaction?.reference_type || "").trim().toLowerCase();
         const isCredit = transaction?.is_credit !== false;
+        const bookingId = String(transaction?.reference_id || "").trim();
+        const bookingPayment = eligibleBookingPayments.get(bookingId);
 
         if (
           type === "earning" &&
           status === "completed" &&
           isCredit &&
-          bookingEarningReferenceTypes.has(referenceType)
+          bookingEarningReferenceTypes.has(referenceType) &&
+          bookingPayment
         ) {
           const amount = toNumber(transaction?.amount);
           allTimeProviderEarnings += amount;
 
-          if (!isInRange(transaction?.created_at, rangeStartMs)) continue;
+          if (!isInRange(bookingPayment.activityDate, rangeStartMs)) continue;
 
           providerEarningsInRange += amount;
 
-          const transactionTsMs = toTimestampMs(transaction?.created_at);
-          const trendBucket = findRevenueTrendBucket(transactionTsMs, revenueTrendBuckets);
+          const trendBucket = findRevenueTrendBucket(bookingPayment.activityTsMs, revenueTrendBuckets);
           if (trendBucket) trendBucket.providerEarnings += amount;
         }
       }

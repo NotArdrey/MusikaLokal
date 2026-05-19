@@ -389,41 +389,100 @@ export async function findSameRoleIdentityDuplicate(
     role,
     userId,
     email,
+    fullLegalName,
+    normalizedFullLegalName,
+    birthDate,
   }: {
     documentFingerprint?: string | null;
     role: string;
     userId?: string | null;
     email?: string | null;
+    fullLegalName?: string | null;
+    normalizedFullLegalName?: string | null;
+    birthDate?: string | null;
   },
 ) {
-  if (!documentFingerprint) return { hasDuplicate: false, matches: [] };
-
-  let query = client
-    .from("identity_document_claims")
-    .select("id, user_id, role, status, source, created_at, normalized_email, profiles:user_id(email)")
-    .eq("document_fingerprint", documentFingerprint)
-    .eq("role", normalizeIdentityRole(role))
-    .in("status", ["APPROVED", "PENDING_REVIEW"])
-    .not("user_id", "is", null)
-    .limit(10);
-
-  if (isUuid(userId)) {
-    query = query.neq("user_id", userId);
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    throw new Error(dbErrorMessage("identity duplicate lookup failed", error));
-  }
-
+  const normalizedRole = normalizeIdentityRole(role);
   const normalizedEmail = normalizeText(email).toLowerCase();
-  const matches = (Array.isArray(data) ? data : []).filter((item: any) => {
+  const nameBirthDateInput = prepareIdentityNameBirthDateDuplicateInput(null, {
+    fullLegalName,
+    normalizedFullLegalName,
+    birthDate,
+  });
+  if (!documentFingerprint && !nameBirthDateInput.hasNameBirthDate) return { hasDuplicate: false, matches: [] };
+
+  const matches: any[] = [];
+  const matchIndexesByUserOrClaim = new Map<string, number>();
+  const appendMatches = (items: any[], matchedOn: string) => {
+    for (const item of items) {
+      const key = normalizeText(item?.user_id) || normalizeText(item?.id);
+      if (!key) continue;
+      const existingIndex = matchIndexesByUserOrClaim.get(key);
+      if (existingIndex !== undefined) {
+        const existing = matches[existingIndex];
+        const existingMatchedOn = String(existing.matched_on || "");
+        if (!existingMatchedOn.split(",").includes(matchedOn)) {
+          existing.matched_on = existingMatchedOn ? `${existingMatchedOn},${matchedOn}` : matchedOn;
+        }
+        continue;
+      }
+      matchIndexesByUserOrClaim.set(key, matches.length);
+      matches.push({ ...item, matched_on: matchedOn });
+    }
+  };
+
+  if (documentFingerprint) {
+    let query = client
+      .from("identity_document_claims")
+      .select("id, user_id, role, status, source, created_at, normalized_email, verified_full_legal_name, normalized_full_legal_name, birth_date, profiles:user_id(email)")
+      .eq("document_fingerprint", documentFingerprint)
+      .eq("role", normalizedRole)
+      .in("status", ["APPROVED", "PENDING_REVIEW"])
+      .not("user_id", "is", null)
+      .limit(10);
+
+    if (isUuid(userId)) {
+      query = query.neq("user_id", userId);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw new Error(dbErrorMessage("identity duplicate lookup failed", error));
+    }
+
+    appendMatches(Array.isArray(data) ? data : [], "DOCUMENT_FINGERPRINT");
+  }
+
+  if (nameBirthDateInput.hasNameBirthDate) {
+    let query = client
+      .from("identity_document_claims")
+      .select("id, user_id, role, status, source, created_at, normalized_email, verified_full_legal_name, normalized_full_legal_name, birth_date, profiles:user_id(email)")
+      .eq("normalized_full_legal_name", nameBirthDateInput.normalizedFullLegalName)
+      .eq("birth_date", nameBirthDateInput.birthDate)
+      .eq("role", normalizedRole)
+      .in("status", ["APPROVED", "PENDING_REVIEW"])
+      .not("user_id", "is", null)
+      .limit(10);
+
+    if (isUuid(userId)) {
+      query = query.neq("user_id", userId);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw new Error(dbErrorMessage("identity name/birthdate duplicate lookup failed", error));
+    }
+
+    appendMatches(Array.isArray(data) ? data : [], "NAME_BIRTHDATE");
+  }
+
+  const filteredMatches = matches.filter((item: any) => {
     if (!normalizedEmail) return true;
     const matchEmail = normalizeText(item?.profiles?.email).toLowerCase();
     const claimEmail = normalizeText(item?.normalized_email).toLowerCase();
     return (!matchEmail || matchEmail !== normalizedEmail) && (!claimEmail || claimEmail !== normalizedEmail);
   });
-  return { hasDuplicate: matches.length > 0, matches };
+  return { hasDuplicate: filteredMatches.length > 0, matches: filteredMatches };
 }
 
 export async function revokeOrphanSameRoleIdentityClaims(

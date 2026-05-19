@@ -336,6 +336,21 @@ function resolveDiditStatusFromSource(source: any) {
 
 function resolveDiditSessionStatus(...sources: any[]) {
   const statuses = sources.map(resolveDiditStatusFromSource).filter(Boolean);
+  const hasApprovedRequiredChecks = sources.some((source) => {
+    const decision = findDecisionObject(source);
+    const idStatus = normalizeDiditStatus(decision?.id_verifications?.[0]?.status);
+    const faceStatus = normalizeDiditStatus(decision?.face_matches?.[0]?.status);
+    return idStatus === "APPROVED" && faceStatus === "APPROVED";
+  });
+
+  if (hasApprovedRequiredChecks && statuses.some(isFailedDiditStatus)) {
+    return (
+      statuses.find((status) => normalizeDiditStatus(status) === "PENDING_REVIEW") ||
+      statuses.find((status) => normalizeDiditStatus(status) === "APPROVED") ||
+      "APPROVED"
+    );
+  }
+
   return (
     statuses.find(isFailedDiditStatus) ||
     statuses.find((status) => normalizeDiditStatus(status) === "PENDING_REVIEW") ||

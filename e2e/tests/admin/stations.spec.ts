@@ -57,7 +57,7 @@ test.describe('admin stations CRUD', () => {
     await expect(page.getByTestId('admin-stations-empty-add-button')).not.toHaveAttribute('aria-disabled', 'true');
   });
 
-  test('reads, updates flags, and deletes a station through admin UI', async ({ page }) => {
+  test('views and deletes a station through admin UI', async ({ page }) => {
     const creator = await seedE2EUser({
       suffix: 'station-owner',
       role: 'musician',
@@ -81,19 +81,11 @@ test.describe('admin stations CRUD', () => {
     const stationCard = page.getByTestId(`admin-station-card-${station.id}`);
     await expect(stationCard).toBeVisible({ timeout: 45_000 });
     await expectActionButtonsAligned(page, [
-      `admin-station-toggle-active-${station.id}`,
-      `admin-station-toggle-featured-${station.id}`,
-      `admin-station-open-${station.id}`,
+      `admin-station-view-${station.id}`,
       `admin-station-delete-${station.id}`,
     ]);
 
-    await page.getByTestId(`admin-station-toggle-active-${station.id}`).click();
-    await expectDbRecord<any>('stations', 'id', station.id, (record) => record.is_active === false);
-
-    await page.getByTestId(`admin-station-toggle-featured-${station.id}`).click();
-    await expectDbRecord<any>('stations', 'id', station.id, (record) => record.is_featured === true);
-
-    await page.getByTestId(`admin-station-open-${station.id}`).click();
+    await page.getByTestId(`admin-station-view-${station.id}`).click();
     await expect(page).toHaveURL(/station_details/);
     await page.goto('/admin/stations');
     await expectVisible(page.getByTestId('admin-stations-page'));
@@ -101,16 +93,27 @@ test.describe('admin stations CRUD', () => {
     await expect(stationCard).toBeVisible({ timeout: 45_000 });
 
     await page.getByTestId(`admin-station-delete-${station.id}`).click();
+    await page.getByTestId('custom-alert-button-delete').click();
     await expectNoDbRecord('stations', 'id', station.id);
   });
 
-  test('manually adds a live radio station from a musician playlist and exposes it to the user side', async ({ page }) => {
+  test('manually adds a looping radio station from multiple musician playlists and exposes it to the user side', async ({ page }) => {
     const musician = await seedE2EUser({
       suffix: 'station-manual-owner',
       role: 'musician',
       fullName: 'E2E Station Manual Owner',
     });
-    const { playlist, item } = await seedE2EPlaylistWithTrack(musician.id, 'admin-station-manual-playlist');
+    const guestMusician = await seedE2EUser({
+      suffix: 'station-manual-guest-owner',
+      role: 'musician',
+      fullName: 'E2E Station Guest Owner',
+    });
+    const { playlist, item } = await seedE2EPlaylistWithTrack(musician.id, 'admin-station-manual-playlist-a');
+    const { playlist: secondPlaylist, item: secondItem } = await seedE2EPlaylistWithTrack(
+      guestMusician.id,
+      'admin-station-manual-playlist-b',
+      { visibility: 'unlisted' },
+    );
     const stationName = `E2E Manual Station ${makeRunId('manual-station')}`;
     const stationDescription = `E2E manual station description ${makeRunId('manual-station')}`;
     const { count: existingStationCount, error: countError } = await getSupabaseAdmin()
@@ -144,7 +147,10 @@ test.describe('admin stations CRUD', () => {
     await page.getByTestId('admin-station-name-input').fill(stationName);
     await page.getByTestId('admin-station-description-input').fill(stationDescription);
     await page.getByTestId('admin-station-genre-input').fill('OPM');
-    await page.getByTestId('admin-station-rotation-input').fill('12');
+    await page.getByTestId('admin-station-status-live').click();
+    await expect(page.getByTestId(`admin-station-playlist-${playlist.id}`)).toBeVisible();
+    await expect(page.getByTestId(`admin-station-playlist-${secondPlaylist.id}`)).toBeVisible();
+    await page.getByTestId(`admin-station-playlist-${secondPlaylist.id}`).click();
     await page.getByTestId('admin-station-editor-save-button').click();
 
     const station = await expect
@@ -172,25 +178,52 @@ test.describe('admin stations CRUD', () => {
         return data;
       });
 
-    await expectDbRecord<any>('station_playlist_slots', 'station_id', station.id, (record) => (
-      record.playlist_id === playlist.id &&
-      record.is_active !== false
-    ));
+    let slotPlaylistIds: string[] = [];
+    await expect
+      .poll(async () => {
+        const { data, error } = await getSupabaseAdmin()
+          .from('station_playlist_slots')
+          .select('playlist_id, is_active, position')
+          .eq('station_id', station.id)
+          .order('position', { ascending: true });
+
+        if (error) throw error;
+        slotPlaylistIds = (data || [])
+          .filter((record) => record.is_active !== false)
+          .map((record) => record.playlist_id);
+        return (
+          slotPlaylistIds.length === 2 &&
+          slotPlaylistIds.includes(playlist.id) &&
+          slotPlaylistIds.includes(secondPlaylist.id)
+        );
+      }, { timeout: 30_000 })
+      .toBe(true);
 
     await page.getByTestId('admin-stations-search-input').fill(stationName);
     await expectVisible(page.getByTestId(`admin-station-card-${station.id}`));
+    await expect(page.getByTestId(`admin-station-card-${station.id}`)).toContainText('Continuous loop');
+    await expect(page.getByTestId(`admin-station-card-${station.id}`)).toContainText(playlist.title);
+    await expect(page.getByTestId(`admin-station-card-${station.id}`)).toContainText(secondPlaylist.title);
     await expectVisible(page.getByTestId(`admin-station-edit-${station.id}`));
     await expectActionButtonsAligned(page, [
-      `admin-station-toggle-active-${station.id}`,
-      `admin-station-toggle-featured-${station.id}`,
-      `admin-station-open-${station.id}`,
+      `admin-station-view-${station.id}`,
       `admin-station-edit-${station.id}`,
       `admin-station-delete-${station.id}`,
     ]);
     await page.getByTestId(`admin-station-edit-${station.id}`).click();
     await expectVisible(page.getByTestId('admin-station-editor-modal'));
-    await page.getByTestId('admin-station-editor-cancel-button').click();
+    await page.getByTestId('admin-station-status-offline').click();
+    await page.getByTestId('admin-station-editor-save-button').click();
     await expect(page.getByTestId('admin-station-editor-modal')).toHaveCount(0);
+    await expectDbRecord<any>('stations', 'id', station.id, (record) => record.is_active === false);
+    await expect(page.getByTestId(`admin-station-card-${station.id}`)).toContainText('OFFLINE');
+
+    await page.getByTestId(`admin-station-edit-${station.id}`).click();
+    await expectVisible(page.getByTestId('admin-station-editor-modal'));
+    await page.getByTestId('admin-station-status-live').click();
+    await page.getByTestId('admin-station-editor-save-button').click();
+    await expect(page.getByTestId('admin-station-editor-modal')).toHaveCount(0);
+    await expectDbRecord<any>('stations', 'id', station.id, (record) => record.is_active === true);
 
     const anon = getSupabaseAnon();
     const stationDetails = await anon.functions.invoke('manage-playlists', {
@@ -199,16 +232,25 @@ test.describe('admin stations CRUD', () => {
     if (stationDetails.error) throw stationDetails.error;
 
     expect(stationDetails.data?.data?.is_active).toBe(true);
-    expect(stationDetails.data?.data?.live_slots?.[0]?.playlist_id).toBe(playlist.id);
-    expect(stationDetails.data?.data?.live_slots?.[0]?.playlist?.items?.[0]?.id).toBe(item.id);
-    expect(stationDetails.data?.data?.live_slots?.[0]?.playlist?.items?.[0]?.audio_url).toMatch(/^https:\/\//);
+    expect(stationDetails.data?.data?.stream_url).toBeNull();
+    expect(stationDetails.data?.data?.now_playing_title).toBeNull();
+    const liveSlots = stationDetails.data?.data?.live_slots || [];
+    expect(liveSlots).toHaveLength(2);
+    expect(liveSlots.map((slot: any) => slot.playlist_id)).toEqual(slotPlaylistIds);
+    expect(liveSlots.map((slot: any) => slot.playlist_id)).toEqual(expect.arrayContaining([playlist.id, secondPlaylist.id]));
+    expect(liveSlots.flatMap((slot: any) => slot.playlist?.items?.map((track: any) => track.id) || [])).toEqual(
+      expect.arrayContaining([item.id, secondItem.id]),
+    );
+    for (const slot of liveSlots) {
+      expect(slot.playlist?.items?.[0]?.audio_url).toMatch(/^https:\/\//);
+    }
 
     const userStations = await anon.functions.invoke('manage-playlists', {
       body: { action: 'list_user_stations', user_id: musician.id },
     });
     if (userStations.error) throw userStations.error;
 
-    expect((userStations.data?.data || []).some((row: any) => row.id === station.id && row.live_slot_count > 0)).toBe(true);
+    expect((userStations.data?.data || []).some((row: any) => row.id === station.id && row.live_slot_count === 2)).toBe(true);
   });
 
   test('auto-creates a live radio station from a musician playlist and exposes it to the user side', async ({ page }) => {

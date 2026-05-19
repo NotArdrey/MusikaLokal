@@ -923,6 +923,39 @@ function filterPublicVisiblePlaylists(query: any) {
     .or("is_hidden.is.false,is_hidden.is.null");
 }
 
+function filterStationEligiblePlaylists(query: any) {
+  return query.or("is_hidden.is.false,is_hidden.is.null");
+}
+
+async function getStationEligiblePlaylistIds(supabaseAdmin: any, playlistIds: string[]) {
+  const uniquePlaylistIds = Array.from(new Set(
+    playlistIds
+      .map((playlistId) => (typeof playlistId === "string" ? playlistId.trim() : ""))
+      .filter((playlistId) => playlistId.length > 0),
+  ));
+
+  if (uniquePlaylistIds.length === 0) {
+    return new Set<string>();
+  }
+
+  const { data, error } = await filterStationEligiblePlaylists(
+    supabaseAdmin
+      .from("playlists")
+      .select("id")
+      .in("id", uniquePlaylistIds),
+  );
+
+  if (error) {
+    throw error;
+  }
+
+  return new Set(
+    (data || [])
+      .map((playlist: any) => (typeof playlist?.id === "string" ? playlist.id : ""))
+      .filter((playlistId: string) => playlistId.length > 0),
+  );
+}
+
 function getSourceStationSummary(stationsBySourceKey: Map<string, any>, sourceKey: string) {
   const station = stationsBySourceKey.get(sourceKey);
   if (!station) {
@@ -981,10 +1014,10 @@ async function getStationPlaylistIdsByStationId(supabaseAdmin: any, stationIds: 
 }
 
 async function listAdminStationSources(supabaseAdmin: any) {
-  const { data: playlists, error: playlistError } = await filterPublicVisiblePlaylists(
+  const { data: playlists, error: playlistError } = await filterStationEligiblePlaylists(
     supabaseAdmin
       .from("playlists")
-      .select("id, creator_id, title, description, genre, cover_image_url, track_count, created_at, creator:profiles!creator_id(id, full_name, avatar_url, role)"),
+      .select("id, creator_id, title, description, genre, cover_image_url, track_count, visibility, created_at, creator:profiles!creator_id(id, full_name, avatar_url, role)"),
   )
     .order("created_at", { ascending: false })
     .limit(ADMIN_STATION_SOURCE_PLAYLIST_LIMIT);
@@ -1193,10 +1226,10 @@ async function getEligibleStationSource(
       throw new Error("Artist not found");
     }
 
-    const { data: playlists, error: playlistError } = await filterPublicVisiblePlaylists(
+    const { data: playlists, error: playlistError } = await filterStationEligiblePlaylists(
       supabaseAdmin
         .from("playlists")
-        .select("id, title, description, genre, cover_image_url, track_count, creator_id")
+        .select("id, title, description, genre, cover_image_url, track_count, visibility, creator_id")
         .eq("creator_id", sourceId),
     )
       .order("created_at", { ascending: false });
@@ -1269,10 +1302,10 @@ async function getEligibleStationSource(
 
   let playlists: any[] = [];
   if (playlistIds.length > 0) {
-    const { data, error } = await filterPublicVisiblePlaylists(
+    const { data, error } = await filterStationEligiblePlaylists(
       supabaseAdmin
         .from("playlists")
-        .select("id, title, description, genre, cover_image_url, track_count, creator_id")
+        .select("id, title, description, genre, cover_image_url, track_count, visibility, creator_id")
         .in("id", playlistIds),
     );
 
@@ -1319,15 +1352,18 @@ async function upsertStationFromSource(
         .map((playlistId: unknown) => (typeof playlistId === "string" ? playlistId.trim() : ""))
         .filter((playlistId: string) => playlistId.length > 0)
     : [];
+  const allowedPlaylistIds = requestedPlaylistIds.length > 0
+    ? await getStationEligiblePlaylistIds(supabaseAdmin, requestedPlaylistIds)
+    : eligiblePlaylistIds;
   const selectedPlaylistIds = (requestedPlaylistIds.length > 0
     ? requestedPlaylistIds
     : Array.from(eligiblePlaylistIds)
   ).filter((playlistId: string, index: number, list: string[]) => {
-    return list.indexOf(playlistId) === index && eligiblePlaylistIds.has(playlistId);
+    return list.indexOf(playlistId) === index && allowedPlaylistIds.has(playlistId);
   });
 
   if (selectedPlaylistIds.length === 0) {
-    throw new Error("Select at least one eligible public playlist for this station.");
+    throw new Error("Select at least one eligible playlist for this station.");
   }
 
   const existingStation = await getPrimaryManagedSourceStation(

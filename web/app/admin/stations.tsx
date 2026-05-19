@@ -19,8 +19,8 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { getEdgeFunctionErrorMessage } from '../../src/utils/edgeFunctionErrors';
 
-type StationFilter = 'all' | 'live' | 'offline' | 'featured';
-type StationRowAction = 'active' | 'featured' | 'delete';
+type StationFilter = 'all' | 'live' | 'offline';
+type StationRowAction = 'delete';
 
 const getStationBusyKey = (stationId: string, action: StationRowAction) => `station:${stationId}:${action}`;
 
@@ -54,6 +54,69 @@ const getDefaultSelectedPlaylistIds = (source: any) => {
     : [];
 };
 
+const getStationPlaylistOptions = (sources: any[]) => {
+  const playlistsById = new Map<string, any>();
+
+  for (const source of sources || []) {
+    const sourcePlaylists = Array.isArray(source?.playlists) ? source.playlists : [];
+    for (const playlist of sourcePlaylists) {
+      if (typeof playlist?.id !== 'string' || playlistsById.has(playlist.id)) {
+        continue;
+      }
+
+      playlistsById.set(playlist.id, {
+        ...playlist,
+        source_key: source?.key || `${source?.kind || 'source'}:${source?.id || ''}`,
+        source_kind: source?.kind || null,
+        source_id: source?.id || null,
+        source_name: source?.name || 'Unknown source',
+      });
+    }
+  }
+
+  return Array.from(playlistsById.values());
+};
+
+const getStationQueuePlaylists = (station: any, playlistOptions: any[]) => {
+  const orderedPlaylistIds = Array.isArray(station?.slot_playlist_ids)
+    ? station.slot_playlist_ids.filter((id: unknown): id is string => typeof id === 'string' && id.trim().length > 0)
+    : [];
+
+  const playlistsById = new Map(
+    playlistOptions
+      .filter((playlist: any) => typeof playlist?.id === 'string')
+      .map((playlist: any) => [playlist.id, playlist]),
+  );
+
+  return orderedPlaylistIds
+    .map((playlistId: string) => playlistsById.get(playlistId) || { id: playlistId, title: 'Playlist' })
+    .filter(Boolean);
+};
+
+const getStationQueuePreview = (station: any, playlistOptions: any[]) => {
+  const queuePlaylists = getStationQueuePlaylists(station, playlistOptions);
+
+  if (queuePlaylists.length === 0) {
+    return { current: null, next: null, loops: false };
+  }
+
+  const livePlaylistIds = Array.isArray(station?.live_slot_playlist_ids)
+    ? station.live_slot_playlist_ids
+    : [];
+  const currentPlaylistId = livePlaylistIds.find((id: unknown) => typeof id === 'string') || queuePlaylists[0]?.id;
+  const currentIndex = Math.max(
+    queuePlaylists.findIndex((playlist: any) => playlist?.id === currentPlaylistId),
+    0,
+  );
+  const nextIndex = queuePlaylists.length > 1 ? (currentIndex + 1) % queuePlaylists.length : currentIndex;
+
+  return {
+    current: queuePlaylists[currentIndex] || queuePlaylists[0],
+    next: queuePlaylists[nextIndex] || null,
+    loops: queuePlaylists.length === 1 || nextIndex <= currentIndex,
+  };
+};
+
 const normalizeStationTestId = (value: unknown) => {
   return String(value || 'item')
     .toLowerCase()
@@ -83,11 +146,7 @@ export default function AdminStationsPage() {
   const [stationName, setStationName] = useState('');
   const [stationDescription, setStationDescription] = useState('');
   const [stationGenre, setStationGenre] = useState('');
-  const [rotationMinutes, setRotationMinutes] = useState('15');
-  const [streamUrl, setStreamUrl] = useState('');
-  const [streamStatus, setStreamStatus] = useState<'offline' | 'live' | 'autoplay'>('offline');
-  const [nowPlayingTitle, setNowPlayingTitle] = useState('');
-  const [nowPlayingArtist, setNowPlayingArtist] = useState('');
+  const [stationIsLive, setStationIsLive] = useState(true);
   const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<string[]>([]);
   const [deleteTargetStation, setDeleteTargetStation] = useState<{ id: string; name: string } | null>(null);
 
@@ -148,8 +207,6 @@ export default function AdminStationsPage() {
     return stations.filter((station) => {
       if (stationFilter === 'live' && station.is_active === false) return false;
       if (stationFilter === 'offline' && station.is_active !== false) return false;
-      if (stationFilter === 'featured' && station.is_featured !== true) return false;
-
       if (!query) return true;
 
       const owner = getStationOwner(station);
@@ -172,6 +229,7 @@ export default function AdminStationsPage() {
     }
     return result;
   }, [sources]);
+  const stationPlaylistOptions = useMemo(() => getStationPlaylistOptions(sources), [sources]);
 
   const manualStationSources = useMemo(() => {
     return sources.filter((source) => (
@@ -199,6 +257,32 @@ export default function AdminStationsPage() {
     });
   }, [manualStationSources, sourceSearch]);
 
+  const editorPlaylistOptions = useMemo(() => {
+    if (!editingSource) return [];
+
+    const selectedSourcePlaylistIds = new Set(
+      (Array.isArray(editingSource?.playlists) ? editingSource.playlists : [])
+        .map((playlist: any) => (typeof playlist?.id === 'string' ? playlist.id : ''))
+        .filter(Boolean),
+    );
+
+    return [...stationPlaylistOptions].sort((left: any, right: any) => {
+      const leftFromSource = selectedSourcePlaylistIds.has(left.id) ? 0 : 1;
+      const rightFromSource = selectedSourcePlaylistIds.has(right.id) ? 0 : 1;
+      if (leftFromSource !== rightFromSource) {
+        return leftFromSource - rightFromSource;
+      }
+
+      const leftOwner = String(left.source_name || '');
+      const rightOwner = String(right.source_name || '');
+      if (leftOwner !== rightOwner) {
+        return leftOwner.localeCompare(rightOwner);
+      }
+
+      return String(left.title || '').localeCompare(String(right.title || ''));
+    });
+  }, [editingSource, stationPlaylistOptions]);
+
   const hasStations = stations.length > 0;
   const hasEligibleStationSources = manualStationSources.length > 0;
   const isStationEditorReady = selectedPlaylistIds.length > 0;
@@ -213,15 +297,7 @@ export default function AdminStationsPage() {
     setStationName(source?.station?.name || `${source?.name || 'Artist'} Radio`);
     setStationDescription(source?.station?.description || '');
     setStationGenre(source?.station?.genre || source?.genre || '');
-    setRotationMinutes(String(source?.station?.rotation_interval_minutes || 15));
-    setStreamUrl(source?.station?.stream_url || '');
-    setStreamStatus(
-      ['offline', 'live', 'autoplay'].includes(source?.station?.stream_status)
-        ? source.station.stream_status
-        : 'offline',
-    );
-    setNowPlayingTitle(source?.station?.now_playing_title || '');
-    setNowPlayingArtist(source?.station?.now_playing_artist || '');
+    setStationIsLive(source?.station?.is_active !== false);
     setSelectedPlaylistIds(getDefaultSelectedPlaylistIds(source));
   }, []);
 
@@ -276,13 +352,13 @@ export default function AdminStationsPage() {
         description: stationDescription.trim() || null,
         genre: stationGenre.trim() || null,
         cover_image_url: editingSource.cover_image_url || null,
-        rotation_interval_minutes: Number(rotationMinutes) || 15,
-        stream_url: streamUrl.trim() || null,
-        stream_status: streamStatus,
-        now_playing_title: nowPlayingTitle.trim() || null,
-        now_playing_artist: nowPlayingArtist.trim() || null,
+        rotation_interval_minutes: 15,
+        stream_url: null,
+        stream_status: 'offline',
+        now_playing_title: null,
+        now_playing_artist: null,
         playlist_ids: selectedPlaylistIds,
-        is_active: editingSource.station?.is_active !== false,
+        is_active: stationIsLive,
       });
 
       closeEditor();
@@ -298,33 +374,12 @@ export default function AdminStationsPage() {
     editingSource,
     fetchData,
     invokePlaylistAction,
-    nowPlayingArtist,
-    nowPlayingTitle,
-    rotationMinutes,
     selectedPlaylistIds,
     stationDescription,
     stationGenre,
+    stationIsLive,
     stationName,
-    streamStatus,
-    streamUrl,
   ]);
-
-  const updateStationFlag = useCallback(async (
-    stationId: string,
-    patch: { is_active?: boolean; is_featured?: boolean },
-  ) => {
-    const actionKey = 'is_active' in patch ? 'active' : 'featured';
-    setBusyKey(getStationBusyKey(stationId, actionKey));
-    try {
-      await invokePlaylistAction({ action: 'update_station', station_id: stationId, ...patch });
-      await fetchData();
-    } catch (error) {
-      console.error('Admin station update failed:', error);
-      Alert.alert('Unable to update station', error instanceof Error ? error.message : 'Please try again.');
-    } finally {
-      setBusyKey(null);
-    }
-  }, [fetchData, invokePlaylistAction]);
 
   const performDeleteStation = useCallback(async (stationId: string) => {
     setBusyKey(getStationBusyKey(stationId, 'delete'));
@@ -487,7 +542,7 @@ export default function AdminStationsPage() {
             />
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-              {(['all', 'live', 'offline', 'featured'] as StationFilter[]).map((nextFilter) => (
+              {(['all', 'live', 'offline'] as StationFilter[]).map((nextFilter) => (
                 <TouchableOpacity
                   key={nextFilter}
                   activeOpacity={1}
@@ -540,12 +595,11 @@ export default function AdminStationsPage() {
 
             {visibleStations.map((item) => {
               const owner = getStationOwner(item);
-              const activeBusy = busyKey === getStationBusyKey(item.id, 'active');
-              const featuredBusy = busyKey === getStationBusyKey(item.id, 'featured');
               const deleteBusy = busyKey === getStationBusyKey(item.id, 'delete');
-              const stationActionBusy = activeBusy || featuredBusy || deleteBusy;
+              const stationActionBusy = deleteBusy;
               const isLive = item.is_active !== false;
               const source = sourceByStationId.get(item.id);
+              const queuePreview = getStationQueuePreview(item, stationPlaylistOptions);
 
               return (
                 <View
@@ -578,55 +632,47 @@ export default function AdminStationsPage() {
                   {item.slot_count} playlist{item.slot_count === 1 ? '' : 's'}
                 </Text>
                 <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                  Full playlist queue
+                  Continuous loop
                 </Text>
                 {item.stream_url ? (
                   <Text style={{ color: item.stream_status === 'live' ? '#22C55E' : colors.textSecondary, fontSize: 12, fontWeight: '700' }}>
                     Stream {item.stream_status || 'offline'}
                   </Text>
                 ) : null}
-                {item.is_featured ? (
-                  <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>Featured</Text>
-                ) : null}
               </View>
+
+              {queuePreview.current ? (
+                <View style={[styles.queuePreview, { backgroundColor: isDark ? '#0F172A' : '#F8FAFC', borderColor: colors.border }]}>
+                  <View style={styles.queuePreviewItem}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
+                      On air
+                    </Text>
+                    <Text style={{ color: colors.text, fontSize: 13, fontWeight: '800' }} numberOfLines={1}>
+                      {queuePreview.current?.title || 'Playlist'}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                  <View style={styles.queuePreviewItem}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
+                      {queuePreview.loops ? 'Loops to' : 'Up next'}
+                    </Text>
+                    <Text style={{ color: colors.text, fontSize: 13, fontWeight: '800' }} numberOfLines={1}>
+                      {queuePreview.next?.title || 'Playlist'}
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
 
               <View style={styles.actionRow}>
                 <TouchableOpacity
-                  testID={`admin-station-toggle-active-${item.id}`}
-                  accessibilityLabel={`admin-station-toggle-active-${item.id}`}
-                  activeOpacity={1}
-                  disabled={stationActionBusy}
-                  style={[styles.actionBtn, { backgroundColor: isLive ? '#EF444420' : '#22C55E20', opacity: stationActionBusy && !activeBusy ? 0.55 : 1 }]}
-                  onPress={() => updateStationFlag(item.id, { is_active: !isLive })}
-                >
-                  {activeBusy ? <ActivityIndicator size="small" color={isLive ? '#EF4444' : '#22C55E'} /> : null}
-                  <Text style={{ color: isLive ? '#EF4444' : '#22C55E', fontSize: 12, fontWeight: '700' }}>
-                    {activeBusy ? (isLive ? 'Deactivating...' : 'Activating...') : isLive ? 'Deactivate' : 'Activate'}
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  testID={`admin-station-toggle-featured-${item.id}`}
-                  accessibilityLabel={`admin-station-toggle-featured-${item.id}`}
-                  activeOpacity={1}
-                  disabled={stationActionBusy}
-                  style={[styles.actionBtn, { backgroundColor: item.is_featured ? '#F59E0B20' : colors.primary + '18', opacity: stationActionBusy && !featuredBusy ? 0.55 : 1 }]}
-                  onPress={() => updateStationFlag(item.id, { is_featured: !item.is_featured })}
-                >
-                  {featuredBusy ? <ActivityIndicator size="small" color={item.is_featured ? '#D97706' : colors.primary} /> : null}
-                  <Text style={{ color: item.is_featured ? '#D97706' : colors.primary, fontSize: 12, fontWeight: '700' }}>
-                    {featuredBusy ? (item.is_featured ? 'Unfeaturing...' : 'Featuring...') : item.is_featured ? 'Unfeature' : 'Feature'}
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  testID={`admin-station-open-${item.id}`}
-                  accessibilityLabel={`admin-station-open-${item.id}`}
+                  testID={`admin-station-view-${item.id}`}
+                  accessibilityLabel={`admin-station-view-${item.id}`}
                   activeOpacity={1}
                   style={[styles.actionBtn, { backgroundColor: isDark ? '#0F172A' : '#F3F4F6' }]}
                   onPress={() => router.push({ pathname: '/station_details' as any, params: { station_id: item.id } })}
                 >
-                  <Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }}>Open</Text>
+                  <Ionicons name="eye-outline" size={15} color={colors.text} style={styles.actionBtnIcon} />
+                  <Text style={[styles.actionBtnText, { color: colors.text }]}>View</Text>
                 </TouchableOpacity>
 
                 {source ? (
@@ -637,7 +683,8 @@ export default function AdminStationsPage() {
                     style={[styles.actionBtn, { backgroundColor: colors.primary + '18' }]}
                     onPress={() => openSourceEditor(source)}
                   >
-                    <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>Edit</Text>
+                    <Ionicons name="create-outline" size={15} color={colors.primary} style={styles.actionBtnIcon} />
+                    <Text style={[styles.actionBtnText, { color: colors.primary }]}>Edit</Text>
                   </TouchableOpacity>
                 ) : null}
 
@@ -650,7 +697,8 @@ export default function AdminStationsPage() {
                   onPress={() => deleteStation(item)}
                 >
                   {deleteBusy ? <ActivityIndicator size="small" color="#EF4444" /> : null}
-                  <Text style={{ color: '#EF4444', fontSize: 12, fontWeight: '700' }}>
+                  {!deleteBusy ? <Ionicons name="trash-outline" size={15} color="#EF4444" style={styles.actionBtnIcon} /> : null}
+                  <Text style={[styles.actionBtnText, { color: '#EF4444' }]}>
                     {deleteBusy ? 'Deleting...' : 'Delete'}
                   </Text>
                 </TouchableOpacity>
@@ -737,7 +785,7 @@ export default function AdminStationsPage() {
                   Add Station
                 </Text>
                 <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                  Choose a playlist owner to turn into a live station.
+                  Choose the main station owner, then add any playlists to its radio queue.
                 </Text>
               </View>
               <TouchableOpacity
@@ -893,90 +941,46 @@ export default function AdminStationsPage() {
                 />
               </View>
               <View style={styles.halfField}>
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Station interval</Text>
-                <TextInput
-                  testID="admin-station-rotation-input"
-                  accessibilityLabel="admin-station-rotation-input"
-                  value={rotationMinutes}
-                  onChangeText={setRotationMinutes}
-                  placeholder="Minutes"
-                  placeholderTextColor={colors.textSecondary}
-                  keyboardType="number-pad"
-                  style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
-                />
-              </View>
-            </View>
-
-            <View style={styles.field}>
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Continuous stream URL</Text>
-              <TextInput
-                testID="admin-station-stream-url-input"
-                accessibilityLabel="admin-station-stream-url-input"
-                value={streamUrl}
-                onChangeText={setStreamUrl}
-                placeholder="https://your-radio.example/live"
-                placeholderTextColor={colors.textSecondary}
-                autoCapitalize="none"
-                keyboardType="url"
-                style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
-              />
-            </View>
-
-            <View style={styles.field}>
-              <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Stream status</Text>
-              <View style={styles.statusSelectorRow}>
-                {(['offline', 'live', 'autoplay'] as const).map((status) => {
-                  const selected = streamStatus === status;
-                  return (
-                    <TouchableOpacity
-                      key={status}
-                      activeOpacity={1}
-                      onPress={() => setStreamStatus(status)}
-                      style={[
-                        styles.statusSelectorButton,
-                        {
-                          borderColor: selected ? colors.primary : colors.border,
-                          backgroundColor: selected ? colors.primary : (isDark ? '#0F172A' : '#F8FAFC'),
-                        },
-                      ]}
-                    >
-                      <Text style={{ color: selected ? '#FFFFFF' : colors.text, fontSize: 12, fontWeight: '700', textTransform: 'capitalize' }}>
-                        {status}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            <View style={styles.modalInputRow}>
-              <View style={styles.halfField}>
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Now playing title</Text>
-                <TextInput
-                  value={nowPlayingTitle}
-                  onChangeText={setNowPlayingTitle}
-                  placeholder="Optional"
-                  placeholderTextColor={colors.textSecondary}
-                  style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
-                />
-              </View>
-              <View style={styles.halfField}>
-                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Now playing artist</Text>
-                <TextInput
-                  value={nowPlayingArtist}
-                  onChangeText={setNowPlayingArtist}
-                  placeholder="Optional"
-                  placeholderTextColor={colors.textSecondary}
-                  style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
-                />
+                <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Station status</Text>
+                <View style={styles.statusSelectorRow}>
+                  {[
+                    { label: 'Offline', value: false },
+                    { label: 'Live', value: true },
+                  ].map((status) => {
+                    const selected = stationIsLive === status.value;
+                    return (
+                      <TouchableOpacity
+                        key={status.label}
+                        testID={`admin-station-status-${status.label.toLowerCase()}`}
+                        accessibilityLabel={`admin-station-status-${status.label.toLowerCase()}`}
+                        activeOpacity={1}
+                        onPress={() => setStationIsLive(status.value)}
+                        style={[
+                          styles.statusSelectorButton,
+                          {
+                            borderColor: selected ? colors.primary : colors.border,
+                            backgroundColor: selected ? colors.primary : (isDark ? '#0F172A' : '#F8FAFC'),
+                          },
+                        ]}
+                      >
+                        <Text style={{ color: selected ? '#FFFFFF' : colors.text, fontSize: 12, fontWeight: '700' }}>
+                          {status.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </View>
             </View>
 
             <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700', marginTop: 6, marginBottom: 8 }}>
               Station playlists
             </Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 18, marginBottom: 10 }}>
+              Pick one or more playlists from any owner. They play as one continuous queue and loop after the final track.
+            </Text>
             <ScrollView style={styles.playlistPicker}>
-              {(editingSource?.playlists || []).map((playlist: any) => {
+              {editorPlaylistOptions.map((playlist: any) => {
                 const selected = selectedPlaylistIds.includes(playlist.id);
                 return (
                   <TouchableOpacity
@@ -993,7 +997,7 @@ export default function AdminStationsPage() {
                         {playlist.title || 'Untitled playlist'}
                       </Text>
                       <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
-                        {playlist.track_count || 0} track{playlist.track_count === 1 ? '' : 's'}
+                        {playlist.source_name || 'Unknown source'} - {playlist.track_count || 0} track{playlist.track_count === 1 ? '' : 's'}
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -1106,17 +1110,38 @@ const styles = StyleSheet.create({
   },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 7 },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 10 },
+  queuePreview: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  queuePreviewItem: { flex: 1, minWidth: 0, gap: 3 },
   actionRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 12 },
   actionBtn: {
-    minHeight: 32,
+    height: 32,
     minWidth: 72,
     paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingVertical: 0,
     borderRadius: 7,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
+  },
+  actionBtnIcon: {
+    width: 15,
+    height: 15,
+    lineHeight: 15,
+  },
+  actionBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 14,
+    includeFontPadding: false,
   },
   errorBanner: {
     borderWidth: 1,

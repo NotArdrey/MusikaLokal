@@ -809,10 +809,12 @@ export default function ProfileScreen() {
   const { loading: authLoading, userId: currentUserId, isGuest, userRole } = useAuth();
   const params = useLocalSearchParams<{
     userId?: string;
+    refresh?: string;
     returnToHome?: string;
     returnListingId?: string;
   }>();
   const normalizedParamUserId = Array.isArray(params.userId) ? params.userId[0] : params.userId;
+  const normalizedRefresh = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
 
   const [profile, setProfile] = useState<any>(null);
   const isFan = isFanUserRole(userRole || profile?.role);
@@ -1340,7 +1342,7 @@ export default function ProfileScreen() {
       }
       // fetchProfile intentionally reads the latest route/auth/profile helpers on focus.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [params.userId, authLoading, currentUserId, isGuest]),
+    }, [params.userId, params.refresh, authLoading, currentUserId, isGuest]),
   );
 
   async function fetchProfile() {
@@ -1421,6 +1423,9 @@ export default function ProfileScreen() {
       // Check ownership
       const ownership = resolvedCurrentUserId && targetId === resolvedCurrentUserId;
       setIsOwner(!!ownership);
+      if (normalizedRefresh) {
+        profilePlaylistsCache.delete(targetId);
+      }
 
       const classifyGigBucket = (gig: any): "active" | "upcoming" | "done" => {
         const eventDate = gig?.event_date ? new Date(gig.event_date) : null;
@@ -1663,12 +1668,15 @@ export default function ProfileScreen() {
   ]);
 
   const openCreatePlaylist = useCallback(() => {
-    setPlaylistTitle("");
-    setPlaylistDescription("");
-    setPlaylistGenre("");
-    setPlaylistVisibility("public");
-    setCreatePlaylistModalVisible(true);
-  }, []);
+    const targetUserId = viewedProfileId || currentUserId || normalizedParamUserId || "";
+    router.push({
+      pathname: "/create_playlist" as any,
+      params: {
+        return_to: "profile",
+        ...(targetUserId ? { return_user_id: targetUserId } : {}),
+      },
+    });
+  }, [currentUserId, normalizedParamUserId, viewedProfileId]);
 
   const closeCreatePlaylistModal = useCallback(() => {
     if (creatingPlaylist) return;

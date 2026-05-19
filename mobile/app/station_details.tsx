@@ -122,11 +122,6 @@ export default function StationDetailsScreen() {
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editGenre, setEditGenre] = useState("");
-  const [editRotationIntervalMinutes, setEditRotationIntervalMinutes] = useState("15");
-  const [editStreamUrl, setEditStreamUrl] = useState("");
-  const [editStreamStatus, setEditStreamStatus] = useState<"offline" | "live" | "autoplay">("offline");
-  const [editNowPlayingTitle, setEditNowPlayingTitle] = useState("");
-  const [editNowPlayingArtist, setEditNowPlayingArtist] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Slot management state
@@ -186,15 +181,6 @@ export default function StationDetailsScreen() {
     setEditName(station?.name || "");
     setEditDescription(station?.description || "");
     setEditGenre(station?.genre || "");
-    setEditRotationIntervalMinutes(String(station?.rotation_interval_minutes || 15));
-    setEditStreamUrl(station?.stream_url || "");
-    setEditStreamStatus(
-      ["offline", "live", "autoplay"].includes(station?.stream_status)
-        ? station.stream_status
-        : "offline",
-    );
-    setEditNowPlayingTitle(station?.now_playing_title || "");
-    setEditNowPlayingArtist(station?.now_playing_artist || "");
     setEditModalVisible(true);
   };
 
@@ -212,14 +198,11 @@ export default function StationDetailsScreen() {
           name: editName.trim(),
           description: editDescription.trim() || null,
           genre: editGenre.trim() || null,
-          rotation_interval_minutes: Math.min(
-            Math.max(Number.parseInt(editRotationIntervalMinutes, 10) || 15, 5),
-            120,
-          ),
-          stream_url: editStreamUrl.trim() || null,
-          stream_status: editStreamStatus,
-          now_playing_title: editNowPlayingTitle.trim() || null,
-          now_playing_artist: editNowPlayingArtist.trim() || null,
+          rotation_interval_minutes: 15,
+          stream_url: null,
+          stream_status: "offline",
+          now_playing_title: null,
+          now_playing_artist: null,
         },
       });
       if (data?.success) {
@@ -615,72 +598,6 @@ export default function StationDetailsScreen() {
               onChangeText={setEditGenre}
             />
 
-            <Text style={[styles.modalLabel, { color: colors.text }]}>Station Interval (minutes)</Text>
-            <TextInput
-              style={[styles.modalInput, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.background }]}
-              placeholder="15"
-              placeholderTextColor={colors.textSecondary}
-              value={editRotationIntervalMinutes}
-              onChangeText={setEditRotationIntervalMinutes}
-              keyboardType="number-pad"
-            />
-            <Text style={[styles.modalHelper, { color: colors.textSecondary }]}>Legacy station setting. Playlist radio now syncs by the full queue duration.</Text>
-
-            <Text style={[styles.modalLabel, { color: colors.text }]}>Continuous Stream URL</Text>
-            <TextInput
-              style={[styles.modalInput, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.background }]}
-              placeholder="https://your-radio.example/live"
-              placeholderTextColor={colors.textSecondary}
-              value={editStreamUrl}
-              onChangeText={setEditStreamUrl}
-              autoCapitalize="none"
-              keyboardType="url"
-            />
-            <Text style={[styles.modalHelper, { color: colors.textSecondary }]}>Use an Icecast, HLS, or managed radio listener URL. Set status to Live only when this is a real broadcast; Autoplay keeps playlist radio as the fallback.</Text>
-
-            <Text style={[styles.modalLabel, { color: colors.text }]}>Stream Status</Text>
-            <View style={styles.segmentRow}>
-              {(["offline", "live", "autoplay"] as const).map((status) => {
-                const selected = editStreamStatus === status;
-                return (
-                  <TouchableOpacity
-                    key={status}
-                    activeOpacity={1}
-                    onPress={() => setEditStreamStatus(status)}
-                    style={[
-                      styles.segmentButton,
-                      {
-                        borderColor: selected ? colors.primary : (isDark ? "#334155" : "#E2E8F0"),
-                        backgroundColor: selected ? colors.primary : colors.background,
-                      },
-                    ]}
-                  >
-                    <Text style={{ color: selected ? "#fff" : colors.text, fontSize: moderateScale(12), fontWeight: "700", textTransform: "capitalize" }}>
-                      {status}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <Text style={[styles.modalLabel, { color: colors.text }]}>Now Playing Title</Text>
-            <TextInput
-              style={[styles.modalInput, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.background }]}
-              placeholder="Optional"
-              placeholderTextColor={colors.textSecondary}
-              value={editNowPlayingTitle}
-              onChangeText={setEditNowPlayingTitle}
-            />
-
-            <Text style={[styles.modalLabel, { color: colors.text }]}>Now Playing Artist</Text>
-            <TextInput
-              style={[styles.modalInput, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.background }]}
-              placeholder="Optional"
-              placeholderTextColor={colors.textSecondary}
-              value={editNowPlayingArtist}
-              onChangeText={setEditNowPlayingArtist}
-            />
-
             <View style={styles.modalButtons}>
               <TouchableOpacity activeOpacity={1} style={[styles.modalBtn, { borderColor: isDark ? "#334155" : "#E2E8F0" }]} onPress={() => setEditModalVisible(false)}>
                 <Text style={{ color: colors.textSecondary, fontWeight: "600" }}>Cancel</Text>
@@ -807,11 +724,8 @@ const styles = StyleSheet.create({
   modalContent: { width: "100%", borderRadius: 16, padding: 20 },
   modalTitle: { fontSize: moderateScale(18), fontWeight: "700", marginBottom: 16 },
   modalLabel: { fontSize: moderateScale(13), fontWeight: "600", marginBottom: 6, marginTop: 12 },
-  modalHelper: { fontSize: moderateScale(12), lineHeight: 18, marginTop: 8 },
   modalInput: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14) },
   modalTextArea: { minHeight: 80, textAlignVertical: "top" },
-  segmentRow: { flexDirection: "row", gap: 8 },
-  segmentButton: { flex: 1, alignItems: "center", justifyContent: "center", borderWidth: 1, borderRadius: 10, paddingVertical: 10 },
   modalButtons: { flexDirection: "row", gap: 10, marginTop: 20 },
   modalBtn: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: "transparent" },
   playlistPickItem: { flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 8 },

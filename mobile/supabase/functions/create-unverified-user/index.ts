@@ -199,6 +199,7 @@ async function fetchLiveDiditFaceRequiredStatus(diditSessionId: string) {
     if (!diditApiKey || !diditSessionId) return ''
 
     const statuses: string[] = []
+    let hasApprovedRequiredChecks = false
 
     for (const url of [
         `https://verification.didit.me/v3/session/${diditSessionId}/decision/`,
@@ -214,9 +215,15 @@ async function fetchLiveDiditFaceRequiredStatus(diditSessionId: string) {
 
             const payload = await response.json()
             const status = resolveDiditFaceRequiredStatus(payload)
+            const decision = findDecisionObject(payload)
+            const idStatus = normalizeDiditSignupStatus(decision?.id_verifications?.[0]?.status)
+            const faceStatus = normalizeDiditSignupStatus(decision?.face_matches?.[0]?.status)
+            if (idStatus === 'APPROVED' && faceStatus === 'APPROVED') {
+                hasApprovedRequiredChecks = true
+            }
             if (status) {
                 statuses.push(status)
-                if (isFailedDiditSignupStatus(status)) break
+                if (isFailedDiditSignupStatus(status) && !hasApprovedRequiredChecks) break
             }
         } catch (error) {
             console.error('live_didit_face_status_lookup_failed', {
@@ -226,7 +233,12 @@ async function fetchLiveDiditFaceRequiredStatus(diditSessionId: string) {
         }
     }
 
-    return resolveDiditSignupStatus(...statuses)
+    const resolvedStatus = resolveDiditSignupStatus(...statuses)
+    if (hasApprovedRequiredChecks && isFailedDiditSignupStatus(resolvedStatus)) {
+        return statuses.find((status) => status === 'PENDING_REVIEW') || 'APPROVED'
+    }
+
+    return resolvedStatus
 }
 
 function buildDeferredEmailDelivery(identityStatus: string) {
@@ -659,7 +671,7 @@ serve(async (req) => {
             }
 
             diditVerificationData = sessionData?.verification_data || null
-            identityNameBirthDate = approvedByDidit
+            identityNameBirthDate = (approvedByDidit || pendingByDidit)
                 ? prepareIdentityNameBirthDateDuplicateInput(diditVerificationData?.raw_data || diditVerificationData, {
                     fullLegalName: diditVerificationData?.verified_full_legal_name || diditVerificationData?.full_legal_name || diditVerificationData?.full_name,
                     normalizedFullLegalName: diditVerificationData?.normalized_full_legal_name,
@@ -695,17 +707,22 @@ serve(async (req) => {
                     })
                 }
 
+            }
+
+            if (documentFingerprint || identityNameBirthDate.hasNameBirthDate) {
                 duplicateIdentityReview = await findSameRoleIdentityDuplicate(supabaseAdmin, {
                     documentFingerprint,
                     role: normalizedRole,
                     email: normalizedEmail,
+                    normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+                    birthDate: identityNameBirthDate.birthDate,
                 })
             }
         }
 
         const diditDuplicateFlag = Boolean(diditVerificationData?.duplicate_identity_review_required)
         const sameRoleDuplicateDetected = Boolean(duplicateIdentityReview?.hasDuplicate)
-        const diditDuplicateFlagRequiresReview = diditDuplicateFlag && (!documentFingerprint || sameRoleDuplicateDetected)
+        const diditDuplicateFlagRequiresReview = diditDuplicateFlag && sameRoleDuplicateDetected
         const requiresDuplicateIdentityReview = Boolean(sameRoleDuplicateDetected || diditDuplicateFlagRequiresReview)
         const effectiveVerificationStatus = approvedByDidit && !requiresDuplicateIdentityReview
             ? 'APPROVED'
@@ -818,6 +835,7 @@ serve(async (req) => {
         let finalDuplicateIdentityReview = requiresDuplicateIdentityReview
         if (requiresDuplicateIdentityReview) {
             const duplicateReason = getDuplicateIdentityReviewReason(normalizedRole)
+            const matchedOn = duplicateIdentityReview?.matches?.[0]?.matched_on || diditVerificationData?.matched_on || (identityNameBirthDate.hasNameBirthDate ? 'NAME_BIRTHDATE' : 'DOCUMENT_FINGERPRINT')
             identityReviewRecord = await queueIdentityReview(supabaseAdmin, {
                 userId,
                 email: normalizedEmail,
@@ -834,11 +852,12 @@ serve(async (req) => {
                 normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
                 birthDate: identityNameBirthDate.birthDate,
                 reviewReason: duplicateReason,
-                matchedOn: 'DOCUMENT_FINGERPRINT',
+                matchedOn,
                 metadata: {
                     didit_duplicate_flag: diditDuplicateFlag,
                     source_session_status: normalizedVerificationStatus,
-                    matched_on: 'DOCUMENT_FINGERPRINT',
+                    matched_on: matchedOn,
+                    missing_document_fingerprint: !documentFingerprint,
                     duplicate_matches: duplicateIdentityReview?.matches || [],
                 },
             })
@@ -858,7 +877,7 @@ serve(async (req) => {
                 normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
                 birthDate: identityNameBirthDate.birthDate,
                 reviewReason: duplicateReason,
-                matchedOn: 'DOCUMENT_FINGERPRINT',
+                matchedOn,
             })
         } else if (pendingByDidit) {
             identityReviewRecord = await queueIdentityReview(supabaseAdmin, {
@@ -913,9 +932,10 @@ serve(async (req) => {
 
             if (approvalClaim?.decision === 'PENDING_REVIEW' || approvalClaim?.decision === 'EXISTING_ACCOUNT') {
                 const duplicateReason = getApprovalClaimReviewReason(approvalClaim, normalizedRole)
+                const missingIdentityKeyReason = duplicateReason === 'MISSING_DOCUMENT_FINGERPRINT' || duplicateReason === 'MISSING_IDENTITY_DUPLICATE_KEY'
                 const matchedOn = getApprovalClaimMatchedOn(
                     approvalClaim,
-                    duplicateReason === 'MISSING_DOCUMENT_FINGERPRINT' ? '' : 'DOCUMENT_FINGERPRINT',
+                    missingIdentityKeyReason ? '' : 'NAME_BIRTHDATE',
                 )
                 identityReviewRecord = await queueIdentityReview(supabaseAdmin, {
                     userId,
@@ -928,7 +948,7 @@ serve(async (req) => {
                     diditSessionId,
                     documentFingerprint,
                     duplicateReason,
-                    duplicateMatchCount: getApprovalClaimMatchCount(approvalClaim, duplicateReason === 'MISSING_DOCUMENT_FINGERPRINT' ? 0 : 1),
+                    duplicateMatchCount: getApprovalClaimMatchCount(approvalClaim, missingIdentityKeyReason ? 0 : 1),
                     verifiedFullLegalName: identityNameBirthDate.fullLegalName,
                     normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
                     birthDate: identityNameBirthDate.birthDate,

@@ -292,6 +292,8 @@ const summarizeSignupInvokeData = (data: any) => {
         },
         error: data.error ?? null,
         details: data.details ?? null,
+        reviewReason: data.verification_data?.review_reason ?? data.extracted_data?.review_reason ?? null,
+        retryReason: data.verification_data?.retry_reason ?? data.extracted_data?.retry_reason ?? null,
         keys: typeof data === 'object' ? Object.keys(data).slice(0, 20) : [],
     };
 };
@@ -386,26 +388,34 @@ const getDiditFlowStatusFromSession = (sessionData: any) => {
     const faceMatch = firstDiditArray(sessionData, 'face_matches')[0];
     const idStatus = normalizeDiditFlowStatus(idVerification?.status);
     const faceStatus = normalizeDiditFlowStatus(faceMatch?.status);
-    const sourceStatuses = [
+    const businessStatuses = [
         sessionData?.status,
         sessionData?.verification_data?.status,
         sessionData?.businessStatus,
-        sessionData?.diditResolvedStatus,
-        sessionData?.rawDiditStatus,
         sessionData?.verification_status,
         sessionData?.verification_data?.businessStatus,
+    ].map(normalizeDiditFlowStatus).filter(Boolean);
+    const sourceStatuses = [
+        ...businessStatuses,
+        sessionData?.diditResolvedStatus,
+        sessionData?.rawDiditStatus,
         sessionData?.verification_data?.diditResolvedStatus,
         sessionData?.verification_data?.rawDiditStatus,
         ...decisionCandidates.map((candidate) => candidate?.status),
     ].map(normalizeDiditFlowStatus).filter(Boolean);
-    const statuses = [idStatus, faceStatus, ...sourceStatuses].filter(Boolean);
 
-    const failedStatus = statuses.find(isFailedDiditFlowStatus);
-    if (failedStatus) return failedStatus;
+    const requiredCheckFailure = [idStatus, faceStatus].find(isFailedDiditFlowStatus);
+    if (requiredCheckFailure) return requiredCheckFailure;
 
     if (idStatus === 'APPROVED' && faceStatus === 'APPROVED') {
-        return 'APPROVED';
+        return businessStatuses.find(isPendingReviewDiditFlowStatus) ||
+            businessStatuses.find(isApprovedDiditFlowStatus) ||
+            'APPROVED';
     }
+
+    const statuses = [idStatus, faceStatus, ...sourceStatuses].filter(Boolean);
+    const failedStatus = sourceStatuses.find(isFailedDiditFlowStatus);
+    if (failedStatus) return failedStatus;
 
     if (idStatus === 'PENDING_REVIEW' || faceStatus === 'PENDING_REVIEW') {
         return 'PENDING_REVIEW';

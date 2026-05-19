@@ -2201,9 +2201,9 @@ serve(async (req: Request) => {
           }, 400);
         }
 
-        if (!documentFingerprintForDecision) {
+        if (!documentFingerprintForDecision && !reviewNameBirth.hasNameBirthDate) {
           return jsonResponse({
-            error: "This review is missing verified document fingerprint data and cannot be approved. Require the user to repeat identity verification instead.",
+            error: "This review is missing both document fingerprint and name/birthdate data, so duplicate identity checks cannot run. Require the user to repeat identity verification instead.",
           }, 400);
         }
       }

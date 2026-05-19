@@ -8,6 +8,7 @@ import {
   hashSessionNonce,
   isUuid,
   normalizeIdentityEmail,
+  prepareIdentityNameBirthDateDuplicateInput,
   sanitizeIdentityVerificationData,
   stripPrivateSessionFields,
   verifySessionNonce,
@@ -271,6 +272,21 @@ function resolveDiditStatusFromSource(source: any) {
 
 function resolveDiditSessionStatus(...sources: any[]) {
   const statuses = sources.map(resolveDiditStatusFromSource).filter(Boolean);
+  const hasApprovedRequiredChecks = sources.some((source) => {
+    const decision = findDecisionObject(source);
+    const idStatus = normalizeDiditStatus(decision?.id_verifications?.[0]?.status);
+    const faceStatus = normalizeDiditStatus(decision?.face_matches?.[0]?.status);
+    return idStatus === "APPROVED" && faceStatus === "APPROVED";
+  });
+
+  if (hasApprovedRequiredChecks && statuses.some(isFailedDiditStatus)) {
+    return (
+      statuses.find((status) => normalizeDiditStatus(status) === "PENDING_REVIEW") ||
+      statuses.find((status) => normalizeDiditStatus(status) === "APPROVED") ||
+      "APPROVED"
+    );
+  }
+
   return (
     statuses.find(isFailedDiditStatus) ||
     statuses.find((status) => normalizeDiditStatus(status) === "PENDING_REVIEW") ||
@@ -529,6 +545,9 @@ async function buildDiditSessionSyncData(
     idVerification?.fullName,
     [firstName, middleName, lastName, secondSurname].filter(Boolean).join(" "),
   ]);
+  const identityNameBirthDate = prepareIdentityNameBirthDateDuplicateInput(idVerification, {
+    fullLegalName: fullName,
+  });
   const documentCountry = firstNonEmptyString([
     idVerification?.issuing_country,
     idVerification?.issuingCountry,
@@ -564,11 +583,23 @@ async function buildDiditSessionSyncData(
     raw_data: sanitizeIdentityVerificationData(idVerification || rawDecisionData || rawBaseData || {}),
     document_fingerprint: documentFingerprint,
     document_country: documentCountry,
+    verified_full_legal_name: identityNameBirthDate.fullLegalName,
+    normalized_full_legal_name: identityNameBirthDate.normalizedFullLegalName,
+    birth_date: identityNameBirthDate.birthDate,
     id_document_expiry: extractDocumentExpiry(idVerification),
     id_verified_at: resolvedStatus === "APPROVED" ? new Date().toISOString() : undefined,
     source_session_status: firstNonEmptyString([rawDecisionData?.status, rawBaseData?.status]),
     didit_status_synced_at: new Date().toISOString(),
   };
+}
+
+function hasNameBirthDateDuplicateKey(verificationData: Record<string, unknown> | null | undefined) {
+  if (!verificationData || typeof verificationData !== "object") return false;
+  return prepareIdentityNameBirthDateDuplicateInput(verificationData.raw_data || verificationData, {
+    fullLegalName: verificationData.verified_full_legal_name || verificationData.full_legal_name || verificationData.full_name,
+    normalizedFullLegalName: verificationData.normalized_full_legal_name,
+    birthDate: verificationData.birth_date || verificationData.date_of_birth,
+  }).hasNameBirthDate;
 }
 
 function addMissingDocumentFingerprintRetryData(verificationData: Record<string, unknown> | null | undefined) {
@@ -579,6 +610,17 @@ function addMissingDocumentFingerprintRetryData(verificationData: Record<string,
     retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
     retry_message: MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE,
     declined_at: new Date().toISOString(),
+  };
+}
+
+function addMissingDocumentFingerprintReviewData(verificationData: Record<string, unknown> | null | undefined) {
+  return {
+    ...(verificationData && typeof verificationData === "object" ? verificationData : {}),
+    missing_document_fingerprint: true,
+    review_required: true,
+    review_reason: "MISSING_DOCUMENT_FINGERPRINT",
+    retry_required: false,
+    pending_review_at: new Date().toISOString(),
   };
 }
 
@@ -938,7 +980,7 @@ serve(async (req) => {
           : diditStatusIsFinal
             ? diditResolvedStatus
             : (storedStatus || diditResolvedStatus || 'PENDING');
-        let missingDocumentFingerprintRetryData: Record<string, unknown> | null = null;
+        let missingDocumentFingerprintReviewData: Record<string, unknown> | null = null;
 
         console.log("[didit] get_session status resolved", {
           sessionId: session_id,
@@ -997,41 +1039,24 @@ serve(async (req) => {
             syncedDocumentFingerprint = String(syncedVerificationData?.document_fingerprint || '').trim();
           }
 
-          if (!storedDocumentFingerprint && !syncedDocumentFingerprint) {
-            effectiveStatus = 'DECLINED';
-            missingDocumentFingerprintRetryData = addMissingDocumentFingerprintRetryData(syncedVerificationData);
+          const hasStoredNameBirthDateDuplicateKey = hasNameBirthDateDuplicateKey(localSessionData.verification_data);
+          const hasSyncedNameBirthDateDuplicateKey = hasNameBirthDateDuplicateKey(syncedVerificationData);
+
+          if (!storedDocumentFingerprint && !syncedDocumentFingerprint && !hasStoredNameBirthDateDuplicateKey && !hasSyncedNameBirthDateDuplicateKey) {
+            effectiveStatus = 'PENDING_REVIEW';
+            missingDocumentFingerprintReviewData = addMissingDocumentFingerprintReviewData(syncedVerificationData);
             const { error: missingFingerprintError } = await upsertVerificationSession(
               supabaseAdmin,
               String(session_id),
-              'DECLINED',
-              missingDocumentFingerprintRetryData,
+              'PENDING_REVIEW',
+              missingDocumentFingerprintReviewData,
             );
 
             if (missingFingerprintError) {
-              console.error('Failed to mark missing document fingerprint session as retry-required:', missingFingerprintError.message);
+              console.error('Failed to mark missing document fingerprint session as pending review:', missingFingerprintError.message);
             } else {
-              console.log('Marked Didit session as retry-required because document fingerprint was missing.');
+              console.log('Marked Didit session as pending review because document fingerprint was missing.');
             }
-
-            await sendMissingDocumentFingerprintRetryEmail(supabaseAdmin, {
-              email: String(
-                missingDocumentFingerprintRetryData?.email ||
-                localSessionData.verification_data?.email ||
-                "",
-              ),
-              displayName: String(
-                missingDocumentFingerprintRetryData?.full_name ||
-                localSessionData.verification_data?.full_name ||
-                "",
-              ),
-              diditSessionId: String(session_id),
-            });
-
-            await markLinkedAccountDeclinedForMissingFingerprint(
-              supabaseAdmin,
-              missingDocumentFingerprintRetryData?.user_ref || localSessionData.verification_data?.user_ref,
-              String(session_id),
-            );
           }
         }
 
@@ -1039,7 +1064,7 @@ serve(async (req) => {
           sanitizeIdentityVerificationData({
             ...(localSessionData.verification_data || {}),
             ...(syncedVerificationData || {}),
-            ...(missingDocumentFingerprintRetryData || {}),
+            ...(missingDocumentFingerprintReviewData || {}),
           }),
         );
 
@@ -1054,6 +1079,9 @@ serve(async (req) => {
             rawDiditStatus: rawBaseStatus || rawDecisionStatus || null,
             businessStatus: effectiveStatus,
             diditResolvedStatus: diditResolvedStatus || null,
+            review_required: Boolean(publicVerificationData?.review_required),
+            review_reason: publicVerificationData?.review_reason || null,
+            matched_on: publicVerificationData?.matched_on || null,
             retry_required: Boolean(publicVerificationData?.retry_required),
             retry_reason: publicVerificationData?.retry_reason || null,
             retry_message: publicVerificationData?.retry_message || null,

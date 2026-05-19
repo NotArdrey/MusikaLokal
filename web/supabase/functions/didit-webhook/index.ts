@@ -400,20 +400,18 @@ async function handleMissingDocumentFingerprintRetry(
     const documentType = idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID';
     const documentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL';
 
-    console.warn('Missing verified document fingerprint; requiring verification retry.', {
+    console.warn('Missing verified document fingerprint; routing verification to pending review.', {
         userReference,
         sessionId,
         context,
         documentType,
         documentCountry,
     });
-    let retryEmailRecipient = String(userEmail || sessionMetadata?.email || '').trim().toLowerCase();
-
     if (sessionId) {
         const { error: sessionError } = await upsertVerificationSession(
             supabaseAdmin,
             sessionId,
-            'DECLINED',
+            'PENDING_REVIEW',
             {
                 user_ref: userReference,
                 email: userEmail || sessionMetadata?.email || null,
@@ -429,17 +427,17 @@ async function handleMissingDocumentFingerprintRetry(
                 birth_date: identityNameBirthDate.birthDate,
                 id_document_expiry: extractDocumentExpiry(idVerification),
                 missing_document_fingerprint: true,
-                retry_required: true,
-                retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
-                retry_message: MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE,
+                review_required: true,
+                review_reason: 'MISSING_DOCUMENT_FINGERPRINT',
+                retry_required: false,
                 source_context: context,
                 warnings: sanitizeIdentityVerificationData(warnings || []),
-                declined_at: new Date().toISOString(),
+                pending_review_at: new Date().toISOString(),
             },
         );
 
         if (sessionError) {
-            console.error('Failed to mark missing document fingerprint session as retry-required:', sessionError.message);
+            console.error('Failed to mark missing document fingerprint session as pending review:', sessionError.message);
         }
     }
 
@@ -448,68 +446,56 @@ async function handleMissingDocumentFingerprintRetry(
             .from('profiles')
             .update({
                 is_verified: false,
-                verification_status: 'DECLINED',
-                didit_session_id: null,
+                verification_status: 'PENDING_REVIEW',
+                didit_session_id: sessionId,
                 id_verified_at: null,
             })
             .eq('id', userReference);
 
         if (profileError) {
-            console.error('Failed to mark profile retry-required for missing document fingerprint:', profileError.message);
+            console.error('Failed to mark profile pending review for missing document fingerprint:', profileError.message);
         }
 
         const { data: authUserData, error: authUserError } = await supabaseAdmin.auth.admin.getUserById(userReference);
         if (authUserError) {
-            console.error('Failed to load auth user for missing document fingerprint decline:', authUserError.message);
+            console.error('Failed to load auth user for missing document fingerprint review:', authUserError.message);
         } else if (authUserData?.user) {
-            retryEmailRecipient = retryEmailRecipient || String(authUserData.user.email || '').trim().toLowerCase();
             const existingMetadata = authUserData.user.user_metadata || {};
             const { error: authUpdateError } = await supabaseAdmin.auth.admin.updateUserById(userReference, {
                 user_metadata: {
                     ...existingMetadata,
                     is_verified: false,
-                    verification_status: 'DECLINED',
-                    retry_required: true,
-                    retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
-                    didit_session_id: null,
+                    verification_status: 'PENDING_REVIEW',
+                    retry_required: false,
+                    review_required: true,
+                    review_reason: 'MISSING_DOCUMENT_FINGERPRINT',
+                    didit_session_id: sessionId,
                 },
             });
 
             if (authUpdateError) {
-                console.error('Failed to mark auth user retry-required for missing document fingerprint:', authUpdateError.message);
+                console.error('Failed to mark auth user pending review for missing document fingerprint:', authUpdateError.message);
             }
         }
-
-        await sendMissingDocumentFingerprintRetryEmail(supabaseAdmin, {
-            email: retryEmailRecipient,
-            displayName: fullName,
-            diditSessionId: sessionId,
-        });
 
         const { error: notificationError } = await supabaseAdmin
             .from('notifications')
             .insert({
                 user_id: userReference,
-                type: 'warning',
-                title: 'Identity Verification Retry Needed',
-                message: MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE,
+                type: 'info',
+                title: 'Identity Review Started',
+                message: 'Your ID checks passed, but we need a quick manual review before activating this account.',
                 meta: {
-                    verification_status: 'DECLINED',
-                    retry_required: true,
-                    retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+                    verification_status: 'PENDING_REVIEW',
+                    review_required: true,
+                    review_reason: 'MISSING_DOCUMENT_FINGERPRINT',
                     didit_session_id: sessionId,
                 },
             });
 
         if (notificationError) {
-            console.error('Failed to store missing document fingerprint retry notification:', notificationError.message);
+            console.error('Failed to store missing document fingerprint review notification:', notificationError.message);
         }
-    } else {
-        await sendMissingDocumentFingerprintRetryEmail(supabaseAdmin, {
-            email: retryEmailRecipient,
-            displayName: fullName,
-            diditSessionId: sessionId,
-        });
     }
 }
 
@@ -874,8 +860,9 @@ serve(async (req) => {
                     documentType: reviewDocumentType,
                     documentCountry: reviewDocumentCountry,
                 });
+                const reviewNameBirthDate = prepareIdentityNameBirthDateDuplicateInput(idVerification);
 
-                if (!reviewDocumentFingerprint) {
+                if (!reviewDocumentFingerprint && !reviewNameBirthDate.hasNameBirthDate) {
                     await handleMissingDocumentFingerprintRetry(supabaseAdmin, {
                         userReference: finalUserReference,
                         userEmail,
@@ -1197,17 +1184,6 @@ async function handleApproved(
         hasNameBirthDateDuplicateInput: identityNameBirthDate.hasNameBirthDate,
     });
 
-    if (!documentFingerprint) {
-        await handleMissingDocumentFingerprintRetry(supabaseAdmin, {
-            userReference,
-            userEmail,
-            idVerification,
-            sessionId,
-            context: 'approved_without_document_fingerprint',
-        });
-        return;
-    }
-
     // ALWAYS Store verification result in verification_sessions table
     // This provides a persistent record for both TEMP and Registered users.
     // create-didit-session checks this table using the Didit Session ID.
@@ -1261,15 +1237,19 @@ async function handleApproved(
     const resolvedRole = currentProfile?.role || authUser?.user?.user_metadata?.role || 'musician';
     const resolvedEmail = userEmail || currentProfile?.email || authUser?.user?.email || '';
 
-    if (documentFingerprint) {
+    if (documentFingerprint || identityNameBirthDate.hasNameBirthDate) {
         const duplicate = await findSameRoleIdentityDuplicate(supabaseAdmin, {
             documentFingerprint,
             role: resolvedRole,
             userId: userReference,
+            email: resolvedEmail,
+            normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+            birthDate: identityNameBirthDate.birthDate,
         });
 
         if (duplicate.hasDuplicate) {
             const duplicateReason = getDuplicateIdentityReviewReason(resolvedRole);
+            const matchedOn = duplicate.matches?.[0]?.matched_on || (identityNameBirthDate.hasNameBirthDate ? 'NAME_BIRTHDATE' : 'DOCUMENT_FINGERPRINT');
             const reviewRecord = await queueIdentityReview(supabaseAdmin, {
                 userId: userReference,
                 email: resolvedEmail,
@@ -1285,10 +1265,11 @@ async function handleApproved(
                 normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
                 birthDate: identityNameBirthDate.birthDate,
                 reviewReason: duplicateReason,
-                matchedOn: 'DOCUMENT_FINGERPRINT',
+                matchedOn,
                 metadata: {
-                    duplicate_detected_by: 'local_document_fingerprint',
-                    matched_on: 'DOCUMENT_FINGERPRINT',
+                    duplicate_detected_by: 'local_identity_match',
+                    matched_on: matchedOn,
+                    missing_document_fingerprint: !documentFingerprint,
                     duplicate_matches: duplicate.matches,
                 },
             });
@@ -1308,7 +1289,7 @@ async function handleApproved(
                 normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
                 birthDate: identityNameBirthDate.birthDate,
                 reviewReason: duplicateReason,
-                matchedOn: 'DOCUMENT_FINGERPRINT',
+                matchedOn,
             });
 
             if (sessionId) {
@@ -1334,7 +1315,7 @@ async function handleApproved(
                             duplicate_identity_review_required: true,
                             duplicate_reason: duplicateReason,
                             review_reason: duplicateReason,
-                            matched_on: 'DOCUMENT_FINGERPRINT',
+                            matched_on: matchedOn,
                             duplicate_match_count: duplicate.matches.length,
                     },
                 );
@@ -1386,11 +1367,12 @@ async function handleApproved(
 
     if (approvalClaim?.decision === 'PENDING_REVIEW' || approvalClaim?.decision === 'EXISTING_ACCOUNT') {
         const duplicateReason = getApprovalClaimReviewReason(approvalClaim, resolvedRole);
+        const missingIdentityKeyReason = duplicateReason === 'MISSING_DOCUMENT_FINGERPRINT' || duplicateReason === 'MISSING_IDENTITY_DUPLICATE_KEY';
         const matchedOn = getApprovalClaimMatchedOn(
             approvalClaim,
-            duplicateReason === 'MISSING_DOCUMENT_FINGERPRINT' ? '' : 'DOCUMENT_FINGERPRINT',
+            missingIdentityKeyReason ? '' : 'NAME_BIRTHDATE',
         );
-        const duplicateMatchCount = getApprovalClaimMatchCount(approvalClaim, duplicateReason === 'MISSING_DOCUMENT_FINGERPRINT' ? 0 : 1);
+        const duplicateMatchCount = getApprovalClaimMatchCount(approvalClaim, missingIdentityKeyReason ? 0 : 1);
         const reviewRecord = await queueIdentityReview(supabaseAdmin, {
             userId: userReference,
             email: resolvedEmail,
@@ -1788,7 +1770,7 @@ async function handleDuplicateDetected(
         resolvedEmail = resolvedEmail || pendingSession?.verification_data?.email || sessionMetadata?.email || '';
     }
 
-    if (!documentFingerprint) {
+    if (!documentFingerprint && !identityNameBirthDate.hasNameBirthDate) {
         await handleMissingDocumentFingerprintRetry(supabaseAdmin, {
             userReference,
             userEmail: resolvedEmail || userEmail,
@@ -1803,17 +1785,21 @@ async function handleDuplicateDetected(
 
     let duplicateMatchCount = 1;
     let duplicateMatchesForReview: any[] = [];
+    let matchedOn = identityNameBirthDate.hasNameBirthDate ? 'NAME_BIRTHDATE' : 'DOCUMENT_FINGERPRINT';
     const hasRoleForDuplicateCheck = Boolean(resolvedRole);
-    if (documentFingerprint && hasRoleForDuplicateCheck && canResolveDuplicateByRole) {
+    if ((documentFingerprint || identityNameBirthDate.hasNameBirthDate) && hasRoleForDuplicateCheck && canResolveDuplicateByRole) {
         const duplicate = await findSameRoleIdentityDuplicate(supabaseAdmin, {
             documentFingerprint,
             role: resolvedRole,
             userId: isUuid(userReference) ? userReference : null,
             email: resolvedEmail,
+            normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+            birthDate: identityNameBirthDate.birthDate,
         });
 
         duplicateMatchCount = duplicate.matches?.length || 0;
         duplicateMatchesForReview = duplicate.matches || [];
+        matchedOn = duplicate.matches?.[0]?.matched_on || matchedOn;
         if (!duplicate.hasDuplicate) {
             await handleApproved(supabaseAdmin, userReference, resolvedEmail || userEmail, idVerification, authUser, sessionId, 'APPROVED');
             return;
@@ -1840,7 +1826,7 @@ async function handleDuplicateDetected(
                     duplicate_identity_review_required: true,
                     duplicate_reason: duplicateReason,
                     review_reason: duplicateReason,
-                    matched_on: 'DOCUMENT_FINGERPRINT',
+                    matched_on: matchedOn,
                     duplicate_match_count: duplicateMatchCount || 1,
                     warnings,
                     review_started_at: new Date().toISOString(),
@@ -1864,12 +1850,13 @@ async function handleDuplicateDetected(
         normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
         birthDate: identityNameBirthDate.birthDate,
         reviewReason: duplicateReason,
-        matchedOn: 'DOCUMENT_FINGERPRINT',
+        matchedOn,
         metadata: {
             didit_warnings: warnings,
             duplicate_detected_by: 'didit_warning',
             role_scoped_duplicate_check: canResolveDuplicateByRole,
-            matched_on: 'DOCUMENT_FINGERPRINT',
+            matched_on: matchedOn,
+            missing_document_fingerprint: !documentFingerprint,
             duplicate_matches: duplicateMatchesForReview,
         },
     });
@@ -1889,7 +1876,7 @@ async function handleDuplicateDetected(
         normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
         birthDate: identityNameBirthDate.birthDate,
         reviewReason: duplicateReason,
-        matchedOn: 'DOCUMENT_FINGERPRINT',
+        matchedOn,
     });
 
     await supabaseAdmin
