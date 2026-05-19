@@ -522,7 +522,9 @@ const nativeInputMaestroFlows = new Set([
   'mobile-booking-cancel.yaml',
   'mobile-booking-report-access.yaml',
   'mobile-booking-report-late.yaml',
+  'mobile-feed-create-post.yaml',
   'mobile-gig-application-withdraw.yaml',
+  'mobile-playlist-create.yaml',
 ]);
 
 export async function requireAndroidApp() {

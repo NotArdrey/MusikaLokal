@@ -434,6 +434,11 @@ export async function recordIdentityDocumentClaim(
     birthDate = null,
     reviewReason = null,
     matchedOn = null,
+    musicVideoPath = null,
+    musicVideoOriginalName = null,
+    musicVideoMimeType = null,
+    musicVideoSizeBytes = null,
+    musicVideoUploadedAt = null,
   }: Record<string, unknown>,
 ) {
   if (!isUuid(userId)) return null;
@@ -611,6 +616,11 @@ export async function queueIdentityReview(
     matched_on: matchedOn || null,
     duplicate_reason: reason,
     duplicate_match_count: Number(duplicateMatchCount || 0),
+    music_video_path: normalizeText(musicVideoPath) || null,
+    music_video_original_name: normalizeText(musicVideoOriginalName) || null,
+    music_video_mime_type: normalizeText(musicVideoMimeType).toLowerCase() || null,
+    music_video_size_bytes: musicVideoSizeBytes ? Number(musicVideoSizeBytes) : null,
+    music_video_uploaded_at: musicVideoUploadedAt || null,
     review_notes: reason,
     metadata: {
       ...(metadata && typeof metadata === "object" ? metadata : {}),

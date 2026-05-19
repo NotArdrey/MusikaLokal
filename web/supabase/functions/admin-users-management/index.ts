@@ -10,6 +10,11 @@ import {
   recordIdentityDocumentClaim,
   queueIdentityReview,
 } from "../_shared/identityDuplicate.ts";
+import {
+  MUSICIAN_VIDEO_BUCKET,
+  MUSICIAN_VIDEO_REVIEW_SOURCE,
+  publishMusicianVideoToProfilePortfolio,
+} from "../_shared/musicianVideoProof.ts";
 
 declare const Deno: {
   env: {
@@ -1519,7 +1524,7 @@ serve(async (req: Request) => {
       let reviewQuery = client
         .from("manual_identity_reviews")
         .select(
-          "id, user_id, submitted_by_email, submitted_role, document_type, document_type_key, document_country, source, status, didit_session_id, document_fingerprint, verified_full_legal_name, normalized_full_legal_name, birth_date, review_reason, matched_on, duplicate_reason, duplicate_match_count, metadata, front_image_path, back_image_path, selfie_image_path, review_notes, reviewed_by, reviewed_at, expected_decision_by, created_at, updated_at",
+          "id, user_id, submitted_by_email, submitted_role, document_type, document_type_key, document_country, source, status, didit_session_id, document_fingerprint, verified_full_legal_name, normalized_full_legal_name, birth_date, review_reason, matched_on, duplicate_reason, duplicate_match_count, metadata, front_image_path, back_image_path, selfie_image_path, music_video_path, music_video_original_name, music_video_mime_type, music_video_size_bytes, music_video_uploaded_at, review_notes, reviewed_by, reviewed_at, expected_decision_by, created_at, updated_at",
         )
         .order("created_at", { ascending: false })
         .limit(limit);
@@ -1788,6 +1793,7 @@ serve(async (req: Request) => {
           front_image_url: null,
           back_image_url: null,
           selfie_image_url: null,
+          music_video_url: null,
         } as Record<string, any>;
 
         if (review.front_image_path) {
@@ -1811,6 +1817,13 @@ serve(async (req: Request) => {
           item.selfie_image_url = signed?.signedUrl || null;
         }
 
+        if (review.music_video_path) {
+          const { data: signed } = await client.storage
+            .from(MUSICIAN_VIDEO_BUCKET)
+            .createSignedUrl(String(review.music_video_path), 60 * 30);
+          item.music_video_url = signed?.signedUrl || null;
+        }
+
         return item;
       }));
 
@@ -1826,7 +1839,7 @@ serve(async (req: Request) => {
 
       const { data: review, error: reviewError } = await client
         .from("manual_identity_reviews")
-        .select("id, source, status, didit_session_id, metadata, front_image_path, back_image_path, selfie_image_path")
+        .select("id, source, status, didit_session_id, metadata, front_image_path, back_image_path, selfie_image_path, music_video_path")
         .eq("id", reviewId)
         .maybeSingle();
 
@@ -1844,6 +1857,7 @@ serve(async (req: Request) => {
         front_image_url: null,
         back_image_url: null,
         selfie_image_url: null,
+        music_video_url: null,
       } as Record<string, any>;
 
       if (isDiditBackedReview(review)) {
@@ -1878,6 +1892,13 @@ serve(async (req: Request) => {
             .createSignedUrl(String(review.selfie_image_path), 60 * 30);
           item.selfie_image_url = signed?.signedUrl || null;
         }
+      }
+
+      if (review.music_video_path) {
+        const { data: signed } = await client.storage
+          .from(MUSICIAN_VIDEO_BUCKET)
+          .createSignedUrl(String(review.music_video_path), 60 * 30);
+        item.music_video_url = signed?.signedUrl || null;
       }
 
       return jsonResponse({ item });
@@ -1916,6 +1937,7 @@ serve(async (req: Request) => {
         front_image_url: null,
         back_image_url: null,
         selfie_image_url: null,
+        music_video_url: null,
         didit_review: null,
       } as Record<string, any>;
 
@@ -1936,7 +1958,7 @@ serve(async (req: Request) => {
       if (manualReviewId) {
         const { data: review, error: reviewError } = await client
           .from("manual_identity_reviews")
-          .select("id, source, status, didit_session_id, metadata, front_image_path, back_image_path, selfie_image_path")
+          .select("id, source, status, didit_session_id, metadata, front_image_path, back_image_path, selfie_image_path, music_video_path")
           .eq("id", manualReviewId)
           .maybeSingle();
 
@@ -1984,6 +2006,13 @@ serve(async (req: Request) => {
             .from("identity-manual")
             .createSignedUrl(String(review.selfie_image_path), 60 * 30);
           item.selfie_image_url = signed?.signedUrl || null;
+        }
+
+        if (review.music_video_path) {
+          const { data: signed } = await client.storage
+            .from(MUSICIAN_VIDEO_BUCKET)
+            .createSignedUrl(String(review.music_video_path), 60 * 30);
+          item.music_video_url = signed?.signedUrl || null;
         }
 
         return jsonResponse({ item });
@@ -2034,11 +2063,41 @@ serve(async (req: Request) => {
       const reviewRoleForClaim = String(review.submitted_role || preDecisionProfile?.role || "musician").trim().toLowerCase();
       let duplicateMatchesForApproval: any[] = [];
       const documentFingerprintForDecision = String(review.document_fingerprint || "").trim() || null;
+      const reviewSourceForDecision = String(review.source || "").trim().toUpperCase();
+      const isMusicianVideoOnlyReview = reviewSourceForDecision === MUSICIAN_VIDEO_REVIEW_SOURCE;
+      const isMusicianSignupReview = reviewRoleForClaim === "musician" || Boolean(review.music_video_path) || isMusicianVideoOnlyReview;
 
       if (decision === "APPROVED") {
+        if (isMusicianSignupReview && !review.music_video_path) {
+          return jsonResponse({
+            error: "Musician signup cannot be approved without a music video proof upload.",
+          }, 400);
+        }
+
+        if (isMusicianVideoOnlyReview) {
+          const { data: approvedIdentityClaim, error: approvedIdentityClaimError } = await client
+            .from("identity_document_claims")
+            .select("id")
+            .eq("user_id", review.user_id)
+            .eq("role", reviewRoleForClaim)
+            .eq("status", "APPROVED")
+            .limit(1)
+            .maybeSingle();
+
+          if (approvedIdentityClaimError) {
+            return jsonResponse({ error: approvedIdentityClaimError.message }, 400);
+          }
+
+          if (!approvedIdentityClaim?.id) {
+            return jsonResponse({
+              error: "Identity must be approved before approving this musician video proof.",
+            }, 400);
+          }
+        }
+
         const reviewEmail = String(preDecisionProfile?.email || review.submitted_by_email || "").trim().toLowerCase();
         const approvalProfilesById = new Map<string, any>();
-        if (documentFingerprintForDecision) {
+        if (!isMusicianVideoOnlyReview && documentFingerprintForDecision) {
           const { data: duplicateClaims, error: duplicateClaimsError } = await client
             .from("identity_document_claims")
             .select("id, user_id, normalized_email, profiles:user_id(id, email, role)")
@@ -2072,7 +2131,7 @@ serve(async (req: Request) => {
           normalizedFullLegalName: review.normalized_full_legal_name,
           birthDate: review.birth_date,
         });
-        if (reviewNameBirth.hasNameBirthDate) {
+        if (!isMusicianVideoOnlyReview && reviewNameBirth.hasNameBirthDate) {
           const { data: nameBirthClaims, error: nameBirthClaimsError } = await client
             .from("identity_document_claims")
             .select("id, user_id, normalized_email, profiles:user_id(id, email, role)")
@@ -2115,7 +2174,7 @@ serve(async (req: Request) => {
           }, 400);
         }
 
-        if (!documentFingerprintForDecision && !reviewNameBirth.hasNameBirthDate) {
+        if (!isMusicianVideoOnlyReview && !documentFingerprintForDecision && !reviewNameBirth.hasNameBirthDate) {
           return jsonResponse({
             error: "This review is missing both document fingerprint and name/birthdate data, so duplicate identity checks cannot run. Require the user to repeat identity verification instead.",
           }, 400);
@@ -2125,6 +2184,7 @@ serve(async (req: Request) => {
       const profileVerificationStatus = decision === "APPROVED" ? "APPROVED" : "DECLINED";
       const nowIso = new Date().toISOString();
       let diditStatusSync: Record<string, any> | null = null;
+      let musicianVideoPortfolio: Record<string, any> | null = null;
 
       if (isDiditPendingReview(review)) {
         const diditSessionId = String(review.didit_session_id || "").trim();
@@ -2147,6 +2207,16 @@ serve(async (req: Request) => {
         }
       }
 
+      if (decision === "APPROVED" && isMusicianSignupReview && review.music_video_path) {
+        musicianVideoPortfolio = await publishMusicianVideoToProfilePortfolio(client, {
+          userId: review.user_id,
+          reviewId,
+          objectPath: review.music_video_path,
+          mimeType: review.music_video_mime_type || "video/mp4",
+          originalName: review.music_video_original_name || "music-video",
+        });
+      }
+
       const existingReviewMetadata = review.metadata && typeof review.metadata === "object" ? review.metadata : {};
       const nextReviewMetadata = {
         ...existingReviewMetadata,
@@ -2164,6 +2234,14 @@ serve(async (req: Request) => {
               duplicate_override_confirmed_at: nowIso,
               duplicate_override_match_count: duplicateMatchesForApproval.length,
               duplicate_override_matched_on: Array.from(new Set(duplicateMatchesForApproval.map((match: any) => match.matched_on).filter(Boolean))),
+            }
+          : {}),
+        ...(musicianVideoPortfolio
+          ? {
+              musician_video_portfolio_bucket: musicianVideoPortfolio.bucketName,
+              musician_video_portfolio_path: musicianVideoPortfolio.path,
+              musician_video_portfolio_url: musicianVideoPortfolio.publicUrl,
+              musician_video_published_to_gallery_at: nowIso,
             }
           : {}),
       };
@@ -2236,7 +2314,7 @@ serve(async (req: Request) => {
         birthDate: review.birth_date,
       });
 
-      if (documentFingerprintForDecision) {
+      if (!isMusicianVideoOnlyReview && documentFingerprintForDecision) {
         if (decision === "APPROVED") {
           const approvalClaim = normalizeApprovalClaimResult(await claimApprovedIdentityDocument(client, {
             userId: review.user_id,
@@ -2293,10 +2371,12 @@ serve(async (req: Request) => {
       await client.from("notifications").insert({
         user_id: review.user_id,
         type: decision === "APPROVED" ? "success" : "warning",
-        title: decision === "APPROVED" ? "Identity Verification Approved" : "Identity Verification Declined",
+        title: isMusicianVideoOnlyReview
+          ? (decision === "APPROVED" ? "Musician Verification Approved" : "Musician Verification Declined")
+          : (decision === "APPROVED" ? "Identity Verification Approved" : "Identity Verification Declined"),
         message: decision === "APPROVED"
-          ? "Your manual identity verification was approved."
-          : "Your manual identity verification was declined. Please submit a new valid government ID.",
+          ? (isMusicianVideoOnlyReview ? "Your musician video proof was approved." : "Your manual identity verification was approved.")
+          : (isMusicianVideoOnlyReview ? "Your musician video proof was declined." : "Your manual identity verification was declined. Please submit a new valid government ID."),
         meta: {
           manual_identity_review_id: reviewId,
           decision: profileVerificationStatus,

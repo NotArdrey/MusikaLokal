@@ -8,6 +8,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCameraPermissions } from 'expo-camera';
+import * as FileSystem from 'expo-file-system/src/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -52,9 +53,21 @@ type ManualUploadAsset = {
     fileName: string;
 };
 
+type MusicianVideoProofUpload = {
+    uploadId: string;
+    bucketName: string;
+    path: string;
+    originalName: string;
+    mimeType: string;
+    sizeBytes: number;
+    expiresAt?: string | null;
+};
+
 type ManualImageTarget = 'front' | 'back' | 'selfie';
 
 const ALLOWED_SIGNUP_ROLES: SignupRole[] = ['fan', 'musician'];
+const MUSICIAN_VIDEO_MAX_BYTES = 50 * 1024 * 1024;
+const MUSICIAN_VIDEO_ALLOWED_MIME_TYPES = new Set(['video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v']);
 
 const SIGNUP_ROLE_OPTIONS: SignupRoleOption[] = [
     {
@@ -85,6 +98,88 @@ const PH_DOCUMENT_OPTIONS: DocumentOption[] = [
 
 const getDocumentOptionByKey = (key: string) => {
     return PH_DOCUMENT_OPTIONS.find((option) => option.key === key) ?? PH_DOCUMENT_OPTIONS[0];
+};
+
+const formatUploadFileSize = (bytes: number) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return 'Unknown size';
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+};
+
+const getVideoOriginalName = (asset: ImagePicker.ImagePickerAsset) => {
+    const fallbackName = asset.uri?.split('/').pop() || 'music-video.mp4';
+    return typeof (asset as any)?.fileName === 'string' && (asset as any).fileName.trim()
+        ? (asset as any).fileName.trim()
+        : fallbackName;
+};
+
+const resolveVideoMimeType = (asset: ImagePicker.ImagePickerAsset, originalName: string) => {
+    const directMime = String(asset.mimeType || '').trim().toLowerCase();
+    if (directMime === 'video/mov') return 'video/quicktime';
+    if (MUSICIAN_VIDEO_ALLOWED_MIME_TYPES.has(directMime)) return directMime;
+
+    const extension = (originalName.split('.').pop() || '').toLowerCase();
+    if (extension === 'mov') return 'video/quicktime';
+    if (extension === 'webm') return 'video/webm';
+    if (extension === 'm4v') return 'video/x-m4v';
+    return 'video/mp4';
+};
+
+const base64ToUint8Array = (base64: string): Uint8Array => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const lookup = new Uint8Array(256);
+    for (let i = 0; i < chars.length; i += 1) {
+        lookup[chars.charCodeAt(i)] = i;
+    }
+
+    const normalized = base64.replace(/\s/g, '');
+    let bufferLength = normalized.length * 0.75;
+    if (normalized.endsWith('==')) bufferLength -= 2;
+    else if (normalized.endsWith('=')) bufferLength -= 1;
+
+    const bytes = new Uint8Array(Math.floor(bufferLength));
+    let p = 0;
+    for (let i = 0; i < normalized.length; i += 4) {
+        const e1 = lookup[normalized.charCodeAt(i)];
+        const e2 = lookup[normalized.charCodeAt(i + 1)];
+        const e3 = lookup[normalized.charCodeAt(i + 2)];
+        const e4 = lookup[normalized.charCodeAt(i + 3)];
+
+        if (p < bytes.length) bytes[p++] = (e1 << 2) | (e2 >> 4);
+        if (p < bytes.length) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
+        if (p < bytes.length) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
+    }
+
+    return bytes;
+};
+
+const getVideoAssetSizeBytes = async (asset: ImagePicker.ImagePickerAsset) => {
+    const directSize = Number((asset as any)?.fileSize || 0);
+    if (Number.isFinite(directSize) && directSize > 0) return directSize;
+
+    if (Platform.OS === 'web') {
+        const webFile = (asset as any)?.file;
+        if (typeof webFile?.size === 'number' && Number.isFinite(webFile.size)) return webFile.size;
+        return null;
+    }
+
+    try {
+        const info = await FileSystem.getInfoAsync(asset.uri);
+        return info.exists && typeof info.size === 'number' ? info.size : null;
+    } catch {
+        return null;
+    }
+};
+
+const getSignedVideoUploadBody = async (asset: ImagePicker.ImagePickerAsset) => {
+    if (Platform.OS === 'web') {
+        const webFile = (asset as any)?.file;
+        if (webFile) return webFile;
+        return await (await fetch(asset.uri)).arrayBuffer();
+    }
+
+    const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: 'base64' });
+    return base64ToUint8Array(base64);
 };
 
 const DEFAULT_SIGNUP_DOCUMENT_KEY = isE2EFixtureMode() ? 'health_insurance' : PH_DOCUMENT_OPTIONS[0].key;
@@ -483,6 +578,8 @@ export default function SignupScreen() {
     const [manualIdNumber, setManualIdNumber] = useState('');
     const [manualIdExpiration, setManualIdExpiration] = useState('');
     const [manualExpirationCalendarVisible, setManualExpirationCalendarVisible] = useState(false);
+    const [musicianVideoProof, setMusicianVideoProof] = useState<MusicianVideoProofUpload | null>(null);
+    const [musicianVideoUploading, setMusicianVideoUploading] = useState(false);
 
     const { verified, session_id, check_verification, role } = useLocalSearchParams<{ verified: string; session_id: string; check_verification: string; role?: string }>();
 
@@ -560,7 +657,7 @@ export default function SignupScreen() {
 
     const Alert = { alert: showAlertNative };
 
-    const [errors, setErrors] = useState<{ email?: string; password?: string; confirmPassword?: string; role?: string; document?: string }>({});
+    const [errors, setErrors] = useState<{ email?: string; password?: string; confirmPassword?: string; role?: string; document?: string; musicVideo?: string }>({});
 
     useEffect(() => {
         const requestedRole = Array.isArray(role) ? role[0] : role;
@@ -638,6 +735,7 @@ export default function SignupScreen() {
             setSessionId('');
             setSessionNonce('');
             setTempSessionRef('');
+            setMusicianVideoProof(null);
             AsyncStorage.removeItem('signup_current_session').catch((storageError) => {
                 logSignupFlowError('email.changed.sessionClearError', storageError, {
                     storageKey: 'signup_current_session',
@@ -670,6 +768,7 @@ export default function SignupScreen() {
                             sVerificationUrl,
                             verificationMode: sVerificationMode,
                             selectedDocumentKey: sSelectedDocumentKey,
+                            musicianVideoProof: sMusicianVideoProof,
                         } = JSON.parse(savedState);
                         logSignupFlow('restoreState.loaded', {
                             email: maskEmailForLog(sEmail),
@@ -692,6 +791,9 @@ export default function SignupScreen() {
                         }
                         if (sSelectedDocumentKey) {
                             setSelectedDocumentKey(getDocumentOptionByKey(String(sSelectedDocumentKey)).key);
+                        }
+                        if (sMusicianVideoProof?.uploadId) {
+                            setMusicianVideoProof(sMusicianVideoProof);
                         }
                         if (tempRef) setTempSessionRef(tempRef);
                         if (sSessionId) setSessionId(sSessionId);
@@ -1222,19 +1324,22 @@ export default function SignupScreen() {
             ? '#D97706'
             : '#DC2626';
     const showPasswordGuidance = Boolean(password) || Boolean(errors.password);
+    const isMusicianSignup = selectedRole === 'musician';
     const isDetailsStepReady =
         isAllowedSignupRole(selectedRole) &&
         emailRegex.test(email.trim()) &&
         isPasswordStrongEnough(password) &&
         password === confirmPassword &&
-        Boolean(selectedDocumentOption?.key);
+        Boolean(selectedDocumentOption?.key) &&
+        (!isMusicianSignup || Boolean(musicianVideoProof?.uploadId));
     const isManualReviewReady = !selectedDocumentOption.diditSupported &&
         Boolean(manualFrontImage) &&
         Boolean(manualBackImage) &&
         Boolean(manualSelfieImage) &&
         Boolean(manualFullName.trim()) &&
         Boolean(manualIdNumber.trim()) &&
-        Boolean(manualIdExpiration.trim());
+        Boolean(manualIdExpiration.trim()) &&
+        (!isMusicianSignup || Boolean(musicianVideoProof?.uploadId));
 
     const clearDiditSignupSession = useCallback(async (reason: string) => {
         setVerificationUrl('');
@@ -1269,6 +1374,9 @@ export default function SignupScreen() {
     const handleRoleSelect = (nextRole: SignupRole) => {
         if (nextRole !== selectedRole) {
             void clearDiditSignupSession('role_changed');
+            if (nextRole !== 'musician') {
+                setMusicianVideoProof(null);
+            }
         }
         setSelectedRole(nextRole);
         if (errors.role) {
@@ -1333,6 +1441,7 @@ export default function SignupScreen() {
                 tempRef,
                 verificationMode,
                 selectedDocumentKey,
+                musicianVideoProof,
                 sSessionId: existingSessionId || undefined,
                 sSessionNonce: existingSessionNonce || undefined,
             }));
@@ -1424,6 +1533,7 @@ export default function SignupScreen() {
                         tempRef,
                         verificationMode,
                         selectedDocumentKey,
+                        musicianVideoProof,
                         sSessionId: createdSessionId,
                         sSessionNonce: createdSessionNonce,
                         sVerificationUrl: createdVerificationUrl,
@@ -1638,6 +1748,100 @@ export default function SignupScreen() {
         }
     };
 
+    const pickAndUploadMusicianVideoProof = async () => {
+        if (selectedRole !== 'musician') {
+            return;
+        }
+
+        if (!emailRegex.test(email.trim())) {
+            Alert.alert('Email Required', 'Enter a valid email before uploading your music video proof.');
+            return;
+        }
+
+        try {
+            if (Platform.OS !== 'web') {
+                const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                if (permissionResult.status !== 'granted') {
+                    Alert.alert('Permission Required', 'Please allow media access to upload your music video proof.');
+                    return;
+                }
+            }
+
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['videos'],
+                allowsEditing: false,
+                quality: 1,
+            });
+
+            if (result.canceled || !result.assets?.[0]) {
+                return;
+            }
+
+            const asset = result.assets[0];
+            const originalName = getVideoOriginalName(asset);
+            const mimeType = resolveVideoMimeType(asset, originalName);
+            const sizeBytes = await getVideoAssetSizeBytes(asset);
+
+            if (!MUSICIAN_VIDEO_ALLOWED_MIME_TYPES.has(mimeType)) {
+                Alert.alert('Unsupported Video', 'Please upload an MP4, MOV, M4V, or WebM music video.');
+                return;
+            }
+
+            if (!sizeBytes || sizeBytes > MUSICIAN_VIDEO_MAX_BYTES) {
+                Alert.alert('Video Too Large', 'Please upload a music video that is 50MB or smaller.');
+                return;
+            }
+
+            setMusicianVideoUploading(true);
+            const { data: slotData, error: slotError } = await supabase.functions.invoke('manual-identity-review', {
+                body: {
+                    action: 'create_musician_video_upload',
+                    email: email.trim(),
+                    role: selectedRole,
+                    originalName,
+                    mimeType,
+                    sizeBytes,
+                },
+            });
+
+            if (slotError) {
+                throw slotError;
+            }
+
+            const upload = (slotData as any)?.upload;
+            if (!upload?.bucketName || !upload?.path || !upload?.token || !upload?.uploadId) {
+                throw new Error('The server did not return a valid upload slot.');
+            }
+
+            const uploadBody = await getSignedVideoUploadBody(asset);
+            const { error: uploadError } = await supabase.storage
+                .from(upload.bucketName)
+                .uploadToSignedUrl(upload.path, upload.token, uploadBody as any, {
+                    contentType: mimeType,
+                });
+
+            if (uploadError) {
+                throw uploadError;
+            }
+
+            setMusicianVideoProof({
+                uploadId: upload.uploadId,
+                bucketName: upload.bucketName,
+                path: upload.path,
+                originalName,
+                mimeType,
+                sizeBytes,
+                expiresAt: upload.expiresAt || null,
+            });
+            Alert.alert('Video Uploaded', 'Your music video proof is attached. Continue with identity verification next.');
+        } catch (err: any) {
+            console.error('Musician video proof upload failed:', err);
+            Alert.alert('Upload Failed', err?.message || 'Unable to upload your music video proof.');
+        } finally {
+            setMusicianVideoUploading(false);
+        }
+    };
+
     const finishAccountCreationPendingReview = async (refToLink?: string) => {
         if (pendingReviewSignupRef.current) {
             logSignupFlow('pendingReviewAccountCreation.blocked', {
@@ -1679,6 +1883,13 @@ export default function SignupScreen() {
             return;
         }
 
+        if (selectedRole === 'musician' && !musicianVideoProof?.uploadId) {
+            Alert.alert('Music Video Required', 'Please upload your music video proof before continuing.');
+            setStep('details');
+            pendingReviewSignupRef.current = false;
+            return;
+        }
+
         setLoading(true);
 
         const fallbackName = email.split('@')[0] || getSignupRoleFallbackName(selectedRole);
@@ -1706,6 +1917,7 @@ export default function SignupScreen() {
                     selectedDocumentType: selectedDocumentOption.label,
                     selectedDocumentTypeKey: selectedDocumentOption.key,
                     verificationMode: 'didit',
+                    musicVideoUploadId: selectedRole === 'musician' ? musicianVideoProof?.uploadId : null,
                     redirectTo: emailRedirectTo,
                 },
             });
@@ -1848,6 +2060,12 @@ export default function SignupScreen() {
             return;
         }
 
+        if (selectedRole === 'musician' && !musicianVideoProof?.uploadId) {
+            Alert.alert('Music Video Required', 'Please upload your music video proof before submitting manual review.');
+            setStep('details');
+            return;
+        }
+
         setLoading(true);
 
         try {
@@ -1877,6 +2095,7 @@ export default function SignupScreen() {
                     documentType: selectedDocumentOption.label,
                     documentTypeKey: selectedDocumentOption.key,
                     documentCountry: 'PHL',
+                    musicVideoUploadId: selectedRole === 'musician' ? musicianVideoProof?.uploadId : null,
                     frontImage: manualFrontImage,
                     backImage: manualBackImage,
                     selfieImage: manualSelfieImage,
@@ -1975,6 +2194,10 @@ export default function SignupScreen() {
 
         if (!selectedDocumentOption?.key) {
             newErrors.document = 'Please select an ID type';
+        }
+
+        if (selectedRole === 'musician' && !musicianVideoProof?.uploadId) {
+            newErrors.musicVideo = 'Please upload your music video proof';
         }
 
         if (password !== confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
@@ -2134,6 +2357,12 @@ export default function SignupScreen() {
                 platform: Platform.OS,
             });
             Alert.alert('Unsupported Account Type', 'Only fan and musician accounts can be registered right now.');
+            setStep('details');
+            return;
+        }
+
+        if (selectedRole === 'musician' && !musicianVideoProof?.uploadId) {
+            Alert.alert('Music Video Required', 'Please upload your music video proof before creating a musician account.');
             setStep('details');
             return;
         }
@@ -2331,6 +2560,7 @@ export default function SignupScreen() {
                     selectedDocumentType: selectedDocumentOption.label,
                     selectedDocumentTypeKey: selectedDocumentOption.key,
                     verificationMode,
+                    musicVideoUploadId: selectedRole === 'musician' ? musicianVideoProof?.uploadId : null,
                     redirectTo: emailRedirectTo,
                 },
             });
@@ -2419,6 +2649,9 @@ export default function SignupScreen() {
                     emailDeliveryAccepted: diditEmailDeliveryWasAccepted(emailDelivery),
                     platform: Platform.OS,
                 });
+                if (selectedRole === 'musician') {
+                    throw new Error('Musician signup must complete through secure verification review. Please try again.');
+                }
             }
 
         } catch (authErr: any) {
@@ -2611,6 +2844,45 @@ export default function SignupScreen() {
                 </View>
                 {errors.role ? <Text style={{ color: 'red', fontSize: 12 }}>{errors.role}</Text> : null}
             </View>
+
+            {isMusicianSignup ? (
+                <View style={styles.musicianVideoSection}>
+                    <View style={styles.sectionHeadingRow}>
+                        <Text style={[styles.sectionEyebrow, { color: colors.primary }]}>Musician proof</Text>
+                        <Text style={[styles.sectionHint, themeStyles.textSecondary]}>Required before verification</Text>
+                    </View>
+                    <TouchableOpacity
+                        activeOpacity={musicianVideoUploading ? 1 : 0.78}
+                        accessibilityLabel="signup-musician-video-upload-button"
+                        onPress={() => void pickAndUploadMusicianVideoProof()}
+                        disabled={musicianVideoUploading}
+                        style={[styles.manualUploadCard, styles.musicianVideoProofCard, themeStyles.inputContainer]}
+                        testID="signup-musician-video-upload-button"
+                    >
+                        <View style={[styles.manualUploadIcon, { backgroundColor: isDark ? '#111827' : '#EEF2FF' }]}>
+                            <Ionicons name="videocam-outline" size={20} color={colors.primary} />
+                        </View>
+                        <View style={styles.manualUploadCopy}>
+                            <Text style={[styles.manualUploadTitle, themeStyles.text]}>
+                                {musicianVideoProof ? 'Music video uploaded' : 'Upload music video'}
+                            </Text>
+                            <Text style={[styles.manualUploadPlaceholder, themeStyles.textSecondary]}>
+                                {musicianVideoProof
+                                    ? `${musicianVideoProof.originalName} - ${formatUploadFileSize(musicianVideoProof.sizeBytes)}`
+                                    : 'MP4, MOV, M4V, or WebM up to 50MB'}
+                            </Text>
+                        </View>
+                        <View style={[styles.manualUploadAction, { backgroundColor: musicianVideoProof ? (isDark ? '#334155' : '#F3F4F6') : colors.primary }]}>
+                            {musicianVideoUploading ? (
+                                <ActivityIndicator size="small" color={musicianVideoProof ? colors.text : '#FFFFFF'} />
+                            ) : (
+                                <Ionicons name={musicianVideoProof ? 'swap-horizontal-outline' : 'cloud-upload-outline'} size={16} color={musicianVideoProof ? colors.text : '#FFFFFF'} />
+                            )}
+                        </View>
+                    </TouchableOpacity>
+                    {errors.musicVideo ? <Text style={{ color: 'red', fontSize: 12 }}>{errors.musicVideo}</Text> : null}
+                </View>
+            ) : null}
 
             <View style={styles.formGap}>
                 {/* Email */}
@@ -3448,6 +3720,10 @@ const styles = StyleSheet.create({
     roleCopy: { flex: 1, gap: 4 },
     roleLabelBig: { fontSize: 18, fontWeight: '600', fontFamily: 'Poppins_600SemiBold' },
     roleDescBig: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
+    sectionHeadingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 },
+    sectionEyebrow: { fontSize: 11, lineHeight: 14, letterSpacing: 0.8, textTransform: 'uppercase', fontFamily: 'Poppins_700Bold' },
+    sectionHint: { fontSize: 12, lineHeight: 16, fontFamily: 'Poppins_400Regular' },
+    musicianVideoSection: { marginBottom: 18 },
     nextButton: {
         height: 56,
         borderRadius: 16,
@@ -3629,6 +3905,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 14,
         paddingVertical: 14,
         gap: 12,
+    },
+    musicianVideoProofCard: {
+        minHeight: 72,
     },
     manualUploadIcon: {
         width: 42,

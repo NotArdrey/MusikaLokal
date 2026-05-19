@@ -129,7 +129,7 @@ const cleanManualReviewEmailError = (rawError: string) => {
 };
 
 type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
-type ManualReviewAssetKind = 'front' | 'back' | 'selfie';
+type ManualReviewAssetKind = 'front' | 'back' | 'selfie' | 'musicVideo';
 
 interface IdentityMatchAccount {
   claim_id?: string | null;
@@ -150,6 +150,7 @@ interface IdentityMatchAccount {
   front_image_url?: string | null;
   back_image_url?: string | null;
   selfie_image_url?: string | null;
+  music_video_url?: string | null;
 }
 
 interface ManualIdentityReviewEntry {
@@ -204,6 +205,12 @@ interface ManualIdentityReviewEntry {
   front_image_url?: string | null;
   back_image_url?: string | null;
   selfie_image_url?: string | null;
+  music_video_path?: string | null;
+  music_video_original_name?: string | null;
+  music_video_mime_type?: string | null;
+  music_video_size_bytes?: number | null;
+  music_video_uploaded_at?: string | null;
+  music_video_url?: string | null;
   profile?: {
     id?: string;
     full_name?: string | null;
@@ -290,12 +297,14 @@ const getDiditReviewInfo = (review?: ManualIdentityReviewEntry | null) => {
 const getManualReviewAssetUrl = (review: ManualIdentityReviewEntry, asset: ManualReviewAssetKind) => {
   if (asset === 'front') return String(review.front_image_url || '').trim();
   if (asset === 'back') return String(review.back_image_url || '').trim();
+  if (asset === 'musicVideo') return String(review.music_video_url || '').trim();
   return String(review.selfie_image_url || '').trim();
 };
 
 const getManualReviewAssetTitle = (asset: ManualReviewAssetKind) => {
   if (asset === 'front') return 'Front of ID';
   if (asset === 'back') return 'Back of ID';
+  if (asset === 'musicVideo') return 'Music video proof';
   return 'Selfie holding ID';
 };
 
@@ -314,7 +323,14 @@ const getIdentityMatchAccountKey = (account: IdentityMatchAccount, index: number
 const getIdentityMatchAccountAssetUrl = (account: Partial<IdentityMatchAccount>, asset: ManualReviewAssetKind) => {
   if (asset === 'front') return String(account.front_image_url || '').trim();
   if (asset === 'back') return String(account.back_image_url || '').trim();
+  if (asset === 'musicVideo') return String(account.music_video_url || '').trim();
   return String(account.selfie_image_url || '').trim();
+};
+
+const isMusicianReview = (review?: ManualIdentityReviewEntry | null) => {
+  const role = String(review?.submitted_role || review?.profile?.role || '').trim().toLowerCase();
+  const source = String(review?.source || '').trim().toUpperCase();
+  return role === 'musician' || source === 'MUSICIAN_VIDEO' || Boolean(review?.music_video_path || review?.music_video_url);
 };
 
 const formatDiditSessionLabel = (sessionId?: string | null) => {
@@ -435,7 +451,9 @@ const isE2EManualIdentityReview = (review?: ManualIdentityReviewEntry | null) =>
 };
 
 const needsIdentityVerificationRetry = (review?: ManualIdentityReviewEntry | null) => (
-  Boolean(review) && !String(review?.document_fingerprint || '').trim()
+  Boolean(review) &&
+  String(review?.source || '').trim().toUpperCase() !== 'MUSICIAN_VIDEO' &&
+  !String(review?.document_fingerprint || '').trim()
 );
 
 const MISSING_FINGERPRINT_RETRY_NOTE = 'Didit did not return a verified document fingerprint from the document country, type, and number. Please repeat identity verification with a valid, readable ID.';
@@ -892,7 +910,12 @@ export default function AdminIdentityReviewsPage() {
     }
 
     const diditSessionId = review.didit_session_id || review.didit_review?.session_id || null;
-    if (!isDiditBackedReviewSource(review.source, diditSessionId)) {
+    if (asset === 'musicVideo' && !review.music_video_path) {
+      showAlert('warning', 'File unavailable', 'No music video proof was found for this item.');
+      return;
+    }
+
+    if (asset !== 'musicVideo' && !isDiditBackedReviewSource(review.source, diditSessionId)) {
       showAlert('warning', 'File unavailable', 'No uploaded file was found for this item.');
       return;
     }
@@ -1041,6 +1064,11 @@ export default function AdminIdentityReviewsPage() {
 
     if (requiresIdentityRetry) {
       showAlert('warning', 'Verification retry required', 'Didit did not return the document data needed for approval. Require the user to repeat identity verification instead.');
+      return;
+    }
+
+    if (manualReviewDecision === 'APPROVED' && isMusicianReview(manualReviewTarget) && !manualReviewTarget.music_video_path && !manualReviewTarget.music_video_url) {
+      showAlert('warning', 'Music video required', 'Musician signup cannot be approved without a music video proof upload.');
       return;
     }
 
@@ -1425,6 +1453,24 @@ export default function AdminIdentityReviewsPage() {
                         <Text style={[styles.smallActionText, { color: colors.text }]}>Selfie</Text>
                       </TouchableOpacity>
 
+                      {isMusicianReview(review) ? (
+                        <TouchableOpacity
+                          testID={`admin-identity-review-music-video-${review.id}`}
+                          accessibilityLabel={`admin-identity-review-music-video-${review.id}`}
+                          activeOpacity={1}
+                          disabled={Boolean(loadingAsset)}
+                          onPress={() => void openManualReviewAsset(review, 'musicVideo')}
+                          style={[styles.smallActionButton, { borderColor: colors.border, opacity: loadingAsset ? 0.65 : 1 }]}
+                        >
+                          {loadingAsset === 'musicVideo' ? (
+                            <ActivityIndicator size="small" color={colors.text} />
+                          ) : (
+                            <Ionicons name="videocam-outline" size={14} color={colors.text} />
+                          )}
+                          <Text style={[styles.smallActionText, { color: colors.text }]}>Music Video</Text>
+                        </TouchableOpacity>
+                      ) : null}
+
                       {requiresVerificationRetry ? (
                         <TouchableOpacity
                           testID={`admin-identity-review-retry-${review.id}`}
@@ -1515,6 +1561,11 @@ export default function AdminIdentityReviewsPage() {
             <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
               Document: {manualReviewTarget?.document_type || '-'}
             </Text>
+            {isMusicianReview(manualReviewTarget) ? (
+              <Text style={[styles.cardMeta, { color: manualReviewTarget?.music_video_path || manualReviewTarget?.music_video_url ? colors.textSecondary : '#D97706' }]}>
+                Music video: {manualReviewTarget?.music_video_original_name || (manualReviewTarget?.music_video_path || manualReviewTarget?.music_video_url ? 'Uploaded' : 'Missing')}
+              </Text>
+            ) : null}
             {manualReviewRequiresRetry ? (
               <View style={[styles.duplicateWarningBox, { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.10)' : '#FFFBEB', borderColor: isDark ? '#FBBF24' : '#F59E0B' }]}>
                 <View style={styles.duplicateWarningTitleRow}>

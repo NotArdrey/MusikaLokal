@@ -18,6 +18,10 @@ import {
     getRegistrationRateLimitStatus,
     markRegistrationAttempt,
 } from '../_shared/registrationRateLimit.ts'
+import {
+    consumeMusicianVideoUpload,
+    MUSICIAN_VIDEO_REVIEW_SOURCE,
+} from '../_shared/musicianVideoProof.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -429,6 +433,8 @@ serve(async (req) => {
             verificationMode,
             redirectTo,
             action,
+            musicVideoUploadId: musicVideoUploadIdInput,
+            music_video_upload_id: musicVideoUploadIdSnake,
         } = await req.json()
 
         const supabaseAdmin = createClient(
@@ -513,6 +519,14 @@ serve(async (req) => {
                 status: 400,
             })
         }
+        const musicianVideoUploadId = String(musicVideoUploadIdInput || musicVideoUploadIdSnake || '').trim()
+        const requiresMusicianVideoReview = normalizedRole === 'musician'
+        if (requiresMusicianVideoReview && !musicianVideoUploadId) {
+            return new Response(JSON.stringify({ error: 'Music video proof is required for musician signup.' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 400,
+            })
+        }
 
         const normalizedVerificationStatus = String(verificationStatus || '').trim().toUpperCase()
         const approvedByDidit = Boolean(isVerified) || normalizedVerificationStatus === 'APPROVED'
@@ -539,6 +553,8 @@ serve(async (req) => {
                     role: normalizedRole,
                     verification_mode: verificationMode || null,
                     requested_verification_status: normalizedVerificationStatus || null,
+                    musician_video_review_required: requiresMusicianVideoReview,
+                    musician_video_upload_id: requiresMusicianVideoReview ? musicianVideoUploadId : null,
                 },
             })
             registrationAttemptId = registrationAttempt?.attemptId || null
@@ -724,7 +740,9 @@ serve(async (req) => {
         const sameRoleDuplicateDetected = Boolean(duplicateIdentityReview?.hasDuplicate)
         const diditDuplicateFlagRequiresReview = diditDuplicateFlag && sameRoleDuplicateDetected
         const requiresDuplicateIdentityReview = Boolean(sameRoleDuplicateDetected || diditDuplicateFlagRequiresReview)
-        const effectiveVerificationStatus = approvedByDidit && !requiresDuplicateIdentityReview
+        const effectiveVerificationStatus = requiresMusicianVideoReview
+            ? 'PENDING_REVIEW'
+            : approvedByDidit && !requiresDuplicateIdentityReview
             ? 'APPROVED'
             : (pendingByDidit || requiresDuplicateIdentityReview) ? 'PENDING_REVIEW' : 'PENDING'
         const effectiveIsVerified = effectiveVerificationStatus === 'APPROVED'
@@ -1010,6 +1028,100 @@ serve(async (req) => {
             }
         }
 
+        let musicianVideoProof: any = null
+        if (requiresMusicianVideoReview) {
+            musicianVideoProof = await consumeMusicianVideoUpload(supabaseAdmin, musicianVideoUploadId, {
+                userId,
+                manualReviewId: identityReviewRecord?.id || null,
+            })
+
+            if (identityReviewRecord?.id) {
+                const { data: existingReview } = await supabaseAdmin
+                    .from('manual_identity_reviews')
+                    .select('metadata')
+                    .eq('id', identityReviewRecord.id)
+                    .maybeSingle()
+                const existingReviewMetadata = existingReview?.metadata && typeof existingReview.metadata === 'object'
+                    ? existingReview.metadata
+                    : {}
+                const { error: videoReviewUpdateError } = await supabaseAdmin
+                    .from('manual_identity_reviews')
+                    .update({
+                        ...musicianVideoProof.reviewColumns,
+                        metadata: {
+                            ...existingReviewMetadata,
+                            musician_video_review_required: true,
+                            musician_video_upload_id: musicianVideoProof.uploadId,
+                        },
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', identityReviewRecord.id)
+                if (videoReviewUpdateError) {
+                    throw new Error(`Unable to attach music video proof to review: ${videoReviewUpdateError.message}`)
+                }
+            } else {
+                identityReviewRecord = await queueIdentityReview(supabaseAdmin, {
+                    userId,
+                    email: normalizedEmail,
+                    role: normalizedRole,
+                    documentType: selectedDocumentType || 'Musician video proof',
+                    documentTypeKey: selectedDocumentTypeKey,
+                    documentCountry: diditVerificationData?.document_country || 'PHL',
+                    source: MUSICIAN_VIDEO_REVIEW_SOURCE,
+                    diditSessionId,
+                    documentFingerprint,
+                    verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+                    normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+                    birthDate: identityNameBirthDate.birthDate,
+                    musicVideoPath: musicianVideoProof.objectPath,
+                    musicVideoOriginalName: musicianVideoProof.originalName,
+                    musicVideoMimeType: musicianVideoProof.mimeType,
+                    musicVideoSizeBytes: musicianVideoProof.sizeBytes,
+                    musicVideoUploadedAt: musicianVideoProof.uploadedAt,
+                    metadata: {
+                        musician_video_review_required: true,
+                        musician_video_upload_id: musicianVideoProof.uploadId,
+                        source_session_status: normalizedVerificationStatus,
+                    },
+                })
+
+                if (identityReviewRecord?.id) {
+                    const { error: videoUploadLinkError } = await supabaseAdmin
+                        .from('musician_verification_uploads')
+                        .update({ manual_review_id: identityReviewRecord.id, updated_at: new Date().toISOString() })
+                        .eq('id', musicianVideoProof.uploadId)
+                    if (videoUploadLinkError) {
+                        throw new Error(`Unable to link music video proof to review: ${videoUploadLinkError.message}`)
+                    }
+                }
+            }
+
+            finalVerificationStatus = 'PENDING_REVIEW'
+            finalDuplicateIdentityReview = true
+
+            await supabaseAdmin
+                .from('profiles')
+                .update({
+                    verification_status: 'PENDING_REVIEW',
+                    is_verified: false,
+                    id_verified_at: null,
+                })
+                .eq('id', userId)
+
+            const { data: demotedUser } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+                user_metadata: {
+                    ...(user.user.user_metadata || {}),
+                    is_verified: false,
+                    verification_status: 'PENDING_REVIEW',
+                    musician_video_review_required: true,
+                    musician_video_upload_id: musicianVideoProof.uploadId,
+                },
+            })
+            if (demotedUser?.user) {
+                user.user = demotedUser.user
+            }
+        }
+
         const emailConfirmationRequired = finalVerificationStatus === 'APPROVED'
         const emailDelivery = emailConfirmationRequired
             ? await sendEmailConfirmationLink(
@@ -1029,6 +1141,8 @@ serve(async (req) => {
                 role: normalizedRole,
                 verification_status: finalVerificationStatus,
                 duplicate_identity_review: finalDuplicateIdentityReview,
+                musician_video_review_required: requiresMusicianVideoReview,
+                musician_video_upload_id: musicianVideoProof?.uploadId || null,
             },
         })
 
@@ -1038,6 +1152,7 @@ serve(async (req) => {
             emailConfirmationDeferred: !emailConfirmationRequired,
             duplicateIdentityReview: finalDuplicateIdentityReview,
             identityReviewId: identityReviewRecord?.id || null,
+            musicianVideoReviewRequired: requiresMusicianVideoReview,
             emailDelivery,
             message: finalVerificationStatus === 'APPROVED'
                 ? 'User created with verified identity; email confirmation required'

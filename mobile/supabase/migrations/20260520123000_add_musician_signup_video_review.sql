@@ -24,7 +24,7 @@ create table if not exists public.musician_verification_uploads (
   mime_type text not null,
   size_bytes bigint not null,
   status text not null default 'PENDING',
-  expires_at timestamptz not null default (now() + interval '1 hour'),
+  expires_at timestamptz not null default (now() + interval '24 hours'),
   user_id uuid references public.profiles(id) on delete set null,
   manual_review_id uuid references public.manual_identity_reviews(id) on delete set null,
   created_at timestamptz not null default now(),
@@ -90,6 +90,19 @@ alter table public.manual_identity_reviews
 alter table public.manual_identity_reviews
   add constraint manual_identity_reviews_music_video_mime_check
   check (music_video_mime_type is null or music_video_mime_type in ('video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v'));
+
+alter table public.registration_attempts
+  drop constraint if exists registration_attempts_action_check;
+
+alter table public.registration_attempts
+  add constraint registration_attempts_action_check
+  check (action = any (array[
+    'create_didit_session'::text,
+    'create_unverified_user'::text,
+    'manual_identity_review'::text,
+    'musician_video_upload'::text,
+    'resend_confirmation_email'::text
+  ]));
 
 comment on table public.musician_verification_uploads is
   'Tracks pre-auth musician signup music-video proof uploads before admin review.';

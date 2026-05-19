@@ -8,6 +8,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
+import { fetchActiveStaffAssignment, isStaffRole, normalizeStaffAccessLevel } from '../utils/staffAccess';
 
 const AnimatedIcon = Animated.createAnimatedComponent(Ionicons);
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -42,7 +43,9 @@ function Header({ title, transparent, onBackPress, showBack, leftComponent, righ
     const [hasUnread, setHasUnread] = useState(false);
     const [hasUnreadChats, setHasUnreadChats] = useState(false);
     const [guestMenuVisible, setGuestMenuVisible] = useState(false);
+    const [staffAccessLevel, setStaffAccessLevel] = useState<1 | 2 | 3 | null>(null);
     const isBrandMainHeader = title.trim().toLowerCase() === 'musikalokal';
+    const isStaff = isStaffRole(userRole);
     const isMainNavPath = useMemo(
         () => routePathname === "/home" || routePathname === "/feed" || routePathname === "/manage" || routePathname === "/bookings" || routePathname === "/ai_suggestions" || routePathname === "/marketplace" || routePathname === "/chat",
         [routePathname],
@@ -60,14 +63,16 @@ function Header({ title, transparent, onBackPress, showBack, leftComponent, righ
 
     const computedBackVisible = !!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath || isBrandMainHeader);
     const backVisible = showBack === false ? false : showBack === true ? true : computedBackVisible;
+    const staffCanUseAddButton = !isStaff || staffAccessLevel === 1;
     const addbtnvisible = useMemo(() => {
         if (!isMyListingPath) return false;
+        if (!staffCanUseAddButton) return false;
         if (routePathname === "/my_group") return userRole === "musician";
         if (routePathname === "/my_venue") return userRole === "venue-owner";
         if (routePathname === "/my_studio") return userRole === "studio-owner";
         if (routePathname === "/my_production") return userRole === "producer";
         return false;
-    }, [isMyListingPath, routePathname, userRole]);
+    }, [isMyListingPath, routePathname, staffCanUseAddButton, userRole]);
     const notifVisible = !isGuest && (isMainNavPath || isBrandMainHeader || (isMyListingPath && !addbtnvisible));
     const titleOverline = useMemo(() => {
         const normalizedTitle = title.trim().toLowerCase();
@@ -97,6 +102,34 @@ function Header({ title, transparent, onBackPress, showBack, leftComponent, righ
         if (routePathname === "/my_production") return '/add_production';
         return '/add_group';
     }, [routePathname]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadStaffAccessLevel = async () => {
+            if (!isStaff || !userId) {
+                setStaffAccessLevel(null);
+                return;
+            }
+
+            try {
+                const assignment = await fetchActiveStaffAssignment(supabase, userId);
+                if (!cancelled) {
+                    setStaffAccessLevel(normalizeStaffAccessLevel(assignment?.access_level));
+                }
+            } catch {
+                if (!cancelled) {
+                    setStaffAccessLevel(null);
+                }
+            }
+        };
+
+        void loadStaffAccessLevel();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isStaff, userId]);
 
     const defaultBackRoute = useMemo(() => {
         if (routePathname === "/notifications" && isFan) return "/feed";

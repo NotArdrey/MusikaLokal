@@ -30,8 +30,8 @@ test.describe('mobile social posting', () => {
       'fan',
       'E2E Mobile Social Post Fan',
     );
-    const content = `Mobile feed post ${makeRunId('mobile-social-post')}`;
-    const fanContent = `Mobile fan feed post ${makeRunId('mobile-social-post-fan')}`;
+    const content = `MobilePost${makeRunId('mobile-social-post').replace(/[^a-zA-Z0-9]/g, '')}`;
+    const fanContent = `MobileFanPost${makeRunId('mobile-social-post-fan').replace(/[^a-zA-Z0-9]/g, '')}`;
 
     await runMaestroFlow('mobile-login.yaml', {
       E2E_MOBILE_EMAIL: creator.email,

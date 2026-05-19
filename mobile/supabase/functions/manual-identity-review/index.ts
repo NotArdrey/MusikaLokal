@@ -14,6 +14,12 @@ import {
   getRegistrationRateLimitStatus,
   markRegistrationAttempt,
 } from "../_shared/registrationRateLimit.ts";
+import {
+  createMusicianVideoUploadSlot,
+  consumeMusicianVideoUpload,
+  MUSICIAN_VIDEO_ALLOWED_MIME_TYPES,
+  MUSICIAN_VIDEO_MAX_BYTES,
+} from "../_shared/musicianVideoProof.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -489,6 +495,72 @@ serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action || "").trim();
 
+    if (action === "create_musician_video_upload") {
+      const email = String(body?.email || "").trim().toLowerCase();
+      const role = String(body?.role || "").trim().toLowerCase();
+      const originalName = String(body?.originalName || body?.fileName || "music-video.mp4").trim();
+      const mimeType = String(body?.mimeType || "").trim().toLowerCase();
+      const sizeBytes = Number(body?.sizeBytes || 0);
+
+      if (!email || role !== "musician") {
+        return jsonResponse({ error: "Music video proof is only available for musician signup." }, 400);
+      }
+
+      let registrationAttemptId: string | null = null;
+      let emailHash: string | null = null;
+      try {
+        const registrationAttempt = await enforceRegistrationRateLimit(supabaseAdmin, req, {
+          action: "musician_video_upload",
+          email,
+          metadata: {
+            role,
+            original_name: originalName,
+            mime_type: mimeType,
+            size_bytes: sizeBytes,
+          },
+          limits: {
+            hourlyEmail: 8,
+            dailyEmail: 16,
+            hourlyIp: 30,
+            dailyIp: 80,
+            hourlyDevice: 16,
+            dailyDevice: 40,
+          },
+        });
+        registrationAttemptId = registrationAttempt?.attemptId || null;
+        emailHash = registrationAttempt?.emailHash || null;
+      } catch (rateLimitError) {
+        const status = getRegistrationRateLimitStatus(rateLimitError);
+        if (status) {
+          return jsonResponse({ error: rateLimitError.message }, status);
+        }
+        throw rateLimitError;
+      }
+
+      const upload = await createMusicianVideoUploadSlot(supabaseAdmin, {
+        emailHash,
+        originalName,
+        mimeType,
+        sizeBytes,
+      });
+
+      await markRegistrationAttempt(supabaseAdmin, registrationAttemptId, {
+        success: true,
+        metadata: {
+          role,
+          musician_video_upload_id: upload.uploadId,
+          musician_video_path: upload.path,
+        },
+      });
+
+      return jsonResponse({
+        success: true,
+        upload,
+        allowedMimeTypes: MUSICIAN_VIDEO_ALLOWED_MIME_TYPES,
+        maxBytes: MUSICIAN_VIDEO_MAX_BYTES,
+      });
+    }
+
     if (action !== "submit_manual_review_signup") {
       return jsonResponse({ error: `Unsupported action: ${action}` }, 400);
     }
@@ -511,6 +583,8 @@ serve(async (req: Request) => {
     const documentTypeKey = String(body?.documentTypeKey || "").trim() || null;
     const documentCountry = String(body?.documentCountry || "PHL").trim().toUpperCase();
     const diditSessionId = String(body?.diditSessionId || body?.didit_session_id || "").trim() || null;
+    const musicVideoUploadId = String(body?.musicVideoUploadId || body?.music_video_upload_id || "").trim();
+    const requiresMusicVideoProof = role === "musician";
     const verificationMode = source === "DIDIT_PENDING" ? "didit" : "manual_upload";
     let registrationAttemptId: string | null = null;
 
@@ -528,6 +602,10 @@ serve(async (req: Request) => {
 
     if (source === "MANUAL_UPLOAD" && !identityDocumentNumber) {
       return jsonResponse({ error: "ID number is required" }, 400);
+    }
+
+    if (requiresMusicVideoProof && !musicVideoUploadId) {
+      return jsonResponse({ error: "Music video proof is required for musician signup." }, 400);
     }
 
     try {
@@ -701,6 +779,26 @@ serve(async (req: Request) => {
       reviewId = String(insertedReview.id);
     }
 
+    let musicianVideoProof: any = null;
+    if (requiresMusicVideoProof) {
+      musicianVideoProof = await consumeMusicianVideoUpload(supabaseAdmin, musicVideoUploadId, {
+        userId,
+        manualReviewId: reviewId,
+      });
+
+      const { error: videoReviewUpdateError } = await supabaseAdmin
+        .from("manual_identity_reviews")
+        .update({
+          ...musicianVideoProof.reviewColumns,
+          updated_at: nowIso,
+        })
+        .eq("id", reviewId);
+
+      if (videoReviewUpdateError) {
+        throw new Error(videoReviewUpdateError.message);
+      }
+    }
+
     await supabaseAdmin
       .from("profiles")
       .update({
@@ -740,6 +838,8 @@ serve(async (req: Request) => {
         document_type: documentType,
         verification_status: "PENDING_REVIEW",
         duplicate_identity_review: duplicateIdentity.hasDuplicate,
+        musician_video_review_required: requiresMusicVideoProof,
+        musician_video_upload_id: musicianVideoProof?.uploadId || null,
       },
     });
 
@@ -752,6 +852,8 @@ serve(async (req: Request) => {
         role,
         source,
         duplicate_identity_review: duplicateIdentity.hasDuplicate,
+        musician_video_review_required: requiresMusicVideoProof,
+        musician_video_upload_id: musicianVideoProof?.uploadId || null,
         manual_identity_review_id: reviewId,
       },
     });
@@ -761,6 +863,7 @@ serve(async (req: Request) => {
       reviewId,
       status: "PENDING_REVIEW",
       duplicateIdentityReview: duplicateIdentity.hasDuplicate,
+      musicianVideoReviewRequired: requiresMusicVideoProof,
       submissionEmail,
     });
   } catch (error) {

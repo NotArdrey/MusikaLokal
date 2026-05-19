@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname } from "expo-router";
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
+import { fetchActiveStaffAssignment, isStaffRole, normalizeStaffAccessLevel } from '../utils/staffAccess';
 
 interface HeaderProps {
     title: string;
@@ -20,7 +21,7 @@ interface HeaderProps {
 
 function Header({ title, transparent, onBackPress, hideBackButton = false, leftComponent, rightComponent, cardStyle }: HeaderProps) {
     const { colors, isDark } = useTheme();
-    const { isGuest, setGuestMode, userRole } = useAuth();
+    const { isGuest, setGuestMode, userId, userRole } = useAuth();
     const insets = useSafeAreaInsets();
     const { width } = useWindowDimensions();
     const isWebDesktop = Platform.OS === 'web' && width >= 768;
@@ -29,6 +30,8 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
     const pathname = usePathname();
     const [hasUnread, setHasUnread] = useState(false);
     const [guestMenuVisible, setGuestMenuVisible] = useState(false);
+    const [staffAccessLevel, setStaffAccessLevel] = useState<1 | 2 | 3 | null>(null);
+    const isStaff = isStaffRole(userRole);
     const isAdminPath = useMemo(
         () => pathname === "/admin" || pathname.startsWith("/admin/"),
         [pathname],
@@ -50,7 +53,7 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
 
     const backVisible = !hideBackButton && (!!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath));
     const notifVisible = isMainNavPath && !isGuest && !isWebDesktop;
-    const addbtnvisible = isMyListingPath;
+    const addbtnvisible = isMyListingPath && (!isStaff || staffAccessLevel === 1);
 
     const btn = useMemo<'/add_gig' | '/add_studio' | '/add_group' | '/add_production'>(() => {
         if (pathname === "/my_venue") return '/add_gig';
@@ -58,6 +61,34 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
         if (pathname === "/my_production") return '/add_production';
         return '/add_group';
     }, [pathname]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadStaffAccessLevel = async () => {
+            if (!isStaff || !userId) {
+                setStaffAccessLevel(null);
+                return;
+            }
+
+            try {
+                const assignment = await fetchActiveStaffAssignment(supabase, userId);
+                if (!cancelled) {
+                    setStaffAccessLevel(normalizeStaffAccessLevel(assignment?.access_level));
+                }
+            } catch {
+                if (!cancelled) {
+                    setStaffAccessLevel(null);
+                }
+            }
+        };
+
+        void loadStaffAccessLevel();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isStaff, userId]);
 
     const defaultBackRoute = useMemo(() => {
         if (pathname === "/edit_profile") return "/profile";
