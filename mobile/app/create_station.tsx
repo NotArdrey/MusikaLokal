@@ -237,7 +237,7 @@ export default function CreateStationScreen() {
           autoCapitalize="none"
           keyboardType="url"
         />
-        <Text style={[styles.helperText, { color: colors.textSecondary }]}>Optional. Add an Icecast, HLS, or managed radio listener URL for real continuous broadcast playback.</Text>
+        <Text style={[styles.helperText, { color: colors.textSecondary }]}>Optional. Add an Icecast, HLS, or managed radio listener URL for real continuous broadcast playback. Without a live stream, the station uses shared playlist radio.</Text>
 
         <Text style={[styles.label, { color: colors.text }]}>Stream Status</Text>
         <View style={styles.segmentRow}>

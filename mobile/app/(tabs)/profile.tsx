@@ -2888,7 +2888,7 @@ export default function ProfileScreen() {
   const stationHasLiveStream =
     typeof userStation?.stream_url === "string" &&
     userStation.stream_url.trim().length > 0 &&
-    userStation?.stream_status !== "offline";
+    userStation?.stream_status === "live";
   const stationIsLive = hasStation && userStation?.is_active !== false && (stationSlotCount > 0 || stationHasLiveStream);
   const stationIsCurrentSource = Boolean(
     hasStation && activeStation?.id && activeStation.id === userStation?.id,

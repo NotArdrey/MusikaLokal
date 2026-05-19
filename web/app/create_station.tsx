@@ -41,6 +41,10 @@ export default function CreateStationScreen() {
   const [description, setDescription] = useState("");
   const [genre, setGenre] = useState("");
   const [rotationIntervalMinutes, setRotationIntervalMinutes] = useState("15");
+  const [streamUrl, setStreamUrl] = useState("");
+  const [streamStatus, setStreamStatus] = useState<"offline" | "live" | "autoplay">("offline");
+  const [nowPlayingTitle, setNowPlayingTitle] = useState("");
+  const [nowPlayingArtist, setNowPlayingArtist] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(isEditing);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
@@ -71,6 +75,14 @@ export default function CreateStationScreen() {
           setDescription(data.data.description || "");
           setGenre(data.data.genre || "");
           setRotationIntervalMinutes(String(data.data.rotation_interval_minutes || 15));
+          setStreamUrl(data.data.stream_url || "");
+          setStreamStatus(
+            ["offline", "live", "autoplay"].includes(data.data.stream_status)
+              ? data.data.stream_status
+              : "offline",
+          );
+          setNowPlayingTitle(data.data.now_playing_title || "");
+          setNowPlayingArtist(data.data.now_playing_artist || "");
         }
       } catch (e: any) {
         if (mounted) {
@@ -107,6 +119,10 @@ export default function CreateStationScreen() {
         description: description.trim() || null,
         genre: genre.trim() || null,
         rotation_interval_minutes: normalizedRotationIntervalMinutes,
+        stream_url: streamUrl.trim() || null,
+        stream_status: streamStatus,
+        now_playing_title: nowPlayingTitle.trim() || null,
+        now_playing_artist: nowPlayingArtist.trim() || null,
       };
       const managedProfileId =
         typeof profile_id === "string" && profile_id.trim().length > 0
@@ -227,6 +243,68 @@ export default function CreateStationScreen() {
                 How often the live lineup changes. Allowed range: 5 to 120 minutes.
               </Text>
 
+              <Text style={[styles.label, { color: colors.text }]}>Continuous Stream URL</Text>
+              <TextInput
+                style={[styles.input, { color: colors.text, borderColor: borderCol, backgroundColor: cardBg }]}
+                placeholder="https://your-radio.example/live"
+                placeholderTextColor={colors.textSecondary}
+                value={streamUrl}
+                onChangeText={setStreamUrl}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+              <Text style={[styles.helperText, { color: colors.textSecondary }]}>
+                Optional. Add a real broadcast stream for live radio. Without it, the station uses shared playlist radio.
+              </Text>
+
+              <Text style={[styles.label, { color: colors.text }]}>Stream Status</Text>
+              <View style={styles.segmentRow}>
+                {(["offline", "live", "autoplay"] as const).map((status) => {
+                  const selected = streamStatus === status;
+                  return (
+                    <TouchableOpacity
+                      key={status}
+                      activeOpacity={1}
+                      onPress={() => setStreamStatus(status)}
+                      style={[
+                        styles.segmentButton,
+                        {
+                          borderColor: selected ? colors.primary : borderCol,
+                          backgroundColor: selected ? colors.primary : cardBg,
+                        },
+                      ]}
+                    >
+                      <Text style={{ color: selected ? "#FFFFFF" : colors.text, fontSize: moderateScale(12), fontWeight: "700", textTransform: "capitalize" }}>
+                        {status}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={styles.inputRow}>
+                <View style={styles.halfField}>
+                  <Text style={[styles.label, { color: colors.text }]}>Now Playing Title</Text>
+                  <TextInput
+                    style={[styles.input, { color: colors.text, borderColor: borderCol, backgroundColor: cardBg }]}
+                    placeholder="Optional"
+                    placeholderTextColor={colors.textSecondary}
+                    value={nowPlayingTitle}
+                    onChangeText={setNowPlayingTitle}
+                  />
+                </View>
+                <View style={styles.halfField}>
+                  <Text style={[styles.label, { color: colors.text }]}>Now Playing Artist</Text>
+                  <TextInput
+                    style={[styles.input, { color: colors.text, borderColor: borderCol, backgroundColor: cardBg }]}
+                    placeholder="Optional"
+                    placeholderTextColor={colors.textSecondary}
+                    value={nowPlayingArtist}
+                    onChangeText={setNowPlayingArtist}
+                  />
+                </View>
+              </View>
+
               <TouchableOpacity
                 activeOpacity={isSaveDisabled ? 1 : 0.78}
                 style={[
@@ -273,6 +351,10 @@ const styles = StyleSheet.create({
   label: { fontSize: moderateScale(13), fontWeight: "600", marginBottom: 6, marginTop: 16 },
   input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14), textAlignVertical: "center" },
   helperText: { fontSize: moderateScale(12), lineHeight: 18, marginTop: 8 },
+  inputRow: { flexDirection: Platform.OS === "web" ? "row" : "column", gap: 12 },
+  halfField: { flex: 1 },
+  segmentRow: { flexDirection: "row", gap: 8 },
+  segmentButton: { flex: 1, alignItems: "center", justifyContent: "center", borderWidth: 1, borderRadius: 10, paddingVertical: 10 },
   textArea: { minHeight: 100, textAlignVertical: "top" },
   saveBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 16, borderRadius: 12, marginTop: 32 },
   saveBtnText: { fontSize: moderateScale(16), fontWeight: "700" },

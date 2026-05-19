@@ -129,6 +129,16 @@ const getStationSlots = (station: any) => {
 const getStationSlotCount = (station: any) =>
   Number(station?.slot_count ?? station?.slot_playlist_ids?.length ?? getStationSlots(station).length ?? 0);
 
+const getStationBroadcastStreamUrl = (station: any) => {
+  const streamUrl = typeof station?.stream_url === "string" ? station.stream_url.trim() : "";
+  if (!streamUrl || station?.is_active === false) return "";
+
+  const streamStatus = typeof station?.stream_status === "string"
+    ? station.stream_status.trim().toLowerCase()
+    : "";
+  return streamStatus === "live" ? streamUrl : "";
+};
+
 const getStationTrackCount = (station: any) =>
   getStationSlots(station).reduce((total: number, slot: any) => {
     const items = Array.isArray(slot?.playlist?.items) ? slot.playlist.items : [];
@@ -155,7 +165,15 @@ const getStationPlayableTrackCount = (station: any) =>
     )).length;
   }, 0);
 
+const isStationPlayable = (station: any) => Boolean(
+  getStationBroadcastStreamUrl(station) || getStationPlayableTrackCount(station) > 0,
+);
+
 const getStationNowPlayingTitle = (station: any, slotIndex = 0) => {
+  if (getStationBroadcastStreamUrl(station)) {
+    return station?.now_playing_title || station?.name || "Live broadcast";
+  }
+
   const slots = getStationSlots(station);
   const slot = slots[slotIndex] || slots[0] || null;
   const firstItem = Array.isArray(slot?.playlist?.items) ? slot.playlist.items[0] : null;
@@ -196,7 +214,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
               action: "browse_stations",
               featured_only: featuredOnly,
               include_items: true,
-              limit: 1,
+              limit: 5,
             },
           });
 
@@ -205,10 +223,12 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
         };
 
         const featuredStations = await fetchStations(true);
-        const stations = featuredStations.length > 0 ? featuredStations : await fetchStations(false);
+        const stations = featuredStations.some(isStationPlayable)
+          ? featuredStations
+          : await fetchStations(false);
 
         if (!cancelled) {
-          setFeaturedStation(stations[0] || null);
+          setFeaturedStation(stations.find(isStationPlayable) || stations[0] || null);
         }
       } catch (error) {
         if (!cancelled) {
@@ -227,15 +247,21 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     };
   }, []);
 
-  const liveFeaturedStation = featuredStation && getStationPlayableTrackCount(featuredStation) > 0
+  const liveFeaturedStation = featuredStation && isStationPlayable(featuredStation)
     ? featuredStation
     : null;
   const displayStation = activeStation || liveFeaturedStation || DEMO_RADIO_STATION;
+  const hasBroadcastStream = Boolean(getStationBroadcastStreamUrl(displayStation));
   const stationSlotCount = getStationSlotCount(displayStation);
   const stationTrackCount = getStationTrackCount(displayStation);
+  const stationPlayableTrackCount = getStationPlayableTrackCount(displayStation);
   const isCurrentStation = Boolean(displayStation?.id && activeStation?.id && displayStation.id === activeStation.id);
   const isTuneInLoading = Boolean(displayStation?.id && loadingStationId === displayStation.id);
-  const canTuneIn = Boolean(displayStation?.id && displayStation?.is_active !== false && stationSlotCount > 0);
+  const canTuneIn = Boolean(
+    displayStation?.id &&
+    displayStation?.is_active !== false &&
+    (hasBroadcastStream || stationPlayableTrackCount > 0)
+  );
   const stationName = typeof displayStation?.name === "string" && displayStation.name.trim()
     ? displayStation.name.trim()
     : "MusikaLokal Radio";
@@ -245,7 +271,9 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
   const nowPlayingTitle = isCurrentStation
     ? currentTrack?.title || getStationNowPlayingTitle(displayStation, currentSlotIndex)
     : getStationNowPlayingTitle(displayStation, 0);
-  const rotationSummary = stationTrackCount > 0
+  const rotationSummary = hasBroadcastStream
+    ? "Live stream"
+    : stationTrackCount > 0
     ? `${stationTrackCount} track${stationTrackCount === 1 ? "" : "s"}`
     : stationSlotCount > 0
       ? `${stationSlotCount} playlist${stationSlotCount === 1 ? "" : "s"}`
@@ -270,7 +298,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
         dedupeKey: "live-radio-offline",
         type: "info",
         title: "Station offline",
-        message: "This station needs at least one playlist on air before it can play.",
+        message: "This station needs a live stream or at least one playable playlist track before it can play.",
       });
       return;
     }

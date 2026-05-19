@@ -169,7 +169,7 @@ export const getStationBroadcastStreamUrl = (stationData: any) => {
   }
 
   const streamStatus = readTrimmedString(stationData?.stream_status).toLowerCase();
-  if (streamStatus === "offline") {
+  if (streamStatus !== "live") {
     return "";
   }
 

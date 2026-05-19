@@ -765,10 +765,14 @@ async function upsertStationFromSource(
       : existingStation?.stream_status || "offline",
     now_playing_title: params.now_playing_title || null,
     now_playing_artist: params.now_playing_artist || null,
-    last_seen_live_at: params.stream_status === "live"
-      ? new Date().toISOString()
-      : existingStation?.last_seen_live_at || null,
+    last_seen_live_at: existingStation?.last_seen_live_at || null,
   };
+  if (!stationPatch.stream_url && stationPatch.stream_status === "live") {
+    stationPatch.stream_status = "offline";
+  }
+  if (stationPatch.stream_url && stationPatch.stream_status === "live") {
+    stationPatch.last_seen_live_at = new Date().toISOString();
+  }
 
   let station: any;
   if (existingStation?.id) {
@@ -1613,7 +1617,9 @@ Deno.serve(async (req: Request) => {
       } catch (error: any) {
         return jsonResponse({ error: error.message || "Invalid stream_url" }, 400);
       }
-      const normalizedStreamStatus = normalizeStationStreamStatus(stream_status);
+      const normalizedStreamStatus = normalizedStreamUrl
+        ? normalizeStationStreamStatus(stream_status)
+        : "offline";
 
       const managedProfileId = resolveManagedProfileId(requesterRole, uid, managed_profile_id);
 
@@ -1769,7 +1775,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: existing } = await supabaseAdmin
         .from("stations")
-        .select("id, creator_id, managed_profile_id, managed_group_id")
+        .select("id, creator_id, managed_profile_id, managed_group_id, stream_url, stream_status")
         .eq("id", station_id)
         .single();
 
@@ -1801,11 +1807,20 @@ Deno.serve(async (req: Request) => {
         }
       }
 
+      const nextStreamUrl = "stream_url" in patch
+        ? patch.stream_url
+        : existing.stream_url || null;
+
       if ("stream_status" in patch) {
         patch.stream_status = normalizeStationStreamStatus(patch.stream_status);
+        if (patch.stream_status === "live" && !nextStreamUrl) {
+          patch.stream_status = "offline";
+        }
         if (patch.stream_status === "live") {
           patch.last_seen_live_at = new Date().toISOString();
         }
+      } else if ("stream_url" in patch && !nextStreamUrl) {
+        patch.stream_status = "offline";
       }
 
       const { data, error } = await supabaseAdmin

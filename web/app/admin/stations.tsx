@@ -564,7 +564,7 @@ export default function AdminStationsPage() {
                   {item.rotation_interval_minutes || 15} min rotation
                 </Text>
                 {item.stream_url ? (
-                  <Text style={{ color: item.stream_status === 'offline' ? colors.textSecondary : '#22C55E', fontSize: 12, fontWeight: '700' }}>
+                  <Text style={{ color: item.stream_status === 'live' ? '#22C55E' : colors.textSecondary, fontSize: 12, fontWeight: '700' }}>
                     Stream {item.stream_status || 'offline'}
                   </Text>
                 ) : null}

@@ -397,7 +397,7 @@ export default function StationDetailsScreen() {
   const hasBroadcastStream =
     typeof station?.stream_url === "string" &&
     station.stream_url.trim().length > 0 &&
-    station?.stream_status !== "offline";
+    station?.stream_status === "live";
   const liveSlots = Array.isArray(station.live_slots) && station.live_slots.length > 0
     ? station.live_slots
     : slots;
@@ -459,21 +459,24 @@ export default function StationDetailsScreen() {
                 color: stationStatus === "live" ? "#22c55e" : "#f59e0b",
                 fontSize: moderateScale(11), fontWeight: "600"
               }}>
-                {stationStatus === "live" ? "Live" : "Offline"}
+                {stationStatus === "live"
+                  ? hasBroadcastStream
+                    ? "Live Stream"
+                    : "Live Rotation"
+                  : "Offline"}
               </Text>
             </View>
             {station.genre && (
               <Text style={[styles.genreText, { color: colors.textSecondary }]}>{station.genre}</Text>
             )}
           </View>
-          {slots.length > 0 && (
+          {hasBroadcastStream ? (
             <Text style={[styles.rotationSummary, { color: colors.textSecondary }]}>
-              Rotates up to {Math.min(concurrentSlotLimit, slots.length)} playlists every {rotationIntervalMinutes} minutes.
+              Real continuous broadcast. Everyone hears the same stream timeline.
             </Text>
-          )}
-          {hasBroadcastStream && (
+          ) : slots.length > 0 && (
             <Text style={[styles.rotationSummary, { color: colors.textSecondary }]}>
-              Real continuous broadcast enabled. Listeners tune into the same live stream timeline.
+              Shared playlist radio. The app keeps listeners on the same station timeline and rotates up to {Math.min(concurrentSlotLimit, slots.length)} playlists every {rotationIntervalMinutes} minutes.
             </Text>
           )}
         </View>
@@ -665,7 +668,7 @@ export default function StationDetailsScreen() {
               autoCapitalize="none"
               keyboardType="url"
             />
-            <Text style={[styles.modalHelper, { color: colors.textSecondary }]}>Use an Icecast, HLS, or managed radio listener URL. When live, all listeners hear this same stream.</Text>
+            <Text style={[styles.modalHelper, { color: colors.textSecondary }]}>Use an Icecast, HLS, or managed radio listener URL. Set status to Live only when this is a real broadcast; Autoplay keeps playlist radio as the fallback.</Text>
 
             <Text style={[styles.modalLabel, { color: colors.text }]}>Stream Status</Text>
             <View style={styles.segmentRow}>
