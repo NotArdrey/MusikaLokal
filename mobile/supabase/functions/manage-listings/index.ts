@@ -6,10 +6,27 @@ import {
     buildNotificationRouteMeta,
     withNotificationRouteMeta,
 } from "../_shared/notificationRoutes.ts";
+import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
+}
+
+async function insertCoreNotifications(supabaseClient: any, payload: Record<string, unknown> | Record<string, unknown>[]) {
+    const payloads = Array.isArray(payload) ? payload : [payload]
+    const { data, error } = await supabaseClient
+        .from('notifications')
+        .insert(payload)
+        .select()
+
+    if (error) throw error
+
+    for (const item of payloads) {
+        scheduleCoreActionEmailForNotification(supabaseClient, item, { source: 'manage-listings' })
+    }
+
+    return data
 }
 
 function uniqueStrings(values: unknown[]) {
@@ -377,21 +394,17 @@ serve(async (req: Request) => {
                 })
             }
 
-            const { data, error } = await supabaseClient
-                .from('notifications')
-                .insert({
-                    user_id: targetUserId,
-                    type: type || 'info',
-                    title,
-                    message,
-                    image: image || null,
-                    meta: withNotificationRouteMeta(meta),
-                    read: false
-                })
-                .select()
-                .single()
+            const payload = {
+                user_id: targetUserId,
+                type: type || 'info',
+                title,
+                message,
+                image: image || null,
+                meta: withNotificationRouteMeta(meta),
+                read: false
+            }
 
-            if (error) throw error
+            const [data] = await insertCoreNotifications(supabaseClient, payload)
 
             return new Response(JSON.stringify(data), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -429,12 +442,7 @@ serve(async (req: Request) => {
                 })
             }
 
-            const { data, error } = await supabaseClient
-                .from('notifications')
-                .insert(payload)
-                .select()
-
-            if (error) throw error
+            const data = await insertCoreNotifications(supabaseClient, payload)
 
             return new Response(JSON.stringify(data), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -1494,9 +1502,7 @@ serve(async (req: Request) => {
 
             // Insert notification for the user
             if (notificationTitle) {
-                await supabaseClient
-                    .from('notifications')
-                    .insert({
+                await insertCoreNotifications(supabaseClient, {
                         user_id: bookingDetails.user_id,
                         type: notificationType,
                         title: notificationTitle,
@@ -1508,7 +1514,7 @@ serve(async (req: Request) => {
                             booking_date: bookingDate,
                             cancellation_reason: cancellation_reason || null
                         }
-                    });
+                });
             }
 
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
@@ -1594,9 +1600,7 @@ serve(async (req: Request) => {
                     notificationMessage += `\n\nNote: ${cancellation_reason}`;
                 }
 
-                await supabaseClient
-                    .from('notifications')
-                    .insert({
+                await insertCoreNotifications(supabaseClient, {
                         user_id: bookingDetails.user_id,
                         type: 'info',
                         title: 'Booking Partially Approved',
@@ -1609,7 +1613,7 @@ serve(async (req: Request) => {
                             accepted_slots: acceptedSlots,
                             declined_slots: declinedSlots
                         }
-                    });
+                });
 
                 return new Response(JSON.stringify({
                     success: true,
@@ -1629,9 +1633,7 @@ serve(async (req: Request) => {
 
                 if (updateError) throw updateError;
 
-                await supabaseClient
-                    .from('notifications')
-                    .insert({
+                await insertCoreNotifications(supabaseClient, {
                         user_id: bookingDetails.user_id,
                         type: 'warning',
                         title: 'Booking Declined',
@@ -1642,7 +1644,7 @@ serve(async (req: Request) => {
                             status: 'cancelled',
                             booking_date: bookingDate
                         }
-                    });
+                });
 
                 return new Response(JSON.stringify({
                     success: true,
@@ -1699,9 +1701,7 @@ serve(async (req: Request) => {
 
             // Insert notification for the applicant
             if (notificationTitle) {
-                await supabaseClient
-                    .from('notifications')
-                    .insert({
+                await insertCoreNotifications(supabaseClient, {
                         user_id: appDetails.applicant_id,
                         type: notificationType,
                         title: notificationTitle,
@@ -1711,7 +1711,7 @@ serve(async (req: Request) => {
                             application_id: applicationId,
                             status: status
                         }
-                    });
+                });
             }
 
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
@@ -1956,7 +1956,7 @@ serve(async (req: Request) => {
             if (error) throw error;
 
             // Notify the new member
-            await supabaseClient.from('notifications').insert({
+            await insertCoreNotifications(supabaseClient, {
                 user_id: targetUserId,
                 type: 'success',
                 title: 'Added to Group',
@@ -2025,7 +2025,7 @@ serve(async (req: Request) => {
 
             // Notify the removed member (if removed by owner)
             if (targetUserId !== effectiveUserId) {
-                await supabaseClient.from('notifications').insert({
+                await insertCoreNotifications(supabaseClient, {
                     user_id: targetUserId,
                     type: 'warning',
                     title: 'Removed from Group',

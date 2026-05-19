@@ -506,10 +506,16 @@ const runMobileLoginFlow = async (extraEnv: Record<string, string>) => {
 
   await resetAndWarmLaunchApp(env.E2E_MOBILE_APP_ID);
   await ensureMetroForDevBuild();
-  await runMaestroCliFlow('mobile-e2e-login.yaml', {
-    ...extraEnv,
-    E2E_MOBILE_LOGIN_URL: `musikalokal://e2e-login?email_b64=${toBase64Url(email)}&password_b64=${toBase64Url(password)}`,
-  }, 240_000);
+  try {
+    await runMaestroCliFlow('mobile-e2e-login.yaml', {
+      ...extraEnv,
+      E2E_MOBILE_LOGIN_URL: `musikalokal://e2e-login?email_b64=${toBase64Url(email)}&password_b64=${toBase64Url(password)}`,
+    }, 240_000);
+  } catch {
+    await resetAndWarmLaunchApp(env.E2E_MOBILE_APP_ID);
+    await ensureMetroForDevBuild();
+    await runMaestroFlowWithAdbText('mobile-login.yaml', extraEnv, 240_000);
+  }
 };
 
 const nativeInputMaestroFlows = new Set([

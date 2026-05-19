@@ -5,6 +5,7 @@ import {
     buildGigApplicationAudienceMeta,
     resolveGigApplicationAudience,
 } from "../_shared/gigApplicationAudience.ts";
+import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -26,6 +27,19 @@ function extractAccessToken(authHeader: string): string | null {
 const ALLOWED_ORGANIZER_STATUSES = new Set(['accepted', 'approved', 'rejected', 'cancelled', 'completed', 'fired'])
 const ALLOWED_LEADER_DECISIONS = new Set(['approved', 'rejected'])
 const ACTIVE_GIG_APPLICATION_STATUSES = ['pending', 'accepted', 'approved']
+
+async function insertCoreNotification(supabaseClient: any, payload: Record<string, unknown>) {
+    const { error } = await supabaseClient
+        .from('notifications')
+        .insert(payload)
+
+    if (error) {
+        console.error('gig_application_notification_failed', { message: error.message })
+        return
+    }
+
+    scheduleCoreActionEmailForNotification(supabaseClient, payload, { source: 'gig-applications' })
+}
 
 async function getVenueStaffAccessLevel(client: any, userId: string, gigId: string): Promise<number | null> {
     if (!userId || !gigId) return null
@@ -177,19 +191,17 @@ async function notifyGigApplicationAudience(
 
         if (!memberNotification) continue
 
-        await supabaseClient
-            .from('notifications')
-            .insert({
-                user_id: member.user_id,
-                type: memberNotification.type,
-                title: memberNotification.title,
-                message: memberNotification.message,
-                meta: buildNotificationRouteMeta('/bookings', undefined, buildGigApplicationAudienceMeta(application, member, {
-                    status: normalizedStatus,
-                    event_type: eventType,
-                    performer_name: options.performerName || null,
-                })),
-            })
+        await insertCoreNotification(supabaseClient, {
+            user_id: member.user_id,
+            type: memberNotification.type,
+            title: memberNotification.title,
+            message: memberNotification.message,
+            meta: buildNotificationRouteMeta('/bookings', undefined, buildGigApplicationAudienceMeta(application, member, {
+                status: normalizedStatus,
+                event_type: eventType,
+                performer_name: options.performerName || null,
+            })),
+        })
     }
 }
 
@@ -405,7 +417,7 @@ Deno.serve(async (req: Request) => {
                 })
             }
 
-            const venueStaffAccessLevel = await getVenueStaffAccessLevel(supabaseAdmin, effectiveUserId, gigId)
+            const venueStaffAccessLevel = await getVenueStaffAccessLevel(supabaseClient, effectiveUserId, gigId)
             if (gigRecord.organizer_id !== effectiveUserId && !(venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2)) {
                 return new Response(JSON.stringify({ error: 'Forbidden' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -604,21 +616,19 @@ Deno.serve(async (req: Request) => {
             const teamName = hydratedInsertedApplication?.production_team?.name || 'Production team';
 
             if (gigRecord.organizer_id && gigRecord.organizer_id !== effectiveUserId) {
-                await supabaseClient
-                    .from('notifications')
-                    .insert({
-                        user_id: gigRecord.organizer_id,
-                        type: 'info',
-                        title: 'New Application from a Production Team',
-                        message: `${teamName} sent ${performerName} for "${gigRecord.name}".`,
-                        meta: buildNotificationRouteMeta('/manage_gig', { id: gigId }, {
-                            gig_id: gigId,
-                            application_id: insertedApplication.id,
-                            production_team_id: teamId,
-                            production_roster_id: rosterId,
-                            performer_name: performerName,
-                        }),
-                    });
+                await insertCoreNotification(supabaseClient, {
+                    user_id: gigRecord.organizer_id,
+                    type: 'info',
+                    title: 'New Application from a Production Team',
+                    message: `${teamName} sent ${performerName} for "${gigRecord.name}".`,
+                    meta: buildNotificationRouteMeta('/manage_gig', { id: gigId }, {
+                        gig_id: gigId,
+                        application_id: insertedApplication.id,
+                        production_team_id: teamId,
+                        production_roster_id: rosterId,
+                        performer_name: performerName,
+                    }),
+                });
             }
 
             const { application: audienceApplication, audience } = await resolveGigApplicationAudience(
@@ -631,19 +641,17 @@ Deno.serve(async (req: Request) => {
                     continue;
                 }
 
-                await supabaseClient
-                    .from('notifications')
-                    .insert({
-                        user_id: member.user_id,
-                        type: 'info',
-                        title: 'Application Sent',
-                        message: `${teamName} sent ${performerName} for "${gigRecord.name}".`,
-                        meta: buildNotificationRouteMeta('/bookings', undefined, buildGigApplicationAudienceMeta(audienceApplication, member, {
-                            status: 'pending',
-                            event_type: 'production_gig_application_submitted',
-                            performer_name: performerName,
-                        })),
-                    });
+                await insertCoreNotification(supabaseClient, {
+                    user_id: member.user_id,
+                    type: 'info',
+                    title: 'Application Sent',
+                    message: `${teamName} sent ${performerName} for "${gigRecord.name}".`,
+                    meta: buildNotificationRouteMeta('/bookings', undefined, buildGigApplicationAudienceMeta(audienceApplication, member, {
+                        status: 'pending',
+                        event_type: 'production_gig_application_submitted',
+                        performer_name: performerName,
+                    })),
+                });
             }
 
             return new Response(JSON.stringify(hydratedInsertedApplication), {
@@ -726,7 +734,7 @@ Deno.serve(async (req: Request) => {
             if (appError) throw appError;
 
             const venueStaffAccessLevel = appDetails?.gig_id
-                ? await getVenueStaffAccessLevel(supabaseAdmin, effectiveUserId, appDetails.gig_id)
+                ? await getVenueStaffAccessLevel(supabaseClient, effectiveUserId, appDetails.gig_id)
                 : null
             if (
                 !appDetails ||
@@ -885,45 +893,41 @@ Deno.serve(async (req: Request) => {
             const submitterId = appDetails.submitted_by_user_id || appDetails.applicant_id;
 
             if (submitterId && submitterId !== effectiveUserId) {
-                await supabaseClient
-                    .from('notifications')
-                    .insert({
-                        user_id: submitterId,
-                        type: normalizedDecision === 'approved' ? 'success' : 'warning',
-                        title:
-                            normalizedDecision === 'approved'
-                                ? 'Application Forwarded to Venue'
-                                : 'Application Rejected by Group Leader',
-                        message:
-                            normalizedDecision === 'approved'
-                                ? `Your ${groupName} application for "${gigName}" was approved by your group leader and sent to the venue owner.`
-                                : `Your ${groupName} application for "${gigName}" was rejected by your group leader.`,
-                        meta: buildNotificationRouteMeta('/bookings', undefined, {
-                            gig_id: appDetails.gig_id,
-                            application_id: applicationId,
-                            group_id: appDetails.group_id,
-                            leader_approval_status: normalizedDecision,
-                        }),
-                    });
+                await insertCoreNotification(supabaseClient, {
+                    user_id: submitterId,
+                    type: normalizedDecision === 'approved' ? 'success' : 'warning',
+                    title:
+                        normalizedDecision === 'approved'
+                            ? 'Application Forwarded to Venue'
+                            : 'Application Rejected by Group Leader',
+                    message:
+                        normalizedDecision === 'approved'
+                            ? `Your ${groupName} application for "${gigName}" was approved by your group leader and sent to the venue owner.`
+                            : `Your ${groupName} application for "${gigName}" was rejected by your group leader.`,
+                    meta: buildNotificationRouteMeta('/bookings', undefined, {
+                        gig_id: appDetails.gig_id,
+                        application_id: applicationId,
+                        group_id: appDetails.group_id,
+                        leader_approval_status: normalizedDecision,
+                    }),
+                });
             }
 
             if (normalizedDecision === 'approved' && appDetails.gig?.organizer_id && appDetails.gig.organizer_id !== effectiveUserId) {
-                await supabaseClient
-                    .from('notifications')
-                    .insert({
-                        user_id: appDetails.gig.organizer_id,
-                        type: 'info',
-                        title: 'New Gig Application',
-                        message: `${groupName} has a new application for "${gigName}" awaiting your review.`,
-                        meta: buildNotificationRouteMeta('/manage_gig', { id: appDetails.gig_id }, {
-                            gig_id: appDetails.gig_id,
-                            application_id: applicationId,
-                            applicant_id: appDetails.applicant_id,
-                            group_id: appDetails.group_id,
-                            submitted_by_user_id: appDetails.submitted_by_user_id,
-                            leader_approved_by: effectiveUserId,
-                        }),
-                    });
+                await insertCoreNotification(supabaseClient, {
+                    user_id: appDetails.gig.organizer_id,
+                    type: 'info',
+                    title: 'New Gig Application',
+                    message: `${groupName} has a new application for "${gigName}" awaiting your review.`,
+                    meta: buildNotificationRouteMeta('/manage_gig', { id: appDetails.gig_id }, {
+                        gig_id: appDetails.gig_id,
+                        application_id: applicationId,
+                        applicant_id: appDetails.applicant_id,
+                        group_id: appDetails.group_id,
+                        submitted_by_user_id: appDetails.submitted_by_user_id,
+                        leader_approved_by: effectiveUserId,
+                    }),
+                });
             }
 
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });

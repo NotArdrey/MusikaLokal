@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 
 declare const Deno: {
   env: {
@@ -255,10 +256,17 @@ async function insertNotificationIfMissing(
     if (Array.isArray(existing) && existing.length > 0) return;
   }
 
-  await client.from("notifications").insert({
+  const notificationPayload = {
     ...payload,
     read: false,
-  });
+  };
+
+  const { error } = await client.from("notifications").insert(notificationPayload);
+  if (error) {
+    console.error("admin_reports_notification_failed", { message: error.message });
+    return;
+  }
+  scheduleCoreActionEmailForNotification(client, notificationPayload, { source: "admin-reports-management" });
 }
 
 async function fetchProfilesMap(client: any, profileIds: string[]) {
@@ -973,14 +981,20 @@ serve(async (req: Request) => {
 
       const notifyTargets = [incident.reporter_user_id, incident.counterparty_user_id].filter(Boolean) as string[];
       for (const targetUserId of [...new Set(notifyTargets)]) {
-        await client.from("notifications").insert({
+        const notificationPayload = {
           user_id: targetUserId,
           type: "info",
           title: "Booking Incident Resolved",
           message: `An admin resolved your booking incident as ${String(resolution).replace(/_/g, " ")}.`,
           read: false,
           meta: { incident_id, booking_id: incident.booking_id, resolution, event_type: "booking_incident_resolved_by_admin" },
-        }).then(() => {});
+        };
+
+        await client.from("notifications").insert(notificationPayload).then(({ error }: any) => {
+          if (!error) {
+            scheduleCoreActionEmailForNotification(client, notificationPayload, { source: "admin-reports-management" });
+          }
+        });
       }
 
       return jsonResponse({ success: true, incident: updatedIncident });

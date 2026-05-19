@@ -88,13 +88,13 @@ async function sendViaHttpMailer(payload: GmailEmailPayload, from: string): Prom
     return {
       sent: false,
       provider: "gmail_http",
-      error: `Gmail mailer ${response.status}: ${errorText.slice(0, 500)}`,
+      error: cleanGmailDeliveryError(`Gmail mailer ${response.status}: ${errorText.slice(0, 500)}`),
     };
   } catch (error) {
     return {
       sent: false,
       provider: "gmail_http",
-      error: error instanceof Error ? error.message : String(error),
+      error: cleanGmailDeliveryError(error),
     };
   }
 }
@@ -147,7 +147,7 @@ async function sendViaGmailSmtp(payload: GmailEmailPayload, from: string): Promi
     return {
       sent: false,
       provider: "gmail_smtp",
-      error: error instanceof Error ? error.message : String(error),
+      error: cleanGmailDeliveryError(error),
     };
   } finally {
     try {
@@ -174,6 +174,35 @@ function extractEmailAddress(value: string) {
   if (angleMatch?.[1]) return angleMatch[1].trim();
   const directMatch = String(value || "").match(/[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+/);
   return directMatch?.[0]?.trim() || "";
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error || "");
+}
+
+function cleanGmailDeliveryError(rawError: unknown) {
+  const value = getErrorMessage(rawError).trim();
+  if (!value) return "Gmail delivery failed";
+
+  const normalized = value.toLowerCase();
+  if (
+    normalized.includes("535") ||
+    normalized.includes("5.7.8") ||
+    normalized.includes("badcredentials") ||
+    normalized.includes("username and password not accepted")
+  ) {
+    return "Gmail rejected the configured sender credentials. Update GMAIL_SMTP_USER and GMAIL_SMTP_APP_PASSWORD in Supabase secrets with a valid Gmail app password.";
+  }
+
+  if (
+    normalized.includes("application-specific password") ||
+    normalized.includes("less secure") ||
+    normalized.includes("534")
+  ) {
+    return "Gmail requires an app password for SMTP delivery. Update GMAIL_SMTP_APP_PASSWORD in Supabase secrets with a valid Gmail app password.";
+  }
+
+  return value;
 }
 
 function dotStuff(value: string) {

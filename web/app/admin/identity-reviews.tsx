@@ -104,7 +104,28 @@ const cleanManualReviewEmailError = (rawError: string) => {
     return 'The Gmail test sender is not configured yet. Set GMAIL_MAILER_URL or GMAIL_SMTP_USER/GMAIL_SMTP_APP_PASSWORD in Supabase secrets.';
   }
 
-  return value.replace(/;?\s*queued in email_notifications\.?$/i, '').trim();
+  const withoutQueueSuffix = value.replace(/;?\s*queued in email_notifications\.?$/i, '').trim();
+  const normalizedWithoutQueueSuffix = withoutQueueSuffix.toLowerCase();
+  if (
+    normalizedWithoutQueueSuffix.includes('gmail rejected the configured sender credentials') ||
+    normalizedWithoutQueueSuffix.includes('username and password not accepted') ||
+    normalizedWithoutQueueSuffix.includes('badcredentials') ||
+    normalizedWithoutQueueSuffix.includes('smtp expected 235') ||
+    normalizedWithoutQueueSuffix.includes('535-5.7.8') ||
+    normalizedWithoutQueueSuffix.includes('535 5.7.8')
+  ) {
+    return 'Gmail rejected the configured sender credentials. Update GMAIL_SMTP_USER and GMAIL_SMTP_APP_PASSWORD in Supabase secrets with a valid Gmail app password.';
+  }
+
+  if (
+    normalizedWithoutQueueSuffix.includes('application-specific password') ||
+    normalizedWithoutQueueSuffix.includes('less secure') ||
+    normalizedWithoutQueueSuffix.includes('smtp expected 235, got 534')
+  ) {
+    return 'Gmail requires an app password for SMTP delivery. Update GMAIL_SMTP_APP_PASSWORD in Supabase secrets with a valid Gmail app password.';
+  }
+
+  return withoutQueueSuffix;
 };
 
 type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
@@ -192,6 +213,8 @@ interface ManualIdentityReviewEntry {
     id_document_expiry?: string | null;
   } | null;
 }
+
+type IdentityMatchWarning = NonNullable<ManualIdentityReviewEntry['identity_match_warning']>;
 
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
@@ -308,8 +331,11 @@ const formatIdentityMatchType = (value?: string | null) => {
   return 'Possible identity match';
 };
 
-const formatIdentityReviewReason = (value?: string | null) => {
+const formatIdentityReviewReason = (value?: string | null, staleNameBirthdateOnly = false) => {
   const normalized = String(value || '').trim().toUpperCase();
+  if (staleNameBirthdateOnly && normalized === 'SAME_NAME_BIRTHDATE_EXISTING_APPROVED_IDENTITY') {
+    return 'Stale same-name/birthdate match; no active same-role account found';
+  }
   if (normalized === 'SAME_NAME_BIRTHDATE_EXISTING_APPROVED_IDENTITY') {
     return 'Same legal name and birthdate as an approved same-role identity';
   }
@@ -325,15 +351,26 @@ const formatIdentityReviewReason = (value?: string | null) => {
   return String(value || '').trim() || 'Pending manual identity review';
 };
 
+const isDuplicateIdentityReviewReason = (value?: string | null) => {
+  const normalized = String(value || '').trim().toUpperCase();
+  return normalized === 'SAME_NAME_BIRTHDATE_EXISTING_APPROVED_IDENTITY' ||
+    normalized === 'DUPLICATE_DOCUMENT_FINGERPRINT' ||
+    normalized === 'SAME_ROLE_DUPLICATE_DOCUMENT';
+};
+
 const getIdentityMatchWarning = (review?: ManualIdentityReviewEntry | null) => {
   if (!review) return null;
 
   if (review.identity_match_warning) {
     const existingAccounts = review.identity_match_warning.matched_accounts || [];
+    const activeMatchCount = Math.max(Number(review.identity_match_warning.match_count || 0), existingAccounts.length);
+    if (activeMatchCount <= 0) return null;
+
     return {
       ...review.identity_match_warning,
-      match_count: Math.max(Number(review.identity_match_warning.match_count || 0), existingAccounts.length),
+      match_count: activeMatchCount,
       matched_accounts: existingAccounts,
+      stale_matched_accounts: [] as IdentityMatchAccount[],
     };
   }
 
@@ -351,7 +388,43 @@ const getIdentityMatchWarning = (review?: ManualIdentityReviewEntry | null) => {
     review_reason: review.review_reason || review.duplicate_reason || null,
     matched_on: 'DOCUMENT_FINGERPRINT',
     matched_accounts: duplicateAccounts,
+    stale_matched_accounts: [] as IdentityMatchAccount[],
   };
+};
+
+const getIdentityMatchCounts = (warning?: IdentityMatchWarning | null) => {
+  const activeCount = Math.max(
+    Number(warning?.match_count || 0),
+    warning?.matched_accounts?.length || 0,
+  );
+  const staleCount = warning?.stale_matched_accounts?.length || 0;
+
+  return { activeCount, staleCount };
+};
+
+const getIdentityMatchTypes = (warning?: IdentityMatchWarning | null) => (
+  (warning?.match_types || [warning?.matched_on])
+    .filter(Boolean)
+    .map((matchType) => String(matchType).trim().toUpperCase())
+    .filter(Boolean)
+);
+
+const hasActiveIdentityMatchWarning = (review?: ManualIdentityReviewEntry | null) => {
+  const warning = getIdentityMatchWarning(review);
+  return getIdentityMatchCounts(warning).activeCount > 0;
+};
+
+const hasStaleOnlyNameBirthdateWarning = (warning?: IdentityMatchWarning | null) => {
+  const { activeCount, staleCount } = getIdentityMatchCounts(warning);
+  if (!warning || activeCount > 0 || staleCount === 0) return false;
+
+  const matchTypes = getIdentityMatchTypes(warning);
+  return matchTypes.length > 0 && matchTypes.every((matchType) => matchType === 'NAME_BIRTHDATE');
+};
+
+const requiresIdentityDuplicateOverride = (review?: ManualIdentityReviewEntry | null) => {
+  const warning = getIdentityMatchWarning(review);
+  return getIdentityMatchCounts(warning).activeCount > 0;
 };
 
 const isE2EManualIdentityReview = (review?: ManualIdentityReviewEntry | null) => {
@@ -962,7 +1035,7 @@ export default function AdminIdentityReviewsPage() {
 
     const e2eDuplicateOverride = manualReviewDecision === 'APPROVED' && isE2EManualIdentityReview(manualReviewTarget);
     const effectiveDuplicateOverrideConfirmed = duplicateOverrideConfirmed || e2eDuplicateOverride;
-    const requiresDuplicateOverride = manualReviewDecision === 'APPROVED' && Boolean(getIdentityMatchWarning(manualReviewTarget));
+    const requiresDuplicateOverride = manualReviewDecision === 'APPROVED' && requiresIdentityDuplicateOverride(manualReviewTarget);
     const requiresIdentityRetry = manualReviewDecision === 'APPROVED' && needsIdentityVerificationRetry(manualReviewTarget);
     const isRetryRequest = manualReviewDecision === 'DECLINED' && needsIdentityVerificationRetry(manualReviewTarget);
 
@@ -1085,6 +1158,12 @@ export default function AdminIdentityReviewsPage() {
 
   const manualReviewDiditInfo = getDiditReviewInfo(manualReviewTarget);
   const manualReviewMatchWarning = getIdentityMatchWarning(manualReviewTarget);
+  const manualReviewHasStaleNameMatchOnly = hasStaleOnlyNameBirthdateWarning(manualReviewMatchWarning);
+  const manualReviewRequiresDuplicateOverride = requiresIdentityDuplicateOverride(manualReviewTarget);
+  const rawManualReviewReason = manualReviewTarget?.review_reason || manualReviewTarget?.duplicate_reason || null;
+  const manualReviewReason = rawManualReviewReason && (!isDuplicateIdentityReviewReason(rawManualReviewReason) || manualReviewRequiresDuplicateOverride)
+    ? rawManualReviewReason
+    : null;
   const manualReviewRequiresRetry = manualReviewDecision === 'DECLINED' && needsIdentityVerificationRetry(manualReviewTarget);
   const identityPreviewWarning = getIdentityMatchWarning(identityMatchPreview);
   const identityPreviewAccounts = identityPreviewWarning?.matched_accounts || [];
@@ -1216,7 +1295,13 @@ export default function AdminIdentityReviewsPage() {
                 const identityMatchWarning = getIdentityMatchWarning(review);
                 const matchedAccounts = identityMatchWarning?.matched_accounts || [];
                 const staleMatchedAccounts = identityMatchWarning?.stale_matched_accounts || [];
-                const reviewReason = review.review_reason || String(review.metadata?.['review_reason'] || '') || review.duplicate_reason || null;
+                const hasActiveIdentityMatch = hasActiveIdentityMatchWarning(review);
+                const requiresDuplicateOverride = requiresIdentityDuplicateOverride(review);
+                const hasStaleNameMatchOnly = hasStaleOnlyNameBirthdateWarning(identityMatchWarning);
+                const rawReviewReason = review.review_reason || String(review.metadata?.['review_reason'] || '') || review.duplicate_reason || null;
+                const reviewReason = rawReviewReason && (!isDuplicateIdentityReviewReason(rawReviewReason) || hasActiveIdentityMatch)
+                  ? rawReviewReason
+                  : null;
                 const matchTypeLabels = (identityMatchWarning?.match_types || [identityMatchWarning?.matched_on])
                   .filter(Boolean)
                   .map((matchType) => formatIdentityMatchType(String(matchType)));
@@ -1237,19 +1322,21 @@ export default function AdminIdentityReviewsPage() {
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Source: {String(review.source || 'MANUAL_UPLOAD').replace(/_/g, ' ')}</Text>
                     {reviewReason ? (
                       <Text style={[styles.cardMeta, { color: isDark ? '#FBBF24' : '#D97706' }]}>
-                        Review reason: {formatIdentityReviewReason(reviewReason)}
+                        Review reason: {formatIdentityReviewReason(reviewReason, hasStaleNameMatchOnly)}
                       </Text>
                     ) : null}
-                    {identityMatchWarning?.match_count ? (
+                    {hasActiveIdentityMatch ? (
                       <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
-                        Matching same-role account(s): {Number(identityMatchWarning.match_count || 0)}
+                        Matching same-role account(s): {Number(identityMatchWarning?.match_count || matchedAccounts.length || 0)}
                       </Text>
                     ) : null}
                     {identityMatchWarning ? (
                       <View style={[styles.duplicateWarningBox, { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.10)' : '#FFFBEB', borderColor: isDark ? '#FBBF24' : '#F59E0B' }]}>
                         <View style={styles.duplicateWarningTitleRow}>
                           <Ionicons name="warning-outline" size={16} color={isDark ? '#FBBF24' : '#D97706'} />
-                          <Text style={[styles.duplicateWarningTitle, { color: isDark ? '#FBBF24' : '#B45309' }]}>Possible same-role identity match</Text>
+                          <Text style={[styles.duplicateWarningTitle, { color: isDark ? '#FBBF24' : '#B45309' }]}>
+                            {requiresDuplicateOverride ? 'Possible same-role identity match' : (hasStaleNameMatchOnly ? 'Stale same-name match history' : 'Stale identity match history')}
+                          </Text>
                         </View>
                         <Text style={[styles.duplicateWarningText, { color: isDark ? '#F8FAFC' : '#92400E' }]}>
                           Match type: {matchTypeLabels.length > 0 ? matchTypeLabels.join(', ') : 'Possible identity match'}
@@ -1260,7 +1347,9 @@ export default function AdminIdentityReviewsPage() {
                           </Text>
                         ) : (
                           <Text style={[styles.duplicateWarningText, { color: isDark ? '#F8FAFC' : '#92400E' }]}>
-                            No active matched user account details found{staleMatchedAccounts.length > 0 ? ` (${staleMatchedAccounts.length} removed stale ${staleMatchedAccounts.length === 1 ? 'match' : 'matches'} available in View Match).` : '.'}
+                            {hasStaleNameMatchOnly
+                              ? `No active same-role account details found. ${staleMatchedAccounts.length} removed same-name ${staleMatchedAccounts.length === 1 ? 'match is' : 'matches are'} available in View Match.`
+                              : `No active matched user account details found${staleMatchedAccounts.length > 0 ? ` (${staleMatchedAccounts.length} removed stale ${staleMatchedAccounts.length === 1 ? 'match' : 'matches'} available in View Match).` : '.'}`}
                           </Text>
                         )}
                         {matchedAccounts.slice(0, 3).map((account) => (
@@ -1459,19 +1548,23 @@ export default function AdminIdentityReviewsPage() {
                 </Text>
               </View>
             ) : null}
-            {(manualReviewTarget?.review_reason || manualReviewTarget?.duplicate_reason) ? (
+            {manualReviewReason ? (
               <Text style={[styles.cardMeta, { color: isDark ? '#FBBF24' : '#D97706' }]}>
-                {formatIdentityReviewReason(manualReviewTarget.review_reason || manualReviewTarget.duplicate_reason)}
+                {formatIdentityReviewReason(manualReviewReason, manualReviewHasStaleNameMatchOnly)}
               </Text>
             ) : null}
             {manualReviewMatchWarning ? (
               <View style={[styles.duplicateWarningBox, { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.10)' : '#FFFBEB', borderColor: isDark ? '#FBBF24' : '#F59E0B' }]}>
                 <View style={styles.duplicateWarningTitleRow}>
                   <Ionicons name="warning-outline" size={16} color={isDark ? '#FBBF24' : '#D97706'} />
-                  <Text style={[styles.duplicateWarningTitle, { color: isDark ? '#FBBF24' : '#B45309' }]}>Possible same-role identity match</Text>
+                  <Text style={[styles.duplicateWarningTitle, { color: isDark ? '#FBBF24' : '#B45309' }]}>
+                    {manualReviewRequiresDuplicateOverride ? 'Possible same-role identity match' : (manualReviewHasStaleNameMatchOnly ? 'Stale same-name match history' : 'Stale identity match history')}
+                  </Text>
                 </View>
                 <Text style={[styles.duplicateWarningText, { color: isDark ? '#F8FAFC' : '#92400E' }]}>
-                  Match type: {(manualReviewMatchWarning.match_types || [manualReviewMatchWarning.matched_on]).filter(Boolean).map((matchType) => formatIdentityMatchType(String(matchType))).join(', ') || 'Possible identity match'}.
+                  {manualReviewRequiresDuplicateOverride
+                    ? `Match type: ${(manualReviewMatchWarning.match_types || [manualReviewMatchWarning.matched_on]).filter(Boolean).map((matchType) => formatIdentityMatchType(String(matchType))).join(', ') || 'Possible identity match'}.`
+                    : 'No active same-role account details were found for this match history.'}
                 </Text>
                 {manualReviewMatchWarning ? (
                   <TouchableOpacity
@@ -1488,7 +1581,7 @@ export default function AdminIdentityReviewsPage() {
               </View>
             ) : null}
 
-            {manualReviewDecision === 'APPROVED' && manualReviewMatchWarning ? (
+            {manualReviewDecision === 'APPROVED' && manualReviewRequiresDuplicateOverride ? (
               <TouchableOpacity
                 testID="admin-identity-review-duplicate-override"
                 accessibilityLabel="admin-identity-review-duplicate-override"
@@ -1514,7 +1607,7 @@ export default function AdminIdentityReviewsPage() {
               onChangeText={setManualReviewNotes}
               multiline
               numberOfLines={4}
-              placeholder={manualReviewDecision === 'APPROVED' && manualReviewMatchWarning ? 'Required notes for matched identity approval' : 'Optional admin notes'}
+              placeholder={manualReviewDecision === 'APPROVED' && manualReviewRequiresDuplicateOverride ? 'Required notes for matched identity approval' : 'Optional admin notes'}
               placeholderTextColor={colors.textSecondary}
               style={[
                 styles.modalInputCompact,

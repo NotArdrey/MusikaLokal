@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 
 declare const Deno: {
   env: {
@@ -428,15 +429,22 @@ async function insertNotificationWithFallback(
 
   // Primary insert: full modern payload.
   const { error: primaryError } = await tryInsert(payload);
-  if (!primaryError) return null;
+  if (!primaryError) {
+    scheduleCoreActionEmailForNotification(client, payload, { source: "permit-management" });
+    return null;
+  }
 
   // Fallback 1: some environments may enforce a stricter type enum.
   if (isNotificationTypeConstraintError(primaryError)) {
-    const { error: typeFallbackError } = await tryInsert({
+    const typeFallbackPayload = {
       ...payload,
       type: "info",
-    });
-    if (!typeFallbackError) return null;
+    };
+    const { error: typeFallbackError } = await tryInsert(typeFallbackPayload);
+    if (!typeFallbackError) {
+      scheduleCoreActionEmailForNotification(client, typeFallbackPayload, { source: "permit-management" });
+      return null;
+    }
 
     if (!isMissingSchemaError(typeFallbackError)) {
       return typeFallbackError;
@@ -446,15 +454,21 @@ async function insertNotificationWithFallback(
   }
 
   // Fallback 2: legacy schema variant without `meta`.
-  const { meta, ...withoutMeta } = payload;
+  const { meta: _meta, ...withoutMeta } = payload;
   const { error: noMetaError } = await tryInsert(withoutMeta);
-  if (!noMetaError) return null;
+  if (!noMetaError) {
+    scheduleCoreActionEmailForNotification(client, payload, { source: "permit-management" });
+    return null;
+  }
 
   // Fallback 3: legacy schema variant without both `meta` and `read`.
   if (isMissingSchemaError(noMetaError)) {
-    const { read, ...minimalPayload } = withoutMeta;
+    const { read: _read, ...minimalPayload } = withoutMeta;
     const { error: minimalError } = await tryInsert(minimalPayload);
-    if (!minimalError) return null;
+    if (!minimalError) {
+      scheduleCoreActionEmailForNotification(client, payload, { source: "permit-management" });
+      return null;
+    }
     return minimalError;
   }
 

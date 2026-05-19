@@ -6,6 +6,7 @@ import {
   buildNotificationRouteMeta,
   withNotificationRouteMeta,
 } from "../_shared/notificationRoutes.ts";
+import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 import {
   buildGigApplicationAudienceMeta,
   resolveGigApplicationAudience,
@@ -296,11 +297,18 @@ async function insertNotificationIfMissing(
     if (existing && existing.length > 0) return;
   }
 
-  await supabaseAdmin.from("notifications").insert({
+  const notificationPayload = {
     ...payload,
     meta: withNotificationRouteMeta(payload.meta),
     read: false,
-  });
+  };
+
+  const { error } = await supabaseAdmin.from("notifications").insert(notificationPayload);
+  if (error) {
+    console.error("manage_bookings_notification_failed", { message: error.message });
+    return;
+  }
+  scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "manage-bookings" });
 }
 
 const toMoneyNumber = (value: unknown) => {
@@ -3027,7 +3035,7 @@ serve(async (req: Request) => {
           .single();
 
         if (studioInfo?.owner_id) {
-          await supabaseAdmin.from("notifications").insert({
+          const notificationPayload = {
             user_id: studioInfo.owner_id,
             type: "info",
             title: "New Booking Request",
@@ -3040,7 +3048,13 @@ serve(async (req: Request) => {
               booking_date: date,
               event_type: "booking_request_created",
             }),
-          });
+          };
+          const { error: notifyError } = await supabaseAdmin.from("notifications").insert(notificationPayload);
+          if (notifyError) {
+            console.error("Error sending booking request notification:", notifyError);
+          } else {
+            scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "manage-bookings" });
+          }
         }
       } catch (notifyError) {
         console.error(
@@ -3818,20 +3832,24 @@ serve(async (req: Request) => {
 
         if (cancelError) throw cancelError;
 
-        await supabaseAdmin
-          .from("notifications")
-          .insert({
-            user_id: bookingDetails.user_id,
-            type: "warning",
-            title: "Booking Declined",
-            message: `Your booking request for ${bookingDetails.studio?.name || "this studio"} has been declined.`,
-            read: false,
-            meta: buildNotificationRouteMeta("/bookings", undefined, {
-              booking_id,
-              studio_id: bookingDetails.studio_id,
-              event_type: "booking_all_slots_declined",
-            }),
-          });
+        const notificationPayload = {
+          user_id: bookingDetails.user_id,
+          type: "warning",
+          title: "Booking Declined",
+          message: `Your booking request for ${bookingDetails.studio?.name || "this studio"} has been declined.`,
+          read: false,
+          meta: buildNotificationRouteMeta("/bookings", undefined, {
+            booking_id,
+            studio_id: bookingDetails.studio_id,
+            event_type: "booking_all_slots_declined",
+          }),
+        };
+        const { error: notifyError } = await supabaseAdmin.from("notifications").insert(notificationPayload);
+        if (notifyError) {
+          console.error("Error sending booking decline notification:", notifyError);
+        } else {
+          scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "manage-bookings" });
+        }
 
         return new Response(
           JSON.stringify({ success: true, status: "cancelled" }),
@@ -3921,31 +3939,35 @@ serve(async (req: Request) => {
         .map((slot: any) => `${slot.start.slice(0, 5)}-${slot.end.slice(0, 5)}`)
         .join(", ");
 
-      await supabaseAdmin
-        .from("notifications")
-        .insert({
-          user_id: bookingDetails.user_id,
-          type: safeDeclinedSlots.length > 0 ? "info" : "success",
-          title:
+      const notificationPayload = {
+        user_id: bookingDetails.user_id,
+        type: safeDeclinedSlots.length > 0 ? "info" : "success",
+        title:
+          safeDeclinedSlots.length > 0
+            ? "Booking Partially Approved"
+            : "Booking Confirmed!",
+        message:
+          safeDeclinedSlots.length > 0
+            ? `Your booking was partially approved. Accepted slots: ${slotLabel}.`
+            : `Your booking at ${bookingDetails.studio?.name || "the studio"} has been confirmed.`,
+        read: false,
+        meta: buildNotificationRouteMeta("/bookings", undefined, {
+          booking_id,
+          studio_id: bookingDetails.studio_id,
+          accepted_slots: normalizedAcceptedSlots,
+          declined_slots: safeDeclinedSlots,
+          event_type:
             safeDeclinedSlots.length > 0
-              ? "Booking Partially Approved"
-              : "Booking Confirmed!",
-          message:
-            safeDeclinedSlots.length > 0
-              ? `Your booking was partially approved. Accepted slots: ${slotLabel}.`
-              : `Your booking at ${bookingDetails.studio?.name || "the studio"} has been confirmed.`,
-          read: false,
-          meta: buildNotificationRouteMeta("/bookings", undefined, {
-            booking_id,
-            studio_id: bookingDetails.studio_id,
-            accepted_slots: normalizedAcceptedSlots,
-            declined_slots: safeDeclinedSlots,
-            event_type:
-              safeDeclinedSlots.length > 0
-                ? "booking_partial_slot_approval"
-                : "booking_confirmed",
-          }),
-        });
+              ? "booking_partial_slot_approval"
+              : "booking_confirmed",
+        }),
+      };
+      const { error: notifyError } = await supabaseAdmin.from("notifications").insert(notificationPayload);
+      if (notifyError) {
+        console.error("Error sending booking approval notification:", notifyError);
+      } else {
+        scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "manage-bookings" });
+      }
 
       return new Response(
         JSON.stringify({
@@ -4504,9 +4526,7 @@ serve(async (req: Request) => {
 
       if (!alreadyPending) {
         // 4. Send notification to the recipient about the actionable renewal offer
-        const { error: notifyError } = await supabaseAdmin
-          .from("notifications")
-          .insert({
+          const notificationPayload = {
             user_id: renewalRecipientId,
             type: "success",
             title: "Contract Renewal Offer",
@@ -4521,11 +4541,18 @@ serve(async (req: Request) => {
               organizer_id: authUser.id,
               production_team_id: originalApp.production_team_id || null,
             }),
-          });
+          };
+          const { error: notifyError } = await supabaseAdmin
+            .from("notifications")
+            .insert(notificationPayload);
 
-        if (notifyError) {
-          console.error("Error sending renewal notification:", notifyError);
-        }
+          if (!notifyError) {
+            scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "manage-bookings" });
+          }
+
+          if (notifyError) {
+            console.error("Error sending renewal notification:", notifyError);
+          }
       }
 
       return new Response(
@@ -4615,7 +4642,7 @@ serve(async (req: Request) => {
 
       // 4. Send Confirmation Notification to User
       try {
-        await supabaseAdmin.from("notifications").insert({
+        const notificationPayload = {
           user_id: booking.user_id,
           type: "success",
           title: "Payment Successful! 🎉",
@@ -4625,7 +4652,13 @@ serve(async (req: Request) => {
             booking_id: booking.id,
             type: "booking_confirmation"
           })
-        });
+        };
+        const { error: notifyError } = await supabaseAdmin.from("notifications").insert(notificationPayload);
+        if (notifyError) {
+          console.error("❌ Notification error:", notifyError);
+        } else {
+          scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "manage-bookings" });
+        }
       } catch (notifyError) {
         console.error("❌ Notification error:", notifyError);
         // Don't fail the request just because notification failed
@@ -4763,20 +4796,25 @@ serve(async (req: Request) => {
       }
 
       // 6. Notify the customer that their balance was cleared
+      const notificationPayload = {
+        user_id: booking.user_id,
+        type: "success",
+        title: "Balance Cleared! ✅",
+        message: `Your remaining balance of ₱${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
+        read: false,
+        meta: buildNotificationRouteMeta("/bookings", undefined, {
+          type: "balance_cleared",
+          booking_id: booking_id,
+          amount: balanceAmount,
+        }),
+      };
       const { error: notifyError } = await supabaseAdmin
         .from("notifications")
-        .insert({
-          user_id: booking.user_id,
-          type: "success",
-          title: "Balance Cleared! ✅",
-          message: `Your remaining balance of ₱${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
-          read: false,
-          meta: buildNotificationRouteMeta("/bookings", undefined, {
-            type: "balance_cleared",
-            booking_id: booking_id,
-            amount: balanceAmount,
-          }),
-        });
+        .insert(notificationPayload);
+
+      if (!notifyError) {
+        scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "manage-bookings" });
+      }
 
       if (notifyError) {
         console.error("Notification error:", notifyError);

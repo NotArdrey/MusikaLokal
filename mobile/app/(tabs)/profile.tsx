@@ -68,6 +68,7 @@ import { buildSocialFollowKey } from "../../src/utils/socialFollow";
 import { getSmoothTabIndex, setSmoothTab } from "../../src/utils/smoothTabs";
 import { bottomSheetSpringConfig, motion } from "../../src/utils/motion";
 import { isFanUserRole } from "../../src/utils/roleRouting";
+import { isStaffRole } from "../../src/utils/staffAccess";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const PROFILE_CONTENT_HORIZONTAL_PADDING = 24;
@@ -1047,6 +1048,7 @@ export default function ProfileScreen() {
 
   const [profile, setProfile] = useState<any>(null);
   const isFan = isFanUserRole(userRole || profile?.role);
+  const isStaff = isStaffRole(userRole || profile?.role);
   const [loading, setLoading] = useState(true);
   const [profilePosts, setProfilePosts] = useState<any[]>([]);
   const [loadingProfilePosts, setLoadingProfilePosts] = useState(false);
@@ -2158,7 +2160,7 @@ export default function ProfileScreen() {
 
   const MENU_ITEMS = [
     { label: "Edit Profile", icon: "person-outline", route: "/edit_profile" },
-    ...(!isFan ? [{ label: "Wallet", icon: "wallet-outline", route: "/wallet" }] : []),
+    ...(!isFan && !isStaff ? [{ label: "Wallet", icon: "wallet-outline", route: "/wallet" }] : []),
     { label: "Identity Verification", icon: "card-outline", route: "/identity_verification" },
     { label: "Settings", icon: "settings-outline", route: "/settings" },
   ];

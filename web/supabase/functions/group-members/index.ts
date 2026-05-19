@@ -1,6 +1,7 @@
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
+import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -23,6 +24,20 @@ const GROUP_APPLICATION_STATUSES = [
     'declined',
     'cancelled',
 ];
+
+async function insertCoreNotifications(supabaseClient: any, payload: Record<string, unknown> | Record<string, unknown>[]) {
+    const payloads = Array.isArray(payload) ? payload : [payload];
+    const { error } = await supabaseClient.from('notifications').insert(payload);
+
+    if (error) {
+        console.error('group_member_notification_failed', { message: error.message });
+        return;
+    }
+
+    for (const item of payloads) {
+        scheduleCoreActionEmailForNotification(supabaseClient, item, { source: 'group-members' });
+    }
+}
 
 function uniqueStrings(values: unknown[]) {
     return Array.from(
@@ -408,7 +423,7 @@ Deno.serve(async (req: Request) => {
                 status: nextStatus,
             });
 
-            await supabaseClient.from('notifications').insert([
+            await insertCoreNotifications(supabaseClient, [
                 {
                     user_id: requestRow.sender_id,
                     type: isAccepted ? 'success' : 'warning',
@@ -558,7 +573,7 @@ Deno.serve(async (req: Request) => {
                 status: nextStatus,
             });
 
-            await supabaseClient.from('notifications').insert([
+            await insertCoreNotifications(supabaseClient, [
                 {
                     user_id: group.owner_id,
                     type: isAccepted ? 'success' : 'warning',
@@ -643,7 +658,7 @@ Deno.serve(async (req: Request) => {
 
             if (error) throw error;
 
-            await supabaseClient.from('notifications').insert({
+            await insertCoreNotifications(supabaseClient, {
                 user_id: targetUserId,
                 type: 'success',
                 title: 'Added to Group',
@@ -707,7 +722,7 @@ Deno.serve(async (req: Request) => {
             if (error) throw error;
 
             if (targetUserId !== effectiveUserId) {
-                await supabaseClient.from('notifications').insert({
+                await insertCoreNotifications(supabaseClient, {
                     user_id: targetUserId,
                     type: 'warning',
                     title: 'Removed from Group',

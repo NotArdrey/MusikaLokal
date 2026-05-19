@@ -5,6 +5,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // @ts-ignore
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
 import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
+import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -352,11 +353,18 @@ async function insertNotification(
     read?: boolean;
   },
 ) {
-  await supabaseAdmin.from("notifications").insert({
+  const notificationPayload = {
     ...payload,
     meta: withNotificationRouteMeta(payload.meta),
     read: payload.read ?? false,
-  });
+  };
+
+  const { error } = await supabaseAdmin.from("notifications").insert(notificationPayload);
+  if (error) {
+    console.error("paymongo_notification_failed", { message: error.message });
+    return;
+  }
+  scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "paymongo" });
 }
 
 // Helper to credit owner's wallet when a booking payment is received

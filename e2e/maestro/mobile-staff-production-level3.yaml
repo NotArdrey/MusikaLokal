@@ -1,0 +1,13 @@
+appId: ${APP_ID}
+---
+- openLink: "musikalokal://manage"
+- extendedWaitUntil:
+    visible:
+      id: ${E2E_STAFF_PRODUCTION_CARD_ID}
+    timeout: 120000
+- assertNotVisible:
+    id: ${E2E_STAFF_PRODUCTION_MANAGE_ID}
+- assertNotVisible:
+    id: ${E2E_STAFF_PRODUCTION_EDIT_ID}
+- assertNotVisible:
+    id: ${E2E_STAFF_PRODUCTION_DELETE_ID}

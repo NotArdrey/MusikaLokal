@@ -8,9 +8,11 @@ appId: ${APP_ID}
 - tapOn:
     id: "auth-email-input"
 - inputText: ${E2E_MOBILE_EMAIL}
+- hideKeyboard
 - tapOn:
     id: "auth-password-input"
 - inputText: ${E2E_MOBILE_PASSWORD}
+- hideKeyboard
 - tapOn:
     id: "auth-sign-in-button"
 - extendedWaitUntil:

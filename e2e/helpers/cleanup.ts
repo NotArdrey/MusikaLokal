@@ -67,6 +67,7 @@ export async function cleanupE2ERecords() {
   const walletIds = await getE2EWalletIds(profileIds);
   const feedPostIds = await getE2EFeedPostIds(profileIds);
 
+  await deleteWhereIn('staff_listing_access', 'staff_user_id', profileIds);
   await deleteWhereIn('post_comments', 'author_id', profileIds);
   await deleteWhereIn('post_reactions', 'user_id', profileIds);
   await deleteWhereIn('post_media', 'post_id', feedPostIds);

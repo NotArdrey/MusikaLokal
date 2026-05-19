@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 
 declare const Deno: {
   env: {
@@ -1290,7 +1291,13 @@ async function deleteResource(client: any, resourceType: ResourceType, id: strin
 
     if (notifications.length > 0) {
       const { error: notifyError } = await client.from("notifications").insert(notifications);
-      if (notifyError) console.error("Failed to notify venue applicants", notifyError);
+      if (notifyError) {
+        console.error("Failed to notify venue applicants", notifyError);
+      } else {
+        for (const notification of notifications) {
+          scheduleCoreActionEmailForNotification(client, notification, { source: "admin-listings-management" });
+        }
+      }
     }
 
     const { error } = await client.from("gigs").delete().eq("id", id);

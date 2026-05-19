@@ -3,6 +3,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
+import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -400,11 +401,18 @@ async function insertNotification(
     meta?: Record<string, any>;
   },
 ) {
-  await supabaseAdmin.from("notifications").insert({
+  const notificationPayload = {
     ...payload,
     meta: withNotificationRouteMeta(payload.meta),
     read: false,
-  });
+  };
+
+  const { error } = await supabaseAdmin.from("notifications").insert(notificationPayload);
+  if (error) {
+    console.error("manage_production_notification_failed", { message: error.message });
+    return;
+  }
+  scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "manage-production" });
 }
 
 function toNonEmptyString(value: unknown) {

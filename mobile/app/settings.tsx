@@ -9,6 +9,7 @@ import { useAuth } from '../src/context/AuthContext';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
 import { isFanUserRole } from '../src/utils/roleRouting';
+import { isStaffRole } from '../src/utils/staffAccess';
 
 export default function SettingsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
@@ -49,6 +50,7 @@ export default function SettingsScreen() {
   };
 
   const isFan = isFanUserRole(userRole);
+  const canShowWallet = Boolean(userRole) && !isFan && !isStaffRole(userRole);
 
   const settingsSections: {
     title: string;
@@ -62,7 +64,7 @@ export default function SettingsScreen() {
         { label: 'Account Security', icon: 'shield-outline', route: '/account_details' },
         { label: 'Notification Preferences', icon: 'notifications-outline', route: '/notification_settings' },
         { label: 'Identity Verification', icon: 'card-outline', route: '/identity_verification' },
-        ...(!isFan ? [{ label: 'Wallet', icon: 'wallet-outline', route: '/wallet' }] : []),
+        ...(canShowWallet ? [{ label: 'Wallet', icon: 'wallet-outline', route: '/wallet' }] : []),
       ],
     });
   }
