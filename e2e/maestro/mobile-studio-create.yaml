@@ -67,16 +67,6 @@ appId: ${APP_ID}
     centerElement: true
 - tapOn:
     id: "mobile-add-studio-next-button"
-- scrollUntilVisible:
-    element:
-      id: "mobile-add-studio-next-button"
-    direction: DOWN
-    timeout: 60000
-    speed: 80
-    visibilityPercentage: 50
-    centerElement: true
-- tapOn:
-    id: "mobile-add-studio-next-button"
 - extendedWaitUntil:
     visible:
       id: "custom-alert-button-create"
