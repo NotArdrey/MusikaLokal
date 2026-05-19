@@ -222,7 +222,7 @@ function extractIdentityBirthDate(rawDocument: any) {
 }
 
 export function prepareIdentityNameBirthDateDuplicateInput(rawDocument: any, options: Record<string, unknown> = {}) {
-  const fullLegalName = normalizeText(options.fullLegalName || extractIdentityFullName(rawDocument));
+  const fullLegalName = normalizeText(options.fullLegalName || extractIdentityFullName(rawDocument)).replace(/\s+/g, " ");
   const normalizedFullLegalName = normalizeFullLegalName(options.normalizedFullLegalName || fullLegalName);
   const birthDate = normalizeBirthDate(options.birthDate || extractIdentityBirthDate(rawDocument));
 
@@ -477,8 +477,10 @@ export async function findSameRoleIdentityDuplicate(
   }
 
   const filteredMatches = matches.filter((item: any) => {
+    const linkedProfile = item?.profiles;
+    if (!linkedProfile || Array.isArray(linkedProfile)) return false;
     if (!normalizedEmail) return true;
-    const matchEmail = normalizeText(item?.profiles?.email).toLowerCase();
+    const matchEmail = normalizeText(linkedProfile?.email).toLowerCase();
     const claimEmail = normalizeText(item?.normalized_email).toLowerCase();
     return (!matchEmail || matchEmail !== normalizedEmail) && (!claimEmail || claimEmail !== normalizedEmail);
   });
@@ -691,6 +693,11 @@ export async function queueIdentityReview(
     birthDate = null,
     reviewReason = null,
     matchedOn = null,
+    musicVideoPath = null,
+    musicVideoOriginalName = null,
+    musicVideoMimeType = null,
+    musicVideoSizeBytes = null,
+    musicVideoUploadedAt = null,
   }: Record<string, unknown>,
 ) {
   if (!isUuid(userId)) return null;

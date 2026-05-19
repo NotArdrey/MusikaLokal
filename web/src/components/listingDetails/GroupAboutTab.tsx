@@ -441,7 +441,7 @@ const GroupAboutTab = ({
                     completionRate === 100 ? "#10B981" : colors.textSecondary,
                 }}
               >
-                {`${completionRate}% Complete`}
+                {`Completion ${completionRate}%`}
               </Text>
             </View>
           ) : (
@@ -453,7 +453,7 @@ const GroupAboutTab = ({
                 color: colors.textSecondary,
               }}
             >
-              Completion rate unavailable
+              Gig completion unavailable
             </Text>
           )}
         </View>

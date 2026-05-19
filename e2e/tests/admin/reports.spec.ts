@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { cleanupE2ERecords } from '../../helpers/cleanup';
 import { expectDbRecord, expectVisible } from '../../helpers/assertions';
 import { seedE2EAdmin, seedE2EReport, seedE2EUser } from '../../helpers/seed';
+import { getSupabaseAdmin } from '../../helpers/supabase';
 import { loginAsAdmin } from '../../helpers/web-auth';
 
 test.describe.configure({ mode: 'serial' });
@@ -58,6 +59,32 @@ test.describe('admin reports moderation CRUD', () => {
       target.id,
       (record) => record.is_verified === false && record.verification_status === 'PENDING_REVIEW',
     );
+
+    await page.getByTestId(`admin-report-reopen-${report.id}`).click();
+    await expectDbRecord<any>('reports', 'id', report.id, (record) => record.status === 'pending');
+
+    await page.getByTestId(`admin-report-resolve-${report.id}`).click();
+    await expect(page.getByTestId('admin-report-moderation-modal')).toBeVisible();
+    await page.getByTestId('admin-report-account-action-ban_7_days').click();
+    await page.getByTestId('admin-report-moderation-apply-button').click();
+    await expectDbRecord<any>(
+      'reports',
+      'id',
+      report.id,
+      (record) => (
+        record.status === 'resolved' &&
+        record.target_account_action === 'ban_7_days' &&
+        Boolean(record.target_account_action_expires_at)
+      ),
+    );
+    await expect
+      .poll(async () => {
+        const { data, error } = await getSupabaseAdmin().auth.admin.getUserById(target.id);
+        if (error) throw error;
+        const bannedUntil = data.user?.banned_until ? new Date(data.user.banned_until).getTime() : 0;
+        return bannedUntil > Date.now();
+      }, { timeout: 45_000 })
+      .toBe(true);
 
     await page.getByTestId(`admin-report-reopen-${report.id}`).click();
     await expectDbRecord<any>('reports', 'id', report.id, (record) => record.status === 'pending');

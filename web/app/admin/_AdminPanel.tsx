@@ -577,8 +577,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   const [reportFilter, setReportFilter] = useState<ReportFilter>('all');
   const [reportEscalationFilter, setReportEscalationFilter] = useState<ReportEscalationFilter>('all');
   const [reportSearch, setReportSearch] = useState('');
-  const [reportsOffset, setReportsOffset] = useState(0);
-  const [reportsHasMore, setReportsHasMore] = useState(false);
   const [incidentFilter, setIncidentFilter] = useState<BookingIncidentFilter>('all');
   const [auditSearch, setAuditSearch] = useState('');
   const [auditEntityFilter, setAuditEntityFilter] = useState<AuditEntityFilter>('all');
@@ -905,17 +903,12 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     }
   }, [showAlert, invokeAdminUsersManagement]);
 
-  useEffect(() => {
-    setReportsOffset(0);
-  }, [reportFilter, reportEscalationFilter]);
-
   const fetchReports = useCallback(async () => {
     setReportsLoading(true);
     try {
       console.log('[AdminPanel][Reports] Fetch started', {
         statusFilter: reportFilter,
         escalationFilter: reportEscalationFilter,
-        offset: reportsOffset,
       });
       const { data, error } = await supabase.functions.invoke<any>('admin-reports-management', {
         body: {
@@ -923,7 +916,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
           statusFilter: reportFilter,
           escalationFilter: reportEscalationFilter,
           limit: REPORTS_PAGE_SIZE,
-          offset: reportsOffset,
         },
       });
 
@@ -953,21 +945,18 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
       }));
 
       setReports(normalizedItems);
-      setReportsHasMore(Boolean(data?.hasMore));
       console.log('[AdminPanel][Reports] Fetch success', {
         total: normalizedItems.length,
-        hasMore: Boolean(data?.hasMore),
       });
     } catch (error) {
       console.error('[AdminPanel][Reports] Fetch failed', error);
       const message = await getErrorMessage(error, 'Unable to fetch reports.');
       showAlert('error', 'Failed to load reports', message);
       setReports([]);
-      setReportsHasMore(false);
     } finally {
       setReportsLoading(false);
     }
-  }, [reportFilter, reportEscalationFilter, reportsOffset, showAlert]);
+  }, [reportFilter, reportEscalationFilter, showAlert]);
 
   const fetchIncidents = useCallback(async () => {
     setIncidentsLoading(true);
@@ -2002,7 +1991,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     incidentStatuses,
     auditActions,
     auditEntityTypes,
-    REPORTS_PAGE_SIZE,
     formatDateTime,
     formatCurrency,
     formatPercent,
@@ -2050,9 +2038,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     reportEscalationFilter,
     setReportEscalationFilter,
     reportsLoading,
-    reportsOffset,
-    setReportsOffset,
-    reportsHasMore,
     filteredReports,
     reportActionLoadingId,
     reportViewLoadingId,
@@ -2676,45 +2661,6 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                 );
               })}
             </ScrollView>
-
-            <View style={styles.reportsPagerRow}>
-              <TouchableOpacity
-                activeOpacity={1}
-                disabled={reportsLoading || reportsOffset <= 0}
-                onPress={() => setReportsOffset((prev) => Math.max(0, prev - REPORTS_PAGE_SIZE))}
-                style={[
-                  styles.reportsPagerButton,
-                  {
-                    borderColor: colors.border,
-                    backgroundColor: isDark ? '#0A1A32' : '#F8FAFC',
-                    opacity: reportsOffset <= 0 ? 0.45 : 1,
-                  },
-                ]}
-              >
-                <Ionicons name="chevron-back-outline" size={16} color={colors.textSecondary} />
-                <Text style={[styles.reportsPagerButtonText, { color: colors.textSecondary }]}>Prev</Text>
-              </TouchableOpacity>
-
-              <Text style={[styles.reportsPagerLabel, { color: colors.textSecondary }]}>Page {Math.floor(reportsOffset / REPORTS_PAGE_SIZE) + 1}</Text>
-
-              <TouchableOpacity
-                activeOpacity={1}
-                disabled={reportsLoading || !reportsHasMore}
-                onPress={() => setReportsOffset((prev) => prev + REPORTS_PAGE_SIZE)}
-                style={[
-                  styles.reportsPagerButton,
-                  {
-                    borderColor: colors.border,
-                    backgroundColor: isDark ? '#0A1A32' : '#F8FAFC',
-                    opacity: reportsHasMore ? 1 : 0.45,
-                  },
-                ]}
-              >
-                <Text style={[styles.reportsPagerButtonText, { color: colors.textSecondary }]}>Next</Text>
-                <Ionicons name="chevron-forward-outline" size={16} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
             {reportsLoading ? (
               <View style={styles.inlineLoader}>
                 <ActivityIndicator size="small" color={colors.primary} />
@@ -4021,32 +3967,6 @@ const styles = StyleSheet.create({
   secondaryActionText: {
     fontSize: 12,
     fontFamily: 'Poppins_500Medium',
-  },
-  reportsPagerRow: {
-    marginTop: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  reportsPagerButton: {
-    minWidth: 104,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  reportsPagerButtonText: {
-    fontSize: 13,
-    fontFamily: 'Poppins_500Medium',
-  },
-  reportsPagerLabel: {
-    fontSize: 13,
-    fontFamily: 'Poppins_600SemiBold',
   },
   filterRow: {
     gap: 8,

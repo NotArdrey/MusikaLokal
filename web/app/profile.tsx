@@ -19,6 +19,9 @@ import {
     View,
     Platform,
     Easing as RNEasing,
+    type ImageStyle,
+    type StyleProp,
+    type ViewStyle,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -350,6 +353,194 @@ const logProfileMedia = (event: string, details?: Record<string, unknown>) => {
     timestamp: new Date().toISOString(),
     ...(details || {}),
   });
+};
+
+const WEB_VIDEO_THUMBNAIL_TIME_SECONDS = 1;
+const WEB_VIDEO_THUMBNAIL_TIMEOUT_MS = 8000;
+
+const createWebVideoThumbnail = (uri: string): Promise<string> =>
+  new Promise((resolve, reject) => {
+    if (typeof document === "undefined") {
+      reject(new Error("Video thumbnails require a browser environment."));
+      return;
+    }
+
+    const video = document.createElement("video");
+    const canvas = document.createElement("canvas");
+    let settled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      video.pause();
+      video.removeAttribute("src");
+      try {
+        video.load();
+      } catch {
+        // Some browsers throw when loading a detached video; the thumbnail work is already done.
+      }
+    };
+
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+
+    const fail = (message: string) => finish(() => reject(new Error(message)));
+
+    const captureFrame = () => {
+      try {
+        const width = video.videoWidth;
+        const height = video.videoHeight;
+        if (!width || !height) {
+          fail("Video frame dimensions were unavailable.");
+          return;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          fail("Could not create a video thumbnail canvas.");
+          return;
+        }
+
+        context.drawImage(video, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.72);
+        finish(() => resolve(dataUrl));
+      } catch (error: any) {
+        finish(() => reject(error instanceof Error ? error : new Error(String(error))));
+      }
+    };
+
+    video.crossOrigin = "anonymous";
+    video.preload = "metadata";
+    video.muted = true;
+    video.playsInline = true;
+
+    video.addEventListener(
+      "loadedmetadata",
+      () => {
+        const duration = Number.isFinite(video.duration)
+          ? video.duration
+          : WEB_VIDEO_THUMBNAIL_TIME_SECONDS;
+        const targetTime = Math.min(
+          WEB_VIDEO_THUMBNAIL_TIME_SECONDS,
+          Math.max(0, duration - 0.1),
+        );
+
+        if (targetTime <= 0.05) {
+          video.addEventListener("loadeddata", captureFrame, { once: true });
+          return;
+        }
+
+        try {
+          video.currentTime = targetTime;
+        } catch (error: any) {
+          finish(() => reject(error instanceof Error ? error : new Error(String(error))));
+        }
+      },
+      { once: true },
+    );
+    video.addEventListener("seeked", captureFrame, { once: true });
+    video.addEventListener("error", () => fail("Could not load video for thumbnail."), {
+      once: true,
+    });
+
+    timeoutId = setTimeout(
+      () => fail("Timed out while creating the video thumbnail."),
+      WEB_VIDEO_THUMBNAIL_TIMEOUT_MS,
+    );
+    video.src = uri;
+    video.load();
+  });
+
+type ProfileVideoThumbnailProps = {
+  uri: string;
+  isDark: boolean;
+  imageStyle?: StyleProp<ImageStyle>;
+  placeholderStyle?: StyleProp<ViewStyle>;
+};
+
+const ProfileVideoThumbnail = ({
+  uri,
+  isDark,
+  imageStyle,
+  placeholderStyle,
+}: ProfileVideoThumbnailProps) => {
+  const [thumbnailUri, setThumbnailUri] = useState<string | null>(null);
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    setThumbnailUri(null);
+    setThumbnailFailed(false);
+
+    if (Platform.OS !== "web") {
+      setThumbnailFailed(true);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    createWebVideoThumbnail(uri)
+      .then((nextThumbnailUri) => {
+        if (isMounted) {
+          setThumbnailUri(nextThumbnailUri);
+        }
+      })
+      .catch((error) => {
+        logProfileMedia("video_thumbnail_failed", {
+          uri,
+          message: error?.message || String(error),
+        });
+        if (isMounted) {
+          setThumbnailFailed(true);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [uri]);
+
+  return (
+    <View
+      style={[
+        styles.gridVideoThumbnail,
+        placeholderStyle,
+        { backgroundColor: isDark ? "#0F172A" : "#E2E8F0" },
+      ]}
+    >
+      {thumbnailUri ? (
+        <>
+          <Image source={{ uri: thumbnailUri }} style={imageStyle} resizeMode="cover" />
+          <View style={styles.gridVideoScrim} />
+        </>
+      ) : (
+        <View style={styles.gridVideoFallback}>
+          {thumbnailFailed ? (
+            <Ionicons name="play-circle" size={38} color="rgba(255,255,255,0.86)" />
+          ) : (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          )}
+        </View>
+      )}
+
+      {thumbnailUri ? (
+        <View style={styles.gridVideoPlayBadgeWrap}>
+          <View style={styles.gridVideoPlayBadge}>
+            <Ionicons name="play" size={18} color="#FFFFFF" />
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
 };
 
 const resolveStorageObjectFromPublicUrl = (url: string): { bucket: string; path: string } | null => {
@@ -3106,16 +3297,15 @@ export default function ProfileScreen() {
                       activeOpacity={1}
                     >
                       {isVideoItem ? (
-                        <View
-                          style={[
+                        <ProfileVideoThumbnail
+                          uri={url}
+                          isDark={isDark}
+                          imageStyle={[styles.gridImage, isWebDesktop && styles.gridImageWeb]}
+                          placeholderStyle={[
                             styles.gridVideoPlaceholder,
                             isWebDesktop && styles.gridVideoPlaceholderWeb,
-                            { backgroundColor: isDark ? "#0F172A" : "#E2E8F0" },
                           ]}
-                        >
-                          <Ionicons name="play-circle" size={30} color="#fff" />
-                          <Text style={styles.gridVideoPlaceholderText}>Tap to play</Text>
-                        </View>
+                        />
                       ) : isDocumentItem ? (
                         <View
                           style={[
@@ -4486,6 +4676,11 @@ const styles = StyleSheet.create({
   gridImageWeb: {
     borderRadius: 0,
   },
+  gridVideoThumbnail: {
+    flex: 1,
+    position: "relative",
+    overflow: "hidden",
+  },
   gridVideoPlaceholder: {
     flex: 1,
     alignItems: "center" as const,
@@ -4494,6 +4689,30 @@ const styles = StyleSheet.create({
   },
   gridVideoPlaceholderWeb: {
     borderRadius: 0,
+  },
+  gridVideoFallback: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  gridVideoScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.16)",
+  },
+  gridVideoPlayBadgeWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  gridVideoPlayBadge: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    backgroundColor: "rgba(15,23,42,0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
   },
   gridVideoPlaceholderText: {
     color: "rgba(255,255,255,0.82)",

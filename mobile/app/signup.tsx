@@ -2845,45 +2845,6 @@ export default function SignupScreen() {
                 {errors.role ? <Text style={{ color: 'red', fontSize: 12 }}>{errors.role}</Text> : null}
             </View>
 
-            {isMusicianSignup ? (
-                <View style={styles.musicianVideoSection}>
-                    <View style={styles.sectionHeadingRow}>
-                        <Text style={[styles.sectionEyebrow, { color: colors.primary }]}>Musician proof</Text>
-                        <Text style={[styles.sectionHint, themeStyles.textSecondary]}>Required before verification</Text>
-                    </View>
-                    <TouchableOpacity
-                        activeOpacity={musicianVideoUploading ? 1 : 0.78}
-                        accessibilityLabel="signup-musician-video-upload-button"
-                        onPress={() => void pickAndUploadMusicianVideoProof()}
-                        disabled={musicianVideoUploading}
-                        style={[styles.manualUploadCard, styles.musicianVideoProofCard, themeStyles.inputContainer]}
-                        testID="signup-musician-video-upload-button"
-                    >
-                        <View style={[styles.manualUploadIcon, { backgroundColor: isDark ? '#111827' : '#EEF2FF' }]}>
-                            <Ionicons name="videocam-outline" size={20} color={colors.primary} />
-                        </View>
-                        <View style={styles.manualUploadCopy}>
-                            <Text style={[styles.manualUploadTitle, themeStyles.text]}>
-                                {musicianVideoProof ? 'Music video uploaded' : 'Upload music video'}
-                            </Text>
-                            <Text style={[styles.manualUploadPlaceholder, themeStyles.textSecondary]}>
-                                {musicianVideoProof
-                                    ? `${musicianVideoProof.originalName} - ${formatUploadFileSize(musicianVideoProof.sizeBytes)}`
-                                    : 'MP4, MOV, M4V, or WebM up to 50MB'}
-                            </Text>
-                        </View>
-                        <View style={[styles.manualUploadAction, { backgroundColor: musicianVideoProof ? (isDark ? '#334155' : '#F3F4F6') : colors.primary }]}>
-                            {musicianVideoUploading ? (
-                                <ActivityIndicator size="small" color={musicianVideoProof ? colors.text : '#FFFFFF'} />
-                            ) : (
-                                <Ionicons name={musicianVideoProof ? 'swap-horizontal-outline' : 'cloud-upload-outline'} size={16} color={musicianVideoProof ? colors.text : '#FFFFFF'} />
-                            )}
-                        </View>
-                    </TouchableOpacity>
-                    {errors.musicVideo ? <Text style={{ color: 'red', fontSize: 12 }}>{errors.musicVideo}</Text> : null}
-                </View>
-            ) : null}
-
             <View style={styles.formGap}>
                 {/* Email */}
                 <View style={[styles.inputContainer, themeStyles.inputContainer, errors.email ? { borderColor: 'red' } : null]}>
@@ -3029,6 +2990,45 @@ export default function SignupScreen() {
 
                     {errors.document ? <Text style={{ color: 'red', fontSize: 12 }}>{errors.document}</Text> : null}
                 </View>
+
+                {isMusicianSignup ? (
+                    <View style={styles.musicianVideoSection}>
+                        <View style={styles.sectionHeadingRow}>
+                            <Text style={[styles.sectionEyebrow, { color: colors.primary }]}>Musician proof</Text>
+                            <Text style={[styles.sectionHint, themeStyles.textSecondary]}>Required before verification</Text>
+                        </View>
+                        <TouchableOpacity
+                            activeOpacity={musicianVideoUploading ? 1 : 0.78}
+                            accessibilityLabel="signup-musician-video-upload-button"
+                            onPress={() => void pickAndUploadMusicianVideoProof()}
+                            disabled={musicianVideoUploading}
+                            style={[styles.manualUploadCard, styles.musicianVideoProofCard, themeStyles.inputContainer]}
+                            testID="signup-musician-video-upload-button"
+                        >
+                            <View style={[styles.manualUploadIcon, { backgroundColor: isDark ? '#111827' : '#EEF2FF' }]}>
+                                <Ionicons name="videocam-outline" size={20} color={colors.primary} />
+                            </View>
+                            <View style={styles.manualUploadCopy}>
+                                <Text style={[styles.manualUploadTitle, themeStyles.text]}>
+                                    {musicianVideoProof ? 'Music video uploaded' : 'Upload music video'}
+                                </Text>
+                                <Text style={[styles.manualUploadPlaceholder, themeStyles.textSecondary]}>
+                                    {musicianVideoProof
+                                        ? `${musicianVideoProof.originalName} - ${formatUploadFileSize(musicianVideoProof.sizeBytes)}`
+                                        : 'MP4, MOV, M4V, or WebM up to 50MB'}
+                                </Text>
+                            </View>
+                            <View style={[styles.manualUploadAction, { backgroundColor: musicianVideoProof ? (isDark ? '#334155' : '#F3F4F6') : colors.primary }]}>
+                                {musicianVideoUploading ? (
+                                    <ActivityIndicator size="small" color={musicianVideoProof ? colors.text : '#FFFFFF'} />
+                                ) : (
+                                    <Ionicons name={musicianVideoProof ? 'swap-horizontal-outline' : 'cloud-upload-outline'} size={16} color={musicianVideoProof ? colors.text : '#FFFFFF'} />
+                                )}
+                            </View>
+                        </TouchableOpacity>
+                        {errors.musicVideo ? <Text style={{ color: 'red', fontSize: 12 }}>{errors.musicVideo}</Text> : null}
+                    </View>
+                ) : null}
             </View>
 
             <TouchableOpacity

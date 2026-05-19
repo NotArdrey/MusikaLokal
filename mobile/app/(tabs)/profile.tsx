@@ -26,6 +26,9 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  type ImageStyle,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -208,6 +211,86 @@ const logProfileMedia = (event: string, details?: Record<string, unknown>) => {
     timestamp: new Date().toISOString(),
     ...(details || {}),
   });
+};
+
+type ProfileVideoThumbnailProps = {
+  uri: string;
+  isDark: boolean;
+  imageStyle?: StyleProp<ImageStyle>;
+  placeholderStyle?: StyleProp<ViewStyle>;
+};
+
+const ProfileVideoThumbnail = ({
+  uri,
+  isDark,
+  imageStyle,
+  placeholderStyle,
+}: ProfileVideoThumbnailProps) => {
+  const [thumbnailUri, setThumbnailUri] = useState<string | null>(null);
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    setThumbnailUri(null);
+    setThumbnailFailed(false);
+
+    VideoThumbnails.getThumbnailAsync(uri, {
+      time: 1000,
+      quality: 0.68,
+    })
+      .then((thumbnail) => {
+        if (isMounted) {
+          setThumbnailUri(thumbnail.uri);
+        }
+      })
+      .catch((error) => {
+        logProfileMedia("video_thumbnail_failed", {
+          uri,
+          message: error?.message || String(error),
+        });
+        if (isMounted) {
+          setThumbnailFailed(true);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [uri]);
+
+  return (
+    <View
+      style={[
+        styles.gridVideoThumbnail,
+        placeholderStyle,
+        { backgroundColor: isDark ? "#0F172A" : "#E2E8F0" },
+      ]}
+    >
+      {thumbnailUri ? (
+        <>
+          <Image source={{ uri: thumbnailUri }} style={imageStyle} resizeMode="cover" />
+          <View style={styles.gridVideoScrim} />
+        </>
+      ) : (
+        <View style={styles.gridVideoFallback}>
+          {thumbnailFailed ? (
+            <Ionicons name="play-circle" size={38} color="rgba(255,255,255,0.86)" />
+          ) : (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          )}
+        </View>
+      )}
+
+      {thumbnailUri ? (
+        <View style={styles.gridVideoPlayBadgeWrap}>
+          <View style={styles.gridVideoPlayBadge}>
+            <Ionicons name="play" size={18} color="#FFFFFF" />
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
 };
 
 const normalizeBookmarkBuckets = (value: any) => ({
@@ -4397,15 +4480,12 @@ export default function ProfileScreen() {
                           activeOpacity={1}
                         >
                           {isVideoItem ? (
-                            <View
-                              style={[
-                                styles.gridVideoPlaceholder,
-                                { backgroundColor: isDark ? "#0F172A" : "#E2E8F0" },
-                              ]}
-                            >
-                              <Ionicons name="play-circle" size={30} color="#fff" />
-                              <Text style={styles.gridVideoPlaceholderText}>Tap to play</Text>
-                            </View>
+                            <ProfileVideoThumbnail
+                              uri={url}
+                              isDark={isDark}
+                              imageStyle={styles.gridImage}
+                              placeholderStyle={styles.gridVideoPlaceholder}
+                            />
                           ) : isDocumentItem ? (
                             <View
                               style={[
@@ -5401,11 +5481,40 @@ const styles = StyleSheet.create({
     height: "100%",
     backgroundColor: "#1a1a1a",
   },
+  gridVideoThumbnail: {
+    flex: 1,
+    position: "relative",
+    overflow: "hidden",
+  },
   gridVideoPlaceholder: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
+  },
+  gridVideoFallback: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  gridVideoScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.16)",
+  },
+  gridVideoPlayBadgeWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  gridVideoPlayBadge: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(15,23,42,0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
   },
   gridVideoPlaceholderText: {
     color: "rgba(255,255,255,0.82)",

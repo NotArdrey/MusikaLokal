@@ -107,7 +107,14 @@ type ReportEscalationFilter = 'all' | ReportEscalationStatus;
 
 type ReportModerationAction = 'none' | 'warn_reporter' | 'warn_target_owner' | 'warn_both' | 'manual_review';
 
-type ReportTargetAccountAction = 'none' | 'mark_unverified';
+type ReportTargetAccountAction =
+  | 'none'
+  | 'mark_unverified'
+  | 'ban_1_day'
+  | 'ban_7_days'
+  | 'ban_30_days'
+  | 'ban_permanent'
+  | 'lift_ban';
 
 type BookingIncidentFilter =
   | 'all'
@@ -150,6 +157,8 @@ interface ReportEntry {
   reviewer_name: string;
   moderation_action: ReportModerationAction;
   moderation_notes: string | null;
+  target_account_action: ReportTargetAccountAction;
+  target_account_action_expires_at: string | null;
   escalation_status: ReportEscalationStatus;
   escalated_at: string | null;
   escalation_reason: string | null;
@@ -213,7 +222,25 @@ const reportEscalationFilters: ReportEscalationFilter[] = ['all', 'none', 'manua
 
 const reportModerationActions: ReportModerationAction[] = ['none', 'warn_reporter', 'warn_target_owner', 'warn_both', 'manual_review'];
 
-const reportTargetAccountActions: ReportTargetAccountAction[] = ['none', 'mark_unverified'];
+const reportTargetAccountActions: ReportTargetAccountAction[] = [
+  'none',
+  'mark_unverified',
+  'ban_1_day',
+  'ban_7_days',
+  'ban_30_days',
+  'ban_permanent',
+  'lift_ban',
+];
+
+const reportTargetAccountActionLabels: Record<ReportTargetAccountAction, string> = {
+  none: 'None',
+  mark_unverified: 'Mark Unverified',
+  ban_1_day: 'Ban 1 Day',
+  ban_7_days: 'Ban 7 Days',
+  ban_30_days: 'Ban 30 Days',
+  ban_permanent: 'Permanent Ban',
+  lift_ban: 'Lift Ban',
+};
 
 const incidentStatuses: BookingIncidentFilter[] = [
   'all',
@@ -563,32 +590,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontFamily: 'Poppins_700Bold',
   },
-  reportsPagerButton: {
-    minWidth: 104,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  reportsPagerButtonText: {
-    fontSize: 13,
-    fontFamily: 'Poppins_500Medium',
-  },
-  reportsPagerLabel: {
-    fontSize: 13,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  reportsPagerRow: {
-    marginTop: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 20,
@@ -734,8 +735,6 @@ export default function AdminReportsPage() {
   const [reportSearch, setReportSearch] = useState('');
   const [reportFilter, setReportFilter] = useState<ReportFilter>('all');
   const [reportEscalationFilter, setReportEscalationFilter] = useState<(typeof reportEscalationFilters)[number]>('all');
-  const [reportsOffset, setReportsOffset] = useState(0);
-  const [reportsHasMore, setReportsHasMore] = useState(false);
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reports, setReports] = useState<ReportEntry[]>([]);
   const [incidentsLoading, setIncidentsLoading] = useState(false);
@@ -786,9 +785,8 @@ export default function AdminReportsPage() {
     () => getAdminPageCacheKey('reports', {
       reportFilter,
       reportEscalationFilter,
-      reportsOffset,
     }),
-    [reportFilter, reportEscalationFilter, reportsOffset],
+    [reportFilter, reportEscalationFilter],
   );
 
   const incidentsCacheKey = useMemo(
@@ -797,12 +795,10 @@ export default function AdminReportsPage() {
   );
 
   const updateReportFilter = useCallback((nextFilter: ReportFilter) => {
-    setReportsOffset(0);
     setReportFilter(nextFilter);
   }, []);
 
   const updateReportEscalationFilter = useCallback((nextFilter: (typeof reportEscalationFilters)[number]) => {
-    setReportsOffset(0);
     setReportEscalationFilter(nextFilter);
   }, []);
 
@@ -871,7 +867,6 @@ export default function AdminReportsPage() {
           statusFilter: reportFilter,
           escalationFilter: reportEscalationFilter,
           limit: REPORTS_PAGE_SIZE,
-          offset: reportsOffset,
         },
       });
 
@@ -895,31 +890,31 @@ export default function AdminReportsPage() {
         reviewer_name: String(item?.reviewer_name || ''),
         moderation_action: (String(item?.moderation_action || 'none') as ReportModerationAction),
         moderation_notes: item?.moderation_notes ? String(item.moderation_notes) : null,
+        target_account_action: (String(item?.target_account_action || 'none') as ReportTargetAccountAction),
+        target_account_action_expires_at: item?.target_account_action_expires_at
+          ? String(item.target_account_action_expires_at)
+          : null,
         escalation_status: (String(item?.escalation_status || 'none') as ReportEscalationStatus),
         escalated_at: item?.escalated_at ? String(item.escalated_at) : null,
         escalation_reason: item?.escalation_reason ? String(item.escalation_reason) : null,
       }));
 
       setReports(normalizedItems);
-      const hasMore = Boolean(data?.hasMore);
-      setReportsHasMore(hasMore);
       writeAdminPageCache(reportsCacheKey, {
         items: normalizedItems,
-        hasMore,
       });
     } catch (error) {
       if (!options?.silent) {
         const message = await getErrorMessage(error, 'Unable to fetch reports.');
         showAlert('error', 'Failed to load reports', message);
         setReports([]);
-        setReportsHasMore(false);
       }
     } finally {
       if (!options?.silent) {
         setReportsLoading(false);
       }
     }
-  }, [reportFilter, reportEscalationFilter, reportsOffset, reportsCacheKey, showAlert]);
+  }, [reportFilter, reportEscalationFilter, reportsCacheKey, showAlert]);
 
   const fetchIncidents = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
@@ -955,14 +950,13 @@ export default function AdminReportsPage() {
   useEffect(() => {
     if (!isAccessReady || !hasInitializedRef.current) return;
 
-    const cachedReports = readAdminPageCache<{ items: ReportEntry[]; hasMore: boolean }>(
+    const cachedReports = readAdminPageCache<{ items: ReportEntry[] }>(
       reportsCacheKey,
       REPORTS_CACHE_TTL_MS,
     );
 
     if (cachedReports) {
       setReports(cachedReports.items);
-      setReportsHasMore(Boolean(cachedReports.hasMore));
     }
 
     void fetchReports({ silent: Boolean(cachedReports) });
@@ -995,7 +989,7 @@ export default function AdminReportsPage() {
     }
 
     let isMounted = true;
-    const cachedReports = readAdminPageCache<{ items: ReportEntry[]; hasMore: boolean }>(
+    const cachedReports = readAdminPageCache<{ items: ReportEntry[] }>(
       reportsCacheKey,
       REPORTS_CACHE_TTL_MS,
     );
@@ -1006,7 +1000,6 @@ export default function AdminReportsPage() {
 
     if (cachedReports) {
       setReports(cachedReports.items);
-      setReportsHasMore(Boolean(cachedReports.hasMore));
     }
 
     if (cachedIncidents) {
@@ -1074,7 +1067,10 @@ export default function AdminReportsPage() {
 
         const moderationLabel = moderationAction.replace(/_/g, ' ');
         const statusLabel = nextStatus.replace(/_/g, ' ');
-        const accountActionLabel = targetAccountAction === 'mark_unverified' ? ' Marked reported account for review.' : '';
+        const accountActionLabel =
+          targetAccountAction === 'none'
+            ? ''
+            : ` ${reportTargetAccountActionLabels[targetAccountAction]} applied to the reported account.`;
         invalidateAdminPageCache();
         showAlert('success', 'Report updated', `Status set to ${statusLabel}. Action: ${moderationLabel}.${accountActionLabel}`);
         await fetchReports();
@@ -1482,6 +1478,7 @@ export default function AdminReportsPage() {
         String(item.reporter_email || '').toLowerCase().includes(q) ||
         String(item.reviewer_name || '').toLowerCase().includes(q) ||
         String(item.moderation_action || '').toLowerCase().includes(q) ||
+        String(item.target_account_action || '').toLowerCase().includes(q) ||
         String(item.moderation_notes || '').toLowerCase().includes(q) ||
         String(item.escalation_status || '').toLowerCase().includes(q) ||
         String(item.escalation_reason || '').toLowerCase().includes(q) ||
@@ -1686,6 +1683,12 @@ export default function AdminReportsPage() {
                 {report.moderation_action && report.moderation_action !== 'none' ? (
                   <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Action: {report.moderation_action.replace(/_/g, ' ')}</Text>
                 ) : null}
+                {report.target_account_action && report.target_account_action !== 'none' ? (
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                    Account action: {reportTargetAccountActionLabels[report.target_account_action]}
+                    {report.target_account_action_expires_at ? ` until ${formatDateTime(report.target_account_action_expires_at)}` : ''}
+                  </Text>
+                ) : null}
                 {report.moderation_notes ? (
                   <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Notes: {report.moderation_notes}</Text>
                 ) : null}
@@ -1766,44 +1769,6 @@ export default function AdminReportsPage() {
           })}
         </View>
       )}
-
-      <View style={styles.reportsPagerRow}>
-        <TouchableOpacity
-          activeOpacity={1}
-          disabled={reportsLoading || reportsOffset <= 0}
-          onPress={() => setReportsOffset((prev) => Math.max(0, prev - REPORTS_PAGE_SIZE))}
-          style={[
-            styles.reportsPagerButton,
-            {
-              borderColor: colors.border,
-              backgroundColor: isDark ? '#0A1A32' : '#F8FAFC',
-              opacity: reportsOffset <= 0 ? 0.45 : 1,
-            },
-          ]}
-        >
-          <Ionicons name="chevron-back-outline" size={16} color={colors.textSecondary} />
-          <Text style={[styles.reportsPagerButtonText, { color: colors.textSecondary }]}>Prev</Text>
-        </TouchableOpacity>
-
-        <Text style={[styles.reportsPagerLabel, { color: colors.textSecondary }]}>Page {Math.floor(reportsOffset / REPORTS_PAGE_SIZE) + 1}</Text>
-
-        <TouchableOpacity
-          activeOpacity={1}
-          disabled={reportsLoading || !reportsHasMore}
-          onPress={() => setReportsOffset((prev) => prev + REPORTS_PAGE_SIZE)}
-          style={[
-            styles.reportsPagerButton,
-            {
-              borderColor: colors.border,
-              backgroundColor: isDark ? '#0A1A32' : '#F8FAFC',
-              opacity: reportsHasMore ? 1 : 0.45,
-            },
-          ]}
-        >
-          <Text style={[styles.reportsPagerButtonText, { color: colors.textSecondary }]}>Next</Text>
-          <Ionicons name="chevron-forward-outline" size={16} color={colors.textSecondary} />
-        </TouchableOpacity>
-      </View>
     </View>
   );
 
@@ -2322,7 +2287,6 @@ export default function AdminReportsPage() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
               {reportTargetAccountActions.map((accountAction) => {
                 const active = reportTargetAccountAction === accountAction;
-                const label = accountAction === 'mark_unverified' ? 'mark unverified' : 'none';
                 return (
                   <TouchableOpacity
                     testID={`admin-report-account-action-${accountAction}`}
@@ -2339,7 +2303,7 @@ export default function AdminReportsPage() {
                     ]}
                   >
                     <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                      {label}
+                      {reportTargetAccountActionLabels[accountAction]}
                     </Text>
                   </TouchableOpacity>
                 );

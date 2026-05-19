@@ -967,6 +967,20 @@ function isDiditPendingReview(review: any) {
   return String(review?.source || "").trim().toUpperCase() === "DIDIT_PENDING";
 }
 
+function getDiditSourceReviewStatus(review: any) {
+  const metadata = review?.metadata && typeof review.metadata === "object" ? review.metadata : {};
+  return normalizeDiditReviewStatus(metadata.didit_status || metadata.source_session_status || null);
+}
+
+function shouldSyncDiditManualReviewStatus(review: any) {
+  if (!isDiditPendingReview(review)) return false;
+
+  const sourceStatus = getDiditSourceReviewStatus(review);
+  if (!sourceStatus) return true;
+
+  return sourceStatus === "In Review" || sourceStatus === "Resubmitted";
+}
+
 function getDiditReviewInfo(review: any) {
   if (!isDiditBackedReview(review)) return null;
 
@@ -976,7 +990,7 @@ function getDiditReviewInfo(review: any) {
   return {
     status: normalizeDiditReviewStatus(rawStatus) || "In Review",
     session_id: review.didit_session_id || null,
-    action_available: isDiditPendingReview(review) && Boolean(review.didit_session_id),
+    action_available: shouldSyncDiditManualReviewStatus(review) && Boolean(review.didit_session_id),
     last_synced_at: metadata.didit_status_synced_at || null,
   };
 }
@@ -2184,9 +2198,10 @@ serve(async (req: Request) => {
       const profileVerificationStatus = decision === "APPROVED" ? "APPROVED" : "DECLINED";
       const nowIso = new Date().toISOString();
       let diditStatusSync: Record<string, any> | null = null;
+      let diditStatusSyncSkipped: Record<string, any> | null = null;
       let musicianVideoPortfolio: Record<string, any> | null = null;
 
-      if (isDiditPendingReview(review)) {
+      if (shouldSyncDiditManualReviewStatus(review)) {
         const diditSessionId = String(review.didit_session_id || "").trim();
         if (!diditSessionId) {
           return jsonResponse({
@@ -2205,6 +2220,15 @@ serve(async (req: Request) => {
             error: diditError?.message || "Unable to update the Didit review status.",
           }, 502);
         }
+      } else if (isDiditPendingReview(review) && String(review.didit_session_id || "").trim()) {
+        const sourceStatus = getDiditSourceReviewStatus(review);
+        diditStatusSyncSkipped = {
+          status: sourceStatus || null,
+          skipped_at: nowIso,
+          reason: sourceStatus
+            ? `Didit source session is already ${sourceStatus}; MusikaLokal review decision is local only.`
+            : "Didit source session is not in an actionable manual-review status.",
+        };
       }
 
       if (decision === "APPROVED" && isMusicianSignupReview && review.music_video_path) {
@@ -2225,6 +2249,14 @@ serve(async (req: Request) => {
               didit_status: diditStatusSync.status,
               didit_status_synced_at: diditStatusSync.synced_at,
               didit_status_sync_session_kind: diditStatusSync.session_kind || null,
+            }
+          : {}),
+        ...(diditStatusSyncSkipped
+          ? {
+              didit_status_sync_skipped: true,
+              didit_status_sync_skipped_at: diditStatusSyncSkipped.skipped_at,
+              didit_status_sync_skipped_reason: diditStatusSyncSkipped.reason,
+              didit_status: diditStatusSyncSkipped.status || existingReviewMetadata.didit_status || existingReviewMetadata.source_session_status || null,
             }
           : {}),
         ...(duplicateOverrideConfirmed && duplicateMatchesForApproval.length > 0

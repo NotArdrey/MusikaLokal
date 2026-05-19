@@ -24,7 +24,23 @@ type ReportModerationAction =
   | "manual_review";
 
 type ReportEscalationStatus = "none" | "manual_review";
-type ReportTargetAccountAction = "none" | "mark_unverified";
+type ReportTargetAccountAction =
+  | "none"
+  | "mark_unverified"
+  | "ban_1_day"
+  | "ban_7_days"
+  | "ban_30_days"
+  | "ban_permanent"
+  | "lift_ban";
+
+type ReportTargetAccountActionConfig = {
+  label: string;
+  banDuration?: string | "none";
+  expiresAfterDays?: number;
+  notificationType: "success" | "info" | "warning" | "error";
+  notificationTitle: string;
+  notificationMessage: string;
+};
 
 const reportModerationActions = new Set<ReportModerationAction>([
   "none",
@@ -38,6 +54,61 @@ const reportEscalationStatuses = new Set<ReportEscalationStatus>([
   "none",
   "manual_review",
 ]);
+
+const reportTargetAccountActionConfigs: Record<ReportTargetAccountAction, ReportTargetAccountActionConfig> = {
+  none: {
+    label: "None",
+    notificationType: "info",
+    notificationTitle: "Report Moderation Update",
+    notificationMessage: "A report related to your account was reviewed by an administrator.",
+  },
+  mark_unverified: {
+    label: "Mark Unverified",
+    notificationType: "warning",
+    notificationTitle: "Account Verification Required",
+    notificationMessage:
+      "An administrator marked your account as needing verification review. Please complete verification before continuing.",
+  },
+  ban_1_day: {
+    label: "Ban 1 Day",
+    banDuration: "24h",
+    expiresAfterDays: 1,
+    notificationType: "error",
+    notificationTitle: "Account Temporarily Banned",
+    notificationMessage: "Your MusikaLokal account has been banned for 1 day after report moderation.",
+  },
+  ban_7_days: {
+    label: "Ban 7 Days",
+    banDuration: "168h",
+    expiresAfterDays: 7,
+    notificationType: "error",
+    notificationTitle: "Account Temporarily Banned",
+    notificationMessage: "Your MusikaLokal account has been banned for 7 days after report moderation.",
+  },
+  ban_30_days: {
+    label: "Ban 30 Days",
+    banDuration: "720h",
+    expiresAfterDays: 30,
+    notificationType: "error",
+    notificationTitle: "Account Temporarily Banned",
+    notificationMessage: "Your MusikaLokal account has been banned for 30 days after report moderation.",
+  },
+  ban_permanent: {
+    label: "Permanent Ban",
+    // Supabase Auth models bans as durations; 100 years is the documented permanent-ban equivalent.
+    banDuration: "876000h",
+    notificationType: "error",
+    notificationTitle: "Account Permanently Banned",
+    notificationMessage: "Your MusikaLokal account has been permanently banned after report moderation.",
+  },
+  lift_ban: {
+    label: "Lift Ban",
+    banDuration: "none",
+    notificationType: "success",
+    notificationTitle: "Account Ban Lifted",
+    notificationMessage: "An administrator lifted the ban on your MusikaLokal account.",
+  },
+};
 
 function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -92,9 +163,15 @@ function parseReportEscalationStatus(rawValue: unknown): ReportEscalationStatus 
 }
 
 function parseReportTargetAccountAction(rawValue: unknown): ReportTargetAccountAction | null {
-  const value = String(rawValue || "none").trim().toLowerCase();
-  if (value === "none" || value === "mark_unverified") return value;
+  const value = String(rawValue || "none").trim().toLowerCase() as ReportTargetAccountAction;
+  if (Object.prototype.hasOwnProperty.call(reportTargetAccountActionConfigs, value)) return value;
   return null;
+}
+
+function getTargetAccountActionExpiresAt(action: ReportTargetAccountAction, now: Date) {
+  const config = reportTargetAccountActionConfigs[action];
+  if (!config.expiresAfterDays) return null;
+  return new Date(now.getTime() + config.expiresAfterDays * 24 * 60 * 60 * 1000).toISOString();
 }
 
 function normalizeText(rawValue: unknown, maxLength: number): string | null {
@@ -408,6 +485,78 @@ async function markTargetAccountUnverified(client: any, userId: string) {
   return { error: null };
 }
 
+async function applyTargetAccountAction(
+  client: any,
+  userId: string,
+  action: ReportTargetAccountAction,
+  input: {
+    reportId: string;
+    adminUserId: string;
+    nowIso: string;
+    banExpiresAt: string | null;
+  },
+) {
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId) {
+    return { error: "Reported account is unavailable." };
+  }
+
+  if (action === "none") {
+    return { error: null };
+  }
+
+  if (action === "mark_unverified") {
+    return await markTargetAccountUnverified(client, normalizedUserId);
+  }
+
+  const config = reportTargetAccountActionConfigs[action];
+  if (!config?.banDuration) {
+    return { error: "Unsupported account action." };
+  }
+
+  const { data: existingAuth, error: existingAuthError } = await client.auth.admin.getUserById(normalizedUserId);
+  if (existingAuthError || !existingAuth?.user) {
+    return { error: "Reported auth account was not found." };
+  }
+
+  const existingMetadata = (existingAuth.user.user_metadata || {}) as Record<string, unknown>;
+  const existingModeration = existingMetadata.moderation || {};
+  const nextModeration =
+    action === "lift_ban"
+      ? {
+          ...(typeof existingModeration === "object" && existingModeration !== null ? existingModeration : {}),
+          banned: false,
+          last_lifted_at: input.nowIso,
+          last_lifted_by: input.adminUserId,
+          last_lifted_report_id: input.reportId,
+        }
+      : {
+          ...(typeof existingModeration === "object" && existingModeration !== null ? existingModeration : {}),
+          banned: true,
+          ban_action: action,
+          banned_at: input.nowIso,
+          banned_by: input.adminUserId,
+          ban_report_id: input.reportId,
+          ban_duration: config.banDuration,
+          ban_expires_at: input.banExpiresAt,
+          ban_permanent: action === "ban_permanent",
+        };
+
+  const { error: authUpdateError } = await client.auth.admin.updateUserById(normalizedUserId, {
+    ban_duration: config.banDuration,
+    user_metadata: {
+      ...existingMetadata,
+      moderation: nextModeration,
+    },
+  });
+
+  if (authUpdateError) {
+    return { error: authUpdateError.message };
+  }
+
+  return { error: null };
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -448,7 +597,6 @@ serve(async (req: Request) => {
         escalationFilterRaw === "all" ? "all" : parseReportEscalationStatus(escalationFilterRaw);
       const pageSize = Math.max(1, Math.min(100, Number(params.limit || 50)));
       const fetchLimit = Math.min(200, pageSize + 1);
-      const offset = Math.max(0, Number(params.offset || 0));
 
       if (escalationFilterRaw !== "all" && !escalationFilter) {
         return jsonResponse({ error: "Invalid escalation filter" }, 400);
@@ -459,7 +607,7 @@ serve(async (req: Request) => {
           .from("reports")
           .select(columns)
           .order("created_at", { ascending: false })
-          .range(offset, offset + fetchLimit - 1);
+          .limit(fetchLimit);
 
         if (["pending", "resolved", "dismissed"].includes(statusFilter)) {
           query = query.eq("status", statusFilter);
@@ -475,6 +623,26 @@ serve(async (req: Request) => {
 
         return query;
       };
+
+      const selectWithTargetAccountAction = [
+        "id",
+        "reporter_id",
+        "target_type",
+        "target_id",
+        "reason",
+        "details",
+        "status",
+        "created_at",
+        "reviewed_by",
+        "reviewed_at",
+        "moderation_action",
+        "moderation_notes",
+        "target_account_action",
+        "target_account_action_expires_at",
+        "escalation_status",
+        "escalated_at",
+        "escalation_reason",
+      ].join(", ");
 
       const selectWithModeration = [
         "id",
@@ -498,26 +666,36 @@ serve(async (req: Request) => {
 
       let reports: any[] = [];
       let usedLegacy = false;
+      let usedTargetAccountActionLegacy = false;
 
       {
-        const { data, error } = await buildQuery(selectWithModeration, true);
+        const { data, error } = await buildQuery(selectWithTargetAccountAction, true);
         if (!error) {
           reports = Array.isArray(data) ? data : [];
         } else if (isMissingColumnError(error)) {
-          usedLegacy = true;
+          usedTargetAccountActionLegacy = true;
 
-          if (escalationFilter === "manual_review") {
-            return jsonResponse({
-              items: [],
-              hasMore: false,
-              nextOffset: null,
-              usedLegacy: true,
-            });
+          const moderation = await buildQuery(selectWithModeration, true);
+          if (!moderation.error) {
+            reports = Array.isArray(moderation.data) ? moderation.data : [];
+          } else if (isMissingColumnError(moderation.error)) {
+            usedLegacy = true;
+
+            if (escalationFilter === "manual_review") {
+              return jsonResponse({
+                items: [],
+                hasMore: false,
+                usedLegacy: true,
+                usedTargetAccountActionLegacy,
+              });
+            }
+
+            const legacy = await buildQuery(selectLegacy, false);
+            if (legacy.error) throw legacy.error;
+            reports = Array.isArray(legacy.data) ? legacy.data : [];
+          } else {
+            throw moderation.error;
           }
-
-          const legacy = await buildQuery(selectLegacy, false);
-          if (legacy.error) throw legacy.error;
-          reports = Array.isArray(legacy.data) ? legacy.data : [];
         } else {
           throw error;
         }
@@ -544,6 +722,8 @@ serve(async (req: Request) => {
           reviewer_name: profileMap[entry.reviewed_by]?.full_name || "",
           moderation_action: entry.moderation_action || "none",
           moderation_notes: entry.moderation_notes || null,
+          target_account_action: entry.target_account_action || "none",
+          target_account_action_expires_at: entry.target_account_action_expires_at || null,
           escalation_status: entry.escalation_status || "none",
           escalated_at: entry.escalated_at || null,
           escalation_reason: entry.escalation_reason || null,
@@ -551,8 +731,8 @@ serve(async (req: Request) => {
           reviewed_at: entry.reviewed_at || null,
         })),
         hasMore,
-        nextOffset: hasMore ? offset + pageSize : null,
         usedLegacy,
+        usedTargetAccountActionLegacy,
       });
     }
 
@@ -669,18 +849,41 @@ serve(async (req: Request) => {
         targetOwnerId = "";
       }
 
-      if (targetAccountAction === "mark_unverified") {
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const targetAccountActionExpiresAt = getTargetAccountActionExpiresAt(targetAccountAction, now);
+      let supportsTargetAccountActionColumns = false;
+
+      if (targetAccountAction !== "none") {
         if (!targetOwnerId) {
           return jsonResponse({ error: "Reported account is unavailable." }, 400);
         }
 
-        const accountActionResult = await markTargetAccountUnverified(client, targetOwnerId);
+        const columnCheck = await client
+          .from("reports")
+          .select("target_account_action, target_account_action_expires_at")
+          .limit(1);
+
+        if (columnCheck.error) {
+          if (isMissingColumnError(columnCheck.error)) {
+            supportsTargetAccountActionColumns = false;
+          } else {
+            throw columnCheck.error;
+          }
+        } else {
+          supportsTargetAccountActionColumns = true;
+        }
+
+        const accountActionResult = await applyTargetAccountAction(client, targetOwnerId, targetAccountAction, {
+          reportId,
+          adminUserId: userId,
+          nowIso,
+          banExpiresAt: targetAccountActionExpiresAt,
+        });
         if (accountActionResult.error) {
           return jsonResponse({ error: accountActionResult.error }, 400);
         }
       }
-
-      const nowIso = new Date().toISOString();
 
       const updatePayload: Record<string, unknown> = {
         status: nextStatus,
@@ -689,6 +892,11 @@ serve(async (req: Request) => {
         moderation_action: moderationAction,
         moderation_notes: moderationNotes,
       };
+
+      if (targetAccountAction !== "none" && supportsTargetAccountActionColumns) {
+        updatePayload.target_account_action = targetAccountAction;
+        updatePayload.target_account_action_expires_at = targetAccountActionExpiresAt;
+      }
 
       if (moderationAction === "manual_review") {
         updatePayload.escalation_status = "manual_review";
@@ -708,15 +916,18 @@ serve(async (req: Request) => {
 
       let updatedReport: Record<string, unknown> | null = null;
       let usedLegacy = false;
+      let usedTargetAccountActionLegacy = targetAccountAction !== "none" && !supportsTargetAccountActionColumns;
 
       {
+        const updateSelect = targetAccountAction !== "none" && supportsTargetAccountActionColumns
+          ? "id, status, target_type, target_id, reviewed_by, reviewed_at, moderation_action, moderation_notes, target_account_action, target_account_action_expires_at, escalation_status, escalated_at, escalation_reason"
+          : "id, status, target_type, target_id, reviewed_by, reviewed_at, moderation_action, moderation_notes, escalation_status, escalated_at, escalation_reason";
+
         const { data, error } = await client
           .from("reports")
           .update(updatePayload)
           .eq("id", reportId)
-          .select(
-            "id, status, target_type, target_id, reviewed_by, reviewed_at, moderation_action, moderation_notes, escalation_status, escalated_at, escalation_reason",
-          )
+          .select(updateSelect)
           .maybeSingle();
 
         if (!error) {
@@ -813,6 +1024,32 @@ serve(async (req: Request) => {
         }
       }
 
+      if (targetAccountAction !== "none" && targetOwnerId) {
+        const accountActionConfig = reportTargetAccountActionConfigs[targetAccountAction];
+        try {
+          await insertNotificationIfMissing(client, {
+            user_id: targetOwnerId,
+            type: accountActionConfig.notificationType,
+            title: accountActionConfig.notificationTitle,
+            message: accountActionConfig.notificationMessage,
+            image: null,
+            meta: {
+              report_id: reportId,
+              target_type: existingReport.target_type,
+              target_id: existingReport.target_id,
+              next_status: nextStatus,
+              moderation_action: moderationAction,
+              target_account_action: targetAccountAction,
+              target_account_action_label: accountActionConfig.label,
+              target_account_action_expires_at: targetAccountActionExpiresAt,
+              event_type: `report_target_account_${targetAccountAction}`,
+            },
+          });
+        } catch {
+          // Do not block moderation if account action notification insert fails.
+        }
+      }
+
       return jsonResponse({
         item: {
           ...updatedReport,
@@ -825,9 +1062,17 @@ serve(async (req: Request) => {
             updatedReport.escalation_status !== undefined
               ? updatedReport.escalation_status
               : (moderationAction === "manual_review" ? "manual_review" : "none"),
-          target_account_action: targetAccountAction,
+          target_account_action:
+            updatedReport.target_account_action !== undefined
+              ? updatedReport.target_account_action
+              : targetAccountAction,
+          target_account_action_expires_at:
+            updatedReport.target_account_action_expires_at !== undefined
+              ? updatedReport.target_account_action_expires_at
+              : targetAccountActionExpiresAt,
         },
         usedLegacy,
+        usedTargetAccountActionLegacy,
       });
     }
 

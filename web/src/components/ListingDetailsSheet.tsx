@@ -3714,7 +3714,6 @@ const ListingDetailsSheet = forwardRef<
       displayRate={effectiveDisplayRate}
       labels={labels}
       currentUserId={currentUserId}
-      completionRate={listingCompletionRate}
       handleProfileNavigation={handleProfileNavigation}
     />
   );

@@ -240,20 +240,65 @@ function estimateBase64Bytes(base64Value: string): number {
   return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
 }
 
+function normalizePhotoMimeType(value?: string | null): string {
+  const mimeType = (value || "").trim().toLowerCase();
+  if (mimeType === "image/jpg") return "image/jpeg";
+  return mimeType;
+}
+
+function resolvePhotoMimeTypeFromExtension(fileName?: string): string {
+  switch (extractExtension(fileName || "")) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "webp":
+      return "image/webp";
+    case "gif":
+      return "image/gif";
+    case "heic":
+      return "image/heic";
+    case "heif":
+      return "image/heif";
+    case "avif":
+      return "image/avif";
+    default:
+      return "";
+  }
+}
+
+function resolveScreeningImageMimeType(file: FileCandidate, declaredMimeType: string): string {
+  const candidates = [
+    declaredMimeType,
+    file.mimeType || "",
+    resolvePhotoMimeTypeFromExtension(file.fileName || ""),
+  ];
+
+  for (const candidate of candidates) {
+    const mimeType = normalizePhotoMimeType(candidate);
+    if (SAFE_PHOTO_MIMES.has(mimeType)) {
+      return mimeType;
+    }
+  }
+
+  return "";
+}
+
 function parseImageDataUrl(
   file: FileCandidate,
 ): { dataUrl: string; mimeType: string; base64: string } | null {
   const raw = typeof file.contentDataUrl === "string" ? file.contentDataUrl.trim() : "";
   if (!raw) return null;
 
-  const match = raw.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i);
+  const match = raw.match(/^data:([^;,]*);base64,([a-z0-9+/=\s]+)$/i);
   if (!match) {
     throw new Error("Image content must be sent as a base64 data URL.");
   }
 
-  const mimeType = match[1].toLowerCase();
+  const mimeType = resolveScreeningImageMimeType(file, match[1]);
   const base64 = match[2].replace(/\s/g, "");
-  if (!SAFE_PHOTO_MIMES.has(mimeType)) {
+  if (!mimeType) {
     throw new Error("Photos must be valid image files (JPEG, PNG, WebP, etc.).");
   }
 

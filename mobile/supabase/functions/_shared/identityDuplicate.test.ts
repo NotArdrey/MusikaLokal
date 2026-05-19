@@ -1,5 +1,6 @@
 import {
   buildIdentityDocumentFingerprint,
+  findSameRoleIdentityDuplicate,
   normalizeBirthDate,
   normalizeFullLegalName,
   prepareIdentityNameBirthDateDuplicateInput,
@@ -15,6 +16,24 @@ function assertEquals(actual: unknown, expected: unknown) {
   if (actualJson !== expectedJson) {
     throw new Error(`Expected ${expectedJson}, got ${actualJson}`);
   }
+}
+
+function createIdentityClaimsClient(data: any[]) {
+  const query = {
+    select: () => query,
+    eq: () => query,
+    in: () => query,
+    not: () => query,
+    limit: () => query,
+    neq: () => query,
+    then: (resolve: any, reject: any) => Promise.resolve({ data, error: null }).then(resolve, reject),
+  };
+  return {
+    from: (table: string) => {
+      assertEquals(table, "identity_document_claims");
+      return query;
+    },
+  };
 }
 
 Deno.env.set("IDENTITY_DOCUMENT_HASH_SECRET", "identity-duplicate-test-secret");
@@ -90,4 +109,23 @@ Deno.test("prepareIdentityNameBirthDateDuplicateInput returns plain match input,
       hasNameBirthDate: true,
     },
   );
+});
+
+Deno.test("findSameRoleIdentityDuplicate ignores stale claims without an active profile", async () => {
+  const result = await findSameRoleIdentityDuplicate(createIdentityClaimsClient([
+    {
+      id: "claim-1",
+      user_id: "00000000-0000-0000-0000-000000000001",
+      role: "musician",
+      status: "APPROVED",
+      normalized_email: "old@example.com",
+      profiles: null,
+    },
+  ]), {
+    documentFingerprint: "v1:abc123",
+    role: "musician",
+    email: "new@example.com",
+  });
+
+  assertEquals(result, { hasDuplicate: false, matches: [] });
 });

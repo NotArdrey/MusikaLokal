@@ -38,7 +38,7 @@ interface RemoteUploadSafetyResult {
   reason?: string;
 }
 
-const SAFETY_CACHE_PREFIX = "upload_safety_screen:v6:";
+const SAFETY_CACHE_PREFIX = "upload_safety_screen:v7:";
 const SAFETY_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SAFETY_UNAVAILABLE_CACHE_TTL_MS = 5 * 60 * 1000;
 const SCREENING_FUNCTION_NAME = "upload-safety-screen";
