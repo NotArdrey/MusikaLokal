@@ -1082,11 +1082,14 @@ Deno.serve(async (req: Request) => {
       };
       const normalizeStudioFeedCard = (item: any) => {
         const images = Array.isArray(item?.images) ? item.images : [];
+        const isVenue = Array.isArray(item?.amenities)
+          ? item.amenities.some((amenity: any) => String(amenity || "").toLowerCase().includes("stage"))
+          : false;
         return {
           __feedKind: "ai_card",
           id: item?.id,
-          type: "Studio",
-          name: item?.name || "Unnamed Studio",
+          type: isVenue ? "Venue" : "Studio",
+          name: item?.name || (isVenue ? "Unnamed Venue" : "Unnamed Studio"),
           image: images[0] || null,
           images,
           rating: Number(item?.rating || 0),
@@ -1094,8 +1097,8 @@ Deno.serve(async (req: Request) => {
           location: item?.address || item?.location || "",
           latitude: item?.latitude ?? null,
           longitude: item?.longitude ?? null,
-          genre: item?.type || "Studio",
-          description: item?.description || "Newly created studio on MusikaLokal.",
+          genre: item?.type || (isVenue ? "Venue" : "Studio"),
+          description: item?.description || `Newly created ${isVenue ? "venue" : "studio"} on MusikaLokal.`,
           created_at: item?.created_at || null,
           updated_at: item?.updated_at || null,
           owner_id: item?.owner_id || null,
@@ -1107,14 +1110,14 @@ Deno.serve(async (req: Request) => {
           social_follow_target_type: "profile",
         };
       };
-      const normalizeVenueFeedCard = (item: any) => {
+      const normalizeGigFeedCard = (item: any) => {
         const images = Array.isArray(item?.images) ? item.images : [];
         const requirements = item?.requirements || {};
         return {
           __feedKind: "ai_card",
           id: item?.id,
           type: "Gig",
-          name: item?.name || "Untitled Venue",
+          name: item?.name || "Untitled Gig",
           image: images[0] || null,
           images,
           rating: Number(item?.rating || 0),
@@ -1125,7 +1128,7 @@ Deno.serve(async (req: Request) => {
           genre: Array.isArray(requirements?.genres)
             ? requirements.genres.join(", ")
             : requirements?.genre || "",
-          description: item?.description || "Newly created venue listing on MusikaLokal.",
+          description: item?.description || "Newly created gig on MusikaLokal.",
           created_at: item?.created_at || null,
           updated_at: item?.updated_at || null,
           organizer_id: item?.organizer_id || null,
@@ -1225,7 +1228,7 @@ Deno.serve(async (req: Request) => {
           groupsByOwnerResult,
           followedGroupsResult,
           studiosResult,
-          venuesResult,
+          gigsResult,
           productionTeamsResult,
         ] = await Promise.all([
           postAuthorIds.length > 0
@@ -1272,7 +1275,7 @@ Deno.serve(async (req: Request) => {
                 supabaseAdmin
                   .from("gigs_with_stats")
                   .select("*")
-                  .eq("status", "open")
+                  .neq("status", "cancelled")
                   .eq("permit_status", "approved")
                   .in("organizer_id", followedProfileIds),
               )
@@ -1293,7 +1296,7 @@ Deno.serve(async (req: Request) => {
           groupsByOwnerResult,
           followedGroupsResult,
           studiosResult,
-          venuesResult,
+          gigsResult,
           productionTeamsResult,
         ].find((result: any) => result?.error)?.error;
         if (sourceError) return jsonResponse({ error: sourceError.message }, 500);
@@ -1303,7 +1306,7 @@ Deno.serve(async (req: Request) => {
           groupsByOwnerResult,
           followedGroupsResult,
           studiosResult,
-          venuesResult,
+          gigsResult,
           productionTeamsResult,
         ].some((result: any) => resultRows(result).length >= sourceLimit);
 
@@ -1313,7 +1316,7 @@ Deno.serve(async (req: Request) => {
           ...resultRows(groupsByOwnerResult).map(normalizeGroupFeedCard),
           ...resultRows(followedGroupsResult).map(normalizeGroupFeedCard),
           ...resultRows(studiosResult).map(normalizeStudioFeedCard),
-          ...resultRows(venuesResult).map(normalizeVenueFeedCard),
+          ...resultRows(gigsResult).map(normalizeGigFeedCard),
           ...resultRows(productionTeamsResult).map(normalizeProductionFeedCard),
         ];
       } else {
@@ -1332,7 +1335,7 @@ Deno.serve(async (req: Request) => {
           artistsResult,
           groupsResult,
           studiosResult,
-          venuesResult,
+          gigsResult,
           productionTeamsResult,
         ] = await Promise.all([
           withCursorAndLimit(
@@ -1369,7 +1372,7 @@ Deno.serve(async (req: Request) => {
                 supabaseAdmin
                   .from("gigs_with_stats")
                   .select("*")
-                  .eq("status", "open")
+                  .neq("status", "cancelled")
                   .eq("permit_status", "approved"),
               )
             : emptyResult(),
@@ -1387,7 +1390,7 @@ Deno.serve(async (req: Request) => {
           artistsResult,
           groupsResult,
           studiosResult,
-          venuesResult,
+          gigsResult,
           productionTeamsResult,
         ].find((result: any) => result?.error)?.error;
         if (sourceError) return jsonResponse({ error: sourceError.message }, 500);
@@ -1396,7 +1399,7 @@ Deno.serve(async (req: Request) => {
           artistsResult,
           groupsResult,
           studiosResult,
-          venuesResult,
+          gigsResult,
           productionTeamsResult,
         ].some((result: any) => resultRows(result).length >= sourceLimit);
 
@@ -1405,7 +1408,7 @@ Deno.serve(async (req: Request) => {
           ...resultRows(artistsResult).map(normalizeArtistFeedCard),
           ...resultRows(groupsResult).map(normalizeGroupFeedCard),
           ...resultRows(studiosResult).map(normalizeStudioFeedCard),
-          ...resultRows(venuesResult).map(normalizeVenueFeedCard),
+          ...resultRows(gigsResult).map(normalizeGigFeedCard),
           ...resultRows(productionTeamsResult).map(normalizeProductionFeedCard),
         ];
       }

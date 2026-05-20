@@ -8,6 +8,8 @@ appId: ${APP_ID}
 - assertVisible:
     id: "mobile-bookings-tab-active-musicians"
 - assertVisible:
+    id: "mobile-bookings-tab-review"
+- assertVisible:
     id: "mobile-bookings-tab-history"
 - assertNotVisible:
     id: "mobile-bookings-tab-pending"

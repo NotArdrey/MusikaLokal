@@ -1958,7 +1958,6 @@ serve(async (req: Request) => {
               // @ts-ignore
               categorized.Pending.push(item);
             } else if (app.status === "accepted" || app.status === "approved") {
-              // Accepted musicians always go to Active Musicians (Upcoming/Ongoing), never to Completed
               if (eventDate) {
                 const eventStart = new Date(gig.event_date);
                 eventStart.setHours(0, 0, 0, 0);
@@ -1970,8 +1969,12 @@ serve(async (req: Request) => {
                     ...item,
                     status: "Happening Now",
                   });
+                } else if (now > eventDate) {
+                  // Past accepted contracts pause in Review before moving to History.
+                  // @ts-ignore
+                  categorized.Review.push({ ...item, status: "Completed" });
                 } else {
-                  // Future or past-date accepted musicians stay in Upcoming (Active Musicians)
+                  // Future accepted musicians stay active.
                   // @ts-ignore
                   categorized.Upcoming.push(item);
                 }

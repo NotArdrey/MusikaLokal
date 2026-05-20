@@ -11,6 +11,7 @@ import { fetchActiveStaffAssignment, isStaffRole, normalizeStaffAccessLevel } fr
 
 interface HeaderProps {
     title: string;
+    overline?: string;
     transparent?: boolean;
     onBackPress?: () => void;
     hideBackButton?: boolean;
@@ -19,7 +20,7 @@ interface HeaderProps {
     cardStyle?: boolean;
 }
 
-function Header({ title, transparent, onBackPress, hideBackButton = false, leftComponent, rightComponent, cardStyle }: HeaderProps) {
+function Header({ title, overline, transparent, onBackPress, hideBackButton = false, leftComponent, rightComponent, cardStyle }: HeaderProps) {
     const { colors, isDark } = useTheme();
     const { isGuest, setGuestMode, userId, userRole } = useAuth();
     const insets = useSafeAreaInsets();
@@ -199,11 +200,23 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
                     styles.titleContainer,
                     !(backVisible || leftComponent) && styles.mainTitleContainer
                 ]}>
-                <Text style={[
-                    styles.title,
-                    { color: transparent ? '#FFFFFF' : colors.text },
-                    !backVisible && styles.mainTitle
-                ]}>
+                    {overline ? (
+                        <Text
+                            style={[
+                                styles.overlineText,
+                                { color: transparent ? 'rgba(255,255,255,0.82)' : colors.textSecondary },
+                                !backVisible && styles.mainOverlineText,
+                            ]}
+                            numberOfLines={1}
+                        >
+                            {overline}
+                        </Text>
+                    ) : null}
+                    <Text style={[
+                        styles.title,
+                        { color: transparent ? '#FFFFFF' : colors.text },
+                        !backVisible && styles.mainTitle
+                    ]}>
                         {title}
                     </Text>
                 </View>
@@ -355,6 +368,16 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
         fontFamily: 'Poppins_600SemiBold',
+    },
+    overlineText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_600SemiBold',
+        letterSpacing: 0,
+        textTransform: 'uppercase',
+        marginBottom: 3,
+    },
+    mainOverlineText: {
+        fontSize: 11,
     },
     mainTitle: {
         fontSize: 28,

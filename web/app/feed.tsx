@@ -546,6 +546,45 @@ const normalizeAiRecommendationCard = (item: any) => {
   };
 };
 
+const isVenueLikeStudio = (item: any) =>
+  Array.isArray(item?.amenities) &&
+  item.amenities.some((amenity: unknown) => String(amenity || "").toLowerCase().includes("stage"));
+
+const normalizeRecentStudioCard = (item: any) =>
+  normalizeAiRecommendationCard({
+    ...item,
+    type: isVenueLikeStudio(item) ? "Venue" : "Studio",
+    image: Array.isArray(item?.images) ? item.images[0] || null : null,
+    images: Array.isArray(item?.images) ? item.images : [],
+    location: item?.address || item?.location || "",
+    genre: item?.type || (isVenueLikeStudio(item) ? "Venue" : "Studio"),
+    owner_id: item?.owner_id || null,
+    studio_type: item?.type || null,
+  });
+
+const normalizeRecentGigCard = (item: any) =>
+  normalizeAiRecommendationCard({
+    ...item,
+    type: "Gig",
+    image: Array.isArray(item?.images) ? item.images[0] || null : null,
+    images: Array.isArray(item?.images) ? item.images : [],
+    genre: Array.isArray(item?.requirements?.genres)
+      ? item.requirements.genres.join(", ")
+      : item?.requirements?.genre || "",
+    organizer_id: item?.organizer_id || null,
+  });
+
+const normalizeRecentProductionCard = (item: any) =>
+  normalizeAiRecommendationCard({
+    ...item,
+    type: "Production",
+    image: item?.logo_url || null,
+    images: item?.logo_url ? [item.logo_url] : [],
+    location: item?.description || "Production Team",
+    owner_id: item?.owner_id || null,
+    open_production_applications: item?.open_production_applications === true,
+  });
+
 const getFeedItemStableKey = (item: any) => {
   const kind = item?.__feedKind || "post";
   const type = item?.type || item?.post_type || "item";
@@ -581,6 +620,9 @@ const getFeedItemCreatedTime = (item: any) => {
   const time = timestamp ? new Date(timestamp).getTime() : 0;
   return Number.isFinite(time) ? time : 0;
 };
+
+const sortFeedItemsNewestFirst = (items: any[]) =>
+  [...items].sort((a, b) => getFeedItemCreatedTime(b) - getFeedItemCreatedTime(a));
 
 const clampFeedScore = (value: number, min = 0, max = 100) => Math.max(min, Math.min(max, value));
 
@@ -933,6 +975,8 @@ const getSocialPrimaryCtaLabel = (item: any, listingId: string) => {
     const type = String(item?.type || "").toLowerCase();
     if (type === "group") return "View Group";
     if (type === "gig") return "View Gig";
+    if (type === "production") return "View Team";
+    if (type === "venue") return "View Venue";
     if (type === "studio") return "View Studio";
     return "View Details";
   }
@@ -996,6 +1040,7 @@ type SocialPostCardProps = {
   width: number;
   currentUserId: string | null;
   onOpenPost: (postId: string) => void;
+  onOpenProductionTeam: (teamId: string) => void;
   onOpenStudio: (studioId: string) => void;
   onToggleReaction: (post: any) => void;
   onSharePost: (post: any) => void;
@@ -1012,12 +1057,14 @@ const SocialPostCard = React.memo(function SocialPostCard({
   width,
   currentUserId,
   onOpenPost,
+  onOpenProductionTeam,
   onOpenStudio,
   onToggleReaction,
   onSharePost,
   onRequestDelete,
 }: SocialPostCardProps) {
   const isSuggestion = item?.__feedKind === "ai_card";
+  const isProductionSuggestion = isSuggestion && String(item?.type || "").toLowerCase() === "production";
   const mediaUrls = useMemo(() => getWebFeedMediaUrls(item), [item]);
   const serviceBadges = useMemo(() => getSocialServiceBadges(item), [item]);
   const priceChips = useMemo(() => getSocialPriceChips(item), [item]);
@@ -1032,23 +1079,32 @@ const SocialPostCard = React.memo(function SocialPostCard({
   const hasReaction = Boolean(item?.my_reaction || item?.user_reaction);
 
   const handleOpenPost = useCallback(() => {
+    if (isProductionSuggestion && item?.id) {
+      onOpenProductionTeam(item.id);
+      return;
+    }
+
     if (isSuggestion && listingId) {
       onOpenStudio(listingId);
       return;
     }
     onOpenPost(item.id);
-  }, [isSuggestion, item?.id, listingId, onOpenPost, onOpenStudio]);
+  }, [isProductionSuggestion, isSuggestion, item?.id, listingId, onOpenPost, onOpenProductionTeam, onOpenStudio]);
 
   const handleOpenCta = useCallback(
     (event?: any) => {
       event?.stopPropagation?.();
+      if (isProductionSuggestion && item?.id) {
+        onOpenProductionTeam(item.id);
+        return;
+      }
       if (listingId) {
         onOpenStudio(listingId);
         return;
       }
       onOpenPost(item.id);
     },
-    [item?.id, listingId, onOpenPost, onOpenStudio],
+    [isProductionSuggestion, item?.id, listingId, onOpenPost, onOpenProductionTeam, onOpenStudio],
   );
 
   const handleToggleReaction = useCallback(
@@ -1408,6 +1464,7 @@ export default function FeedScreen() {
   const [tab, setTab] = useState<FeedTab>("for_you");
   const [posts, setPosts] = useState<any[]>([]);
   const [aiCards, setAiCards] = useState<any[]>([]);
+  const [listingCards, setListingCards] = useState<any[]>([]);
   const [postBody, setPostBody] = useState("");
   const [postVisibility, setPostVisibility] = useState<"public" | "followers">("public");
   const [showCreate, setShowCreate] = useState(false);
@@ -1482,11 +1539,46 @@ export default function FeedScreen() {
     }
   }, [isGuest, session?.user?.id]);
 
+  const fetchRecentListingCards = useCallback(async (): Promise<any[]> => {
+    const [studiosResult, gigsResult, productionTeamsResult] = await Promise.all([
+      supabase
+        .from("studios_with_stats")
+        .select("*")
+        .eq("permit_status", "approved")
+        .order("created_at", { ascending: false })
+        .limit(FEED_PAGE_SIZE),
+      supabase
+        .from("gigs_with_stats")
+        .select("*")
+        .neq("status", "cancelled")
+        .eq("permit_status", "approved")
+        .order("created_at", { ascending: false })
+        .limit(FEED_PAGE_SIZE),
+      supabase
+        .from("production_teams")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(FEED_PAGE_SIZE),
+    ]);
+
+    const sourceError = [studiosResult, gigsResult, productionTeamsResult].find((result) => result.error)?.error;
+    if (sourceError) {
+      throw sourceError;
+    }
+
+    return sortFeedItemsNewestFirst([
+      ...(studiosResult.data || []).map(normalizeRecentStudioCard),
+      ...(gigsResult.data || []).map(normalizeRecentGigCard),
+      ...(productionTeamsResult.data || []).map(normalizeRecentProductionCard),
+    ]);
+  }, []);
+
   const fetchFeed = useCallback(
     async (feedTab: FeedTab, append = false) => {
       if (!session || isGuest) {
         setPosts([]);
         setAiCards([]);
+        setListingCards([]);
         setHasMore(false);
         setLoading(false);
         setRefreshing(false);
@@ -1495,6 +1587,7 @@ export default function FeedScreen() {
 
       if (!append && feedTab !== "for_you") {
         setAiCards([]);
+        setListingCards([]);
       }
 
       if (!append) setLoading(true);
@@ -1528,8 +1621,9 @@ export default function FeedScreen() {
             return;
           }
 
-          const [cards, feedResult] = await Promise.all([
+          const [cards, recentListings, feedResult] = await Promise.all([
             fetchAiCardsForYou(),
+            fetchRecentListingCards(),
             supabase.functions.invoke("manage-social-feed", {
               body: {
                 action: "get_feed",
@@ -1555,6 +1649,7 @@ export default function FeedScreen() {
             : [];
           setPosts(page);
           setAiCards(cards);
+          setListingCards(recentListings);
           setHasMore(page.length === FEED_PAGE_SIZE);
           return;
         }
@@ -1584,14 +1679,17 @@ export default function FeedScreen() {
         setHasMore(page.length === FEED_PAGE_SIZE);
       } catch (e: any) {
         setAlert({ type: "error", title: "Error", message: e?.message || "Failed to load feed." });
-        if (!append) setPosts([]);
+        if (!append) {
+          setPosts([]);
+          setListingCards([]);
+        }
       } finally {
         setLoading(false);
         setRefreshing(false);
         setLoadingMore(false);
       }
     },
-    [fetchAiCardsForYou, isGuest, posts.length, session],
+    [fetchAiCardsForYou, fetchRecentListingCards, isGuest, posts.length, session],
   );
 
   const presentListingDetailsWithRetry = useCallback(() => {
@@ -1891,6 +1989,7 @@ export default function FeedScreen() {
 
   const userMeta = (session?.user?.user_metadata || {}) as { full_name?: string; name?: string; avatar_url?: string };
   const composerName = (userMeta.full_name || userMeta.name || session?.user?.email?.split("@")[0] || "there").split(" ")[0];
+  const feedHeaderName = session && !isGuest ? composerName : "Guest";
   const composerAvatar = userMeta.avatar_url || "";
 
   const [openPostId, setOpenPostId] = useState<string | null>(null);
@@ -2070,9 +2169,14 @@ export default function FeedScreen() {
     openListingDetails(studioId);
   }, [openListingDetails]);
 
+  const openProductionTeamDetails = useCallback((teamId: string) => {
+    if (!teamId) return;
+    router.push({ pathname: "/production_team", params: { teamId } } as any);
+  }, []);
+
   const feedItems = useMemo(
-    () => (tab === "for_you" ? sortForYouFeedItems(dedupeFeedItems([...posts, ...aiCards])) : posts),
-    [aiCards, posts, tab],
+    () => (tab === "for_you" ? sortForYouFeedItems(dedupeFeedItems([...posts, ...aiCards, ...listingCards])) : posts),
+    [aiCards, listingCards, posts, tab],
   );
 
   const renderPost = useCallback(
@@ -2086,6 +2190,7 @@ export default function FeedScreen() {
         mediaWidth={mediaWidth}
         currentUserId={session?.user?.id || null}
         onOpenPost={openPostDetails}
+        onOpenProductionTeam={openProductionTeamDetails}
         onOpenStudio={openStudioDetails}
         onToggleReaction={handleTogglePostReaction}
         onSharePost={handleSharePost}
@@ -2093,12 +2198,12 @@ export default function FeedScreen() {
         width={contentWidth}
       />
     ),
-    [borderCol, cardBg, feedColors, contentWidth, handleSharePost, handleTogglePostReaction, isDark, mediaWidth, openPostDetails, openStudioDetails, requestDeletePost, session?.user?.id],
+    [borderCol, cardBg, feedColors, contentWidth, handleSharePost, handleTogglePostReaction, isDark, mediaWidth, openPostDetails, openProductionTeamDetails, openStudioDetails, requestDeletePost, session?.user?.id],
   );
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      {!isWebDesktop && <Header title="Feed" onBackPress={() => router.back()} />}
+      {!isWebDesktop && <Header title={feedHeaderName} overline="Welcome" onBackPress={() => router.back()} />}
 
       <View style={[styles.pageWrap, isWebDesktop && styles.pageWrapWeb]}>
         <View style={[styles.centerColumn, isWebDesktop && { width: contentWidth }]}>

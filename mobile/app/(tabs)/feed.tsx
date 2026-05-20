@@ -227,6 +227,11 @@ const FEED_FALLBACK_IMAGES: Record<string, string[]> = {
     "https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1000&q=75",
     "https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1000&q=75",
   ],
+  Venue: [
+    "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=1000&q=75",
+  ],
 };
 
 const getFeedFallbackImage = (type: string, id?: string | null) => {
@@ -892,7 +897,7 @@ type FeedCoordinate = {
   longitude: number;
 };
 
-const PH_LOCATION_COORDINATES: Array<{ keywords: string[]; coordinate: FeedCoordinate }> = [
+const PH_LOCATION_COORDINATES: { keywords: string[]; coordinate: FeedCoordinate }[] = [
   { keywords: ["albay", "legazpi"], coordinate: { latitude: 13.1391, longitude: 123.7438 } },
   { keywords: ["daraga"], coordinate: { latitude: 13.1483, longitude: 123.7124 } },
   { keywords: ["naga"], coordinate: { latitude: 13.6218, longitude: 123.1948 } },
@@ -1019,14 +1024,14 @@ const getFeedQuickInfoItems = (item: any): FeedQuickInfoItem[] => {
   const locationLabel =
     distanceKm > 0
       ? `${distanceKm.toFixed(distanceKm >= 10 ? 0 : 1)} km away`
-      : item?.type === "Studio"
+      : item?.type === "Studio" || item?.type === "Venue"
         ? "Distance N/A"
         : rawLocation.split(",")[0]?.trim() || "Local";
   const ratingLabel =
     rating > 0
       ? `${rating.toFixed(1)} Rating`
-      : item?.type === "Studio"
-        ? "New Studio"
+      : item?.type === "Studio" || item?.type === "Venue"
+        ? `New ${item?.type}`
         : "Featured";
 
   const quickInfoItems: FeedQuickInfoItem[] = [
@@ -1047,7 +1052,7 @@ const getFeedPriceChips = (item: any) => {
   const budget = getPositiveInteger(item?.budget);
   const numericRate = getPositiveInteger(item?.rate);
 
-  if (type === "Studio") {
+  if (type === "Studio" || type === "Venue") {
     if (rehearsalRate > 0) chips.push(formatFeedPrice(rehearsalRate, "/hr", "Rehearsal"));
     if (recordingRate > 0) chips.push(formatFeedPrice(recordingRate, "/song", "Recording"));
     if (chips.length === 0 && hourlyRate > 0) chips.push(formatFeedPrice(hourlyRate, "/hr"));
@@ -1073,8 +1078,8 @@ const getFeedServiceBadges = (item: any) => {
   const type = item?.type;
   const studioType = typeof item?.studio_type === "string" ? item.studio_type : "";
 
-  if (type === "Studio") {
-    badges.push("Live Room");
+  if (type === "Studio" || type === "Venue") {
+    badges.push(type === "Venue" ? "Venue" : "Live Room");
     if (/rehearsal/i.test(studioType) || getPositiveInteger(item?.rehearsal_rate) > 0) {
       badges.push("Rehearsal");
     }
@@ -1260,7 +1265,8 @@ const getFeedOptionViewLabel = (item: any) => {
   const type = String(item?.type || "").trim().toLowerCase();
   if (type === "artist" || type === "profile" || type === "musician") return "View Profile";
   if (type === "group") return "View Group";
-  if (type === "studio" || type === "venue") return "View Studio";
+  if (type === "venue") return "View Venue";
+  if (type === "studio") return "View Studio";
   if (type === "gig") return "View Gig";
   if (type === "production") return "View Team";
   if (type === "product") return "View Product";
@@ -1300,6 +1306,7 @@ const getFeedTimestampLabel = (item: any, formatter: (value: string) => string) 
 const getFeedPrimaryCtaLabel = (item: any) => {
   if (item?.__feedKind !== "ai_card") return "View Post";
   if (item?.type === "Studio") return "View Studio";
+  if (item?.type === "Venue") return "View Venue";
   if (item?.type === "Artist") return "View Profile";
   if (item?.type === "Group") return "View Group";
   if (item?.type === "Gig") return "View Gig";
@@ -2279,6 +2286,13 @@ export default function FeedScreen() {
     const role = typeof userRole === "string" ? userRole.toLowerCase() : "";
     return Boolean(session && resolvedUserId && ["fan", "musician", "producer", "studio-owner", "venue-owner", "admin"].includes(role));
   }, [resolvedUserId, session, userRole]);
+  const feedHeaderName = useMemo(() => {
+    if (isGuest) return "Guest";
+
+    const userMeta = (session?.user?.user_metadata || {}) as { full_name?: string; name?: string };
+    const displayName = userMeta.full_name || userMeta.name || session?.user?.email?.split("@")[0] || "there";
+    return displayName.trim().split(/\s+/)[0] || "there";
+  }, [isGuest, session?.user?.email, session?.user?.user_metadata]);
   const shouldPersonalizeForYouFeed = Boolean(resolvedUserId && !isGuest);
   const openPostOptions = useCallback((post: any) => {
     if (!post?.id) return;
@@ -2717,7 +2731,7 @@ export default function FeedScreen() {
         supabase
           .from("gigs_with_stats")
           .select("*")
-          .eq("status", "open")
+          .neq("status", "cancelled")
           .eq("permit_status", "approved")
           .order("created_at", { ascending: false })
           .limit(24),
@@ -2761,6 +2775,7 @@ export default function FeedScreen() {
           supabase
             .from("gigs_with_stats")
             .select("*")
+            .neq("status", "cancelled")
             .order("created_at", { ascending: false })
             .limit(24),
           supabase
@@ -2884,28 +2899,35 @@ export default function FeedScreen() {
         social_follow_target_type: "group",
       }));
 
-      const normalizedStudios = finalStudios.map((item: any) => ({
-        id: item.id,
-        type: "Studio",
-        name: item.name || "Unnamed Studio",
-        image: Array.isArray(item.images) ? item.images[0] || null : null,
-        images: Array.isArray(item.images) ? item.images : [],
-        rating: Number(item.rating || 0),
-        review_count: Number(item.review_count || 0),
-        location: item.address || "",
-        latitude: item.latitude ?? null,
-        longitude: item.longitude ?? null,
-        genre: item.type || "Studio",
-        created_at: item.created_at || null,
-        updated_at: item.updated_at || null,
-        owner_id: item.owner_id || null,
-        hourly_rate: item.hourly_rate?.toString() || null,
-        rehearsal_rate: item.rehearsal_rate?.toString() || null,
-        recording_rate: item.recording_rate?.toString() || null,
-        studio_type: item.type || null,
-        social_follow_target_id: item.owner_id || null,
-        social_follow_target_type: "profile",
-      }));
+      const normalizedStudios = finalStudios.map((item: any) => {
+        const isVenue = Array.isArray(item?.amenities)
+          ? item.amenities.some((amenity: any) => String(amenity || "").toLowerCase().includes("stage"))
+          : false;
+        const listingType = isVenue ? "Venue" : "Studio";
+
+        return {
+          id: item.id,
+          type: listingType,
+          name: item.name || `Unnamed ${listingType}`,
+          image: Array.isArray(item.images) ? item.images[0] || null : null,
+          images: Array.isArray(item.images) ? item.images : [],
+          rating: Number(item.rating || 0),
+          review_count: Number(item.review_count || 0),
+          location: item.address || "",
+          latitude: item.latitude ?? null,
+          longitude: item.longitude ?? null,
+          genre: item.type || listingType,
+          created_at: item.created_at || null,
+          updated_at: item.updated_at || null,
+          owner_id: item.owner_id || null,
+          hourly_rate: item.hourly_rate?.toString() || null,
+          rehearsal_rate: item.rehearsal_rate?.toString() || null,
+          recording_rate: item.recording_rate?.toString() || null,
+          studio_type: item.type || null,
+          social_follow_target_id: item.owner_id || null,
+          social_follow_target_type: "profile",
+        };
+      });
 
       const normalizedGigs = finalGigs.map((item: any) => ({
         id: item.id,
@@ -3121,7 +3143,7 @@ export default function FeedScreen() {
         ? supabase
             .from("gigs_with_stats")
             .select("*")
-            .eq("status", "open")
+            .neq("status", "cancelled")
             .eq("permit_status", "approved")
             .in("organizer_id", followedProfileIds)
             .order("created_at", { ascending: false })
@@ -3218,11 +3240,16 @@ export default function FeedScreen() {
     };
     const toStudioCard = (item: any) => {
       const images = normalizeImages(item?.images);
+      const isVenue = Array.isArray(item?.amenities)
+        ? item.amenities.some((amenity: any) => String(amenity || "").toLowerCase().includes("stage"))
+        : false;
+      const listingType = isVenue ? "Venue" : "Studio";
+
       return ensureFeedCardImage({
         __feedKind: "ai_card",
         id: item.id,
-        type: "Studio",
-        name: item.name || "Unnamed Studio",
+        type: listingType,
+        name: item.name || `Unnamed ${listingType}`,
         image: images[0] || null,
         images,
         rating: Number(item.rating || 0),
@@ -3230,7 +3257,7 @@ export default function FeedScreen() {
         location: item.address || item.location || "",
         latitude: item.latitude ?? null,
         longitude: item.longitude ?? null,
-        genre: item.type || "Studio",
+        genre: item.type || listingType,
         created_at: item.created_at || null,
         updated_at: item.updated_at || null,
         owner_id: item.owner_id || null,
@@ -4923,7 +4950,7 @@ export default function FeedScreen() {
   if (isGuest) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="MusikaLokal" />
+        <Header title={feedHeaderName} overline="Welcome" />
         <GuestSignInGate message="Sign in to see your social feed" />
         <Navbar />
       </View>
@@ -4932,7 +4959,7 @@ export default function FeedScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: isDark ? "#0F172A" : "#FFFFFF" }]}>
-      <Header title="MusikaLokal" />
+      <Header title={feedHeaderName} overline="Welcome" />
       {showInitialFeedSkeleton ? (
         renderFeedSkeleton()
       ) : feedItems.length === 0 ? (

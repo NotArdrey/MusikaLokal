@@ -3,7 +3,6 @@ import {
   useInfiniteQuery,
   useQuery,
 } from "@tanstack/react-query";
-import { supabase } from "../../lib/supabase";
 import { invokeEdgeFunction } from "./api";
 import { queryKeys } from "./queryKeys";
 import { logLoadTime } from "../utils/loadTimeLogger";
@@ -16,10 +15,6 @@ export type PaginatedResponse<T> = {
   unreadCount?: number;
   [key: string]: unknown;
 };
-
-const isApprovedProfile = (profile: any) =>
-  profile?.is_verified === true &&
-  String(profile?.verification_status || "").toUpperCase() === "APPROVED";
 
 export const useHomeDataQuery = (params: {
   enabled?: boolean;
@@ -180,7 +175,6 @@ export const useFeedQuery = <TItem = any>(params: {
     params.feedTab === "for_you" && personalize
       ? "for_you"
       : params.feedType;
-  const usePublicDirectRead = feedType === "public" && !personalize;
   const getPageItems = (page: PaginatedResponse<TItem>) =>
     Array.isArray(page?.items)
       ? page.items
@@ -199,59 +193,6 @@ export const useFeedQuery = <TItem = any>(params: {
     meta: { persist: feedType === "public" && !personalize },
     placeholderData: keepPreviousData,
     queryFn: async ({ pageParam }) => {
-      if (usePublicDirectRead) {
-        const startedAt = Date.now();
-        let query = supabase
-          .from("feed_posts")
-          .select(
-            "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role, is_verified, verification_status), media:post_media(id, post_id, media_type, storage_path, mime_type, width, height, duration_seconds, display_order)",
-          )
-          .eq("visibility", "public")
-          .eq("is_hidden", false)
-          .order("created_at", { ascending: false })
-          .limit(params.limit + 1);
-
-        if (typeof pageParam === "string" && pageParam.trim().length > 0) {
-          query = query.lt("created_at", pageParam);
-        }
-
-        const { data, error } = await query;
-        const durationMs = Date.now() - startedAt;
-
-        if (error) {
-          logLoadTime("PostgREST:feed_posts", "failed", {
-            durationMs,
-            limit: params.limit,
-            message: error.message,
-          });
-          throw error;
-        }
-
-        const rows = data || [];
-        const visibleRows = rows.filter((row: any) => isApprovedProfile(row?.author));
-        const items = visibleRows.slice(0, params.limit) as TItem[];
-        const cursorRow = visibleRows.length > 0
-          ? visibleRows[Math.min(visibleRows.length, params.limit) - 1]
-          : rows[Math.min(rows.length, params.limit) - 1];
-        const nextCursor =
-          rows.length > params.limit
-            ? (cursorRow as any)?.created_at || null
-            : null;
-
-        logLoadTime("PostgREST:feed_posts", "complete", {
-          cursor: pageParam ? "present" : undefined,
-          durationMs,
-          limit: params.limit,
-          returned: items.length,
-        });
-
-        return {
-          data: items,
-          items,
-          nextCursor,
-        } as PaginatedResponse<TItem>;
-      }
-
       const feedPayload = {
         action: "get_feed",
         cursor: pageParam,

@@ -17,12 +17,14 @@ export default function SubmitReviewScreen() {
   const params = useLocalSearchParams<{
     studioId?: string;
     gigId?: string;
+    groupId?: string;
     targetUserId?: string;
     bookingId?: string;
     bookingType?: string;
     entityName?: string;
     entityType?: string;
     reviewerRole?: string;
+    returnTab?: string;
   }>();
 
   const [selectedValue, setSelectedValue] = useState<number>(0);
@@ -52,13 +54,41 @@ export default function SubmitReviewScreen() {
     setAlertVisible(true);
   };
 
+  const extractFunctionErrorMessage = async (
+    error: any,
+    fallback: string
+  ) => {
+    if (!error) return fallback;
+
+    if (typeof error?.message === 'string' && error.message.trim().length > 0) {
+      const isGenericFunctionMessage = error.message.includes('non-2xx status code');
+      if (!isGenericFunctionMessage) return error.message;
+    }
+
+    try {
+      if (error.context && typeof error.context.json === 'function') {
+        const body = await error.context.json();
+        if (typeof body?.error === 'string' && body.error.trim().length > 0) {
+          return body.error;
+        }
+        if (typeof body?.message === 'string' && body.message.trim().length > 0) {
+          return body.message;
+        }
+      }
+    } catch (_parseError) {
+      // Fall through to fallback error text.
+    }
+
+    return fallback;
+  };
+
   // Determine what we're reviewing based on params
   const entityName = params.entityName || 'this booking';
-  const isReviewingUser = !!params.targetUserId;
-  const reviewTitle = isReviewingUser
+  const isReviewingCounterparty = !!(params.targetUserId || params.groupId);
+  const reviewTitle = isReviewingCounterparty
     ? `Rate ${entityName}`
     : `Rate your experience`;
-  const reviewSubtitle = isReviewingUser
+  const reviewSubtitle = isReviewingCounterparty
     ? `How was your interaction with ${entityName}?`
     : `How was your booking with ${entityName}?`;
   const isSubmitDisabled = selectedValue === 0 || submitting;
@@ -75,6 +105,30 @@ export default function SubmitReviewScreen() {
       return;
     }
 
+    const hasTargetEntity = !!(params.studioId || params.gigId || params.groupId || params.targetUserId);
+    if (!hasTargetEntity) {
+      showAlert(
+        'error',
+        'Error',
+        'Missing review target. Please open this screen from your booking history and try again.'
+      );
+      return;
+    }
+
+    if (!params.bookingId || !params.bookingType || !params.reviewerRole) {
+      showAlert(
+        'error',
+        'Error',
+        'Missing review metadata. Please open this screen from Bookings and try again.'
+      );
+      return;
+    }
+
+    if (params.bookingType !== 'studio_booking' && params.bookingType !== 'gig_application') {
+      showAlert('error', 'Error', 'Invalid booking type for review submission.');
+      return;
+    }
+
     try {
       setSubmitting(true);
 
@@ -83,7 +137,7 @@ export default function SubmitReviewScreen() {
 
       const reviewPayload: any = {
         action: 'create_review',
-        userId,
+        userId: session.user.id,
         rating: selectedValue,
         content: feedback || null,
         bookingId: params.bookingId,
@@ -94,6 +148,7 @@ export default function SubmitReviewScreen() {
       // Set the target entity
       if (params.studioId) reviewPayload.studioId = params.studioId;
       if (params.gigId) reviewPayload.gigId = params.gigId;
+      if (params.groupId) reviewPayload.groupId = params.groupId;
       if (params.targetUserId) reviewPayload.targetUserId = params.targetUserId;
 
       const { data, error } = await supabase.functions.invoke('manage-bookings', {
@@ -103,7 +158,14 @@ export default function SubmitReviewScreen() {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        const errorMessage = await extractFunctionErrorMessage(
+          error,
+          'Failed to submit review. Please try again.'
+        );
+        showAlert('error', 'Error', errorMessage);
+        return;
+      }
 
       if (data?.error) {
         showAlert('error', 'Error', data.error);
@@ -113,11 +175,28 @@ export default function SubmitReviewScreen() {
       // Success - close modal and go back
       setModalVisible(false);
       showAlert('success', 'Success', 'Your review has been submitted!', [
-        { text: 'OK', onPress: () => router.back() }
+        {
+          text: 'OK',
+          onPress: () => {
+            const requestedTab = typeof params.returnTab === 'string' ? params.returnTab : undefined;
+            if (requestedTab) {
+              router.replace({
+                pathname: '/bookings',
+                params: { tab: requestedTab },
+              } as any);
+              return;
+            }
+            router.back();
+          },
+        }
       ]);
     } catch (e: any) {
       console.log('Review submission error:', e);
-      showAlert('error', 'Error', 'Failed to submit review. Please try again.');
+      const errorMessage = await extractFunctionErrorMessage(
+        e,
+        'Failed to submit review. Please try again.'
+      );
+      showAlert('error', 'Error', errorMessage);
     } finally {
       setSubmitting(false);
     }

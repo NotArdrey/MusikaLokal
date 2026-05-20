@@ -23,6 +23,7 @@ const normalizeHeaderPathname = (value: string) => {
 
 interface HeaderProps {
     title: string;
+    overline?: string;
     transparent?: boolean;
     onBackPress?: () => void;
     showBack?: boolean;
@@ -32,7 +33,7 @@ interface HeaderProps {
     rightIconOnPress?: () => void;
 }
 
-function Header({ title, transparent, onBackPress, showBack, leftComponent, rightComponent, rightIconName, rightIconOnPress }: HeaderProps) {
+function Header({ title, overline, transparent, onBackPress, showBack, leftComponent, rightComponent, rightIconName, rightIconOnPress }: HeaderProps) {
     const { colors, isDark } = useTheme();
     const { isGuest, setGuestMode, userId, userRole } = useAuth();
     const insets = useSafeAreaInsets();
@@ -75,6 +76,9 @@ function Header({ title, transparent, onBackPress, showBack, leftComponent, righ
     }, [isMyListingPath, routePathname, staffCanUseAddButton, userRole]);
     const notifVisible = !isGuest && (isMainNavPath || isBrandMainHeader || (isMyListingPath && !addbtnvisible));
     const titleOverline = useMemo(() => {
+        const explicitOverline = overline?.trim();
+        if (explicitOverline) return explicitOverline;
+
         const normalizedTitle = title.trim().toLowerCase();
 
         if (normalizedTitle === 'musikalokal') {
@@ -94,7 +98,7 @@ function Header({ title, transparent, onBackPress, showBack, leftComponent, righ
         if (routePathname === '/notifications') return 'Updates';
         if (routePathname === '/chat') return 'Messages';
         return 'MusikaLokal';
-    }, [routePathname, title]);
+    }, [overline, routePathname, title]);
 
     const btn = useMemo<'/add_gig' | '/add_studio' | '/add_group' | '/add_production'>(() => {
         if (routePathname === "/my_venue") return '/add_gig';

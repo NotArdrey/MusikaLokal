@@ -2736,6 +2736,22 @@ const ListingDetailsSheet = forwardRef<
     getStaffPermissions(staffAssignment?.access_level).canViewOnly;
   const showReportButton = !!group && !isOwnListing && !isGuest && !isStaffViewOnlyListing;
   const isGroupListing = group?.type === "Group";
+  const isGigListing = group?.type === "Gig";
+  const normalizedGigStatus = String(group?.status || "").trim().toLowerCase();
+  const gigTotalSlotsNeeded = Number(group?.requirements?.total_slots_needed ?? group?.total_slots_needed ?? 0);
+  const gigTotalSlotsFilled = Number(group?.total_slots_filled ?? 0);
+  const isGigFull =
+    isGigListing &&
+    (
+      normalizedGigStatus === "closed" ||
+      normalizedGigStatus === "cancelled" ||
+      (
+        Number.isFinite(gigTotalSlotsNeeded) &&
+        gigTotalSlotsNeeded > 0 &&
+        Number.isFinite(gigTotalSlotsFilled) &&
+        gigTotalSlotsFilled >= gigTotalSlotsNeeded
+      )
+    );
   const effectiveUserRole = userRole || currentUserRole;
   const isFan = isFanUserRole(effectiveUserRole);
   const isMusicianUser = effectiveUserRole === "musician";
@@ -2774,25 +2790,28 @@ const ListingDetailsSheet = forwardRef<
     const roleFilteredTabs = isMusicianUser
       ? baseTabs
       : baseTabs.filter((tab) => !["Apply", "Book"].includes(tab));
+    const availabilityFilteredTabs = isGigFull
+      ? roleFilteredTabs.filter((tab) => tab !== "Apply")
+      : roleFilteredTabs;
 
     if (isGuest) {
-      return roleFilteredTabs.filter((tab) => tab !== "Connect");
+      return availabilityFilteredTabs.filter((tab) => tab !== "Connect");
     }
 
-    if (shouldShowConnectTab && !roleFilteredTabs.includes("Connect")) {
-      const reviewTabIndex = roleFilteredTabs.indexOf("Review");
+    if (shouldShowConnectTab && !availabilityFilteredTabs.includes("Connect")) {
+      const reviewTabIndex = availabilityFilteredTabs.indexOf("Review");
       if (reviewTabIndex === -1) {
-        roleFilteredTabs.push("Connect");
+        availabilityFilteredTabs.push("Connect");
       } else {
-        roleFilteredTabs.splice(reviewTabIndex, 0, "Connect");
+        availabilityFilteredTabs.splice(reviewTabIndex, 0, "Connect");
       }
     }
 
     if (!isGroupListing) {
-      return roleFilteredTabs;
+      return availabilityFilteredTabs;
     }
 
-    const withoutApply = roleFilteredTabs.filter((tab) => tab !== "Apply");
+    const withoutApply = availabilityFilteredTabs.filter((tab) => tab !== "Apply");
     if (!canApplyToGroup) {
       return withoutApply;
     }
@@ -2809,7 +2828,7 @@ const ListingDetailsSheet = forwardRef<
     const nextTabs = [...withoutApply];
     nextTabs.splice(reviewTabIndex, 0, "Apply");
     return nextTabs;
-  }, [canApplyToGroup, isGroupListing, isGuest, isMusicianUser, labels.tabs, shouldShowConnectTab]);
+  }, [canApplyToGroup, isGigFull, isGroupListing, isGuest, isMusicianUser, labels.tabs, shouldShowConnectTab]);
 
   const showTabs = hasDefaultTabs && tabsToRender.length > 0;
   const visibleActiveTab = tabsToRender.includes(activeTab)

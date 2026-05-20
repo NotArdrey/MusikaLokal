@@ -183,7 +183,7 @@ export default function LoginScreen() {
         showAlert(
           'success',
           'Verification In Review',
-          `Your identity is now under manual review.\n\nWe will send the email confirmation link to ${createdEmail || 'your email'} after the review is approved.`
+          `Your identity is now under manual review for admin approval. This usually takes 5 to 7 business days.\n\nWe will send the email confirmation link to ${createdEmail || 'your email'} after the review is approved.`
         );
         return;
       }
@@ -192,7 +192,7 @@ export default function LoginScreen() {
         showAlert(
           'success',
           'Manual Review Submitted',
-          `Your requirements were submitted and your account is under manual review.\n\nWe will send the email confirmation link to ${createdEmail || 'you'} after the review is approved.`
+          `Your requirements were submitted and your account is under manual review for admin approval. This usually takes 5 to 7 business days.\n\nWe will send the email confirmation link to ${createdEmail || 'you'} after the review is approved.`
         );
         return;
       }

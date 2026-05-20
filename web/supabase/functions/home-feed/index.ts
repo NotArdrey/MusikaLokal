@@ -431,7 +431,7 @@ const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> =>
         supabaseClient
             .from("gigs_with_stats")
             .select("id, name, images, location, budget, rate, requirements, rating, review_count, organizer_id, created_at, status")
-            .eq("status", "open")
+            .neq("status", "cancelled")
             .eq("permit_status", "approved")
             .limit(60),
     ]);
@@ -595,7 +595,7 @@ const getFeaturedPayload = async (supabaseClient: any) => {
         supabaseClient
             .from("gigs_with_stats")
             .select("*")
-            .eq("status", "open")
+            .neq("status", "cancelled")
             .eq("permit_status", "approved")
             .order("created_at", { ascending: false })
             .limit(5),

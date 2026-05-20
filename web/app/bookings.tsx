@@ -636,7 +636,7 @@ type Tab =
   | "History";
 
 // Venue owner specific tabs for managing gig applications
-type VenueOwnerTab = "Applicants" | "Active Musicians" | "History";
+type VenueOwnerTab = "Applicants" | "Active Musicians" | "Review" | "History";
 
 // Application-specific tabs for musician's gig application flow
 type ApplicationTab = "Applied" | "Accepted" | "Completed";
@@ -1650,6 +1650,8 @@ export default function BookingsScreen() {
 
           if (now >= eventStart && now <= eventDate) {
             fallback.Ongoing.push({ ...item, status: "Happening Now" });
+          } else if (now > eventDate) {
+            fallback.Review.push({ ...item, status: "Completed" });
           } else {
             fallback.Upcoming.push(item);
           }
@@ -2180,11 +2182,32 @@ export default function BookingsScreen() {
       );
       const allOngoing = rawOngoing;
 
-      // 4. History - Cancelled/Declined bookings + already-reviewed completed items (by current viewer)
+      // 4. History - terminal items and completed/fired items already reviewed by the current viewer
       const rawReview = attachLateReportMeta(effectiveBookings?.Review || []);
       const cancelledFromUpcoming = rawUpcoming.filter(
         (item: any) => item.isCancelled || item.status === "Declined" || item.status === "Cancelled"
       );
+      const getGigApplicationReviewStatus = (item: any) => {
+        const rawStatus = normalizeStatus(item.raw_status);
+        const displayStatus = normalizeStatus(item.status);
+        if (
+          (rawStatus === "accepted" || rawStatus === "approved") &&
+          displayStatus === "completed"
+        ) {
+          return "completed";
+        }
+        return rawStatus || displayStatus;
+      };
+      const isReviewRequiredGigApplication = (item: any) =>
+        item.type_id === "gig_application" &&
+        ["completed", "fired"].includes(getGigApplicationReviewStatus(item));
+      const isHistoryOnlyGigApplication = (item: any) =>
+        item.type_id === "gig_application" &&
+        ["declined", "rejected", "cancelled", "resigned"].includes(getGigApplicationReviewStatus(item));
+      const hasCurrentViewerReviewedGigApplication = (item: any) => {
+        if (role === "venue-owner") return item.reviewed_by_organizer === true;
+        return item.reviewed_by_applicant === true;
+      };
       const alreadyReviewedCompleted = rawReview.filter((item: any) => {
         if (item.type_id === "gig_application") return false;
 
@@ -2200,16 +2223,9 @@ export default function BookingsScreen() {
       });
       const terminalGigApplications = rawReview.filter((item: any) => {
         if (item.type_id !== "gig_application") return false;
-        const status = normalizeStatus(item.status);
-        if (!["completed", "fired", "declined", "rejected", "cancelled", "resigned"].includes(status)) {
-          return false;
-        }
-
-        if (isProducerActivityRole(role)) {
-          return status === "fired" || item.reviewed_by_applicant === true;
-        }
-
-        return true;
+        if (isHistoryOnlyGigApplication(item)) return true;
+        if (!isReviewRequiredGigApplication(item)) return false;
+        return hasCurrentViewerReviewedGigApplication(item);
       });
 
       const historyItems = [
@@ -2217,7 +2233,7 @@ export default function BookingsScreen() {
         ...alreadyReviewedCompleted,
         ...terminalGigApplications,
         ...expiredPendingStudioItems,
-        ...(role === "venue-owner" ? [] : resolvedConnectionRequests),
+        ...resolvedConnectionRequests,
       ]
         .filter(
           (item: any, index: number, arr: any[]) =>
@@ -2234,21 +2250,24 @@ export default function BookingsScreen() {
       const unreviewedItems = [
         ...rawReview.filter((item: any) => {
           if (role === "venue-owner") {
-            // Venue owners see terminal gig applications here; accepted contracts stay active.
-            const status = normalizeStatus(item.raw_status || item.status);
-            return item.type_id === "gig_application" &&
-              ["rejected", "cancelled", "fired", "completed", "resigned"].includes(status);
+            return (
+              isReviewRequiredGigApplication(item) &&
+              item.reviewed_by_organizer !== true
+            );
           }
 
           if (isProducerActivityRole(role)) {
-            const status = normalizeStatus(item.raw_status || item.status);
-            return item.type_id === "gig_application" &&
+            return isReviewRequiredGigApplication(item) &&
               item.viewer_can_act !== false &&
-              item.reviewed_by_applicant !== true &&
-              status !== "fired";
+              item.reviewed_by_applicant !== true;
           }
 
-          if (item.type_id === "gig_application") return false;
+          if (item.type_id === "gig_application") {
+            return (
+              isReviewRequiredGigApplication(item) &&
+              item.reviewed_by_applicant !== true
+            );
+          }
 
           if (role === "studio-owner") {
             return item.reviewed_by_owner !== true;
@@ -3365,28 +3384,40 @@ export default function BookingsScreen() {
 
     // For studio owners reviewing musicians, target the user
     // For musicians reviewing studios, target the studio
+    const gigBaseName = typeof item.name === "string" ? item.name.split(" - ")[0] : "Gig";
+
     const params: any = {
       bookingId: item.id,
       bookingType: item.type_id,
-      entityName: item.name,
       reviewerRole,
+      returnTab: activeTab === "Review" ? "History" : activeTab,
     };
 
     if (item.type_id === "studio_booking") {
       if (isOwner) {
         // Owner reviews the musician (user)
         params.targetUserId = item.user_id;
+        params.entityName = item.customer_name || "Musician";
       } else {
         // Musician reviews the studio
         params.studioId = item.studio_id;
+        params.entityName = item.name || "Studio";
       }
     } else if (item.type_id === "gig_application") {
       if (isOrganizer) {
-        // Venue owner reviews the applicant
-        params.targetUserId = item.applicant_id;
+        // Venue owner reviews the actual performer target:
+        // group/duo applications -> review group, solo applications -> review user.
+        if (item.group_id) {
+          params.groupId = item.group_id;
+          params.entityName = item.performer || item.customer_name || "Group";
+        } else {
+          params.targetUserId = item.applicant_id;
+          params.entityName = item.customer_name || item.performer || "Musician";
+        }
       } else {
         // Musician reviews the gig
         params.gigId = item.gig_id;
+        params.entityName = gigBaseName;
       }
     }
 
@@ -3904,10 +3935,7 @@ export default function BookingsScreen() {
     : activeTab === "Active Musicians"
       ? data.ActiveMusicians
       : data[activeTab as keyof typeof data] || [];
-  const isHistoryTabView =
-    userRole === "venue-owner"
-      ? activeTab === "Review"
-      : activeTab === "History";
+  const isHistoryTabView = activeTab === "History";
 
   // Render application tab for musicians
   const renderAppTab = (tab: ApplicationTab) => {
@@ -3998,8 +4026,10 @@ export default function BookingsScreen() {
           return data.Applicants;
         case "Active Musicians":
           return data.ActiveMusicians;
+        case "Review":
+          return data.Review;
         case "History":
-          return data.Review.filter((item: any) => item.type_id === "gig_application");
+          return data.History;
         default:
           return [];
       }
@@ -4007,12 +4037,12 @@ export default function BookingsScreen() {
 
     const tabData = getTabData();
     const count = tabData.length;
-    const isActive = activeTab === (tab === "History" ? "Review" : tab);
+    const isActive = activeTab === tab;
 
     return (
       <TouchableOpacity activeOpacity={1}
         key={tab}
-        onPress={() => setActiveTab(tab === "History" ? "Review" : tab as Tab)}
+        onPress={() => setActiveTab(tab as Tab)}
         style={[
           styles.tabButton,
           {
@@ -4157,7 +4187,7 @@ export default function BookingsScreen() {
           >
             {userRole === "venue-owner" ? (
               // Venue owner specific tabs for managing gig applications
-              (["Applicants", "Active Musicians", "History"] as VenueOwnerTab[]).map(
+              (["Applicants", "Active Musicians", "Review", "History"] as VenueOwnerTab[]).map(
                 (tab) => renderVenueOwnerTab(tab),
               )
             ) : (
@@ -5162,6 +5192,75 @@ export default function BookingsScreen() {
                             </Text>
                           </View>
                         ) : null}
+                        {isHistoryTabView && item.type_id === "gig_application" && (
+                          <View
+                            style={[
+                              styles.actionButtonsContainer,
+                              { marginTop: 0, width: "100%", flexDirection: "row", gap: moderateScale(8) },
+                            ]}
+                          >
+                            <TouchableOpacity activeOpacity={1}
+                              onPress={() => handleDetailsPress(item)}
+                              style={{
+                                flex: 1,
+                                borderColor: colors.border,
+                                borderWidth: 1,
+                                padding: 10,
+                                borderRadius: 100,
+                                alignItems: "center",
+                                flexDirection: "row",
+                                justifyContent: "center",
+                                gap: 6,
+                              }}
+                            >
+                              <Ionicons
+                                name="eye-outline"
+                                size={16}
+                                color={colors.textSecondary}
+                              />
+                              <Text
+                                style={{
+                                  color: colors.textSecondary,
+                                  fontFamily: "Poppins_500Medium",
+                                  fontSize: 12,
+                                }}
+                              >
+                                View Details
+                              </Text>
+                            </TouchableOpacity>
+
+                            {userRole === "venue-owner" && canRenewGigApplication(item) && (
+                              <TouchableOpacity activeOpacity={1}
+                                onPress={() => handleRenewContract(item)}
+                                style={{
+                                  flex: 1,
+                                  backgroundColor: "#7C3AED",
+                                  padding: 10,
+                                  borderRadius: 100,
+                                  alignItems: "center",
+                                  flexDirection: "row",
+                                  justifyContent: "center",
+                                  gap: 6,
+                                }}
+                              >
+                                <Ionicons
+                                  name="refresh"
+                                  size={16}
+                                  color="white"
+                                />
+                                <Text
+                                  style={{
+                                    color: "white",
+                                    fontFamily: "Poppins_600SemiBold",
+                                    fontSize: 12,
+                                  }}
+                                >
+                                  Renew
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        )}
                         {!isHistoryTabView && (
                           <View
                             style={[
@@ -5498,71 +5597,35 @@ export default function BookingsScreen() {
                               );
                             })()
                           ) : activeTab === "Review" ? (
-                            // History tab: completed contracts can be renewed by venue owners.
-                            <View style={{ flexDirection: "row", gap: 8, flex: 1 }}>
-                              {!(userRole === "venue-owner" && item.type_id === "gig_application") && (
-                                <TouchableOpacity activeOpacity={1}
-                                onPress={() => handleLeaveReview(item)}
+                            <TouchableOpacity activeOpacity={1}
+                              onPress={() => handleLeaveReview(item)}
+                              style={{
+                                flex: 1,
+                                borderColor: colors.primary,
+                                borderWidth: 1,
+                                padding: 10,
+                                borderRadius: 100,
+                                alignItems: "center",
+                                flexDirection: "row",
+                                justifyContent: "center",
+                                gap: 6,
+                              }}
+                            >
+                              <Ionicons
+                                name="star-outline"
+                                size={16}
+                                color={colors.primary}
+                              />
+                              <Text
                                 style={{
-                                  flex: 1,
-                                  borderColor: colors.primary,
-                                  borderWidth: 1,
-                                  padding: 10,
-                                  borderRadius: 100,
-                                  alignItems: "center",
-                                  flexDirection: "row",
-                                  justifyContent: "center",
-                                  gap: 6,
+                                  color: colors.primary,
+                                  fontFamily: "Poppins_500Medium",
+                                  fontSize: 12,
                                 }}
                               >
-                                <Ionicons
-                                  name="star-outline"
-                                  size={16}
-                                  color={colors.primary}
-                                />
-                                <Text
-                                  style={{
-                                    color: colors.primary,
-                                    fontFamily: "Poppins_500Medium",
-                                    fontSize: 12,
-                                  }}
-                                >
-                                  Leave Review
-                                </Text>
-                                </TouchableOpacity>
-                              )}
-
-                              {userRole === "venue-owner" && canRenewGigApplication(item) && (
-                                <TouchableOpacity activeOpacity={1}
-                                  onPress={() => handleRenewContract(item)}
-                                  style={{
-                                    flex: 1,
-                                    backgroundColor: "#7C3AED",
-                                    padding: 10,
-                                    borderRadius: 100,
-                                    alignItems: "center",
-                                    flexDirection: "row",
-                                    justifyContent: "center",
-                                    gap: 6,
-                                  }}
-                                >
-                                  <Ionicons
-                                    name="refresh"
-                                    size={16}
-                                    color="white"
-                                  />
-                                  <Text
-                                    style={{
-                                      color: "white",
-                                      fontFamily: "Poppins_600SemiBold",
-                                      fontSize: 12,
-                                    }}
-                                  >
-                                    Renew
-                                  </Text>
-                                </TouchableOpacity>
-                              )}
-                            </View>
+                                Leave Review
+                              </Text>
+                            </TouchableOpacity>
                           ) : (
                             // Default / Details
                             <TouchableOpacity activeOpacity={1}
@@ -7215,16 +7278,10 @@ export default function BookingsScreen() {
               );
             }
 
-            // Keep completion in review, but fired production applications belong in History.
+            // Keep completion/termination as status updates only.
+            // Users can submit reviews manually from the Review tab.
             if (didUpdate && (modalMode === "fire" || modalMode === "complete")) {
-              setActiveTab(
-                modalMode === "fire" && isProducerActivityRole(userRole)
-                  ? "History"
-                  : "Review",
-              );
-              if (modalMode === "complete") {
-                handleLeaveReview(selectedItem);
-              }
+              setActiveTab("Review");
             }
           }
         }}

@@ -10,4 +10,6 @@ appId: ${APP_ID}
 - assertVisible:
     id: "mobile-bookings-tab-ongoing"
 - assertVisible:
+    id: "mobile-bookings-tab-review"
+- assertVisible:
     id: "mobile-bookings-tab-history"
