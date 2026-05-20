@@ -207,7 +207,7 @@ export default function PostDetailsScreen() {
         body: { action: "add_comment", post_id: post.id, content: commentText.trim() },
       });
       if (data?.blocked || data?.status === "blocked") {
-        setAlert({
+        emitToast({
           type: "warning",
           title: "Comment blocked",
           message: data?.moderation?.reason || data?.error || "This comment did not pass AI moderation.",

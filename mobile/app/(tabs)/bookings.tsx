@@ -591,6 +591,7 @@ type BookingsScreenCachePayload = {
 
 const BOOKINGS_FOCUS_REFRESH_COOLDOWN_MS = 30000;
 const BOOKINGS_BACKGROUND_REFRESH_INTERVAL_MS = 60000;
+const BOOKINGS_DYNAMIC_CLOCK_INTERVAL_MS = 30000;
 const bookingsScreenCache = new Map<string, BookingsScreenCachePayload>();
 
 const createEmptyBookingsData = (): BookingsTabData => ({
@@ -608,6 +609,180 @@ const createEmptyApplicationData = (): ApplicationTabData => ({
   Accepted: [],
   Completed: [],
 });
+
+type DynamicBookingTab = "Pending" | "Upcoming" | "Ongoing" | "Review";
+
+const DYNAMIC_BOOKING_TABS: DynamicBookingTab[] = ["Pending", "Upcoming", "Ongoing", "Review"];
+
+const normalizeActivityStatus = (value: unknown) =>
+  String(value || "").trim().toLowerCase().replace(/[_\s]+/g, "-");
+
+const parseActivityDateTime = (dateValue: unknown, timeValue?: unknown) => {
+  const dateText = String(dateValue || "").trim();
+  if (!dateText || dateText.toLowerCase() === "tba") return null;
+
+  const timeText = String(timeValue || "").trim();
+  const candidate = timeText
+    ? `${dateText.split("T")[0]}T${timeText}`
+    : dateText.includes("T")
+      ? dateText
+      : `${dateText}T00:00:00`;
+  const parsed = new Date(candidate);
+
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const getActivityDayWindow = (dateValue: unknown) => {
+  const start = parseActivityDateTime(dateValue);
+  if (!start) return null;
+
+  const end = new Date(start);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+};
+
+const getStudioBookingWindow = (item: any) => {
+  if (!item?.raw_date || !item?.start_time) return null;
+
+  const start = parseActivityDateTime(item.raw_date, item.start_time);
+  const end = parseActivityDateTime(item.raw_date, item.end_time || item.start_time);
+  if (!start || !end) return null;
+
+  if (end.getTime() < start.getTime()) {
+    end.setDate(end.getDate() + 1);
+  }
+
+  return { start, end };
+};
+
+const getDynamicActivityTarget = (item: any, now: Date): { tab: DynamicBookingTab; status?: string } | null => {
+  if (!item || item.isCancelled) return null;
+
+  if (item.type_id === "studio_booking") {
+    const rawStatus = normalizeActivityStatus(item.raw_status || item.status);
+    const displayStatus = normalizeActivityStatus(item.status);
+    const hasBalanceDue =
+      displayStatus === "balance-due" ||
+      (rawStatus === "confirmed" &&
+        normalizeActivityStatus(item.payment_status) === "partial" &&
+        Number(item.remaining_balance || 0) > 0);
+
+    if (hasBalanceDue || !["confirmed", "checked-in"].includes(rawStatus)) {
+      return null;
+    }
+
+    const window = getStudioBookingWindow(item);
+    if (!window) return null;
+
+    if (now.getTime() > window.end.getTime()) {
+      return { tab: "Review", status: "Completed" };
+    }
+
+    if (now.getTime() >= window.start.getTime()) {
+      return { tab: "Ongoing", status: "In Progress" };
+    }
+
+    return { tab: "Upcoming", status: displayStatus === "in-progress" ? "Confirmed" : item.status };
+  }
+
+  if (item.type_id === "gig_application") {
+    const rawStatus = normalizeActivityStatus(item.raw_status || item.status);
+    const displayStatus = normalizeActivityStatus(item.status);
+    const isAccepted =
+      ["accepted", "approved", "confirmed"].includes(rawStatus) ||
+      ["confirmed", "happening-now"].includes(displayStatus);
+
+    if (!isAccepted) return null;
+
+    const window = getActivityDayWindow(item.raw_date || item.start_time || item.date);
+    if (!window) return null;
+
+    if (now.getTime() > window.end.getTime()) {
+      return { tab: "Review", status: "Completed" };
+    }
+
+    if (now.getTime() >= window.start.getTime()) {
+      return { tab: "Ongoing", status: "Happening Now" };
+    }
+
+    return { tab: "Upcoming", status: displayStatus === "happening-now" ? "Confirmed" : item.status };
+  }
+
+  return null;
+};
+
+const isDynamicActivityCandidate = (item: any) => {
+  if (!item || item.isCancelled) return false;
+
+  if (item.type_id === "studio_booking") {
+    const rawStatus = normalizeActivityStatus(item.raw_status || item.status);
+    const displayStatus = normalizeActivityStatus(item.status);
+    const hasBalanceDue =
+      displayStatus === "balance-due" ||
+      (rawStatus === "confirmed" &&
+        normalizeActivityStatus(item.payment_status) === "partial" &&
+        Number(item.remaining_balance || 0) > 0);
+
+    return !hasBalanceDue && ["confirmed", "checked-in"].includes(rawStatus);
+  }
+
+  if (item.type_id === "gig_application") {
+    const rawStatus = normalizeActivityStatus(item.raw_status || item.status);
+    const displayStatus = normalizeActivityStatus(item.status);
+
+    return (
+      ["accepted", "approved", "confirmed"].includes(rawStatus) ||
+      ["confirmed", "happening-now"].includes(displayStatus)
+    );
+  }
+
+  return false;
+};
+
+const hasDynamicActivityCandidates = (source: BookingsTabData) =>
+  DYNAMIC_BOOKING_TABS.some((tab) =>
+    (source[tab] || []).some(isDynamicActivityCandidate),
+  );
+
+const dedupeActivityTabItems = (items: any[]) => {
+  const seen = new Set<string>();
+  return items.filter((item: any) => {
+    const key = `${item?.type_id || "activity"}:${item?.id || ""}`;
+    if (!item?.id || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const buildDynamicBookingsData = (source: BookingsTabData, now: Date): BookingsTabData => {
+  if (!hasDynamicActivityCandidates(source)) {
+    return source;
+  }
+
+  const next: BookingsTabData = {
+    Applicants: source.Applicants,
+    ActiveMusicians: source.ActiveMusicians,
+    Pending: [],
+    Upcoming: [],
+    Ongoing: [],
+    Review: [],
+    History: source.History,
+  };
+
+  DYNAMIC_BOOKING_TABS.forEach((sourceTab) => {
+    (source[sourceTab] || []).forEach((item: any) => {
+      const target = getDynamicActivityTarget(item, now);
+      const targetTab = target?.tab || sourceTab;
+      next[targetTab].push(target?.status ? { ...item, status: target.status } : item);
+    });
+  });
+
+  DYNAMIC_BOOKING_TABS.forEach((tab) => {
+    next[tab] = dedupeActivityTabItems(next[tab]);
+  });
+
+  return next;
+};
 
 const getBookingsSummarySignature = (payload: any) => {
   if (!payload) return "";
@@ -1050,6 +1225,14 @@ export default function BookingsScreen() {
   const bookingsSummaryQuery = useBookingsSummaryQuery(userId, {
     enabled: isAuthenticated && Boolean(userId),
   });
+  const dynamicBookingsData = React.useMemo(
+    () => buildDynamicBookingsData(data, currentTime),
+    [currentTime, data],
+  );
+  const shouldRunDynamicBookingsClock = React.useMemo(
+    () => hasDynamicActivityCandidates(data),
+    [data],
+  );
   const startActionLoading = useCallback((itemId: unknown, message: string) => {
     const normalizedItemId = String(itemId || "").trim();
     if (!normalizedItemId) return;
@@ -1104,14 +1287,14 @@ export default function BookingsScreen() {
 
   usePageLoadLogger({
     counts: {
-      activeMusicians: data.ActiveMusicians.length,
-      applicants: data.Applicants.length,
-      history: data.History.length,
-      ongoing: data.Ongoing.length,
-      pending: data.Pending.length,
+      activeMusicians: dynamicBookingsData.ActiveMusicians.length,
+      applicants: dynamicBookingsData.Applicants.length,
+      history: dynamicBookingsData.History.length,
+      ongoing: dynamicBookingsData.Ongoing.length,
+      pending: dynamicBookingsData.Pending.length,
       pendingPermits: pendingPermitStudios.length,
-      review: data.Review.length,
-      upcoming: data.Upcoming.length,
+      review: dynamicBookingsData.Review.length,
+      upcoming: dynamicBookingsData.Upcoming.length,
     },
     details: {
       activeTab,
@@ -4246,39 +4429,24 @@ export default function BookingsScreen() {
       userRole === "musician" && viewMode === "applications"
         ? applicationData[deferredActiveAppTab as keyof typeof applicationData] || []
         : deferredActiveTab === "Active Musicians"
-          ? data.ActiveMusicians
-          : data[deferredActiveTab as keyof typeof data] || [],
-    [applicationData, data, deferredActiveAppTab, deferredActiveTab, userRole, viewMode],
-  );
-
-  const shouldTrackLateReportWindow = React.useMemo(
-    () =>
-      userRole === "musician" &&
-      renderActiveTab === "Upcoming" &&
-      currentItems.some(
-        (item: any) =>
-          item?.type_id === "studio_booking" &&
-          !item?.isCancelled &&
-          !item?.has_late_report &&
-          !locallyReportedLateBookings[item?.id] &&
-          item?.raw_date &&
-          item?.start_time,
-      ),
-    [currentItems, locallyReportedLateBookings, renderActiveTab, userRole],
+          ? dynamicBookingsData.ActiveMusicians
+          : dynamicBookingsData[deferredActiveTab as keyof typeof dynamicBookingsData] || [],
+    [applicationData, deferredActiveAppTab, deferredActiveTab, dynamicBookingsData, userRole, viewMode],
   );
 
   useEffect(() => {
-    if (!shouldTrackLateReportWindow) return;
+    if (!isAuthenticated || isGuest) return;
+    if (!shouldRunDynamicBookingsClock) return;
 
     setCurrentTime(new Date());
     const intervalId = setInterval(() => {
       setCurrentTime(new Date());
-    }, 30 * 1000);
+    }, BOOKINGS_DYNAMIC_CLOCK_INTERVAL_MS);
 
     return () => {
       clearInterval(intervalId);
     };
-  }, [shouldTrackLateReportWindow]);
+  }, [isAuthenticated, isGuest, shouldRunDynamicBookingsClock]);
 
   const activeListLabel =
     userRole === "musician" && viewMode === "applications"

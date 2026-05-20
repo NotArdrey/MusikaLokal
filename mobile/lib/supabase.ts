@@ -43,6 +43,68 @@ const projectRef = (() => {
 
 export const SUPABASE_AUTH_STORAGE_KEY = `sb-${projectRef}-auth-token`;
 
+const getAuthErrorText = (rawError: unknown): string => {
+    if (rawError instanceof Error) {
+        return `${rawError.name}: ${rawError.message} ${rawError.stack || ''}`;
+    }
+
+    if (typeof rawError === 'string') {
+        return rawError;
+    }
+
+    if (rawError && typeof rawError === 'object') {
+        const errorRecord = rawError as Record<string, unknown>;
+        return [
+            errorRecord.name,
+            errorRecord.message,
+            errorRecord.error,
+            errorRecord.error_description,
+            errorRecord.code,
+            errorRecord.error_code,
+            errorRecord.details,
+        ]
+            .filter((value): value is string | number => (
+                typeof value === 'string' || typeof value === 'number'
+            ))
+            .join(' ');
+    }
+
+    return '';
+};
+
+export const isInvalidRefreshTokenError = (rawError: unknown): boolean => {
+    const message = getAuthErrorText(rawError).toLowerCase();
+
+    return (
+        message.includes('invalid refresh token') ||
+        message.includes('refresh token not found') ||
+        message.includes('refresh_token_not_found')
+    );
+};
+
+const installInvalidRefreshTokenConsoleFilter = () => {
+    const consoleRef = console as typeof console & {
+        __musikaInvalidRefreshTokenFilterInstalled?: boolean;
+    };
+
+    if (consoleRef.__musikaInvalidRefreshTokenFilterInstalled) {
+        return;
+    }
+
+    const originalError = console.error.bind(console);
+    console.error = (...args: unknown[]) => {
+        if (args.some(isInvalidRefreshTokenError)) {
+            return;
+        }
+
+        originalError(...args);
+    };
+
+    consoleRef.__musikaInvalidRefreshTokenFilterInstalled = true;
+};
+
+installInvalidRefreshTokenConsoleFilter();
+
 if (!hasSupabaseConfig) {
     console.warn('Supabase URL or Anon Key is missing! Please set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in the repository root .env file, then restart Expo.');
 }
@@ -94,7 +156,11 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 export const clearSupabaseAuthStorage = async () => {
     invalidateTokenCache();
-    await ExpoSecureStorage.removeItem(SUPABASE_AUTH_STORAGE_KEY);
+    await Promise.all([
+        ExpoSecureStorage.removeItem(SUPABASE_AUTH_STORAGE_KEY),
+        ExpoSecureStorage.removeItem(`${SUPABASE_AUTH_STORAGE_KEY}-code-verifier`),
+        ExpoSecureStorage.removeItem(`${SUPABASE_AUTH_STORAGE_KEY}-user`),
+    ]);
 };
 
 // Monkey-patch functions.invoke for React Native/Hermes compatibility
@@ -109,6 +175,8 @@ export const clearSupabaseAuthStorage = async () => {
 const _functionsInstance = supabase.functions;               // capture one instance
 const originalInvoke = _functionsInstance.invoke.bind(_functionsInstance) as any;
 const _authInstance = supabase.auth;
+const originalGetSession = _authInstance.getSession.bind(_authInstance);
+const originalRefreshSession = _authInstance.refreshSession.bind(_authInstance);
 const originalSignOut = _authInstance.signOut.bind(_authInstance);
 type InvokeOptions = { body?: any; headers?: Record<string, string> };
 type NormalizedFunctionsError = Error & {
@@ -194,15 +262,55 @@ export const invalidateTokenCache = () => {
     _refreshInFlight = null;
 };
 
-const isInvalidRefreshTokenError = (rawError: any): boolean => {
-    const message = String(rawError?.message || '').toLowerCase();
-    const errorCode = String(rawError?.code || rawError?.error_code || '').toLowerCase();
+const clearAuthStorageForInvalidRefreshToken = async (error: unknown): Promise<boolean> => {
+    if (!isInvalidRefreshTokenError(error)) {
+        return false;
+    }
 
-    return (
-        message.includes('invalid refresh token') ||
-        message.includes('refresh token not found') ||
-        errorCode === 'refresh_token_not_found'
-    );
+    await clearSupabaseAuthStorage();
+    return true;
+};
+
+(_authInstance as any).getSession = async function(
+    ...args: Parameters<typeof _authInstance.getSession>
+) {
+    try {
+        const result = await originalGetSession(...args);
+        if (result.error) {
+            await clearAuthStorageForInvalidRefreshToken(result.error);
+        }
+        return result;
+    } catch (error) {
+        if (await clearAuthStorageForInvalidRefreshToken(error)) {
+            return {
+                data: { session: null },
+                error,
+            } as Awaited<ReturnType<typeof _authInstance.getSession>>;
+        }
+
+        throw error;
+    }
+};
+
+(_authInstance as any).refreshSession = async function(
+    ...args: Parameters<typeof _authInstance.refreshSession>
+) {
+    try {
+        const result = await originalRefreshSession(...args);
+        if (result.error) {
+            await clearAuthStorageForInvalidRefreshToken(result.error);
+        }
+        return result;
+    } catch (error) {
+        if (await clearAuthStorageForInvalidRefreshToken(error)) {
+            return {
+                data: { user: null, session: null },
+                error,
+            } as Awaited<ReturnType<typeof _authInstance.refreshSession>>;
+        }
+
+        throw error;
+    }
 };
 
 const refreshAccessToken = async (): Promise<string | null> => {

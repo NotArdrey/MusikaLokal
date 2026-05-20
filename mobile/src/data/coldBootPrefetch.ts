@@ -5,6 +5,7 @@ import { queryKeys } from "./queryKeys";
 const FEED_PAGE_SIZE = 12;
 const MARKETPLACE_PAGE_SIZE = 20;
 const NAVBAR_PREFETCH_STALE_MS = 30_000;
+const FEED_PREFETCH_STALE_MS = 120_000;
 
 type PaginatedResponse<T = any> = {
   data?: T[];
@@ -93,7 +94,7 @@ const prefetchFeed = (queryClient: QueryClient, userId: string | null) => {
   const personalize = Boolean(userId);
   const queryKey = queryKeys.feed.list("for_you", userId, FEED_PAGE_SIZE, personalize);
 
-  if (!shouldPrefetch(queryClient, queryKey)) {
+  if (!shouldPrefetch(queryClient, queryKey, FEED_PREFETCH_STALE_MS)) {
     return Promise.resolve();
   }
 
@@ -114,7 +115,7 @@ const prefetchFeed = (queryClient: QueryClient, userId: string | null) => {
         },
       }),
     queryKey,
-    staleTime: 30_000,
+    staleTime: FEED_PREFETCH_STALE_MS,
   });
 };
 

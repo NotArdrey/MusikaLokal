@@ -40,13 +40,14 @@ interface HeaderProps {
     transparent?: boolean;
     onBackPress?: () => void;
     showBack?: boolean;
+    showMainActions?: boolean;
     leftComponent?: React.ReactNode;
     rightComponent?: React.ReactNode;
     rightIconName?: string;
     rightIconOnPress?: () => void;
 }
 
-function Header({ title, overline, transparent, onBackPress, showBack, leftComponent, rightComponent, rightIconName, rightIconOnPress }: HeaderProps) {
+function Header({ title, overline, transparent, onBackPress, showBack, showMainActions, leftComponent, rightComponent, rightIconName, rightIconOnPress }: HeaderProps) {
     const { colors, isDark } = useTheme();
     const { isGuest, setGuestMode, userId, userRole } = useAuth();
     const insets = useSafeAreaInsets();
@@ -91,7 +92,13 @@ function Header({ title, overline, transparent, onBackPress, showBack, leftCompo
         if (routePathname === "/my_production") return userRole === "producer";
         return false;
     }, [isMyListingPath, routePathname, staffCanUseAddButton, userRole]);
-    const notifVisible = !isGuest && (isMainNavPath || isBrandMainHeader || (isMyListingPath && !addbtnvisible));
+    const notifVisible = !isGuest && (showMainActions || isMainNavPath || isBrandMainHeader || (isMyListingPath && !addbtnvisible));
+    const rightActionSlots = useMemo(() => {
+        if (rightComponent) return -1;
+        if (rightIconName || isGuest || addbtnvisible) return 1;
+        if (notifVisible) return isFan ? 1 : 2;
+        return 0;
+    }, [addbtnvisible, isFan, isGuest, notifVisible, rightComponent, rightIconName]);
     const titleOverline = useMemo(() => {
         const explicitOverline = overline?.trim();
         if (explicitOverline) return explicitOverline;
@@ -223,7 +230,7 @@ function Header({ title, overline, transparent, onBackPress, showBack, leftCompo
             if (data) {
                 setHasUnread(data.count > 0);
             }
-        } catch (e) {
+        } catch {
             // Silently ignore errors - user likely not logged in
         }
     }, [isGuest, userId]);
@@ -333,7 +340,7 @@ function Header({ title, overline, transparent, onBackPress, showBack, leftCompo
 
     useEffect(() => {
         isTransparent.value = withTiming(transparent ? 1 : 0, { duration: 300 });
-    }, [transparent]);
+    }, [isTransparent, transparent]);
 
     const surfaceAnimatedStyle = useAnimatedStyle(() => ({
         backgroundColor: interpolateColor(
@@ -454,7 +461,12 @@ function Header({ title, overline, transparent, onBackPress, showBack, leftCompo
                     </View>
 
                     {/* Action Buttons */}
-                    <View style={styles.rightContainer}>
+                    <View style={[
+                        styles.rightContainer,
+                        rightActionSlots === 0 && styles.rightContainerEmpty,
+                        rightActionSlots === 1 && styles.rightContainerSingle,
+                        rightActionSlots >= 2 && styles.rightContainerDouble,
+                    ]}>
                         {rightComponent ? (
                             rightComponent
                         ) : rightIconName ? (
@@ -569,6 +581,16 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'flex-end',
         zIndex: 1,
+        flexShrink: 0,
+    },
+    rightContainerEmpty: {
+        width: 46,
+    },
+    rightContainerSingle: {
+        width: 46,
+    },
+    rightContainerDouble: {
+        width: 98,
     },
     iconRow: {
         flexDirection: 'row',

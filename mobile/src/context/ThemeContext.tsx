@@ -61,16 +61,13 @@ const darkColors: ThemeColors = {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeMode>('dark');
+  const [theme, setThemeState] = useState<ThemeMode>('light');
 
   useEffect(() => {
     // Load saved theme preference
     AsyncStorage.getItem('theme').then((savedTheme: string | null) => {
-      if (savedTheme === 'dark' || savedTheme === 'system') {
+      if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
         setThemeState(savedTheme);
-      } else if (savedTheme === 'light') {
-        setThemeState('dark');
-        AsyncStorage.setItem('theme', 'dark');
       }
     });
   }, []);

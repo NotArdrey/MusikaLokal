@@ -1281,6 +1281,20 @@ Deno.serve(async (req: Request) => {
         social_follow_target_id: item?.owner_id || null,
         social_follow_target_type: "profile",
       });
+      const getAiCardUploaderProfileId = (item: any) => {
+        if (item?.__feedKind !== "ai_card") return null;
+        const type = String(item?.type || "").trim().toLowerCase();
+        if (type === "artist" || type === "profile" || type === "musician") {
+          return typeof item?.id === "string" && item.id.length > 0 ? item.id : null;
+        }
+
+        const uploaderId = item?.uploader_id || item?.owner_id || item?.organizer_id || item?.author_id;
+        return typeof uploaderId === "string" && uploaderId.length > 0 ? uploaderId : null;
+      };
+      const isArtistFeedCard = (item: any) => {
+        const type = String(item?.type || "").trim().toLowerCase();
+        return type === "artist" || type === "profile" || type === "musician";
+      };
 
       let mixedRows: any[] = [];
       let sourceHadExtra = false;
@@ -1316,16 +1330,14 @@ Deno.serve(async (req: Request) => {
           ),
         );
 
-        const postAuthorIds = Array.from(new Set([...followedProfileIds, uid].filter(Boolean)));
+        const postAuthorIds = followedProfileIds;
         let followedPostsQuery = supabaseAdmin
           .from("feed_posts")
           .select(feedPostSelect)
           .in("author_id", postAuthorIds)
           .eq("is_hidden", false)
           .is("linked_gig_id", null);
-        followedPostsQuery = includeEntityCards
-          ? followedPostsQuery.in("visibility", ["public", "followers"])
-          : followedPostsQuery.or(`visibility.in.(public,followers),author_id.eq.${uid}`);
+        followedPostsQuery = followedPostsQuery.in("visibility", ["public", "followers"]);
 
         const [
           postsResult,
@@ -1554,8 +1566,20 @@ Deno.serve(async (req: Request) => {
             .filter((value: any): value is string => typeof value === "string" && value.length > 0),
         ),
       );
+      const uploaderProfileIds = Array.from(
+        new Set(
+          pageRows
+            .map(getAiCardUploaderProfileId)
+            .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+        ),
+      );
 
-      const [userReactionsResult, followingProfileRowsResult, followingGroupRowsResult] = await Promise.all([
+      const [
+        userReactionsResult,
+        followingProfileRowsResult,
+        followingGroupRowsResult,
+        uploaderProfilesResult,
+      ] = await Promise.all([
         shouldPersonalize && postIds.length > 0
           ? supabaseAdmin
               .from("post_reactions")
@@ -1579,6 +1603,12 @@ Deno.serve(async (req: Request) => {
               .eq("followed_type", "group")
               .in("followed_id", groupTargetIds)
           : Promise.resolve({ data: [] }),
+        uploaderProfileIds.length > 0
+          ? supabaseAdmin
+              .from("profiles")
+              .select("id, full_name, avatar_url")
+              .in("id", uploaderProfileIds)
+          : Promise.resolve({ data: [] }),
       ]);
 
       const reactionMap = new Map();
@@ -1592,6 +1622,21 @@ Deno.serve(async (req: Request) => {
       const followingGroupIds = new Set(
         (followingGroupRowsResult.data || []).map((row: any) => row?.followed_id).filter(Boolean),
       );
+      const uploaderProfileById = new Map(
+        (uploaderProfilesResult.data || [])
+          .filter((row: any) => typeof row?.id === "string")
+          .map((row: any) => [
+            row.id,
+            {
+              full_name: typeof row?.full_name === "string" && row.full_name.trim().length > 0
+                ? row.full_name.trim()
+                : null,
+              avatar_url: typeof row?.avatar_url === "string" && row.avatar_url.trim().length > 0
+                ? row.avatar_url
+                : null,
+            },
+          ]),
+      );
       const enrichmentMs = Math.round(performance.now() - enrichmentStartedAt);
 
       const enriched = pageRows.map((p: any) => {
@@ -1602,8 +1647,25 @@ Deno.serve(async (req: Request) => {
           : followingProfileIds.has(followTargetId);
 
         if (p?.__feedKind === "ai_card") {
+          const uploaderId = getAiCardUploaderProfileId(p);
+          const uploader = uploaderId ? uploaderProfileById.get(uploaderId) : null;
+          const uploaderName =
+            uploader?.full_name ||
+            p?.uploader_name ||
+            p?.owner_name ||
+            p?.organizer_name ||
+            (isArtistFeedCard(p) ? p?.name : null);
+          const uploaderAvatar =
+            uploader?.avatar_url ||
+            p?.uploader_avatar ||
+            p?.owner_avatar ||
+            p?.organizer_avatar ||
+            (isArtistFeedCard(p) ? p?.image : null);
           return {
             ...p,
+            uploader_id: uploaderId,
+            uploader_name: uploaderName || null,
+            uploader_avatar: uploaderAvatar || null,
             is_following: isFollowing,
           };
         }
@@ -1647,9 +1709,14 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: "Post not found" }, 404);
       }
 
+      const commentsSelect =
+        "id, post_id, author_id, content, parent_comment_id, is_hidden, moderation_status, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url)";
+      const commentsFallbackSelect =
+        "id, post_id, author_id, content, parent_comment_id, is_hidden, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url)";
+
       let commentsResult = await supabaseAdmin
         .from("post_comments")
-        .select("*, author:profiles!author_id(id, full_name, avatar_url)")
+        .select(commentsSelect)
         .eq("post_id", post_id)
         .or("is_hidden.eq.false,is_hidden.is.null")
         .eq("moderation_status", "approved")
@@ -1662,7 +1729,7 @@ Deno.serve(async (req: Request) => {
       ) {
         commentsResult = await supabaseAdmin
           .from("post_comments")
-          .select("*, author:profiles!author_id(id, full_name, avatar_url)")
+          .select(commentsFallbackSelect)
           .eq("post_id", post_id)
           .or("is_hidden.eq.false,is_hidden.is.null")
           .order("created_at", { ascending: true });

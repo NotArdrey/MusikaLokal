@@ -3,7 +3,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  InteractionManager,
   Keyboard,
   type KeyboardEvent,
   LayoutAnimation,
@@ -214,6 +213,11 @@ const normalizePostDetailsPayload = (rawPost: any) => {
   };
 };
 
+const normalizePostPreviewPayload = (rawPost: any) => {
+  if (!rawPost?.id) return null;
+  return normalizePostDetailsPayload(rawPost).post;
+};
+
 const fetchPostDetailsPayload = async (targetPostId: string) => {
   const { data, error } = await supabase.functions.invoke("manage-social-feed", {
     body: { action: "get_post_details", post_id: targetPostId },
@@ -224,7 +228,61 @@ const fetchPostDetailsPayload = async (targetPostId: string) => {
   return normalizePostDetailsPayload(data?.data || null);
 };
 
+export const prefetchPostDetails = (
+  targetPostId: string | null | undefined,
+  initialPost?: any | null,
+) => {
+  if (!targetPostId) {
+    return Promise.resolve(null);
+  }
+
+  const cached = postDetailsCache.get(targetPostId);
+  const cacheIsFresh =
+    cached?.post && Date.now() - cached.cachedAt < POST_DETAILS_CACHE_TTL_MS;
+
+  if (cacheIsFresh) {
+    return Promise.resolve({ post: cached.post, comments: cached.comments });
+  }
+
+  if (cached?.inFlight) {
+    return cached.inFlight;
+  }
+
+  const seedPost = cached?.post || normalizePostPreviewPayload(initialPost);
+  const seedComments = cached?.comments || [];
+  const inFlight = fetchPostDetailsPayload(targetPostId)
+    .then((nextDetails) => {
+      postDetailsCache.set(targetPostId, {
+        ...nextDetails,
+        cachedAt: Date.now(),
+      });
+      return nextDetails;
+    })
+    .catch((error) => {
+      if (seedPost) {
+        postDetailsCache.set(targetPostId, {
+          post: seedPost,
+          comments: seedComments,
+          cachedAt: cached?.cachedAt || 0,
+        });
+      } else {
+        postDetailsCache.delete(targetPostId);
+      }
+      throw error;
+    });
+
+  postDetailsCache.set(targetPostId, {
+    post: seedPost,
+    comments: seedComments,
+    cachedAt: cached?.cachedAt || 0,
+    inFlight,
+  });
+
+  return inFlight;
+};
+
 type Props = {
+  initialPost?: any | null;
   postId: string | null;
   visible: boolean;
   onClose: () => void;
@@ -236,6 +294,7 @@ type Props = {
 };
 
 export default function PostDetailsModal({
+  initialPost,
   postId,
   visible,
   onClose,
@@ -253,7 +312,9 @@ export default function PostDetailsModal({
   const [post, setPost] = useState<any>(null);
   const [comments, setComments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentText, setCommentText] = useState("");
+  const [commentNotice, setCommentNotice] = useState<{ title: string; message: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
   const [postOptionsVisible, setPostOptionsVisible] = useState(false);
@@ -272,41 +333,39 @@ export default function PostDetailsModal({
   const subtleBg = isDark ? "#0F172A" : "#F1F5F9";
   const bubbleBg = isDark ? "#334155" : "#F1F5F9";
   const mediaWidth = Math.min(Math.max(width - 32, 240), 420);
+  const visibleCommentCount = Math.max(0, Number(post?.comment_count ?? comments.length) || 0);
 
   const fetchPost = useCallback(async (forceRefresh = false) => {
     if (!postId) return;
     const cached = postDetailsCache.get(postId);
+    const seedPost = cached?.post || normalizePostPreviewPayload(initialPost);
     const cacheIsFresh =
       cached?.post && Date.now() - cached.cachedAt < POST_DETAILS_CACHE_TTL_MS;
 
-    if (cached?.post) {
-      setPost(cached.post);
-      setComments(cached.comments);
+    if (seedPost) {
+      setPost(seedPost);
+      setComments(cached?.comments || []);
     }
 
     if (cacheIsFresh && !forceRefresh) {
       setLoading(false);
+      setCommentsLoading(false);
       return { post: cached.post, comments: cached.comments };
     }
 
-    setLoading(!cached?.post);
+    setLoading(!seedPost);
+    setCommentsLoading(true);
     try {
-      const inFlight =
-        !forceRefresh && cached?.inFlight
-          ? cached.inFlight
-          : fetchPostDetailsPayload(postId);
-      postDetailsCache.set(postId, {
-        post: cached?.post,
-        comments: cached?.comments || [],
-        cachedAt: cached?.cachedAt || 0,
-        inFlight,
-      });
-
-      const nextDetails = await inFlight;
-      postDetailsCache.set(postId, {
-        ...nextDetails,
-        cachedAt: Date.now(),
-      });
+      const nextDetails = forceRefresh
+        ? await fetchPostDetailsPayload(postId)
+        : await prefetchPostDetails(postId, initialPost);
+      if (!nextDetails) return null;
+      if (forceRefresh) {
+        postDetailsCache.set(postId, {
+          ...nextDetails,
+          cachedAt: Date.now(),
+        });
+      }
       setPost(nextDetails.post);
       setComments(nextDetails.comments);
       return nextDetails;
@@ -331,8 +390,9 @@ export default function PostDetailsModal({
       });
     } finally {
       setLoading(false);
+      setCommentsLoading(false);
     }
-  }, [postId]);
+  }, [initialPost, postId]);
 
   const animateKeyboardLayoutChange = useCallback((event: KeyboardEvent) => {
     if (Platform.OS === "android") {
@@ -360,22 +420,21 @@ export default function PostDetailsModal({
   useEffect(() => {
     if (!visible || !postId) return;
     const cached = postDetailsCache.get(postId);
-    setPost(cached?.post || null);
+    const seedPost = cached?.post || normalizePostPreviewPayload(initialPost);
+    const cacheIsFresh =
+      cached?.post && Date.now() - cached.cachedAt < POST_DETAILS_CACHE_TTL_MS;
+    setPost(seedPost || null);
     setComments(cached?.comments || []);
-    setLoading(!cached?.post);
+    setLoading(!seedPost);
+    setCommentsLoading(!cacheIsFresh);
     setCommentText("");
+    setCommentNotice(null);
     setAlert(null);
     setPostOptionsVisible(false);
     setReportModalVisible(false);
     setDeleteConfirmVisible(false);
-    const loadTask = InteractionManager.runAfterInteractions(() => {
-      void fetchPost(false);
-    });
-
-    return () => {
-      loadTask.cancel?.();
-    };
-  }, [fetchPost, postId, visible]);
+    void fetchPost(false);
+  }, [fetchPost, initialPost, postId, visible]);
 
   useEffect(() => {
     if (!visible) {
@@ -448,6 +507,7 @@ export default function PostDetailsModal({
     const content = commentText.trim();
     if (!content || !post) return;
     setSubmitting(true);
+    setCommentNotice(null);
     try {
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
         body: { action: "add_comment", post_id: post.id, content },
@@ -456,18 +516,19 @@ export default function PostDetailsModal({
       if (error) throw error;
 
       if (data?.blocked || data?.status === "blocked") {
-        setAlert({
-          type: "warning",
-          title: "Comment blocked",
-          message: data?.moderation?.reason || data?.error || "This comment did not pass moderation.",
-        });
+        const message =
+          data?.moderation?.reason ||
+          data?.error ||
+          "This comment did not pass moderation.";
+        setCommentNotice({ title: "Comment blocked", message });
+        emitToast({ type: "warning", title: "Comment blocked", message });
         return;
       }
 
       if (data?.pending_review || data?.status === "pending_review") {
         setCommentText("");
         emitToast({ type: "info", title: "Comment sent for review", message: "It will appear if approved." });
-        onCommentChanged?.(post.id, comments.length);
+        onCommentChanged?.(post.id, visibleCommentCount);
         return;
       }
 
@@ -475,7 +536,7 @@ export default function PostDetailsModal({
         setCommentText("");
         const nextComment = normalizeCommentPayload(data.data);
         const nextComments = [...comments, nextComment];
-        const nextCount = nextComments.length;
+        const nextCount = Math.max(nextComments.length, visibleCommentCount + 1);
         const nextPost = {
           ...post,
           comment_count: nextCount,
@@ -516,7 +577,7 @@ export default function PostDetailsModal({
       if (data?.success) {
         emitToast({ type: "info", title: "Deleted", message: "Comment deleted." });
         const nextComments = comments.filter((comment) => comment?.id !== commentId);
-        const nextCount = nextComments.length;
+        const nextCount = Math.max(0, Math.min(nextComments.length, visibleCommentCount - 1));
         const nextPost = {
           ...post,
           comment_count: nextCount,
@@ -539,7 +600,7 @@ export default function PostDetailsModal({
     } catch (e: any) {
       setAlert({ type: "error", title: "Delete Failed", message: e?.message || "Please try again." });
     }
-  }, [comments, onCommentChanged, post]);
+  }, [comments, onCommentChanged, post, visibleCommentCount]);
 
   const handleDeletePost = async () => {
     if (!post) return;
@@ -561,6 +622,13 @@ export default function PostDetailsModal({
       setAlert({ type: "error", title: "Delete Failed", message: e?.message || "Please try again." });
     }
   };
+
+  const handleCommentTextChange = useCallback((value: string) => {
+    setCommentText(value);
+    if (commentNotice) {
+      setCommentNotice(null);
+    }
+  }, [commentNotice]);
 
   const handleEditPost = () => {
     if (!post || !onEditPost) return;
@@ -669,12 +737,16 @@ export default function PostDetailsModal({
   const listEmptyComponent = useMemo(
     () => (
       <View style={styles.emptyComments}>
-        <Text style={[styles.noComments, { color: colors.textSecondary }]}>
-          No comments yet. Be the first to comment.
-        </Text>
+        {commentsLoading ? (
+          <ActivityIndicator size="small" color={colors.primary} />
+        ) : (
+          <Text style={[styles.noComments, { color: colors.textSecondary }]}>
+            No comments yet. Be the first to comment.
+          </Text>
+        )}
       </View>
     ),
-    [colors.textSecondary],
+    [colors.primary, colors.textSecondary, commentsLoading],
   );
 
   const listHeaderComponent = useMemo(() => {
@@ -766,12 +838,12 @@ export default function PostDetailsModal({
           </TouchableOpacity>
           <View
             accessibilityRole="text"
-            accessibilityLabel={`Comments, ${formatCountLabel(comments.length, "comment")}`}
+            accessibilityLabel={`Comments, ${formatCountLabel(visibleCommentCount, "comment")}`}
             style={styles.actionBtn}
           >
             <Ionicons name="chatbubble-outline" size={19} color={colors.textSecondary} />
             <Text style={[styles.actionCountText, { color: colors.textSecondary }]}>
-              {formatEngagementCount(comments.length)}
+              {formatEngagementCount(visibleCommentCount)}
             </Text>
           </View>
           <TouchableOpacity
@@ -797,7 +869,6 @@ export default function PostDetailsModal({
     borderCol,
     colors.text,
     colors.textSecondary,
-    comments.length,
     handleMoreOptions,
     handleReaction,
     handleSharePost,
@@ -805,6 +876,7 @@ export default function PostDetailsModal({
     mediaWidth,
     post,
     subtleBg,
+    visibleCommentCount,
   ]);
 
   return (
@@ -862,6 +934,27 @@ export default function PostDetailsModal({
             edges={footerSafeAreaEdges}
             style={{ backgroundColor: cardBg }}
           >
+            {commentNotice ? (
+              <View
+                style={[
+                  styles.commentNotice,
+                  {
+                    backgroundColor: isDark ? "rgba(180,83,9,0.18)" : "#FFFBEB",
+                    borderColor: isDark ? "rgba(245,158,11,0.35)" : "#FDE68A",
+                  },
+                ]}
+              >
+                <Ionicons name="alert-circle-outline" size={17} color="#F59E0B" />
+                <View style={styles.commentNoticeTextWrap}>
+                  <Text style={[styles.commentNoticeTitle, { color: isDark ? "#FDE68A" : "#92400E" }]}>
+                    {commentNotice.title}
+                  </Text>
+                  <Text style={[styles.commentNoticeMessage, { color: isDark ? "#FCD34D" : "#B45309" }]} numberOfLines={2}>
+                    {commentNotice.message}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
             <View
               style={[
                 styles.footer,
@@ -884,7 +977,7 @@ export default function PostDetailsModal({
                   placeholder="Write a comment..."
                   placeholderTextColor={colors.textSecondary}
                   value={commentText}
-                  onChangeText={setCommentText}
+                  onChangeText={handleCommentTextChange}
                   multiline
                   maxLength={1000}
                   editable={Boolean(session && post)}
@@ -1106,6 +1199,21 @@ const styles = StyleSheet.create({
   commentMeta: { fontSize: 12, fontWeight: "600" },
   emptyComments: { paddingVertical: 28, paddingHorizontal: 16 },
   noComments: { fontSize: 13, textAlign: "center" },
+  commentNotice: {
+    marginHorizontal: 12,
+    marginTop: 10,
+    marginBottom: -2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  commentNoticeTextWrap: { flex: 1, minWidth: 0 },
+  commentNoticeTitle: { fontSize: 12, fontWeight: "700", marginBottom: 2 },
+  commentNoticeMessage: { fontSize: 12, lineHeight: 16 },
   footer: {
     flexDirection: "row",
     alignItems: "center",
