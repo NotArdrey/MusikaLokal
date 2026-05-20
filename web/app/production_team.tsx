@@ -13,6 +13,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
@@ -84,6 +85,13 @@ const logFunctionInvokeError = (
 
 export default function ProductionTeamScreen() {
   const { colors, isDark } = useTheme();
+  const { width } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && width >= 768;
+  const detailPageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
   const { userRole } = useAuth();
@@ -674,8 +682,8 @@ export default function ProductionTeamScreen() {
 
     return (
       <>
-        <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-          <Header title="Manage Production" onBackPress={closeTeamDetail} />
+        <View style={[styles.flex1, { backgroundColor: detailPageBackground }]}>
+          <Header title="Manage Production" cardStyle onBackPress={closeTeamDetail} />
 
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -1025,8 +1033,12 @@ export default function ProductionTeamScreen() {
 
   // ── Teams List View ──
   return (
-    <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-      <Header title={routeTeamId ? "Manage Production" : "Production Teams"} onBackPress={routeTeamId ? () => router.back() : undefined} />
+    <View style={[styles.flex1, { backgroundColor: routeTeamId ? detailPageBackground : colors.background }]}>
+      <Header
+        title={routeTeamId ? "Manage Production" : "Production Teams"}
+        cardStyle={Boolean(routeTeamId)}
+        onBackPress={routeTeamId ? () => router.back() : undefined}
+      />
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
         refreshControl={

@@ -4,11 +4,13 @@ import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Image,
+    Modal as RNModal,
     Platform,
     ScrollView,
     StyleSheet,
     Switch,
     Text,
+    TextInput,
     TouchableOpacity,
     useWindowDimensions,
     View,
@@ -16,6 +18,7 @@ import {
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
+import ImageUploader from "../src/components/ImageUploader";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import ProfileAvatar from "../src/components/ProfileAvatar";
@@ -33,6 +36,9 @@ import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 import { useLocalSearchParams } from "expo-router";
 
 const GROUP_TABS = ["About", "Applications", "Review"];
+const PLAYLIST_COVER_BUCKET = "post-media";
+const PLAYLIST_COVER_FOLDER = "playlist-covers";
+const PLAYLIST_GENRES = ["Pop", "Rock", "Hip-Hop", "R&B", "Jazz", "Classical", "Electronic", "OPM", "Indie", "Other"];
 
 export default function GroupDetailsScreen() {
   const { colors, isDark } = useTheme();
@@ -78,6 +84,13 @@ export default function GroupDetailsScreen() {
   const [reviews, setReviews] = useState<any[]>([]);
   const [groupPlaylists, setGroupPlaylists] = useState<any[]>([]);
   const [loadingGroupPlaylists, setLoadingGroupPlaylists] = useState(false);
+  const [groupPlaylistModalVisible, setGroupPlaylistModalVisible] = useState(false);
+  const [playlistTitle, setPlaylistTitle] = useState("");
+  const [playlistDescription, setPlaylistDescription] = useState("");
+  const [playlistGenre, setPlaylistGenre] = useState("");
+  const [playlistVisibility, setPlaylistVisibility] = useState<"public" | "private" | "unlisted">("public");
+  const [playlistCoverImages, setPlaylistCoverImages] = useState<string[]>([]);
+  const [creatingGroupPlaylist, setCreatingGroupPlaylist] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -131,14 +144,57 @@ export default function GroupDetailsScreen() {
       return;
     }
 
-    router.push({
-      pathname: "/create_playlist",
-      params: {
-        owner_group_id: groupId,
-        return_to: "manage_group",
-        return_group_id: groupId,
-      },
-    });
+    setPlaylistTitle("");
+    setPlaylistDescription("");
+    setPlaylistGenre("");
+    setPlaylistVisibility("public");
+    setPlaylistCoverImages([]);
+    setGroupPlaylistModalVisible(true);
+  };
+
+  const closeGroupPlaylistModal = () => {
+    if (creatingGroupPlaylist) return;
+    setGroupPlaylistModalVisible(false);
+  };
+
+  const handleSubmitGroupPlaylist = async () => {
+    const groupId = String(group?.id || (Array.isArray(id) ? id[0] : id) || "").trim();
+    if (!groupId) {
+      showAlert("warning", "Group Unavailable", "Open this group again before uploading a group playlist.");
+      return;
+    }
+
+    if (!playlistTitle.trim()) {
+      showAlert("warning", "Missing Title", "Enter a playlist title before creating it.");
+      return;
+    }
+
+    setCreatingGroupPlaylist(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-playlists", {
+        body: {
+          action: "create_playlist",
+          title: playlistTitle.trim(),
+          description: playlistDescription.trim(),
+          genre: playlistGenre,
+          cover_image_url: playlistCoverImages[0] || null,
+          visibility: playlistVisibility,
+          owner_group_id: groupId,
+        },
+      });
+
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || "Failed to create group playlist.");
+
+      const playlistRows = await fetchGroupLinkedPlaylists(groupId);
+      setGroupPlaylists(playlistRows);
+      setGroupPlaylistModalVisible(false);
+      showAlert("success", "Playlist Created", "Your group playlist has been added.");
+    } catch (error: any) {
+      showAlert("error", "Playlist Failed", error?.message || "Unable to create group playlist.");
+    } finally {
+      setCreatingGroupPlaylist(false);
+    }
   };
 
   const handlePlaylistPress = (playlistId: string) => {
@@ -1295,6 +1351,150 @@ export default function GroupDetailsScreen() {
           }
         }}
       />
+      <RNModal
+        visible={groupPlaylistModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeGroupPlaylistModal}
+      >
+        <View style={styles.playlistPopupOverlay}>
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={closeGroupPlaylistModal}
+            style={styles.playlistPopupBackdrop}
+          />
+          <View style={[styles.playlistPopupCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
+            <View style={[styles.playlistPopupHeader, { borderBottomColor: colors.border }]}>
+              <View>
+                <Text style={[styles.playlistPopupTitle, { color: colors.text }]}>Upload Group Playlist</Text>
+                <Text style={[styles.playlistPopupSubtitle, { color: colors.textSecondary }]}>
+                  Create a playlist for {group?.name || "this group"}.
+                </Text>
+              </View>
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={closeGroupPlaylistModal}
+                style={[styles.playlistPopupCloseButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+              >
+                <Ionicons name="close" size={18} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.playlistPopupBody}
+              contentContainerStyle={styles.playlistPopupBodyContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              <Text style={[styles.playlistPopupLabel, { color: colors.text }]}>Album Cover</Text>
+              {currentUserId ? (
+                <ImageUploader
+                  images={playlistCoverImages}
+                  onImagesChange={(images) => setPlaylistCoverImages(images.slice(0, 1))}
+                  maxImages={1}
+                  bucketName={PLAYLIST_COVER_BUCKET}
+                  userId={currentUserId}
+                  folder={PLAYLIST_COVER_FOLDER}
+                />
+              ) : null}
+
+              <Text style={[styles.playlistPopupLabel, { color: colors.text }]}>Title *</Text>
+              <TextInput
+                value={playlistTitle}
+                onChangeText={setPlaylistTitle}
+                placeholder="Playlist title"
+                placeholderTextColor={colors.textSecondary}
+                maxLength={100}
+                style={[styles.playlistPopupInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+              />
+
+              <Text style={[styles.playlistPopupLabel, { color: colors.text }]}>Description</Text>
+              <TextInput
+                value={playlistDescription}
+                onChangeText={setPlaylistDescription}
+                placeholder="Describe your playlist"
+                placeholderTextColor={colors.textSecondary}
+                maxLength={500}
+                multiline
+                style={[
+                  styles.playlistPopupInput,
+                  styles.playlistPopupTextArea,
+                  { color: colors.text, borderColor: colors.border, backgroundColor: colors.card },
+                ]}
+              />
+
+              <Text style={[styles.playlistPopupLabel, { color: colors.text }]}>Genre</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.playlistChipRow}>
+                {PLAYLIST_GENRES.map((genreOption) => {
+                  const selected = playlistGenre === genreOption;
+                  return (
+                    <TouchableOpacity
+                      key={genreOption}
+                      activeOpacity={1}
+                      onPress={() => setPlaylistGenre(selected ? "" : genreOption)}
+                      style={[
+                        styles.playlistChip,
+                        {
+                          backgroundColor: selected ? colors.primary : "transparent",
+                          borderColor: selected ? colors.primary : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text style={{ color: selected ? "#FFFFFF" : colors.text, fontFamily: "Poppins_500Medium", fontSize: 12 }}>
+                        {genreOption}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              <Text style={[styles.playlistPopupLabel, { color: colors.text }]}>Visibility</Text>
+              <View style={styles.playlistVisibilityRow}>
+                {(["public", "private", "unlisted"] as const).map((visibilityOption) => {
+                  const selected = playlistVisibility === visibilityOption;
+                  return (
+                    <TouchableOpacity
+                      key={visibilityOption}
+                      activeOpacity={1}
+                      onPress={() => setPlaylistVisibility(visibilityOption)}
+                      style={[
+                        styles.playlistVisibilityButton,
+                        {
+                          backgroundColor: selected ? colors.primary : "transparent",
+                          borderColor: selected ? colors.primary : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text style={{ color: selected ? "#FFFFFF" : colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 12, textTransform: "capitalize" }}>
+                        {visibilityOption}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <TouchableOpacity
+                activeOpacity={creatingGroupPlaylist || !playlistTitle.trim() ? 1 : 0.78}
+                disabled={creatingGroupPlaylist || !playlistTitle.trim()}
+                onPress={handleSubmitGroupPlaylist}
+                style={[
+                  styles.playlistSubmitButton,
+                  {
+                    backgroundColor: playlistTitle.trim() ? colors.primary : colors.border,
+                    opacity: creatingGroupPlaylist || !playlistTitle.trim() ? 0.62 : 1,
+                  },
+                ]}
+              >
+                {creatingGroupPlaylist ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.playlistSubmitText}>Create Group Playlist</Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </RNModal>
       <CustomAlert
         visible={alertVisible}
         type={alertConfig.type}
@@ -1794,5 +1994,115 @@ const styles = StyleSheet.create({
   },
   reviewText: {
     lineHeight: 20,
+  },
+  playlistPopupOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 28,
+    backgroundColor: "rgba(2,6,23,0.72)",
+  },
+  playlistPopupBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  playlistPopupCard: {
+    width: "100%",
+    maxWidth: 620,
+    maxHeight: "88%",
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: "hidden",
+    elevation: 22,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.3,
+    shadowRadius: 34,
+  },
+  playlistPopupHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+  },
+  playlistPopupTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 18,
+  },
+  playlistPopupSubtitle: {
+    marginTop: 2,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+  },
+  playlistPopupCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  playlistPopupBody: {
+    flexGrow: 0,
+  },
+  playlistPopupBodyContent: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 22,
+  },
+  playlistPopupLabel: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+    marginTop: 14,
+    marginBottom: 7,
+  },
+  playlistPopupInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 14,
+  },
+  playlistPopupTextArea: {
+    minHeight: 92,
+    textAlignVertical: "top",
+  },
+  playlistChipRow: {
+    gap: 8,
+    paddingRight: 20,
+    paddingBottom: 2,
+  },
+  playlistChip: {
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  playlistVisibilityRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 9,
+  },
+  playlistVisibilityButton: {
+    paddingHorizontal: 15,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  playlistSubmitButton: {
+    marginTop: 24,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  playlistSubmitText: {
+    color: "#FFFFFF",
+    fontFamily: "Poppins_700Bold",
+    fontSize: 14,
   },
 });

@@ -29,6 +29,7 @@ import InAppMediaViewer, { getInAppMediaType } from "../src/components/InAppMedi
 import ReportModal from "../src/components/ReportModal";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
+import ImageUploader from "../src/components/ImageUploader";
 import Navbar from "../src/components/navbar";
 import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import ProfileAvatar from "../src/components/ProfileAvatar";
@@ -40,6 +41,16 @@ import { emitToast } from "../src/events/toastBus";
 import { screenUploadsWithAi } from "../src/services/uploadSafetyScreen";
 import { isFanUserRole } from "../src/utils/roleRouting";
 import { isStaffRole } from "../src/utils/staffAccess";
+import {
+  ensurePlaylistAudioPassesCopyrightScreening,
+  pickPlaylistAudioFile,
+  uploadPlaylistAudioFile,
+  type PlaylistAudioFile,
+} from "../src/utils/playlistAudio";
+import {
+  createE2EPlaylistAudioFixture,
+  isE2EFixtureMode,
+} from "../src/utils/e2eFixtures";
 
 const GRID_GAP = 4;
 const NUM_COLUMNS = 3;
@@ -168,8 +179,59 @@ type ProfileConnectionItem = {
 const PROFILE_POSTS_CACHE_TTL_MS = 30000;
 const PROFILE_PLAYLISTS_CACHE_TTL_MS = 30000;
 const PLAYLIST_GENRES = ["Pop", "Rock", "Hip-Hop", "R&B", "Jazz", "Classical", "Electronic", "OPM", "Indie", "Other"];
+const PLAYLIST_COVER_BUCKET = "post-media";
+const PLAYLIST_COVER_FOLDER = "playlist-covers";
+const PLAYLIST_COPYRIGHT_MATCH_PATTERN = /this (?:audio|track) appears to match|appears to be copyrighted|permission to share/i;
+const PLAYLIST_EXPECTED_UPLOAD_FEEDBACK_PATTERN =
+  /(blocked by safety screening|safety check|copyright check|appears to match|appears to be copyrighted|permission to share|please upload music you own|licensed to share|playlist tracks must be|tracks must be|only mp3)/i;
 const profilePostsCache = new Map<string, { posts: any[]; fetchedAt: number }>();
 const profilePlaylistsCache = new Map<string, { playlists: any[]; fetchedAt: number }>();
+
+type PlaylistDraftTrack = {
+  id: string;
+  title: string;
+  artist_name: string;
+  audio_file: PlaylistAudioFile | null;
+};
+
+type PlaylistDraftTrackPayload = {
+  id: string;
+  title: string;
+  artist_name: string | null;
+  duration_seconds: number | null;
+  audio_file: PlaylistAudioFile | null;
+};
+
+const createPlaylistTrackDraft = (): PlaylistDraftTrack => ({
+  id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  title: "",
+  artist_name: "",
+  audio_file: null,
+});
+
+const getFriendlyPlaylistUploadErrorMessage = (error: any) => {
+  const message = typeof error?.message === "string" ? error.message : "";
+  const normalizedMessage = message.toLowerCase();
+
+  if (
+    normalizedMessage.includes("different document picking in progress") ||
+    normalizedMessage.includes("document picking in progress")
+  ) {
+    return "Another file picker is already open. Please finish or close it, then tap Upload MP3 again.";
+  }
+
+  if (normalizedMessage.includes("cancel") || normalizedMessage.includes("dismiss")) {
+    return "No file was selected. Tap Upload MP3 when you're ready to choose a track.";
+  }
+
+  return message || "Please choose an MP3 file that is 5 minutes or less.";
+};
+
+const isExpectedPlaylistUploadFeedback = (message: string) =>
+  PLAYLIST_EXPECTED_UPLOAD_FEEDBACK_PATTERN.test(message);
+
+const formatPlaylistUploadFeedbackMessage = (message: string) =>
+  message.replace(/^.+? was blocked by safety screening\.\s*/i, "").trim() || message;
 
 const sanitizeAvatarUrl = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
@@ -1051,8 +1113,12 @@ export default function ProfileScreen() {
   const [playlistTitle, setPlaylistTitle] = useState("");
   const [playlistDescription, setPlaylistDescription] = useState("");
   const [playlistGenre, setPlaylistGenre] = useState("");
+  const [playlistCoverImages, setPlaylistCoverImages] = useState<string[]>([]);
+  const [playlistTrackDrafts, setPlaylistTrackDrafts] = useState<PlaylistDraftTrack[]>([]);
   const [playlistVisibility, setPlaylistVisibility] = useState<"public" | "private" | "unlisted">("public");
   const [creatingPlaylist, setCreatingPlaylist] = useState(false);
+  const [uploadingPlaylistTrackId, setUploadingPlaylistTrackId] = useState<string | null>(null);
+  const [playlistAudioUploadMessage, setPlaylistAudioUploadMessage] = useState<string | null>(null);
   const profilePostsFetchInFlightRef = useRef<string | null>(null);
   const profilePlaylistsFetchInFlightRef = useRef<string | null>(null);
 
@@ -1862,21 +1928,129 @@ export default function ProfileScreen() {
     viewedProfileId,
   ]);
 
+  const ensurePlaylistMutationSession = useCallback(async () => {
+    if (isGuest) {
+      throw new Error("You need to sign in to manage playlists.");
+    }
+
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    if (session?.access_token) {
+      return session;
+    }
+
+    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError) {
+      throw refreshError;
+    }
+
+    if (!refreshed.session?.access_token) {
+      throw new Error("Your session expired. Please sign in again.");
+    }
+
+    return refreshed.session;
+  }, [isGuest]);
+
+  const addPlaylistTrackDraft = useCallback(() => {
+    setPlaylistTrackDrafts((current) => [...current, createPlaylistTrackDraft()]);
+  }, []);
+
+  const updatePlaylistTrackDraft = useCallback((trackId: string, field: "title" | "artist_name", value: string) => {
+    setPlaylistTrackDrafts((current) => current.map((track) => (
+      track.id === trackId ? { ...track, [field]: value } : track
+    )));
+  }, []);
+
+  const setPlaylistTrackAudioFile = useCallback((trackId: string, audioFile: PlaylistAudioFile | null) => {
+    setPlaylistTrackDrafts((current) => current.map((track) => (
+      track.id === trackId ? { ...track, audio_file: audioFile } : track
+    )));
+  }, []);
+
+  const removePlaylistTrackDraft = useCallback((trackId: string) => {
+    setPlaylistTrackDrafts((current) => current.filter((track) => track.id !== trackId));
+  }, []);
+
+  const handlePickPlaylistTrackAudio = useCallback(async (trackId: string) => {
+    try {
+      if (isE2EFixtureMode()) {
+        setPlaylistTrackAudioFile(trackId, createE2EPlaylistAudioFixture());
+        return;
+      }
+
+      setUploadingPlaylistTrackId(trackId);
+      setPlaylistAudioUploadMessage("Preparing MP3...");
+      const audioFile = await pickPlaylistAudioFile();
+      if (!audioFile) return;
+
+      setPlaylistAudioUploadMessage("Checking MP3...");
+      await ensurePlaylistAudioPassesCopyrightScreening(audioFile);
+      setPlaylistTrackAudioFile(trackId, audioFile);
+    } catch (error: any) {
+      const pickerErrorMessage = getFriendlyPlaylistUploadErrorMessage(error);
+      const displayMessage = isExpectedPlaylistUploadFeedback(pickerErrorMessage)
+        ? formatPlaylistUploadFeedbackMessage(pickerErrorMessage)
+        : pickerErrorMessage;
+
+      showAlert(
+        "warning",
+        PLAYLIST_COPYRIGHT_MATCH_PATTERN.test(pickerErrorMessage) ? "Copyright Match Found" : "Upload MP3",
+        displayMessage,
+        undefined,
+        true,
+      );
+    } finally {
+      setUploadingPlaylistTrackId(null);
+      setPlaylistAudioUploadMessage(null);
+    }
+  }, [setPlaylistTrackAudioFile]);
+
+  const preparePlaylistTrackPayloads = useCallback(async (): Promise<PlaylistDraftTrackPayload[]> => {
+    const items = playlistTrackDrafts
+      .map((track) => ({
+        id: track.id,
+        title: track.title.trim(),
+        artist_name: track.artist_name.trim() || null,
+        audio_file: track.audio_file,
+      }))
+      .filter((track) => track.title || track.artist_name || track.audio_file);
+
+    if (items.some((track) => !track.title)) {
+      throw new Error("Each added music needs a title before you save the playlist.");
+    }
+
+    return Promise.all(items.map(async (track) => ({
+      id: track.id,
+      title: track.title,
+      artist_name: track.artist_name,
+      duration_seconds: track.audio_file?.durationSeconds || null,
+      audio_file: track.audio_file,
+    })));
+  }, [playlistTrackDrafts]);
+
   const openCreatePlaylist = useCallback(() => {
-    const targetUserId = viewedProfileId || currentUserId || normalizedParamUserId || "";
-    router.push({
-      pathname: "/create_playlist" as any,
-      params: {
-        return_to: "profile",
-        ...(targetUserId ? { return_user_id: targetUserId } : {}),
-      },
-    });
-  }, [currentUserId, normalizedParamUserId, viewedProfileId]);
+    setPlaylistTitle("");
+    setPlaylistDescription("");
+    setPlaylistGenre("");
+    setPlaylistCoverImages([]);
+    setPlaylistTrackDrafts([]);
+    setPlaylistVisibility("public");
+    setUploadingPlaylistTrackId(null);
+    setPlaylistAudioUploadMessage(null);
+    setCreatePlaylistModalVisible(true);
+  }, []);
 
   const closeCreatePlaylistModal = useCallback(() => {
-    if (creatingPlaylist) return;
+    if (creatingPlaylist || uploadingPlaylistTrackId) return;
     setCreatePlaylistModalVisible(false);
-  }, [creatingPlaylist]);
+  }, [creatingPlaylist, uploadingPlaylistTrackId]);
 
   const handleCreatePlaylistFromModal = useCallback(async () => {
     const trimmedTitle = playlistTitle.trim();
@@ -1885,14 +2059,22 @@ export default function ProfileScreen() {
       return;
     }
 
+    if (authLoading) {
+      showAlert("info", "Please Wait", "Your session is still loading. Try again in a moment.");
+      return;
+    }
+
     try {
       setCreatingPlaylist(true);
+      await ensurePlaylistMutationSession();
+      const draftItems = await preparePlaylistTrackPayloads();
       const { data, error } = await supabase.functions.invoke("manage-playlists", {
         body: {
           action: "create_playlist",
           title: trimmedTitle,
-          description: playlistDescription.trim(),
-          genre: playlistGenre,
+          description: playlistDescription.trim() || null,
+          genre: playlistGenre.trim() || null,
+          cover_image_url: playlistCoverImages[0] || null,
           visibility: playlistVisibility,
         },
       });
@@ -1900,6 +2082,48 @@ export default function ProfileScreen() {
       if (!data?.success) throw new Error(data?.error || "Failed to create playlist.");
 
       const createdPlaylist = data?.data || data?.playlist || null;
+      const playlistId = createdPlaylist?.id || "";
+      const failedTracks: { title: string; reason?: string }[] = [];
+
+      if (playlistId && draftItems.length > 0) {
+        for (const track of draftItems) {
+          try {
+            let sourceUrl: string | null = null;
+            if (track.audio_file) {
+              if (isE2EFixtureMode()) {
+                sourceUrl = track.audio_file.uri;
+              } else {
+                setUploadingPlaylistTrackId(track.id);
+                setPlaylistAudioUploadMessage(`Uploading ${track.title}...`);
+                const upload = await uploadPlaylistAudioFile(track.audio_file, playlistId);
+                sourceUrl = upload.publicUrl;
+              }
+            }
+
+            const itemBody = {
+              action: "add_playlist_item",
+              playlist_id: playlistId,
+              title: track.title,
+              artist_name: track.artist_name,
+              audio_url: sourceUrl,
+              duration_seconds: track.duration_seconds,
+            };
+
+            const { data: itemData, error: itemError } = await supabase.functions.invoke("manage-playlists", {
+              body: itemBody,
+            });
+
+            if (itemError) throw itemError;
+            if (!itemData?.success) throw new Error(itemData?.error || "Failed to add playlist item.");
+          } catch (trackError: any) {
+            failedTracks.push({
+              title: track.title,
+              reason: typeof trackError?.message === "string" ? trackError.message : undefined,
+            });
+          }
+        }
+      }
+
       const targetUserId = viewedProfileId || currentUserId || normalizedParamUserId || "";
       if (targetUserId) profilePlaylistsCache.delete(targetUserId);
       if (createdPlaylist?.id) {
@@ -1910,20 +2134,43 @@ export default function ProfileScreen() {
 
       setCreatePlaylistModalVisible(false);
       setActiveTab("playlists");
+      if (failedTracks.length > 0) {
+        const firstReason = failedTracks.find((track) => track.reason)?.reason;
+        const displayReason = firstReason && isExpectedPlaylistUploadFeedback(firstReason)
+          ? formatPlaylistUploadFeedbackMessage(firstReason)
+          : firstReason;
+        showAlert(
+          "warning",
+          firstReason && PLAYLIST_COPYRIGHT_MATCH_PATTERN.test(firstReason)
+            ? "Copyright Match Found"
+            : "Track Upload Feedback",
+          displayReason || `${failedTracks.length} track${failedTracks.length === 1 ? "" : "s"} could not be uploaded.`,
+          undefined,
+          true,
+        );
+        return;
+      }
       emitToast({ type: "success", title: "Playlist Created", message: `${trimmedTitle} is ready.` });
     } catch (error: any) {
       showAlert("error", "Create Playlist Failed", error?.message || "Please try again.");
     } finally {
+      setUploadingPlaylistTrackId(null);
+      setPlaylistAudioUploadMessage(null);
       setCreatingPlaylist(false);
     }
   }, [
+    authLoading,
     currentUserId,
+    ensurePlaylistMutationSession,
     fetchPlaylists,
     normalizedParamUserId,
+    playlistCoverImages,
     playlistDescription,
     playlistGenre,
     playlistTitle,
+    playlistTrackDrafts,
     playlistVisibility,
+    preparePlaylistTrackPayloads,
     viewedProfileId,
   ]);
 
@@ -2573,6 +2820,15 @@ export default function ProfileScreen() {
       : isOwner
         ? "Add photos, videos, and documents that show your sound, setup, or stage presence."
         : "No portfolio uploads yet.";
+  const hasValidPlaylistTrackDrafts = playlistTrackDrafts.every((track) => {
+    const hasAnyDraftValue =
+      track.title.trim().length > 0 ||
+      track.artist_name.trim().length > 0 ||
+      Boolean(track.audio_file);
+    return !hasAnyDraftValue || track.title.trim().length > 0;
+  });
+  const isCreatePlaylistReady = playlistTitle.trim().length > 0 && hasValidPlaylistTrackDrafts;
+  const isCreatePlaylistBusy = creatingPlaylist || Boolean(uploadingPlaylistTrackId);
 
   return (
     <>
@@ -3473,14 +3729,36 @@ export default function ProfileScreen() {
                   <TouchableOpacity
                     activeOpacity={0.85}
                     onPress={closeCreatePlaylistModal}
-                    disabled={creatingPlaylist}
+                    disabled={isCreatePlaylistBusy}
                     style={[styles.followModalClose, { backgroundColor: surfaceBackground }]}
                   >
                     <Ionicons name="close" size={18} color={colors.text} />
                   </TouchableOpacity>
                 </View>
 
-                <View style={styles.playlistModalBody}>
+                <ScrollView
+                  style={styles.playlistModalBodyScroll}
+                  contentContainerStyle={styles.playlistModalBody}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <Text style={[styles.playlistModalLabel, { color: colors.text }]}>Album Cover</Text>
+                  {currentUserId ? (
+                    <ImageUploader
+                      images={playlistCoverImages}
+                      onImagesChange={(images) => setPlaylistCoverImages(images.slice(0, 1))}
+                      maxImages={1}
+                      bucketName={PLAYLIST_COVER_BUCKET}
+                      userId={currentUserId}
+                      folder={PLAYLIST_COVER_FOLDER}
+                    />
+                  ) : (
+                    <View style={[styles.playlistUploadUnavailable, { backgroundColor: surfaceBackground, borderColor: borderSoft }]}>
+                      <Text style={[styles.playlistUploadUnavailableText, { color: colors.textSecondary }]}>
+                        Sign in fully to upload a cover image.
+                      </Text>
+                    </View>
+                  )}
+
                   <Text style={[styles.playlistModalLabel, { color: colors.text }]}>Title *</Text>
                   <TextInput
                     value={playlistTitle}
@@ -3555,38 +3833,153 @@ export default function ProfileScreen() {
                       );
                     })}
                   </View>
-                </View>
+
+                  <View style={styles.playlistMusicHeader}>
+                    <View>
+                      <Text style={[styles.playlistModalLabel, styles.playlistMusicLabel, { color: colors.text }]}>Musics</Text>
+                      <Text style={[styles.playlistModalHint, { color: colors.textSecondary }]}>
+                        Add the tracks now so the playlist is ready as soon as it is created.
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={addPlaylistTrackDraft}
+                      disabled={creatingPlaylist}
+                      style={[styles.playlistAddTrackBtn, { backgroundColor: colors.primary + "18", borderColor: colors.primary + "35" }]}
+                    >
+                      <Ionicons name="add" size={15} color={colors.primary} />
+                      <Text style={[styles.playlistAddTrackText, { color: colors.primary }]}>Add Music</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {playlistTrackDrafts.length === 0 ? (
+                    <View style={[styles.playlistTrackEmptyCard, { backgroundColor: surfaceBackground, borderColor: borderSoft }]}>
+                      <Ionicons name="musical-notes-outline" size={22} color={colors.textSecondary} />
+                      <Text style={[styles.playlistTrackEmptyTitle, { color: colors.text }]}>No musics added yet</Text>
+                      <Text style={[styles.playlistTrackEmptyText, { color: colors.textSecondary }]}>
+                        Tap Add Music to include a title and an MP3 audio file up to 5 minutes.
+                      </Text>
+                    </View>
+                  ) : (
+                    playlistTrackDrafts.map((track, index) => (
+                      <View key={track.id} style={[styles.playlistTrackCard, { backgroundColor: surfaceBackground, borderColor: borderSoft }]}>
+                        <View style={styles.playlistTrackCardHeader}>
+                          <Text style={[styles.playlistTrackCardTitle, { color: colors.text }]}>Music {index + 1}</Text>
+                          <TouchableOpacity
+                            activeOpacity={0.85}
+                            onPress={() => removePlaylistTrackDraft(track.id)}
+                            disabled={creatingPlaylist || uploadingPlaylistTrackId === track.id}
+                            style={styles.playlistTrackRemoveBtn}
+                          >
+                            <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                          </TouchableOpacity>
+                        </View>
+                        <TextInput
+                          value={track.title}
+                          onChangeText={(value) => updatePlaylistTrackDraft(track.id, "title", value)}
+                          placeholder="Track title"
+                          placeholderTextColor={colors.textSecondary}
+                          maxLength={120}
+                          style={[styles.playlistModalInput, styles.playlistTrackInput, { color: colors.text, backgroundColor: pageCardBackground, borderColor: borderSoft }]}
+                        />
+                        <TextInput
+                          value={track.artist_name}
+                          onChangeText={(value) => updatePlaylistTrackDraft(track.id, "artist_name", value)}
+                          placeholder="Artist name"
+                          placeholderTextColor={colors.textSecondary}
+                          maxLength={120}
+                          style={[styles.playlistModalInput, styles.playlistTrackInput, { color: colors.text, backgroundColor: pageCardBackground, borderColor: borderSoft }]}
+                        />
+                        <TouchableOpacity
+                          activeOpacity={uploadingPlaylistTrackId === track.id || creatingPlaylist ? 1 : 0.85}
+                          onPress={() => void handlePickPlaylistTrackAudio(track.id)}
+                          disabled={Boolean(uploadingPlaylistTrackId) || creatingPlaylist}
+                          style={[
+                            styles.playlistAudioPickerBtn,
+                            {
+                              backgroundColor: pageCardBackground,
+                              borderColor: borderSoft,
+                              opacity: uploadingPlaylistTrackId === track.id || creatingPlaylist ? 0.65 : 1,
+                            },
+                          ]}
+                        >
+                          {uploadingPlaylistTrackId === track.id ? (
+                            <ActivityIndicator size="small" color={colors.primary} />
+                          ) : (
+                            <Ionicons name="cloud-upload-outline" size={16} color={colors.primary} />
+                          )}
+                          <Text style={[styles.playlistAudioPickerText, { color: colors.primary }]}>
+                            {uploadingPlaylistTrackId === track.id ? "Working..." : "Upload MP3"}
+                          </Text>
+                        </TouchableOpacity>
+                        <Text style={[styles.playlistModalHint, { color: colors.textSecondary }]}>
+                          Uploaded MP3 files must be 5 minutes or less.
+                        </Text>
+                        {track.audio_file ? (
+                          <View style={[styles.playlistAudioFileChip, { backgroundColor: colors.primary + "12", borderColor: colors.primary + "35" }]}>
+                            <Ionicons name="musical-note" size={14} color={colors.primary} />
+                            <Text numberOfLines={1} style={[styles.playlistAudioFileText, { color: colors.text }]}>
+                              {track.audio_file.name}
+                            </Text>
+                            <TouchableOpacity activeOpacity={0.85} onPress={() => setPlaylistTrackAudioFile(track.id, null)}>
+                              <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+                            </TouchableOpacity>
+                          </View>
+                        ) : null}
+                      </View>
+                    ))
+                  )}
+
+                </ScrollView>
 
                 <View style={[styles.playlistModalFooter, { borderTopColor: borderSoft }]}>
                   <TouchableOpacity
                     activeOpacity={0.85}
                     onPress={closeCreatePlaylistModal}
-                    disabled={creatingPlaylist}
+                    disabled={isCreatePlaylistBusy}
                     style={[styles.playlistModalCancelBtn, { borderColor: borderSoft }]}
                   >
                     <Text style={[styles.playlistModalCancelText, { color: colors.textSecondary }]}>Cancel</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    activeOpacity={playlistTitle.trim() ? 0.85 : 1}
+                    activeOpacity={isCreatePlaylistReady ? 0.85 : 1}
                     onPress={() => void handleCreatePlaylistFromModal()}
-                    disabled={creatingPlaylist || !playlistTitle.trim()}
+                    disabled={isCreatePlaylistBusy || !isCreatePlaylistReady}
                     style={[
                       styles.playlistModalSubmitBtn,
                       {
-                        backgroundColor: playlistTitle.trim() ? colors.primary : surfaceBackground,
-                        opacity: creatingPlaylist || !playlistTitle.trim() ? 0.65 : 1,
+                        backgroundColor: isCreatePlaylistReady ? colors.primary : surfaceBackground,
+                        opacity: isCreatePlaylistBusy || !isCreatePlaylistReady ? 0.65 : 1,
                       },
                     ]}
                   >
-                    {creatingPlaylist ? (
+                    {isCreatePlaylistBusy ? (
                       <ActivityIndicator size="small" color="#fff" />
                     ) : (
-                      <Text style={[styles.playlistModalSubmitText, { color: playlistTitle.trim() ? "#fff" : colors.textSecondary }]}>
+                      <Text style={[styles.playlistModalSubmitText, { color: isCreatePlaylistReady ? "#fff" : colors.textSecondary }]}>
                         Create Playlist
                       </Text>
                     )}
                   </TouchableOpacity>
                 </View>
+              </View>
+            </View>
+          </Modal>
+          <Modal
+            visible={Boolean(playlistAudioUploadMessage)}
+            transparent
+            animationType="fade"
+            statusBarTranslucent
+          >
+            <View style={styles.uploadLoadingOverlay}>
+              <View style={[styles.uploadLoadingCard, { backgroundColor: colors.surface }]}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={[styles.uploadLoadingTitle, { color: colors.text }]}>
+                  {playlistAudioUploadMessage}
+                </Text>
+                <Text style={[styles.uploadLoadingSubtitle, { color: colors.textSecondary }]}>
+                  Please keep this screen open.
+                </Text>
               </View>
             </View>
           </Modal>
@@ -4021,6 +4414,7 @@ const styles = StyleSheet.create({
   playlistModalCard: {
     width: "100%",
     maxWidth: 560,
+    maxHeight: "88%",
     borderRadius: 22,
     borderWidth: 1,
     overflow: "hidden",
@@ -4050,6 +4444,9 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 3,
   },
+  playlistModalBodyScroll: {
+    maxHeight: 560,
+  },
   playlistModalBody: {
     paddingHorizontal: 22,
     paddingBottom: 20,
@@ -4072,6 +4469,17 @@ const styles = StyleSheet.create({
   playlistModalTextArea: {
     minHeight: 92,
     textAlignVertical: "top",
+  },
+  playlistUploadUnavailable: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    borderStyle: "dashed",
+  },
+  playlistUploadUnavailableText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
   },
   playlistGenreWrap: {
     flexDirection: "row",
@@ -4103,6 +4511,106 @@ const styles = StyleSheet.create({
   },
   playlistVisibilityText: {
     fontFamily: "Poppins_700Bold",
+    fontSize: 12,
+  },
+  playlistMusicHeader: {
+    marginTop: 18,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+  playlistMusicLabel: {
+    marginTop: 0,
+    marginBottom: 3,
+  },
+  playlistModalHint: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    lineHeight: 17,
+  },
+  playlistAddTrackBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 2,
+  },
+  playlistAddTrackText: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 12,
+  },
+  playlistTrackEmptyCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 16,
+    alignItems: "center",
+  },
+  playlistTrackEmptyTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 14,
+    marginTop: 8,
+  },
+  playlistTrackEmptyText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    lineHeight: 17,
+    marginTop: 4,
+    textAlign: "center",
+  },
+  playlistTrackCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 10,
+  },
+  playlistTrackCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  playlistTrackCardTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 13,
+  },
+  playlistTrackRemoveBtn: {
+    padding: 4,
+  },
+  playlistTrackInput: {
+    marginTop: 10,
+  },
+  playlistAudioPickerBtn: {
+    marginTop: 10,
+    minHeight: 40,
+    borderWidth: 1,
+    borderRadius: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  playlistAudioPickerText: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 12,
+  },
+  playlistAudioFileChip: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  playlistAudioFileText: {
+    flex: 1,
+    fontFamily: "Poppins_600SemiBold",
     fontSize: 12,
   },
   playlistModalFooter: {

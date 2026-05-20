@@ -1915,23 +1915,37 @@ export default function AddGroupScreen() {
 
       {/* Group Type Selector Modal Native Implementation */}
       {groupTypeModalVisible && (
-        <View style={StyleSheet.absoluteFillObject}>
+        <View
+          style={[
+            StyleSheet.absoluteFillObject,
+            {
+              alignItems: "center",
+              justifyContent: "center",
+              paddingHorizontal: 20,
+              paddingVertical: 28,
+              zIndex: 50,
+            },
+          ]}
+        >
           <TouchableOpacity
-            style={{ flex: 1, minWidth: 150, backgroundColor: "rgba(0,0,0,0.5)" }}
+            style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(2,6,23,0.72)" }]}
             activeOpacity={1}
             onPress={() => setGroupTypeModalVisible(false)}
           />
           <View style={{
-            position: "absolute",
-            bottom: 0,
-            left: 0,
-            right: 0,
             backgroundColor: colors.card,
-            borderTopLeftRadius: 24,
-            borderTopRightRadius: 24,
-            maxHeight: "80%",
-            padding: 24,
-            paddingBottom: Platform.OS === "ios" ? 40 : 24,
+            borderColor: colors.border,
+            borderWidth: 1,
+            borderRadius: 22,
+            width: "100%",
+            maxWidth: 640,
+            maxHeight: "82%",
+            padding: 22,
+            elevation: 18,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 18 },
+            shadowOpacity: 0.3,
+            shadowRadius: 34,
           }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <Text style={{ fontSize: 18, fontFamily: "Poppins_600SemiBold", color: colors.text }}>

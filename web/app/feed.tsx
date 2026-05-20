@@ -2191,7 +2191,6 @@ export default function FeedScreen() {
                         onPress={() => {
                           if (!session || isGuest) return;
                           setShowCreate(true);
-                          setTimeout(() => handlePickMedia(), 50);
                         }}
                         disabled={!session || isGuest}
                         style={[styles.composerMediaIconButton, { backgroundColor: feedColors.primary + "12" }]}
@@ -2214,19 +2213,19 @@ export default function FeedScreen() {
                     mutedTextColor={feedColors.textSecondary}
                   />
 
-                  {/* Sliding pill tab bar (mobile parity) */}
+                  {/* Feed audience tabs */}
                   <View
                     style={[
                       styles.pillTabRow,
                       {
-                        backgroundColor: "#1E293B",
+                        backgroundColor: "#0F172A",
                         borderColor: borderCol,
                       },
                     ]}
                   >
                     {[
-                      { key: "for_you", label: "For You" },
-                      { key: "following", label: "Following" },
+                      { key: "for_you", label: "For You", icon: "sparkles-outline" },
+                      { key: "following", label: "Following", icon: "people-outline" },
                     ].map((item) => {
                       const active = tab === item.key;
                       return (
@@ -2235,10 +2234,19 @@ export default function FeedScreen() {
                           activeOpacity={1}
                           style={[
                             styles.pillTabButton,
-                            active && { borderBottomColor: "#FFFFFF" },
+                            active && {
+                              backgroundColor: feedColors.primary,
+                              borderColor: feedColors.primary,
+                              shadowOpacity: 0.22,
+                            },
                           ]}
                           onPress={() => setTab(item.key as FeedTab)}
                         >
+                          <Ionicons
+                            name={item.icon as any}
+                            size={16}
+                            color={active ? "#FFFFFF" : feedColors.textSecondary}
+                          />
                           <Text
                             style={[
                               styles.pillTabText,
@@ -3097,32 +3105,34 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: "rgba(148,163,184,0.08)",
   },
-  // Mobile-parity sliding pill tab bar
+  // Feed audience segmented control
   pillTabRow: {
     flexDirection: "row",
     marginHorizontal: 0,
-    paddingHorizontal: 0,
-    paddingTop: 0,
-    minHeight: 54,
-    gap: 0,
-    borderWidth: 0,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
+    marginTop: 12,
+    marginBottom: 14,
+    padding: 5,
+    minHeight: 52,
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 18,
   },
   pillTabButton: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 0,
-    borderRadius: 0,
-    borderBottomWidth: 3,
-    borderBottomColor: "transparent",
+    gap: 7,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "transparent",
     shadowColor: "#0F172A",
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 16,
+    shadowOpacity: 0,
   },
-  pillTabText: { fontSize: 16, lineHeight: 22, fontFamily: "Poppins_700Bold" },
+  pillTabText: { fontSize: 14, lineHeight: 20, fontFamily: "Poppins_700Bold" },
   // Create post modal (mobile parity)
   createModalOverlay: {
     flex: 1,
