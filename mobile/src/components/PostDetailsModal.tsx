@@ -115,7 +115,7 @@ type CachedPostDetails = {
 
 const POST_DETAILS_CACHE_TTL_MS = 60_000;
 const postDetailsCache = new Map<string, CachedPostDetails>();
-const ANDROID_KEYBOARD_ANIMATION_MS = 180;
+const ANDROID_KEYBOARD_ANIMATION_MS = 220;
 
 const normalizePostDetailsPayload = (rawPost: any) => {
   const normalizedComments = Array.isArray(rawPost?.comments)
@@ -198,6 +198,11 @@ export default function PostDetailsModal({
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [keyboardAvoidingResetKey, setKeyboardAvoidingResetKey] = useState(0);
+
+  const handleClose = useCallback(() => {
+    Keyboard.dismiss();
+    onClose();
+  }, [onClose]);
 
   const cardBg = isDark ? "#1E293B" : "#FFFFFF";
   const borderCol = isDark ? "#334155" : "#E2E8F0";
@@ -446,7 +451,7 @@ export default function PostDetailsModal({
         emitToast({ type: "info", title: "Deleted", message: "Post deleted." });
         postDetailsCache.delete(post.id);
         onPostDeleted?.(post.id);
-        onClose();
+        handleClose();
       }
     } catch (e: any) {
       setAlert({ type: "error", title: "Delete Failed", message: e?.message || "Please try again." });
@@ -456,7 +461,7 @@ export default function PostDetailsModal({
   const handleEditPost = () => {
     if (!post || !onEditPost) return;
     setPostOptionsVisible(false);
-    onClose();
+    handleClose();
     onEditPost(post);
   };
 
@@ -539,18 +544,18 @@ export default function PostDetailsModal({
       return isKeyboardVisible ? 16 : Math.max(insets.bottom, 8) + 4;
     }
 
-    return isKeyboardVisible ? 0 : 8;
+    return isKeyboardVisible ? 12 : 8;
   })();
   const footerSafeAreaEdges: Edge[] = Platform.OS === "android" && !isKeyboardVisible ? ["bottom"] : [];
 
   return (
     <BottomModal
       visible={visible}
-      onClose={onClose}
+      onClose={handleClose}
       closeOnBackdropPress
       keyboardAvoiding
       keyboardAvoidingResetKey={Platform.OS === "android" ? keyboardAvoidingResetKey : "ios"}
-      keyboardVerticalOffset={Platform.OS === "android" ? -Math.max(insets.bottom, 0) : 0}
+      keyboardVerticalOffset={0}
       overlayLabel="FeedPostDetailsModal"
       contentContainerStyle={[styles.sheet, { backgroundColor: cardBg, maxHeight: modalMaxHeight }]}
     >
@@ -562,7 +567,7 @@ export default function PostDetailsModal({
         </Text>
         <TouchableOpacity
           activeOpacity={0.78}
-          onPress={onClose}
+          onPress={handleClose}
           style={[styles.iconCircle, { backgroundColor: subtleBg }]}
           accessibilityLabel="Close post details"
         >
@@ -581,6 +586,7 @@ export default function PostDetailsModal({
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           >
             <View style={styles.authorRow}>
               <ProfileAvatar

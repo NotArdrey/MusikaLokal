@@ -730,6 +730,60 @@ async function cleanupProfileDeleteBlockers(client: any, userId: string) {
   }
 }
 
+async function deleteReviewedIdentityAccount(client: any, userId: string) {
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId) {
+    throw new Error("Missing userId for account deletion");
+  }
+
+  const { data: existingAuth, error: existingAuthError } = await client.auth.admin.getUserById(normalizedUserId);
+  const { data: existingProfile, error: existingProfileError } = await client
+    .from("profiles")
+    .select("id")
+    .eq("id", normalizedUserId)
+    .maybeSingle();
+
+  if (existingProfileError) throw existingProfileError;
+
+  if ((existingAuthError || !existingAuth?.user) && !existingProfile) {
+    return {
+      deleted: false,
+      auth_deleted: false,
+      profile_deleted: false,
+      already_removed: true,
+    };
+  }
+
+  await deleteIdentityClaimsForRemovedUser(client, normalizedUserId);
+
+  let profileDeleted = false;
+  if (existingProfile) {
+    await cleanupProfileDeleteBlockers(client, normalizedUserId);
+
+    const { error: profileDeleteError } = await client
+      .from("profiles")
+      .delete()
+      .eq("id", normalizedUserId);
+
+    if (profileDeleteError) throw profileDeleteError;
+    profileDeleted = true;
+  }
+
+  let authDeleted = false;
+  if (existingAuth?.user) {
+    const { error: authDeleteError } = await client.auth.admin.deleteUser(normalizedUserId);
+    if (authDeleteError) throw authDeleteError;
+    authDeleted = true;
+  }
+
+  return {
+    deleted: profileDeleted || authDeleted,
+    auth_deleted: authDeleted,
+    profile_deleted: profileDeleted,
+    already_removed: false,
+  };
+}
+
 function maskEmailForLog(email: string) {
   const [name, domain] = String(email || "").split("@");
   if (!name || !domain) return "missing";
@@ -838,7 +892,7 @@ async function sendDecisionEmail(
     ? hasConfirmationStep
       ? "Identity Verified - Confirm Your Email - MusikaLokal"
       : "Identity Verified - MusikaLokal"
-    : "Identity Verification Update - MusikaLokal";
+    : "Identity Verification Declined - MusikaLokal";
 
   const notesHtml = reviewNotes
     ? `<div style="background: #f8fafc; padding: 16px 18px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 20px 0;"><p style="margin: 0; color: #334155;"><strong>Admin notes:</strong> ${escapeHtml(reviewNotes)}</p></div>`
@@ -853,12 +907,12 @@ async function sendDecisionEmail(
     : "";
 
   const html = buildMusikaLokalEmail({
-    title: decision === "APPROVED" ? "Identity Verification Approved!" : "Identity Verification Updated",
+    title: decision === "APPROVED" ? "Identity Verification Approved!" : "Identity Verification Declined",
     subtitle: decision === "APPROVED"
       ? hasConfirmationStep
         ? "Your account is now ready for the final email confirmation step"
         : "Your account is ready to use"
-      : "You can submit a new valid government ID to retry verification",
+      : "This unverified account will be removed so you can start fresh",
     bodyHtml: decision === "APPROVED"
       ? `
   <p style="margin: 0 0 12px;">Good news: your manual identity review has been <strong>${normalizedDecision}</strong>, and your MusikaLokal identity is now verified.</p>
@@ -875,10 +929,11 @@ async function sendDecisionEmail(
   <p style="margin: 16px 0 0;">Thank you,<br>MusikaLokal Team</p>`
       : `
   <p style="margin: 0 0 12px;">We reviewed your manual identity submission, but we could not approve it yet.</p>
+  <p style="margin: 0 0 12px;">Because this account could not pass identity verification, the unverified MusikaLokal account tied to this submission will be removed.</p>
   <ul style="background: #f8fafc; padding: 20px 20px 20px 40px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 24px 0;">
     <li>Use a clear photo of a valid government ID</li>
     <li>Make sure the name and document details are readable</li>
-    <li>Submit a new document from the MusikaLokal app</li>
+    <li>Create a new account only when you are ready to submit valid verification details</li>
   </ul>
   ${notesHtml}
   <p style="margin: 16px 0 0;">Thank you,<br>MusikaLokal Team</p>`,
@@ -2421,6 +2476,15 @@ serve(async (req: Request) => {
       const targetEmail = String(authUserData.user.email || fallbackEmail).trim().toLowerCase();
       let confirmationLinkResult = { link: null as string | null, error: null as string | null };
       let decisionEmail;
+      const declinedAccountDeletion: Record<string, any> = {
+        attempted: false,
+        deleted: false,
+        auth_deleted: false,
+        profile_deleted: false,
+        already_removed: false,
+        skipped_reason: null,
+        error: null,
+      };
 
       if (decision === "APPROVED") {
         if (!emailAlreadyConfirmed) {
@@ -2464,6 +2528,54 @@ serve(async (req: Request) => {
           .eq("id", reviewId);
       }
 
+      if (decision === "DECLINED") {
+        const emailWasHandled = Boolean(decisionEmail.sent || decisionEmail.queued);
+
+        if (!emailWasHandled) {
+          declinedAccountDeletion.skipped_reason = "Decision email was not sent or queued.";
+          console.error("manual_identity_review_declined_account_delete_skipped", {
+            reviewId,
+            userId: review.user_id,
+            reason: declinedAccountDeletion.skipped_reason,
+            emailError: decisionEmail.error || null,
+          });
+        } else if (String(review.user_id) === actorId) {
+          declinedAccountDeletion.skipped_reason = "Refused to delete the signed-in admin account.";
+          console.error("manual_identity_review_declined_account_delete_skipped", {
+            reviewId,
+            userId: review.user_id,
+            reason: declinedAccountDeletion.skipped_reason,
+          });
+        } else {
+          declinedAccountDeletion.attempted = true;
+
+          try {
+            const deleteResult = await deleteReviewedIdentityAccount(client, String(review.user_id));
+            declinedAccountDeletion.deleted = Boolean(deleteResult.deleted || deleteResult.already_removed);
+            declinedAccountDeletion.auth_deleted = Boolean(deleteResult.auth_deleted);
+            declinedAccountDeletion.profile_deleted = Boolean(deleteResult.profile_deleted);
+            declinedAccountDeletion.already_removed = Boolean(deleteResult.already_removed);
+
+            console.log("manual_identity_review_declined_account_deleted", {
+              reviewId,
+              userId: review.user_id,
+              authDeleted: declinedAccountDeletion.auth_deleted,
+              profileDeleted: declinedAccountDeletion.profile_deleted,
+              alreadyRemoved: declinedAccountDeletion.already_removed,
+              emailSent: decisionEmail.sent,
+              emailQueued: decisionEmail.queued,
+            });
+          } catch (deleteError: any) {
+            declinedAccountDeletion.error = deleteError?.message || "Unable to delete declined account.";
+            console.error("manual_identity_review_declined_account_delete_failed", {
+              reviewId,
+              userId: review.user_id,
+              message: declinedAccountDeletion.error,
+            });
+          }
+        }
+      }
+
       return jsonResponse({
         item: {
           ...(updatedReview || review),
@@ -2471,6 +2583,13 @@ serve(async (req: Request) => {
           decision_email_queued: decisionEmail.queued,
           decision_email_provider: decisionEmail.provider,
           decision_email_error: decisionEmail.error || null,
+          declined_account_delete_attempted: declinedAccountDeletion.attempted,
+          declined_account_deleted: declinedAccountDeletion.deleted,
+          declined_account_auth_deleted: declinedAccountDeletion.auth_deleted,
+          declined_account_profile_deleted: declinedAccountDeletion.profile_deleted,
+          declined_account_already_removed: declinedAccountDeletion.already_removed,
+          declined_account_delete_skipped_reason: declinedAccountDeletion.skipped_reason,
+          declined_account_delete_error: declinedAccountDeletion.error,
           didit_status_sync: diditStatusSync,
         },
       });

@@ -1093,6 +1093,10 @@ export default function AdminIdentityReviewsPage() {
       const emailSent = Boolean(reviewedItem.decision_email_sent);
       const emailQueued = Boolean(reviewedItem.decision_email_queued);
       const emailError = String(reviewedItem.decision_email_error || '').trim();
+      const declinedAccountDeleted = Boolean(reviewedItem.declined_account_deleted);
+      const declinedAccountDeleteAttempted = Boolean(reviewedItem.declined_account_delete_attempted);
+      const declinedAccountDeleteError = String(reviewedItem.declined_account_delete_error || '').trim();
+      const declinedAccountDeleteSkippedReason = String(reviewedItem.declined_account_delete_skipped_reason || '').trim();
       const diditSync = reviewedItem.didit_status_sync as { synced?: boolean; status?: string | null } | null | undefined;
       console.log('manual identity review email result', {
         reviewId: manualReviewTarget.id,
@@ -1101,20 +1105,33 @@ export default function AdminIdentityReviewsPage() {
         queued: emailQueued,
         provider: reviewedItem.decision_email_provider || null,
         error: emailError || null,
+        declinedAccountDeleted,
+        declinedAccountDeleteError: declinedAccountDeleteError || null,
+        declinedAccountDeleteSkippedReason: declinedAccountDeleteSkippedReason || null,
         diditStatus: diditSync?.status || null,
       });
       const cleanEmailError = cleanManualReviewEmailError(emailError);
+      const cleanDeclinedAccountDeleteIssue = cleanManualReviewEmailError(
+        declinedAccountDeleteError || declinedAccountDeleteSkippedReason,
+      );
       const diditMessage = diditSync?.synced
         ? ` Didit was updated to ${formatDiditStatusLabel(diditSync.status)}.`
         : '';
+      const declinedAccountDeletionMessage = manualReviewDecision !== 'DECLINED'
+        ? ''
+        : declinedAccountDeleted
+          ? ' The declined account was deleted.'
+          : declinedAccountDeleteAttempted && cleanDeclinedAccountDeleteIssue
+            ? ` The email was handled, but account deletion failed: ${cleanDeclinedAccountDeleteIssue}`
+            : ` The account was not deleted.${cleanDeclinedAccountDeleteIssue ? ` ${cleanDeclinedAccountDeleteIssue}` : ''}`;
       const emailMessage = emailSent
-        ? `The decision was saved and the email notification was sent automatically.${diditMessage}`
+        ? `The decision was saved and the email notification was sent automatically.${diditMessage}${declinedAccountDeletionMessage}`
         : emailQueued
-          ? `The decision was saved.${diditMessage} The email is queued for later delivery. ${cleanEmailError || 'Check the Gmail sender secrets or account limit.'}`
-          : `The decision was saved.${diditMessage} The email notification was not sent. ${cleanEmailError || 'Check the email provider configuration.'}`;
+          ? `The decision was saved.${diditMessage} The email is queued for later delivery. ${cleanEmailError || 'Check the Gmail sender secrets or account limit.'}${declinedAccountDeletionMessage}`
+          : `The decision was saved.${diditMessage} The email notification was not sent. ${cleanEmailError || 'Check the email provider configuration.'}${declinedAccountDeletionMessage}`;
 
       showAlert(
-        emailSent ? 'success' : 'warning',
+        emailSent && (manualReviewDecision !== 'DECLINED' || declinedAccountDeleted) ? 'success' : 'warning',
         manualReviewDecision === 'APPROVED'
           ? 'Identity approved'
           : isRetryRequest

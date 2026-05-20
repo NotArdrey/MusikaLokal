@@ -215,8 +215,12 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
                     <Text style={[
                         styles.title,
                         { color: transparent ? '#FFFFFF' : colors.text },
-                        !backVisible && styles.mainTitle
-                    ]}>
+                        !backVisible && styles.mainTitle,
+                        overline && styles.wrappingTitle,
+                    ]}
+                        numberOfLines={overline ? undefined : 1}
+                        ellipsizeMode={overline ? undefined : "tail"}
+                    >
                         {title}
                     </Text>
                 </View>
@@ -358,6 +362,7 @@ const styles = StyleSheet.create({
     },
     titleContainer: {
         flex: 1,
+        minWidth: 0,
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -368,6 +373,11 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
         fontFamily: 'Poppins_600SemiBold',
+        textAlign: 'center',
+    },
+    wrappingTitle: {
+        flexShrink: 1,
+        lineHeight: 24,
     },
     overlineText: {
         fontSize: 11,

@@ -31,7 +31,7 @@ import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { useRadioPlayer } from "../src/context/RadioPlayerContext";
 
-type FeedTab = "for_you" | "following";
+type FeedTab = "for_you" | "talent" | "following";
 
 type LiveRadioCardProps = {
   borderColor: string;
@@ -410,8 +410,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
 });
 
 const FEED_PAGE_SIZE = 20;
-const AI_CARD_LIMIT = 8;
-const AI_RECOMMENDATION_TIMEOUT_MS = 2500;
+const TALENT_CARD_LIMIT = 80;
 const PENDING_REOPEN_LISTING_STORAGE_KEY = "pending_reopen_listing_id";
 const PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY = "pending_reopen_listing_type";
 const SOCIAL_MEDIA_ASPECT_RATIO = 1.45;
@@ -424,13 +423,10 @@ const normalizeListingTypeParam = (value?: string | null) =>
 const isProductionTeamListingType = (listingType: string) =>
   listingType === "production_team" || listingType === "production";
 
-const withAiRecommendationTimeout = async <T,>(promise: Promise<T>): Promise<T | null> =>
-  Promise.race([
-    promise,
-    new Promise<null>((resolve) => {
-      setTimeout(() => resolve(null), AI_RECOMMENDATION_TIMEOUT_MS);
-    }),
-  ]);
+const formatFeedHeaderName = (value: string) => {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized || "there";
+};
 
 const normalizeRelativeSupabaseStorageUrl = (value: string) => {
   const trimmed = value.trim();
@@ -510,11 +506,13 @@ const normalizeFeedPost = (post: any) => {
 
 const normalizeAiRecommendationCard = (item: any) => {
   const type = typeof item?.type === "string" && item.type.trim().length > 0 ? item.type.trim() : "Group";
-  const isGroup = type.toLowerCase() === "group";
-  const isGig = type.toLowerCase() === "gig";
+  const normalizedType = type.toLowerCase();
+  const isGroup = normalizedType === "group" || normalizedType === "duo";
+  const isGig = normalizedType === "gig";
+  const isProfile = normalizedType === "artist" || normalizedType === "profile" || normalizedType === "musician";
   const ownerId = typeof item?.owner_id === "string" ? item.owner_id : null;
   const organizerId = typeof item?.organizer_id === "string" ? item.organizer_id : null;
-  const targetId = isGroup ? item?.id : isGig ? organizerId : ownerId;
+  const targetId = isGroup ? item?.id : isGig ? organizerId : isProfile ? item?.id : ownerId;
 
   return {
     ...item,
@@ -562,16 +560,32 @@ const normalizeRecentStudioCard = (item: any) =>
     studio_type: item?.type || null,
   });
 
-const normalizeRecentGigCard = (item: any) =>
-  normalizeAiRecommendationCard({
+const normalizeRecentGroupCard = (item: any) => {
+  const groupType = String(item?.group_type || "").toLowerCase();
+  const type = groupType.includes("duo") ? "Duo" : "Group";
+  return normalizeAiRecommendationCard({
     ...item,
-    type: "Gig",
+    type,
     image: Array.isArray(item?.images) ? item.images[0] || null : null,
     images: Array.isArray(item?.images) ? item.images : [],
-    genre: Array.isArray(item?.requirements?.genres)
-      ? item.requirements.genres.join(", ")
-      : item?.requirements?.genre || "",
-    organizer_id: item?.organizer_id || null,
+    location: item?.location || "",
+    genre: item?.genre || "",
+    owner_id: item?.owner_id || null,
+  });
+};
+
+const normalizeRecentProfileCard = (item: any) =>
+  normalizeAiRecommendationCard({
+    ...item,
+    id: item?.id,
+    type: "Artist",
+    name: item?.full_name || "Solo Artist",
+    image: item?.avatar_url || null,
+    images: item?.avatar_url ? [item.avatar_url] : [],
+    body: item?.bio || "Solo artist on MusikaLokal.",
+    location: item?.address || item?.location || "",
+    genre: "Solo Artist",
+    owner_id: item?.id || null,
   });
 
 const normalizeRecentProductionCard = (item: any) =>
@@ -623,89 +637,6 @@ const getFeedItemCreatedTime = (item: any) => {
 
 const sortFeedItemsNewestFirst = (items: any[]) =>
   [...items].sort((a, b) => getFeedItemCreatedTime(b) - getFeedItemCreatedTime(a));
-
-const clampFeedScore = (value: number, min = 0, max = 100) => Math.max(min, Math.min(max, value));
-
-const normalizeRecommendationScore = (value: unknown) => {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return 0;
-  return clampFeedScore(numeric <= 1 ? numeric * 100 : numeric);
-};
-
-const getExplicitRecommendationScore = (item: any) => {
-  const score = normalizeRecommendationScore(item?.aiScore ?? item?.ai_score);
-  if (score > 0) return score;
-  return normalizeRecommendationScore(item?.similarity);
-};
-
-const getForYouRecencyScore = (item: any) => {
-  const createdTime = getFeedItemCreatedTime(item);
-  if (!createdTime) return 20;
-  const ageDays = Math.max(0, (Date.now() - createdTime) / (1000 * 60 * 60 * 24));
-  if (ageDays <= 1) return 100;
-  if (ageDays <= 7) return 82;
-  if (ageDays <= 30) return 58;
-  if (ageDays <= 90) return 34;
-  return 18;
-};
-
-const getForYouEngagementScore = (item: any) => {
-  const reactions = Number(item?.reaction_count || 0);
-  const comments = Number(item?.comment_count || 0);
-  const shares = Number(item?.share_count || 0);
-  return clampFeedScore(Math.log1p(Math.max(0, reactions) + Math.max(0, comments) * 2 + Math.max(0, shares) * 3) * 22);
-};
-
-const getRecommendationProfileTargetId = (item: any) => {
-  if (item?.social_follow_target_type === "profile" && typeof item?.social_follow_target_id === "string") {
-    return item.social_follow_target_id;
-  }
-
-  return [item?.owner_id, item?.organizer_id, item?.author_id].find(
-    (value) => typeof value === "string" && value.length > 0,
-  ) || "";
-};
-
-const buildForYouRecommendationSignals = (items: any[]) => {
-  const signals = new Map<string, number>();
-
-  for (const item of items) {
-    if (item?.__feedKind !== "ai_card") continue;
-    const targetId = getRecommendationProfileTargetId(item);
-    if (!targetId) continue;
-    const score = getExplicitRecommendationScore(item) || 62;
-    signals.set(targetId, Math.max(signals.get(targetId) || 0, score));
-  }
-
-  return signals;
-};
-
-const sortForYouFeedItems = (items: any[]) => {
-  const recommendationSignals = buildForYouRecommendationSignals(items);
-
-  return [...items].sort((a, b) => {
-    const scoreItem = (item: any) => {
-      const explicitScore = getExplicitRecommendationScore(item);
-      const recencyScore = getForYouRecencyScore(item);
-      const engagementScore = getForYouEngagementScore(item);
-
-      if (item?.__feedKind === "ai_card") {
-        return (explicitScore || 62) * 0.7 + recencyScore * 0.2 + engagementScore * 0.1;
-      }
-
-      const authorSignal = typeof item?.author_id === "string"
-        ? recommendationSignals.get(item.author_id) || 0
-        : 0;
-      const followSignal = item?.is_following === true ? 52 : 0;
-
-      return Math.max(authorSignal, followSignal) * 0.55 + recencyScore * 0.3 + engagementScore * 0.15;
-    };
-
-    const scoreDelta = scoreItem(b) - scoreItem(a);
-    if (Math.abs(scoreDelta) > 0.001) return scoreDelta;
-    return getFeedItemCreatedTime(b) - getFeedItemCreatedTime(a);
-  });
-};
 
 const getPositiveInteger = (value: unknown) => {
   if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, Math.round(value));
@@ -930,7 +861,7 @@ const getTimestampLabel = (value: unknown) => {
 const getSocialServiceBadges = (item: any) => {
   if (item?.__feedKind === "ai_card") {
     const type = typeof item?.type === "string" ? item.type : "Recommended";
-    const badges = [type === "Gig" ? "Live Gig" : type];
+    const badges = [type === "Gig" ? "Live Gig" : type === "Artist" ? "Solo Artist" : type];
     const score = Number(item?.similarity || 0);
     if (score > 0) badges.push(`${Math.round(score * 100)}% match`);
     return Array.from(new Set(badges.filter(Boolean))).slice(0, 3);
@@ -973,6 +904,8 @@ const getLinkedStudioId = (item: any) =>
 const getSocialPrimaryCtaLabel = (item: any, listingId: string) => {
   if (item?.__feedKind === "ai_card") {
     const type = String(item?.type || "").toLowerCase();
+    if (type === "artist" || type === "profile" || type === "musician") return "View Profile";
+    if (type === "duo") return "View Duo";
     if (type === "group") return "View Group";
     if (type === "gig") return "View Gig";
     if (type === "production") return "View Team";
@@ -982,6 +915,18 @@ const getSocialPrimaryCtaLabel = (item: any, listingId: string) => {
   }
 
   return listingId ? "View Studio" : "View Post";
+};
+
+const getFeedFavoriteTargetType = (item: any): "group" | "studio" | "gig" | "profile" | "production_team" | "" => {
+  if (!item?.id || item?.__feedKind !== "ai_card") return "";
+
+  const type = String(item?.type || "").trim().toLowerCase();
+  if (type === "artist" || type === "musician" || type === "profile") return "profile";
+  if (type === "group" || type === "duo") return "group";
+  if (type === "studio" || type === "venue") return "studio";
+  if (type === "gig") return "gig";
+  if (type === "production" || type === "production_team") return "production_team";
+  return "";
 };
 
 const getSocialHeaderBadge = (item: any) => {
@@ -1040,9 +985,12 @@ type SocialPostCardProps = {
   width: number;
   currentUserId: string | null;
   onOpenPost: (postId: string) => void;
+  onOpenProfile: (profileId: string) => void;
   onOpenProductionTeam: (teamId: string) => void;
   onOpenStudio: (studioId: string) => void;
+  onToggleCardFavorite: (card: any) => void;
   onToggleReaction: (post: any) => void;
+  onShareCard: (card: any) => void;
   onSharePost: (post: any) => void;
   onRequestDelete: (postId: string) => void;
 };
@@ -1057,14 +1005,20 @@ const SocialPostCard = React.memo(function SocialPostCard({
   width,
   currentUserId,
   onOpenPost,
+  onOpenProfile,
   onOpenProductionTeam,
   onOpenStudio,
+  onToggleCardFavorite,
   onToggleReaction,
+  onShareCard,
   onSharePost,
   onRequestDelete,
 }: SocialPostCardProps) {
   const isSuggestion = item?.__feedKind === "ai_card";
-  const isProductionSuggestion = isSuggestion && String(item?.type || "").toLowerCase() === "production";
+  const suggestionType = String(item?.type || "").toLowerCase();
+  const isProductionSuggestion = isSuggestion && suggestionType === "production";
+  const isProfileSuggestion =
+    isSuggestion && (suggestionType === "artist" || suggestionType === "profile" || suggestionType === "musician");
   const mediaUrls = useMemo(() => getWebFeedMediaUrls(item), [item]);
   const serviceBadges = useMemo(() => getSocialServiceBadges(item), [item]);
   const priceChips = useMemo(() => getSocialPriceChips(item), [item]);
@@ -1073,12 +1027,24 @@ const SocialPostCard = React.memo(function SocialPostCard({
   const primaryCtaLabel = getSocialPrimaryCtaLabel(item, listingId);
   const headerBadge = getSocialHeaderBadge(item);
   const suggestionQuickInfo = useMemo(() => getSocialSuggestionQuickInfo(item), [item]);
-  const reactionCount = getPositiveInteger(item?.reaction_count || item?.like_count || item?.likes);
+  const reactionCount = getPositiveInteger(
+    isSuggestion
+      ? item?.favorites_count ?? item?.favorite_count ?? item?.reaction_count ?? 0
+      : item?.reaction_count || item?.like_count || item?.likes,
+  );
   const commentCount = getPositiveInteger(item?.comment_count || item?.comments);
   const shareCount = getPositiveInteger(item?.share_count || item?.shares);
-  const hasReaction = Boolean(item?.my_reaction || item?.user_reaction);
+  const hasReaction = isSuggestion
+    ? Boolean(item?.is_favorited || item?.my_reaction || item?.user_reaction)
+    : Boolean(item?.my_reaction || item?.user_reaction);
+  const actionTargetLabel = isSuggestion ? String(item?.type || "card").toLowerCase() : "post";
 
   const handleOpenPost = useCallback(() => {
+    if (isProfileSuggestion && item?.id) {
+      onOpenProfile(item.id);
+      return;
+    }
+
     if (isProductionSuggestion && item?.id) {
       onOpenProductionTeam(item.id);
       return;
@@ -1089,11 +1055,15 @@ const SocialPostCard = React.memo(function SocialPostCard({
       return;
     }
     onOpenPost(item.id);
-  }, [isProductionSuggestion, isSuggestion, item?.id, listingId, onOpenPost, onOpenProductionTeam, onOpenStudio]);
+  }, [isProductionSuggestion, isProfileSuggestion, isSuggestion, item?.id, listingId, onOpenPost, onOpenProductionTeam, onOpenProfile, onOpenStudio]);
 
   const handleOpenCta = useCallback(
     (event?: any) => {
       event?.stopPropagation?.();
+      if (isProfileSuggestion && item?.id) {
+        onOpenProfile(item.id);
+        return;
+      }
       if (isProductionSuggestion && item?.id) {
         onOpenProductionTeam(item.id);
         return;
@@ -1104,31 +1074,43 @@ const SocialPostCard = React.memo(function SocialPostCard({
       }
       onOpenPost(item.id);
     },
-    [isProductionSuggestion, item?.id, listingId, onOpenPost, onOpenProductionTeam, onOpenStudio],
+    [isProductionSuggestion, isProfileSuggestion, item?.id, listingId, onOpenPost, onOpenProductionTeam, onOpenProfile, onOpenStudio],
   );
 
   const handleToggleReaction = useCallback(
     (event?: any) => {
       event?.stopPropagation?.();
+      if (isSuggestion) {
+        onToggleCardFavorite(item);
+        return;
+      }
       onToggleReaction(item);
     },
-    [item, onToggleReaction],
+    [isSuggestion, item, onToggleCardFavorite, onToggleReaction],
   );
 
   const handleOpenComments = useCallback(
     (event?: any) => {
       event?.stopPropagation?.();
+      if (isSuggestion) {
+        handleOpenPost();
+        return;
+      }
       onOpenPost(item.id);
     },
-    [item?.id, onOpenPost],
+    [handleOpenPost, isSuggestion, item?.id, onOpenPost],
   );
 
   const handleShare = useCallback(
     (event?: any) => {
       event?.stopPropagation?.();
+      if (isSuggestion) {
+        onShareCard(item);
+        return;
+      }
       onSharePost(item);
     },
-    [item, onSharePost],
+    [isSuggestion, item, onShareCard, onSharePost],
   );
 
   const isOwner = !isSuggestion && !!currentUserId && item?.author_id === currentUserId;
@@ -1302,60 +1284,56 @@ const SocialPostCard = React.memo(function SocialPostCard({
         </View>
       ) : null}
 
-      {!isSuggestion ? (
-        <View style={[styles.socialStatsRow, { borderTopColor: borderColor }]}>
-          <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
-            {formatFeedCountLabel(reactionCount, "like")}
-          </Text>
-          <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
-            {formatFeedCountLabel(commentCount, "comment")}
-          </Text>
-          <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
-            {formatFeedCountLabel(shareCount, "share")}
-          </Text>
-        </View>
-      ) : null}
+      <View style={[styles.socialStatsRow, { borderTopColor: borderColor }]}>
+        <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
+          {formatFeedCountLabel(reactionCount, "like")}
+        </Text>
+        <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
+          {formatFeedCountLabel(commentCount, "comment")}
+        </Text>
+        <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
+          {formatFeedCountLabel(shareCount, "share")}
+        </Text>
+      </View>
 
-      {!isSuggestion ? (
-        <View style={[styles.socialActionRow, { borderTopColor: borderColor, borderBottomColor: borderColor }]}>
-          <TouchableOpacity
-            activeOpacity={0.78}
-            accessibilityRole="button"
-            accessibilityLabel={hasReaction ? "Unlike post" : "Like post"}
-            onPress={handleToggleReaction}
-            style={styles.socialActionButton}
-          >
-            <Ionicons
-              name={hasReaction ? "heart" : "heart-outline"}
-              size={19}
-              color={hasReaction ? "#EF4444" : colors.textSecondary}
-            />
-            <Text style={[styles.socialActionText, { color: hasReaction ? "#EF4444" : colors.textSecondary }]}>
-              Like
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={0.78}
-            accessibilityRole="button"
-            accessibilityLabel="Comment on post"
-            onPress={handleOpenComments}
-            style={styles.socialActionButton}
-          >
-            <Ionicons name="chatbubble-outline" size={18} color={colors.textSecondary} />
-            <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Comment</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={0.78}
-            accessibilityRole="button"
-            accessibilityLabel="Share post"
-            onPress={handleShare}
-            style={styles.socialActionButton}
-          >
-            <Ionicons name="share-social-outline" size={18} color={colors.textSecondary} />
-            <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Share</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
+      <View style={[styles.socialActionRow, { borderTopColor: borderColor, borderBottomColor: borderColor }]}>
+        <TouchableOpacity
+          activeOpacity={0.78}
+          accessibilityRole="button"
+          accessibilityLabel={hasReaction ? `Unlike ${actionTargetLabel}` : `Like ${actionTargetLabel}`}
+          onPress={handleToggleReaction}
+          style={styles.socialActionButton}
+        >
+          <Ionicons
+            name={hasReaction ? "heart" : "heart-outline"}
+            size={19}
+            color={hasReaction ? "#EF4444" : colors.textSecondary}
+          />
+          <Text style={[styles.socialActionText, { color: hasReaction ? "#EF4444" : colors.textSecondary }]}>
+            Like
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={0.78}
+          accessibilityRole="button"
+          accessibilityLabel={`Comment on ${actionTargetLabel}`}
+          onPress={handleOpenComments}
+          style={styles.socialActionButton}
+        >
+          <Ionicons name="chatbubble-outline" size={18} color={colors.textSecondary} />
+          <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Comment</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={0.78}
+          accessibilityRole="button"
+          accessibilityLabel={`Share ${actionTargetLabel}`}
+          onPress={handleShare}
+          style={styles.socialActionButton}
+        >
+          <Ionicons name="share-social-outline" size={18} color={colors.textSecondary} />
+          <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Share</Text>
+        </TouchableOpacity>
+      </View>
 
       {isSuggestion ? (
       <View style={styles.socialCtaRow}>
@@ -1378,22 +1356,6 @@ const SocialPostCard = React.memo(function SocialPostCard({
           </Text>
           <Ionicons name="chevron-forward" size={15} color={isSuggestion ? "#FFFFFF" : colors.primary} />
         </TouchableOpacity>
-        {isSuggestion ? (
-          <TouchableOpacity
-            activeOpacity={1}
-            style={[
-              styles.socialSecondaryCta,
-              {
-                borderColor,
-                backgroundColor: isDark ? "#1E293B" : "#F8FAFC",
-              },
-            ]}
-          >
-            <Text style={[styles.socialSecondaryCtaText, { color: colors.textSecondary }]}>
-              Following
-            </Text>
-          </TouchableOpacity>
-        ) : null}
       </View>
       ) : null}
     </TouchableOpacity>
@@ -1463,7 +1425,6 @@ export default function FeedScreen() {
 
   const [tab, setTab] = useState<FeedTab>("for_you");
   const [posts, setPosts] = useState<any[]>([]);
-  const [aiCards, setAiCards] = useState<any[]>([]);
   const [listingCards, setListingCards] = useState<any[]>([]);
   const [postBody, setPostBody] = useState("");
   const [postVisibility, setPostVisibility] = useState<"public" | "followers">("public");
@@ -1486,98 +1447,101 @@ export default function FeedScreen() {
 
   const canCreatePost = !!session && !isGuest && (normalizeVisibleInput(postBody).length > 0 || selectedMedia.length > 0);
 
-  const fetchAiCardsForYou = useCallback(async (): Promise<any[]> => {
+  const fetchTalentCards = useCallback(async (): Promise<any[]> => {
     if (!session?.user?.id || isGuest) {
-      setAiCards([]);
       return [];
     }
 
-    try {
-      const aiInvokeResult = await withAiRecommendationTimeout(
-        supabase.functions.invoke("home-feed", {
-          body: {
-            action: "for-you",
-            limit: AI_CARD_LIMIT,
-            userId: session.user.id,
-          },
-        }),
-      );
-
-      if (!aiInvokeResult) {
-        setAiCards([]);
-        return [];
-      }
-
-      if (aiInvokeResult.error) {
-        logFeedInvokeError("home-feed:for-you", aiInvokeResult.error, {
-          action: "for-you",
-          timeoutMs: AI_RECOMMENDATION_TIMEOUT_MS,
-        });
-        setAiCards([]);
-        return [];
-      }
-
-      const recommendations = Array.isArray(aiInvokeResult.data?.recommendations)
-        ? aiInvokeResult.data.recommendations
-        : Array.isArray(aiInvokeResult.data?.aiRecommendations)
-          ? aiInvokeResult.data.aiRecommendations
-          : [];
-
-      const cards = recommendations
-        .map(normalizeAiRecommendationCard)
-        .filter((card: any) => typeof card?.id === "string" && card.id.length > 0)
-        .slice(0, AI_CARD_LIMIT);
-
-      setAiCards(cards);
-      return cards;
-    } catch (aiError: any) {
-      logFeedInvokeError("home-feed:for-you", aiError, {
-        action: "for-you",
-      });
-      setAiCards([]);
-      return [];
-    }
-  }, [isGuest, session?.user?.id]);
-
-  const fetchRecentListingCards = useCallback(async (): Promise<any[]> => {
-    const [studiosResult, gigsResult, productionTeamsResult] = await Promise.all([
+    const userId = session.user.id;
+    const [groupsResult, studiosResult, profilesResult, productionTeamsResult, favoritesResult] = await Promise.all([
+      supabase
+        .from("groups_with_stats")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(TALENT_CARD_LIMIT),
       supabase
         .from("studios_with_stats")
         .select("*")
         .eq("permit_status", "approved")
         .order("created_at", { ascending: false })
-        .limit(FEED_PAGE_SIZE),
+        .limit(TALENT_CARD_LIMIT),
       supabase
-        .from("gigs_with_stats")
-        .select("*")
-        .neq("status", "cancelled")
-        .eq("permit_status", "approved")
+        .from("profiles")
+        .select("id, full_name, avatar_url, address, location, role, bio, created_at")
+        .eq("role", "musician")
+        .eq("is_verified", true)
+        .eq("verification_status", "APPROVED")
+        .neq("id", userId)
         .order("created_at", { ascending: false })
-        .limit(FEED_PAGE_SIZE),
+        .limit(TALENT_CARD_LIMIT),
       supabase
         .from("production_teams")
         .select("*")
         .order("created_at", { ascending: false })
-        .limit(FEED_PAGE_SIZE),
+        .limit(TALENT_CARD_LIMIT),
+      supabase
+        .from("favorites")
+        .select("profile_id, group_id, studio_id, production_team_id")
+        .eq("user_id", userId)
+        .limit(1000),
     ]);
 
-    const sourceError = [studiosResult, gigsResult, productionTeamsResult].find((result) => result.error)?.error;
+    const sourceError = [groupsResult, studiosResult, profilesResult, productionTeamsResult, favoritesResult].find((result) => result.error)?.error;
     if (sourceError) {
       throw sourceError;
     }
 
+    let studioRows = studiosResult.data || [];
+    if (studioRows.length === 0) {
+      const relaxedStudiosResult = await supabase
+        .from("studios_with_stats")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(TALENT_CARD_LIMIT);
+      if (relaxedStudiosResult.error) throw relaxedStudiosResult.error;
+      studioRows = relaxedStudiosResult.data || [];
+    }
+
+    const favoriteKeys = new Set<string>();
+    for (const row of favoritesResult.data || []) {
+      if (typeof row?.profile_id === "string") favoriteKeys.add(`profile:${row.profile_id}`);
+      if (typeof row?.group_id === "string") favoriteKeys.add(`group:${row.group_id}`);
+      if (typeof row?.studio_id === "string") favoriteKeys.add(`studio:${row.studio_id}`);
+      if (typeof row?.production_team_id === "string") favoriteKeys.add(`production_team:${row.production_team_id}`);
+    }
+
+    const withFavoriteState = (
+      card: any,
+      targetType: "group" | "studio" | "profile" | "production_team",
+      targetId: string,
+    ) => {
+      const isFavorited = favoriteKeys.has(`${targetType}:${targetId}`);
+      const favoriteCount = getPositiveInteger(card?.favorites_count ?? card?.favorite_count ?? card?.reaction_count ?? 0);
+      const visibleFavoriteCount = Math.max(favoriteCount, isFavorited ? 1 : 0);
+      return {
+        ...card,
+        is_favorited: isFavorited,
+        my_reaction: isFavorited ? "like" : null,
+        user_reaction: isFavorited ? "like" : null,
+        favorites_count: visibleFavoriteCount,
+        reaction_count: visibleFavoriteCount,
+        comment_count: getPositiveInteger(card?.comment_count || 0),
+        share_count: getPositiveInteger(card?.share_count || 0),
+      };
+    };
+
     return sortFeedItemsNewestFirst([
-      ...(studiosResult.data || []).map(normalizeRecentStudioCard),
-      ...(gigsResult.data || []).map(normalizeRecentGigCard),
-      ...(productionTeamsResult.data || []).map(normalizeRecentProductionCard),
-    ]);
-  }, []);
+      ...(groupsResult.data || []).map((item: any) => withFavoriteState(normalizeRecentGroupCard(item), "group", item.id)),
+      ...studioRows.map((item: any) => withFavoriteState(normalizeRecentStudioCard(item), "studio", item.id)),
+      ...(profilesResult.data || []).map((item: any) => withFavoriteState(normalizeRecentProfileCard(item), "profile", item.id)),
+      ...(productionTeamsResult.data || []).map((item: any) => withFavoriteState(normalizeRecentProductionCard(item), "production_team", item.id)),
+    ]).slice(0, TALENT_CARD_LIMIT);
+  }, [isGuest, session?.user?.id]);
 
   const fetchFeed = useCallback(
     async (feedTab: FeedTab, append = false) => {
       if (!session || isGuest) {
         setPosts([]);
-        setAiCards([]);
         setListingCards([]);
         setHasMore(false);
         setLoading(false);
@@ -1586,13 +1550,21 @@ export default function FeedScreen() {
       }
 
       if (!append && feedTab !== "for_you") {
-        setAiCards([]);
         setListingCards([]);
       }
 
       if (!append) setLoading(true);
 
       try {
+        if (feedTab === "talent") {
+          if (append) return;
+          const cards = await fetchTalentCards();
+          setPosts([]);
+          setListingCards(cards);
+          setHasMore(false);
+          return;
+        }
+
         if (feedTab === "for_you") {
           if (append) {
             const offset = posts.length;
@@ -1600,6 +1572,7 @@ export default function FeedScreen() {
               body: {
                 action: "get_feed",
                 feed_type: "for_you",
+                include_entities: false,
                 limit: FEED_PAGE_SIZE,
                 offset,
               },
@@ -1621,18 +1594,15 @@ export default function FeedScreen() {
             return;
           }
 
-          const [cards, recentListings, feedResult] = await Promise.all([
-            fetchAiCardsForYou(),
-            fetchRecentListingCards(),
-            supabase.functions.invoke("manage-social-feed", {
-              body: {
-                action: "get_feed",
-                feed_type: "for_you",
-                limit: FEED_PAGE_SIZE,
-                offset: 0,
-              },
-            }),
-          ]);
+          const feedResult = await supabase.functions.invoke("manage-social-feed", {
+            body: {
+              action: "get_feed",
+              feed_type: "for_you",
+              include_entities: false,
+              limit: FEED_PAGE_SIZE,
+              offset: 0,
+            },
+          });
 
           if (feedResult.error) {
             logFeedInvokeError("manage-social-feed:get_feed", feedResult.error, {
@@ -1648,8 +1618,7 @@ export default function FeedScreen() {
             ? feedResult.data.data.map(normalizeFeedPost)
             : [];
           setPosts(page);
-          setAiCards(cards);
-          setListingCards(recentListings);
+          setListingCards([]);
           setHasMore(page.length === FEED_PAGE_SIZE);
           return;
         }
@@ -1659,6 +1628,7 @@ export default function FeedScreen() {
           body: {
             action: "get_feed",
             feed_type: feedTab === "following" ? "following" : "public",
+            include_entities: true,
             limit: FEED_PAGE_SIZE,
             offset,
           },
@@ -1689,7 +1659,7 @@ export default function FeedScreen() {
         setLoadingMore(false);
       }
     },
-    [fetchAiCardsForYou, fetchRecentListingCards, isGuest, posts.length, session],
+    [fetchTalentCards, isGuest, posts.length, session],
   );
 
   const presentListingDetailsWithRetry = useCallback(() => {
@@ -1863,7 +1833,7 @@ export default function FeedScreen() {
   };
 
   const loadMore = () => {
-    if (!hasMore || loadingMore || loading) return;
+    if (tab === "talent" || !hasMore || loadingMore || loading) return;
     setLoadingMore(true);
     fetchFeed(tab, true);
   };
@@ -1989,7 +1959,9 @@ export default function FeedScreen() {
 
   const userMeta = (session?.user?.user_metadata || {}) as { full_name?: string; name?: string; avatar_url?: string };
   const composerName = (userMeta.full_name || userMeta.name || session?.user?.email?.split("@")[0] || "there").split(" ")[0];
-  const feedHeaderName = session && !isGuest ? composerName : "Guest";
+  const feedHeaderName = session && !isGuest
+    ? formatFeedHeaderName(userMeta.full_name || userMeta.name || session.user.email?.split("@")[0] || "there")
+    : "Guest";
   const composerAvatar = userMeta.avatar_url || "";
 
   const [openPostId, setOpenPostId] = useState<string | null>(null);
@@ -2130,6 +2102,111 @@ export default function FeedScreen() {
     [isGuest, session],
   );
 
+  const patchListingCard = useCallback((card: any, updater: (item: any) => any) => {
+    const cardKey = getFeedItemStableKey(card);
+    if (!cardKey) return;
+
+    setListingCards((current) =>
+      current.map((item) => (getFeedItemStableKey(item) === cardKey ? updater(item) : item)),
+    );
+  }, []);
+
+  const handleToggleCardFavorite = useCallback(
+    async (card: any) => {
+      const cardId = typeof card?.id === "string" ? card.id : "";
+      if (!cardId) return;
+      if (!session?.user?.id || isGuest) {
+        emitToast({ type: "info", title: "Sign in required", message: "Log in to like this card." });
+        return;
+      }
+
+      const targetType = getFeedFavoriteTargetType(card);
+      if (!targetType) {
+        emitToast({ type: "info", title: "Like unavailable", message: "This card cannot be liked yet." });
+        return;
+      }
+
+      const wasFavorited = Boolean(card?.is_favorited || card?.my_reaction || card?.user_reaction);
+      const applyFavoriteState = (isFavorited: boolean, explicitCount?: number) => (item: any) => {
+        const currentCount = getPositiveInteger(item?.favorites_count ?? item?.favorite_count ?? item?.reaction_count ?? 0);
+        const nextCount = Number.isFinite(explicitCount)
+          ? Math.max(0, Number(explicitCount))
+          : Math.max(0, currentCount + (isFavorited ? 1 : -1));
+
+        return {
+          ...item,
+          is_favorited: isFavorited,
+          my_reaction: isFavorited ? "like" : null,
+          user_reaction: isFavorited ? "like" : null,
+          favorites_count: nextCount,
+          reaction_count: nextCount,
+        };
+      };
+
+      patchListingCard(card, applyFavoriteState(!wasFavorited));
+
+      try {
+        const { data, error } = await supabase.functions.invoke("manage-details", {
+          body: {
+            action: "toggle_favorite",
+            type: targetType,
+            id: cardId,
+            userId: session.user.id,
+          },
+        });
+        if (error) throw error;
+        if (data?.error) throw new Error(String(data.error));
+
+        const isFavorited = typeof data?.is_favorited === "boolean" ? data.is_favorited : !wasFavorited;
+        const favoritesCount = Number(data?.favorites_count);
+        patchListingCard(card, applyFavoriteState(isFavorited, favoritesCount));
+      } catch (e: any) {
+        patchListingCard(card, applyFavoriteState(wasFavorited));
+        emitToast({ type: "error", title: "Like failed", message: e?.message || "Could not update this card." });
+      }
+    },
+    [isGuest, patchListingCard, session?.user?.id],
+  );
+
+  const handleShareCard = useCallback(
+    async (card: any) => {
+      const cardId = typeof card?.id === "string" ? card.id : "";
+      if (!cardId) return;
+
+      const targetType = getFeedFavoriteTargetType(card);
+      const shareUrl =
+        Platform.OS === "web" && typeof window !== "undefined"
+          ? targetType === "profile"
+            ? `${window.location.origin}/profile?userId=${encodeURIComponent(cardId)}`
+            : `${window.location.origin}/feed?listingId=${encodeURIComponent(cardId)}&listingType=${encodeURIComponent(targetType || "listing")}`
+          : `https://musikalokal.app/feed?listingId=${encodeURIComponent(cardId)}`;
+      const shareTitle = `${getSocialDisplayName(card)} on MusikaLokal`;
+      const shareText = getSocialCaption(card);
+
+      try {
+        const webNavigator = Platform.OS === "web" && typeof navigator !== "undefined" ? navigator : null;
+        if (webNavigator?.share) {
+          await webNavigator.share({ title: shareTitle, text: shareText, url: shareUrl });
+        } else if (webNavigator?.clipboard?.writeText) {
+          await webNavigator.clipboard.writeText(shareUrl);
+          emitToast({ type: "success", title: "Link copied", message: "Card link copied to clipboard." });
+        } else {
+          emitToast({ type: "info", title: "Share link", message: shareUrl });
+        }
+      } catch (e: any) {
+        if (e?.name === "AbortError") return;
+        emitToast({ type: "error", title: "Share failed", message: e?.message || "Could not share this card." });
+        return;
+      }
+
+      patchListingCard(card, (item) => ({
+        ...item,
+        share_count: getPositiveInteger(item?.share_count || item?.shares) + 1,
+      }));
+    },
+    [patchListingCard],
+  );
+
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -2169,14 +2246,27 @@ export default function FeedScreen() {
     openListingDetails(studioId);
   }, [openListingDetails]);
 
+  const openProfileDetails = useCallback((profileId: string) => {
+    if (!profileId) return;
+    router.push({ pathname: "/profile", params: { userId: profileId } } as any);
+  }, []);
+
   const openProductionTeamDetails = useCallback((teamId: string) => {
     if (!teamId) return;
     router.push({ pathname: "/production_team", params: { teamId } } as any);
   }, []);
 
   const feedItems = useMemo(
-    () => (tab === "for_you" ? sortForYouFeedItems(dedupeFeedItems([...posts, ...aiCards, ...listingCards])) : posts),
-    [aiCards, listingCards, posts, tab],
+    () => {
+      if (tab === "talent") {
+        return sortFeedItemsNewestFirst(dedupeFeedItems(listingCards));
+      }
+      if (tab === "following") {
+        return sortFeedItemsNewestFirst(dedupeFeedItems(posts));
+      }
+      return sortFeedItemsNewestFirst(dedupeFeedItems(posts.filter((item) => item?.__feedKind !== "ai_card")));
+    },
+    [listingCards, posts, tab],
   );
 
   const renderPost = useCallback(
@@ -2190,15 +2280,18 @@ export default function FeedScreen() {
         mediaWidth={mediaWidth}
         currentUserId={session?.user?.id || null}
         onOpenPost={openPostDetails}
+        onOpenProfile={openProfileDetails}
         onOpenProductionTeam={openProductionTeamDetails}
         onOpenStudio={openStudioDetails}
+        onToggleCardFavorite={handleToggleCardFavorite}
         onToggleReaction={handleTogglePostReaction}
+        onShareCard={handleShareCard}
         onSharePost={handleSharePost}
         onRequestDelete={requestDeletePost}
         width={contentWidth}
       />
     ),
-    [borderCol, cardBg, feedColors, contentWidth, handleSharePost, handleTogglePostReaction, isDark, mediaWidth, openPostDetails, openProductionTeamDetails, openStudioDetails, requestDeletePost, session?.user?.id],
+    [borderCol, cardBg, feedColors, contentWidth, handleShareCard, handleSharePost, handleToggleCardFavorite, handleTogglePostReaction, isDark, mediaWidth, openPostDetails, openProductionTeamDetails, openProfileDetails, openStudioDetails, requestDeletePost, session?.user?.id],
   );
 
   return (
@@ -2330,6 +2423,7 @@ export default function FeedScreen() {
                   >
                     {[
                       { key: "for_you", label: "For You", icon: "sparkles-outline" },
+                      { key: "talent", label: "Talent", icon: "musical-notes-outline" },
                       { key: "following", label: "Following", icon: "people-outline" },
                     ].map((item) => {
                       const active = tab === item.key;
@@ -2383,18 +2477,28 @@ export default function FeedScreen() {
                   >
                     <View style={[styles.emptyIconCircle, { backgroundColor: feedColors.primary + "12" }]}>
                       <Ionicons
-                        name={session && !isGuest ? "sparkles-outline" : "lock-closed-outline"}
+                        name={!session || isGuest ? "lock-closed-outline" : tab === "following" ? "people-outline" : tab === "talent" ? "musical-notes-outline" : "chatbubbles-outline"}
                         size={34}
                         color={feedColors.primary}
                       />
                     </View>
                     <Text style={[styles.emptyTitle, { color: feedColors.text }]}>
-                      {session && !isGuest ? "Your feed is warming up" : "Sign in to unlock the feed"}
+                      {!session || isGuest
+                        ? "Sign in to unlock the feed"
+                        : tab === "following"
+                          ? "Your Following Feed is Empty"
+                          : tab === "talent"
+                            ? "No talent cards yet"
+                            : "No posts yet"}
                     </Text>
                     <Text style={[styles.emptySubtitle, { color: feedColors.textSecondary }]}>
-                      {session && !isGuest
-                        ? "Follow local artists, studios, and creators to start shaping a feed that looks more like your music world."
-                        : "Join MusikaLokal to post updates, discover local talent, and build a personalized For You stream."}
+                      {!session || isGuest
+                        ? "Join MusikaLokal to post updates, discover local talent, and build a personalized For You stream."
+                        : tab === "following"
+                          ? "Follow musicians, groups, and creators to see their latest posts and newly created listings here."
+                          : tab === "talent"
+                            ? "Newest musicians, groups, duos, studios, venues, and production teams will appear here."
+                            : "Posts from the community will appear here newest first."}
                     </Text>
                     <TouchableOpacity
                       activeOpacity={0.78}
@@ -2407,7 +2511,7 @@ export default function FeedScreen() {
                         color="#FFFFFF"
                       />
                       <Text style={styles.emptyActionBtnText}>
-                        {session && !isGuest ? "Explore Musicians" : "Sign In"}
+                        {session && !isGuest ? (tab === "talent" ? "Explore Talent" : "Explore Musicians") : "Sign In"}
                       </Text>
                     </TouchableOpacity>
                   </View>

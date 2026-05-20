@@ -4,7 +4,10 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
+  Keyboard,
+  type KeyboardEvent,
   KeyboardAvoidingView,
+  LayoutAnimation,
   Platform,
   ScrollView,
   StyleSheet,
@@ -13,7 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets, type Edge } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
@@ -25,6 +28,8 @@ import { useTheme } from "../src/context/ThemeContext";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const ANDROID_KEYBOARD_ANIMATION_MS = 220;
+
 const moderateScale = (size: number, factor = 0.3) => {
   const scaled = Math.max((SCREEN_WIDTH / 375) * size, size * 0.85);
   return size + (scaled - size) * factor;
@@ -78,6 +83,8 @@ export default function PostDetailsScreen() {
   const [commentText, setCommentText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [keyboardAvoidingResetKey, setKeyboardAvoidingResetKey] = useState(0);
 
   const fetchPost = useCallback(async () => {
     if (!post_id) return;
@@ -126,6 +133,52 @@ export default function PostDetailsScreen() {
   }, [post_id]);
 
   useEffect(() => { fetchPost(); }, [fetchPost]);
+
+  const animateKeyboardLayoutChange = useCallback((event: KeyboardEvent) => {
+    if (Platform.OS === "android") {
+      LayoutAnimation.configureNext({
+        duration: ANDROID_KEYBOARD_ANIMATION_MS,
+        update: {
+          type: LayoutAnimation.Types.easeInEaseOut,
+        },
+      });
+      return;
+    }
+
+    try {
+      Keyboard.scheduleLayoutAnimation(event);
+    } catch {
+      LayoutAnimation.configureNext({
+        duration: event.duration || ANDROID_KEYBOARD_ANIMATION_MS,
+        update: {
+          type: LayoutAnimation.Types.easeInEaseOut,
+        },
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    const keyboardShowEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const keyboardHideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const showSub = Keyboard.addListener(keyboardShowEvent, (event) => {
+      animateKeyboardLayoutChange(event);
+      setIsKeyboardVisible(true);
+    });
+
+    const hideSub = Keyboard.addListener(keyboardHideEvent, (event) => {
+      animateKeyboardLayoutChange(event);
+      setIsKeyboardVisible(false);
+      if (Platform.OS === "android") {
+        setKeyboardAvoidingResetKey((currentKey) => currentKey + 1);
+      }
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [animateKeyboardLayoutChange]);
 
   const handleReaction = async () => {
     if (!post) return;
@@ -259,17 +312,25 @@ export default function PostDetailsScreen() {
   }
 
   const isOwner = post.author_id === userId;
+  const keyboardAvoidingBehavior = Platform.OS === "ios" ? "padding" : "height";
+  const commentInputBottomPadding = Platform.OS === "ios"
+    ? (isKeyboardVisible ? 16 : Math.max(insets.bottom, 8) + 4)
+    : (isKeyboardVisible ? 12 : 8);
+  const commentInputSafeAreaEdges: Edge[] = Platform.OS === "android" && !isKeyboardVisible ? ["bottom"] : [];
 
   return (
     <KeyboardAvoidingView
+      key={Platform.OS === "android" ? keyboardAvoidingResetKey : "ios"}
       style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={keyboardAvoidingBehavior}
     >
       <Header title="Post" onBackPress={() => router.back()} />
 
       <ScrollView
         style={styles.content}
         contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
       >
         {/* Author */}
         <View style={styles.authorRow}>
@@ -359,33 +420,38 @@ export default function PostDetailsScreen() {
       </ScrollView>
 
       {/* Comment input */}
-      <View
-        style={[
-          styles.commentInputRow,
-          {
-            backgroundColor: colors.surface,
-            borderTopColor: colors.border,
-            paddingBottom: Math.max(insets.bottom, 20),
-          },
-        ]}
+      <SafeAreaView
+        edges={commentInputSafeAreaEdges}
+        style={{ backgroundColor: colors.surface }}
       >
-        <TextInput
-          style={[styles.commentInput, { color: colors.text, borderColor: colors.border }]}
-          placeholder="Add a comment..."
-          placeholderTextColor={colors.textSecondary}
-          value={commentText}
-          onChangeText={setCommentText}
-          multiline
-          maxLength={1000}
-        />
-        <TouchableOpacity activeOpacity={submitting || !canSubmitComment ? 1 : 0.78}
-          style={[styles.sendBtn, { backgroundColor: canSubmitComment ? colors.primary : colors.border, opacity: submitting || !canSubmitComment ? 0.6 : 1 }]}
-          onPress={handleAddComment}
-          disabled={submitting || !canSubmitComment}
+        <View
+          style={[
+            styles.commentInputRow,
+            {
+              backgroundColor: colors.surface,
+              borderTopColor: colors.border,
+              paddingBottom: commentInputBottomPadding,
+            },
+          ]}
         >
-          {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send" size={18} color={canSubmitComment ? "#fff" : colors.textSecondary} />}
-        </TouchableOpacity>
-      </View>
+          <TextInput
+            style={[styles.commentInput, { color: colors.text, borderColor: colors.border }]}
+            placeholder="Add a comment..."
+            placeholderTextColor={colors.textSecondary}
+            value={commentText}
+            onChangeText={setCommentText}
+            multiline
+            maxLength={1000}
+          />
+          <TouchableOpacity activeOpacity={submitting || !canSubmitComment ? 1 : 0.78}
+            style={[styles.sendBtn, { backgroundColor: canSubmitComment ? colors.primary : colors.border, opacity: submitting || !canSubmitComment ? 0.6 : 1 }]}
+            onPress={handleAddComment}
+            disabled={submitting || !canSubmitComment}
+          >
+            {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send" size={18} color={canSubmitComment ? "#fff" : colors.textSecondary} />}
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
 
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
     </KeyboardAvoidingView>

@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { cleanupE2ERecords } from '../../helpers/cleanup';
-import { expectDbRecord, expectVisible } from '../../helpers/assertions';
+import { expectDbRecord, expectNoDbRecord, expectVisible } from '../../helpers/assertions';
 import { seedE2EAdmin, seedE2EManualIdentityReview, seedE2EUser } from '../../helpers/seed';
+import { findAuthUserByEmail } from '../../helpers/supabase';
 import { loginAsAdmin } from '../../helpers/web-auth';
 
 test.describe.configure({ mode: 'serial' });
@@ -79,9 +80,14 @@ test.describe('admin identity review moderation', () => {
     await expectVisible(page.getByTestId('admin-identity-review-decision-modal'));
     await page.getByTestId('admin-identity-review-notes-input').fill('E2E decline from admin identity review spec.');
     await page.getByTestId('admin-identity-review-confirm-button').click();
-    await expectDbRecord<any>('manual_identity_reviews', 'id', declineReview.id, (record) => (
-      String(record.status || '').toUpperCase() === 'DECLINED'
-    ));
+    await expectNoDbRecord('manual_identity_reviews', 'id', declineReview.id);
+    await expectNoDbRecord('profiles', 'id', declineUser.id);
+    await expect
+      .poll(async () => {
+        const authUser = await findAuthUserByEmail(declineUser.email);
+        return authUser?.id || null;
+      }, { timeout: 30_000 })
+      .toBeNull();
     await expect(page.getByTestId('admin-identity-review-decision-modal')).toBeHidden({ timeout: 45_000 });
     await dismissCustomAlertIfPresent(page);
   });

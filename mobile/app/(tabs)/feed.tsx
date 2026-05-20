@@ -77,10 +77,11 @@ const moderateScale = (size: number, factor = 0.3) => {
   return size + (scaled - size) * factor;
 };
 
-type FeedTab = "for_you" | "following";
+type FeedTab = "for_you" | "talent" | "following";
 const isForYouFeedTab = (feedTab: FeedTab) => feedTab === "for_you";
 const FEED_TABS = [
   { key: "for_you", label: "For You" },
+  { key: "talent", label: "Talent" },
   { key: "following", label: "Following" },
 ] as const;
 
@@ -110,6 +111,7 @@ const createEmptyFeedCacheEntry = (provider: string): FeedCacheEntry => ({
 
 const createFeedCache = (provider: string): Record<FeedTab, FeedCacheEntry> => ({
   for_you: createEmptyFeedCacheEntry(provider),
+  talent: createEmptyFeedCacheEntry(provider),
   following: createEmptyFeedCacheEntry(provider),
 });
 
@@ -143,8 +145,9 @@ const logFeedInvokeError = (
 
 const FEED_PAGE_SIZE = 12;
 const AI_CARD_LIMIT = 20;
-const AI_RECOMMENDATION_TIMEOUT_MS = 2500;
+const TALENT_CARD_LIMIT = 80;
 const FEED_FOCUS_REFRESH_COOLDOWN_MS = 30000;
+const MAX_FEED_HEADER_NAME_LENGTH = 26;
 const PESO_SIGN = "\u20B1";
 const POST_MEDIA_BUCKET = "post-media";
 const MAX_POST_MEDIA_ITEMS = 10;
@@ -193,13 +196,12 @@ type PostComposerMedia = {
 const feedScreenCache = createFeedCache(getGroqModelInfo().modelLabel);
 let feedScreenCacheIdentity = "guest";
 
-const withAiRecommendationTimeout = async <T,>(promise: Promise<T>): Promise<T | null> =>
-  Promise.race([
-    promise,
-    new Promise<null>((resolve) => {
-      setTimeout(() => resolve(null), AI_RECOMMENDATION_TIMEOUT_MS);
-    }),
-  ]);
+const formatFeedHeaderName = (value: string) => {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized) return "there";
+  if (normalized.length <= MAX_FEED_HEADER_NAME_LENGTH) return normalized;
+  return `${normalized.slice(0, MAX_FEED_HEADER_NAME_LENGTH - 3).trimEnd()}...`;
+};
 
 const FEED_FALLBACK_IMAGES: Record<string, string[]> = {
   Artist: [
@@ -257,43 +259,6 @@ const ensureFeedCardImage = <T extends { id?: string | null; type?: string; imag
   };
 };
 
-const normalizeAiRecommendationCard = (item: any) => {
-  const type = typeof item?.type === "string" && item.type.trim().length > 0
-    ? item.type.trim()
-    : "Group";
-  const isGroup = type.toLowerCase() === "group";
-  const isGig = type.toLowerCase() === "gig";
-  const ownerId = typeof item?.owner_id === "string" ? item.owner_id : null;
-  const organizerId = typeof item?.organizer_id === "string" ? item.organizer_id : null;
-  const targetId = isGroup ? item?.id : isGig ? organizerId : ownerId;
-
-  return ensureFeedCardImage({
-    ...item,
-    __feedKind: "ai_card",
-    id: item?.id,
-    type,
-    name: item?.name || `Recommended ${type}`,
-    image: typeof item?.image === "string" ? item.image : null,
-    images: Array.isArray(item?.images) ? item.images : [],
-    rating: Number(item?.rating || 0),
-    review_count: Number(item?.review_count || 0),
-    location: item?.location || "",
-    genre: item?.genre || "",
-    created_at: item?.created_at || null,
-    updated_at: item?.updated_at || item?.created_at || null,
-    owner_id: ownerId,
-    organizer_id: organizerId,
-    rate: item?.rate?.toString?.() || null,
-    hourly_rate: item?.hourly_rate?.toString?.() || null,
-    budget: item?.budget?.toString?.() || null,
-    similarity: Number(item?.similarity || 0),
-    aiReason: typeof item?.aiReason === "string" ? item.aiReason : "",
-    aiScore: Number(item?.aiScore || 0),
-    social_follow_target_id: typeof targetId === "string" && targetId.length > 0 ? targetId : null,
-    social_follow_target_type: isGroup ? "group" : "profile",
-  });
-};
-
 const getFeedItemCreatedTime = (item: any) => {
   const timestamp = typeof item?.created_at === "string" && item.created_at.length > 0
     ? item.created_at
@@ -307,99 +272,19 @@ const getFeedItemCreatedTime = (item: any) => {
 const sortFeedItemsNewestFirst = (items: any[]) =>
   [...items].sort((a, b) => getFeedItemCreatedTime(b) - getFeedItemCreatedTime(a));
 
-const clampFeedScore = (value: number, min = 0, max = 100) => Math.max(min, Math.min(max, value));
-
-const normalizeRecommendationScore = (value: unknown) => {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return 0;
-  return clampFeedScore(numeric <= 1 ? numeric * 100 : numeric);
-};
-
-const getExplicitRecommendationScore = (item: any) => {
-  const score = normalizeRecommendationScore(item?.aiScore ?? item?.ai_score);
-  if (score > 0) return score;
-  return normalizeRecommendationScore(item?.similarity);
-};
-
-const getForYouRecencyScore = (item: any) => {
-  const createdTime = getFeedItemCreatedTime(item);
-  if (!createdTime) return 20;
-  const ageDays = Math.max(0, (Date.now() - createdTime) / (1000 * 60 * 60 * 24));
-  if (ageDays <= 1) return 100;
-  if (ageDays <= 7) return 82;
-  if (ageDays <= 30) return 58;
-  if (ageDays <= 90) return 34;
-  return 18;
-};
-
-const getForYouEngagementScore = (item: any) => {
-  const reactions = Number(item?.reaction_count || 0);
-  const comments = Number(item?.comment_count || 0);
-  const shares = Number(item?.share_count || 0);
-  return clampFeedScore(Math.log1p(Math.max(0, reactions) + Math.max(0, comments) * 2 + Math.max(0, shares) * 3) * 22);
-};
-
-const getRecommendationProfileTargetId = (item: any) => {
-  if (item?.social_follow_target_type === "profile" && typeof item?.social_follow_target_id === "string") {
-    return item.social_follow_target_id;
-  }
-
-  return [item?.owner_id, item?.organizer_id, item?.author_id].find(
-    (value) => typeof value === "string" && value.length > 0,
-  ) || "";
-};
-
-const buildForYouRecommendationSignals = (items: any[]) => {
-  const signals = new Map<string, number>();
-
-  for (const item of items) {
-    if (item?.__feedKind !== "ai_card") continue;
-    const targetId = getRecommendationProfileTargetId(item);
-    if (!targetId) continue;
-    const score = getExplicitRecommendationScore(item) || 62;
-    signals.set(targetId, Math.max(signals.get(targetId) || 0, score));
-  }
-
-  return signals;
-};
-
-const sortForYouFeedItems = (items: any[]) => {
-  const recommendationSignals = buildForYouRecommendationSignals(items);
-
-  return [...items].sort((a, b) => {
-    const scoreItem = (item: any) => {
-      const explicitScore = getExplicitRecommendationScore(item);
-      const recencyScore = getForYouRecencyScore(item);
-      const engagementScore = getForYouEngagementScore(item);
-
-      if (item?.__feedKind === "ai_card") {
-        return (explicitScore || 62) * 0.7 + recencyScore * 0.2 + engagementScore * 0.1;
-      }
-
-      const authorSignal = typeof item?.author_id === "string"
-        ? recommendationSignals.get(item.author_id) || 0
-        : 0;
-      const followSignal = item?.is_following === true ? 52 : 0;
-
-      return Math.max(authorSignal, followSignal) * 0.55 + recencyScore * 0.3 + engagementScore * 0.15;
-    };
-
-    const scoreDelta = scoreItem(b) - scoreItem(a);
-    if (Math.abs(scoreDelta) > 0.001) return scoreDelta;
-    return getFeedItemCreatedTime(b) - getFeedItemCreatedTime(a);
-  });
-};
-
 const feedLastFetchAt: Record<FeedTab, number> = {
   for_you: 0,
+  talent: 0,
   following: 0,
 };
 
 const resetFeedScreenCacheForIdentity = (provider: string, identity: string) => {
   const nextCache = createFeedCache(provider);
   feedScreenCache.for_you = nextCache.for_you;
+  feedScreenCache.talent = nextCache.talent;
   feedScreenCache.following = nextCache.following;
   feedLastFetchAt.for_you = 0;
+  feedLastFetchAt.talent = 0;
   feedLastFetchAt.following = 0;
   feedScreenCacheIdentity = identity;
   return feedScreenCache;
@@ -1093,10 +978,10 @@ const getFeedServiceBadges = (item: any) => {
     if (item?.open_production_applications === true) {
       badges.push("Open Applications");
     }
-  } else if (type === "Group") {
+  } else if (type === "Group" || type === "Duo") {
     badges.push(formatGroupTypeLabel(item?.group_type));
   } else if (type === "Artist") {
-    badges.push("Artist");
+    badges.push("Solo Artist");
   }
 
   if (item?.linked_playlist) badges.push("Playlist");
@@ -1233,11 +1118,23 @@ const getFeedReportTargetType = (item: any) => {
 
   const type = String(item?.type || "").trim().toLowerCase();
   if (type === "artist" || type === "musician" || type === "profile") return "profile";
-  if (type === "group") return "group";
+  if (type === "group" || type === "duo") return "group";
   if (type === "studio" || type === "venue") return "studio";
   if (type === "gig") return "gig";
   if (type === "product") return "product";
   if (type === "playlist" || type === "music") return "playlist";
+  return "";
+};
+
+const getFeedFavoriteTargetType = (item: any): "group" | "studio" | "gig" | "profile" | "production_team" | "" => {
+  if (!item?.id || item?.__feedKind !== "ai_card") return "";
+
+  const type = String(item?.type || "").trim().toLowerCase();
+  if (type === "artist" || type === "musician" || type === "profile") return "profile";
+  if (type === "group" || type === "duo") return "group";
+  if (type === "studio" || type === "venue") return "studio";
+  if (type === "gig") return "gig";
+  if (type === "production" || type === "production_team") return "production_team";
   return "";
 };
 
@@ -1264,7 +1161,7 @@ const getFeedOptionViewLabel = (item: any) => {
   if (item?.__feedKind !== "ai_card") return "Open Post";
   const type = String(item?.type || "").trim().toLowerCase();
   if (type === "artist" || type === "profile" || type === "musician") return "View Profile";
-  if (type === "group") return "View Group";
+  if (type === "group" || type === "duo") return type === "duo" ? "View Duo" : "View Group";
   if (type === "venue") return "View Venue";
   if (type === "studio") return "View Studio";
   if (type === "gig") return "View Gig";
@@ -1308,6 +1205,7 @@ const getFeedPrimaryCtaLabel = (item: any) => {
   if (item?.type === "Studio") return "View Studio";
   if (item?.type === "Venue") return "View Venue";
   if (item?.type === "Artist") return "View Profile";
+  if (item?.type === "Duo") return "View Duo";
   if (item?.type === "Group") return "View Group";
   if (item?.type === "Gig") return "View Gig";
   if (item?.type === "Production") return "View Team";
@@ -1886,7 +1784,9 @@ type SocialFeedCardProps = {
   onOpenProfile: (profileId: string) => void;
   onOpenProductionTeam: (teamId: string) => void;
   onOpenPlaylist: (playlistId: string) => void;
+  onShareCard?: (card: any) => void;
   onSharePost?: (post: any) => void;
+  onToggleCardFavorite?: (card: any) => void;
   onToggleReaction?: (post: any) => void;
   showAuthorFollow: boolean;
   timeAgo: (value: string) => string;
@@ -1910,7 +1810,9 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   onOpenProfile,
   onOpenProductionTeam,
   onOpenPlaylist,
+  onShareCard,
   onSharePost,
+  onToggleCardFavorite,
   onToggleReaction,
   showAuthorFollow,
   timeAgo,
@@ -1963,7 +1865,9 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
     }
   }, [item?.linked_product?.id, onOpenProduct]);
 
-  const hasLiked = Boolean(item?.my_reaction || item?.user_reaction);
+  const hasLiked = isSuggestion
+    ? Boolean(item?.is_favorited || item?.my_reaction || item?.user_reaction)
+    : Boolean(item?.my_reaction || item?.user_reaction);
 
   const handleMoreOptions = useCallback(() => {
     if (onOpenPostOptions) {
@@ -1978,9 +1882,38 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
 
   }, [handleOpenPrimary, isSuggestion, item, onOpenPostOptions]);
 
-  const reactionCount = Number(item?.reaction_count || 0);
+  const reactionCount = Number(
+    isSuggestion
+      ? item?.favorites_count ?? item?.favorite_count ?? item?.reaction_count ?? 0
+      : item?.reaction_count || 0,
+  );
   const commentCount = Number(item?.comment_count || 0);
   const shareCount = Number(item?.share_count || 0);
+  const actionTargetLabel = isSuggestion ? getFeedReportTypeLabel(item).toLowerCase() : "post";
+  const handleLikePress = useCallback(() => {
+    if (isSuggestion) {
+      onToggleCardFavorite?.(item);
+      return;
+    }
+
+    onToggleReaction?.(item);
+  }, [isSuggestion, item, onToggleCardFavorite, onToggleReaction]);
+  const handleCommentPress = useCallback(() => {
+    if (isSuggestion) {
+      handleOpenPrimary();
+      return;
+    }
+
+    handleOpenPrimary();
+  }, [handleOpenPrimary, isSuggestion]);
+  const handleSharePress = useCallback(() => {
+    if (isSuggestion) {
+      onShareCard?.(item);
+      return;
+    }
+
+    onSharePost?.(item);
+  }, [isSuggestion, item, onShareCard, onSharePost]);
 
   return (
     <View
@@ -2185,39 +2118,51 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
             </TouchableOpacity>
           ) : null}
         </View>
-      ) : (
-        <>
-          <View style={styles.socialStatsRow}>
-            <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
-              {formatCountLabel(reactionCount, "like")}
-            </Text>
-            <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
-              {formatCountLabel(commentCount, "comment")}
-            </Text>
-            <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
-              {formatCountLabel(shareCount, "share")}
-            </Text>
-          </View>
-          <View style={[styles.socialActionRow, { borderTopColor: borderColor }]}>
-            <TouchableOpacity
-              activeOpacity={0.78}
-              style={styles.socialActionButton}
-              onPress={() => onToggleReaction?.(item)}
-            >
-              <Ionicons name={hasLiked ? "heart" : "heart-outline"} size={18} color={hasLiked ? "#EF4444" : colors.textSecondary} />
-              <Text style={[styles.socialActionText, { color: hasLiked ? "#EF4444" : colors.textSecondary }]}>Like</Text>
-            </TouchableOpacity>
-            <TouchableOpacity activeOpacity={0.78} style={styles.socialActionButton} onPress={handleOpenPrimary}>
-              <Ionicons name="chatbubble-outline" size={17} color={colors.textSecondary} />
-              <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Comment</Text>
-            </TouchableOpacity>
-            <TouchableOpacity activeOpacity={0.78} style={styles.socialActionButton} onPress={() => onSharePost?.(item)}>
-              <Ionicons name="share-social-outline" size={17} color={colors.textSecondary} />
-              <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Share</Text>
-            </TouchableOpacity>
-          </View>
-        </>
-      )}
+      ) : null}
+
+      <View style={styles.socialStatsRow}>
+        <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
+          {formatCountLabel(reactionCount, "like")}
+        </Text>
+        <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
+          {formatCountLabel(commentCount, "comment")}
+        </Text>
+        <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
+          {formatCountLabel(shareCount, "share")}
+        </Text>
+      </View>
+      <View style={[styles.socialActionRow, { borderTopColor: borderColor }]}>
+        <TouchableOpacity
+          activeOpacity={0.78}
+          accessibilityRole="button"
+          accessibilityLabel={hasLiked ? `Unlike ${actionTargetLabel}` : `Like ${actionTargetLabel}`}
+          style={styles.socialActionButton}
+          onPress={handleLikePress}
+        >
+          <Ionicons name={hasLiked ? "heart" : "heart-outline"} size={18} color={hasLiked ? "#EF4444" : colors.textSecondary} />
+          <Text style={[styles.socialActionText, { color: hasLiked ? "#EF4444" : colors.textSecondary }]}>Like</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={0.78}
+          accessibilityRole="button"
+          accessibilityLabel={`Comment on ${actionTargetLabel}`}
+          style={styles.socialActionButton}
+          onPress={handleCommentPress}
+        >
+          <Ionicons name="chatbubble-outline" size={17} color={colors.textSecondary} />
+          <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Comment</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={0.78}
+          accessibilityRole="button"
+          accessibilityLabel={`Share ${actionTargetLabel}`}
+          style={styles.socialActionButton}
+          onPress={handleSharePress}
+        >
+          <Ionicons name="share-social-outline" size={17} color={colors.textSecondary} />
+          <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Share</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 });
@@ -2270,8 +2215,8 @@ export default function FeedScreen() {
   const productionTeamSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const activeTabRef = React.useRef<FeedTab>(tab);
   const feedCacheRef = React.useRef<Record<FeedTab, FeedCacheEntry>>(feedScreenCache);
-  const feedInFlightRef = React.useRef<Record<FeedTab, boolean>>({ for_you: false, following: false });
-  const feedRequestIdRef = React.useRef<Record<FeedTab, number>>({ for_you: 0, following: 0 });
+  const feedInFlightRef = React.useRef<Record<FeedTab, boolean>>({ for_you: false, talent: false, following: false });
+  const feedRequestIdRef = React.useRef<Record<FeedTab, number>>({ for_you: 0, talent: 0, following: 0 });
   const feedPublicFallbackCursorRef = React.useRef<string | null>(null);
   const feedCacheIdentityRef = React.useRef(feedScreenCacheIdentity);
   const followingKeysRef = React.useRef<Set<string>>(new Set());
@@ -2291,7 +2236,7 @@ export default function FeedScreen() {
 
     const userMeta = (session?.user?.user_metadata || {}) as { full_name?: string; name?: string };
     const displayName = userMeta.full_name || userMeta.name || session?.user?.email?.split("@")[0] || "there";
-    return displayName.trim().split(/\s+/)[0] || "there";
+    return formatFeedHeaderName(displayName);
   }, [isGuest, session?.user?.email, session?.user?.user_metadata]);
   const shouldPersonalizeForYouFeed = Boolean(resolvedUserId && !isGuest);
   const openPostOptions = useCallback((post: any) => {
@@ -2338,6 +2283,7 @@ export default function FeedScreen() {
     enabled: false,
     feedTab: "for_you",
     feedType: shouldPersonalizeForYouFeed ? "for_you" : "public",
+    includeEntities: false,
     limit: FEED_PAGE_SIZE,
     personalize: shouldPersonalizeForYouFeed,
     userId: resolvedUserId,
@@ -2346,6 +2292,7 @@ export default function FeedScreen() {
     enabled: false,
     feedTab: "following",
     feedType: "following",
+    includeEntities: true,
     limit: FEED_PAGE_SIZE,
     userId: resolvedUserId,
   });
@@ -2415,9 +2362,10 @@ export default function FeedScreen() {
     feedCacheIdentityRef.current = feedIdentityKey;
     feedCacheRef.current = resetFeedScreenCacheForIdentity(groqModelLabel, feedIdentityKey);
     feedPublicFallbackCursorRef.current = null;
-    feedInFlightRef.current = { for_you: false, following: false };
+    feedInFlightRef.current = { for_you: false, talent: false, following: false };
     feedRequestIdRef.current = {
       for_you: feedRequestIdRef.current.for_you + 1,
+      talent: feedRequestIdRef.current.talent + 1,
       following: feedRequestIdRef.current.following + 1,
     };
     setFollowingKeys(new Set());
@@ -2472,18 +2420,12 @@ export default function FeedScreen() {
           nextFollowingKeys.has(buildSocialFollowKey("profile", post.author_id)),
       }));
     const nextPosts = fetchedPosts;
-    const cachedEntry = feedCacheRef.current[feedTab];
-
-    const shouldKeepRecommendationCards = feedTab === "for_you";
 
     return {
       posts: nextPosts,
-      aiCards: shouldKeepRecommendationCards ? cachedEntry.aiCards : [],
-      aiFeedMessage: shouldKeepRecommendationCards ? normalizeAiFeedMessage(cachedEntry.aiFeedMessage || "") : "",
-      aiFeedProvider:
-        shouldKeepRecommendationCards
-          ? normalizeAiFeedProvider(cachedEntry.aiFeedProvider || groqModelLabel)
-          : groqModelLabel,
+      aiCards: [],
+      aiFeedMessage: "",
+      aiFeedProvider: groqModelLabel,
       hasMore: Boolean(latestPage?.nextCursor),
       loaded: true,
     };
@@ -2492,6 +2434,10 @@ export default function FeedScreen() {
   const hydrateCachedFeed = useCallback((feedTab: FeedTab) => {
     const cached = feedCacheRef.current[feedTab];
     if (!cached.loaded) {
+      if (feedTab === "talent") {
+        return false;
+      }
+
       const queryData =
         feedTab === "following"
           ? followingFeedQueryRef.current.data
@@ -2656,154 +2602,97 @@ export default function FeedScreen() {
     }
   }, [params.reopenListingId]);
 
-  const fetchAiCardsForYou = useCallback(async (): Promise<FeedAiCardsResult> => {
-    if (!session || !resolvedUserId || !roleResolved) {
+  const fetchTalentCards = useCallback(async (): Promise<FeedAiCardsResult> => {
+    if (!session || !resolvedUserId) {
       return { cards: [], provider: groqModelLabel, message: "" };
     }
 
     setIsAiCardsLoading(true);
 
     try {
-      try {
-        const aiInvokeResult = await withAiRecommendationTimeout(
-          supabase.functions.invoke("home-feed", {
-            body: {
-              action: "for-you",
-              limit: AI_CARD_LIMIT,
-              userId: resolvedUserId,
-            },
-          }),
-        );
-
-        if (!aiInvokeResult) {
-          logLoadTime("Feed", "home-feed-ai-timeout", {
-            timeoutMs: AI_RECOMMENDATION_TIMEOUT_MS,
-          });
-        } else if (aiInvokeResult.error) {
-          logFeedInvokeError("home-feed:for-you", aiInvokeResult.error, {
-            action: "for-you",
-            userId: resolvedUserId,
-          });
-        } else {
-          const recommendations = Array.isArray(aiInvokeResult.data?.recommendations)
-            ? aiInvokeResult.data.recommendations
-            : Array.isArray(aiInvokeResult.data?.aiRecommendations)
-              ? aiInvokeResult.data.aiRecommendations
-              : [];
-          const cards = recommendations
-            .map(normalizeAiRecommendationCard)
-            .filter((card: any) => typeof card?.id === "string" && card.id.length > 0)
-            .slice(0, AI_CARD_LIMIT);
-
-          if (cards.length > 0) {
-            return {
-              cards: applyFollowingStateToRecommendationCards(cards),
-              provider: normalizeAiFeedProvider(aiInvokeResult.data?.aiProvider || aiInvokeResult.data?.provider || groqModelLabel),
-              message: normalizeAiFeedMessage(
-                aiInvokeResult.data?.message ||
-                (aiInvokeResult.data?.aiPowered
-                  ? "AI-ranked For You feed is active."
-                  : "Showing profile-ranked recommendations."),
-              ),
-            };
-          }
-        }
-      } catch (aiError: any) {
-        logFeedInvokeError("home-feed:for-you", aiError, {
-          action: "for-you",
-          userId: resolvedUserId,
-        });
-      }
-
-      // Primary queries with strict filters (matching Home)
-      const [groupsResult, studiosResult, gigsResult, artistsResult, teamsResult, viewerProfileResult] = await Promise.all([
+      const [groupsResult, studiosResult, artistsResult, teamsResult, viewerProfileResult, favoritesResult] = await Promise.all([
         supabase
           .from("groups_with_stats")
           .select("*")
           .order("created_at", { ascending: false })
-          .limit(24),
+          .limit(TALENT_CARD_LIMIT),
         supabase
           .from("studios_with_stats")
           .select("*")
           .eq("permit_status", "approved")
           .order("created_at", { ascending: false })
-          .limit(24),
-        supabase
-          .from("gigs_with_stats")
-          .select("*")
-          .neq("status", "cancelled")
-          .eq("permit_status", "approved")
-          .order("created_at", { ascending: false })
-          .limit(24),
+          .limit(TALENT_CARD_LIMIT),
         supabase
           .from("profiles")
-          .select("id, full_name, avatar_url, address, role, created_at")
+          .select("id, full_name, avatar_url, address, location, role, bio, created_at")
           .eq("role", "musician")
           .eq("is_verified", true)
           .eq("verification_status", "APPROVED")
           .neq("id", resolvedUserId)
           .order("created_at", { ascending: false })
-          .limit(24),
+          .limit(TALENT_CARD_LIMIT),
         supabase
           .from("production_teams")
           .select("*")
           .order("created_at", { ascending: false })
-          .limit(24),
+          .limit(TALENT_CARD_LIMIT),
         supabase
           .from("profiles")
           .select("address, location")
           .eq("id", resolvedUserId)
           .maybeSingle(),
+        supabase
+          .from("favorites")
+          .select("profile_id, group_id, studio_id, production_team_id")
+          .eq("user_id", resolvedUserId)
+          .limit(1000),
       ]);
 
-
-      // If strict queries all return empty, try relaxed queries (drop permit_status)
-      const strictTotal = (groupsResult.data || []).length + (studiosResult.data || []).length +
-        (gigsResult.data || []).length + (artistsResult.data || []).length + (teamsResult.data || []).length;
-
       let relaxedStudios: any[] = [];
-      let relaxedGigs: any[] = [];
-      let relaxedProfiles: any[] = [];
 
-      if (strictTotal === 0) {
-        const [relaxedStudiosResult, relaxedGigsResult, relaxedProfilesResult] = await Promise.all([
-          supabase
-            .from("studios_with_stats")
-            .select("*")
-            .order("created_at", { ascending: false })
-            .limit(24),
-          supabase
-            .from("gigs_with_stats")
-            .select("*")
-            .neq("status", "cancelled")
-            .order("created_at", { ascending: false })
-            .limit(24),
-          supabase
-            .from("profiles")
-            .select("id, full_name, avatar_url, address, role, created_at")
-            .eq("role", "musician")
-            .eq("is_verified", true)
-            .eq("verification_status", "APPROVED")
-            .neq("id", resolvedUserId)
-            .order("created_at", { ascending: false })
-            .limit(24),
-        ]);
-
+      if ((studiosResult.data || []).length === 0) {
+        const relaxedStudiosResult = await supabase
+          .from("studios_with_stats")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(TALENT_CARD_LIMIT);
         relaxedStudios = relaxedStudiosResult.data || [];
-        relaxedGigs = relaxedGigsResult.data || [];
-        relaxedProfiles = relaxedProfilesResult.data || [];
-
       }
 
-      // Use strict results if available, else relaxed fallback
       const finalGroups = groupsResult.data || [];
       const finalStudios = (studiosResult.data || []).length > 0 ? studiosResult.data! : relaxedStudios;
-      const finalGigs = (gigsResult.data || []).length > 0 ? gigsResult.data! : relaxedGigs;
-      const finalArtists = (artistsResult.data || []).length > 0 ? artistsResult.data! : relaxedProfiles;
+      const finalArtists = artistsResult.data || [];
       const finalTeams = teamsResult.data || [];
       const viewerProfile = (viewerProfileResult.data || {}) as {
         address?: string | null;
         location?: string | null;
+      };
+      const favoriteRows = favoritesResult.data || [];
+      const favoriteKeys = new Set<string>();
+      for (const row of favoriteRows) {
+        if (typeof row?.profile_id === "string") favoriteKeys.add(`profile:${row.profile_id}`);
+        if (typeof row?.group_id === "string") favoriteKeys.add(`group:${row.group_id}`);
+        if (typeof row?.studio_id === "string") favoriteKeys.add(`studio:${row.studio_id}`);
+        if (typeof row?.production_team_id === "string") favoriteKeys.add(`production_team:${row.production_team_id}`);
+      }
+      const getFavoriteCount = (item: any) => {
+        const count = Number(item?.favorites_count ?? item?.favorite_count ?? item?.reaction_count ?? 0);
+        return Number.isFinite(count) && count > 0 ? count : 0;
+      };
+      const withFavoriteState = (item: any, targetType: "group" | "studio" | "profile" | "production_team", targetId: string) => {
+        const favoritesCount = getFavoriteCount(item);
+        const isFavorited = favoriteKeys.has(`${targetType}:${targetId}`);
+        const visibleFavoriteCount = Math.max(favoritesCount, isFavorited ? 1 : 0);
+        return {
+          ...item,
+          is_favorited: isFavorited,
+          my_reaction: isFavorited ? "like" : null,
+          user_reaction: isFavorited ? "like" : null,
+          favorites_count: visibleFavoriteCount,
+          reaction_count: visibleFavoriteCount,
+          comment_count: Number(item?.comment_count || 0),
+          share_count: Number(item?.share_count || 0),
+        };
       };
       const viewerCoordinates = getCoordinateFromLocationText(viewerProfile.address || viewerProfile.location || "");
       const withFeedDistance = (item: any) => {
@@ -2879,25 +2768,29 @@ export default function FeedScreen() {
         );
       }
 
-      const normalizedGroups = finalGroups.map((item: any) => ({
-        id: item.id,
-        type: "Group",
-        name: item.name || "Unnamed Group",
-        image: Array.isArray(item.images) ? item.images[0] || null : null,
-        images: Array.isArray(item.images) ? item.images : [],
-        rating: Number(item.rating || 0),
-        review_count: Number(item.review_count || 0),
-        location: item.location || "",
-        latitude: item.latitude ?? null,
-        longitude: item.longitude ?? null,
-        genre: item.genre || "",
-        group_type: item.group_type || null,
-        created_at: item.created_at || null,
-        updated_at: item.updated_at || null,
-        owner_id: item.owner_id || null,
-        social_follow_target_id: item.id,
-        social_follow_target_type: "group",
-      }));
+      const normalizedGroups = finalGroups.map((item: any) => {
+        const groupType = String(item?.group_type || "").toLowerCase();
+        const listingType = groupType.includes("duo") ? "Duo" : "Group";
+        return withFavoriteState({
+          id: item.id,
+          type: listingType,
+          name: item.name || `Unnamed ${listingType}`,
+          image: Array.isArray(item.images) ? item.images[0] || null : null,
+          images: Array.isArray(item.images) ? item.images : [],
+          rating: Number(item.rating || 0),
+          review_count: Number(item.review_count || 0),
+          location: item.location || "",
+          latitude: item.latitude ?? null,
+          longitude: item.longitude ?? null,
+          genre: item.genre || "",
+          group_type: item.group_type || null,
+          created_at: item.created_at || null,
+          updated_at: item.updated_at || null,
+          owner_id: item.owner_id || null,
+          social_follow_target_id: item.id,
+          social_follow_target_type: "group",
+        }, "group", item.id);
+      });
 
       const normalizedStudios = finalStudios.map((item: any) => {
         const isVenue = Array.isArray(item?.amenities)
@@ -2905,7 +2798,7 @@ export default function FeedScreen() {
           : false;
         const listingType = isVenue ? "Venue" : "Studio";
 
-        return {
+        return withFavoriteState({
           id: item.id,
           type: listingType,
           name: item.name || `Unnamed ${listingType}`,
@@ -2926,34 +2819,10 @@ export default function FeedScreen() {
           studio_type: item.type || null,
           social_follow_target_id: item.owner_id || null,
           social_follow_target_type: "profile",
-        };
+        }, "studio", item.id);
       });
 
-      const normalizedGigs = finalGigs.map((item: any) => ({
-        id: item.id,
-        type: "Gig",
-        name: item.name || "Untitled Gig",
-        image: Array.isArray(item.images) ? item.images[0] || null : null,
-        images: Array.isArray(item.images) ? item.images : [],
-        rating: Number(item.rating || 0),
-        review_count: Number(item.review_count || 0),
-        location: item.location || "",
-        latitude: item.latitude ?? null,
-        longitude: item.longitude ?? null,
-        genre: Array.isArray(item?.requirements?.genres)
-          ? item.requirements.genres.join(", ")
-          : item?.requirements?.genre || "",
-        created_at: item.created_at || null,
-        updated_at: item.updated_at || null,
-        organizer_id: item.organizer_id || null,
-        budget: item.budget?.toString() || null,
-        rate: item.rate?.toString() || null,
-        requirements: item.requirements || null,
-        social_follow_target_id: item.organizer_id || null,
-        social_follow_target_type: "profile",
-      }));
-
-      const normalizedArtists = finalArtists.map((item: any) => ({
+      const normalizedArtists = finalArtists.map((item: any) => withFavoriteState({
         id: item.id,
         type: "Artist",
         name: item.full_name || "Artist",
@@ -2961,22 +2830,23 @@ export default function FeedScreen() {
         images: item.avatar_url ? [item.avatar_url] : [],
         rating: 0,
         review_count: 0,
-        location: item.address || "",
+        location: item.address || item.location || "",
         genre: (artistGenresById.get(item.id) || []).join(", "),
         genres: artistGenresById.get(item.id) || [],
         skills: artistSkillsById.get(item.id) || [],
+        description: item.bio || "",
         created_at: item.created_at || null,
         updated_at: item.updated_at || null,
         owner_id: item.id,
         social_follow_target_id: item.id,
         social_follow_target_type: "profile",
-      }));
+      }, "profile", item.id));
 
       const normalizedTeams = finalTeams.map((item: any) => {
         const owner = teamOwnerById.get(item.owner_id);
         const primaryImage = item.logo_url || owner?.avatar_url || null;
 
-        return {
+        return withFavoriteState({
           id: item.id,
           type: "Production",
           name: item.name || "Production Team",
@@ -2995,13 +2865,12 @@ export default function FeedScreen() {
           open_production_applications: item.open_production_applications === true,
           social_follow_target_id: item.owner_id || null,
           social_follow_target_type: "profile",
-        };
+        }, "production_team", item.id);
       });
 
       const allCandidates = [
         ...normalizedGroups,
         ...normalizedStudios,
-        ...normalizedGigs,
         ...normalizedArtists,
         ...normalizedTeams,
       ]
@@ -3015,21 +2884,21 @@ export default function FeedScreen() {
       return {
         cards: applyFollowingStateToRecommendationCards(
           sortFeedItemsNewestFirst(allCandidates)
-            .slice(0, AI_CARD_LIMIT)
+            .slice(0, TALENT_CARD_LIMIT)
             .map((item) => ({ ...ensureFeedCardImage(item), __feedKind: "ai_card" })),
         ),
         provider: "Latest",
-        message: "Showing the newest posts and listings.",
+        message: "Newest talent first.",
       };
     } catch (error: any) {
-      console.error("Feed AI cards error:", error);
+      console.error("Feed talent cards error:", error);
       return {
         cards: [],
         provider: "Normal Feed",
-        message: error?.message || "Unable to load recommendation cards right now.",
+        message: error?.message || "Unable to load talent cards right now.",
       };
     }
-  }, [applyFollowingStateToRecommendationCards, groqModelLabel, resolvedUserId, roleResolved, session]);
+  }, [applyFollowingStateToRecommendationCards, groqModelLabel, resolvedUserId, session]);
 
   const loadFollowingGraph = useCallback(async () => {
     if (!session) {
@@ -3389,6 +3258,42 @@ export default function FeedScreen() {
     const requestId = ++feedRequestIdRef.current[feedTab];
 
     try {
+      if (feedTab === "talent") {
+        if (append) {
+          return;
+        }
+
+        setIsAiCardsLoading(true);
+        const talentResult = await fetchTalentCards();
+
+        if (requestId !== feedRequestIdRef.current[feedTab]) {
+          return;
+        }
+
+        const nextSnapshot: FeedCacheEntry = {
+          posts: [],
+          aiCards: applyFollowingStateToRecommendationCards(talentResult.cards),
+          aiFeedMessage: normalizeAiFeedMessage(talentResult.message || ""),
+          aiFeedProvider: normalizeAiFeedProvider(talentResult.provider || groqModelLabel),
+          hasMore: false,
+          loaded: true,
+        };
+
+        feedCacheRef.current[feedTab] = nextSnapshot;
+        feedLastFetchAt[feedTab] = Date.now();
+
+        if (activeTabRef.current === feedTab) {
+          applyFeedSnapshot(nextSnapshot);
+          setIsAiCardsLoading(false);
+        }
+
+        void loadFollowingGraph().catch(() => {
+          // Follow metadata is nice-to-have; Talent can render without waiting on it.
+        });
+
+        return;
+      }
+
       if (isForYouFeedTab(feedTab)) {
         if (append) {
           const cachedEntry = feedCacheRef.current[feedTab];
@@ -3407,14 +3312,12 @@ export default function FeedScreen() {
 
           const querySnapshot = buildFeedSnapshotFromPages(feedTab, queryResult.data);
           const nextSnapshot: FeedCacheEntry = querySnapshot
-            ? {
-                ...querySnapshot,
-                aiCards: cachedEntry.aiCards,
-                aiFeedMessage: cachedEntry.aiFeedMessage,
-                aiFeedProvider: cachedEntry.aiFeedProvider,
-              }
+            ? querySnapshot
             : {
                 ...cachedEntry,
+                aiCards: [],
+                aiFeedMessage: "",
+                aiFeedProvider: groqModelLabel,
                 hasMore: false,
                 loaded: true,
               };
@@ -3428,12 +3331,7 @@ export default function FeedScreen() {
         }
 
         feedPublicFallbackCursorRef.current = null;
-        setIsAiCardsLoading(true);
-
-        const [aiResult, queryResult] = await Promise.all([
-          fetchAiCardsForYou(),
-          forYouFeedQueryRef.current.refetch(),
-        ]);
+        const queryResult = await forYouFeedQueryRef.current.refetch();
 
         if (requestId !== feedRequestIdRef.current[feedTab]) {
           return;
@@ -3455,9 +3353,9 @@ export default function FeedScreen() {
 
         const nextSnapshot: FeedCacheEntry = {
           posts: postSnapshot?.posts || [],
-          aiCards: applyFollowingStateToRecommendationCards(aiResult.cards),
-          aiFeedMessage: normalizeAiFeedMessage(aiResult.message || ""),
-          aiFeedProvider: normalizeAiFeedProvider(aiResult.provider || groqModelLabel),
+          aiCards: [],
+          aiFeedMessage: "",
+          aiFeedProvider: groqModelLabel,
           hasMore: postSnapshot?.hasMore || false,
           loaded: true,
         };
@@ -3469,10 +3367,6 @@ export default function FeedScreen() {
           applyFeedSnapshot(nextSnapshot);
           setIsAiCardsLoading(false);
         }
-
-        void loadFollowingGraph().catch(() => {
-          // Follow metadata is nice-to-have; recommendations should render without waiting on it.
-        });
 
         return;
       }
@@ -3607,7 +3501,7 @@ export default function FeedScreen() {
     applyFeedSnapshot,
     authLoading,
     buildFeedSnapshotFromPages,
-    fetchAiCardsForYou,
+    fetchTalentCards,
     groqModelLabel,
     isGuest,
     loadFollowingGraph,
@@ -3722,7 +3616,7 @@ export default function FeedScreen() {
       isHydratedEmptyForYou ||
       Date.now() - feedLastFetchAt[tab] >= FEED_FOCUS_REFRESH_COOLDOWN_MS;
 
-    if (tab === "for_you" && shouldRefreshTabFeed && (!hydrated || isEmptyForYouSnapshot(hydratedSnapshot))) {
+    if (tab === "talent" && shouldRefreshTabFeed && (!hydrated || hydratedSnapshot.aiCards.length === 0)) {
       setIsAiCardsLoading(true);
     }
 
@@ -3768,7 +3662,7 @@ export default function FeedScreen() {
     }
 
     setRefreshing(true);
-    if (tab === "for_you" && posts.length === 0 && aiCards.length === 0) {
+    if (tab === "talent" && posts.length === 0 && aiCards.length === 0) {
       setIsAiCardsLoading(true);
     }
     void fetchFeed(tab);
@@ -3780,6 +3674,7 @@ export default function FeedScreen() {
       loading ||
       loadingMore ||
       !hasMore ||
+      tab === "talent" ||
       posts.length === 0 ||
       (tab === "for_you" && posts.length === 0 && aiCards.length > 0)
     ) {
@@ -4038,6 +3933,7 @@ export default function FeedScreen() {
 
           feedCacheRef.current = {
             for_you: addCreatedPost(feedCacheRef.current.for_you),
+            talent: feedCacheRef.current.talent,
             following: addCreatedPost(feedCacheRef.current.following),
           };
           setPosts((current) => sortFeedItemsNewestFirst(dedupeFeedItems([createdPost, ...current])));
@@ -4170,6 +4066,10 @@ export default function FeedScreen() {
         ...feedCacheRef.current.for_you,
         posts: updatePosts(feedCacheRef.current.for_you.posts),
       },
+      talent: {
+        ...feedCacheRef.current.talent,
+        posts: updatePosts(feedCacheRef.current.talent.posts),
+      },
       following: {
         ...feedCacheRef.current.following,
         posts: updatePosts(feedCacheRef.current.following.posts),
@@ -4271,6 +4171,82 @@ export default function FeedScreen() {
     }
   }, [patchPostEverywhere, session]);
 
+  const patchCardEverywhere = useCallback((card: any, updater: (item: any) => any) => {
+    const cardKey = getFeedItemStableKey(card);
+    if (!cardKey) return;
+
+    const updateCards = (items: any[]) =>
+      items.map((item) => (getFeedItemStableKey(item) === cardKey ? updater(item) : item));
+
+    setAiCards(updateCards);
+    feedCacheRef.current = {
+      for_you: {
+        ...feedCacheRef.current.for_you,
+        aiCards: updateCards(feedCacheRef.current.for_you.aiCards),
+      },
+      talent: {
+        ...feedCacheRef.current.talent,
+        aiCards: updateCards(feedCacheRef.current.talent.aiCards),
+      },
+      following: {
+        ...feedCacheRef.current.following,
+        aiCards: updateCards(feedCacheRef.current.following.aiCards),
+      },
+    };
+  }, []);
+
+  const handleToggleCardFavorite = useCallback(async (card: any) => {
+    if (!session || !resolvedUserId || !card?.id) {
+      emitToast({ type: "info", title: "Sign in required", message: "Please sign in to like this card." });
+      return;
+    }
+
+    const targetType = getFeedFavoriteTargetType(card);
+    if (!targetType) {
+      emitToast({ type: "info", title: "Like unavailable", message: "This card cannot be liked yet." });
+      return;
+    }
+
+    const wasFavorited = Boolean(card.is_favorited || card.my_reaction || card.user_reaction);
+    const applyFavoriteState = (isFavorited: boolean, explicitCount?: number) => (item: any) => {
+      const currentCount = Number(item.favorites_count ?? item.favorite_count ?? item.reaction_count ?? 0);
+      const nextCount = Number.isFinite(explicitCount)
+        ? Math.max(0, Number(explicitCount))
+        : Math.max(0, currentCount + (isFavorited ? 1 : -1));
+
+      return {
+        ...item,
+        is_favorited: isFavorited,
+        my_reaction: isFavorited ? "like" : null,
+        user_reaction: isFavorited ? "like" : null,
+        favorites_count: nextCount,
+        reaction_count: nextCount,
+      };
+    };
+
+    patchCardEverywhere(card, applyFavoriteState(!wasFavorited));
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-details", {
+        body: {
+          action: "toggle_favorite",
+          type: targetType,
+          id: card.id,
+          userId: resolvedUserId,
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+
+      const isFavorited = typeof data?.is_favorited === "boolean" ? data.is_favorited : !wasFavorited;
+      const favoritesCount = Number(data?.favorites_count);
+      patchCardEverywhere(card, applyFavoriteState(isFavorited, favoritesCount));
+    } catch (error: any) {
+      patchCardEverywhere(card, applyFavoriteState(wasFavorited));
+      emitToast({ type: "error", title: "Like failed", message: error?.message || "Please try again." });
+    }
+  }, [patchCardEverywhere, resolvedUserId, session]);
+
   const openReportTarget = useCallback((target: any) => {
     if (!session || !resolvedUserId) {
       emitToast({ type: "info", title: "Sign in required", message: "Please sign in to submit a report." });
@@ -4370,6 +4346,27 @@ export default function FeedScreen() {
       emitToast({ type: "error", title: "Share failed", message: error?.message || "Please try again." });
     }
   }, []);
+
+  const handleShareCard = useCallback(async (card: any) => {
+    if (!card?.id) return;
+    const label = getFeedReportTypeLabel(card);
+    const name = card.name || `MusikaLokal ${label}`;
+
+    try {
+      const shareResult = await Share.share({
+        message: `${name}\n\nCheck out this ${label.toLowerCase()} on MusikaLokal: ${card.id}`,
+      });
+
+      if (shareResult.action === Share.dismissedAction) return;
+
+      patchCardEverywhere(card, (item) => ({
+        ...item,
+        share_count: Number(item.share_count || 0) + 1,
+      }));
+    } catch (error: any) {
+      emitToast({ type: "error", title: "Share failed", message: error?.message || "Please try again." });
+    }
+  }, [patchCardEverywhere]);
 
   const openProfileDetails = useCallback((profileId: string) => {
     if (!profileId) return;
@@ -4571,7 +4568,9 @@ export default function FeedScreen() {
           onOpenProfile={openProfileDetails}
           onOpenProductionTeam={openProductionTeamDetails}
           onOpenPlaylist={openPlaylistDetails}
+          onShareCard={handleShareCard}
           onSharePost={handleSharePost}
+          onToggleCardFavorite={handleToggleCardFavorite}
           onToggleReaction={handleTogglePostReaction}
           showAuthorFollow={false}
           timeAgo={timeAgo}
@@ -4611,7 +4610,9 @@ export default function FeedScreen() {
         onOpenProfile={openProfileDetails}
         onOpenProductionTeam={openProductionTeamDetails}
         onOpenPlaylist={openPlaylistDetails}
+        onShareCard={handleShareCard}
         onSharePost={handleSharePost}
+        onToggleCardFavorite={handleToggleCardFavorite}
         onToggleReaction={handleTogglePostReaction}
         showAuthorFollow={Boolean(authorFollowTarget)}
         timeAgo={timeAgo}
@@ -4623,7 +4624,9 @@ export default function FeedScreen() {
     followBusyByKey,
     followingKeys,
     handleFollow,
+    handleShareCard,
     handleSharePost,
+    handleToggleCardFavorite,
     handleTogglePostReaction,
     isDark,
     openListingDetails,
@@ -4766,12 +4769,11 @@ export default function FeedScreen() {
         </View>
 
         <View style={[styles.tabRow, { backgroundColor: cardBg, borderBottomColor: skeletonBorder }]}>
-          <View style={styles.feedSkeletonTab}>
-            <Skeleton width={110} height={18} borderRadius={8} />
-          </View>
-          <View style={styles.feedSkeletonTab}>
-            <Skeleton width={110} height={18} borderRadius={8} />
-          </View>
+          {[1, 2, 3].map((item) => (
+            <View key={`feed-tab-skeleton-${item}`} style={styles.feedSkeletonTab}>
+              <Skeleton width={82} height={18} borderRadius={8} />
+            </View>
+          ))}
         </View>
         <View style={[styles.feedTabBottomSpacer, { backgroundColor: cardBg }]} />
 
@@ -4819,7 +4821,10 @@ export default function FeedScreen() {
   const feedItems = useMemo(() => {
     if (loading) return [];
     if (tab === "for_you") {
-      return sortForYouFeedItems(dedupeFeedItems([...posts, ...aiCards]));
+      return sortFeedItemsNewestFirst(dedupeFeedItems(posts.filter((item) => item?.__feedKind !== "ai_card")));
+    }
+    if (tab === "talent") {
+      return sortFeedItemsNewestFirst(dedupeFeedItems(aiCards));
     }
     if (tab === "following") {
       return sortFeedItemsNewestFirst(dedupeFeedItems([...posts, ...followingEntities]));
@@ -4827,8 +4832,8 @@ export default function FeedScreen() {
     return sortFeedItemsNewestFirst(dedupeFeedItems(posts));
   }, [aiCards, followingEntities, loading, posts, tab]);
 
-  const isShowingAiCards = tab === "for_you" && posts.length === 0 && aiCards.length > 0;
-  const showRecommendationLoadingState = tab === "for_you" && isAiCardsLoading;
+  const isShowingAiCards = tab === "talent" && aiCards.length > 0;
+  const showRecommendationLoadingState = tab === "talent" && isAiCardsLoading;
   const radioPlayerBottom = NAVBAR_BOTTOM_OFFSET + NAVBAR_HEIGHT + RADIO_MINI_PLAYER_STACK_GAP + insets.bottom;
   const hasRadioMiniPlayer = Boolean(activeStation);
   const feedBottomSpacer = hasRadioMiniPlayer
@@ -4870,7 +4875,7 @@ export default function FeedScreen() {
         <View style={[styles.emptyStateContainer, { backgroundColor: isDark ? "#1E293B" : "#FFFFFF" }]}>
           <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? "#1E293B" : colors.primary + "10" }]}>
             <Ionicons
-              name={tab === "following" ? "people-outline" : "sparkles-outline"}
+              name={tab === "following" ? "people-outline" : tab === "talent" ? "sparkles-outline" : "chatbubbles-outline"}
               size={48}
               color={colors.primary}
             />
@@ -4878,12 +4883,16 @@ export default function FeedScreen() {
           <Text style={[styles.emptyTitle, { color: colors.text }]}>
             {tab === "following"
               ? "Your Following Feed is Empty"
-              : "No posts or recommendations yet"}
+              : tab === "talent"
+                ? "No talent cards yet"
+                : "No posts yet"}
           </Text>
           <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
             {tab === "following"
               ? "Follow musicians, groups, and creators to see their latest posts and newly created listings here."
-              : "Explore musicians, groups, studios, and gigs to help shape your For You feed."}
+              : tab === "talent"
+                ? "Newest musicians, groups, duos, studios, venues, and production teams will appear here."
+                : "Posts from the community will appear here newest first."}
           </Text>
 
           <TouchableOpacity
@@ -4893,7 +4902,7 @@ export default function FeedScreen() {
           >
             <Ionicons name="search" size={18} color="#fff" />
             <Text style={styles.emptyActionBtnText}>
-              {tab === "following" ? "Find Musicians" : "Explore Feed"}
+              {tab === "following" ? "Find Musicians" : tab === "talent" ? "Explore Talent" : "Explore Feed"}
             </Text>
           </TouchableOpacity>
         </View>

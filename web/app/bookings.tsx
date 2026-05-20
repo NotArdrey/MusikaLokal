@@ -622,10 +622,6 @@ const getGigApplicationStatusLabel = (
   return fallback || status;
 };
 
-const canRenewGigApplication = (item: any) =>
-  item?.type_id === "gig_application" &&
-  String(item?.raw_status || item?.status || "").trim().toLowerCase() === "completed";
-
 type Tab =
   | "Applicants"
   | "Active Musicians"
@@ -677,12 +673,8 @@ export default function BookingsScreen() {
       : "#D8E3F2"
     : colors.border;
   const [modalMode, setModalMode] = useState<
-    "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew" | "clear_balance" | "late" | "late_confirm" | "report_access"
+    "confirm" | "cancel" | "decline" | "fire" | "complete" | "clear_balance" | "late" | "late_confirm" | "report_access"
   >("confirm");
-
-  // Renew Contract State
-  const [showRenewModal, setShowRenewModal] = useState(false);
-  const [renewGigId, setRenewGigId] = useState<string | null>(null);
 
   // Payment Option State
   const [showPaymentOptionModal, setShowPaymentOptionModal] = useState(false);
@@ -3427,67 +3419,6 @@ export default function BookingsScreen() {
     } as any);
   };
 
-  // Renew Contract Logic
-  const handleRenewContract = async (item: any) => {
-    if (isReadOnlyBookingItem(item)) {
-      showReadOnlyBookingAlert();
-      return;
-    }
-
-    setSelectedItem(item);
-    setModalMode("renew");
-    setModalVisible(true);
-  };
-
-  const processRenewContract = async () => {
-    if (!selectedItem || !userId) return;
-    if (isReadOnlyBookingItem(selectedItem)) {
-      showReadOnlyBookingAlert();
-      return;
-    }
-    if (!canRenewGigApplication(selectedItem)) {
-      Alert.alert(
-        "Renewal Unavailable",
-        "Only completed contracts can receive renewal offers.",
-      );
-      return;
-    }
-
-    try {
-      setLoading(true);
-
-      const { data, error } = await supabase.functions.invoke(
-        "manage-bookings",
-        {
-          body: {
-            action: "renew_contract",
-            application_id: selectedItem.id,
-            gig_id: selectedItem.gig_id,
-            applicant_id: selectedItem.applicant_id || selectedItem.user_id,
-            organizer_id: userId,
-          },
-        },
-      );
-
-      if (error) throw error;
-
-      Alert.alert(
-        "Success",
-        "Contract renewal sent! The offer now appears in the recipient's Pending activity.",
-      );
-      setModalVisible(false);
-      fetchBookings(userId);
-    } catch (e: any) {
-      console.error("Renew contract error:", e);
-      Alert.alert(
-        "Error",
-        e?.message || "Failed to renew contract. Please try again.",
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // Show payment option modal before paying
   const showPaymentOptions = (item: any) => {
     setPaymentItem(item);
@@ -5229,36 +5160,6 @@ export default function BookingsScreen() {
                               </Text>
                             </TouchableOpacity>
 
-                            {userRole === "venue-owner" && canRenewGigApplication(item) && (
-                              <TouchableOpacity activeOpacity={1}
-                                onPress={() => handleRenewContract(item)}
-                                style={{
-                                  flex: 1,
-                                  backgroundColor: "#7C3AED",
-                                  padding: 10,
-                                  borderRadius: 100,
-                                  alignItems: "center",
-                                  flexDirection: "row",
-                                  justifyContent: "center",
-                                  gap: 6,
-                                }}
-                              >
-                                <Ionicons
-                                  name="refresh"
-                                  size={16}
-                                  color="white"
-                                />
-                                <Text
-                                  style={{
-                                    color: "white",
-                                    fontFamily: "Poppins_600SemiBold",
-                                    fontSize: 12,
-                                  }}
-                                >
-                                  Renew
-                                </Text>
-                              </TouchableOpacity>
-                            )}
                           </View>
                         )}
                         {!isHistoryTabView && (
@@ -7010,12 +6911,10 @@ export default function BookingsScreen() {
                 ? "Terminate Agreement"
                 : modalMode === "complete"
                   ? "Complete Contract"
-                  : modalMode === "renew"
-                    ? "Renew Contract"
-                    : modalMode === "clear_balance"
-                      ? "Clear Remaining Balance"
-                  : modalMode === "late_confirm"
-                        ? "Confirm Late Report"
+                  : modalMode === "clear_balance"
+                    ? "Clear Remaining Balance"
+                    : modalMode === "late_confirm"
+                      ? "Confirm Late Report"
                       : modalMode === "late"
                         ? "Report Late"
                         : modalMode === "report_access"
@@ -7041,8 +6940,6 @@ export default function BookingsScreen() {
                 ? "Are you sure you want to fire this musician? This will cancel their upcoming gigs with you."
                 : modalMode === "complete"
                   ? "Confirm efficient completion of this gig? You will be redirected to review the musician."
-                  : modalMode === "renew"
-                    ? `Would you like to send a contract renewal offer to ${selectedItem?.customer_name || "this musician"}? They will receive a notification and can accept or decline the offer.`
                     : modalMode === "clear_balance"
                       ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
                       : modalMode === "late_confirm"
@@ -7112,8 +7009,6 @@ export default function BookingsScreen() {
                 ? "Fire Musician"
                 : modalMode === "complete"
                   ? "Complete & Review"
-                  : modalMode === "renew"
-                    ? "Send Renewal Offer"
                     : modalMode === "clear_balance"
                         ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
                         : modalMode === "late_confirm"
@@ -7127,7 +7022,6 @@ export default function BookingsScreen() {
         showInput={
           modalMode !== "confirm" &&
           modalMode !== "complete" &&
-          modalMode !== "renew" &&
           modalMode !== "late_confirm" &&
           modalMode !== "clear_balance" &&
           !(modalMode === "decline" && selectedItem?.leader_approval_required)
@@ -7173,12 +7067,6 @@ export default function BookingsScreen() {
               "?? Modal onConfirm - selectedItem.type_id:",
               selectedItem.type_id,
             );
-
-            // Handle renew contract separately
-            if (modalMode === "renew") {
-              await processRenewContract();
-              return;
-            }
 
             if (
               selectedItem?.type_id === "gig_application" &&

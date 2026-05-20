@@ -426,10 +426,11 @@ function Header({ title, overline, transparent, onBackPress, showBack, leftCompo
                             style={[
                                 styles.title,
                                 !backVisible && styles.mainTitle,
-                                titleAnimatedStyle
+                                titleAnimatedStyle,
+                                overline && styles.wrappingTitle,
                             ]}
-                            numberOfLines={1}
-                            ellipsizeMode="tail"
+                            numberOfLines={overline ? undefined : 1}
+                            ellipsizeMode={overline ? undefined : "tail"}
                         >
                             {title}
                         </Animated.Text>
@@ -567,6 +568,7 @@ const styles = StyleSheet.create({
     },
     titleContainer: {
         flex: 1,
+        minWidth: 0,
         justifyContent: 'center',
         alignItems: 'center',
         paddingHorizontal: 10,
@@ -592,6 +594,11 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         fontFamily: 'Poppins_600SemiBold',
         letterSpacing: -0.3,
+        textAlign: 'center',
+    },
+    wrappingTitle: {
+        flexShrink: 1,
+        lineHeight: 24,
     },
     mainTitle: {
         fontSize: 28,

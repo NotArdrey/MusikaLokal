@@ -165,6 +165,7 @@ export const useFeedQuery = <TItem = any>(params: {
   enabled?: boolean;
   feedTab: string;
   feedType: string;
+  includeEntities?: boolean;
   limit: number;
   personalize?: boolean;
   userId?: string | null;
@@ -197,7 +198,7 @@ export const useFeedQuery = <TItem = any>(params: {
         action: "get_feed",
         cursor: pageParam,
         feed_type: feedType,
-        include_entities: true,
+        include_entities: params.includeEntities === true,
         limit: params.limit,
         personalize,
         ...(resolvedUserId ? { userId: resolvedUserId } : {}),
@@ -214,7 +215,7 @@ export const useFeedQuery = <TItem = any>(params: {
           action: "get_feed",
           cursor: undefined,
           feed_type: "public",
-          include_entities: true,
+          include_entities: params.includeEntities === true,
           limit: params.limit,
           personalize: false,
           ...(resolvedUserId ? { userId: resolvedUserId } : {}),
