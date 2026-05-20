@@ -99,14 +99,14 @@ export default function GigDetailsScreen() {
 
   useEffect(() => {
     const availableTabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
-    if (requestedTab && availableTabs.includes(requestedTab) && requestedTab !== activeTab) {
+    if (requestedTab && availableTabs.includes(requestedTab)) {
       setActiveTab(requestedTab);
       return;
     }
-    if (!availableTabs.includes(activeTab)) {
-      setActiveTab("About");
-    }
-  }, [activeTab, canManageGig, requestedTab]);
+    setActiveTab((currentTab) => (
+      availableTabs.includes(currentTab) ? currentTab : "About"
+    ));
+  }, [canManageGig, requestedTab]);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;

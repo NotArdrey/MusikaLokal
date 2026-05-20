@@ -94,10 +94,10 @@ export default function GroupDetailsScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (requestedTab && GROUP_TABS.includes(requestedTab) && requestedTab !== activeTab) {
+    if (requestedTab && GROUP_TABS.includes(requestedTab)) {
       setActiveTab(requestedTab);
     }
-  }, [activeTab, requestedTab]);
+  }, [requestedTab]);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;

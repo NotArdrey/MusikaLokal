@@ -1,12 +1,35 @@
 // @ts-nocheck
 /**
  * Login Redirect Edge Function
- * 
- * Direct 302 redirect to the app's login screen after email verification.
- * Passes ?verified=true to trigger success alert in the app.
+ *
+ * Shows a success page after email verification, then opens the app deep link.
+ * The visible button keeps the flow usable when mobile browsers block automatic
+ * custom-scheme redirects.
  */
 Deno.serve(async (req: Request) => {
-    // Serve a nice HTML success page
+    const url = new URL(req.url);
+    const rawAppUrl = url.searchParams.get("app_url") || "";
+    const defaultAppUrl = "musikalokal://?verified=true";
+    let appUrl = defaultAppUrl;
+
+    try {
+        const parsed = new URL(rawAppUrl || defaultAppUrl);
+        const protocol = parsed.protocol.replace(/:$/, "");
+        const isAllowedNativeScheme = ["musikalokal", "exp", "exps"].includes(protocol);
+        const isAllowedLocalWeb =
+            ["http", "https"].includes(protocol) &&
+            ["localhost", "127.0.0.1"].includes(parsed.hostname);
+
+        if (isAllowedNativeScheme || isAllowedLocalWeb) {
+            appUrl = parsed.toString();
+        }
+    } catch {
+        appUrl = defaultAppUrl;
+    }
+
+    const safeAppUrl = appUrl.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+    const appUrlScript = JSON.stringify(appUrl);
+
     const html = `
 <!DOCTYPE html>
 <html lang="en">
@@ -24,14 +47,13 @@ Deno.serve(async (req: Request) => {
 </head>
 <body>
     <div class="container">
-        <h1>✅ Verification Complete!</h1>
+        <h1>Verification Complete</h1>
         <p>Your email has been confirmed successfully.</p>
-        <a href="musikalokal://?verified=true" class="btn">Open MusikaLokal App</a>
+        <a href="${safeAppUrl}" class="btn">Open MusikaLokal App</a>
     </div>
     <script>
-        // Attempt auto-redirect
         setTimeout(function() {
-            window.location.href = "musikalokal://?verified=true";
+            window.location.href = ${appUrlScript};
         }, 1000);
     </script>
 </body>
@@ -40,7 +62,8 @@ Deno.serve(async (req: Request) => {
     return new Response(html.trim(), {
         status: 200,
         headers: {
-            "Content-Type": "text/html; charset=utf-8"
-        }
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
     });
 });

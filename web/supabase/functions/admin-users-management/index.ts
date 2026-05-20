@@ -840,7 +840,9 @@ function buildMusikaLokalEmail({
 }
 
 function getManualApprovalConfirmationRedirect() {
-  return Deno.env.get("EMAIL_CONFIRM_REDIRECT_TO") || "musikalokal://?verified=true";
+  const supabaseUrl = String(Deno.env.get("SUPABASE_URL") || "").replace(/\/+$/, "");
+  const redirectPageUrl = supabaseUrl ? `${supabaseUrl}/functions/v1/login-redirect` : "musikalokal://?verified=true";
+  return Deno.env.get("EMAIL_CONFIRM_REDIRECT_TO") || redirectPageUrl;
 }
 
 async function generateManualApprovalConfirmationLink(client: any, userEmail: string) {

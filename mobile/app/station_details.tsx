@@ -25,8 +25,10 @@ import { useRadioPlayer } from "../src/context/RadioPlayerContext";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
+import { getStationLiveTimelineState } from "../src/utils/radioTimeline";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const LIVE_STATION_REFRESH_MS = 30_000;
 const moderateScale = (size: number, factor = 0.3) => {
   const scaled = Math.max((SCREEN_WIDTH / 375) * size, size * 0.85);
   return size + (scaled - size) * factor;
@@ -91,6 +93,31 @@ const getStationArtworkUrl = (station: any) => {
   return "";
 };
 
+const readLiveIndex = (value: unknown) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
+};
+
+const getLiveCurrentSlot = (station: any, slots: any[]) => {
+  if (station?.live_current_slot) {
+    return station.live_current_slot;
+  }
+
+  const index = readLiveIndex(station?.live_current_slot_index);
+  return slots[index] || slots[0] || null;
+};
+
+const getLiveCurrentItem = (station: any, slots: any[]) => {
+  if (station?.live_current_item) {
+    return station.live_current_item;
+  }
+
+  const slot = getLiveCurrentSlot(station, slots);
+  const items = Array.isArray(slot?.playlist?.items) ? slot.playlist.items : [];
+  const index = readLiveIndex(station?.live_current_item_index);
+  return items[index] || items[0] || null;
+};
+
 export default function StationDetailsScreen() {
   const { colors, isDark } = useTheme();
   const { userId, userRole } = useAuth();
@@ -99,22 +126,16 @@ export default function StationDetailsScreen() {
     activeStation,
     currentTrack,
     currentSlotIndex,
-    isAutoplayEnabled,
     isMuted,
-    isPlaying,
-    queueLength,
-    skipPrevious,
-    skipNext,
     syncStationData,
-    toggleAutoplay,
     toggleMute,
-    togglePlayPause,
     tuneIn,
   } = useRadioPlayer();
   const { station_id } = useLocalSearchParams();
 
   const [station, setStation] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
 
   // Owner management state
@@ -133,9 +154,7 @@ export default function StationDetailsScreen() {
 
   const canManageStation = userRole === "admin";
   const isActiveStation = activeStation?.id === station?.id;
-  const playerIsPlaying = isActiveStation && isPlaying;
   const playerIsMuted = isActiveStation && isMuted;
-  const playerSlotIndex = isActiveStation ? currentSlotIndex : 0;
 
   const fetchStation = useCallback(async () => {
     if (!station_id) return;
@@ -154,7 +173,19 @@ export default function StationDetailsScreen() {
     }
   }, [station_id, syncStationData]);
 
-  useEffect(() => { fetchStation(); }, [fetchStation]);
+  useEffect(() => {
+    fetchStation();
+    const intervalId = setInterval(fetchStation, LIVE_STATION_REFRESH_MS);
+    return () => clearInterval(intervalId);
+  }, [fetchStation]);
+
+  useEffect(() => {
+    const liveClockTimer = setInterval(() => {
+      setLiveNowMs(Date.now());
+    }, 1000);
+
+    return () => clearInterval(liveClockTimer);
+  }, []);
 
   const fetchOwnerPlaylists = useCallback(async () => {
     const targetProfileId = typeof station?.managed_profile_id === "string" && station.managed_profile_id.trim().length > 0
@@ -199,10 +230,6 @@ export default function StationDetailsScreen() {
           description: editDescription.trim() || null,
           genre: editGenre.trim() || null,
           rotation_interval_minutes: 15,
-          stream_url: null,
-          stream_status: "offline",
-          now_playing_title: null,
-          now_playing_artist: null,
         },
       });
       if (data?.success) {
@@ -295,35 +322,16 @@ export default function StationDetailsScreen() {
     setAddSlotModalVisible(true);
   };
 
-  const handlePlayPause = useCallback(async () => {
+  const handleListenOrMute = useCallback(async () => {
     if (!station) return;
 
     if (isActiveStation) {
-      await togglePlayPause();
+      await toggleMute();
       return;
     }
 
     await tuneIn(station, 0);
-  }, [isActiveStation, station, togglePlayPause, tuneIn]);
-
-  const handleMuteToggle = useCallback(async () => {
-    if (!isActiveStation) return;
-    await toggleMute();
-  }, [isActiveStation, toggleMute]);
-
-  const handleAutoplayToggle = useCallback(() => {
-    toggleAutoplay();
-  }, [toggleAutoplay]);
-
-  const handleSkipPrevious = useCallback(async () => {
-    if (!isActiveStation) return;
-    await skipPrevious();
-  }, [isActiveStation, skipPrevious]);
-
-  const handleSkipNext = useCallback(async () => {
-    if (!isActiveStation) return;
-    await skipNext();
-  }, [isActiveStation, skipNext]);
+  }, [isActiveStation, station, toggleMute, tuneIn]);
 
   if (loading) {
     return (
@@ -351,23 +359,24 @@ export default function StationDetailsScreen() {
   }
 
   const slots = station.slots || [];
-  const hasBroadcastStream =
-    typeof station?.stream_url === "string" &&
-    station.stream_url.trim().length > 0 &&
-    station?.stream_status === "live";
   const liveSlots = Array.isArray(station.live_slots) && station.live_slots.length > 0
     ? station.live_slots
     : slots;
+  const liveTimelineState = getStationLiveTimelineState(station, liveNowMs);
+  const liveCurrentSlot = liveTimelineState.slot || getLiveCurrentSlot(station, liveSlots);
+  const liveCurrentItem = liveTimelineState.item || getLiveCurrentItem(station, liveSlots);
+  const playerSlotIndex = liveTimelineState.synchronized
+    ? liveTimelineState.slotIndex
+    : isActiveStation
+      ? currentSlotIndex
+      : readLiveIndex(station.live_current_slot_index);
   const liveSlotIds = new Set(liveSlots.map((slot: any) => slot.id));
   const existingPlaylistIds = new Set(slots.map((s: any) => s.playlist_id));
-  const canSkipTrack = isActiveStation && queueLength > 1;
   const playerTrackTitle = isActiveStation
-    ? currentTrack?.title || liveSlots[playerSlotIndex]?.playlist?.title || liveSlots[playerSlotIndex]?.label || `Track ${playerSlotIndex + 1}`
-    : hasBroadcastStream
-      ? station.now_playing_title || station.name || "Live broadcast"
-      : liveSlots[playerSlotIndex]?.playlist?.title || liveSlots[playerSlotIndex]?.label || `Slot ${playerSlotIndex + 1}`;
+    ? liveCurrentItem?.title || currentTrack?.title || liveSlots[playerSlotIndex]?.playlist?.title || liveSlots[playerSlotIndex]?.label || `Track ${playerSlotIndex + 1}`
+    : liveCurrentItem?.title || liveCurrentSlot?.playlist?.title || liveCurrentSlot?.label || `Slot ${playerSlotIndex + 1}`;
   const stationArtworkUrl = getStationArtworkUrl(station);
-  const stationStatus = station?.is_active && (hasBroadcastStream || liveSlots.length > 0) ? "live" : "offline";
+  const stationStatus = station?.is_active && liveSlots.length > 0 ? "live" : "offline";
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -411,9 +420,7 @@ export default function StationDetailsScreen() {
                 fontSize: moderateScale(11), fontWeight: "600"
               }}>
                 {stationStatus === "live"
-                  ? hasBroadcastStream
-                    ? "Live Stream"
-                    : "Station Queue"
+                  ? "Station Queue"
                   : "Offline"}
               </Text>
             </View>
@@ -421,11 +428,7 @@ export default function StationDetailsScreen() {
               <Text style={[styles.genreText, { color: colors.textSecondary }]}>{station.genre}</Text>
             )}
           </View>
-          {hasBroadcastStream ? (
-            <Text style={[styles.rotationSummary, { color: colors.textSecondary }]}>
-              Real continuous broadcast. Everyone hears the same stream timeline.
-            </Text>
-          ) : slots.length > 0 && (
+          {slots.length > 0 && (
             <Text style={[styles.rotationSummary, { color: colors.textSecondary }]}>
               Shared playlist radio. The app plays every station playlist in order and keeps listeners on the same full-queue timeline.
             </Text>
@@ -433,48 +436,28 @@ export default function StationDetailsScreen() {
         </View>
 
         {/* Player Controls */}
-        {stationStatus === "live" && (liveSlots.length > 0 || hasBroadcastStream) && (
+        {stationStatus === "live" && liveSlots.length > 0 && (
           <View style={[styles.playerBar, { backgroundColor: isDark ? "#1E293B" : "#F8FAFC", borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
-            <TouchableOpacity activeOpacity={1} onPress={handlePlayPause} style={styles.playerBtn}>
-              <Ionicons name={playerIsPlaying ? "pause" : "play"} size={28} color={colors.primary} />
+            <TouchableOpacity activeOpacity={1} onPress={handleListenOrMute} style={styles.playerBtn}>
+              <Ionicons
+                name={isActiveStation ? (playerIsMuted ? "volume-mute" : "volume-high") : "play"}
+                size={28}
+                color={isActiveStation && playerIsMuted ? "#ef4444" : colors.primary}
+              />
             </TouchableOpacity>
 
             <View style={{ flex: 1, marginHorizontal: 12 }}>
               <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                {playerIsPlaying ? "Now Playing" : "Tap to Play"}
+                {isActiveStation ? "Now Playing" : "Tap to Listen"}
               </Text>
               <Text style={{ fontSize: moderateScale(13), fontWeight: "600", color: colors.text }} numberOfLines={1}>
                 {playerTrackTitle}
               </Text>
             </View>
 
-            <View style={styles.playerTransportGroup}>
-              <TouchableOpacity activeOpacity={1} onPress={handleSkipPrevious} style={styles.playerBtn}>
-                <Ionicons name="play-skip-back" size={22} color={colors.text} />
-              </TouchableOpacity>
-
-              {canSkipTrack && (
-                <TouchableOpacity activeOpacity={1} onPress={handleSkipNext} style={styles.playerBtn}>
-                  <Ionicons name="play-skip-forward" size={22} color={colors.text} />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            <TouchableOpacity activeOpacity={1} onPress={handleMuteToggle} style={styles.playerBtn}>
-              <Ionicons
-                name={playerIsMuted ? "volume-mute" : "volume-high"}
-                size={22}
-                color={playerIsMuted ? "#ef4444" : colors.text}
-              />
-            </TouchableOpacity>
-
-            <TouchableOpacity activeOpacity={1} onPress={handleAutoplayToggle} style={styles.playerBtn}>
-              <Ionicons
-                name={isAutoplayEnabled ? "repeat" : "repeat-outline"}
-                size={22}
-                color={isAutoplayEnabled ? colors.primary : colors.textSecondary}
-              />
-            </TouchableOpacity>
+            <Text style={[styles.radioModeLabel, { color: colors.textSecondary }]}>
+              {isActiveStation ? (playerIsMuted ? "Muted" : "Live") : "Listen"}
+            </Text>
           </View>
         )}
 
@@ -718,7 +701,7 @@ const styles = StyleSheet.create({
   // Player bar
   playerBar: { flexDirection: "row", alignItems: "center", marginTop: 20, padding: 12, borderRadius: 14, borderWidth: 1 },
   playerBtn: { padding: 6 },
-  playerTransportGroup: { flexDirection: "row", alignItems: "center" },
+  radioModeLabel: { fontSize: moderateScale(12), fontWeight: "700", textTransform: "uppercase" },
   // Modal styles
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 24 },
   modalContent: { width: "100%", borderRadius: 16, padding: 20 },

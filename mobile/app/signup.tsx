@@ -288,8 +288,9 @@ const isSupersededVerificationStatus = (status: unknown) => {
 };
 
 const createEmailConfirmationRedirectUrl = () => {
-    const baseUrl = Linking.createURL('/');
-    return `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}verified=true`;
+    const appUrl = Linking.createURL('', { queryParams: { verified: 'true' } });
+    const redirectPageUrl = `${supabaseUrl.replace(/\/+$/, '')}/functions/v1/login-redirect`;
+    return `${redirectPageUrl}?app_url=${encodeURIComponent(appUrl)}`;
 };
 
 const DIDIT_EMAIL_FLOW_LOG_PREFIX = '[DiditEmailFlow]';

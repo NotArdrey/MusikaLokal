@@ -105,7 +105,9 @@ function escapeHtml(value: unknown) {
 
 function getConfirmationRedirect(rawRedirectTo: unknown) {
     const redirectTo = String(rawRedirectTo || '').trim()
-    return redirectTo || Deno.env.get('EMAIL_CONFIRM_REDIRECT_TO') || 'musikalokal://?verified=true'
+    const supabaseUrl = String(Deno.env.get('SUPABASE_URL') || '').replace(/\/+$/, '')
+    const redirectPageUrl = supabaseUrl ? `${supabaseUrl}/functions/v1/login-redirect` : 'musikalokal://?verified=true'
+    return redirectTo || Deno.env.get('EMAIL_CONFIRM_REDIRECT_TO') || redirectPageUrl
 }
 
 function normalizeVerificationStatus(value: unknown) {
@@ -367,7 +369,10 @@ async function sendEmailConfirmationLink(
 
     if (supabaseUrl && supabaseAnonKey) {
         try {
-            const response = await fetch(`${supabaseUrl}/auth/v1/resend`, {
+            const resendUrl = new URL(`${supabaseUrl.replace(/\/+$/, '')}/auth/v1/resend`)
+            resendUrl.searchParams.set('redirect_to', redirectTo)
+
+            const response = await fetch(resendUrl.toString(), {
                 method: 'POST',
                 headers: {
                     apikey: supabaseAnonKey,
@@ -377,9 +382,6 @@ async function sendEmailConfirmationLink(
                 body: JSON.stringify({
                     type: 'signup',
                     email,
-                    options: {
-                        email_redirect_to: redirectTo,
-                    },
                 }),
             })
 

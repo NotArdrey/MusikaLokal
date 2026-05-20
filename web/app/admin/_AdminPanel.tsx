@@ -499,14 +499,15 @@ const getDetailsSectionIcon = (title: string) => {
 };
 
 const reportTargetLabels: Record<string, string> = {
+  feed_post: 'Feed post',
   group: 'Group',
   studio: 'Studio',
   venue: 'Gig',
   gig: 'Gig',
-  user: 'User Profile',
-  profile: 'User Profile',
-  product: 'Marketplace Item',
-  playlist: 'Music',
+  user: 'User profile',
+  profile: 'User profile',
+  product: 'Marketplace item',
+  playlist: 'Music playlist',
   music: 'Music',
 };
 
@@ -526,11 +527,15 @@ const extractReportTargetName = (record?: Record<string, unknown> | null) => {
     record.full_name,
     record.display_name,
     record.headline,
+    record.content,
+    record.caption,
+    record.description,
   ];
 
   for (const candidate of candidates) {
     if (typeof candidate === 'string' && candidate.trim().length > 0) {
-      return candidate.trim();
+      const value = candidate.replace(/\s+/g, ' ').trim();
+      return value.length > 140 ? `${value.slice(0, 137).trimEnd()}...` : value;
     }
   }
 
@@ -1809,6 +1814,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
         String(item.moderation_notes || '').toLowerCase().includes(q) ||
         String(item.escalation_status || '').toLowerCase().includes(q) ||
         String(item.escalation_reason || '').toLowerCase().includes(q) ||
+        formatReportTargetType(item.target_type).toLowerCase().includes(q) ||
         String(item.target_type || '').toLowerCase().includes(q) ||
         String(item.target_id || '').toLowerCase().includes(q) ||
         String(item.status || '').toLowerCase().includes(q)
@@ -2682,7 +2688,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Status: {report.status}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Escalation: {String(report.escalation_status || 'none').replace(/_/g, ' ')}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reporter: {report.reporter_name || 'Unknown'} ({report.reporter_email || 'no email'})</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Target: {formatReportTargetType(report.target_type)} ({report.target_id})</Text>
+                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reported item: {formatReportTargetType(report.target_type)}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Created: {formatDateTime(report.created_at)}</Text>
                     {report.reviewed_at ? (
                       <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reviewed: {formatDateTime(report.reviewed_at)} {report.reviewer_name ? `by ${report.reviewer_name}` : ''}</Text>

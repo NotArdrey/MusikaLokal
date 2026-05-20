@@ -57,6 +57,7 @@ const DEFAULT_SIGNED_URL_SECONDS = 24 * 60 * 60;
 const DEFAULT_LIVE_TRACK_DURATION_SECONDS = 180;
 
 let playerSetupPromise: Promise<void> | null = null;
+let radioPlayerCapabilitiesKey = "";
 
 type StorageObjectReference = {
   bucket: string;
@@ -266,55 +267,9 @@ const readTimestampMs = (value: unknown) => {
   return timestampMs;
 };
 
-export const getStationBroadcastStreamUrl = (stationData: any) => {
-  const streamUrl = readTrimmedString(stationData?.stream_url);
-  if (!streamUrl || stationData?.is_active === false) {
-    return "";
-  }
-
-  const streamStatus = readTrimmedString(stationData?.stream_status).toLowerCase();
-  if (streamStatus !== "live") {
-    return "";
-  }
-
-  return streamUrl;
-};
-
-export const buildStationBroadcastTrack = (stationData: any): RadioQueueTrack | null => {
-  const streamUrl = getStationBroadcastStreamUrl(stationData);
-  if (!streamUrl) {
-    return null;
-  }
-
-  const stationId = readTrimmedString(stationData?.id) || "station";
-  const stationName = readTrimmedString(stationData?.name) || "Live Station";
-  const artist = readTrimmedString(stationData?.now_playing_artist) ||
-    readPublicStationArtistName(stationData) ||
-    "MusikaLokal";
-  const title = readTrimmedString(stationData?.now_playing_title) || stationName;
-  const artwork = getTrackArtworkUrl(stationData, null, null, null);
-
-  return {
-    id: `${stationId}:live-stream`,
-    radioTrackId: `${stationId}:live-stream`,
-    stationId,
-    queueIndex: 0,
-    slotIndex: 0,
-    itemIndex: 0,
-    itemId: `${stationId}:live-stream`,
-    stationName,
-    playlistTitle: "Live broadcast",
-    slotLabel: "Live",
-    sourceArtistName: artist,
-    url: streamUrl,
-    title,
-    artist,
-    album: stationName,
-    artwork: artwork || undefined,
-    description: readTrimmedString(stationData?.description) || undefined,
-    genre: readTrimmedString(stationData?.genre) || undefined,
-    isLiveStream: true,
-  };
+const readNonNegativeNumber = (value: unknown) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 };
 
 const getStationAnchorTimestampMs = (stationData: any) => {
@@ -351,22 +306,34 @@ const getStationAnchorTimestampMs = (stationData: any) => {
   return Math.max(...candidateTimestamps);
 };
 
-const resolveAudioUri = async (item: any) => {
-  const storagePath = [
-    item?.teaser?.storage_path,
-    item?.teaser?.file_path,
-    item?.storage_path,
-  ]
-    .map(readTrimmedString)
-    .find(Boolean) || "";
+const getSyncedLiveOffsetSeconds = (
+  stationData: any,
+  resolvedTrackDurations: number[],
+  nowMs: number,
+) => {
+  const queueIndex = readNonNegativeNumber(stationData?.live_current_queue_index);
+  const positionSeconds = readNonNegativeNumber(stationData?.live_position_seconds);
 
-  if (storagePath) {
-    const resolvedStorageUrl = await resolveStorageAudioUri(storagePath, "playlist-assets");
-    if (resolvedStorageUrl) {
-      return resolvedStorageUrl;
-    }
+  if (
+    queueIndex === null ||
+    positionSeconds === null ||
+    queueIndex >= resolvedTrackDurations.length
+  ) {
+    return null;
   }
 
+  const syncedAtMs = readTimestampMs(stationData?.live_synced_at);
+  const elapsedSinceSyncSeconds = syncedAtMs === null
+    ? 0
+    : Math.max(0, Math.floor((nowMs - syncedAtMs) / 1000));
+  const offsetBeforeTrack = resolvedTrackDurations
+    .slice(0, Math.floor(queueIndex))
+    .reduce((total, duration) => total + duration, 0);
+
+  return offsetBeforeTrack + Math.floor(positionSeconds) + elapsedSinceSyncSeconds;
+};
+
+const resolveAudioUri = async (item: any) => {
   const directCandidates = [
     item?.audio_url,
     item?.audioUrl,
@@ -385,11 +352,26 @@ const resolveAudioUri = async (item: any) => {
   ];
 
   for (const candidate of directCandidates) {
-    const resolved = await resolveStorageAudioUri(candidate);
+    const trimmed = readTrimmedString(candidate);
+    if (!trimmed) {
+      continue;
+    }
+
+    const resolved = /^(https?:\/\/|data:|file:\/\/)/i.test(trimmed)
+      ? resolveRadioMediaUrl(trimmed)
+      : await resolveStorageAudioUri(trimmed);
     if (resolved) {
       return resolved;
     }
   }
+
+  const storagePath = [
+    item?.teaser?.storage_path,
+    item?.teaser?.file_path,
+    item?.storage_path,
+  ]
+    .map(readTrimmedString)
+    .find(Boolean) || "";
 
   return storagePath ? await resolveStorageAudioUri(storagePath, "playlist-assets") : "";
 };
@@ -415,39 +397,20 @@ const buildStationQueueEntries = (stationData: any): RadioQueueEntry[] => {
   });
 };
 
-const buildPlayerOptions = (canSkipPrevious: boolean, canSkipNext: boolean) => {
-  const capabilities: string[] = [Capability.Play, Capability.Pause, Capability.Stop, Capability.SeekTo];
-  const notificationCapabilities: string[] = [
-    Capability.Play,
-    Capability.Pause,
-    Capability.Stop,
-    Capability.SeekTo,
-  ];
-  const compactCapabilities: string[] = [Capability.Play, Capability.Pause];
-
-  if (canSkipPrevious) {
-    capabilities.push(Capability.SkipToPrevious);
-    notificationCapabilities.push(Capability.SkipToPrevious);
-    compactCapabilities.push(Capability.SkipToPrevious);
-  }
-
-  if (canSkipNext) {
-    capabilities.push(Capability.SkipToNext);
-    notificationCapabilities.push(Capability.SkipToNext);
-    compactCapabilities.push(Capability.SkipToNext);
-  }
-
+const buildPlayerOptions = (_canSkipPrevious: boolean, _canSkipNext: boolean) => {
   return {
     android: {
       appKilledPlaybackBehavior: AppKilledPlaybackBehavior.StopPlaybackAndRemoveNotification,
       stopForegroundGracePeriod: 0,
     },
-    capabilities,
-    notificationCapabilities,
-    compactCapabilities,
+    capabilities: [Capability.Stop],
+    notificationCapabilities: [Capability.Stop],
+    compactCapabilities: [],
     progressUpdateEventInterval: 1,
   };
 };
+
+const getRadioPlayerCapabilitiesKey = (_canSkipPrevious: boolean, _canSkipNext: boolean) => "radio-stop-only";
 
 export const ensureRadioPlayerSetup = async () => {
   if (!isTrackPlayerAvailable) {
@@ -476,6 +439,7 @@ export const ensureRadioPlayerSetup = async () => {
       }
 
       await TrackPlayer.updateOptions(buildPlayerOptions(false, false));
+      radioPlayerCapabilitiesKey = getRadioPlayerCapabilitiesKey(false, false);
     })();
   }
 
@@ -490,14 +454,37 @@ export const updateRadioPlayerCapabilities = async (
     return;
   }
 
+  const nextCapabilitiesKey = getRadioPlayerCapabilitiesKey(canSkipPrevious, canSkipNext);
   await ensureRadioPlayerSetup();
+  if (radioPlayerCapabilitiesKey === nextCapabilitiesKey) {
+    return;
+  }
+
   await TrackPlayer.updateOptions(buildPlayerOptions(canSkipPrevious, canSkipNext));
+  radioPlayerCapabilitiesKey = nextCapabilitiesKey;
 };
 
-export const buildStationQueue = async (stationData: any): Promise<RadioQueueTrack[]> => {
-  const queueEntries = buildStationQueueEntries(stationData);
+type BuildStationQueueOptions = {
+  onlyQueueIndex?: number | null;
+};
 
-  const tracks: Array<RadioQueueTrack | null> = await Promise.all(queueEntries.map(async (entry, queueIndex) => {
+export const buildStationQueue = async (
+  stationData: any,
+  options: BuildStationQueueOptions = {},
+): Promise<RadioQueueTrack[]> => {
+  const queueEntries = buildStationQueueEntries(stationData);
+  const onlyQueueIndex = typeof options.onlyQueueIndex === "number"
+    && Number.isFinite(options.onlyQueueIndex)
+    && options.onlyQueueIndex >= 0
+    ? Math.floor(options.onlyQueueIndex)
+    : null;
+  const entriesToResolve = onlyQueueIndex === null
+    ? queueEntries.map((entry, queueIndex) => ({ entry, queueIndex }))
+    : queueEntries[onlyQueueIndex]
+      ? [{ entry: queueEntries[onlyQueueIndex], queueIndex: onlyQueueIndex }]
+      : [];
+
+  const tracks: Array<RadioQueueTrack | null> = await Promise.all(entriesToResolve.map(async ({ entry, queueIndex }) => {
     const url = await resolveAudioUri(entry.item);
     if (!url) {
       return null;
@@ -554,7 +541,9 @@ export const buildStationQueue = async (stationData: any): Promise<RadioQueueTra
     return track;
   }));
 
-  return tracks.filter((track): track is RadioQueueTrack => track !== null);
+  return tracks
+    .filter((track): track is RadioQueueTrack => track !== null)
+    .sort((a, b) => a.queueIndex - b.queueIndex);
 };
 
 export const getLiveStationCursor = (
@@ -574,15 +563,6 @@ export const getLiveStationCursor = (
     (track) => normalizeDurationSeconds(track.duration) ?? DEFAULT_LIVE_TRACK_DURATION_SECONDS,
   );
 
-  const anchorTimestampMs = getStationAnchorTimestampMs(stationData);
-  if (!anchorTimestampMs) {
-    return {
-      queueIndex: 0,
-      positionSeconds: 0,
-      isSynchronized: false,
-    };
-  }
-
   const loopDurationSeconds = resolvedTrackDurations.reduce(
     (sum, duration) => sum + duration,
     0,
@@ -595,7 +575,17 @@ export const getLiveStationCursor = (
     };
   }
 
-  const elapsedSeconds = Math.max(0, Math.floor((nowMs - anchorTimestampMs) / 1000));
+  const syncedOffsetSeconds = getSyncedLiveOffsetSeconds(stationData, resolvedTrackDurations, nowMs);
+  const anchorTimestampMs = getStationAnchorTimestampMs(stationData);
+  if (syncedOffsetSeconds === null && !anchorTimestampMs) {
+    return {
+      queueIndex: 0,
+      positionSeconds: 0,
+      isSynchronized: false,
+    };
+  }
+
+  const elapsedSeconds = syncedOffsetSeconds ?? Math.max(0, Math.floor((nowMs - anchorTimestampMs!) / 1000));
   let remainingOffsetSeconds = elapsedSeconds % loopDurationSeconds;
 
   for (let index = 0; index < resolvedTrackDurations.length; index += 1) {

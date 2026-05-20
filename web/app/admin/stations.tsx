@@ -353,10 +353,6 @@ export default function AdminStationsPage() {
         genre: stationGenre.trim() || null,
         cover_image_url: editingSource.cover_image_url || null,
         rotation_interval_minutes: 15,
-        stream_url: null,
-        stream_status: 'offline',
-        now_playing_title: null,
-        now_playing_artist: null,
         playlist_ids: selectedPlaylistIds,
         is_active: stationIsLive,
       });
@@ -634,11 +630,6 @@ export default function AdminStationsPage() {
                 <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
                   Continuous loop
                 </Text>
-                {item.stream_url ? (
-                  <Text style={{ color: item.stream_status === 'live' ? '#22C55E' : colors.textSecondary, fontSize: 12, fontWeight: '700' }}>
-                    Stream {item.stream_status || 'offline'}
-                  </Text>
-                ) : null}
               </View>
 
               {queuePreview.current ? (

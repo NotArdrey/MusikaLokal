@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Image,
@@ -115,13 +115,11 @@ export default function StudioDetailsScreen() {
     message: "",
   });
 
-  useFocusEffect(
-    React.useCallback(() => {
-      if (requestedTab && STUDIO_TABS.includes(requestedTab) && requestedTab !== activeTab) {
-        setActiveTab(requestedTab);
-      }
-    }, [activeTab, requestedTab]),
-  );
+  useEffect(() => {
+    if (requestedTab && STUDIO_TABS.includes(requestedTab)) {
+      setActiveTab(requestedTab);
+    }
+  }, [requestedTab]);
 
   const showAlert = (
     type: AlertType,

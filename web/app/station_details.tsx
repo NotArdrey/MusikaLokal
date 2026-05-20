@@ -16,9 +16,11 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
-import { useAuth } from "../src/context/AuthContext";
 import { useRadioPlayer } from "../src/context/RadioPlayerContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { getStationLiveTimelineState } from "../src/utils/radioTimeline";
+
+const LIVE_STATION_REFRESH_MS = 30_000;
 
 const moderateScale = (size: number, factor = 0.3) => {
   const w = Math.min(Dimensions.get("window").width, 600);
@@ -26,16 +28,40 @@ const moderateScale = (size: number, factor = 0.3) => {
   return size + (scaled - size) * factor;
 };
 
+const readLiveIndex = (value: unknown) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
+};
+
+const getLiveCurrentSlot = (station: any, slots: any[]) => {
+  if (station?.live_current_slot) {
+    return station.live_current_slot;
+  }
+
+  const index = readLiveIndex(station?.live_current_slot_index);
+  return slots[index] || slots[0] || null;
+};
+
+const getLiveCurrentItem = (station: any, slots: any[]) => {
+  if (station?.live_current_item) {
+    return station.live_current_item;
+  }
+
+  const slot = getLiveCurrentSlot(station, slots);
+  const items = Array.isArray(slot?.playlist?.items) ? slot.playlist.items : [];
+  const index = readLiveIndex(station?.live_current_item_index);
+  return items[index] || items[0] || null;
+};
+
 export default function StationDetailsScreen() {
   const { colors, isDark } = useTheme();
-  const { userId } = useAuth();
   const {
     activeStation,
     currentSlotIndex,
     currentTrack,
-    isPlaying,
+    isMuted,
     loadingStationId,
-    togglePlayPause,
+    toggleMute,
     tuneIn,
   } = useRadioPlayer();
   const { station_id } = useLocalSearchParams();
@@ -45,6 +71,7 @@ export default function StationDetailsScreen() {
   const [station, setStation] = useState<any>(null);
   const [slots, setSlots] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
 
   const bg = isWebDesktop ? (isDark ? "#0F172A" : "#F1F5F9") : colors.background;
   const cardBg = isWebDesktop ? (isDark ? "#1E293B" : "#FFFFFF") : colors.surface;
@@ -59,35 +86,44 @@ export default function StationDetailsScreen() {
     finally { setLoading(false); }
   }, [station_id]);
 
-  useEffect(() => { fetchStation(); }, [fetchStation]);
+  useEffect(() => {
+    fetchStation();
+    const intervalId = setInterval(fetchStation, LIVE_STATION_REFRESH_MS);
+    return () => clearInterval(intervalId);
+  }, [fetchStation]);
+
+  useEffect(() => {
+    const liveClockTimer = setInterval(() => {
+      setLiveNowMs(Date.now());
+    }, 1000);
+
+    return () => clearInterval(liveClockTimer);
+  }, []);
 
   if (loading) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Station" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /><Navbar /></View>;
   if (!station) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Station" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Station not found</Text></View><Navbar /></View>;
 
-  const isOwner = station.creator_id === userId || station.managed_profile_id === userId;
-  const hasBroadcastStream =
-    typeof station?.stream_url === "string" &&
-    station.stream_url.trim().length > 0 &&
-    station?.stream_status === "live";
   const liveSlots = Array.isArray(station.live_slots) && station.live_slots.length > 0
     ? station.live_slots
     : slots;
-  const stationStatus = station?.is_active && (hasBroadcastStream || liveSlots.length > 0) ? "live" : "offline";
+  const liveTimelineState = getStationLiveTimelineState(station, liveNowMs);
+  const liveCurrentSlot = liveTimelineState.slot || getLiveCurrentSlot(station, liveSlots);
+  const liveCurrentItem = liveTimelineState.item || getLiveCurrentItem(station, liveSlots);
+  const stationStatus = station?.is_active && liveSlots.length > 0 ? "live" : "offline";
   const isCurrentStation = Boolean(activeStation?.id && activeStation.id === station.id);
+  const isCurrentMuted = isCurrentStation && isMuted;
   const isTuneInLoading = Boolean(loadingStationId === station.id);
   const canTuneIn = stationStatus === "live";
   const nowPlayingTitle = isCurrentStation
-    ? currentTrack?.title || station.now_playing_title || liveSlots[currentSlotIndex]?.playlist?.title || station.name
-    : hasBroadcastStream
-      ? station.now_playing_title || station.name || "Live broadcast"
-      : liveSlots[0]?.playlist?.title || liveSlots[0]?.label || "Shared playlist radio";
+    ? liveCurrentItem?.title || currentTrack?.title || liveSlots[liveTimelineState.slotIndex ?? currentSlotIndex]?.playlist?.title || station.name
+    : liveCurrentItem?.title || liveCurrentSlot?.playlist?.title || liveCurrentSlot?.label || "Shared playlist radio";
   const statusColors: Record<string, string> = { live: "#22c55e", paused: "#eab308", offline: "#64748b" };
 
   const handlePlayPress = async () => {
     if (!canTuneIn || isTuneInLoading) return;
 
     if (isCurrentStation) {
-      await togglePlayPause();
+      await toggleMute();
       return;
     }
 
@@ -108,18 +144,16 @@ export default function StationDetailsScreen() {
           <View style={styles.metaRow}>
             <View style={[styles.badge, { backgroundColor: statusColors[stationStatus] + "20" }]}>
               <Text style={{ color: statusColors[stationStatus], fontSize: 12, fontWeight: "600", textTransform: "capitalize" }}>
-                {stationStatus === "live" ? (hasBroadcastStream ? "Live Stream" : "Station Queue") : "Offline"}
+                {stationStatus === "live" ? "Station Queue" : "Offline"}
               </Text>
             </View>
             {station.genre && <View style={[styles.badge, { backgroundColor: colors.primary + "18" }]}><Text style={{ color: colors.primary, fontSize: 12 }}>{station.genre}</Text></View>}
           </View>
 
           <Text style={{ color: colors.textSecondary, fontSize: moderateScale(13), marginTop: 10, lineHeight: 20 }}>
-            {hasBroadcastStream
-              ? "Real continuous broadcast. Everyone hears the same stream timeline."
-              : liveSlots.length > 0
+            {liveSlots.length > 0
                 ? "Shared playlist radio. The app keeps listeners on the same station timeline."
-                : "No station queue or live stream is available yet."}
+                : "No station queue is available yet."}
           </Text>
 
           {canTuneIn && (
@@ -141,20 +175,17 @@ export default function StationDetailsScreen() {
                 {isTuneInLoading ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Ionicons name={isCurrentStation && isPlaying ? "pause" : "play"} size={18} color="#FFFFFF" />
+                  <Ionicons
+                    name={isCurrentStation ? (isCurrentMuted ? "volume-mute" : "volume-high") : "play"}
+                    size={18}
+                    color="#FFFFFF"
+                  />
                 )}
                 <Text style={{ color: "#FFFFFF", fontWeight: "700", marginLeft: 8 }}>
-                  {isTuneInLoading ? "Loading" : isCurrentStation && isPlaying ? "Pause" : "Listen"}
+                  {isTuneInLoading ? "Loading" : isCurrentStation ? (isCurrentMuted ? "Unmute" : "Mute") : "Listen"}
                 </Text>
               </TouchableOpacity>
             </View>
-          )}
-
-          {isOwner && (
-            <TouchableOpacity activeOpacity={1} style={[styles.manageBtn, { backgroundColor: colors.primary }]}>
-              <Ionicons name="settings-outline" size={18} color="#fff" />
-              <Text style={{ color: "#fff", fontWeight: "600", marginLeft: 8 }}>Manage Station</Text>
-            </TouchableOpacity>
           )}
 
           <Text style={{ color: colors.text, fontSize: moderateScale(16), fontWeight: "700", marginTop: 24, marginBottom: 12 }}>Station Queue</Text>
@@ -189,7 +220,6 @@ const styles = StyleSheet.create({
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   playerPanel: { flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderRadius: 12, marginTop: 14, padding: 12 },
   playBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
-  manageBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 12, borderRadius: 10, marginTop: 16 },
   slotCard: { padding: 14, borderRadius: 10, borderWidth: 1, marginBottom: 10 },
   slotTime: { flexDirection: "row", alignItems: "center" },
 });

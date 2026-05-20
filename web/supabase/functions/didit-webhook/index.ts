@@ -1005,7 +1005,11 @@ async function sendVerificationEmail(
             // Use magic link endpoint - customize the "Magic Link" template in 
             // Supabase Dashboard > Authentication > Email Templates
             // Template variables available: {{ .ConfirmationURL }}, {{ .Email }}, {{ .SiteURL }}
-            const response = await fetch(`${supabaseUrl}/auth/v1/magiclink`, {
+            const appRedirectTo = `${supabaseUrl.replace(/\/+$/, '')}/functions/v1/login-redirect`;
+            const magicLinkUrl = new URL(`${supabaseUrl.replace(/\/+$/, '')}/auth/v1/magiclink`);
+            magicLinkUrl.searchParams.set('redirect_to', appRedirectTo);
+
+            const response = await fetch(magicLinkUrl.toString(), {
                 method: 'POST',
                 headers: {
                     'apikey': serviceRoleKey,
@@ -1014,8 +1018,6 @@ async function sendVerificationEmail(
                 body: JSON.stringify({
                     email: userEmail,
                     options: {
-                        // This becomes {{ .RedirectTo }} in your template
-                        redirectTo: 'musikalokal://?verified=true',
                         // Pass custom data that might be available in template
                         data: {
                             full_name: fullName,
@@ -1038,7 +1040,10 @@ async function sendVerificationEmail(
 
                 // Fallback: Try invite endpoint
                 console.log('Trying invite endpoint as fallback...');
-                const inviteResponse = await fetch(`${supabaseUrl}/auth/v1/invite`, {
+                const inviteUrl = new URL(`${supabaseUrl.replace(/\/+$/, '')}/auth/v1/invite`);
+                inviteUrl.searchParams.set('redirect_to', appRedirectTo);
+
+                const inviteResponse = await fetch(inviteUrl.toString(), {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${serviceRoleKey}`,
@@ -1048,7 +1053,6 @@ async function sendVerificationEmail(
                     body: JSON.stringify({
                         email: userEmail,
                         options: {
-                            redirectTo: 'musikalokal://?verified=true',
                             data: {
                                 full_name: fullName,
                                 first_name: firstName,

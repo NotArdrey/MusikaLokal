@@ -54,12 +54,45 @@ type RadioPlayerContextValue = {
 const KNOWN_RADIO_MEDIA_BUCKETS = ["post-media", "posts", "images", "listings", "documents", "avatars"];
 const DEFAULT_SIGNED_URL_SECONDS = 24 * 60 * 60;
 const DEFAULT_LIVE_TRACK_DURATION_SECONDS = 180;
+const PLAYLIST_RADIO_ID_PREFIX = "playlist-radio:";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const RadioPlayerContext = createContext<RadioPlayerContextValue | undefined>(undefined);
 
 const normalizeQueueIndex = (queueLength: number, index: number) => {
   if (queueLength <= 0) return 0;
   return ((index % queueLength) + queueLength) % queueLength;
+};
+
+const readUuidString = (value: unknown) => {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return UUID_PATTERN.test(trimmed) ? trimmed : "";
+};
+
+const getStationTuneInEventIds = (stationData: any) => {
+  const slots = Array.isArray(stationData?.live_slots)
+    ? stationData.live_slots
+    : Array.isArray(stationData?.slots)
+      ? stationData.slots
+      : [];
+  const playlistId = slots
+    .map((slot: any) => readUuidString(slot?.playlist?.id ?? slot?.playlist_id))
+    .find(Boolean) || "";
+
+  const stationId = readUuidString(stationData?.id);
+  if (stationId) {
+    return { playlistId, stationId };
+  }
+
+  const syntheticId = typeof stationData?.id === "string" ? stationData.id.trim() : "";
+  const syntheticPlaylistId = syntheticId.startsWith(PLAYLIST_RADIO_ID_PREFIX)
+    ? readUuidString(syntheticId.slice(PLAYLIST_RADIO_ID_PREFIX.length))
+    : "";
+  if (syntheticPlaylistId) {
+    return { playlistId: syntheticPlaylistId, stationId: "" };
+  }
+
+  return { playlistId, stationId: "" };
 };
 
 const normalizeRelativeSupabaseStorageUrl = (value: string) => {
@@ -134,55 +167,9 @@ const readTimestampMs = (value: unknown) => {
   return Number.isFinite(timestampMs) ? timestampMs : null;
 };
 
-const readTrimmedString = (value: unknown) => (
-  typeof value === "string" ? value.trim() : ""
-);
-
-const getStationBroadcastStreamUrl = (stationData: any) => {
-  const streamUrl = readTrimmedString(stationData?.stream_url);
-  if (!streamUrl || stationData?.is_active === false) return "";
-
-  const streamStatus = readTrimmedString(stationData?.stream_status).toLowerCase();
-  if (streamStatus !== "live") return "";
-
-  return streamUrl;
-};
-
-const buildStationBroadcastTrack = (stationData: any): RadioQueueTrack | null => {
-  const streamUrl = getStationBroadcastStreamUrl(stationData);
-  if (!streamUrl) return null;
-
-  const stationId = readTrimmedString(stationData?.id) || "station";
-  const stationName = readTrimmedString(stationData?.name) || "Live Station";
-  const artist =
-    readTrimmedString(stationData?.now_playing_artist) ||
-    readTrimmedString(stationData?.managed_profile?.full_name) ||
-    readTrimmedString(stationData?.creator?.full_name) ||
-    "MusikaLokal";
-  const title = readTrimmedString(stationData?.now_playing_title) || stationName;
-  const artwork = resolveRadioMediaUrl(
-    stationData?.cover_image_url ||
-    stationData?.managed_profile?.avatar_url ||
-    stationData?.creator?.avatar_url,
-  );
-
-  return {
-    id: `${stationId}:live-stream`,
-    itemId: `${stationId}:live-stream`,
-    stationId,
-    queueIndex: 0,
-    slotIndex: 0,
-    itemIndex: 0,
-    stationName,
-    playlistTitle: "Live broadcast",
-    slotLabel: "Live",
-    sourceArtistName: artist,
-    url: streamUrl,
-    title,
-    artist,
-    artwork: artwork || undefined,
-    isLiveStream: true,
-  };
+const readNonNegativeNumber = (value: unknown) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 };
 
 const getStationAnchorTimestampMs = (stationData: any) => {
@@ -210,25 +197,82 @@ const getStationAnchorTimestampMs = (stationData: any) => {
   return timestamps.length > 0 ? Math.max(...timestamps) : null;
 };
 
+const getSyncedLiveOffsetSeconds = (
+  stationData: any,
+  resolvedTrackDurations: number[],
+  nowMs: number,
+) => {
+  const queueIndex = readNonNegativeNumber(stationData?.live_current_queue_index);
+  const positionSeconds = readNonNegativeNumber(stationData?.live_position_seconds);
+
+  if (
+    queueIndex === null ||
+    positionSeconds === null ||
+    queueIndex >= resolvedTrackDurations.length
+  ) {
+    return null;
+  }
+
+  const syncedAtMs = readTimestampMs(stationData?.live_synced_at);
+  const elapsedSinceSyncSeconds = syncedAtMs === null
+    ? 0
+    : Math.max(0, Math.floor((nowMs - syncedAtMs) / 1000));
+  const offsetBeforeTrack = resolvedTrackDurations
+    .slice(0, Math.floor(queueIndex))
+    .reduce((total, duration) => total + duration, 0);
+
+  return offsetBeforeTrack + Math.floor(positionSeconds) + elapsedSinceSyncSeconds;
+};
+
 const getStationSlots = (stationData: any) => {
   if (Array.isArray(stationData?.live_slots)) return stationData.live_slots;
   return Array.isArray(stationData?.slots) ? stationData.slots : [];
 };
 
 const resolveAudioUri = async (item: any) => {
-  const storagePath = typeof item?.teaser?.storage_path === "string" ? item.teaser.storage_path.trim() : "";
+  const directCandidates = [
+    item?.audio_url,
+    item?.audioUrl,
+    item?.public_url,
+    item?.publicUrl,
+    item?.signed_url,
+    item?.signedUrl,
+    item?.url,
+    item?.teaser?.audio_url,
+    item?.teaser?.audioUrl,
+    item?.teaser?.public_url,
+    item?.teaser?.publicUrl,
+    item?.teaser?.signed_url,
+    item?.teaser?.signedUrl,
+    item?.teaser?.url,
+  ];
 
-  if (storagePath) {
-    const { data, error } = await supabase.storage
-      .from("playlist-assets")
-      .createSignedUrl(storagePath, DEFAULT_SIGNED_URL_SECONDS);
-
-    if (data?.signedUrl) return data.signedUrl;
-    if (error) console.warn("Radio signed URL error:", error.message);
+  for (const candidate of directCandidates) {
+    const audioUrl = typeof candidate === "string" ? candidate.trim() : "";
+    if (isLikelyBrowserAudioUrl(audioUrl)) {
+      return resolveRadioMediaUrl(audioUrl);
+    }
   }
 
-  const audioUrl = typeof item?.audio_url === "string" ? item.audio_url.trim() : "";
-  return isLikelyBrowserAudioUrl(audioUrl) ? resolveRadioMediaUrl(audioUrl) : "";
+  const storagePath = [
+    item?.teaser?.storage_path,
+    item?.teaser?.file_path,
+    item?.storage_path,
+  ]
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .find(Boolean) || "";
+
+  if (!storagePath) {
+    return "";
+  }
+
+  const { data, error } = await supabase.storage
+    .from("playlist-assets")
+    .createSignedUrl(storagePath, DEFAULT_SIGNED_URL_SECONDS);
+
+  if (data?.signedUrl) return data.signedUrl;
+  if (error) console.warn("Radio signed URL error:", error.message);
+  return "";
 };
 
 const buildStationQueue = async (stationData: any): Promise<RadioQueueTrack[]> => {
@@ -286,16 +330,21 @@ const buildStationQueue = async (stationData: any): Promise<RadioQueueTrack[]> =
 const getLiveStationCursor = (stationData: any, fullQueue: RadioQueueTrack[]) => {
   if (fullQueue.length === 0) return { queueIndex: 0, positionSeconds: 0, isSynchronized: false };
 
-  const anchorTimestampMs = getStationAnchorTimestampMs(stationData);
-  if (!anchorTimestampMs) return { queueIndex: 0, positionSeconds: 0, isSynchronized: false };
-
   const resolvedDurations = fullQueue.map(
     (track) => normalizeDurationSeconds(track.duration) ?? DEFAULT_LIVE_TRACK_DURATION_SECONDS,
   );
   const loopDurationSeconds = resolvedDurations.reduce((sum, duration) => sum + duration, 0);
   if (loopDurationSeconds <= 0) return { queueIndex: 0, positionSeconds: 0, isSynchronized: false };
 
-  let remainingOffsetSeconds = Math.max(0, Math.floor((Date.now() - anchorTimestampMs) / 1000)) % loopDurationSeconds;
+  const nowMs = Date.now();
+  const syncedOffsetSeconds = getSyncedLiveOffsetSeconds(stationData, resolvedDurations, nowMs);
+  const anchorTimestampMs = getStationAnchorTimestampMs(stationData);
+  if (syncedOffsetSeconds === null && !anchorTimestampMs) {
+    return { queueIndex: 0, positionSeconds: 0, isSynchronized: false };
+  }
+
+  const elapsedSeconds = syncedOffsetSeconds ?? Math.max(0, Math.floor((nowMs - anchorTimestampMs!) / 1000));
+  let remainingOffsetSeconds = elapsedSeconds % loopDurationSeconds;
 
   for (let index = 0; index < resolvedDurations.length; index += 1) {
     if (remainingOffsetSeconds < resolvedDurations[index]) {
@@ -457,15 +506,15 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
   }, [beginRequest, ensureAudio, setQueueState]);
 
   const recordStationTuneIn = useCallback((stationData: any) => {
-    const stationId = typeof stationData?.id === "string" ? stationData.id : "";
-    if (!stationId) return;
+    const { playlistId, stationId } = getStationTuneInEventIds(stationData);
+    if (!stationId && !playlistId) return;
 
     void supabase.functions.invoke("manage-playlists", {
       body: {
         action: "record_play_event",
         event_type: "station_tune_in",
-        station_id: stationId,
-        playlist_id: null,
+        station_id: stationId || null,
+        playlist_id: playlistId || null,
         item_id: null,
         platform: "web",
       },
@@ -484,8 +533,6 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
 
     if (activeStationRef.current?.id === stationId && queueRef.current.length > 0 && audio) {
       if (!audio.paused) {
-        audio.pause();
-        setIsPlaying(false);
         return;
       }
 
@@ -499,34 +546,12 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
 
     try {
       let playableStation = stationData;
-      let broadcastTrack = buildStationBroadcastTrack(playableStation);
-      if (broadcastTrack) {
-        activeStationRef.current = playableStation;
-        queueRef.current = [broadcastTrack];
-        setQueueLength(1);
-        setActiveStation(playableStation);
-        await playQueueIndex(0, true, 0);
-        recordStationTuneIn(playableStation);
-        return;
-      }
-
       let queue = await buildStationQueue(playableStation);
       if (requestId !== requestIdRef.current) return;
 
       if (queue.length === 0 && playableStation.__queueReady !== true) {
         playableStation = await ensureStationData(stationData);
         if (requestId !== requestIdRef.current) return;
-
-        broadcastTrack = buildStationBroadcastTrack(playableStation);
-        if (broadcastTrack) {
-          activeStationRef.current = playableStation;
-          queueRef.current = [broadcastTrack];
-          setQueueLength(1);
-          setActiveStation(playableStation);
-          await playQueueIndex(0, true, 0);
-          recordStationTuneIn(playableStation);
-          return;
-        }
 
         queue = await buildStationQueue(playableStation);
         if (requestId !== requestIdRef.current) return;
@@ -565,8 +590,6 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     if (!audio) return;
 
     if (!audio.paused) {
-      audio.pause();
-      setIsPlaying(false);
       return;
     }
 

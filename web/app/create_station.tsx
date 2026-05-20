@@ -100,10 +100,6 @@ export default function CreateStationScreen() {
         description: description.trim() || null,
         genre: genre.trim() || null,
         rotation_interval_minutes: 15,
-        stream_url: null,
-        stream_status: "offline",
-        now_playing_title: null,
-        now_playing_artist: null,
       };
       const managedProfileId =
         typeof profile_id === "string" && profile_id.trim().length > 0

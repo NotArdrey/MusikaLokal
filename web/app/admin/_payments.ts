@@ -22,6 +22,7 @@ export interface AdminPaymentTransaction {
   payment_status: string;
   payment_type: string | null;
   payment_method: string | null;
+  booking_value_amount: number;
   amount: number;
   refund_amount: number;
   net_amount: number;
@@ -140,6 +141,7 @@ const normalizePaymentTransaction = (item: any): AdminPaymentTransaction => ({
   payment_status: String(item?.payment_status || ''),
   payment_type: normalizeText(item?.payment_type),
   payment_method: normalizeText(item?.payment_method),
+  booking_value_amount: toNumber(item?.booking_value_amount ?? item?.bookingValueAmount ?? item?.amount),
   amount: toNumber(item?.amount),
   refund_amount: toNumber(item?.refund_amount),
   net_amount: toNumber(item?.net_amount),
@@ -246,9 +248,10 @@ const buildPaymentExcelRows = (transactions: AdminPaymentTransaction[]) => {
     'Studio': transaction.studio_name || '',
     'Studio Owner': transaction.owner_name || transaction.owner_email || '',
     'Owner Email': transaction.owner_email || '',
-    'Amount': transaction.amount.toFixed(2),
+    'Booking Value': transaction.booking_value_amount.toFixed(2),
+    'Collected Amount': transaction.amount.toFixed(2),
     'Refund Amount': transaction.refund_amount.toFixed(2),
-    'Net Amount': transaction.net_amount.toFixed(2),
+    'Net Collected': transaction.net_amount.toFixed(2),
     'Remaining Balance': transaction.remaining_balance.toFixed(2),
     'Provider Earning': transaction.provider_earning_amount.toFixed(2),
     'Payment Type': transaction.payment_type || '',
@@ -370,9 +373,9 @@ const pdfColumns: {
   { header: 'Action', key: 'Action', width: 82 },
   { header: 'Customer', key: 'Customer', width: 120 },
   { header: 'Studio', key: 'Studio', width: 110 },
-  { header: 'Amount', key: 'Amount', width: 65, align: 'right' },
+  { header: 'Collected', key: 'Collected Amount', width: 65, align: 'right' },
   { header: 'Refund', key: 'Refund Amount', width: 65, align: 'right' },
-  { header: 'Net', key: 'Net Amount', width: 65, align: 'right' },
+  { header: 'Net', key: 'Net Collected', width: 65, align: 'right' },
   { header: 'Booking ID', key: 'Booking ID', width: 175 },
 ];
 

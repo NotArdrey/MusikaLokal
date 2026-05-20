@@ -11,6 +11,7 @@ const MAX_PLAYLIST_TRACK_DURATION_SECONDS = 300;
 const DEFAULT_STATION_ROTATION_INTERVAL_MINUTES = 15;
 const MIN_STATION_ROTATION_INTERVAL_MINUTES = 5;
 const MAX_STATION_ROTATION_INTERVAL_MINUTES = 120;
+const DEFAULT_LIVE_TRACK_DURATION_SECONDS = 180;
 const DEFAULT_STATION_CONCURRENT_SLOT_LIMIT = 4;
 const MAX_STATION_CONCURRENT_SLOT_LIMIT = 4;
 const ADMIN_STATION_SOURCE_PLAYLIST_LIMIT = 500;
@@ -18,6 +19,8 @@ const PLAYLIST_AUDIO_SIGNED_URL_SECONDS = 24 * 60 * 60;
 const KNOWN_PLAYLIST_AUDIO_BUCKETS = new Set(["documents", "playlist-assets"]);
 const KNOWN_PLAYLIST_STORAGE_BUCKETS = new Set(["documents", "playlist-assets", "post-media"]);
 const PLAYLIST_ASSET_BUCKET = "playlist-assets";
+const PLAYLIST_RADIO_ID_PREFIX = "playlist-radio:";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")?.trim() || "";
 const GROQ_MODEL_CANDIDATES = [
@@ -93,31 +96,6 @@ function normalizeOptionalAudioUrl(value: unknown): string | null {
   }
 
   return trimmed;
-}
-
-function normalizeOptionalStationStreamUrl(value: unknown): string | null {
-  const trimmed = typeof value === "string" ? value.trim() : "";
-  if (!trimmed) {
-    return null;
-  }
-
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch (_) {
-    throw new Error("stream_url must be a valid http or https URL");
-  }
-
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("stream_url must be a valid http or https URL");
-  }
-
-  return trimmed;
-}
-
-function normalizeStationStreamStatus(value: unknown, fallback = "offline") {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-  return ["offline", "live", "autoplay"].includes(normalized) ? normalized : fallback;
 }
 
 function normalizePositiveInteger(
@@ -198,6 +176,143 @@ function getStationQueueAnchorTimestampMs(station: any, slots: any[]) {
   }
 
   return Math.max(...candidateTimestamps);
+}
+
+function normalizeLiveTrackDurationSeconds(value: unknown, fallback = DEFAULT_LIVE_TRACK_DURATION_SECONDS) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return Math.max(1, Math.round(parsed));
+}
+
+function getSlotFallbackDurationSeconds(slot: any, rotationIntervalMinutes: number) {
+  const playlist = slot?.playlist || {};
+  const playlistDuration = Number(playlist?.total_duration_seconds);
+  if (Number.isFinite(playlistDuration) && playlistDuration > 0) {
+    return Math.max(1, Math.round(playlistDuration));
+  }
+
+  const trackCount = Number(playlist?.track_count);
+  if (Number.isFinite(trackCount) && trackCount > 0) {
+    return Math.max(1, Math.round(trackCount) * DEFAULT_LIVE_TRACK_DURATION_SECONDS);
+  }
+
+  return Math.max(1, rotationIntervalMinutes * 60);
+}
+
+function hasPlaylistItemAudioSource(item: any) {
+  return Boolean(
+    (typeof item?.audio_url === "string" && item.audio_url.trim().length > 0) ||
+    (typeof item?.storage_path === "string" && item.storage_path.trim().length > 0) ||
+    (typeof item?.teaser?.storage_path === "string" && item.teaser.storage_path.trim().length > 0) ||
+    (typeof item?.teaser?.file_path === "string" && item.teaser.file_path.trim().length > 0)
+  );
+}
+
+function getStationLiveTimeline(
+  station: any,
+  slots: any[],
+  rotationIntervalMinutes: number,
+  nowMs = Date.now(),
+) {
+  const anchorTimestampMs = getStationQueueAnchorTimestampMs(station, slots) ?? nowMs;
+  const entries = (slots || []).flatMap((slot: any, slotIndex: number) => {
+    const playlist = slot?.playlist || {};
+    const items = Array.isArray(playlist?.items)
+      ? playlist.items.filter(hasPlaylistItemAudioSource)
+      : [];
+
+    if (items.length === 0) {
+      return [{
+        durationSeconds: getSlotFallbackDurationSeconds(slot, rotationIntervalMinutes),
+        item: null,
+        itemIndex: 0,
+        queueIndex: 0,
+        slot,
+        slotIndex,
+      }];
+    }
+
+    return items.map((item: any, itemIndex: number) => ({
+      durationSeconds: normalizeLiveTrackDurationSeconds(
+        item?.duration_seconds ?? item?.teaser?.duration_seconds,
+      ),
+      item,
+      itemIndex,
+      queueIndex: 0,
+      slot,
+      slotIndex,
+    }));
+  }).map((entry: any, queueIndex: number) => ({ ...entry, queueIndex }));
+
+  if (entries.length === 0) {
+    return {
+      anchorTimestampMs,
+      currentDurationSeconds: 0,
+      currentItem: null,
+      currentItemIndex: 0,
+      currentQueueIndex: 0,
+      currentSlot: null,
+      currentSlotIndex: 0,
+      loopDurationSeconds: 0,
+      positionSeconds: 0,
+    };
+  }
+
+  const loopDurationSeconds = entries.reduce(
+    (total: number, entry: any) => total + entry.durationSeconds,
+    0,
+  );
+  if (loopDurationSeconds <= 0) {
+    const first = entries[0];
+    return {
+      anchorTimestampMs,
+      currentDurationSeconds: 0,
+      currentItem: first.item,
+      currentItemIndex: first.itemIndex,
+      currentQueueIndex: first.queueIndex,
+      currentSlot: first.slot,
+      currentSlotIndex: first.slotIndex,
+      loopDurationSeconds: 0,
+      positionSeconds: 0,
+    };
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor((nowMs - anchorTimestampMs) / 1000));
+  let remainingOffsetSeconds = elapsedSeconds % loopDurationSeconds;
+
+  for (const entry of entries) {
+    if (remainingOffsetSeconds < entry.durationSeconds) {
+      return {
+        anchorTimestampMs,
+        currentDurationSeconds: entry.durationSeconds,
+        currentItem: entry.item,
+        currentItemIndex: entry.itemIndex,
+        currentQueueIndex: entry.queueIndex,
+        currentSlot: entry.slot,
+        currentSlotIndex: entry.slotIndex,
+        loopDurationSeconds,
+        positionSeconds: remainingOffsetSeconds,
+      };
+    }
+
+    remainingOffsetSeconds -= entry.durationSeconds;
+  }
+
+  const first = entries[0];
+  return {
+    anchorTimestampMs,
+    currentDurationSeconds: first.durationSeconds,
+    currentItem: first.item,
+    currentItemIndex: first.itemIndex,
+    currentQueueIndex: first.queueIndex,
+    currentSlot: first.slot,
+    currentSlotIndex: first.slotIndex,
+    loopDurationSeconds,
+    positionSeconds: 0,
+  };
 }
 
 function clamp(value: number, min = 0, max = 1) {
@@ -719,6 +834,20 @@ function normalizeProfileId(value: unknown) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function normalizeUuid(value: unknown) {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return UUID_PATTERN.test(trimmed) ? trimmed : null;
+}
+
+function readPlaylistRadioFallbackId(value: unknown) {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed.startsWith(PLAYLIST_RADIO_ID_PREFIX)) {
+    return null;
+  }
+
+  return normalizeUuid(trimmed.slice(PLAYLIST_RADIO_ID_PREFIX.length));
+}
+
 function resolveManagedProfileId(
   requesterRole: string | null,
   uid: string,
@@ -829,7 +958,7 @@ async function transferManagedProfileStationsToAdmin(
 async function getPrimaryManagedStation(supabaseAdmin: any, managedProfileId: string) {
   const { data, error } = await supabaseAdmin
     .from("stations")
-    .select("id, creator_id, managed_profile_id, last_seen_live_at")
+    .select("id, creator_id, managed_profile_id")
     .eq("managed_profile_id", managedProfileId)
     .is("managed_group_id", null)
     .order("created_at", { ascending: false })
@@ -851,7 +980,7 @@ async function getPrimaryManagedSourceStation(
 ) {
   let query = supabaseAdmin
     .from("stations")
-    .select("id, creator_id, managed_profile_id, managed_group_id, is_active, is_featured, stream_url, stream_status, now_playing_title, now_playing_artist, last_seen_live_at")
+    .select("id, creator_id, managed_profile_id, managed_group_id, is_active, is_featured")
     .order("created_at", { ascending: false })
     .limit(1);
 
@@ -971,11 +1100,6 @@ function getSourceStationSummary(stationsBySourceKey: Map<string, any>, sourceKe
     is_active: station.is_active,
     is_featured: station.is_featured,
     rotation_interval_minutes: station.rotation_interval_minutes,
-    stream_url: station.stream_url || null,
-    stream_status: station.stream_status || "offline",
-    now_playing_title: station.now_playing_title || null,
-    now_playing_artist: station.now_playing_artist || null,
-    last_seen_live_at: station.last_seen_live_at || null,
     slot_count: station.slot_count || 0,
     slot_playlist_ids: station.slot_playlist_ids || [],
   };
@@ -1040,7 +1164,7 @@ async function listAdminStationSources(supabaseAdmin: any) {
       : Promise.resolve({ data: [], error: null }),
     supabaseAdmin
       .from("stations")
-      .select("id, creator_id, name, description, genre, cover_image_url, is_active, is_featured, rotation_interval_minutes, stream_url, stream_status, now_playing_title, now_playing_artist, last_seen_live_at, managed_profile_id, managed_group_id"),
+      .select("id, creator_id, name, description, genre, cover_image_url, is_active, is_featured, rotation_interval_minutes, managed_profile_id, managed_group_id"),
   ]);
 
   if (groupLinksError) {
@@ -1384,22 +1508,12 @@ async function upsertStationFromSource(
     is_active: "is_active" in params ? params.is_active !== false : existingStation?.is_active ?? true,
     is_featured: "is_featured" in params ? params.is_featured === true : existingStation?.is_featured ?? false,
     rotation_interval_minutes: normalizeStationRotationIntervalMinutes(params.rotation_interval_minutes),
-    stream_url: "stream_url" in params
-      ? normalizeOptionalStationStreamUrl(params.stream_url)
-      : existingStation?.stream_url || null,
-    stream_status: "stream_status" in params
-      ? normalizeStationStreamStatus(params.stream_status, existingStation?.stream_status || "offline")
-      : existingStation?.stream_status || "offline",
-    now_playing_title: params.now_playing_title || null,
-    now_playing_artist: params.now_playing_artist || null,
-    last_seen_live_at: existingStation?.last_seen_live_at || null,
+    stream_url: null,
+    stream_status: "offline",
+    now_playing_title: null,
+    now_playing_artist: null,
+    last_seen_live_at: null,
   };
-  if (!stationPatch.stream_url && stationPatch.stream_status === "live") {
-    stationPatch.stream_status = "offline";
-  }
-  if (stationPatch.stream_url && stationPatch.stream_status === "live") {
-    stationPatch.last_seen_live_at = new Date().toISOString();
-  }
 
   let station: any;
   if (existingStation?.id) {
@@ -1454,7 +1568,7 @@ async function upsertStationFromSource(
   }
 
   return {
-    ...station,
+    ...removeStationStreamFields(station),
     slot_count: selectedPlaylistIds.length,
     slot_playlist_ids: selectedPlaylistIds,
   };
@@ -1477,13 +1591,26 @@ function getStationLiveSlotState(station: any, slots: any[]) {
   const rotationIntervalMinutes = getStationRotationIntervalMinutes(station);
   const concurrentSlotLimit = normalizedSlots.length || getStationConcurrentSlotLimit(station);
   const nowMs = Date.now();
-
-  const baseTimestampMs = getStationQueueAnchorTimestampMs(station, normalizedSlots) ?? nowMs;
+  const liveTimeline = getStationLiveTimeline(
+    station,
+    normalizedSlots,
+    rotationIntervalMinutes,
+    nowMs,
+  );
 
   return {
     concurrentSlotLimit,
-    liveAnchorAt: new Date(baseTimestampMs).toISOString(),
+    liveAnchorAt: new Date(liveTimeline.anchorTimestampMs).toISOString(),
+    liveCurrentDurationSeconds: liveTimeline.currentDurationSeconds,
+    liveCurrentItem: liveTimeline.currentItem,
+    liveCurrentItemIndex: liveTimeline.currentItemIndex,
+    liveCurrentQueueIndex: liveTimeline.currentQueueIndex,
+    liveCurrentSlot: liveTimeline.currentSlot,
+    liveCurrentSlotIndex: liveTimeline.currentSlotIndex,
+    liveLoopDurationSeconds: liveTimeline.loopDurationSeconds,
+    livePositionSeconds: liveTimeline.positionSeconds,
     liveSlots: normalizedSlots,
+    liveSyncedAt: new Date(nowMs).toISOString(),
     rotationIntervalMinutes,
   };
 }
@@ -1753,18 +1880,60 @@ function attachStationSlotSummary(station: any, slots: any[]) {
   station.rotation_interval_minutes = liveSlotState.rotationIntervalMinutes;
   station.concurrent_slot_limit = liveSlotState.concurrentSlotLimit;
   station.live_anchor_at = liveSlotState.liveAnchorAt;
-  return station;
+  station.live_current_slot_id = liveSlotState.liveCurrentSlot?.id || null;
+  station.live_current_playlist_id = (
+    liveSlotState.liveCurrentSlot?.playlist?.id ||
+    liveSlotState.liveCurrentSlot?.playlist_id ||
+    null
+  );
+  station.live_current_slot_index = liveSlotState.liveCurrentSlotIndex;
+  station.live_current_item_index = liveSlotState.liveCurrentItemIndex;
+  station.live_current_queue_index = liveSlotState.liveCurrentQueueIndex;
+  station.live_position_seconds = liveSlotState.livePositionSeconds;
+  station.live_duration_seconds = liveSlotState.liveCurrentDurationSeconds;
+  station.live_loop_duration_seconds = liveSlotState.liveLoopDurationSeconds;
+  station.live_synced_at = liveSlotState.liveSyncedAt;
+  return removeStationStreamFields(station);
+}
+
+function removeStationStreamFields(station: any) {
+  if (!station || typeof station !== "object") {
+    return station;
+  }
+
+  const sanitized = { ...station };
+  delete sanitized.stream_url;
+  delete sanitized.stream_status;
+  delete sanitized.now_playing_title;
+  delete sanitized.now_playing_artist;
+  delete sanitized.last_seen_live_at;
+  return sanitized;
 }
 
 function decorateStationWithLiveRotation(station: any, enrichedSlots: any[]) {
   const liveSlotState = getStationLiveSlotState(station, enrichedSlots);
 
   return {
-    ...station,
+    ...removeStationStreamFields(station),
     concurrent_slot_limit: liveSlotState.concurrentSlotLimit,
     live_anchor_at: liveSlotState.liveAnchorAt,
+    live_current_duration_seconds: liveSlotState.liveCurrentDurationSeconds,
+    live_current_item: liveSlotState.liveCurrentItem,
+    live_current_item_index: liveSlotState.liveCurrentItemIndex,
+    live_current_playlist_id: (
+      liveSlotState.liveCurrentSlot?.playlist?.id ||
+      liveSlotState.liveCurrentSlot?.playlist_id ||
+      null
+    ),
+    live_current_queue_index: liveSlotState.liveCurrentQueueIndex,
+    live_current_slot: liveSlotState.liveCurrentSlot,
+    live_current_slot_id: liveSlotState.liveCurrentSlot?.id || null,
+    live_current_slot_index: liveSlotState.liveCurrentSlotIndex,
+    live_loop_duration_seconds: liveSlotState.liveLoopDurationSeconds,
+    live_position_seconds: liveSlotState.livePositionSeconds,
     live_slot_count: liveSlotState.liveSlots.length,
     live_slots: liveSlotState.liveSlots,
+    live_synced_at: liveSlotState.liveSyncedAt,
     rotation_interval_minutes: liveSlotState.rotationIntervalMinutes,
     slot_count: enrichedSlots.length,
     slots: enrichedSlots,
@@ -2334,13 +2503,50 @@ Deno.serve(async (req: Request) => {
     if (action === "record_play_event") {
       const { playlist_id, item_id, station_id, event_type, platform } = params;
       if (!event_type) return jsonResponse({ error: "event_type is required" }, 400);
+      const fallbackPlaylistId = readPlaylistRadioFallbackId(station_id);
+      let normalizedPlaylistId = normalizeUuid(playlist_id) || fallbackPlaylistId;
+      let normalizedItemId = normalizeUuid(item_id);
+      let normalizedStationId = normalizeUuid(station_id);
+
+      if (normalizedStationId) {
+        const { data: stationExists, error: stationLookupError } = await supabaseAdmin
+          .from("stations")
+          .select("id")
+          .eq("id", normalizedStationId)
+          .maybeSingle();
+
+        if (stationLookupError) return jsonResponse({ error: stationLookupError.message }, 500);
+        if (!stationExists) normalizedStationId = "";
+      }
+
+      if (normalizedPlaylistId) {
+        const { data: playlistExists, error: playlistLookupError } = await supabaseAdmin
+          .from("playlists")
+          .select("id")
+          .eq("id", normalizedPlaylistId)
+          .maybeSingle();
+
+        if (playlistLookupError) return jsonResponse({ error: playlistLookupError.message }, 500);
+        if (!playlistExists) normalizedPlaylistId = "";
+      }
+
+      if (normalizedItemId) {
+        const { data: itemExists, error: itemLookupError } = await supabaseAdmin
+          .from("playlist_items")
+          .select("id")
+          .eq("id", normalizedItemId)
+          .maybeSingle();
+
+        if (itemLookupError) return jsonResponse({ error: itemLookupError.message }, 500);
+        if (!itemExists) normalizedItemId = "";
+      }
 
       const { data, error } = await supabaseAdmin
         .from("playlist_play_events")
         .insert({
-          playlist_id: playlist_id || null,
-          item_id: item_id || null,
-          station_id: station_id || null,
+          playlist_id: normalizedPlaylistId || null,
+          item_id: normalizedItemId || null,
+          station_id: normalizedStationId || null,
           user_id: uid,
           event_type,
           platform: platform || null,
@@ -2383,23 +2589,9 @@ Deno.serve(async (req: Request) => {
         genre,
         cover_image_url,
         rotation_interval_minutes,
-        stream_url,
-        stream_status,
-        now_playing_title,
-        now_playing_artist,
         managed_profile_id,
       } = params;
       if (!name) return jsonResponse({ error: "name is required" }, 400);
-
-      let normalizedStreamUrl: string | null;
-      try {
-        normalizedStreamUrl = normalizeOptionalStationStreamUrl(stream_url);
-      } catch (error: any) {
-        return jsonResponse({ error: error.message || "Invalid stream_url" }, 400);
-      }
-      const normalizedStreamStatus = normalizedStreamUrl
-        ? normalizeStationStreamStatus(stream_status)
-        : "offline";
 
       const managedProfileId = resolveManagedProfileId(requesterRole, uid, managed_profile_id);
 
@@ -2421,20 +2613,18 @@ Deno.serve(async (req: Request) => {
             genre: genre || null,
             cover_image_url: cover_image_url || null,
             rotation_interval_minutes: normalizeStationRotationIntervalMinutes(rotation_interval_minutes),
-            stream_url: normalizedStreamUrl,
-            stream_status: normalizedStreamStatus,
-            now_playing_title: now_playing_title || null,
-            now_playing_artist: now_playing_artist || null,
-            last_seen_live_at: normalizedStreamStatus === "live"
-              ? new Date().toISOString()
-              : existingManagedStation.last_seen_live_at || null,
+            stream_url: null,
+            stream_status: "offline",
+            now_playing_title: null,
+            now_playing_artist: null,
+            last_seen_live_at: null,
           })
           .eq("id", existingManagedStation.id)
           .select()
           .single();
 
         if (error) return jsonResponse({ error: error.message }, 500);
-        return jsonResponse({ success: true, data });
+        return jsonResponse({ success: true, data: removeStationStreamFields(data) });
       }
 
       const { data, error } = await supabaseAdmin
@@ -2448,19 +2638,17 @@ Deno.serve(async (req: Request) => {
           genre: genre || null,
           cover_image_url: cover_image_url || null,
           rotation_interval_minutes: normalizeStationRotationIntervalMinutes(rotation_interval_minutes),
-          stream_url: normalizedStreamUrl,
-          stream_status: normalizedStreamStatus,
-          now_playing_title: now_playing_title || null,
-          now_playing_artist: now_playing_artist || null,
-          last_seen_live_at: normalizedStreamStatus === "live"
-            ? new Date().toISOString()
-            : null,
+          stream_url: null,
+          stream_status: "offline",
+          now_playing_title: null,
+          now_playing_artist: null,
+          last_seen_live_at: null,
         })
         .select()
         .single();
 
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ success: true, data });
+      return jsonResponse({ success: true, data: removeStationStreamFields(data) });
     }
 
     if (action === "admin_list_station_sources") {
@@ -2555,7 +2743,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: existing } = await supabaseAdmin
         .from("stations")
-        .select("id, creator_id, managed_profile_id, managed_group_id, stream_url, stream_status")
+        .select("id, creator_id, managed_profile_id, managed_group_id")
         .eq("id", station_id)
         .single();
 
@@ -2563,7 +2751,7 @@ Deno.serve(async (req: Request) => {
 
       await transferStationToAdminIfNeeded(supabaseAdmin, existing, uid);
 
-      const allowed = ["name", "description", "genre", "cover_image_url", "is_active", "is_featured", "rotation_interval_minutes", "stream_url", "stream_status", "now_playing_title", "now_playing_artist"];
+      const allowed = ["name", "description", "genre", "cover_image_url", "is_active", "is_featured", "rotation_interval_minutes"];
       const patch: Record<string, any> = {};
       for (const key of allowed) {
         if (key in updates) patch[key] = updates[key];
@@ -2579,29 +2767,11 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      if ("stream_url" in patch) {
-        try {
-          patch.stream_url = normalizeOptionalStationStreamUrl(patch.stream_url);
-        } catch (error: any) {
-          return jsonResponse({ error: error.message || "Invalid stream_url" }, 400);
-        }
-      }
-
-      const nextStreamUrl = "stream_url" in patch
-        ? patch.stream_url
-        : existing.stream_url || null;
-
-      if ("stream_status" in patch) {
-        patch.stream_status = normalizeStationStreamStatus(patch.stream_status);
-        if (patch.stream_status === "live" && !nextStreamUrl) {
-          patch.stream_status = "offline";
-        }
-        if (patch.stream_status === "live") {
-          patch.last_seen_live_at = new Date().toISOString();
-        }
-      } else if ("stream_url" in patch && !nextStreamUrl) {
-        patch.stream_status = "offline";
-      }
+      patch.stream_url = null;
+      patch.stream_status = "offline";
+      patch.now_playing_title = null;
+      patch.now_playing_artist = null;
+      patch.last_seen_live_at = null;
 
       const { data, error } = await supabaseAdmin
         .from("stations")
@@ -2611,7 +2781,7 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ success: true, data });
+      return jsonResponse({ success: true, data: removeStationStreamFields(data) });
     }
 
     if (action === "delete_station") {
@@ -2661,7 +2831,7 @@ Deno.serve(async (req: Request) => {
         .order("created_at", { ascending: false });
 
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ success: true, data });
+      return jsonResponse({ success: true, data: (data || []).map(removeStationStreamFields) });
     }
 
     // ── list_user_stations ───────────────────────────────────────────
@@ -2746,7 +2916,7 @@ Deno.serve(async (req: Request) => {
       const slotsByStationId = await fetchStationSlotsByStation(
         supabaseAdmin,
         stationRows.map((st: any) => st.id),
-        { includeItems: shouldIncludeItems, itemLimit: 3 },
+        { includeItems: shouldIncludeItems },
       );
 
       let aiProvider = "";

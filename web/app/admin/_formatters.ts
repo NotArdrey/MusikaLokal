@@ -101,6 +101,7 @@ const valueOverrides: Record<string, string> = {
   draft: 'Draft',
   expired: 'Expired',
   fan: 'Fan',
+  feed_post: 'Feed post',
   gig: 'Gig',
   group: 'Group',
   manual_review: 'Manual review',

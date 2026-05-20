@@ -19,7 +19,7 @@ const playbackService = async () => {
 
   TrackPlayer.addEventListener(Event.RemotePause, async () => {
     try {
-      await TrackPlayer.pause();
+      await TrackPlayer.play();
     } catch (_) {
       // Ignore remote command failures to keep the service resilient.
     }
@@ -34,33 +34,16 @@ const playbackService = async () => {
   });
 
   TrackPlayer.addEventListener(Event.RemoteNext, async () => {
-    try {
-      await TrackPlayer.skipToNext();
-    } catch (_) {
-      // Ignore when there is no next track in the current queue.
-    }
+    // Live radio keeps one shared timeline; remote skip is intentionally ignored.
   });
 
   TrackPlayer.addEventListener(Event.RemotePrevious, async () => {
-    try {
-      const progress = await TrackPlayer.getProgress();
-      if ((progress.position || 0) > 3) {
-        await TrackPlayer.seekTo(0);
-        return;
-      }
-
-      await TrackPlayer.skipToPrevious();
-    } catch (_) {
-      // Ignore when there is no previous track in the current queue.
-    }
+    // Live radio keeps one shared timeline; remote skip is intentionally ignored.
   });
 
   TrackPlayer.addEventListener(Event.RemoteSeek, async (event: { position: number }) => {
-    try {
-      await TrackPlayer.seekTo(event.position);
-    } catch (_) {
-      // Ignore remote command failures to keep the service resilient.
-    }
+    void event;
+    // Live radio keeps one shared timeline; remote seek is intentionally ignored.
   });
 };
 

@@ -41,6 +41,7 @@ type SlidingTabBarProps<T extends SlidingTabKey> = {
   borderColor?: string;
   backgroundColor?: string;
   deferOnChange?: boolean;
+  optimisticPress?: boolean;
   iconSize?: number;
   indicatorWidthRatio?: number;
   showTopBorder?: boolean;
@@ -59,6 +60,7 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
   borderColor,
   backgroundColor,
   deferOnChange = false,
+  optimisticPress = true,
   iconSize = 21,
   indicatorWidthRatio = 0.42,
   showTopBorder = false,
@@ -69,9 +71,10 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
   const { colors } = useTheme();
   const [containerWidth, setContainerWidth] = useState(0);
   const [pressedActiveKey, setPressedActiveKey] = useState<T | null>(null);
+  const optimisticActiveKeyRef = useRef<T>(activeKey);
   const pendingFrameRef = useRef<number | null>(null);
   const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const displayedActiveKey = pressedActiveKey ?? activeKey;
+  const displayedActiveKey = optimisticPress ? pressedActiveKey ?? activeKey : activeKey;
   const activeIndex = useMemo(
     () => Math.max(0, tabs.findIndex((tab) => tab.key === displayedActiveKey)),
     [displayedActiveKey, tabs],
@@ -90,6 +93,7 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
   }, [activeIndex, progress]);
 
   useEffect(() => {
+    optimisticActiveKeyRef.current = activeKey;
     setPressedActiveKey(null);
   }, [activeKey]);
 
@@ -136,18 +140,23 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
   }, [deferOnChange, onChange]);
 
   const handlePress = useCallback((key: T) => {
-    if (key === displayedActiveKey) {
+    const currentActiveKey = optimisticPress ? optimisticActiveKeyRef.current : activeKey;
+    if (key === currentActiveKey) {
       return;
     }
 
+    optimisticActiveKeyRef.current = key;
+
     const nextIndex = tabs.findIndex((tab) => tab.key === key);
-    if (nextIndex >= 0) {
+    if (optimisticPress && nextIndex >= 0) {
       progress.value = withTiming(nextIndex, motion.timing.tab);
     }
 
-    setPressedActiveKey(key);
+    if (optimisticPress) {
+      setPressedActiveKey(key);
+    }
     commitChange(key);
-  }, [commitChange, displayedActiveKey, progress, tabs]);
+  }, [activeKey, commitChange, optimisticPress, progress, tabs]);
 
   const indicatorAnimatedStyle = useAnimatedStyle(() => ({
     opacity: tabWidth > 0 ? 1 : 0,

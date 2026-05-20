@@ -38,7 +38,7 @@ import {
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import { ProductionInviteTarget } from "../src/utils/productionTeamInvites";
 import { sendVenueGigInvites } from "../src/utils/venueGigInvites";
-import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
+import { getSmoothTabIndex, setSmoothTab, useStagedTabRows } from "../src/utils/smoothTabs";
 import { bottomSheetSpringConfig } from "../src/utils/motion";
 import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 
@@ -125,14 +125,14 @@ export default function GigDetailsScreen() {
 
   useEffect(() => {
     const availableTabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
-    if (requestedTab && availableTabs.includes(requestedTab) && requestedTab !== activeTab) {
+    if (requestedTab && availableTabs.includes(requestedTab)) {
       setActiveTab(requestedTab);
       return;
     }
-    if (!availableTabs.includes(activeTab)) {
-      setActiveTab("About");
-    }
-  }, [activeTab, canManageGig, requestedTab]);
+    setActiveTab((currentTab) => (
+      availableTabs.includes(currentTab) ? currentTab : "About"
+    ));
+  }, [canManageGig, requestedTab]);
 
   useEffect(() => {
     if (inviteModalVisible) {
@@ -620,10 +620,19 @@ export default function GigDetailsScreen() {
 
   const tabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
   const isInviteSubmitDisabled = sendingInvites || selectedInviteTargets.length === 0;
-  const visibleApplications = applications.filter((app) => {
-    const normalizedStatus = String(app?.status || "").trim().toLowerCase();
-    return !HIDDEN_APPLICANT_STATUSES.has(normalizedStatus);
-  });
+  const visibleApplications = useMemo(
+    () =>
+      applications.filter((app) => {
+        const normalizedStatus = String(app?.status || "").trim().toLowerCase();
+        return !HIDDEN_APPLICANT_STATUSES.has(normalizedStatus);
+      }),
+    [applications],
+  );
+  const renderedApplications = useStagedTabRows(
+    visibleApplications,
+    activeTab === "Applicants",
+    6,
+  );
 
   const formatMusicianType = (requirements?: any) => {
     const slots = requirements?.slots || {};
@@ -706,8 +715,8 @@ export default function GigDetailsScreen() {
       .filter((group) => group.needed > 0);
   };
 
-  const eventSchedules = getEventSchedules(gig);
-  const slotGroups = getSlotGroups(gig?.requirements);
+  const eventSchedules = useMemo(() => getEventSchedules(gig), [gig]);
+  const slotGroups = useMemo(() => getSlotGroups(gig?.requirements), [gig?.requirements]);
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -1341,7 +1350,7 @@ export default function GigDetailsScreen() {
                     No active applications yet.
                   </Text>
                 ) : (
-                  visibleApplications.map((app) => {
+                  renderedApplications.map((app) => {
                     const statusMeta = getApplicationStatusMeta(app.status);
                     const rosterProfile = app.production_roster?.roster_profile;
                     const rosterGroup = app.production_roster?.roster_group;

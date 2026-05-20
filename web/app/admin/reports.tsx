@@ -242,6 +242,53 @@ const reportTargetAccountActionLabels: Record<ReportTargetAccountAction, string>
   lift_ban: 'Lift Ban',
 };
 
+const reportTargetLabels: Record<string, string> = {
+  feed_post: 'Feed post',
+  gig: 'Gig',
+  group: 'Group',
+  playlist: 'Music playlist',
+  product: 'Marketplace item',
+  profile: 'User profile',
+  studio: 'Studio',
+  user: 'User profile',
+  venue: 'Gig',
+};
+
+const formatReportTargetType = (rawType: unknown) => {
+  const normalized = String(rawType || '').trim().toLowerCase();
+  if (!normalized) return 'Unknown item';
+
+  return reportTargetLabels[normalized] || normalized
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+};
+
+const extractReportTargetName = (record?: Record<string, unknown> | null) => {
+  if (!record) return '';
+
+  const candidates = [
+    record.title,
+    record.name,
+    record.full_name,
+    record.display_name,
+    record.headline,
+    record.content,
+    record.caption,
+    record.description,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+
+    const value = candidate.replace(/\s+/g, ' ').trim();
+    if (!value) continue;
+
+    return value.length > 140 ? `${value.slice(0, 137).trimEnd()}...` : value;
+  }
+
+  return '';
+};
+
 const incidentStatuses: BookingIncidentFilter[] = [
   'all',
   'open',
@@ -1405,13 +1452,7 @@ export default function AdminReportsPage() {
 
   const reportDetailsTargetType = String(reportDetailsTarget?.target?.type || '').trim().toLowerCase();
   const reportDetailsTargetRecord = reportDetailsTarget?.target?.record || null;
-  const reportDetailsTargetName = String(
-    reportDetailsTargetRecord?.['title'] ||
-    reportDetailsTargetRecord?.['name'] ||
-    reportDetailsTargetRecord?.['full_name'] ||
-    reportDetailsTargetRecord?.['display_name'] ||
-    '',
-  ).trim();
+  const reportDetailsTargetName = extractReportTargetName(reportDetailsTargetRecord);
   const reportDetailsReporterId = String(
     reportDetailsTarget?.reporter_profile?.id ||
     reportDetailsTarget?.report?.['reporter_id'] ||
@@ -1482,6 +1523,7 @@ export default function AdminReportsPage() {
         String(item.moderation_notes || '').toLowerCase().includes(q) ||
         String(item.escalation_status || '').toLowerCase().includes(q) ||
         String(item.escalation_reason || '').toLowerCase().includes(q) ||
+        formatReportTargetType(item.target_type).toLowerCase().includes(q) ||
         String(item.target_type || '').toLowerCase().includes(q) ||
         String(item.target_id || '').toLowerCase().includes(q) ||
         String(item.status || '').toLowerCase().includes(q)
@@ -1675,7 +1717,7 @@ export default function AdminReportsPage() {
                 <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Status: {report.status}</Text>
                 <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Escalation: {String(report.escalation_status || 'none').replace(/_/g, ' ')}</Text>
                 <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reporter: {report.reporter_name || 'Unknown'} ({report.reporter_email || 'no email'})</Text>
-                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Target: {report.target_type} ({report.target_id})</Text>
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reported item: {formatReportTargetType(report.target_type)}</Text>
                 <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Created: {formatDateTime(report.created_at)}</Text>
                 {report.reviewed_at ? (
                   <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reviewed: {formatDateTime(report.reviewed_at)} {report.reviewer_name ? `by ${report.reviewer_name}` : ''}</Text>
@@ -2099,7 +2141,7 @@ export default function AdminReportsPage() {
                 'Reported Item',
                 reportDetailsTarget?.target
                   ? {
-                    target_type: reportDetailsTarget.target.type,
+                    target_type: formatReportTargetType(reportDetailsTarget.target.type),
                     target_name: reportDetailsTargetName,
                     target_id: reportDetailsTarget.target.id,
                     source_table: reportDetailsTarget.target.table,

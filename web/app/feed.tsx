@@ -30,6 +30,7 @@ import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { useRadioPlayer } from "../src/context/RadioPlayerContext";
+import { getStationLiveTimelineState } from "../src/utils/radioTimeline";
 
 type FeedTab = "for_you" | "talent" | "following";
 
@@ -101,16 +102,6 @@ const getStationSlots = (station: any) => {
 const getStationSlotCount = (station: any) =>
   Number(station?.slot_count ?? station?.slot_playlist_ids?.length ?? getStationSlots(station).length ?? 0);
 
-const getStationBroadcastStreamUrl = (station: any) => {
-  const streamUrl = typeof station?.stream_url === "string" ? station.stream_url.trim() : "";
-  if (!streamUrl || station?.is_active === false) return "";
-
-  const streamStatus = typeof station?.stream_status === "string"
-    ? station.stream_status.trim().toLowerCase()
-    : "";
-  return streamStatus === "live" ? streamUrl : "";
-};
-
 const getStationTrackCount = (station: any) =>
   getStationSlots(station).reduce((total: number, slot: any) => {
     const items = Array.isArray(slot?.playlist?.items) ? slot.playlist.items : [];
@@ -138,19 +129,46 @@ const getStationPlayableTrackCount = (station: any) =>
   }, 0);
 
 const isStationPlayable = (station: any) => Boolean(
-  getStationBroadcastStreamUrl(station) || getStationPlayableTrackCount(station) > 0,
+  getStationPlayableTrackCount(station) > 0,
 );
 
-const getStationNowPlayingTitle = (station: any, slotIndex = 0) => {
-  if (getStationBroadcastStreamUrl(station)) {
-    return station?.now_playing_title || station?.name || "Live broadcast";
+const getStationLiveCurrentSlot = (station: any, slotIndex: number | null = null) => {
+  const slots = getStationSlots(station);
+  if (typeof slotIndex === "number") {
+    return slots[slotIndex] || slots[0] || null;
   }
 
-  const slots = getStationSlots(station);
-  const slot = slots[slotIndex] || slots[0] || null;
-  const firstItem = Array.isArray(slot?.playlist?.items) ? slot.playlist.items[0] : null;
+  if (station?.live_current_slot) {
+    return station.live_current_slot;
+  }
 
-  return firstItem?.title || slot?.playlist?.title || slot?.label || "Local artist spotlight";
+  const currentSlotIndex = Number(station?.live_current_slot_index);
+  if (Number.isFinite(currentSlotIndex)) {
+    return slots[currentSlotIndex] || slots[0] || null;
+  }
+
+  return slots[0] || null;
+};
+
+const getStationLiveCurrentItem = (station: any, slotIndex: number | null = null) => {
+  if (slotIndex === null && station?.live_current_item) {
+    return station.live_current_item;
+  }
+
+  const slot = getStationLiveCurrentSlot(station, slotIndex);
+  const items = Array.isArray(slot?.playlist?.items) ? slot.playlist.items : [];
+  const currentItemIndex = slotIndex === null ? Number(station?.live_current_item_index) : 0;
+
+  return Number.isFinite(currentItemIndex)
+    ? items[currentItemIndex] || items[0] || null
+    : items[0] || null;
+};
+
+const getStationNowPlayingTitle = (station: any, slotIndex: number | null = null) => {
+  const slot = getStationLiveCurrentSlot(station, slotIndex);
+  const currentItem = getStationLiveCurrentItem(station, slotIndex);
+
+  return currentItem?.title || slot?.playlist?.title || slot?.label || "Local artist spotlight";
 };
 
 const getStationArtworkUrl = (station: any) => {
@@ -186,13 +204,31 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     activeStation,
     currentSlotIndex,
     currentTrack,
-    isPlaying,
+    isMuted,
     loadingStationId,
-    togglePlayPause,
+    toggleMute,
     tuneIn,
   } = useRadioPlayer();
   const [featuredStation, setFeaturedStation] = useState<any | null>(null);
   const [loadingStation, setLoadingStation] = useState(true);
+  const [radioRefreshTick, setRadioRefreshTick] = useState(0);
+  const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setRadioRefreshTick((value) => value + 1);
+    }, 30_000);
+
+    return () => clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    const liveClockTimer = setInterval(() => {
+      setLiveNowMs(Date.now());
+    }, 1000);
+
+    return () => clearInterval(liveClockTimer);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -201,13 +237,23 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
       setLoadingStation(true);
 
       try {
-        const fetchStations = async (featuredOnly: boolean, useRecommendation = false) => {
+        const fetchStations = async (
+          featuredOnly: boolean,
+          options: {
+            includeItems?: boolean;
+            limit?: number;
+            useRecommendation?: boolean;
+          } = {},
+        ) => {
+          const useRecommendation = options.useRecommendation === true;
+          const includeItems = options.includeItems ?? true;
+          const limit = options.limit ?? (useRecommendation ? 12 : 5);
           const { data, error } = await supabase.functions.invoke("manage-playlists", {
             body: {
               action: "browse_stations",
               featured_only: featuredOnly,
-              include_items: true,
-              limit: useRecommendation ? 12 : 5,
+              include_items: includeItems,
+              limit,
               ...(useRecommendation ? { recommendation_mode: "for_you" } : {}),
             },
           });
@@ -216,20 +262,32 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
           return Array.isArray(data?.data) ? data.data : [];
         };
 
-        const recommendedStations = recommendationEnabled && recommendationUserId
-          ? await fetchStations(false, true)
+        const shouldUseRecommendation = Boolean(recommendationEnabled && recommendationUserId);
+        let stations = shouldUseRecommendation
+          ? await fetchStations(false, { limit: 1 })
           : [];
-        const featuredStations = recommendedStations.some(isStationPlayable)
-          ? []
-          : await fetchStations(true);
-        const stations = recommendedStations.some(isStationPlayable)
-          ? recommendedStations
-          : featuredStations.some(isStationPlayable)
+
+        if (!shouldUseRecommendation) {
+          const featuredStations = await fetchStations(true);
+          stations = featuredStations.some(isStationPlayable)
             ? featuredStations
             : await fetchStations(false);
+        }
 
         if (!cancelled) {
           setFeaturedStation(stations.find(isStationPlayable) || stations[0] || null);
+        }
+
+        if (shouldUseRecommendation) {
+          void (async () => {
+            try {
+              const recommendedStations = await fetchStations(false, { useRecommendation: true });
+              if (cancelled || !recommendedStations.some(isStationPlayable)) return;
+              setFeaturedStation(recommendedStations.find(isStationPlayable) || recommendedStations[0] || null);
+            } catch (error) {
+              console.warn("Live radio recommendation refresh error:", error);
+            }
+          })();
         }
       } catch (error) {
         if (!cancelled) {
@@ -246,13 +304,12 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     return () => {
       cancelled = true;
     };
-  }, [recommendationEnabled, recommendationUserId]);
+  }, [radioRefreshTick, recommendationEnabled, recommendationUserId]);
 
   const liveFeaturedStation = featuredStation && isStationPlayable(featuredStation)
     ? featuredStation
     : null;
   const displayStation = activeStation || liveFeaturedStation || DEMO_RADIO_STATION;
-  const hasBroadcastStream = Boolean(getStationBroadcastStreamUrl(displayStation));
   const stationSlotCount = getStationSlotCount(displayStation);
   const stationTrackCount = getStationTrackCount(displayStation);
   const stationPlayableTrackCount = getStationPlayableTrackCount(displayStation);
@@ -261,20 +318,27 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
   const canTuneIn = Boolean(
     displayStation?.id &&
     displayStation?.is_active !== false &&
-    (hasBroadcastStream || stationPlayableTrackCount > 0)
+    stationPlayableTrackCount > 0
   );
+  const liveTimelineState = useMemo(
+    () => getStationLiveTimelineState(displayStation, liveNowMs),
+    [displayStation, liveNowMs],
+  );
+  const liveTimelineTitle =
+    liveTimelineState.item?.title ||
+    liveTimelineState.slot?.playlist?.title ||
+    liveTimelineState.slot?.label ||
+    "";
   const stationName = typeof displayStation?.name === "string" && displayStation.name.trim()
     ? displayStation.name.trim()
     : "MusikaLokal Radio";
   const stationSubtitle = typeof displayStation?.description === "string" && displayStation.description.trim()
     ? displayStation.description.trim()
-    : "Stream local music and artist features";
+      : "Stream local music and artist features";
   const nowPlayingTitle = isCurrentStation
-    ? currentTrack?.title || getStationNowPlayingTitle(displayStation, currentSlotIndex)
-    : getStationNowPlayingTitle(displayStation, 0);
-  const rotationSummary = hasBroadcastStream
-    ? "Live stream"
-    : stationTrackCount > 0
+    ? liveTimelineTitle || currentTrack?.title || getStationNowPlayingTitle(displayStation, currentSlotIndex)
+    : liveTimelineTitle || getStationNowPlayingTitle(displayStation);
+  const rotationSummary = stationTrackCount > 0
     ? `${stationTrackCount} track${stationTrackCount === 1 ? "" : "s"}`
     : stationSlotCount > 0
       ? `${stationSlotCount} playlist${stationSlotCount === 1 ? "" : "s"}`
@@ -283,12 +347,9 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     ? "Loading"
     : !canTuneIn
       ? "Offline"
-      : isCurrentStation && isPlaying
-        ? "Pause"
-        : isCurrentStation
-          ? "Resume"
-          : "Play";
-  const playIcon = isCurrentStation && isPlaying ? "pause" : "play";
+      : isCurrentStation
+        ? isMuted ? "Unmute" : "Mute"
+        : "Listen";
   const badgeLabel = loadingStation ? "..." : canTuneIn ? "LIVE" : "OFF";
   const stationArtworkUrl = getStationArtworkUrl(displayStation);
   const stationCreator =
@@ -306,11 +367,16 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
       : nowPlayingTitle;
   const stationMetaLine = stationRecommendationReason
     ? stationRecommendationReason
-    : hasBroadcastStream
-      ? "Live stream"
-      : stationSlotCount > 0 || stationPlayableTrackCount > 0
+    : stationSlotCount > 0 || stationPlayableTrackCount > 0
         ? `${stationSlotCount || 1} slot | ${stationPlayableTrackCount || stationTrackCount || 0} playable tracks`
         : rotationSummary;
+  const tapHintLabel = loadingStation || isTuneInLoading
+    ? "Starting radio..."
+    : isCurrentStation
+      ? isMuted ? "Tap to unmute" : "Tap to mute"
+      : canTuneIn
+        ? "Tap to listen"
+        : "";
 
   const handlePlayPress = useCallback(async () => {
     if (!displayStation || loadingStation || isTuneInLoading) return;
@@ -320,14 +386,14 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
         dedupeKey: "live-radio-offline",
         type: "info",
         title: "Station offline",
-        message: "This station needs a live stream or at least one playable playlist track before it can play.",
+        message: "This station needs at least one playable playlist track before it can play.",
       });
       return;
     }
 
     try {
       if (isCurrentStation) {
-        await togglePlayPause();
+        await toggleMute();
         return;
       }
 
@@ -345,10 +411,15 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
           : error?.message || "Unable to start this station right now.",
       });
     }
-  }, [canTuneIn, displayStation, isCurrentStation, isTuneInLoading, loadingStation, togglePlayPause, tuneIn]);
+  }, [canTuneIn, displayStation, isCurrentStation, isTuneInLoading, loadingStation, toggleMute, tuneIn]);
 
   return (
-    <View
+    <TouchableOpacity
+      activeOpacity={0.86}
+      accessibilityRole="button"
+      accessibilityLabel={`${playButtonLabel} Live Radio`}
+      disabled={loadingStation || isTuneInLoading}
+      onPress={handlePlayPress}
       style={[
         styles.liveRadioCard,
         {
@@ -370,7 +441,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
         <View style={styles.liveRadioEyebrowRow}>
           <View style={[styles.liveRadioLiveDot, { backgroundColor: primaryColor }]} />
           <Text style={[styles.liveRadioEyebrow, { color: primaryColor }]} numberOfLines={1}>
-            {stationRecommendationReason ? "FOR YOU RADIO" : badgeLabel === "LIVE" ? "LIVE RADIO" : "RADIO"}
+            {recommendationEnabled ? "FOR YOU RADIO" : badgeLabel === "LIVE" ? "LIVE RADIO" : "RADIO"}
           </Text>
         </View>
 
@@ -383,29 +454,38 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
         <Text style={[styles.liveRadioMetaText, { color: mutedTextColor }]} numberOfLines={1}>
           {stationMetaLine}
         </Text>
+        {tapHintLabel ? (
+          <Text style={[styles.liveRadioTapHint, { color: primaryColor }]} numberOfLines={1}>
+            {tapHintLabel}
+          </Text>
+        ) : null}
       </View>
 
-      <TouchableOpacity
-        activeOpacity={0.78}
-        accessibilityRole="button"
-        accessibilityLabel={`${playButtonLabel} Live Radio`}
-        disabled={loadingStation || isTuneInLoading}
-        onPress={handlePlayPress}
-        style={[
-          styles.liveRadioPlayButton,
-          {
-            backgroundColor: canTuneIn ? primaryColor : (isDark ? "#334155" : "#CBD5E1"),
-            opacity: loadingStation || isTuneInLoading ? 0.8 : 1,
-          },
-        ]}
-      >
-        {loadingStation || isTuneInLoading ? (
-          <ActivityIndicator size="small" color="#FFFFFF" />
-        ) : (
-          <Ionicons name={playIcon} size={24} color="#FFFFFF" />
-        )}
-      </TouchableOpacity>
-    </View>
+      {loadingStation || isTuneInLoading ? (
+        <View
+          style={[
+            styles.liveRadioStatusIcon,
+            {
+              backgroundColor: isDark ? "#334155" : "#FFFFFF",
+              opacity: 0.8,
+            },
+          ]}
+        >
+          <ActivityIndicator size="small" color={primaryColor} />
+        </View>
+      ) : isCurrentStation ? (
+        <View
+          style={[
+            styles.liveRadioStatusIcon,
+            {
+              backgroundColor: isDark ? "#334155" : "#FFFFFF",
+            },
+          ]}
+        >
+          <Ionicons name={isMuted ? "volume-mute" : "volume-high"} size={22} color={primaryColor} />
+        </View>
+      ) : null}
+    </TouchableOpacity>
   );
 });
 
@@ -2955,7 +3035,13 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontFamily: "Poppins_600SemiBold",
   },
-  liveRadioPlayButton: {
+  liveRadioTapHint: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: "Poppins_700Bold",
+  },
+  liveRadioStatusIcon: {
     width: 46,
     height: 46,
     borderRadius: 23,

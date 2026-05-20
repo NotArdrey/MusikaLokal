@@ -1633,7 +1633,7 @@ export default function AdminDashboardPage() {
     showAlert(
       'info',
       'Payment Details',
-      `${studio}\nCustomer: ${customer}\nAction: ${normalizePaymentActionLabel(transaction.action)}\nAmount: ${formatCurrency(transaction.amount)}\nRefund: ${formatCurrency(transaction.refund_amount)}\nNet: ${formatCurrency(transaction.net_amount)}\nRef: ${reference}`,
+      `${studio}\nCustomer: ${customer}\nAction: ${normalizePaymentActionLabel(transaction.action)}\nBooking value: ${formatCurrency(transaction.booking_value_amount)}\nCollected: ${formatCurrency(transaction.amount)}\nRefund: ${formatCurrency(transaction.refund_amount)}\nNet collected: ${formatCurrency(transaction.net_amount)}\nRef: ${reference}`,
     );
   }, [showAlert]);
 
@@ -1999,7 +1999,7 @@ export default function AdminDashboardPage() {
               <View>
                 <Text style={[styles.panelTitle, { color: colors.text, marginBottom: 0 }]}>Payment Transactions</Text>
                 <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>
-                  Gross: {formatCurrency(paymentTotals.grossAmount)} | Refunds: {formatCurrency(paymentTotals.refundedAmount)} | Net: {formatCurrency(paymentTotals.netAmount)}
+                  Gross: {formatCurrency(paymentTotals.grossAmount)} | Refunds: {formatCurrency(paymentTotals.refundedAmount)} | Collected: {formatCurrency(paymentTotals.netAmount)}
                 </Text>
               </View>
               <View style={styles.withdrawalButtonRow}>
@@ -2097,7 +2097,7 @@ export default function AdminDashboardPage() {
               <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.4 }]}>Customer</Text>
               <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.4 }]}>Studio</Text>
               <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary }]}>Action</Text>
-              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right' }]}>Net</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right' }]}>Collected</Text>
               <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right', flex: 1.1 }]}>Details</Text>
             </View>
 
@@ -2138,7 +2138,9 @@ export default function AdminDashboardPage() {
                         {formatCurrency(transaction.net_amount)}
                       </Text>
                       <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', textAlign: 'right' }}>
-                        Refund {formatCurrency(transaction.refund_amount)}
+                        {transaction.booking_value_amount > transaction.amount
+                          ? `Booking ${formatCurrency(transaction.booking_value_amount)}`
+                          : `Refund ${formatCurrency(transaction.refund_amount)}`}
                       </Text>
                     </View>
                     <View style={[styles.tableCell, styles.withdrawalActionsCell, { flex: 1.1 }]}>

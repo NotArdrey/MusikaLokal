@@ -1799,8 +1799,14 @@ serve(async (req: Request) => {
           walletTransactionIds: [],
         };
 
-        const amount = toNumber(booking?.payment_amount) || toNumber(booking?.final_price);
-        const refundAmount = toNumber(booking?.refund_amount) || toNumber(penaltySummary.refundAmount);
+        const paymentStatus = String(booking?.payment_status || "").trim().toLowerCase();
+        const bookingValueAmount = toNumber(booking?.final_price);
+        const recordedPaymentAmount = toNumber(booking?.payment_amount);
+        const hasCollectedPayment = ["paid", "partial", "refunded", "refund_pending"].includes(paymentStatus);
+        const amount = hasCollectedPayment ? (recordedPaymentAmount || bookingValueAmount) : 0;
+        const refundAmount = hasCollectedPayment
+          ? (toNumber(booking?.refund_amount) || toNumber(penaltySummary.refundAmount))
+          : 0;
         const providerEarningAmount = bookingWalletTransactions.reduce((sum: number, transaction: any) => {
           const type = String(transaction?.type || "").trim().toLowerCase();
           const status = String(transaction?.status || "").trim().toLowerCase();
@@ -1829,6 +1835,7 @@ serve(async (req: Request) => {
           payment_status: String(booking?.payment_status || ""),
           payment_type: booking?.payment_type || null,
           payment_method: booking?.payment_method || null,
+          booking_value_amount: roundTo(bookingValueAmount, 2),
           amount: roundTo(amount, 2),
           refund_amount: roundTo(refundAmount, 2),
           net_amount: roundTo(Math.max(amount - refundAmount, 0), 2),

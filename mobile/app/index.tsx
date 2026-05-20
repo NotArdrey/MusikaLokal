@@ -3,7 +3,7 @@ import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseUrl } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import VerificationModal from '../src/components/VerificationModal';
 import { useAuth } from '../src/context/AuthContext';
@@ -25,8 +25,9 @@ const isAdminRole = (role: unknown): boolean => {
 };
 
 const createEmailConfirmationRedirectUrl = () => {
-  const baseUrl = Linking.createURL('/');
-  return `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}verified=true`;
+  const appUrl = Linking.createURL('', { queryParams: { verified: 'true' } });
+  const redirectPageUrl = `${supabaseUrl.replace(/\/+$/, '')}/functions/v1/login-redirect`;
+  return `${redirectPageUrl}?app_url=${encodeURIComponent(appUrl)}`;
 };
 
 export default function LoginScreen() {

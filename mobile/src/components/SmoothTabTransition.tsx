@@ -59,8 +59,10 @@ const SmoothTabTransition = ({
       previousKeyRef.current = activeKey;
       previousIndexRef.current = activeIndex;
       currentChildrenRef.current = children;
-      setCurrentChildren(children);
-      finishTransition();
+      if (renderOutgoing) {
+        setCurrentChildren(children);
+        finishTransition();
+      }
       progress.value = 1;
       return;
     }
@@ -68,7 +70,9 @@ const SmoothTabTransition = ({
     if (previousKeyRef.current === activeKey) {
       previousIndexRef.current = activeIndex;
       currentChildrenRef.current = children;
-      setCurrentChildren(children);
+      if (renderOutgoing) {
+        setCurrentChildren(children);
+      }
       return;
     }
 
@@ -85,12 +89,14 @@ const SmoothTabTransition = ({
     previousIndexRef.current = activeIndex;
     setPreviousChildren(renderOutgoing ? currentChildrenRef.current : null);
     currentChildrenRef.current = children;
-    setCurrentChildren(children);
-    setIsTransitioning(true);
+    if (renderOutgoing) {
+      setCurrentChildren(children);
+      setIsTransitioning(true);
+    }
     cancelAnimation(progress);
     progress.value = 0;
     progress.value = withTiming(1, motion.timing.tab, (finished) => {
-      if (finished) {
+      if (finished && renderOutgoing) {
         runOnJS(finishTransition)();
       }
     });
@@ -111,13 +117,13 @@ const SmoothTabTransition = ({
 
   return (
     <Animated.View style={[style, styles.container]}>
-      {isTransitioning && previousChildren ? (
+      {renderOutgoing && isTransitioning && previousChildren ? (
         <Animated.View pointerEvents="none" style={[outgoingStyle, styles.outgoing]}>
           {previousChildren}
         </Animated.View>
       ) : null}
       <Animated.View style={incomingStyle}>
-        {currentChildren}
+        {renderOutgoing ? currentChildren : children}
       </Animated.View>
     </Animated.View>
   );

@@ -20,12 +20,72 @@ import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidatio
 import { StaffAssignment, fetchActiveStaffAssignment, getStaffPermissions } from '../../src/utils/staffAccess';
 
 const DEFAULT_GIG_IMAGE = 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop';
-const JOINED_GIG_APPLICATION_STATUSES = ['accepted', 'approved', 'completed'];
+const JOINED_GIG_APPLICATION_STATUSES = ['accepted', 'approved'];
+const FINISHED_GIG_STATUSES = new Set(['cancelled', 'canceled', 'completed', 'done']);
 
 const normalizeStatus = (status: unknown) => String(status || '').trim().toLowerCase();
 
 const isJoinedGigApplicationStatus = (status: unknown) =>
     JOINED_GIG_APPLICATION_STATUSES.includes(normalizeStatus(status));
+
+const parseClockTime = (timeValue: unknown) => {
+    const timeText = String(timeValue || '').trim();
+    if (!timeText) return null;
+
+    const match = timeText.match(/^(\d{1,2})(?::(\d{2}))?(?::\d{2})?\s*(AM|PM)?$/i);
+    if (!match) return null;
+
+    let hours = Number(match[1]);
+    const minutes = Number(match[2] || '0');
+    const period = match[3]?.toUpperCase();
+
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes) || minutes < 0 || minutes > 59) {
+        return null;
+    }
+
+    if (period) {
+        if (hours < 1 || hours > 12) return null;
+        if (period === 'PM' && hours !== 12) hours += 12;
+        if (period === 'AM' && hours === 12) hours = 0;
+    } else if (hours < 0 || hours > 23) {
+        return null;
+    }
+
+    return { hours, minutes };
+};
+
+const parseGigDateTime = (dateValue: unknown, timeValue?: unknown, endOfDayFallback = false) => {
+    const dateText = String(dateValue || '').trim();
+    if (!dateText || dateText.toLowerCase() === 'tba') return null;
+
+    const baseDate = new Date(dateText.includes('T') ? dateText : `${dateText}T00:00:00`);
+    if (Number.isNaN(baseDate.getTime())) return null;
+
+    const clock = parseClockTime(timeValue);
+    if (clock) {
+        baseDate.setHours(clock.hours, clock.minutes, 0, 0);
+    } else if (endOfDayFallback) {
+        baseDate.setHours(23, 59, 59, 999);
+    }
+
+    return baseDate;
+};
+
+const isUpcomingOrOngoingGig = (gig: any, now = new Date()) => {
+    if (FINISHED_GIG_STATUSES.has(normalizeStatus(gig?.status))) {
+        return false;
+    }
+
+    const startDateTime = parseGigDateTime(gig?.event_date, gig?.requirements?.event_start_time);
+    const endDateTime = parseGigDateTime(gig?.event_date, gig?.requirements?.event_end_time, true);
+    if (!endDateTime) return true;
+
+    if (startDateTime && endDateTime.getTime() < startDateTime.getTime()) {
+        endDateTime.setDate(endDateTime.getDate() + 1);
+    }
+
+    return endDateTime.getTime() >= now.getTime();
+};
 
 const collectJoinedGigIdsFromBookingsPayload = (payload: any) => {
     const buckets = payload?.categorized || payload || {};
@@ -297,7 +357,7 @@ export default function MyVenueScreen() {
                 return acc;
             }, {});
 
-            setGigs((baseGigs || []).map((gig: any) => {
+            const hydratedGigs = (baseGigs || []).map((gig: any) => {
                 const reviewStats = reviewsByGigId[gig.id] || { sum: 0, count: 0 };
                 const reviewCount = reviewStats.count;
                 const rating = reviewCount > 0 ? reviewStats.sum / reviewCount : 0;
@@ -314,7 +374,9 @@ export default function MyVenueScreen() {
                     permit_reviewed_at: gig.permit_reviewed_at || null,
                     is_owner: gig.organizer_id === userId || activeStaffAssignment?.gig_id === gig.id,
                 };
-            }));
+            });
+
+            setGigs(hydratedGigs.filter((gig: any) => isUpcomingOrOngoingGig(gig)));
         } catch (e) {
             const message = getActionErrorMessage(e, 'Failed to load gigs.');
             logActionError('MyVenue', 'fetchGigs', e, { userId, isMusicianView });
@@ -548,7 +610,7 @@ export default function MyVenueScreen() {
                                         : null;
                                     const canShowActions = !staffPermissions?.canViewOnly;
                                     const canManageBookings = !staffPermissions || staffPermissions.canManageBookings;
-                                    const canEditVenue = !staffPermissions || staffPermissions.canEditListing;
+                                    const canEditVenue = gig.is_owner === true && (!staffPermissions || staffPermissions.canEditListing);
                                     const canManageGig = (!isMusicianView || gig.is_owner === true) && canManageBookings;
 
                                     const permitStatusLabel = isRejected

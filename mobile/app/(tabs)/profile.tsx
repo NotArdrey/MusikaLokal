@@ -572,13 +572,6 @@ const getProfileStationSlotCount = (station: any, fallbackCount = 0) => {
   return slotCount > 0 ? slotCount : fallbackCount;
 };
 
-const hasProfileStationBroadcastStream = (station: any) => (
-  typeof station?.stream_url === "string" &&
-  station.stream_url.trim().length > 0 &&
-  station?.stream_status === "live" &&
-  station?.is_active !== false
-);
-
 const hasProfileStationPlayableItem = (item: any) => {
   const storagePath = typeof item?.teaser?.storage_path === "string" && item.teaser.storage_path.trim().length > 0;
   const teaserFilePath = typeof item?.teaser?.file_path === "string" && item.teaser.file_path.trim().length > 0;
@@ -1132,8 +1125,8 @@ export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
   const { loading: authLoading, userId: currentUserId, isGuest, userRole } = useAuth();
   const { activeStation } = useRadioPlayerPresence();
-  const { isPlaying, loadingStationId } = useRadioPlayerPlayback();
-  const { togglePlayPause, tuneIn } = useRadioPlayerActions();
+  const { isMuted, isPlaying, loadingStationId } = useRadioPlayerPlayback();
+  const { toggleMute, tuneIn } = useRadioPlayerActions();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
     userId?: string;
@@ -3143,8 +3136,7 @@ export default function ProfileScreen() {
   const stationHasPlayablePlaylistTracks = stationHasHydratedSlots
     ? stationPlayableTrackCount > 0
     : stationSlotCount > 0;
-  const stationHasLiveStream = hasProfileStationBroadcastStream(userStation);
-  const stationIsLive = hasStation && userStation?.is_active !== false && (stationHasPlayablePlaylistTracks || stationHasLiveStream);
+  const stationIsLive = hasStation && userStation?.is_active !== false && stationHasPlayablePlaylistTracks;
   const stationIsCurrentSource = Boolean(
     hasStation && activeStation?.id && activeStation.id === userStation?.id,
   );
@@ -3288,9 +3280,9 @@ export default function ProfileScreen() {
       : "Managed"
     : canPlayStationFromProfile
       ? stationIsCurrentSource
-        ? isPlaying
-          ? "Pause Live Audio"
-          : "Resume Live Audio"
+        ? isMuted
+          ? "Unmute Live Audio"
+          : "Mute Live Audio"
         : "Listen Live"
       : canManageStations
         ? "Manage Station"
@@ -3467,24 +3459,21 @@ export default function ProfileScreen() {
     setStationActionBusy(true);
     try {
       if (stationIsCurrentSource) {
-        await togglePlayPause();
+        await toggleMute();
         return;
       }
 
       const playableStation = await hydrateStationForProfilePlayback();
       const canTuneIn = Boolean(
         playableStation &&
-        (
-          hasProfileStationBroadcastStream(playableStation) ||
-          getProfileStationPlayableTrackCount(playableStation) > 0
-        ),
+        getProfileStationPlayableTrackCount(playableStation) > 0,
       );
 
       if (!canTuneIn) {
         emitToast({
           type: "info",
           title: "Station offline",
-          message: "This station needs a live stream or at least one playable playlist track before it can play.",
+          message: "This station needs at least one playable playlist track before it can play.",
         });
         return;
       }
@@ -4074,9 +4063,7 @@ export default function ProfileScreen() {
                           </Text>
 
                           <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 4 }} numberOfLines={1}>
-                            {stationHasLiveStream
-                              ? "Continuous live stream"
-                              : `${stationSlotCount} playlist${stationSlotCount === 1 ? "" : "s"}`}
+                            {`${stationSlotCount} playlist${stationSlotCount === 1 ? "" : "s"}`}
                             {stationGenre ? ` \u2022 ${stationGenre}` : ""}
                           </Text>
                         </View>
@@ -4085,7 +4072,7 @@ export default function ProfileScreen() {
                           <ActivityIndicator size="small" color={colors.primary} />
                         ) : (
                           <Ionicons
-                            name={canPlayStationFromProfile && stationIsCurrentSource && isPlaying ? "pause-circle" : "play-circle"}
+                            name={canPlayStationFromProfile && stationIsCurrentSource ? (isMuted ? "volume-mute" : "volume-high") : "play-circle"}
                             size={30}
                             color={canPlayStationFromProfile ? colors.primary : colors.textSecondary}
                           />
@@ -4122,7 +4109,7 @@ export default function ProfileScreen() {
                           <ActivityIndicator size="small" color={canPlayStationFromProfile ? "#fff" : colors.primary} />
                         ) : (
                           <Ionicons
-                            name={canPlayStationFromProfile && stationIsCurrentSource && isPlaying ? "pause" : canPlayStationFromProfile ? "radio" : "open-outline"}
+                            name={canPlayStationFromProfile && stationIsCurrentSource ? (isMuted ? "volume-mute" : "volume-high") : canPlayStationFromProfile ? "radio" : "open-outline"}
                             size={16}
                             color={canPlayStationFromProfile ? "#fff" : colors.text}
                           />

@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Image,
@@ -36,7 +36,7 @@ import {
     GroupInviteTarget,
     sendGroupMemberInvites,
 } from "../src/utils/groupMemberInvites";
-import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
+import { getSmoothTabIndex, setSmoothTab, useStagedTabRows } from "../src/utils/smoothTabs";
 
 import { useLocalSearchParams } from "expo-router";
 
@@ -80,10 +80,10 @@ export default function GroupDetailsScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (requestedTab && GROUP_TABS.includes(requestedTab) && requestedTab !== activeTab) {
+    if (requestedTab && GROUP_TABS.includes(requestedTab)) {
       setActiveTab(requestedTab);
     }
-  }, [activeTab, requestedTab]);
+  }, [requestedTab]);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -741,38 +741,56 @@ export default function GroupDetailsScreen() {
   };
 
   const tabs = GROUP_TABS;
-  const rosterMembers = Array.isArray(group?.members) ? group.members : [];
-  const syncedMembersByUserId = new Map(
-    groupMembers
-      .filter((member: any) => member?.user_id)
-      .map((member: any) => [member.user_id, member]),
-  );
-  const rosterUserIds = new Set(
-    rosterMembers
-      .map((member: any) => (typeof member === "string" ? "" : member?.user_id))
-      .filter(Boolean),
-  );
-  const displayMembers = [
-    ...rosterMembers.map((member: any) => {
-      if (typeof member === "string") return member;
+  const displayMembers = useMemo(() => {
+    const rosterMembers = Array.isArray(group?.members) ? group.members : [];
+    const syncedMembersByUserId = new Map(
+      groupMembers
+        .filter((member: any) => member?.user_id)
+        .map((member: any) => [member.user_id, member]),
+    );
+    const rosterUserIds = new Set(
+      rosterMembers
+        .map((member: any) => (typeof member === "string" ? "" : member?.user_id))
+        .filter(Boolean),
+    );
 
-      const syncedMember = member?.user_id
-        ? syncedMembersByUserId.get(member.user_id)
-        : null;
+    return [
+      ...rosterMembers.map((member: any) => {
+        if (typeof member === "string") return member;
 
-      return {
-        ...member,
-        name: syncedMember?.name || member?.name || member?.full_name,
-        avatar_url: syncedMember?.avatar_url || member?.avatar_url,
-        role: member?.role || syncedMember?.role,
-        membershipState: syncedMember
-          ? "active"
-          : member?.membershipState || "roster",
-        source: syncedMember ? "group_members" : member?.source || "group_roster_members",
-      };
-    }),
-    ...groupMembers.filter((member: any) => !rosterUserIds.has(member?.user_id)),
-  ];
+        const syncedMember = member?.user_id
+          ? syncedMembersByUserId.get(member.user_id)
+          : null;
+
+        return {
+          ...member,
+          name: syncedMember?.name || member?.name || member?.full_name,
+          avatar_url: syncedMember?.avatar_url || member?.avatar_url,
+          role: member?.role || syncedMember?.role,
+          membershipState: syncedMember
+            ? "active"
+            : member?.membershipState || "roster",
+          source: syncedMember ? "group_members" : member?.source || "group_roster_members",
+        };
+      }),
+      ...groupMembers.filter((member: any) => !rosterUserIds.has(member?.user_id)),
+    ];
+  }, [group?.members, groupMembers]);
+  const renderedDisplayMembers = useStagedTabRows(
+    displayMembers,
+    activeTab === "About",
+    10,
+  );
+  const renderedGroupMemberApplications = useStagedTabRows(
+    groupMemberApplications,
+    activeTab === "Applications",
+    6,
+  );
+  const renderedApplications = useStagedTabRows(
+    applications,
+    activeTab === "Applications",
+    6,
+  );
   const displayMemberCount = displayMembers.length;
   const displayGroupType = getDisplayGroupType(group);
 
@@ -1052,7 +1070,7 @@ export default function GroupDetailsScreen() {
                     {getGroupMembersLabel(group?.group_type)} & Roles
                   </Text>
                   {displayMembers && displayMembers.length > 0 ? (
-                    displayMembers.map((member: any, index: number) => {
+                    renderedDisplayMembers.map((member: any, index: number) => {
                       const memberName =
                         typeof member === "string"
                           ? member
@@ -1203,7 +1221,7 @@ export default function GroupDetailsScreen() {
                       No member applications yet.
                     </Text>
                   ) : (
-                    groupMemberApplications.map((app) => {
+                    renderedGroupMemberApplications.map((app) => {
                       const rawStatus = String(app?.status || "pending");
                       const normalizedStatus = rawStatus.toLowerCase();
                       const requestDetails =
@@ -1306,7 +1324,7 @@ export default function GroupDetailsScreen() {
                     No applications sent yet.
                   </Text>
                 ) : (
-                  applications.map((app) => {
+                  renderedApplications.map((app) => {
                     const rawStatus = String(app?.status || "pending");
                     const normalizedStatus = rawStatus.toLowerCase();
                     const statusColor =

@@ -1,6 +1,6 @@
 ﻿import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Image,
@@ -29,11 +29,21 @@ import {
     openNavigationDirections,
 } from "../src/utils/navigation";
 import { formatDashedNumericDate, formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
-import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
+import { getSmoothTabIndex, setSmoothTab, useStagedTabRows } from "../src/utils/smoothTabs";
 import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 
 const CUSTOM_DATE_PREVIEW_LIMIT = 5;
 const STUDIO_TABS = ["About", "Setup", "Bookings", "Review"];
+
+const getBookingDateKey = (booking: any) => {
+  const explicitDate = booking?.raw_date || booking?.booking_date;
+  if (explicitDate) return explicitDate;
+
+  const parsedDate = new Date(booking?.start_time);
+  return Number.isNaN(parsedDate.getTime())
+    ? ""
+    : parsedDate.toISOString().split("T")[0];
+};
 
 const canonicalizeStudioType = (
   value: unknown,
@@ -102,13 +112,11 @@ export default function StudioDetailsScreen() {
     message: "",
   });
 
-  useFocusEffect(
-    React.useCallback(() => {
-      if (requestedTab && STUDIO_TABS.includes(requestedTab) && requestedTab !== activeTab) {
-        setActiveTab(requestedTab);
-      }
-    }, [activeTab, requestedTab]),
-  );
+  useEffect(() => {
+    if (requestedTab && STUDIO_TABS.includes(requestedTab)) {
+      setActiveTab(requestedTab);
+    }
+  }, [requestedTab]);
   const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
   const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
 
@@ -799,6 +807,45 @@ export default function StudioDetailsScreen() {
   const studioPromotions = Array.isArray(studio?.promotions)
     ? studio.promotions.filter((promo: any) => promo?.is_active !== false)
     : [];
+  const visibleBookingRows = useStagedTabRows(
+    bookings,
+    activeTab === "Bookings" && viewMode === "list",
+    8,
+  );
+  const bookingMarkedDates = useMemo(
+    () =>
+      bookings.reduce<Record<string, { marked: boolean; dotColor: string }>>(
+        (acc, booking) => {
+          const dateStr = getBookingDateKey(booking);
+          if (dateStr) {
+            acc[dateStr] = {
+              marked: true,
+              dotColor: colors.primary,
+            };
+          }
+          return acc;
+        },
+        {},
+      ),
+    [bookings, colors.primary],
+  );
+  const selectedDateBookings = useMemo(
+    () =>
+      selectedDate
+        ? bookings
+          .filter((booking) => getBookingDateKey(booking) === selectedDate)
+          .sort((a, b) => {
+            const aTime = a.start_time?.includes(":")
+              ? a.start_time
+              : new Date(a.start_time).toTimeString().slice(0, 5);
+            const bTime = b.start_time?.includes(":")
+              ? b.start_time
+              : new Date(b.start_time).toTimeString().slice(0, 5);
+            return aTime.localeCompare(bTime);
+          })
+        : [],
+    [bookings, selectedDate],
+  );
   const getEquipmentLabel = (item: any) => {
     const name = typeof item === "string" ? item : item?.name;
     const quantity = typeof item === "object" && item?.quantity ? ` x${item.quantity}` : "";
@@ -1682,19 +1729,7 @@ export default function StudioDetailsScreen() {
                       <Calendar
                         current={new Date().toISOString().split("T")[0]}
                         markedDates={{
-                          ...bookings.reduce((acc, booking) => {
-                            const dateStr =
-                              booking.raw_date ||
-                              booking.booking_date ||
-                              new Date(booking.start_time)
-                                .toISOString()
-                                .split("T")[0];
-                            acc[dateStr] = {
-                              marked: true,
-                              dotColor: colors.primary,
-                            };
-                            return acc;
-                          }, {}),
+                          ...bookingMarkedDates,
                           [selectedDate]: {
                             selected: true,
                             selectedColor: colors.primary,
@@ -1747,38 +1782,9 @@ export default function StudioDetailsScreen() {
                             { weekday: "long", month: "short", day: "numeric" },
                           )}
                         </Text>
-                        {bookings.filter(
-                          (b) =>
-                            (b.raw_date ||
-                              b.booking_date ||
-                              new Date(b.start_time)
-                                .toISOString()
-                                .split("T")[0]) === selectedDate,
-                        ).length > 0 ? (
+                        {selectedDateBookings.length > 0 ? (
                           <View style={styles.tagsContainer}>
-                            {bookings
-                              .filter(
-                                (b) =>
-                                  (b.raw_date ||
-                                    b.booking_date ||
-                                    new Date(b.start_time)
-                                      .toISOString()
-                                      .split("T")[0]) === selectedDate,
-                              )
-                              .sort((a, b) => {
-                                const aTime = a.start_time.includes(":")
-                                  ? a.start_time
-                                  : new Date(a.start_time)
-                                    .toTimeString()
-                                    .slice(0, 5);
-                                const bTime = b.start_time.includes(":")
-                                  ? b.start_time
-                                  : new Date(b.start_time)
-                                    .toTimeString()
-                                    .slice(0, 5);
-                                return aTime.localeCompare(bTime);
-                              })
-                              .map((booking, index) => (
+                            {selectedDateBookings.map((booking, index) => (
                                 <TouchableOpacity activeOpacity={1}
                                   key={booking.id}
                                   style={[
@@ -1895,10 +1901,10 @@ export default function StudioDetailsScreen() {
                         marginTop: 20,
                       }}
                     >
-                      No bookings found.
-                    </Text>
+                        No bookings found.
+                      </Text>
                   ) : (
-                    bookings.map((booking) => (
+                    visibleBookingRows.map((booking) => (
                       <View
                         key={booking.id}
                         style={[

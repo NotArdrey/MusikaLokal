@@ -539,7 +539,7 @@ function RootContent() {
       console.log("📱 Parsed deep link:", { hostname, path, queryParams });
 
       // Create a unique key for this deep link to prevent double processing
-      const linkKey = `${path}-${queryParams?.booking_id}-${queryParams?.status}-${queryParams?.type}`;
+      const linkKey = `${path}-${queryParams?.booking_id}-${queryParams?.status}-${queryParams?.type}-${queryParams?.verified}-${queryParams?.check_verification}`;
       if (processedDeepLinksRef.current.has(linkKey)) {
         console.log("📱 Deep link already processed, skipping");
         return;
@@ -562,6 +562,26 @@ function RootContent() {
             refresh_token: queryParams?.refresh_token as string,
           },
         });
+        return;
+      }
+
+      // Handle email and identity verification return links.
+      if (queryParams?.verified === "true") {
+        router.replace({
+          pathname: "/",
+          params: { verified: "true" },
+        });
+        return;
+      }
+
+      if (queryParams?.check_verification === "true") {
+        router.replace({
+          pathname: "/signup",
+          params: {
+            check_verification: "true",
+            session_id: queryParams?.session_id as string,
+          },
+        } as any);
         return;
       }
 

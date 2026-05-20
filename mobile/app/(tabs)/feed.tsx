@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { BottomSheetBackdrop, BottomSheetView, useBottomSheetSpringConfigs } from "@gorhom/bottom-sheet";
 import { useFocusEffect } from "@react-navigation/native";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -63,6 +63,7 @@ import {
   normalizeSocialFollowTargetType,
 } from "../../src/utils/socialFollow";
 import type { SocialFollowTargetType } from "../../src/utils/socialFollow";
+import { getStationLiveTimelineState } from "../../src/utils/radioTimeline";
 import {
   getGroqModelInfo,
 } from "../../src/services/groqModelRouter";
@@ -1375,18 +1376,6 @@ const getFeedTimestampLabel = (item: any, formatter: (value: string) => string) 
   return item?.__feedKind === "ai_card" ? "Featured now" : "Just now";
 };
 
-const getFeedPrimaryCtaLabel = (item: any) => {
-  if (item?.__feedKind !== "ai_card") return "View Post";
-  if (item?.type === "Studio") return "View Studio";
-  if (item?.type === "Venue") return "View Gig";
-  if (item?.type === "Artist") return "View Profile";
-  if (item?.type === "Duo") return "View Duo";
-  if (item?.type === "Group") return "View Group";
-  if (item?.type === "Gig") return "View Gig";
-  if (item?.type === "Production") return "View Team";
-  return "View Details";
-};
-
 const getFeedCommentTargetPostId = (item: any) => {
   const explicitPostId =
     item?.post_id ||
@@ -1418,18 +1407,6 @@ const getStationSlots = (station: any) => {
 const getStationSlotCount = (station: any) => Number(
   station?.slot_count ?? station?.slot_playlist_ids?.length ?? getStationSlots(station).length ?? 0,
 );
-
-const getStationBroadcastStreamUrl = (station: any) => {
-  const streamUrl = typeof station?.stream_url === "string" ? station.stream_url.trim() : "";
-  if (!streamUrl || station?.is_active === false) {
-    return "";
-  }
-
-  const streamStatus = typeof station?.stream_status === "string"
-    ? station.stream_status.trim().toLowerCase()
-    : "";
-  return streamStatus === "live" ? streamUrl : "";
-};
 
 const hasStationPlayableItem = (item: any) => {
   const storagePath = typeof item?.teaser?.storage_path === "string" && item.teaser.storage_path.trim().length > 0;
@@ -1467,36 +1444,66 @@ const getStationPlayableTrackCount = (station: any) =>
   }, 0);
 
 const isStationPlayable = (station: any) => Boolean(
-  getStationBroadcastStreamUrl(station) || getStationPlayableTrackCount(station) > 0,
+  getStationPlayableTrackCount(station) > 0,
 );
 
-const getStationNowPlayingTitle = (station: any, slotIndex = 0) => {
-  if (getStationBroadcastStreamUrl(station)) {
-    return station?.now_playing_title || station?.name || "Live broadcast";
+const getStationLiveCurrentSlot = (station: any, slotIndex: number | null = null) => {
+  const slots = getStationSlots(station);
+  if (typeof slotIndex === "number") {
+    return slots[slotIndex] || slots[0] || null;
   }
 
-  const slots = getStationSlots(station);
-  const slot = slots[slotIndex] || slots[0] || null;
-  const firstItem = Array.isArray(slot?.playlist?.items) ? slot.playlist.items[0] : null;
+  if (station?.live_current_slot) {
+    return station.live_current_slot;
+  }
+
+  const currentSlotIndex = Number(station?.live_current_slot_index);
+  if (Number.isFinite(currentSlotIndex)) {
+    return slots[currentSlotIndex] || slots[0] || null;
+  }
+
+  return slots[0] || null;
+};
+
+const getStationLiveCurrentItem = (station: any, slotIndex: number | null = null) => {
+  if (slotIndex === null && station?.live_current_item) {
+    return station.live_current_item;
+  }
+
+  const slot = getStationLiveCurrentSlot(station, slotIndex);
+  const items = Array.isArray(slot?.playlist?.items) ? slot.playlist.items : [];
+  const currentItemIndex = slotIndex === null ? Number(station?.live_current_item_index) : 0;
+
+  return Number.isFinite(currentItemIndex)
+    ? items[currentItemIndex] || items[0] || null
+    : items[0] || null;
+};
+
+const getStationNowPlayingTitle = (station: any, slotIndex: number | null = null) => {
+  const slot = getStationLiveCurrentSlot(station, slotIndex);
+  const currentItem = getStationLiveCurrentItem(station, slotIndex);
 
   return (
-    firstItem?.title ||
+    currentItem?.title ||
     slot?.playlist?.title ||
     slot?.label ||
     "Local artist spotlight"
   );
 };
 
-const FEED_RADIO_CACHE_TTL_MS = 60_000;
-const FEED_RADIO_DEFER_MS = 250;
+const FEED_RADIO_CACHE_TTL_MS = 30_000;
+const FEED_RADIO_DEFER_MS = 80;
+const FEED_RADIO_STATION_ROTATION_MS = 30_000;
+const FEED_RADIO_DEBUG_LOGS = __DEV__;
 type FeedLiveRadioRequest = {
   recommendationEnabled?: boolean;
   recommendationUserId?: string | null;
 };
-let feedRadioStationCache: { fetchedAt: number; key: string; station: any | null } = {
+let feedRadioStationCache: { fetchedAt: number; key: string; station: any | null; stations: any[] } = {
   fetchedAt: 0,
   key: "guest",
   station: null,
+  stations: [],
 };
 let feedRadioStationPromise: { key: string; promise: Promise<any | null> } | null = null;
 
@@ -1506,16 +1513,123 @@ const getFeedRadioCacheKey = (request?: FeedLiveRadioRequest) => (
     : "guest"
 );
 
+const summarizeFeedRadioStationForDebug = (station: any) => {
+  if (!station) {
+    return null;
+  }
+
+  const slots = getStationSlots(station);
+
+  return {
+    id: station?.id || "",
+    name: station?.name || "",
+    isActive: station?.is_active !== false,
+    isFeatured: station?.is_featured === true,
+    queueReady: station?.__queueReady === true,
+    managedGroup: station?.managed_group?.name || "",
+    managedProfile: station?.managed_profile?.full_name || "",
+    slotCount: getStationSlotCount(station),
+    playableTrackCount: getStationPlayableTrackCount(station),
+    liveSlotCount: Array.isArray(station?.live_slots) ? station.live_slots.length : 0,
+    liveCurrentItem: station?.live_current_item?.title || "",
+    liveCurrentPlaylist: station?.live_current_slot?.playlist?.title || "",
+    liveCurrentQueueIndex: station?.live_current_queue_index,
+    livePositionSeconds: station?.live_position_seconds,
+    slotSummaries: slots.map((slot: any, index: number) => ({
+      index,
+      slotId: slot?.id || "",
+      playlistId: slot?.playlist?.id || slot?.playlist_id || "",
+      playlistTitle: slot?.playlist?.title || "",
+      itemCount: Array.isArray(slot?.playlist?.items) ? slot.playlist.items.length : 0,
+      active: slot?.is_active !== false,
+    })),
+  };
+};
+
+const summarizeFeedRadioStationsForDebug = (stations: any[]) => (
+  stations.map((station) => ({
+    id: station?.id || "",
+    name: station?.name || "",
+    playableTrackCount: getStationPlayableTrackCount(station),
+    slotCount: getStationSlotCount(station),
+    isActive: station?.is_active !== false,
+  }))
+);
+
+const logFeedRadioDebug = (event: string, details: Record<string, unknown> = {}) => {
+  if (!FEED_RADIO_DEBUG_LOGS) {
+    return;
+  }
+
+  console.log(`[FeedRadio][ForYou] ${event}`, details);
+};
+
 const getFreshFeedRadioStationCache = (cacheKey = "guest") => {
   if (feedRadioStationCache.key !== cacheKey) {
+    logFeedRadioDebug("cache-miss-key", {
+      cacheKey,
+      storedKey: feedRadioStationCache.key,
+    });
+    return null;
+  }
+
+  if (!feedRadioStationCache.station && feedRadioStationCache.stations.length === 0) {
+    logFeedRadioDebug("cache-miss-empty", { cacheKey });
     return null;
   }
 
   if (Date.now() - feedRadioStationCache.fetchedAt >= FEED_RADIO_CACHE_TTL_MS) {
+    logFeedRadioDebug("cache-miss-expired", {
+      ageMs: Date.now() - feedRadioStationCache.fetchedAt,
+      cacheKey,
+    });
     return null;
   }
 
   return feedRadioStationCache;
+};
+
+const getFeedRadioCacheKeyHash = (cacheKey: string) => (
+  cacheKey.split("").reduce((total, character) => (
+    (total + character.charCodeAt(0)) % 997
+  ), 0)
+);
+
+const selectFeedLiveRadioStation = (stations: any[], cacheKey: string) => {
+  const playableStations = stations.filter(isStationPlayable);
+  const candidates = playableStations.length > 0 ? playableStations : stations.filter(Boolean);
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+
+  const rotationBucket = Math.floor(Date.now() / FEED_RADIO_STATION_ROTATION_MS);
+  const cacheOffset = getFeedRadioCacheKeyHash(cacheKey);
+  const selectedIndex = (rotationBucket + cacheOffset) % candidates.length;
+  const selectedStation = candidates[selectedIndex];
+  logFeedRadioDebug("select-station", {
+    cacheKey,
+    candidateCount: candidates.length,
+    playableCount: playableStations.length,
+    rotationBucket,
+    cacheOffset,
+    selectedIndex,
+    selectedStation: summarizeFeedRadioStationForDebug(selectedStation),
+  });
+  return selectedStation;
+};
+
+const getCachedFeedLiveRadioStation = (cacheKey: string) => {
+  const freshCache = getFreshFeedRadioStationCache(cacheKey);
+  if (!freshCache) {
+    return null;
+  }
+
+  return selectFeedLiveRadioStation(freshCache.stations, cacheKey) || freshCache.station;
 };
 
 const fetchFeedLiveRadioStation = async (request?: FeedLiveRadioRequest) => {
@@ -1523,37 +1637,69 @@ const fetchFeedLiveRadioStation = async (request?: FeedLiveRadioRequest) => {
   const shouldUseRecommendation = Boolean(request?.recommendationEnabled && request?.recommendationUserId);
   const freshCache = getFreshFeedRadioStationCache(cacheKey);
   if (freshCache) {
+    const selectedStation = selectFeedLiveRadioStation(freshCache.stations, cacheKey) || freshCache.station;
+    logFeedRadioDebug("cache-hit", {
+      cacheAgeMs: Date.now() - freshCache.fetchedAt,
+      cacheKey,
+      selectedStation: summarizeFeedRadioStationForDebug(selectedStation),
+      stations: summarizeFeedRadioStationsForDebug(freshCache.stations),
+    });
     logLoadTime("FeedRadio", "cache-hit", {
       details: {
         cacheKey,
-        playableStations: freshCache.station && isStationPlayable(freshCache.station) ? 1 : 0,
-        stations: freshCache.station ? 1 : 0,
+        playableStations: freshCache.stations.filter(isStationPlayable).length,
+        selectedStationId: selectedStation?.id || "",
+        stations: freshCache.stations.length,
       },
     });
-    return freshCache.station;
+    return selectedStation;
   }
 
   if (feedRadioStationPromise?.key === cacheKey) {
+    logFeedRadioDebug("dedupe-hit", { cacheKey });
     logLoadTime("FeedRadio", "dedupe-hit", {
-      details: { cacheKey, includeItems: true },
+      details: { cacheKey },
     });
     return feedRadioStationPromise.promise;
   }
 
   const promise = (async () => {
-    const fetchStations = async (featuredOnly: boolean, useRecommendation = false) => {
+    const fetchStations = async (
+      featuredOnly: boolean,
+      options: {
+        includeItems?: boolean;
+        limit?: number;
+        useRecommendation?: boolean;
+      } = {},
+    ) => {
+      const useRecommendation = options.useRecommendation === true;
+      const includeItems = options.includeItems ?? true;
+      const limit = options.limit ?? (useRecommendation ? 12 : 5);
       const startedAt = Date.now();
+      logFeedRadioDebug("edge-request-start", {
+        cacheKey,
+        featuredOnly,
+        includeItems,
+        limit,
+        useRecommendation,
+      });
       const { data, error } = await supabase.functions.invoke("manage-playlists", {
         body: {
           action: "browse_stations",
           featured_only: featuredOnly,
-          include_items: true,
-          limit: useRecommendation ? 12 : 5,
+          include_items: includeItems,
+          limit,
           ...(useRecommendation ? { recommendation_mode: "for_you" } : {}),
         },
       });
 
       if (error) {
+        logFeedRadioDebug("edge-request-error", {
+          cacheKey,
+          featuredOnly,
+          message: error.message,
+          useRecommendation,
+        });
         throw error;
       }
 
@@ -1563,9 +1709,19 @@ const fetchFeedLiveRadioStation = async (request?: FeedLiveRadioRequest) => {
           ? data.stations
           : [];
 
+      logFeedRadioDebug("edge-request-complete", {
+        cacheKey,
+        durationMs: Date.now() - startedAt,
+        featuredOnly,
+        playableStations: rows.filter(isStationPlayable).length,
+        provider: data?.aiProvider || "",
+        stations: summarizeFeedRadioStationsForDebug(rows),
+        useRecommendation,
+      });
       logLoadTime("FeedRadio", "edge-complete", {
         details: {
           featuredOnly,
+          includeItems,
           provider: data?.aiProvider || "",
           recommended: useRecommendation,
           playableStations: rows.filter(isStationPlayable).length,
@@ -1577,142 +1733,97 @@ const fetchFeedLiveRadioStation = async (request?: FeedLiveRadioRequest) => {
       return rows;
     };
 
-    const fetchPlaylistStationFallback = async () => {
-      const startedAt = Date.now();
-      const { data, error } = await supabase.functions.invoke("manage-playlists", {
-        body: {
-          action: "browse_playlists",
-          limit: 3,
-        },
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      const playlists = Array.isArray(data?.data) ? data.data : [];
-      logLoadTime("FeedRadio", "playlist-fallback-start", {
-        details: { playlists: playlists.length },
-        durationMs: Date.now() - startedAt,
-      });
-
-      for (const playlist of playlists) {
-        if (!playlist?.id) {
-          continue;
-        }
-
-        const detailsStartedAt = Date.now();
-        const { data: detailsData, error: detailsError } = await supabase.functions.invoke("manage-playlists", {
-          body: {
-            action: "get_playlist_details",
-            playlist_id: playlist.id,
-          },
-        });
-
-        if (detailsError) {
-          console.warn("Live radio playlist fallback details error:", detailsError);
-          continue;
-        }
-
-        const detailedPlaylist = detailsData?.data || playlist;
-        const items = Array.isArray(detailedPlaylist?.items) ? detailedPlaylist.items : [];
-        const playableItems = items.filter(hasStationPlayableItem);
-        logLoadTime("FeedRadio", "playlist-fallback-detail-complete", {
-          details: {
-            items: items.length,
-            playableItems: playableItems.length,
-            playlistId: playlist.id,
-          },
-          durationMs: Date.now() - detailsStartedAt,
-        });
-
-        if (playableItems.length === 0) {
-          continue;
-        }
-
-        const stationName = typeof detailedPlaylist?.title === "string" && detailedPlaylist.title.trim().length > 0
-          ? `${detailedPlaylist.title.trim()} Radio`
-          : "MusikaLokal Radio";
-
-        return {
-          __playlistFallback: true,
-          __queueReady: true,
-          cover_image_url: detailedPlaylist?.cover_image_url || null,
-          created_at: detailedPlaylist?.created_at,
-          creator: detailedPlaylist?.creator || null,
-          description: detailedPlaylist?.description || null,
-          genre: detailedPlaylist?.genre || null,
-          id: `playlist-radio:${playlist.id}`,
-          is_active: true,
-          live_slots: [
-            {
-              id: `playlist-slot:${playlist.id}`,
-              label: detailedPlaylist?.title || "Now Playing",
-              playlist: {
-                ...detailedPlaylist,
-                items,
-                track_count: items.length,
-              },
-              position: 0,
-            },
-          ],
-          name: stationName,
-          slot_count: 1,
-          slots: [
-            {
-              id: `playlist-slot:${playlist.id}`,
-              label: detailedPlaylist?.title || "Now Playing",
-              playlist: {
-                ...detailedPlaylist,
-                items,
-                track_count: items.length,
-              },
-              position: 0,
-            },
-          ],
-          updated_at: detailedPlaylist?.updated_at,
-        };
-      }
-
-      return null;
-    };
-
     const startedAt = Date.now();
+    logFeedRadioDebug("fetch-start", {
+      cacheKey,
+      shouldUseRecommendation,
+    });
     logLoadTime("FeedRadio", "fetch-start", {
-      details: { cacheKey, includeItems: true, recommended: shouldUseRecommendation },
+      details: {
+        cacheKey,
+        queueOnly: true,
+        recommended: shouldUseRecommendation,
+      },
     });
 
-    const recommendedStations = shouldUseRecommendation
-      ? await fetchStations(false, true)
+    let stations = shouldUseRecommendation
+      ? await fetchStations(false, { limit: 1 })
       : [];
-    const featuredStations = recommendedStations.some(isStationPlayable)
-      ? []
-      : await fetchStations(true);
-    let stations = recommendedStations.some(isStationPlayable)
-      ? recommendedStations
-      : featuredStations.some(isStationPlayable)
-        ? featuredStations
-        : await fetchStations(false);
-    if (!stations.some(isStationPlayable)) {
-      const playlistStation = await fetchPlaylistStationFallback();
-      stations = playlistStation ? [playlistStation] : stations;
+    let source = shouldUseRecommendation ? "fast-all" : "";
+
+    if (!shouldUseRecommendation) {
+      const featuredStations = await fetchStations(true);
+      const hasFeaturedStation = featuredStations.some(isStationPlayable);
+      stations = hasFeaturedStation ? featuredStations : await fetchStations(false);
+      source = hasFeaturedStation ? "featured" : "all";
     }
 
-    const station = stations.find(isStationPlayable) || stations[0] || null;
-    feedRadioStationCache = {
-      fetchedAt: Date.now(),
-      key: cacheKey,
-      station,
-    };
+    const station = selectFeedLiveRadioStation(stations, cacheKey);
+    logFeedRadioDebug("fetch-selected", {
+      cacheKey,
+      selectedStation: summarizeFeedRadioStationForDebug(station),
+      source,
+      stations: summarizeFeedRadioStationsForDebug(stations),
+    });
+    feedRadioStationCache = station || stations.length > 0
+      ? {
+          fetchedAt: Date.now(),
+          key: cacheKey,
+          station,
+          stations,
+        }
+      : {
+          fetchedAt: 0,
+          key: cacheKey,
+          station: null,
+          stations: [],
+        };
 
+    logFeedRadioDebug("fetch-complete", {
+      cacheKey,
+      durationMs: Date.now() - startedAt,
+      selectedStation: summarizeFeedRadioStationForDebug(station),
+      stationCount: stations.length,
+    });
     logLoadTime("FeedRadio", "fetch-complete", {
       details: {
         playableStations: stations.filter(isStationPlayable).length,
         recommended: shouldUseRecommendation,
+        selectedStationId: station?.id || "",
         stations: stations.length,
       },
       durationMs: Date.now() - startedAt,
     });
+
+    if (shouldUseRecommendation) {
+      void (async () => {
+        try {
+          const recommendedStations = await fetchStations(false, { useRecommendation: true });
+          if (!recommendedStations.some(isStationPlayable)) {
+            logFeedRadioDebug("background-recommendation-empty", { cacheKey });
+            return;
+          }
+
+          const recommendedStation = selectFeedLiveRadioStation(recommendedStations, cacheKey);
+          feedRadioStationCache = {
+            fetchedAt: Date.now(),
+            key: cacheKey,
+            station: recommendedStation,
+            stations: recommendedStations,
+          };
+          logFeedRadioDebug("background-recommendation-cache-updated", {
+            cacheKey,
+            selectedStation: summarizeFeedRadioStationForDebug(recommendedStation),
+            stations: summarizeFeedRadioStationsForDebug(recommendedStations),
+          });
+        } catch (error) {
+          logFeedRadioDebug("background-recommendation-failed", {
+            cacheKey,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      })();
+    }
 
     return station;
   })();
@@ -1752,9 +1863,11 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     activeStation,
     currentSlotIndex,
     currentTrack,
+    isMuted,
     isPlaying,
     loadingStationId,
-    togglePlayPause,
+    prepareStation,
+    toggleMute,
     tuneIn,
   } = useRadioPlayer();
   const radioRequest = useMemo<FeedLiveRadioRequest>(() => ({
@@ -1762,15 +1875,58 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     recommendationUserId,
   }), [recommendationEnabled, recommendationUserId]);
   const radioCacheKey = useMemo(() => getFeedRadioCacheKey(radioRequest), [radioRequest]);
-  const cachedRadioStation = getFreshFeedRadioStationCache(radioCacheKey)?.station ?? null;
-  const [featuredStation, setFeaturedStation] = useState<any | null>(cachedRadioStation);
-  const [loadingStation, setLoadingStation] = useState(!cachedRadioStation);
+  const initialCachedRadioStation = useMemo(
+    () => getCachedFeedLiveRadioStation(radioCacheKey),
+    [radioCacheKey],
+  );
+  const [featuredStation, setFeaturedStation] = useState<any | null>(initialCachedRadioStation);
+  const [loadingStation, setLoadingStation] = useState(!initialCachedRadioStation);
+  const [radioRefreshTick, setRadioRefreshTick] = useState(0);
+  const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
+  const lastPrepareScheduleKeyRef = useRef<string | null>(null);
+  const activeRadioPlaybackRef = useRef({ isPlaying: false, stationId: "" });
+  const activeStationId = typeof activeStation?.id === "string" ? activeStation.id : "";
+
+  useEffect(() => {
+    const liveClockTimer = setInterval(() => {
+      setLiveNowMs(Date.now());
+    }, 1000);
+
+    return () => {
+      clearInterval(liveClockTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    activeRadioPlaybackRef.current = {
+      isPlaying,
+      stationId: activeStationId,
+    };
+  }, [activeStationId, isPlaying]);
+
+  useEffect(() => {
+    const rotationTimer = setInterval(() => {
+      logFeedRadioDebug("rotation-tick", {
+        radioCacheKey,
+      });
+      setRadioRefreshTick((currentTick) => currentTick + 1);
+    }, FEED_RADIO_STATION_ROTATION_MS);
+
+    return () => {
+      clearInterval(rotationTimer);
+    };
+  }, [radioCacheKey]);
 
   useEffect(() => {
     let cancelled = false;
-    const cachedStation = getFreshFeedRadioStationCache(radioCacheKey)?.station ?? null;
+    const cachedStation = getCachedFeedLiveRadioStation(radioCacheKey);
 
     if (cachedStation) {
+      logFeedRadioDebug("card-effect-cache-station", {
+        radioCacheKey,
+        radioRefreshTick,
+        station: summarizeFeedRadioStationForDebug(cachedStation),
+      });
       setFeaturedStation(cachedStation);
       setLoadingStation(false);
       return () => {
@@ -1779,15 +1935,31 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     }
 
     setLoadingStation(true);
+    logFeedRadioDebug("card-effect-fetch-scheduled", {
+      delayMs: FEED_RADIO_DEFER_MS,
+      radioCacheKey,
+      radioRefreshTick,
+      request: radioRequest,
+    });
     const deferTimer = setTimeout(() => {
       void fetchFeedLiveRadioStation(radioRequest)
         .then((station) => {
           if (!cancelled) {
+            logFeedRadioDebug("card-effect-fetch-resolved", {
+              radioCacheKey,
+              radioRefreshTick,
+              station: summarizeFeedRadioStationForDebug(station),
+            });
             setFeaturedStation(station);
           }
         })
         .catch((error) => {
           if (!cancelled) {
+            logFeedRadioDebug("card-effect-fetch-failed", {
+              message: error instanceof Error ? error.message : String(error),
+              radioCacheKey,
+              radioRefreshTick,
+            });
             console.warn("Live radio station fetch error:", error);
             logLoadTime("FeedRadio", "fetch-failed", {
               error: error instanceof Error ? error.message : String(error),
@@ -1797,6 +1969,10 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
         })
         .finally(() => {
           if (!cancelled) {
+            logFeedRadioDebug("card-effect-fetch-finished", {
+              radioCacheKey,
+              radioRefreshTick,
+            });
             setLoadingStation(false);
           }
         });
@@ -1806,22 +1982,25 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
       cancelled = true;
       clearTimeout(deferTimer);
     };
-  }, [radioCacheKey, radioRequest]);
+  }, [radioCacheKey, radioRefreshTick, radioRequest]);
 
   useEffect(() => {
     if (!activeStation?.id) {
       return;
     }
 
+    logFeedRadioDebug("active-station-detected", {
+      activeStation: summarizeFeedRadioStationForDebug(activeStation),
+      radioCacheKey,
+    });
     setLoadingStation(false);
-  }, [activeStation?.id]);
+  }, [activeStation, radioCacheKey]);
 
   const liveFeaturedStation = featuredStation && isStationPlayable(featuredStation)
     ? featuredStation
     : null;
   const displayStation = activeStation || liveFeaturedStation || null;
   const hasDisplayStation = Boolean(displayStation?.id);
-  const hasBroadcastStream = Boolean(getStationBroadcastStreamUrl(displayStation));
   const stationSlotCount = getStationSlotCount(displayStation);
   const stationPlayableTrackCount = getStationPlayableTrackCount(displayStation);
   const isCurrentStation = Boolean(
@@ -1833,29 +2012,48 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
   const canTuneIn = Boolean(
     displayStation?.id &&
     displayStation?.is_active !== false &&
-    (hasBroadcastStream || stationPlayableTrackCount > 0)
+    stationPlayableTrackCount > 0
   );
+  const liveTimelineState = useMemo(
+    () => getStationLiveTimelineState(displayStation, liveNowMs),
+    [displayStation, liveNowMs],
+  );
+  const displayStationId = typeof displayStation?.id === "string" ? displayStation.id : "";
+  const liveTimelineTitle =
+    liveTimelineState.item?.title ||
+    liveTimelineState.slot?.playlist?.title ||
+    liveTimelineState.slot?.label ||
+    "";
   const stationName =
     typeof displayStation?.name === "string" && displayStation.name.trim().length > 0
       ? displayStation.name.trim()
       : hasDisplayStation
         ? "MusikaLokal Radio"
-        : "No live station";
+        : loadingStation
+          ? "Loading radio"
+          : "No live station";
   const nowPlayingTitle = hasDisplayStation
-    ? isCurrentStation
-      ? currentTrack?.title || getStationNowPlayingTitle(displayStation, currentSlotIndex)
-      : getStationNowPlayingTitle(displayStation, 0)
-    : "Check back for live stations";
+    ? liveTimelineTitle || currentTrack?.title || getStationNowPlayingTitle(
+      displayStation,
+      isCurrentStation ? currentSlotIndex : null,
+    )
+    : loadingStation
+      ? "Checking live stations"
+      : "Check back for live stations";
   const primaryTrackTitle = hasDisplayStation
-    ? currentTrack?.title || getStationNowPlayingTitle(displayStation, currentSlotIndex)
+    ? liveTimelineTitle || currentTrack?.title || getStationNowPlayingTitle(
+      displayStation,
+      isCurrentStation ? currentSlotIndex : null,
+    )
     : nowPlayingTitle;
   const stationRecommendationReason =
     displayStation?.ai_reason ||
     displayStation?.recommendation_reason ||
     "";
   const primaryArtistName =
+    liveTimelineState.item?.artist_name ||
     currentTrack?.sourceArtistName ||
-    displayStation?.now_playing_artist ||
+    getStationLiveCurrentItem(displayStation, isCurrentStation ? currentSlotIndex : null)?.artist_name ||
     displayStation?.managed_group?.name ||
     displayStation?.managed_profile?.full_name ||
     "MusikaLokal artists";
@@ -1867,32 +2065,157 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     ),
   ).join(" | ");
   const stationArtworkUrl = displayStation?.cover_image_url || displayStation?.creator?.avatar_url || null;
+  const tapHintLabel = isTuneInLoading
+    ? "Starting radio..."
+    : isCurrentStation
+      ? isMuted ? "Tap to unmute" : "Tap to mute"
+      : canTuneIn
+        ? "Tap to listen"
+        : "";
+
+  useEffect(() => {
+    const activeStationMatches = activeStationId === displayStationId;
+    if (
+      !displayStationId ||
+      !canTuneIn ||
+      isCurrentStation ||
+      isTuneInLoading ||
+      activeStationMatches ||
+      (isPlaying && activeStationMatches)
+    ) {
+      if (activeStationMatches) {
+        lastPrepareScheduleKeyRef.current = null;
+      }
+      return undefined;
+    }
+
+    const prepareScheduleKey = `${radioCacheKey}:${displayStationId}:${liveTimelineState.queueIndex}`;
+    if (lastPrepareScheduleKeyRef.current === prepareScheduleKey) {
+      logFeedRadioDebug("prepare-skip-duplicate", {
+        prepareScheduleKey,
+        radioCacheKey,
+        stationId: displayStationId,
+      });
+      return undefined;
+    }
+
+    lastPrepareScheduleKeyRef.current = prepareScheduleKey;
+    const prepareTimer = setTimeout(() => {
+      const activePlayback = activeRadioPlaybackRef.current;
+      const timerActiveStationMatches = activePlayback.stationId === displayStationId;
+      if (timerActiveStationMatches || (activePlayback.isPlaying && timerActiveStationMatches)) {
+        lastPrepareScheduleKeyRef.current = null;
+        logFeedRadioDebug("prepare-skip-active", {
+          isPlaying: activePlayback.isPlaying,
+          prepareScheduleKey,
+          radioCacheKey,
+          stationId: displayStationId,
+        });
+        return;
+      }
+
+      logFeedRadioDebug("prepare-scheduled", {
+        prepareScheduleKey,
+        radioCacheKey,
+        station: summarizeFeedRadioStationForDebug(displayStation),
+      });
+      void prepareStation({
+        ...displayStation,
+        __queueReady: displayStation.__queueReady === true,
+      }).catch((error) => {
+        logFeedRadioDebug("prepare-error", {
+          message: error instanceof Error ? error.message : String(error),
+          radioCacheKey,
+          station: summarizeFeedRadioStationForDebug(displayStation),
+        });
+      });
+    }, 20);
+
+    return () => {
+      clearTimeout(prepareTimer);
+    };
+  }, [
+    activeStationId,
+    canTuneIn,
+    displayStation,
+    displayStationId,
+    isCurrentStation,
+    isPlaying,
+    isTuneInLoading,
+    liveTimelineState.queueIndex,
+    prepareStation,
+    radioCacheKey,
+  ]);
 
   const handlePlayPress = useCallback(async () => {
-    if (!displayStation || loadingStation || isTuneInLoading) {
+    const tapDebugDetails = {
+      activeStation: summarizeFeedRadioStationForDebug(activeStation),
+      canTuneIn,
+      currentSlotIndex,
+      currentTrack: currentTrack
+        ? {
+            id: currentTrack.id || "",
+            title: currentTrack.title || "",
+            stationId: currentTrack.stationId || "",
+            queueIndex: currentTrack.queueIndex,
+            slotIndex: currentTrack.slotIndex,
+          }
+        : null,
+      displayStation: summarizeFeedRadioStationForDebug(displayStation),
+      isCurrentStation,
+      isPlaying,
+      isTuneInLoading,
+      loadingStation,
+      loadingStationId,
+      radioCacheKey,
+      stationPlayableTrackCount,
+      stationSlotCount,
+    };
+    logFeedRadioDebug("tap-start", tapDebugDetails);
+
+    if (!displayStation || isTuneInLoading) {
+      logFeedRadioDebug("tap-blocked", {
+        ...tapDebugDetails,
+        reason: !displayStation ? "missing-display-station" : "station-loading",
+      });
       return;
     }
 
     if (!canTuneIn) {
+      logFeedRadioDebug("tap-blocked", {
+        ...tapDebugDetails,
+        reason: "station-not-playable",
+      });
       emitToast({
         type: "info",
         title: "Station offline",
-        message: "This station needs a live stream or at least one playable playlist track before it can play.",
+        message: "This station needs at least one playable playlist track before it can play.",
       });
       return;
     }
 
     try {
       if (isCurrentStation) {
-        await togglePlayPause();
+        logFeedRadioDebug("tap-toggle-mute-current", tapDebugDetails);
+        await toggleMute();
+        logFeedRadioDebug("tap-toggle-mute-current-complete", tapDebugDetails);
         return;
       }
 
+      logFeedRadioDebug("tap-tune-in-start", tapDebugDetails);
       await tuneIn({
         ...displayStation,
         __queueReady: displayStation.__queueReady === true,
       });
+      logFeedRadioDebug("tap-tune-in-complete", {
+        ...tapDebugDetails,
+        stationId: displayStation.id || "",
+      });
     } catch (error: any) {
+      logFeedRadioDebug("tap-tune-in-error", {
+        ...tapDebugDetails,
+        message: error?.message || String(error),
+      });
       emitToast({
         type: "error",
         title: "Radio unavailable",
@@ -1901,35 +2224,49 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     }
   }, [
     canTuneIn,
+    activeStation,
+    currentSlotIndex,
+    currentTrack,
     displayStation,
     isCurrentStation,
+    isPlaying,
     isTuneInLoading,
     loadingStation,
-    togglePlayPause,
+    loadingStationId,
+    radioCacheKey,
+    stationPlayableTrackCount,
+    stationSlotCount,
+    toggleMute,
     tuneIn,
   ]);
   const handleTuneIn = handlePlayPress;
 
   return (
     <TouchableOpacity
-      activeOpacity={0.9}
+      activeOpacity={isTuneInLoading ? 1 : 0.9}
       onPress={handleTuneIn}
+      disabled={isTuneInLoading}
       style={[styles.liveRadioCard, { backgroundColor: cardColor, borderColor }]}
       accessibilityRole="button"
-      accessibilityLabel={isCurrentStation ? "Toggle live radio playback" : "Tune in to live radio"}
+      accessibilityLabel={isCurrentStation ? "Mute or unmute live radio" : "Tune in to live radio"}
+      accessibilityState={{ busy: isTuneInLoading, disabled: isTuneInLoading }}
     >
       <View style={[styles.liveRadioIcon, { backgroundColor: primaryColor + "18" }]}>
         {stationArtworkUrl ? (
           <CachedImage uri={stationArtworkUrl} style={styles.liveRadioArtwork} />
         ) : (
-          <Ionicons name={isCurrentStation && isPlaying ? "volume-high" : "radio"} size={20} color={primaryColor} />
+          <Ionicons
+            name={isCurrentStation ? (isMuted ? "volume-mute" : "volume-high") : "radio"}
+            size={20}
+            color={primaryColor}
+          />
         )}
       </View>
       <View style={styles.liveRadioContent}>
         <View style={styles.liveRadioEyebrowRow}>
           <View style={[styles.liveDot, { backgroundColor: isPlaying && isCurrentStation ? "#22C55E" : primaryColor }]} />
           <Text style={[styles.liveRadioEyebrow, { color: primaryColor }]}>
-            {stationRecommendationReason ? "For You Radio" : "Live Radio"}
+            {recommendationEnabled ? "For You Radio" : "Live Radio"}
           </Text>
         </View>
         <Text style={[styles.liveRadioTitle, { color: textColor }]} numberOfLines={1}>
@@ -1939,24 +2276,31 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
           {liveRadioSubtitle}
         </Text>
         <Text style={[styles.liveRadioMeta, { color: mutedTextColor }]} numberOfLines={1}>
-          {stationRecommendationReason
+          {loadingStation && !hasDisplayStation
+            ? "Updating station list"
+            : stationRecommendationReason
             ? stationRecommendationReason
-            : hasBroadcastStream
-            ? "Broadcast stream"
             : `${stationSlotCount} ${stationSlotCount === 1 ? "slot" : "slots"} | ${stationPlayableTrackCount} playable tracks`}
         </Text>
+        {tapHintLabel ? (
+          <Text style={[styles.liveRadioTapHint, { color: primaryColor }]} numberOfLines={1}>
+            {tapHintLabel}
+          </Text>
+        ) : null}
       </View>
-      <View style={[styles.liveRadioPlayButton, { backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "#FFFFFF" }]}>
-        {isTuneInLoading ? (
+      {isTuneInLoading || (loadingStation && !hasDisplayStation) ? (
+        <View style={[styles.liveRadioStatusIcon, { backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "#FFFFFF" }]}>
           <ActivityIndicator size="small" color={primaryColor} />
-        ) : (
+        </View>
+      ) : isCurrentStation ? (
+        <View style={[styles.liveRadioStatusIcon, { backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "#FFFFFF" }]}>
           <Ionicons
-            name={isCurrentStation && isPlaying ? "pause" : "play"}
+            name={isMuted ? "volume-mute" : "volume-high"}
             size={18}
             color={primaryColor}
           />
-        )}
-      </View>
+        </View>
+      ) : null}
     </TouchableOpacity>
   );
 });
@@ -2033,7 +2377,9 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   const metaLabel = getFeedMetaLabel(item);
   const caption = getFeedCaption(item);
   const timestamp = getFeedTimestampLabel(item, timeAgo);
-  const primaryCtaLabel = getFeedPrimaryCtaLabel(item);
+  const showHeaderFollow = Boolean(followTarget && (showAuthorFollow || isSuggestion));
+  const showSuggestionDetails =
+    isSuggestion && (bodyBadges.length > 0 || priceChips.length > 0 || quickInfoItems.length > 0);
 
   const handleOpenPrimary = useCallback(() => {
     if (isSuggestion) {
@@ -2225,7 +2571,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
         </TouchableOpacity>
 
         <View style={styles.socialHeaderActions}>
-          {showAuthorFollow ? (
+          {showHeaderFollow ? (
             <TouchableOpacity
               activeOpacity={followBusy ? 1 : 0.78}
               disabled={followBusy}
@@ -2312,7 +2658,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
         </TouchableOpacity>
       ) : null}
 
-      {isSuggestion ? (
+      {showSuggestionDetails ? (
         <View
           style={[
             styles.socialEntityModule,
@@ -2372,38 +2718,6 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
             </View>
           ) : null}
 
-          <View style={styles.socialCtaRow}>
-            <TouchableOpacity
-              activeOpacity={0.78}
-              onPress={handleOpenPrimary}
-              style={[styles.socialPrimaryCta, { backgroundColor: colors.primary }]}
-            >
-              <Text style={styles.socialPrimaryCtaText}>{primaryCtaLabel}</Text>
-            </TouchableOpacity>
-
-            {followTarget ? (
-              <TouchableOpacity
-                activeOpacity={followBusy ? 1 : 0.78}
-                disabled={followBusy}
-                onPress={handleFollow}
-                style={[
-                  styles.socialSecondaryCta,
-                  {
-                    borderColor,
-                    opacity: followBusy ? 0.7 : 1,
-                  },
-                ]}
-              >
-                {followBusy ? (
-                  <ActivityIndicator size="small" color={colors.textSecondary} />
-                ) : (
-                  <Text style={[styles.socialSecondaryCtaText, { color: colors.textSecondary }]}>
-                    {isFollowing ? "Following" : "Follow"}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            ) : null}
-          </View>
         </View>
       ) : null}
 
@@ -6220,6 +6534,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+    minHeight: moderateScale(12),
     marginBottom: 2,
   },
   liveDot: {
@@ -6229,9 +6544,12 @@ const styles = StyleSheet.create({
   },
   liveRadioEyebrow: {
     fontSize: moderateScale(9),
+    lineHeight: moderateScale(12),
     fontFamily: "Poppins_700Bold",
     textTransform: "uppercase",
     letterSpacing: 0,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   liveRadioTitle: {
     fontSize: moderateScale(15),
@@ -6249,6 +6567,12 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_500Medium",
     lineHeight: 13,
     marginTop: 4,
+  },
+  liveRadioTapHint: {
+    marginTop: 3,
+    fontSize: moderateScale(10),
+    lineHeight: moderateScale(13),
+    fontFamily: "Poppins_700Bold",
   },
   liveRadioThumbnail: {
     width: 48,
@@ -6340,7 +6664,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
   },
-  liveRadioPlayButton: {
+  liveRadioStatusIcon: {
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -6672,37 +6996,6 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
     textAlignVertical: "center",
   },
-  socialCtaRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  socialPrimaryCta: {
-    flex: 1,
-    minHeight: 34,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 10,
-  },
-  socialPrimaryCtaText: {
-    color: "#FFFFFF",
-    fontSize: moderateScale(12),
-    fontFamily: "Poppins_700Bold",
-  },
-  socialSecondaryCta: {
-    minWidth: 86,
-    minHeight: 34,
-    borderRadius: 10,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-  },
-  socialSecondaryCtaText: {
-    fontSize: moderateScale(12),
-    fontFamily: "Poppins_700Bold",
-  },
-
   /* Create-post modal */
   modalBox: { flex: 1, overflow: "hidden" },
   modalHeader: { minHeight: 58, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth },

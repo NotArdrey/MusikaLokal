@@ -1,5 +1,5 @@
-import { router } from "expo-router";
-import React, { useEffect, useRef } from "react";
+import { router, usePathname } from "expo-router";
+import React, { useMemo } from "react";
 import { StyleProp, StyleSheet, TextStyle, ViewStyle } from "react-native";
 import SlidingTabBar from "./SlidingTabBar";
 import { useTheme } from "../context/ThemeContext";
@@ -24,18 +24,14 @@ export default function MusicianWorkspaceTabs({
   textStyle,
 }: MusicianWorkspaceTabsProps) {
   const { colors } = useTheme();
-  const pendingNavigationFrameRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (pendingNavigationFrameRef.current !== null) {
-        cancelAnimationFrame(pendingNavigationFrameRef.current);
-      }
-    };
-  }, []);
+  const pathname = usePathname();
+  const routeActiveKey = useMemo(() => {
+    const activeTab = MUSICIAN_WORKSPACE_TABS.find((tab) => pathname.includes(tab.route));
+    return activeTab?.key ?? activeKey;
+  }, [activeKey, pathname]);
 
   const handleChange = (nextKey: MusicianWorkspaceTabKey) => {
-    if (nextKey === activeKey) {
+    if (nextKey === routeActiveKey) {
       return;
     }
 
@@ -44,25 +40,19 @@ export default function MusicianWorkspaceTabs({
       return;
     }
 
-    if (pendingNavigationFrameRef.current !== null) {
-      cancelAnimationFrame(pendingNavigationFrameRef.current);
-    }
-
-    pendingNavigationFrameRef.current = requestAnimationFrame(() => {
-      pendingNavigationFrameRef.current = null;
-      router.replace(nextTab.route as any);
-    });
+    router.replace(nextTab.route as any);
   };
 
   return (
     <SlidingTabBar
       activeColor={colors.primary}
-      activeKey={activeKey}
+      activeKey={routeActiveKey}
       backgroundColor={colors.surface}
       borderColor={colors.border}
       indicatorColor={colors.primary}
       indicatorWidthRatio={0.28}
       onChange={handleChange}
+      optimisticPress={false}
       style={[styles.container, style]}
       tabs={MUSICIAN_WORKSPACE_TABS.map((tab) => ({
         key: tab.key,

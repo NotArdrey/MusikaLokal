@@ -76,9 +76,10 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
         () => routePathname === "/my_group" || routePathname === "/my_venue" || routePathname === "/my_studio" || routePathname === "/my_production",
         [routePathname],
     );
-    const isRoundedMainHeader = isMainNavPath || isSettingsOrProfile || isMyListingPath || isBrandMainHeader;
+    const isMainActionHeader = Boolean(showMainActions);
+    const isRoundedMainHeader = isMainActionHeader || isMainNavPath || isSettingsOrProfile || isMyListingPath || isBrandMainHeader;
 
-    const computedBackVisible = !!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath || isBrandMainHeader);
+    const computedBackVisible = !!onBackPress || !(isMainActionHeader || isMainNavPath || isSettingsOrProfile || isMyListingPath || isBrandMainHeader);
     const backVisible = showBack === false ? false : showBack === true ? true : computedBackVisible;
     const useMainTitleStyle = !backVisible;
     const useCompactMainTitleStyle = useMainTitleStyle && isRoundedMainHeader;
