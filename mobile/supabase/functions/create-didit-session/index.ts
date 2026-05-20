@@ -244,7 +244,7 @@ function normalizeDiditStatus(value: unknown) {
   if (!normalized) return "";
 
   if (normalized === "APPROVED") return "APPROVED";
-  if (["DECLINED", "REJECTED", "DENIED"].includes(normalized)) return "DECLINED";
+  if (["DECLINED", "REJECTED", "DENIED", "FAILED", "FAILURE", "NOT_APPROVED", "NOT_VERIFIED"].includes(normalized)) return "DECLINED";
   if (["ABANDONED", "EXPIRED", "CANCELLED", "CANCELED"].includes(normalized)) return "ABANDONED";
   if (normalized === "IN_REVIEW") return "PENDING";
   if ([
@@ -272,11 +272,18 @@ function isFailedDiditStatus(value: unknown) {
 function findDecisionObject(source: any) {
   const candidates = [
     source?.decision,
+    source?.result,
+    source?.session,
     source?.verification_data?.decision,
+    source?.verification_data?.result,
+    source?.verification_data?.session,
     source?.verification_data,
     source?.extracted_data?.decision,
+    source?.extracted_data?.result,
     source?.extracted_data,
     source?.details?.decision,
+    source?.details?.result,
+    source?.details,
     source,
   ];
 
@@ -287,17 +294,63 @@ function findDecisionObject(source: any) {
   )) || null;
 }
 
-function resolveSourceStatus(source: any) {
-  if (!source || typeof source !== "object") return "";
+function collectStatusValues(values: any[], seen = new Set<any>()) {
+  const statuses: string[] = [];
 
-  return normalizeDiditStatus(
+  for (const value of values) {
+    if (typeof value === "string" || typeof value === "number") {
+      const normalized = String(value).trim();
+      if (normalized) statuses.push(normalized);
+      continue;
+    }
+
+    if (value && typeof value === "object") {
+      if (seen.has(value)) continue;
+      seen.add(value);
+      statuses.push(...collectStatusValues([
+        value.status,
+        value.verification_status,
+        value.businessStatus,
+        value.diditResolvedStatus,
+        value.rawDiditStatus,
+        value.result,
+        value.outcome,
+        value.state,
+        value.verdict,
+        value.decision,
+      ], seen));
+    }
+  }
+
+  return statuses;
+}
+
+function resolveStatusValue(values: any[]) {
+  const statuses = collectStatusValues(values).map(normalizeDiditStatus).filter(Boolean);
+  return (
+    statuses.find(isFailedDiditStatus) ||
+    statuses.find((status) => status === "PENDING_REVIEW") ||
+    statuses.find((status) => status === "APPROVED") ||
+    statuses[0] ||
+    ""
+  );
+}
+
+function resolveSourceStatus(source: any) {
+  if (!source) return "";
+  if (typeof source === "string" || typeof source === "number") return normalizeDiditStatus(source);
+  if (typeof source !== "object") return "";
+
+  return resolveStatusValue([
     source.status ||
     source.verification_status ||
     source.verification_data?.status ||
-    source.session?.status ||
-    source.result?.status ||
-    source.decision?.status,
-  );
+    source.session?.status,
+    source.session,
+    source.result?.status,
+    source.result,
+    source.decision,
+  ]);
 }
 
 function shouldReviewMissingFaceMatch(sourceStatus: unknown) {
@@ -321,7 +374,16 @@ function resolveDecisionStatus(decision: any, sourceStatus: unknown = "") {
   if (idStatus === "PENDING_REVIEW" || faceStatus === "PENDING_REVIEW") return "PENDING_REVIEW";
   if (idStatus === "APPROVED" && faceStatus === "APPROVED") return "APPROVED";
 
-  return normalizeDiditStatus(decision.status);
+  return resolveStatusValue([
+    decision.status,
+    decision.verification_status,
+    decision.result,
+    decision.outcome,
+    decision.state,
+    decision.verdict,
+    decision.decision,
+    sourceStatus,
+  ]);
 }
 
 function resolveDiditStatusFromSource(source: any) {

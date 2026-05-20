@@ -114,7 +114,7 @@ function normalizeVerificationStatus(value: unknown) {
 
 function normalizeDiditSignupStatus(value: unknown) {
     const normalized = normalizeVerificationStatus(value)
-    if (['DECLINED', 'REJECTED', 'DENIED'].includes(normalized)) return 'DECLINED'
+    if (['DECLINED', 'REJECTED', 'DENIED', 'FAILED', 'FAILURE', 'NOT_APPROVED', 'NOT_VERIFIED'].includes(normalized)) return 'DECLINED'
     if (['ABANDONED', 'EXPIRED', 'CANCELLED', 'CANCELED'].includes(normalized)) return 'ABANDONED'
     if ([
         'PENDING_REVIEW',
@@ -136,11 +136,18 @@ function isFailedDiditSignupStatus(value: unknown) {
 function findDecisionObject(source: any) {
     const candidates = [
         source?.decision,
+        source?.result,
+        source?.session,
         source?.verification_data?.decision,
+        source?.verification_data?.result,
+        source?.verification_data?.session,
         source?.verification_data,
         source?.extracted_data?.decision,
+        source?.extracted_data?.result,
         source?.extracted_data,
         source?.details?.decision,
+        source?.details?.result,
+        source?.details,
         source,
     ]
 
@@ -151,17 +158,59 @@ function findDecisionObject(source: any) {
     )) || null
 }
 
-function resolveSourceVerificationStatus(source: any) {
-    if (!source || typeof source !== 'object') return ''
+function collectDiditStatusValues(values: any[], seen = new Set<any>()) {
+    const statuses: string[] = []
 
-    return normalizeDiditSignupStatus(
-        source.status ||
-        source.verification_status ||
-        source.verification_data?.status ||
-        source.session?.status ||
-        source.result?.status ||
-        source.decision?.status,
-    )
+    for (const value of values) {
+        if (typeof value === 'string' || typeof value === 'number') {
+            const normalized = String(value).trim()
+            if (normalized) statuses.push(normalized)
+            continue
+        }
+
+        if (value && typeof value === 'object') {
+            if (seen.has(value)) continue
+            seen.add(value)
+            statuses.push(...collectDiditStatusValues([
+                value.status,
+                value.verification_status,
+                value.businessStatus,
+                value.diditResolvedStatus,
+                value.rawDiditStatus,
+                value.result,
+                value.outcome,
+                value.state,
+                value.verdict,
+                value.decision,
+            ], seen))
+        }
+    }
+
+    return statuses
+}
+
+function resolveDiditStatusValue(values: any[]) {
+    const statuses = collectDiditStatusValues(values).map(normalizeDiditSignupStatus).filter(Boolean)
+    return statuses.find((status) => ['DECLINED', 'ABANDONED'].includes(status))
+        || statuses.find((status) => status === 'PENDING_REVIEW')
+        || statuses.find((status) => status === 'APPROVED')
+        || statuses[0]
+        || ''
+}
+
+function resolveSourceVerificationStatus(source: any) {
+    if (!source) return ''
+    if (typeof source === 'string' || typeof source === 'number') return normalizeDiditSignupStatus(source)
+    if (typeof source !== 'object') return ''
+
+    return resolveDiditStatusValue([
+        source.status || source.verification_status || source.verification_data?.status,
+        source.session?.status,
+        source.session,
+        source.result?.status,
+        source.result,
+        source.decision,
+    ])
 }
 
 function shouldReviewMissingFaceMatch(sourceStatus: unknown) {
@@ -186,7 +235,15 @@ function resolveDiditFaceRequiredStatus(source: any) {
     if (idStatus === 'PENDING_REVIEW' || faceStatus === 'PENDING_REVIEW') return 'PENDING_REVIEW'
     if (idStatus === 'APPROVED' && faceStatus === 'APPROVED') return 'APPROVED'
 
-    return sourceStatus || normalizeDiditSignupStatus(decision.status)
+    return sourceStatus || resolveDiditStatusValue([
+        decision.status,
+        decision.verification_status,
+        decision.result,
+        decision.outcome,
+        decision.state,
+        decision.verdict,
+        decision.decision,
+    ])
 }
 
 function resolveDiditSignupStatus(...values: unknown[]) {

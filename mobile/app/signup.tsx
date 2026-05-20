@@ -479,6 +479,10 @@ const isFailedDiditFlowStatus = (status: unknown) => [
     'DECLINED',
     'REJECTED',
     'DENIED',
+    'FAILED',
+    'FAILURE',
+    'NOT_APPROVED',
+    'NOT_VERIFIED',
     'ABANDONED',
     'EXPIRED',
     'CANCELLED',
@@ -494,10 +498,18 @@ const isTerminalDiditFlowStatus = (status: unknown) => (
 
 const getDiditDecisionCandidates = (sessionData: any) => [
     sessionData?.decision,
+    sessionData?.result,
+    sessionData?.session,
     sessionData?.verification_data?.decision,
+    sessionData?.verification_data?.result,
+    sessionData?.verification_data?.session,
     sessionData?.verification_data,
     sessionData?.extracted_data?.decision,
+    sessionData?.extracted_data?.result,
     sessionData?.extracted_data,
+    sessionData?.details?.decision,
+    sessionData?.details?.result,
+    sessionData?.details,
     sessionData,
 ].filter(Boolean);
 
@@ -506,6 +518,29 @@ const firstDiditArray = (sessionData: any, key: string) => {
         if (Array.isArray(candidate?.[key])) return candidate[key];
     }
     return [];
+};
+
+const getDiditStatusFieldValues = (source: any, seen = new Set<any>()): unknown[] => {
+    if (!source) return [];
+    if (typeof source === 'string' || typeof source === 'number') return [source];
+    if (typeof source !== 'object') return [];
+    if (seen.has(source)) return [];
+    seen.add(source);
+
+    const values = [
+        source.status,
+        source.verification_status,
+        source.businessStatus,
+        source.diditResolvedStatus,
+        source.rawDiditStatus,
+        source.decision,
+        source.result,
+        source.outcome,
+        source.state,
+        source.verdict,
+    ];
+
+    return values.flatMap((value) => getDiditStatusFieldValues(value, seen));
 };
 
 const diditSessionHasApprovedFaceMatch = (sessionData: any) => {
@@ -540,7 +575,10 @@ const getDiditFlowStatusFromSession = (sessionData: any) => {
         sessionData?.rawDiditStatus,
         sessionData?.verification_data?.diditResolvedStatus,
         sessionData?.verification_data?.rawDiditStatus,
-        ...decisionCandidates.map((candidate) => candidate?.status),
+        ...decisionCandidates.flatMap((candidate) => getDiditStatusFieldValues(candidate)),
+        ...['id_verifications', 'face_matches', 'liveness_checks', 'reviews'].flatMap((key) =>
+            firstDiditArray(sessionData, key).flatMap((item: any) => getDiditStatusFieldValues(item))
+        ),
     ].map(normalizeDiditFlowStatus).filter(Boolean);
 
     const requiredCheckFailure = [idStatus, faceStatus].find(isFailedDiditFlowStatus);
@@ -571,6 +609,11 @@ const getDiditFlowStatusFromSession = (sessionData: any) => {
         '';
 };
 
+const isDiditAccountCreationStatusRejection = (error: unknown) => {
+    const message = String((error as any)?.message || error || '').toLowerCase();
+    return /didit verification is not (approved|pending review|approved or pending review)|didit face match is not approved|identity_not_approved/.test(message);
+};
+
 const logSignupFlow = (stage: string, payload: Record<string, unknown> = {}) => {
     console.log(`${SIGNUP_FLOW_LOG_PREFIX} ${stage}`, {
         debugVersion: SIGNUP_FLOW_DEBUG_VERSION,
@@ -599,6 +642,7 @@ export default function SignupScreen() {
     const diditStatusPollInFlightRef = useRef(false);
     const diditStatusPollFinalizedRef = useRef(false);
     const pendingReviewSignupRef = useRef(false);
+    const finishAccountCreationRef = useRef(false);
     const documentSheetSnapPoints = useMemo(() => ['88%'], []);
     const manualCalendarSnapPoints = useMemo(() => ['70%'], []);
     const bottomSheetAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
@@ -1403,6 +1447,11 @@ export default function SignupScreen() {
             });
         }
     }, []);
+
+    const resetDiditVerificationReturnState = useCallback(async (reason: string) => {
+        await clearDiditSignupSession(reason);
+        router.setParams({ verified: '', check_verification: '' });
+    }, [clearDiditSignupSession, router]);
 
     const handleDocumentSelect = (documentKey: string) => {
         if (documentKey !== selectedDocumentKey) {
@@ -2431,6 +2480,17 @@ export default function SignupScreen() {
             return;
         }
 
+        if (finishAccountCreationRef.current) {
+            logDiditEmailFlow('finishAccountCreation.blocked', {
+                reason: 'already_in_flight',
+                email: maskEmailForLog(email),
+                diditSessionId: refToLink,
+                platform: Platform.OS,
+            });
+            return;
+        }
+
+        finishAccountCreationRef.current = true;
         setLoading(true);
 
         // Fetch Didit Data via Edge Function
@@ -2498,12 +2558,7 @@ export default function SignupScreen() {
                 platform: Platform.OS,
             });
             setLoading(false);
-            setVerificationUrl('');
-            setSessionId('');
-            setSessionNonce('');
-            setTempSessionRef('');
-            await AsyncStorage.removeItem('signup_current_session');
-            router.setParams({ verified: '', check_verification: '' });
+            await resetDiditVerificationReturnState('didit_final_failure');
             setStep('details');
 
             Alert.alert(
@@ -2512,6 +2567,7 @@ export default function SignupScreen() {
                     ? 'You did not complete the verification process. Please try again.'
                     : 'Your I.D. was declined or does not match. Please try again with a valid government-issued I.D.',
             );
+            finishAccountCreationRef.current = false;
             return;
         }
 
@@ -2523,6 +2579,7 @@ export default function SignupScreen() {
                 platform: Platform.OS,
             });
             await finishAccountCreationPendingReview(refToLink);
+            finishAccountCreationRef.current = false;
             return;
         }
 
@@ -2542,6 +2599,7 @@ export default function SignupScreen() {
                 'Face Match Not Completed',
                 'Your ID was scanned, but Didit did not return an approved face match. Please restart identity verification after confirming the workflow requires Liveness and Face Match.',
             );
+            finishAccountCreationRef.current = false;
             return;
         }
 
@@ -2556,6 +2614,24 @@ export default function SignupScreen() {
             hasVerifiedName: Boolean(verifiedName),
             platform: Platform.OS,
         });
+
+        const handleDiditSignupStatusRejected = async (error: unknown, stage: string) => {
+            logDiditEmailFlow('finishAccountCreation.diditStatusRejected', {
+                stage,
+                email: maskEmailForLog(email),
+                diditSessionId: refToLink,
+                diditStatus: diditStatus || null,
+                error: summarizeErrorForDiditEmailLog(error),
+                platform: Platform.OS,
+            });
+            setLoading(false);
+            await resetDiditVerificationReturnState('didit_signup_status_rejected');
+            setStep('details');
+            Alert.alert(
+                'Invalid I.D.',
+                'Your I.D. was declined or does not match. Please try again with a valid government-issued I.D.',
+            );
+        };
 
         try {
             // 3. Create the auth user/profile through the signup Edge Function.
@@ -2625,6 +2701,11 @@ export default function SignupScreen() {
             });
 
             if (signupError) {
+                if (isDiditAccountCreationStatusRejection(signupError)) {
+                    await handleDiditSignupStatusRejected(signupError, 'edgeSignup.error');
+                    return;
+                }
+
                 logDiditEmailFlowError('auth.edgeSignup.error', signupError, {
                     email: maskEmailForLog(email),
                     diditSessionId: refToLink,
@@ -2690,6 +2771,11 @@ export default function SignupScreen() {
             }
 
         } catch (authErr: any) {
+            if (isDiditAccountCreationStatusRejection(authErr)) {
+                await handleDiditSignupStatusRejected(authErr, 'finishAccountCreation.catch');
+                return;
+            }
+
             logDiditEmailFlowError('finishAccountCreation.catch', authErr, {
                 email: maskEmailForLog(email),
                 diditSessionId: refToLink,
@@ -2759,6 +2845,7 @@ export default function SignupScreen() {
             Alert.alert('Creation Failed', authErr.message);
         } finally {
             setLoading(false);
+            finishAccountCreationRef.current = false;
         }
     };
 
