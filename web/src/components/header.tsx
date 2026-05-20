@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect, usePathname } from "expo-router";
+import { router, useFocusEffect, usePathname, useSegments } from "expo-router";
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +20,27 @@ interface HeaderProps {
     cardStyle?: boolean;
 }
 
+const normalizeHeaderSegments = (segments: readonly string[]) => {
+    const normalizedSegments = segments
+        .map((segment) => String(segment || '').trim())
+        .filter((segment) => segment && !(segment.startsWith('(') && segment.endsWith(')')));
+
+    return `/${normalizedSegments.join('/')}`;
+};
+
+const normalizeHeaderPathname = (value: string, segments: readonly string[] = []) => {
+    const normalizedFromSegments = normalizeHeaderSegments(segments);
+    if (normalizedFromSegments !== '/') {
+        return normalizedFromSegments;
+    }
+
+    const normalizedSegments = value
+        .split('/')
+        .filter((segment) => segment && !(segment.startsWith('(') && segment.endsWith(')')));
+
+    return `/${normalizedSegments.join('/')}`;
+};
+
 function Header({ title, overline, transparent, onBackPress, hideBackButton = false, leftComponent, rightComponent, cardStyle }: HeaderProps) {
     const { colors, isDark } = useTheme();
     const { isGuest, setGuestMode, userId, userRole } = useAuth();
@@ -29,39 +50,44 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
     const isFan = isFanUserRole(userRole);
 
     const pathname = usePathname();
+    const segments = useSegments();
+    const routePathname = useMemo(() => normalizeHeaderPathname(pathname, segments), [pathname, segments]);
     const [hasUnread, setHasUnread] = useState(false);
     const [guestMenuVisible, setGuestMenuVisible] = useState(false);
     const [staffAccessLevel, setStaffAccessLevel] = useState<1 | 2 | 3 | null>(null);
     const isStaff = isStaffRole(userRole);
     const isAdminPath = useMemo(
-        () => pathname === "/admin" || pathname.startsWith("/admin/"),
-        [pathname],
+        () => routePathname === "/admin" || routePathname.startsWith("/admin/"),
+        [routePathname],
     );
     const isMainNavPath = useMemo(
-        () => pathname === "/explore" || pathname === "/feed" || pathname === "/manage" || pathname === "/bookings" || pathname === "/ai_suggestions",
-        [pathname],
+        () => routePathname === "/explore" || routePathname === "/feed" || routePathname === "/manage" || routePathname === "/bookings" || routePathname === "/ai_suggestions",
+        [routePathname],
     );
 
     const isSettingsOrProfile = useMemo(
-        () => pathname === "/settings" || pathname === "/profile",
-        [pathname],
+        () => routePathname === "/settings" || routePathname === "/profile",
+        [routePathname],
     );
 
     const isMyListingPath = useMemo(
-        () => pathname === "/my_group" || pathname === "/my_venue" || pathname === "/my_studio" || pathname === "/my_production",
-        [pathname],
+        () => routePathname === "/my_group" || routePathname === "/my_venue" || routePathname === "/my_studio" || routePathname === "/my_production",
+        [routePathname],
     );
+    const isRoundedMainHeader = isMainNavPath || isSettingsOrProfile || isMyListingPath;
 
     const backVisible = !hideBackButton && (!!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath));
+    const useMainTitleStyle = !backVisible;
+    const useCompactMainTitleStyle = useMainTitleStyle && isRoundedMainHeader;
     const notifVisible = isMainNavPath && !isGuest && !isWebDesktop;
     const addbtnvisible = isMyListingPath && (!isStaff || staffAccessLevel === 1);
 
     const btn = useMemo<'/add_gig' | '/add_studio' | '/add_group' | '/add_production'>(() => {
-        if (pathname === "/my_venue") return '/add_gig';
-        if (pathname === "/my_studio") return '/add_studio';
-        if (pathname === "/my_production") return '/add_production';
+        if (routePathname === "/my_venue") return '/add_gig';
+        if (routePathname === "/my_studio") return '/add_studio';
+        if (routePathname === "/my_production") return '/add_production';
         return '/add_group';
-    }, [pathname]);
+    }, [routePathname]);
 
     useEffect(() => {
         let cancelled = false;
@@ -92,19 +118,19 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
     }, [isStaff, userId]);
 
     const defaultBackRoute = useMemo(() => {
-        if (pathname === "/edit_profile") return "/profile";
-        if (pathname === "/add_gig" || pathname === "/edit_gig") return "/my_venue";
-        if (pathname === "/add_group" || pathname === "/add_duo" || pathname === "/edit_group") return "/my_group";
-        if (pathname === "/add_studio" || pathname === "/edit_studio") return "/my_studio";
-        if (pathname === "/add_production" || pathname === "/edit_production") return "/my_production";
-        if (pathname === "/manage_gig") return "/my_venue";
-        if (pathname === "/manage_group") return "/my_group";
-        if (pathname === "/manage_studio") return "/my_studio";
-        if (pathname.startsWith("/add_") || pathname.startsWith("/edit_")) {
+        if (routePathname === "/edit_profile") return "/profile";
+        if (routePathname === "/add_gig" || routePathname === "/edit_gig") return "/my_venue";
+        if (routePathname === "/add_group" || routePathname === "/add_duo" || routePathname === "/edit_group") return "/my_group";
+        if (routePathname === "/add_studio" || routePathname === "/edit_studio") return "/my_studio";
+        if (routePathname === "/add_production" || routePathname === "/edit_production") return "/my_production";
+        if (routePathname === "/manage_gig") return "/my_venue";
+        if (routePathname === "/manage_group") return "/my_group";
+        if (routePathname === "/manage_studio") return "/my_studio";
+        if (routePathname.startsWith("/add_") || routePathname.startsWith("/edit_")) {
             return resolveRoleManageRoute(userRole);
         }
         return null;
-    }, [pathname, userRole]);
+    }, [routePathname, userRole]);
 
     const handleBackPress = useCallback(() => {
         if (onBackPress) {
@@ -215,11 +241,11 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
                     <Text style={[
                         styles.title,
                         { color: transparent ? '#FFFFFF' : colors.text },
-                        !backVisible && styles.mainTitle,
-                        overline && styles.wrappingTitle,
+                        useMainTitleStyle && styles.mainTitle,
+                        useCompactMainTitleStyle && styles.compactMainTitle,
                     ]}
-                        numberOfLines={overline ? undefined : 1}
-                        ellipsizeMode={overline ? undefined : "tail"}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
                     >
                         {title}
                     </Text>
@@ -373,11 +399,6 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
         fontFamily: 'Poppins_600SemiBold',
-        textAlign: 'center',
-    },
-    wrappingTitle: {
-        flexShrink: 1,
-        lineHeight: 24,
     },
     overlineText: {
         fontSize: 11,
@@ -394,6 +415,11 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         fontFamily: 'Poppins_700Bold',
         letterSpacing: -0.5,
+    },
+    compactMainTitle: {
+        fontSize: 18,
+        lineHeight: 24,
+        letterSpacing: 0,
     },
     iconButton: {
         padding: 8,

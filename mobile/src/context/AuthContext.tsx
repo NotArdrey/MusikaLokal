@@ -113,6 +113,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const profileRealtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const identityExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const roleUserIdRef = useRef<string | null>(null);
   const roleFetchInFlightRef = useRef<Promise<void> | null>(null);
   const lastRoleFetchRef = useRef<{ userId: string | null; fetchedAt: number }>({
     userId: null,
@@ -283,6 +284,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       setSession(null);
+      roleUserIdRef.current = null;
       setIsAdmin(false);
       setUserRole(null);
       setRoleResolved(true);
@@ -328,11 +330,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setSession(secureSession);
         if (secureSession) {
           setGuestMode(false);
+          prepareRoleFetch(secureSession.user.id);
           checkAdmin(secureSession.user.id);
-          setRoleResolved(false);
           fetchUserRole(secureSession.user.id);
         } else {
-          setRoleResolved(true);
+          clearResolvedRole();
         }
         setLoading(false);
       } catch (error) {
@@ -354,6 +356,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // Handle sign out event
       if (event === "SIGNED_OUT") {
         setSession(null);
+        roleUserIdRef.current = null;
         setIsAdmin(false);
         setUserRole(null);
         setRoleResolved(true);
@@ -380,11 +383,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setSession(secureSession);
       if (secureSession) {
         setGuestMode(false);
+        prepareRoleFetch(secureSession.user.id);
         checkAdmin(secureSession.user.id);
-        setRoleResolved(false);
         fetchUserRole(secureSession.user.id);
       } else if (event !== "INITIAL_SESSION") {
         // Only reset state if this isn't the initial session load
+        roleUserIdRef.current = null;
         setIsAdmin(false);
         setUserRole(null);
         setRoleResolved(true);
@@ -395,6 +399,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setIdentityRequired(false);
         setIdentityChecked(true);
         setIdentityExpiresAt(null);
+      } else {
+        clearResolvedRole();
       }
       setLoading(false);
     });
@@ -570,6 +576,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setIsAdmin(false);
   };
 
+  const prepareRoleFetch = (nextUserId: string) => {
+    if (roleUserIdRef.current !== nextUserId) {
+      roleUserIdRef.current = nextUserId;
+      setUserRole(null);
+      setIsAdmin(false);
+      roleFetchInFlightRef.current = null;
+      lastRoleFetchRef.current = { userId: null, fetchedAt: 0 };
+    }
+    setRoleResolved(false);
+  };
+
+  const clearResolvedRole = () => {
+    roleUserIdRef.current = null;
+    roleFetchInFlightRef.current = null;
+    lastRoleFetchRef.current = { userId: null, fetchedAt: 0 };
+    setUserRole(null);
+    setIsAdmin(false);
+    setRoleResolved(true);
+  };
+
   const fetchUserRole = async (nextUserId: string) => {
     const now = Date.now();
     const last = lastRoleFetchRef.current;
@@ -601,6 +627,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         if (error) {
           console.warn("Error fetching user role:", error.message);
+          if (roleUserIdRef.current !== nextUserId) return;
           setUserRole(null);
           setRoleResolved(true);
           return;
@@ -610,6 +637,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           if (__DEV__ && AUTH_DEBUG_LOGS) {
           }
 
+          if (roleUserIdRef.current !== nextUserId) return;
           setUserRole(data[0].role);
           lastRoleFetchRef.current = { userId: nextUserId, fetchedAt: Date.now() };
           setRoleResolved(true);
@@ -619,14 +647,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         if (__DEV__ && AUTH_DEBUG_LOGS) {
         }
 
+        if (roleUserIdRef.current !== nextUserId) return;
         setUserRole(null);
         setRoleResolved(true);
       } catch (error) {
         console.warn("Exception fetching user role:", error);
+        if (roleUserIdRef.current !== nextUserId) return;
         setUserRole(null);
         setRoleResolved(true);
       } finally {
-        roleFetchInFlightRef.current = null;
+        if (roleUserIdRef.current === nextUserId) {
+          roleFetchInFlightRef.current = null;
+        }
       }
     })();
 

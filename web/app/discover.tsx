@@ -377,7 +377,7 @@ export default function DiscoverScreen() {
 		}
 
 		if (budget > 0) {
-			return `₱${budget.toLocaleString()}`;
+			return `₱${budget.toLocaleString()}${item.type === "Gig" ? " Talent Fee" : ""}`;
 		}
 
 		if (rate > 0) {

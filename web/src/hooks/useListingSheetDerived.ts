@@ -11,7 +11,7 @@ const getTypeLabels = (type: string) => {
       };
     case "Venue":
       return {
-        aboutTitle: "About this venue",
+        aboutTitle: "About this gig",
         tabs: ["About", "Specs", "Book", "Review"],
         unit: "hour",
       };

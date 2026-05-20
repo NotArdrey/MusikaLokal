@@ -149,7 +149,7 @@ const LOCAL_CATALOG: LocalInstrumentProfile[] = [
     genres: ["Acoustic", "Folk", "Latin", "Pop"],
     difficulty: "beginner",
     category: "percussion",
-    description: "Compact percussion option for unplugged sets and small venues.",
+    description: "Compact percussion option for unplugged sets and small gigs.",
     relatedInstruments: ["Acoustic Guitar", "Microphone"],
     famousPlayers: ["Alex Acuna", "Paquito Gonzalez"],
   },

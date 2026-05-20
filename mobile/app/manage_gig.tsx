@@ -1115,7 +1115,7 @@ export default function GigDetailsScreen() {
                       { color: colors.text, marginBottom: 12 },
                     ]}
                   >
-                    Venue Gallery
+                    Gig Gallery
                   </Text>
 
                   <ScrollView
@@ -2015,7 +2015,7 @@ export default function GigDetailsScreen() {
                           { color: colors.textSecondary },
                         ]}
                       >
-                        {review.comment}
+                        {review.content || review.comment || "No written review."}
                       </Text>
                     </View>
                   ))

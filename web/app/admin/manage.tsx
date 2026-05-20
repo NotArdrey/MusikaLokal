@@ -187,7 +187,7 @@ type DetailSection = {
 const resourceTabs: { key: ResourceFilter; label: string; icon: string }[] = [
   { key: 'all', label: 'All', icon: 'albums-outline' },
   { key: 'studio', label: 'Studios', icon: 'business-outline' },
-  { key: 'venue', label: 'Venues', icon: 'musical-notes-outline' },
+  { key: 'venue', label: 'Gigs', icon: 'musical-notes-outline' },
   { key: 'production', label: 'Production', icon: 'people-circle-outline' },
 ];
 
@@ -230,7 +230,7 @@ const defaultForm = (resourceType: ResourceType = 'studio'): EditorForm => ({
 
 const typeLabels: Record<ResourceType, string> = {
   studio: 'Studio',
-  venue: 'Venue',
+  venue: 'Gig',
   production: 'Production',
 };
 
@@ -926,7 +926,7 @@ export default function AdminManagePage() {
     }
 
     if (form.resourceType === 'venue' && !form.location.trim()) {
-      setAlert({ type: 'warning', title: 'Missing Location', message: 'Enter the venue location before saving.' });
+      setAlert({ type: 'warning', title: 'Missing Location', message: 'Enter the gig location before saving.' });
       return false;
     }
 
@@ -1129,7 +1129,7 @@ export default function AdminManagePage() {
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={[styles.pageTitle, { color: colors.text }]}>Manage Listings</Text>
             <Text style={[styles.pageMeta, { color: colors.textSecondary }]}>
-              {counts.studio} studios | {counts.venue} venues | {counts.production} production teams
+              {counts.studio} studios | {counts.venue} gigs | {counts.production} production teams
             </Text>
           </View>
           <TouchableOpacity
@@ -1529,11 +1529,11 @@ export default function AdminManagePage() {
 
               {form.resourceType === 'venue' ? (
                 <>
-                  <FieldLabel label="Venue Location" colors={colors} />
+                  <FieldLabel label="Gig Location" colors={colors} />
                   <TextInput
                     value={form.location}
                     onChangeText={(location) => updateForm({ location })}
-                    placeholder="Venue location"
+                    placeholder="Gig location"
                     placeholderTextColor={colors.textSecondary}
                     style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
                   />

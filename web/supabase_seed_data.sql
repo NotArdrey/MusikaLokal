@@ -65,7 +65,7 @@ BEGIN
     -- User 4: Producer (producer@test.com)
     SELECT id INTO user4_id FROM auth.users WHERE email = 'producer@test.com' LIMIT 1;
     
-    -- User 3: Venue Owner / Manager (manager@test.com)
+    -- User 3: Gig Owner / Manager (manager@test.com)
     SELECT id INTO user3_id FROM auth.users WHERE email = 'manager@test.com' LIMIT 1;
 
     -- Fallbacks (if specific emails not found, use offsets)
@@ -180,7 +180,7 @@ BEGIN
     INSERT INTO public.studios (owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude)
     VALUES (
         user2_id,
-      'OneRoots Records',
+      'Roots Records',
       'MacArthur Highway, Tabang, Ilang-ilang, Guiguinto, Bulacan, Philippines',
       1500,
       'Recording and music production studio in Guiguinto, Bulacan for solo artists, bands, and local releases.',
@@ -293,7 +293,7 @@ BEGIN
     INSERT INTO public.reviews (author_id, studio_id, rating, content) VALUES (user3_id, studio_ids[1], 4, 'Good acoustics.');
 
     -- Reviews for Gig 1
-    INSERT INTO public.reviews (author_id, gig_id, rating, content) VALUES (user1_id, gig_ids[1], 5, 'Great venue owner, clear instructions.');
+    INSERT INTO public.reviews (author_id, gig_id, rating, content) VALUES (user1_id, gig_ids[1], 5, 'Great gig owner, clear instructions.');
 
     -- Random extra reviews
     INSERT INTO public.reviews (author_id, studio_id, rating, content) VALUES (user1_id, studio_ids[2], 3, 'Decent for the price.');
@@ -349,7 +349,7 @@ VALUES (
     'studio@test.com',
   'Maria Santos',
     'studio-owner',
-  'Independent recording and music production studio operating under the OneRoots Records banner in Bulacan.',
+  'Independent recording and music production studio operating under the Roots Records banner in Bulacan.',
   'Quezon City, Philippines',
     TRUE,
     'APPROVED'
@@ -368,7 +368,7 @@ VALUES (
     'producer@test.com',
   'Paolo Ramirez',
     'producer',
-  'Live event producer coordinating venue partnerships, stage logistics, and commercial show planning across Metro Manila.',
+  'Live event producer coordinating gig partnerships, stage logistics, and commercial show planning across Metro Manila.',
   'Pasig City, Metro Manila, Philippines',
   ARRAY['Event Production', 'Show Calling', 'Talent Coordination'],
   ARRAY['OPM', 'Pop', 'Live Events'],
@@ -380,7 +380,7 @@ VALUES (
     role = 'producer',
   full_name = 'Paolo Ramirez';
 
--- Test User 3: Manager/Venue Owner
+-- Test User 3: Manager/Gig Owner
 -- Email: manager@test.com / Password: pass123
 -- User ID from your dashboard: 00000000-0000-0000-0000-000000000001
 INSERT INTO profiles (id, email, full_name, role, bio, location, is_verified, verification_status)
@@ -389,7 +389,7 @@ VALUES (
     'manager@test.com',
   'Marco Reyes',
     'venue-owner',
-  'Venue booker and event organizer focused on OPM nights, private functions, and branded live events.',
+  'Gig booker and event organizer focused on OPM nights, private functions, and branded live events.',
   'Quezon City, Metro Manila, Philippines',
     TRUE,
     'APPROVED'
@@ -413,10 +413,10 @@ ON CONFLICT DO NOTHING;
 -- Sample Studio (owned by studio owner)
 INSERT INTO studios (id, owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude)
 VALUES 
-  (uuid_generate_v4(), '00000000-0000-0000-0000-000000000003', 'OneRoots Records', 'MacArthur Highway, Tabang, Ilang-ilang, Guiguinto, Bulacan, Philippines', 1500, 'Recording and music production studio in Guiguinto, Bulacan for solo artists, bands, and local releases.', ARRAY['Recording', 'Mixing', 'Music Production', 'Wi-Fi'], ARRAY['https://onerootsrecords.weebly.com/uploads/1/2/6/0/126010163/published/oneroots-logo-ping.png?1559873743'], 14.8336802, 120.8656847)
+  (uuid_generate_v4(), '00000000-0000-0000-0000-000000000003', 'Roots Records', 'MacArthur Highway, Tabang, Ilang-ilang, Guiguinto, Bulacan, Philippines', 1500, 'Recording and music production studio in Guiguinto, Bulacan for solo artists, bands, and local releases.', ARRAY['Recording', 'Mixing', 'Music Production', 'Wi-Fi'], ARRAY['https://onerootsrecords.weebly.com/uploads/1/2/6/0/126010163/published/oneroots-logo-ping.png?1559873743'], 14.8336802, 120.8656847)
 ON CONFLICT DO NOTHING;
 
--- Sample Gigs (organized by venue owner/manager)
+-- Sample Gigs (organized by gig owner/manager)
 INSERT INTO gigs (id, organizer_id, name, location, budget, description, event_date, status, images, latitude, longitude)
 VALUES 
   (uuid_generate_v4(), '00000000-0000-0000-0000-000000000001', 'Friday OPM Set at 70''s Bistro', '70''s Bistro, Quezon City', 7000, 'Looking for a rock or alt-pop act to anchor a Friday night OPM lineup.', NOW() + INTERVAL '14 days', 'open', ARRAY['https://picsum.photos/400/300?random=5'], 14.6348, 121.0387),
@@ -434,7 +434,7 @@ VALUES
     (
         uuid_generate_v4(), 
         '14d2e916-8d1c-4c04-9877-7ccd9bea6149',
-        (SELECT id FROM studios WHERE name = 'OneRoots Records' LIMIT 1),
+        (SELECT id FROM studios WHERE name = 'Roots Records' LIMIT 1),
         NOW() + INTERVAL '3 days',
         '14:00:00',
         '18:00:00',
@@ -546,7 +546,7 @@ BEGIN
         -- A. Update specific named studios from seed
         UPDATE public.studios 
         SET owner_id = v_studio_owner_id 
-        WHERE name IN ('OneRoots Records') 
+        WHERE name IN ('Roots Records', 'OneRoots Records') 
            OR owner_id = '00000000-0000-0000-0000-000000000003'; -- Catch the dummy ID
     ELSE
         RAISE NOTICE 'WARNING: studio@test.com not found';
@@ -569,7 +569,7 @@ BEGIN
         RAISE NOTICE 'WARNING: musician@test.com not found';
     END IF;
 
-    -- Venue Owner
+    -- Gig Owner
     IF v_manager_id IS NOT NULL THEN
         RAISE NOTICE 'Found Manager: %', v_manager_id;
         INSERT INTO public.profiles (id, email, full_name, role, verification_status)
@@ -796,7 +796,7 @@ END $$;
 
 -- ============================================================
 -- ACTIVITY TAB COVERAGE SEED
--- Deterministic demo rows for musician, studio-owner, venue-owner, and producer tabs.
+-- Deterministic demo rows for musician, studio-owner, gig owner, and producer tabs.
 -- This block uses fixed IDs so reruns refresh the same records instead of multiplying them.
 -- ============================================================
 DO $seed$
@@ -880,7 +880,7 @@ BEGIN
     v_team_id,
     v_producer_id,
     'North Loop Live Productions',
-    'Demo production team for seeded venue, producer, and musician activity tabs.',
+    'Demo production team for seeded gig, producer, and musician activity tabs.',
     'https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=600&fit=crop'
   )
   ON CONFLICT (id) DO UPDATE
@@ -965,7 +965,7 @@ BEGIN
       'Tab Coverage Upcoming Gig 1',
       'San Juan City, Metro Manila',
       12000,
-      'Accepted future gig for musician, venue owner, and producer tabs.',
+      'Accepted future gig for musician, gig owner, and producer tabs.',
       now() + interval '6 days',
       'open',
       ARRAY['https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=1200&fit=crop'],
@@ -1328,7 +1328,7 @@ BEGIN
       NULL,
       '11111111-1111-4111-8111-111111111202',
       'pending',
-      'Second pending direct application for venue and musician tabs.',
+      'Second pending direct application for gig and musician tabs.',
       false,
       true,
       'solo',
@@ -1562,7 +1562,7 @@ BEGIN
     production_team_id = EXCLUDED.production_team_id,
     production_roster_id = EXCLUDED.production_roster_id;
 
-  RAISE NOTICE 'Activity tab coverage seed refreshed for musician, studio-owner, venue-owner, and producer demo accounts.';
+  RAISE NOTICE 'Activity tab coverage seed refreshed for musician, studio-owner, gig owner, and producer demo accounts.';
 END
 $seed$;
 

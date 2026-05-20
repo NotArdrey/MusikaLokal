@@ -34,6 +34,12 @@ import { useTheme } from "../context/ThemeContext";
 import ListingCard from "./ListingCard";
 
 const debugLog = (..._args: unknown[]) => {};
+const PROFILE_SKILL_DISPLAY_EXCLUSIONS = new Set(["producer"]);
+
+const isVisibleProfileSkill = (value: unknown) =>
+  typeof value === "string" &&
+  value.trim().length > 0 &&
+  !PROFILE_SKILL_DISPLAY_EXCLUSIONS.has(value.trim().toLowerCase());
 
 // Enable LayoutAnimation on Android
 if (
@@ -138,7 +144,7 @@ const collectProfileValues = (rows: any[] | null | undefined, valueKey: string) 
     }
 
     const nextValue = rawValue.trim();
-    if (!nextValue) {
+    if (!nextValue || (valueKey === "skill" && !isVisibleProfileSkill(nextValue))) {
       return;
     }
 

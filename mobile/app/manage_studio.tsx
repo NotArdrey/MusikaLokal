@@ -2218,7 +2218,7 @@ export default function StudioDetailsScreen() {
                         { color: colors.textSecondary },
                       ]}
                     >
-                      {review.comment}
+                      {review.content || review.comment || "No written review."}
                     </Text>
                   </View>
                 ))}

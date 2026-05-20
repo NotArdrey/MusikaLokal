@@ -1321,7 +1321,7 @@ export default function GroupDetailsScreen() {
                           { color: colors.textSecondary },
                         ]}
                       >
-                        {review.comment}
+                        {review.content || review.comment || "No written review."}
                       </Text>
                     </View>
                   ))

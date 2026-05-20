@@ -238,7 +238,7 @@ const getForeignKeyUnavailableMessage = (
   }
 
   if (payload.studioId && errorText.includes("studio_id")) {
-    return "This studio or venue is no longer available. It may have been deleted by the owner. Please refresh and choose another listing.";
+    return "This studio or gig is no longer available. It may have been deleted by the owner. Please refresh and choose another listing.";
   }
 
   return null;
@@ -288,7 +288,7 @@ const ensureListingRequestTargetsAvailable = async (payload: ListingRequestPaylo
 
     if (!data) {
       throw createUnavailableError(
-        "This studio or venue is no longer available. It may have been deleted by the owner. Please refresh and choose another listing.",
+        "This studio or gig is no longer available. It may have been deleted by the owner. Please refresh and choose another listing.",
       );
     }
   }

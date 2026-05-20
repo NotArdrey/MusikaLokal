@@ -86,6 +86,21 @@ function normalizeContent(value: unknown) {
   return value.trim();
 }
 
+function buildGigCommentThreadContent(gig: any) {
+  const lines = [`Gig comments: ${gig?.name || "Untitled Gig"}`];
+  const location = normalizeContent(gig?.location);
+  const eventDate = normalizeContent(gig?.event_date);
+  const talentFee = Number(gig?.budget || gig?.rate || 0);
+
+  if (location) lines.push(`Location: ${location}`);
+  if (eventDate) lines.push(`Event date: ${eventDate.slice(0, 10)}`);
+  if (Number.isFinite(talentFee) && talentFee > 0) {
+    lines.push(`Talent Fee: PHP ${talentFee.toLocaleString("en-US")}`);
+  }
+
+  return lines.join("\n").slice(0, 5000);
+}
+
 function normalizeStoragePath(value: unknown, ownerId: string) {
   if (typeof value !== "string") return "";
   const trimmed = value.trim().replace(/^\/+/, "");
@@ -913,6 +928,95 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── update_post ─────────────────────────────────────────────────
+    if (action === "get_or_create_gig_comment_post") {
+      const { gig_id } = params;
+      if (!gig_id) return jsonResponse({ error: "gig_id is required" }, 400);
+
+      const { data: gig, error: gigError } = await supabaseAdmin
+        .from("gigs")
+        .select("id, organizer_id, name, location, budget, rate, event_date, status, permit_status")
+        .eq("id", gig_id)
+        .maybeSingle();
+
+      if (gigError || !gig) return jsonResponse({ error: "Gig not found" }, 404);
+
+      const requesterRole = await getRequesterRole();
+      const requesterIsOrganizer = gig.organizer_id === uid;
+      const requesterIsAdmin = requesterRole === "admin";
+      const permitStatus = normalizeContent(gig.permit_status).toLowerCase();
+      const gigStatus = normalizeContent(gig.status).toLowerCase();
+
+      if (gigStatus === "cancelled" || (permitStatus && permitStatus !== "approved" && !requesterIsOrganizer && !requesterIsAdmin)) {
+        return jsonResponse({ error: "Gig not found" }, 404);
+      }
+
+      const existingResult = await supabaseAdmin
+        .from("feed_posts")
+        .select("id, comment_count, reaction_count, share_count")
+        .eq("linked_gig_id", gig.id)
+        .maybeSingle();
+
+      if (existingResult.error) {
+        return jsonResponse({ error: existingResult.error.message }, 500);
+      }
+
+      if (existingResult.data?.id) {
+        return jsonResponse({
+          success: true,
+          data: {
+            post_id: existingResult.data.id,
+            comment_count: existingResult.data.comment_count || 0,
+            reaction_count: existingResult.data.reaction_count || 0,
+            share_count: existingResult.data.share_count || 0,
+          },
+        });
+      }
+
+      const { data: createdThread, error: createThreadError } = await supabaseAdmin
+        .from("feed_posts")
+        .insert({
+          author_id: gig.organizer_id,
+          content: buildGigCommentThreadContent(gig),
+          post_type: "announcement",
+          visibility: "public",
+          linked_gig_id: gig.id,
+        })
+        .select("id, comment_count, reaction_count, share_count")
+        .single();
+
+      if (createThreadError) {
+        const retryResult = await supabaseAdmin
+          .from("feed_posts")
+          .select("id, comment_count, reaction_count, share_count")
+          .eq("linked_gig_id", gig.id)
+          .maybeSingle();
+
+        if (retryResult.data?.id) {
+          return jsonResponse({
+            success: true,
+            data: {
+              post_id: retryResult.data.id,
+              comment_count: retryResult.data.comment_count || 0,
+              reaction_count: retryResult.data.reaction_count || 0,
+              share_count: retryResult.data.share_count || 0,
+            },
+          });
+        }
+
+        return jsonResponse({ error: createThreadError.message }, 500);
+      }
+
+      return jsonResponse({
+        success: true,
+        data: {
+          post_id: createdThread.id,
+          comment_count: createdThread.comment_count || 0,
+          reaction_count: createdThread.reaction_count || 0,
+          share_count: createdThread.share_count || 0,
+        },
+      });
+    }
+
     if (action === "update_post") {
       const { post_id, content, visibility, is_pinned, media } = params;
       if (!post_id) return jsonResponse({ error: "post_id is required" }, 400);
@@ -1042,6 +1146,7 @@ Deno.serve(async (req: Request) => {
           .select(feedPostSelect)
           .in("author_id", followedIds)
           .eq("is_hidden", false)
+          .is("linked_gig_id", null)
           .or(`visibility.in.(public,followers),author_id.eq.${uid}`)
           .order("created_at", { ascending: false });
       } else {
@@ -1051,6 +1156,7 @@ Deno.serve(async (req: Request) => {
               .from("feed_posts")
               .select(feedPostSelect)
               .eq("is_hidden", false)
+              .is("linked_gig_id", null)
               .or(`visibility.eq.public,author_id.eq.${uid}`)
               .order("created_at", { ascending: false })
           : supabaseAdmin
@@ -1058,6 +1164,7 @@ Deno.serve(async (req: Request) => {
               .select(feedPostSelect)
               .eq("visibility", "public")
               .eq("is_hidden", false)
+              .is("linked_gig_id", null)
               .order("created_at", { ascending: false });
       }
 

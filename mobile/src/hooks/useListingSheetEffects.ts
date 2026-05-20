@@ -31,11 +31,21 @@ const getReviewTargetColumn = (type: unknown) => {
   return "group_id";
 };
 
+const getReviewContent = (row: any) => {
+  const candidates = [row?.content, row?.comment, row?.feedback, row?.body, row?.review_text];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return null;
+};
+
 const normalizeReviewRows = (rows: any[] = []) =>
   rows.map((row) => ({
     ...row,
     author: row?.author ?? row?.profiles ?? null,
-    content: row?.content ?? row?.comment ?? null,
+    content: getReviewContent(row),
     likes_count: Number(row?.likes_count ?? row?.computed_likes_count ?? 0),
   }));
 

@@ -74,11 +74,11 @@ function Ensure-AdminUser($email, $password, $displayName) {
 
 $oneRoots = [ordered]@{
   owner_email = 'seed.oneroots.records@musikalokal.app'
-  owner_name = 'OneRoots Records'
+  owner_name = 'Roots Records'
   owner_avatar_url = 'https://onerootsrecords.weebly.com/uploads/1/2/6/0/126010163/published/oneroots-logo-ping.png?1559873743'
   owner_location = 'Guiguinto, Bulacan, Philippines'
-  owner_bio = 'Independent recording and music production studio operating under the OneRoots Records banner in Bulacan.'
-  studio_name = 'OneRoots Records'
+  owner_bio = 'Independent recording and music production studio operating under the Roots Records banner in Bulacan.'
+  studio_name = 'Roots Records'
   address = 'MacArthur Highway, Tabang, Ilang-ilang, Guiguinto, Bulacan, Philippines'
   description = 'Recording and music production studio in Guiguinto, Bulacan for solo artists, bands, and local releases.'
   image = 'https://onerootsrecords.weebly.com/uploads/1/2/6/0/126010163/published/oneroots-logo-ping.png?1559873743'
@@ -92,9 +92,11 @@ $oneRoots = [ordered]@{
   longitude = 120.8656847
 }
 
+$legacyOneRootsStudioName = 'OneRoots Records'
+
 $existingStudiosResponse = Invoke-RestMethod -Method Get -Uri "$base/studios?select=id,name" -Headers $restHeaders
 $existingStudios = @($existingStudiosResponse | Where-Object { $_ -ne $null })
-$studiosToRemove = @($existingStudios | Where-Object { $_.name -ne $oneRoots.studio_name })
+$studiosToRemove = @($existingStudios | Where-Object { $_.name -ne $oneRoots.studio_name -and $_.name -ne $legacyOneRootsStudioName })
 
 if ($studiosToRemove.Count -gt 0) {
   $studioIdsToRemove = @($studiosToRemove | ForEach-Object { $_.id })
@@ -120,8 +122,7 @@ Ensure-Profile ([ordered]@{
   location = $oneRoots.owner_location
 })
 
-$existingOneRootsResponse = Invoke-RestMethod -Method Get -Uri "$base/studios?select=id,name&name=eq.OneRoots%20Records" -Headers $restHeaders
-$existingOneRoots = @($existingOneRootsResponse | Where-Object { $_ -ne $null })
+$existingOneRoots = @($existingStudios | Where-Object { $_.name -eq $oneRoots.studio_name -or $_.name -eq $legacyOneRootsStudioName })
 $studioBody = [ordered]@{
   owner_id = $ownerId
   name = $oneRoots.studio_name

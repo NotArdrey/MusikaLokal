@@ -27,7 +27,7 @@ export const STAFF_ACCESS_LEVEL_LABELS: Record<StaffAccessLevel, string> = {
 
 export const STAFF_ENTITY_LABELS: Record<StaffEntityType, string> = {
   studio: 'Studio',
-  venue: 'Venue',
+  venue: 'Gig',
   production: 'Production',
 };
 

@@ -61,7 +61,7 @@ interface UseApplicationSubmissionActionParams {
 }
 
 const GIG_UNAVAILABLE_MESSAGE =
-  "This gig is no longer available. It may have been deleted or closed by the venue owner. Please refresh and choose another gig.";
+  "This gig is no longer available. It may have been deleted or closed by the gig owner. Please refresh and choose another gig.";
 const GROUP_UNAVAILABLE_MESSAGE =
   "This group is no longer available. It may have been deleted by the owner. Please refresh and choose another group.";
 
@@ -495,7 +495,7 @@ export const useApplicationSubmissionAction = ({
         setAlertConfig({
           type: "success",
           title: "Application Sent",
-          message: `${selectedProductionRoster?.display_name || "Your selected performer"} was sent to the venue owner from your production team. We'll let you know when they respond.`,
+          message: `${selectedProductionRoster?.display_name || "Your selected performer"} was sent to the gig owner from your production team. We'll let you know when they respond.`,
         });
         setAlertVisible(true);
 
@@ -673,9 +673,9 @@ export const useApplicationSubmissionAction = ({
         title: "Application Sent",
         message: selectedGroupId
           ? needsLeaderApproval
-            ? "Your group application was sent to your group leader for approval. Once approved, it will be visible to the venue owner."
-            : "Your group application has been sent. Group members have been notified. The venue owner will review it and get back to you soon."
-          : "Your application has been sent to the venue owner. They'll review it and get back to you soon.",
+            ? "Your group application was sent to your group leader for approval. Once approved, it will be visible to the gig owner."
+            : "Your group application has been sent. Group members have been notified. The gig owner will review it and get back to you soon."
+          : "Your application has been sent to the gig owner. They'll review it and get back to you soon.",
       });
       setAlertVisible(true);
 
@@ -904,7 +904,7 @@ export const useApplicationSubmissionAction = ({
           type: "error",
           title: "Select Category",
           message:
-            "Please select a valid category (Individual, Duo, or Group) based on the venue requirements.",
+            "Please select a valid category (Individual, Duo, or Group) based on the gig requirements.",
         });
         setAlertVisible(true);
         return;
@@ -1003,7 +1003,7 @@ export const useApplicationSubmissionAction = ({
         type: "error",
         title: "Video Required",
         message:
-          "Please upload a performance video to apply. This helps venue owners evaluate your talent.",
+          "Please upload a performance video to apply. This helps gig owners evaluate your talent.",
       });
       setAlertVisible(true);
       return;

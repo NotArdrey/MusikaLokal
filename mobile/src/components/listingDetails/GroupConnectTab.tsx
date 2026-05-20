@@ -56,7 +56,7 @@ const GroupConnectTab = ({
 
           {currentUserRole === "venue-owner" && userVenues.length > 0 && (
             <View style={{ marginBottom: 16 }}>
-              <Text style={[styles.label, { color: colors.textSecondary }]}>Select Venue</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Select Gig</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 {userVenues.map((v) => (
                   <TouchableOpacity activeOpacity={1}
@@ -113,7 +113,7 @@ const GroupConnectTab = ({
                 ]}
               >
                 <Text style={[styles.infoText, { color: "#B91C1C" }]}>
-                  {"You don't have any venues listed. Please create a venue to send invites."}
+                  {"You don't have any gigs listed. Please create a gig to send invites."}
                 </Text>
               </View>
             )}

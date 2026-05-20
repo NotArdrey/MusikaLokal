@@ -113,6 +113,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const profileRealtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const identityExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const roleUserIdRef = useRef<string | null>(null);
 
   const setGuestMode = useCallback(async (enabled: boolean) => {
     setIsGuest(enabled);
@@ -261,6 +262,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       setSession(null);
+      roleUserIdRef.current = null;
       setIsAdmin(false);
       setUserRole(null);
       setRoleResolved(true);
@@ -306,10 +308,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setSession(secureSession);
         if (secureSession) {
           setGuestMode(false);
-          setRoleResolved(false);
+          prepareRoleFetch(secureSession.user.id);
           void fetchUserRole(secureSession.user.id, secureSession);
         } else {
-          setRoleResolved(true);
+          clearResolvedRole();
         }
         setLoading(false);
       } catch (error) {
@@ -332,6 +334,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // Handle sign out event
       if (event === "SIGNED_OUT") {
         setSession(null);
+        roleUserIdRef.current = null;
         setIsAdmin(false);
         setUserRole(null);
         setRoleResolved(true);
@@ -357,10 +360,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setSession(secureSession);
       if (secureSession) {
         setGuestMode(false);
-        setRoleResolved(false);
+        prepareRoleFetch(secureSession.user.id);
         void fetchUserRole(secureSession.user.id, secureSession);
       } else {
-        setRoleResolved(true);
+        clearResolvedRole();
 
         if (event === "INITIAL_SESSION") {
           setLoading(false);
@@ -553,7 +556,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return normalized.length > 0 ? normalized : null;
   };
 
-  const applyResolvedRole = (resolvedRole: string | null) => {
+  const prepareRoleFetch = (nextUserId: string) => {
+    if (roleUserIdRef.current !== nextUserId) {
+      roleUserIdRef.current = nextUserId;
+      setUserRole(null);
+      setIsAdmin(false);
+    }
+    setRoleResolved(false);
+  };
+
+  const clearResolvedRole = () => {
+    roleUserIdRef.current = null;
+    setUserRole(null);
+    setIsAdmin(false);
+    setRoleResolved(true);
+  };
+
+  const applyResolvedRole = (resolvedRole: string | null, nextUserId: string) => {
+    if (roleUserIdRef.current !== nextUserId) return;
     setUserRole(resolvedRole);
     setIsAdmin(resolvedRole === "admin");
     setRoleResolved(true);
@@ -575,7 +595,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const profileRole = normalizeRole(data?.role);
       if (profileRole) {
         console.log("✅ User role fetched from profiles:", profileRole);
-        applyResolvedRole(profileRole);
+        applyResolvedRole(profileRole, userId);
         return;
       }
 
@@ -590,7 +610,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const functionRole = normalizeRole(profileData?.role);
         if (functionRole) {
           console.log("✅ User role fetched from manage-profile:", functionRole);
-          applyResolvedRole(functionRole);
+          applyResolvedRole(functionRole, userId);
           return;
         }
       } else {
@@ -598,10 +618,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       console.log("⚠️ No role data found for user");
-      applyResolvedRole(null);
+      applyResolvedRole(null, userId);
     } catch (error) {
       console.log("❌ Exception fetching user role:", error);
-      applyResolvedRole(null);
+      applyResolvedRole(null, userId);
     }
   };
 

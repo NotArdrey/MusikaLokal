@@ -113,6 +113,8 @@ const ListingCard: React.FC<ListingCardProps> = ({
     let nextPriceLabel = "";
     let nextSecondaryPriceLabel = "";
     const nextIsGroup = item.type === "Group";
+    const normalizedType = String(item.type || "").toLowerCase();
+    const nextIsGig = normalizedType === "gig" || normalizedType === "venue";
     const rehearsalRateValue =
       item.rehearsal_rate && item.rehearsal_rate !== "0"
         ? parseInt(item.rehearsal_rate)
@@ -150,7 +152,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
     } else if (item.recording_rate && item.recording_rate !== "0") {
       nextPriceLabel = `₱${parseInt(item.recording_rate).toLocaleString()} / song`;
     } else if (item.budget && item.budget !== "0") {
-      nextPriceLabel = `₱${parseInt(item.budget).toLocaleString()}`;
+      nextPriceLabel = `₱${parseInt(item.budget).toLocaleString()}${nextIsGig ? " Talent Fee" : ""}`;
     } else if (item.rate && item.rate !== "0") {
       if (typeof item.rate === "string" && item.rate.includes("/")) {
         nextPriceLabel = `₱${item.rate}`;
@@ -181,7 +183,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
           ? "Rehearsal & Recording"
           : item.studio_type || "Studio";
       nextBadgeColor = "#7C3AED";
-    } else if (normalizedType === "Gig") {
+    } else if (normalizedType === "Gig" || normalizedType === "Venue") {
       nextBadgeLabel = "Gig";
       nextBadgeColor = "#10B981";
     } else if (normalizedType === "Group") {
@@ -702,7 +704,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
               </View>
             )}
 
-            {/* Instruments/Equipment Display for Studios/Venues */}
+            {/* Instruments/Equipment Display for Studios/Gigs */}
             {item.instruments &&
               Array.isArray(item.instruments) &&
               item.instruments.length > 0 && (
@@ -1204,7 +1206,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
             </View>
           )}
 
-          {/* Instruments Display for Studios/Venues */}
+          {/* Instruments Display for Studios/Gigs */}
           {item.instruments &&
             Array.isArray(item.instruments) &&
             item.instruments.length > 0 && (

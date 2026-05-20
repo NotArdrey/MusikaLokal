@@ -117,7 +117,7 @@ function getApplicationStatusNotification(
         return {
             type: 'error',
             title: 'Removed from Gig',
-            message: `Your contract for "${gigName}"${productionLabel} has been ended by the venue.`,
+            message: `Your contract for "${gigName}"${productionLabel} has been ended by the gig.`,
         }
     }
 
@@ -874,11 +874,11 @@ Deno.serve(async (req: Request) => {
                     type: normalizedDecision === 'approved' ? 'success' : 'warning',
                     title:
                         normalizedDecision === 'approved'
-                            ? 'Application Forwarded to Venue'
+                            ? 'Application Forwarded to Gig'
                             : 'Application Rejected by Group Leader',
                     message:
                         normalizedDecision === 'approved'
-                            ? `Your ${groupName} application for "${gigName}" was approved by your group leader and sent to the venue owner.`
+                            ? `Your ${groupName} application for "${gigName}" was approved by your group leader and sent to the gig owner.`
                             : `Your ${groupName} application for "${gigName}" was rejected by your group leader.`,
                     meta: buildNotificationRouteMeta('/bookings', undefined, {
                         gig_id: appDetails.gig_id,

@@ -274,7 +274,7 @@ export default function AddGigScreen() {
       if (profileError) throw profileError;
 
       if (profile?.role !== "venue-owner") {
-        showAlert("warning", "Unauthorized", "Only venue owners can create gigs.");
+        showAlert("warning", "Unauthorized", "Only gig owners can create gigs.");
         router.replace("/feed");
         return;
       }
@@ -397,7 +397,7 @@ export default function AddGigScreen() {
         showAlert(
           "warning",
           "Required Field",
-          "Please enter a venue address",
+          "Please enter a gig address",
         );
         return false;
       }
@@ -765,7 +765,7 @@ export default function AddGigScreen() {
           showAlert(
             "success",
             "Address Verified!",
-            `Your venue address has been verified:\n\n${data.extracted_address}`
+            `Your gig address has been verified:\n\n${data.extracted_address}`
           );
         } else {
           // Verification may still be processing
@@ -823,7 +823,7 @@ export default function AddGigScreen() {
       showAlert(
         "warning",
         "Verification Error",
-        "Could not start address verification. You can verify your venue address later from My Venue."
+        "Could not start address verification. You can verify your gig address later from My Gig."
       );
       setAddressVerificationModalVisible(false);
       router.replace({ pathname: "/my_venue", params: { refresh: String(Date.now()) } });
@@ -1202,7 +1202,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       )}
       <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
         <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
-        <Header title="Add Venue" onBackPress={handleBack} />
+        <Header title="Add Gig" onBackPress={handleBack} />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
@@ -1320,12 +1320,12 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 />
               </View>
 
-              {/* Venue Location - Pin on Map */}
+              {/* Gig Location - Pin on Map */}
               <View style={styles.inputContainer}>
                 <Text
                   style={[styles.inputLabel, { color: colors.textSecondary }]}
                 >
-                  Venue Address
+                  Gig Address
                 </Text>
                 <TouchableOpacity activeOpacity={1}
                   onPress={() => setLocationPickerVisible(true)}
@@ -1360,7 +1360,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         textAlignVertical: "center",
                       }}
                     >
-                      {address || "Tap to select venue location on map"}
+                      {address || "Tap to select gig location on map"}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -1371,12 +1371,12 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 <Text
                   style={[styles.inputLabel, { color: colors.textSecondary }]}
                 >
-                  Venue Address
+                  Gig Address
                 </Text>
                 <Text
                   style={[styles.inputSubLabel, { color: colors.textSecondary, marginBottom: 12 }]}
                 >
-                  Verify your venue address using a utility bill (Meralco, Maynilad, etc.)
+                  Verify your gig address using a utility bill (Meralco, Maynilad, etc.)
                 </Text>
                 
                 {addressVerified && address ? (
@@ -1437,10 +1437,10 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           </View>
                           <View style={{ alignItems: 'center' }}>
                             <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 14 }}>
-                              Verify Your Venue Address
+                              Verify Your Gig Address
                             </Text>
                             <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, textAlign: 'center', marginTop: 4 }}>
-                              Upload a recent utility bill to verify and auto-fill your venue address
+                              Upload a recent utility bill to verify and auto-fill your gig address
                             </Text>
                           </View>
                         </>
@@ -2949,7 +2949,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   </Text>
                 </View>
                 <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 12, color: colors.textSecondary, marginBottom: 10 }}>
-                  After creating this gig, you can coordinate venue partnerships with a production team from your production workspace.
+                  After creating this gig, you can coordinate gig partnerships with a production team from your production workspace.
                 </Text>
                 <TouchableOpacity activeOpacity={1}
                   onPress={() => router.push("/production_team" as any)}
@@ -3038,7 +3038,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           <View style={[styles.verificationModalContainer, { backgroundColor: colors.background }]}>
             <View style={styles.verificationModalHeader}>
               <Text style={[styles.verificationModalTitle, { color: colors.text }]}>
-                Verify Venue Address
+                Verify Gig Address
               </Text>
               <TouchableOpacity activeOpacity={1} onPress={skipAddressVerification} style={styles.skipButton}>
                 <Text style={[styles.skipButtonText, { color: colors.textSecondary }]}>Skip for now</Text>
@@ -3047,7 +3047,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
             <View style={[styles.verificationInfoBanner, { backgroundColor: colors.primary + '15' }]}>
               <Ionicons name="information-circle" size={20} color={colors.primary} />
               <Text style={[styles.verificationInfoText, { color: colors.text }]}>
-                Upload a recent utility bill (Meralco, Maynilad, etc.) to verify your venue address. The name on the bill should match your verified identity.
+                Upload a recent utility bill (Meralco, Maynilad, etc.) to verify your gig address. The name on the bill should match your verified identity.
               </Text>
             </View>
             {addressVerificationUrl ? (

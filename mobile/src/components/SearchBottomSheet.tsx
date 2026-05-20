@@ -95,6 +95,17 @@ const SORT_OPTIONS = [
 ];
 
 const PAGE_SIZE = 10;
+const PROFILE_SKILL_DISPLAY_EXCLUSIONS = new Set(["producer"]);
+
+const filterVisibleProfileSkills = (skills: unknown) =>
+  Array.isArray(skills)
+    ? skills.filter(
+      (skill) =>
+        typeof skill === "string" &&
+        skill.trim().length > 0 &&
+        !PROFILE_SKILL_DISPLAY_EXCLUSIONS.has(skill.trim().toLowerCase()),
+    )
+    : skills;
 
 const getSearchResultIdentity = (item: any) => {
   const typeKey =
@@ -210,7 +221,10 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           Array.isArray(page?.items) ? page.items : Array.isArray(page?.data) ? page.data : [],
         );
 
-        return dedupeSearchResults(items);
+        return dedupeSearchResults(items).map((item) => ({
+          ...item,
+          skills: filterVisibleProfileSkills(item?.skills),
+        }));
       },
       [searchResultsQuery.data],
     );

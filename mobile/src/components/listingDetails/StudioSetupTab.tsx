@@ -33,7 +33,7 @@ const StudioSetupTab = ({ group, colors, isDark, styles }: StudioSetupTabProps) 
     });
   }
 
-  const title = group.type === "Venue" ? "Venue Specs" : "Studio Amenities";
+  const title = group.type === "Venue" ? "Gig Specs" : "Studio Amenities";
   const getAmenityIcon = (tag: string) => {
     const lower = tag.toLowerCase();
 
@@ -90,7 +90,7 @@ const StudioSetupTab = ({ group, colors, isDark, styles }: StudioSetupTabProps) 
             ))
           ) : (
             <Text style={{ color: colors.textSecondary, fontStyle: "italic" }}>
-              No specs listed for this {group.type === "Venue" ? "venue" : "studio"}.
+              No specs listed for this {group.type === "Venue" ? "gig" : "studio"}.
             </Text>
           )}
         </View>

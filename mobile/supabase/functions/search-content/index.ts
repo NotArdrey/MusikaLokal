@@ -10,6 +10,12 @@ const corsHeaders = {
 };
 
 const DEFAULT_PAGE_SIZE = 20;
+const PROFILE_SKILL_DISPLAY_EXCLUSIONS = new Set(["producer"]);
+
+const isVisibleProfileSkill = (value: unknown) =>
+  typeof value === "string" &&
+  value.trim().length > 0 &&
+  !PROFILE_SKILL_DISPLAY_EXCLUSIONS.has(value.trim().toLowerCase());
 
 type SearchTable =
   | "groups_with_stats"
@@ -27,7 +33,7 @@ const collectProfileValues = (rows: any[] | null | undefined, valueKey: string) 
     if (typeof profileId !== "string" || typeof rawValue !== "string") return;
 
     const nextValue = rawValue.trim();
-    if (!nextValue) return;
+    if (!nextValue || (valueKey === "skill" && !isVisibleProfileSkill(nextValue))) return;
 
     const existingValues = valueMap.get(profileId);
     if (existingValues) {

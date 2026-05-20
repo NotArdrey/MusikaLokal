@@ -60,7 +60,7 @@ export const MOCK_LISTINGS = [
         images: [
             'https://images.unsplash.com/photo-1519167758481-83f550bb49b3?w=800&fit=crop'
         ],
-        description: 'Spacious venue for concerts and large gatherings.',
+        description: 'Spacious gig for concerts and large gatherings.',
         owner_name: 'Events Inc.',
         amenities: ['Stage', 'Sound System', 'Lighting'],
         genre: 'Live Events'

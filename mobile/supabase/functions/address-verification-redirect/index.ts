@@ -108,7 +108,7 @@ Deno.serve(async (req: Request) => {
             ${entityType ? `
             <div class="info-box">
                 <div class="info-label">Verifying</div>
-                <div class="info-value">${entityType === 'studio' ? 'Studio' : 'Venue'} Address</div>
+                <div class="info-value">${entityType === 'studio' ? 'Studio' : 'Gig'} Address</div>
             </div>
             ` : ''}
             

@@ -13,6 +13,24 @@ interface ReviewsTabProps {
   relatedListings?: any[];
 }
 
+const getReviewContent = (review: any) => {
+  const candidates = [
+    review?.content,
+    review?.comment,
+    review?.feedback,
+    review?.body,
+    review?.review_text,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+
+  return "No written review.";
+};
+
 const ReviewsTab = ({
   group,
   colors,
@@ -66,7 +84,7 @@ const ReviewsTab = ({
                 </Text>
               </View>
             </View>
-            <Text style={[styles.reviewBody, { color: colors.text }]}>{review.content}</Text>
+            <Text style={[styles.reviewBody, { color: colors.text }]}>{getReviewContent(review)}</Text>
           </View>
         ))
       ) : (

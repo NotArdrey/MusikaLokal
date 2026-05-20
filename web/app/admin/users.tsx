@@ -198,7 +198,7 @@ const userFilters: { value: UserFilter; label: string }[] = [
   { value: 'fan', label: 'fans' },
   { value: 'musicians', label: 'musicians' },
   { value: 'studio-owner', label: 'studio owner' },
-  { value: 'venue-owner', label: 'venue owner' },
+  { value: 'venue-owner', label: 'gig owner' },
   { value: 'producer', label: 'producer' },
   { value: 'staff', label: 'staff' },
 ];
@@ -937,7 +937,7 @@ export default function AdminUsersPage() {
     }
 
     if (userFormRole === 'staff' && !staffFormTargetId) {
-      errors.staffTarget = 'Select the studio, venue, or production team this staff member can access.';
+      errors.staffTarget = 'Select the studio, gig, or production team this staff member can access.';
     }
 
     return errors;

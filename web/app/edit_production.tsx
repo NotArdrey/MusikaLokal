@@ -147,7 +147,7 @@ export default function EditProductionScreen() {
       const normalizedDescription = (existingTeam.description || '').trim();
       setDescription(
         normalizedDescription ||
-          `${existingTeam.name || 'This production team'} focuses on live events, talent coordination, and venue partnerships.`,
+          `${existingTeam.name || 'This production team'} focuses on live events, talent coordination, and gig partnerships.`,
       );
       setLogoImages(existingTeam.logo_url ? [existingTeam.logo_url] : []);
       setThumbnailIndex(0);

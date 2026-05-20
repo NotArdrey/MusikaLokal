@@ -698,7 +698,7 @@ async function materializeAcceptedVenueGigInvite(
 
   const gigId = getVenueGigInviteGigId(eventDetails);
   if (!gigId) {
-    throw new Error("Venue invite is missing a gig reference");
+    throw new Error("Gig invite is missing a gig reference");
   }
 
   const receiverEntityType = normalizeConnectionEntityType(eventDetails.receiver_entity_type);
@@ -712,14 +712,14 @@ async function materializeAcceptedVenueGigInvite(
       : receiverEntityId || requestRow.receiver_id;
 
   if (!applicantId) {
-    throw new Error("Venue invite is missing an invited performer");
+    throw new Error("Gig invite is missing an invited performer");
   }
 
   const slotType = getVenueGigInviteSlotType(eventDetails, groupRecord);
   const pitchMessage =
     readEventString(eventDetails, "pitch_message") ||
     toNonEmptyString(requestRow.message) ||
-    "Accepted venue gig invite.";
+    "Accepted gig invite.";
 
   let existingQuery = supabaseAdmin
     .from("gig_applications")
@@ -1443,7 +1443,7 @@ serve(async (req: Request) => {
             groupRecord,
           );
         } catch (acceptanceError: any) {
-          console.error("Failed to create accepted gig application for venue invite:", acceptanceError);
+          console.error("Failed to create accepted gig application for gig invite:", acceptanceError);
           await supabaseAdmin
             .from("booking_requests")
             .update({ status: "pending" })

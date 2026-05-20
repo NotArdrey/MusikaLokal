@@ -2024,15 +2024,15 @@ async function handleAddressVerification(
 
     if (verificationStatus === 'APPROVED') {
         notificationTitle = 'Address Verified ✅';
-        notificationMessage = `Your ${entityType === 'studio' ? 'studio' : 'venue'} address has been verified. Your listing is now active!`;
+        notificationMessage = `Your ${entityType === 'studio' ? 'studio' : 'gig'} address has been verified. Your listing is now active!`;
         notificationType = 'success';
     } else if (verificationStatus === 'MANUAL_REVIEW') {
         notificationTitle = 'Address Under Review';
-        notificationMessage = `Your ${entityType === 'studio' ? 'studio' : 'venue'} address verification requires manual review. We'll notify you within 5-7 business days.`;
+        notificationMessage = `Your ${entityType === 'studio' ? 'studio' : 'gig'} address verification requires manual review. We'll notify you within 5-7 business days.`;
         notificationType = 'info';
     } else if (verificationStatus === 'DECLINED') {
         notificationTitle = 'Address Verification Failed';
-        notificationMessage = `We couldn't verify your ${entityType === 'studio' ? 'studio' : 'venue'} address. Please try again with a valid utility bill.`;
+        notificationMessage = `We couldn't verify your ${entityType === 'studio' ? 'studio' : 'gig'} address. Please try again with a valid utility bill.`;
         notificationType = 'error';
     }
 

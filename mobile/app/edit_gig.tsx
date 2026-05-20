@@ -344,7 +344,7 @@ export default function EditGigScreen() {
       }
 
       if (!canEditGig) {
-        showAlert("warning", "Unauthorized", "Only the venue owner or assigned Level 1 staff can edit this gig.");
+        showAlert("warning", "Unauthorized", "Only the gig owner or assigned Level 1 staff can edit this gig.");
         router.replace("/home");
         return;
       }
@@ -617,7 +617,7 @@ export default function EditGigScreen() {
       showAlert(
         "warning",
         "Required Field",
-        "Please enter a venue address",
+        "Please enter a gig address",
       );
       return false;
     }

@@ -497,7 +497,7 @@ export default function AiSuggestionsScreen() {
 
     const applyProfileSignals = (profile: CachedOfflineProfile) => {
         const safeRoles = Array.isArray(profile.roles)
-            ? profile.roles.filter((value) => typeof value === 'string' && value.trim().length > 0)
+            ? profile.roles.filter((value) => typeof value === 'string' && value.trim().length > 0 && value.trim().toLowerCase() !== 'producer')
             : [];
         const safeGenres = Array.isArray(profile.genres)
             ? profile.genres.filter((value) => typeof value === 'string' && value.trim().length > 0)
@@ -544,7 +544,7 @@ export default function AiSuggestionsScreen() {
 
                 const skills = (skillsResult.data || [])
                     .map((row: any) => row.skill)
-                    .filter((value: any) => typeof value === 'string' && value.trim().length > 0);
+                    .filter((value: any) => typeof value === 'string' && value.trim().length > 0 && value.trim().toLowerCase() !== 'producer');
                 setUserRoles(skills);
                 setCurrentInstruments(skills);
 
@@ -719,15 +719,15 @@ export default function AiSuggestionsScreen() {
                 {userRoles.length > 0 ? (
                     <>
                         <Text style={[styles.profileSubtitle, { color: textSecondary }]}>
-                            You&apos;re a <Text style={{ color: accentColor, fontFamily: 'Poppins_600SemiBold' }}>{userRoles.join(', ')}</Text>
+                            Profile skills: <Text style={{ color: accentColor, fontFamily: 'Poppins_600SemiBold' }}>{userRoles.join(', ')}</Text>
                         </Text>
                         <Text style={[styles.profileHint, { color: textSecondary }]}>
-                            These suggestions complement your role
+                            These suggestions complement your profile skills
                         </Text>
                     </>
                 ) : (
                     <Text style={[styles.profileSubtitle, { color: textSecondary }]}>
-                        Add roles in your profile to get personalized suggestions!
+                        Add skills or instruments in your profile to get personalized suggestions!
                     </Text>
                 )}
 
@@ -1484,7 +1484,7 @@ export default function AiSuggestionsScreen() {
                     </View>
                     <Text style={[styles.aiHeaderTitle, { color: textPrimary }]}>
                         {userRoles.length > 0
-                            ? `Perfect for a ${userRoles[0]}`
+                            ? `Perfect for your ${userRoles[0]} setup`
                             : 'Your Personalized Picks'}
                     </Text>
                     <Text style={[styles.aiHeaderSubtitle, { color: textSecondary }]}>
@@ -1537,7 +1537,7 @@ export default function AiSuggestionsScreen() {
                 </View>
                 <Text style={[styles.resultsSubtitle, { color: textSecondary }]}>
                     {userRoles.length > 0
-                        ? `Instruments that complement your role as a ${userRoles[0]}`
+                        ? `Instruments that complement your ${userRoles[0]} setup`
                         : 'Curated just for you based on your musical profile'}
                 </Text>
 

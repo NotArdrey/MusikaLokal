@@ -359,6 +359,8 @@ const ListingCard: React.FC<ListingCardProps> = ({
     let nextPriceLabel = "";
     let nextSecondaryPriceLabel = "";
     const nextIsGroup = item.type === "Group";
+    const normalizedType = String(item.type || "").toLowerCase();
+    const nextIsGig = normalizedType === "gig" || normalizedType === "venue";
     const rehearsalRateValue = getPositiveInteger(item.rehearsal_rate);
     const recordingRateValue = getPositiveInteger(item.recording_rate);
     const isRecordingOnlyStudio =
@@ -421,7 +423,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
       const hourlyPrice = buildPriceItem("hourly", item.hourly_rate, "/hr");
       const rehearsalPrice = buildPriceItem("rehearsal", item.rehearsal_rate, "/hr", "Rehearsal");
       const recordingPrice = buildPriceItem("recording", item.recording_rate, "/song", "Recording");
-      const budgetPrice = buildPriceItem("budget", item.budget, undefined, "Budget");
+      const budgetPrice = buildPriceItem("budget", item.budget, undefined, nextIsGig ? "Talent Fee" : "Budget");
       const numericRatePrice = buildPriceItem("rate", item.rate, undefined, "Rate");
 
       if (hourlyPrice) {
@@ -509,7 +511,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
           ? "Rehearsal & Recording"
           : item.studio_type || "Studio";
       nextBadgeColor = "#7C3AED";
-    } else if (normalizedType === "Gig") {
+    } else if (normalizedType === "Gig" || normalizedType === "Venue") {
       nextBadgeLabel = "Gig";
       nextBadgeColor = "#10B981";
     } else if (normalizedType === "Group") {
@@ -712,6 +714,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
     if (item.type === "Artist") return "View Musician";
     if (item.type === "Group") return "View Group";
     if (item.type === "Studio") return "View Studio";
+    if (item.type === "Venue") return "View Gig";
     if (item.type === "Gig") return "View Gig";
     if (item.type === "Production") return "View Team";
     return "View Details";
@@ -1151,7 +1154,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
               </View>
             )}
 
-            {/* Instruments/Equipment Display for Studios/Venues */}
+            {/* Instruments/Equipment Display for Studios/Gigs */}
             {item.instruments &&
               Array.isArray(item.instruments) &&
               item.instruments.length > 0 && (
@@ -1827,7 +1830,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
             </View>
           )}
 
-          {/* Instruments Display for Studios/Venues */}
+          {/* Instruments Display for Studios/Gigs */}
           {!isFeedVariant && item.instruments &&
             Array.isArray(item.instruments) &&
             item.instruments.length > 0 && (

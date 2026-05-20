@@ -178,7 +178,7 @@ export default function AddGigScreen() {
     if (!isE2EFixtureMode()) return;
     const e2eEventDate = getE2EEventDate();
     setImages((current) => current.length > 0 ? current : createE2EImageFixtureUrls(1));
-    setAddress((current) => current.trim() ? current : "E2E Venue Address");
+    setAddress((current) => current.trim() ? current : "E2E Gig Address");
     setLatitude((current) => current ?? 14.5995);
     setLongitude((current) => current ?? 120.9842);
     setAddressVerified(true);
@@ -265,7 +265,7 @@ export default function AddGigScreen() {
       if (profileError) throw profileError;
 
       if (profile?.role !== "venue-owner") {
-        showAlert("warning", "Unauthorized", "Only venue owners can create gigs.");
+        showAlert("warning", "Unauthorized", "Only gig owners can create gigs.");
         router.replace("/home");
         return;
       }
@@ -391,7 +391,7 @@ export default function AddGigScreen() {
         showAlert(
           "warning",
           "Required Field",
-          "Please enter a venue address",
+          "Please enter a gig address",
         );
         return false;
       }
@@ -640,7 +640,7 @@ export default function AddGigScreen() {
 
   const handleLocationSelectPress = () => {
     if (isE2EFixtureMode()) {
-      setAddress("E2E Venue Address");
+      setAddress("E2E Gig Address");
       setLatitude(14.5995);
       setLongitude(120.9842);
       setAddressVerified(true);
@@ -754,7 +754,7 @@ export default function AddGigScreen() {
           showAlert(
             "success",
             "Address Verified!",
-            `Your venue address has been verified:\n\n${data.extracted_address}`
+            `Your gig address has been verified:\n\n${data.extracted_address}`
           );
         } else {
           // Verification may still be processing
@@ -812,7 +812,7 @@ export default function AddGigScreen() {
       showAlert(
         "warning",
         "Verification Error",
-        "Could not start address verification. You can verify your venue address later from My Venue."
+        "Could not start address verification. You can verify your gig address later from My Gig."
       );
       setAddressVerificationModalVisible(false);
       router.replace({ pathname: "/my_venue", params: { refresh: String(Date.now()) } });
@@ -1318,12 +1318,12 @@ export default function AddGigScreen() {
                 />
               </View>
 
-              {/* Venue Location - Pin on Map */}
+              {/* Gig Location - Pin on Map */}
               <View style={styles.inputContainer}>
                 <Text
                   style={[styles.inputLabel, { color: colors.textSecondary }]}
                 >
-                  Venue Address
+                  Gig Address
                 </Text>
                 <TouchableOpacity
                   activeOpacity={1}
@@ -1361,7 +1361,7 @@ export default function AddGigScreen() {
                         textAlignVertical: "center",
                       }}
                     >
-                      {address || "Tap to select venue location on map"}
+                      {address || "Tap to select gig location on map"}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -1372,12 +1372,12 @@ export default function AddGigScreen() {
                 <Text
                   style={[styles.inputLabel, { color: colors.textSecondary }]}
                 >
-                  Venue Address
+                  Gig Address
                 </Text>
                 <Text
                   style={[styles.inputSubLabel, { color: colors.textSecondary, marginBottom: 12 }]}
                 >
-                  Verify your venue address using a utility bill (Meralco, Maynilad, etc.)
+                  Verify your gig address using a utility bill (Meralco, Maynilad, etc.)
                 </Text>
                 
                 {addressVerified && address ? (
@@ -1438,10 +1438,10 @@ export default function AddGigScreen() {
                           </View>
                           <View style={{ alignItems: 'center' }}>
                             <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 14 }}>
-                              Verify Your Venue Address
+                              Verify Your Gig Address
                             </Text>
                             <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, textAlign: 'center', marginTop: 4 }}>
-                              Upload a recent utility bill to verify and auto-fill your venue address
+                              Upload a recent utility bill to verify and auto-fill your gig address
                             </Text>
                           </View>
                         </>
@@ -2959,7 +2959,7 @@ export default function AddGigScreen() {
           <View style={[styles.verificationModalContainer, { backgroundColor: colors.background }]}>
             <View style={styles.verificationModalHeader}>
               <Text style={[styles.verificationModalTitle, { color: colors.text }]}>
-                Verify Venue Address
+                Verify Gig Address
               </Text>
               <TouchableOpacity activeOpacity={1} onPress={skipAddressVerification} style={styles.skipButton}>
                 <Text style={[styles.skipButtonText, { color: colors.textSecondary }]}>Skip for now</Text>
@@ -2968,7 +2968,7 @@ export default function AddGigScreen() {
             <View style={[styles.verificationInfoBanner, { backgroundColor: colors.primary + '15' }]}>
               <Ionicons name="information-circle" size={20} color={colors.primary} />
               <Text style={[styles.verificationInfoText, { color: colors.text }]}>
-                Upload a recent utility bill (Meralco, Maynilad, etc.) to verify your venue address. The name on the bill should match your verified identity.
+                Upload a recent utility bill (Meralco, Maynilad, etc.) to verify your gig address. The name on the bill should match your verified identity.
               </Text>
             </View>
             {addressVerificationUrl ? (

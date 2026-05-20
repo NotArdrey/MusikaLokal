@@ -35,7 +35,7 @@ const PREFERENCE_OPTIONS: PreferenceOption[] = [
   {
     key: 'booking_confirmed',
     label: 'Booking Confirmed',
-    description: 'Receive updates when your booking at a venue or studio is confirmed.',
+    description: 'Receive updates when your booking at a gig or studio is confirmed.',
   },
   {
     key: 'awaiting_confirmation',

@@ -14,8 +14,8 @@ type MusicianWorkspaceTabsProps = {
 
 const MUSICIAN_WORKSPACE_TABS = [
   { key: "group", label: "My Group", route: "/my_group" },
-  { key: "producer", label: "My Producer", route: "/my_production" },
-  { key: "venue", label: "My Venue", route: "/my_venue" },
+  { key: "producer", label: "My Production", route: "/my_production" },
+  { key: "venue", label: "My Gig", route: "/my_venue" },
 ] as const;
 
 export default function MusicianWorkspaceTabs({

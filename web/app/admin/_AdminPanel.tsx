@@ -481,7 +481,7 @@ const userFilters: { value: UserFilter; label: string }[] = [
   { value: 'fan', label: 'fans' },
   { value: 'musicians', label: 'musicians' },
   { value: 'studio-owner', label: 'studio owner' },
-  { value: 'venue-owner', label: 'venue owner' },
+  { value: 'venue-owner', label: 'gig owner' },
   { value: 'producer', label: 'producer' },
 ];
 const USER_MANAGEMENT_HIDDEN_VERIFICATION_STATUSES = new Set(['DECLINED', 'PENDING_REVIEW']);
@@ -501,7 +501,7 @@ const getDetailsSectionIcon = (title: string) => {
 const reportTargetLabels: Record<string, string> = {
   group: 'Group',
   studio: 'Studio',
-  venue: 'Studio',
+  venue: 'Gig',
   gig: 'Gig',
   user: 'User Profile',
   profile: 'User Profile',

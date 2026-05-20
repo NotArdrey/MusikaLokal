@@ -120,6 +120,12 @@ interface CandidateItem extends Omit<RecommendationItem, "similarity" | "aiReaso
 const clamp = (value: number, min = 0, max = 1) => Math.max(min, Math.min(max, value));
 
 const normalizeText = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+const PROFILE_SKILL_DISPLAY_EXCLUSIONS = new Set(["producer"]);
+
+const isVisibleProfileSkill = (value: unknown) =>
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    !PROFILE_SKILL_DISPLAY_EXCLUSIONS.has(value.trim().toLowerCase());
 
 const uniqueStrings = (values: unknown[]): string[] => {
     const seen = new Set<string>();
@@ -406,7 +412,7 @@ const fetchProfile = async (supabaseClient: any, userId: string): Promise<UserPr
         console.error("home-feed profile genres lookup error:", genresResult.error);
     }
 
-    const skills = uniqueStrings((skillsResult.data || []).map((row: any) => row.skill));
+    const skills = uniqueStrings((skillsResult.data || []).map((row: any) => row.skill).filter(isVisibleProfileSkill));
     const genres = uniqueStrings((genresResult.data || []).map((row: any) => row.genre));
 
     return {

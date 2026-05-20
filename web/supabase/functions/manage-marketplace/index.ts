@@ -133,7 +133,7 @@ async function requireMarketplaceSeller(supabaseAdmin: any, userId: string | nul
 
   if (error || !profile || !MARKETPLACE_SELLER_ROLES.has(profile.role)) {
     return jsonResponse(
-      { error: "Only producer, venue-owner, and studio-owner accounts can sell in marketplace." },
+      { error: "Only producer, gig owner, and studio-owner accounts can sell in marketplace." },
       403,
     );
   }

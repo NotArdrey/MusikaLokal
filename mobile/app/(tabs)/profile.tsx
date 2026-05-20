@@ -213,7 +213,12 @@ const logProfileMedia = (event: string, details?: Record<string, unknown>) => {
   });
 };
 
-const isRemoteHttpUrl = (value: string | null | undefined) => /^https?:\/\//i.test(String(value || "").trim());
+const formatProfileCompletionRate = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return "N/A";
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "N/A";
+  return `${Math.max(0, Math.min(100, Math.round(parsed)))}%`;
+};
 
 type ProfileVideoThumbnailProps = {
   uri: string;
@@ -237,14 +242,15 @@ const ProfileVideoThumbnail = ({
     setThumbnailUri(null);
     setThumbnailFailed(false);
 
-    if (isRemoteHttpUrl(uri)) {
+    const sourceUri = uri.trim();
+    if (!sourceUri) {
       setThumbnailFailed(true);
       return () => {
         isMounted = false;
       };
     }
 
-    VideoThumbnails.getThumbnailAsync(uri, {
+    VideoThumbnails.getThumbnailAsync(sourceUri, {
       time: 1000,
       quality: 0.68,
     })
@@ -255,7 +261,7 @@ const ProfileVideoThumbnail = ({
       })
       .catch((error) => {
         logProfileMedia("video_thumbnail_failed", {
-          uri,
+          uri: sourceUri,
           message: error?.message || String(error),
         });
         if (isMounted) {
@@ -2936,8 +2942,26 @@ export default function ProfileScreen() {
     if (!role) return "Profile";
     if (role === "group") return "Group";
     if (role === "studio-owner") return "Studio Owner";
-    if (role === "venue-owner") return "Venue Owner";
+    if (role === "venue-owner") return "Gig Owner";
     return role.replace("-", " ").replace(/\b\w/g, (char) => char.toUpperCase());
+  };
+
+  const formatProfileRoleHeadline = (profileData?: any) => {
+    const role = profileData?.role;
+    if (role === "musician") {
+      const specialties = Array.isArray(profileData?.skills)
+        ? profileData.skills
+          .map((skill: unknown) => String(skill || "").trim())
+          .filter((skill: string) => skill.length > 0 && skill.toLowerCase() !== "producer")
+        : [];
+
+      return specialties.length > 0
+        ? `Musician (${specialties.join(", ")})`
+        : "Musician";
+    }
+    if (role === "studio-owner") return "Studio Owner";
+    if (role === "venue-owner") return "Gig Owner";
+    return role ? role.charAt(0).toUpperCase() + role.slice(1) : "User";
   };
 
   const openFollowListItem = (item: ProfileConnectionItem) => {
@@ -3612,16 +3636,7 @@ export default function ProfileScreen() {
               {profile?.full_name || "User"}
             </Text>
             <Text style={[styles.roleText, { color: colors.textSecondary }]}>
-              {profile?.role === "musician"
-                ? profile?.skills?.join(", ") || "Musician"
-                : profile?.role === "studio-owner"
-                  ? "Studio Owner"
-                  : profile?.role === "venue-owner"
-                    ? "Venue Owner"
-                    : profile?.role
-                      ? profile.role.charAt(0).toUpperCase() +
-                      profile.role.slice(1)
-                      : "User"}{" "}
+              {formatProfileRoleHeadline(profile)}{" "}
               {"\u2022"} {profile?.location || "Unknown"}
             </Text>
 
@@ -3717,6 +3732,16 @@ export default function ProfileScreen() {
                   style={[styles.statLabel, { color: colors.textSecondary }]}
                 >
                   Rating
+                </Text>
+              </View>
+              <View style={styles.statItem}>
+                <Text style={[styles.statValue, { color: colors.text }]}>
+                  {formatProfileCompletionRate(profile?.completion_rate)}
+                </Text>
+                <Text
+                  style={[styles.statLabel, { color: colors.textSecondary }]}
+                >
+                  Completion
                 </Text>
               </View>
               <TouchableOpacity
@@ -4965,15 +4990,17 @@ const styles = StyleSheet.create({
   },
   statsContainer: {
     flexDirection: "row",
-    justifyContent: "center",
+    justifyContent: "space-between",
     alignItems: "center",
     width: "100%",
     paddingVertical: 12,
     marginBottom: 16,
-    gap: 32,
+    gap: 12,
   },
   statItem: {
     alignItems: "center",
+    flex: 1,
+    minWidth: 0,
   },
   statValue: {
     fontFamily: "Poppins_700Bold",
@@ -4983,6 +5010,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
     fontSize: 12,
     marginTop: 2,
+    textAlign: "center",
   },
   followersSection: {
     width: "100%",

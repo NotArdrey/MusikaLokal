@@ -116,7 +116,7 @@ const buildConnectionRequestTypeLabel = (eventDetails: any) => {
   }
 
   if (senderType === "venue" && receiverType === "production_team") {
-    return "Venue Invite";
+    return "Gig Invite";
   }
 
   if (senderType === "production_team" && (receiverType === "musician" || receiverType === "group")) {
@@ -1782,7 +1782,7 @@ export default function BookingsScreen() {
       .eq("organizer_id", targetUserId);
 
     if (gigsError) {
-      debugLog("Error fetching local venue gigs:", gigsError);
+      debugLog("Error fetching local gigs:", gigsError);
       return fallback;
     }
 
@@ -1814,7 +1814,7 @@ export default function BookingsScreen() {
       .order("created_at", { ascending: false });
 
     if (venueAppsError) {
-      debugLog("Error fetching local venue gig applications:", venueAppsError);
+      debugLog("Error fetching local gig applications:", venueAppsError);
       return fallback;
     }
 
@@ -1952,7 +1952,7 @@ export default function BookingsScreen() {
       let role = profile?.role || "";
       if (role) {
         setUserRole(role);
-        // If venue owner, default to Applicants tab only once (avoid tab reset on auto-refresh)
+        // If gig owner, default to Applicants tab only once (avoid tab reset on auto-refresh)
         if (role === "venue-owner" && !venueTabInitializedRef.current) {
           setActiveTab("Applicants");
           venueTabInitializedRef.current = true;
@@ -3500,7 +3500,7 @@ export default function BookingsScreen() {
             recipientAvatar = item.customer_avatar || null;
           } else {
             recipientId = item.organizer_id || null;
-            recipientName = item.organizer_name || "Venue Owner";
+            recipientName = item.organizer_name || "Gig Owner";
             recipientAvatar = item.organizer_avatar || null;
 
             if (!recipientId && item.gig_id) {
@@ -3809,7 +3809,7 @@ export default function BookingsScreen() {
       }
     } else if (item.type_id === "gig_application") {
       if (isOrganizer) {
-        // Venue owner reviews the actual performer target:
+        // Gig owner reviews the actual performer target:
         // group/duo applications -> review group, solo applications -> review user.
         if (item.group_id) {
           params.groupId = item.group_id;
@@ -4702,7 +4702,7 @@ export default function BookingsScreen() {
                                 color={colors.textSecondary}
                               />
                               <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
-                                {listingType === "gig" ? "Venue Listing Permit" : "Studio Listing Permit"}
+                                {listingType === "gig" ? "Gig Listing Permit" : "Studio Listing Permit"}
                               </Text>
                             </View>
                           </View>
@@ -5486,7 +5486,7 @@ export default function BookingsScreen() {
                         </View>
                       </View>
 
-                      {/* Content: Pitch & Audition (for venue owners) */}
+                      {/* Content: Pitch & Audition (for gig owners) */}
                       {!isMusicianView && (
                         <View style={{ marginBottom: moderateScale(8) }}>
                           {item.note && (
@@ -6167,7 +6167,7 @@ export default function BookingsScreen() {
                           {item.name}
                         </Text>
 
-                        {/* Booker Info for Studio/Venue Owners */}
+                        {/* Booker Info for Studio/Gig Owners */}
                         {(userRole === "studio-owner" ||
                           userRole === "venue-owner") &&
                           item.customer_name && (
@@ -6282,7 +6282,7 @@ export default function BookingsScreen() {
                             </View>
                           )}
 
-                        {/* Video & Note (Venue Owners / Gig Applications) */}
+                        {/* Video & Note (Gig Owners / Gig Applications) */}
                         {userRole === "venue-owner" &&
                           item.type_id === "gig_application" && (
                             <View style={{ marginTop: 8, gap: 8 }}>
@@ -7517,7 +7517,7 @@ export default function BookingsScreen() {
           modalMode === "confirm"
             ? selectedItem?.type_id === "gig_application"
               ? selectedItem?.leader_approval_required
-                ? "Approve for Venue Review"
+                ? "Approve for Gig Review"
                 : "Accept Application"
               : "Confirm Booking"
             : modalMode === "decline"
@@ -7546,7 +7546,7 @@ export default function BookingsScreen() {
           modalMode === "confirm"
             ? selectedItem?.type_id === "gig_application"
               ? selectedItem?.leader_approval_required
-                ? "Approve this member submission so it can be sent to the venue owner for review?"
+                ? "Approve this member submission so it can be sent to the gig owner for review?"
                 : "Are you sure you want to accept this application? The musician will be notified."
               : "Are you sure you want to confirm this booking?"
             : modalMode === "decline"
@@ -7573,7 +7573,7 @@ export default function BookingsScreen() {
                             if (userRole === "venue-owner") {
                               return "Are you sure you want to revoke this accepted application? The musician will be notified.";
                             } else {
-                              return "Are you sure you want to resign from this gig? The venue owner will be notified and your completion rate will not be affected.";
+                              return "Are you sure you want to resign from this gig? The gig owner will be notified and your completion rate will not be affected.";
                             }
                           } else {
                             // For studio bookings - strictly no-refund policy

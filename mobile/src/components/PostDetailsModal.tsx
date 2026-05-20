@@ -2,9 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  FlatList,
+  InteractionManager,
   Keyboard,
   type KeyboardEvent,
   LayoutAnimation,
+  type ListRenderItem,
   Platform,
   Share,
   StyleSheet,
@@ -94,6 +97,17 @@ const formatTimestamp = (raw: string | null | undefined) => {
 const formatCountLabel = (count: number, singular: string, plural = `${singular}s`) =>
   `${count} ${count === 1 ? singular : plural}`;
 
+const formatEngagementCount = (count: number) => {
+  const value = Math.max(0, Math.round(Number(count) || 0));
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  }
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  }
+  return String(value);
+};
+
 const getCommentKey = (comment: any, index: number) => {
   const id = typeof comment?.id === "string" && comment.id.length > 0 ? comment.id : "";
   if (id) return `comment:${id}`;
@@ -106,6 +120,53 @@ const getMediaKey = (media: any, index: number) => {
   return `media:${media?.url || media?.thumbnail_url || "unknown"}:${index}`;
 };
 
+type CommentRowProps = {
+  bubbleBg: string;
+  colors: any;
+  comment: any;
+  isDark: boolean;
+  onDeleteComment: (commentId: string) => void;
+  userId?: string | null;
+};
+
+const CommentRow = React.memo(function CommentRow({
+  bubbleBg,
+  colors,
+  comment,
+  isDark,
+  onDeleteComment,
+  userId,
+}: CommentRowProps) {
+  return (
+    <View style={styles.commentRow}>
+      <ProfileAvatar
+        uri={comment.author_avatar}
+        style={styles.commentAvatar}
+        backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+        iconColor={colors.textSecondary}
+      />
+      <View style={styles.commentBodyWrap}>
+        <View style={[styles.commentBubble, { backgroundColor: bubbleBg }]}>
+          <Text style={[styles.commentAuthor, { color: colors.text }]} numberOfLines={1}>
+            {comment.author_name}
+          </Text>
+          <Text style={[styles.commentBody, { color: colors.text }]}>{comment.body}</Text>
+        </View>
+        <View style={styles.commentMetaRow}>
+          <Text style={[styles.commentMeta, { color: colors.textSecondary }]}>
+            {formatTimestamp(comment.created_at)}
+          </Text>
+          {comment.author_id === userId ? (
+            <TouchableOpacity activeOpacity={0.78} onPress={() => onDeleteComment(comment.id)}>
+              <Text style={[styles.commentMeta, { color: "#ef4444" }]}>Delete</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </View>
+    </View>
+  );
+});
+
 type CachedPostDetails = {
   post: any;
   comments: any[];
@@ -117,14 +178,16 @@ const POST_DETAILS_CACHE_TTL_MS = 60_000;
 const postDetailsCache = new Map<string, CachedPostDetails>();
 const ANDROID_KEYBOARD_ANIMATION_MS = 220;
 
+const normalizeCommentPayload = (comment: any) => ({
+  ...comment,
+  body: comment?.body ?? comment?.content ?? "",
+  author_name: comment?.author_name ?? comment?.author?.full_name ?? "User",
+  author_avatar: comment?.author_avatar ?? comment?.author?.avatar_url ?? "",
+});
+
 const normalizePostDetailsPayload = (rawPost: any) => {
   const normalizedComments = Array.isArray(rawPost?.comments)
-    ? rawPost.comments.map((comment: any) => ({
-        ...comment,
-        body: comment?.body ?? comment?.content ?? "",
-        author_name: comment?.author_name ?? comment?.author?.full_name ?? "User",
-        author_avatar: comment?.author_avatar ?? comment?.author?.avatar_url ?? "",
-      }))
+    ? rawPost.comments.map(normalizeCommentPayload)
     : [];
 
   return {
@@ -299,12 +362,19 @@ export default function PostDetailsModal({
     const cached = postDetailsCache.get(postId);
     setPost(cached?.post || null);
     setComments(cached?.comments || []);
+    setLoading(!cached?.post);
     setCommentText("");
     setAlert(null);
     setPostOptionsVisible(false);
     setReportModalVisible(false);
     setDeleteConfirmVisible(false);
-    void fetchPost(true);
+    const loadTask = InteractionManager.runAfterInteractions(() => {
+      void fetchPost(false);
+    });
+
+    return () => {
+      loadTask.cancel?.();
+    };
   }, [fetchPost, postId, visible]);
 
   useEffect(() => {
@@ -335,7 +405,7 @@ export default function PostDetailsModal({
     };
   }, [animateKeyboardLayoutChange, visible]);
 
-  const handleReaction = async () => {
+  const handleReaction = useCallback(async () => {
     if (!post) return;
     const hadReaction = Boolean(post.my_reaction);
     const nextCount = hadReaction
@@ -372,7 +442,7 @@ export default function PostDetailsModal({
     } catch (e: any) {
       setAlert({ type: "error", title: "Reaction Failed", message: e?.message || "Please try again." });
     }
-  };
+  }, [comments, onReactionChanged, post]);
 
   const handleAddComment = async () => {
     const content = commentText.trim();
@@ -397,15 +467,32 @@ export default function PostDetailsModal({
       if (data?.pending_review || data?.status === "pending_review") {
         setCommentText("");
         emitToast({ type: "info", title: "Comment sent for review", message: "It will appear if approved." });
-        const nextDetails = await fetchPost(true);
-        onCommentChanged?.(post.id, nextDetails?.comments.length ?? comments.length);
+        onCommentChanged?.(post.id, comments.length);
         return;
       }
 
       if (data?.success) {
         setCommentText("");
-        const nextDetails = await fetchPost(true);
-        const nextCount = nextDetails?.comments.length ?? comments.length + 1;
+        const nextComment = normalizeCommentPayload(data.data);
+        const nextComments = [...comments, nextComment];
+        const nextCount = nextComments.length;
+        const nextPost = {
+          ...post,
+          comment_count: nextCount,
+          comments: nextComments,
+        };
+
+        setComments(nextComments);
+        setPost((current: any) => current ? {
+          ...current,
+          comment_count: nextCount,
+          comments: nextComments,
+        } : current);
+        postDetailsCache.set(post.id, {
+          post: nextPost,
+          comments: nextComments,
+          cachedAt: Date.now(),
+        });
         onCommentChanged?.(post.id, nextCount);
       } else {
         setAlert({ type: "error", title: "Comment Failed", message: data?.error || "Failed to add comment." });
@@ -417,7 +504,7 @@ export default function PostDetailsModal({
     }
   };
 
-  const handleDeleteComment = async (commentId: string) => {
+  const handleDeleteComment = useCallback(async (commentId: string) => {
     if (!post) return;
     try {
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
@@ -428,14 +515,31 @@ export default function PostDetailsModal({
 
       if (data?.success) {
         emitToast({ type: "info", title: "Deleted", message: "Comment deleted." });
-        const nextDetails = await fetchPost(true);
-        const nextCount = nextDetails?.comments.length ?? Math.max(comments.length - 1, 0);
+        const nextComments = comments.filter((comment) => comment?.id !== commentId);
+        const nextCount = nextComments.length;
+        const nextPost = {
+          ...post,
+          comment_count: nextCount,
+          comments: nextComments,
+        };
+
+        setComments(nextComments);
+        setPost((current: any) => current ? {
+          ...current,
+          comment_count: nextCount,
+          comments: nextComments,
+        } : current);
+        postDetailsCache.set(post.id, {
+          post: nextPost,
+          comments: nextComments,
+          cachedAt: Date.now(),
+        });
         onCommentChanged?.(post.id, nextCount);
       }
     } catch (e: any) {
       setAlert({ type: "error", title: "Delete Failed", message: e?.message || "Please try again." });
     }
-  };
+  }, [comments, onCommentChanged, post]);
 
   const handleDeletePost = async () => {
     if (!post) return;
@@ -502,12 +606,12 @@ export default function PostDetailsModal({
     }
   };
 
-  const handleMoreOptions = () => {
+  const handleMoreOptions = useCallback(() => {
     if (!post) return;
     setPostOptionsVisible(true);
-  };
+  }, [post]);
 
-  const handleSharePost = async () => {
+  const handleSharePost = useCallback(async () => {
     if (!post) return;
     try {
       const shareResult = await Share.share({
@@ -534,10 +638,11 @@ export default function PostDetailsModal({
     } catch (e: any) {
       setAlert({ type: "error", title: "Share Failed", message: e?.message || "Please try again." });
     }
-  };
+  }, [comments, onShareChanged, post]);
 
   const modalMaxHeight = useMemo(() => Math.min(height - 72, 760), [height]);
-  const isOwner = post?.author_id === userId;
+  const isGigCommentThread = Boolean(post?.linked_gig_id);
+  const isOwner = post?.author_id === userId && !isGigCommentThread;
   const canSubmitComment = commentText.trim().length > 0;
   const footerBottomPadding = (() => {
     if (Platform.OS === "ios") {
@@ -547,6 +652,160 @@ export default function PostDetailsModal({
     return isKeyboardVisible ? 12 : 8;
   })();
   const footerSafeAreaEdges: Edge[] = Platform.OS === "android" && !isKeyboardVisible ? ["bottom"] : [];
+  const renderComment = useCallback<ListRenderItem<any>>(
+    ({ item }) => (
+      <CommentRow
+        bubbleBg={bubbleBg}
+        colors={colors}
+        comment={item}
+        isDark={isDark}
+        onDeleteComment={handleDeleteComment}
+        userId={userId}
+      />
+    ),
+    [bubbleBg, colors, handleDeleteComment, isDark, userId],
+  );
+
+  const listEmptyComponent = useMemo(
+    () => (
+      <View style={styles.emptyComments}>
+        <Text style={[styles.noComments, { color: colors.textSecondary }]}>
+          No comments yet. Be the first to comment.
+        </Text>
+      </View>
+    ),
+    [colors.textSecondary],
+  );
+
+  const listHeaderComponent = useMemo(() => {
+    if (!post) return null;
+
+    return (
+      <>
+        <View style={styles.authorRow}>
+          <ProfileAvatar
+            uri={post.author_avatar}
+            style={styles.avatar}
+            backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+            iconColor={colors.textSecondary}
+          />
+          <View style={styles.authorText}>
+            <Text style={[styles.authorName, { color: colors.text }]} numberOfLines={1}>
+              {post.author_name}
+            </Text>
+            <View style={styles.authorMetaRow}>
+              <Text style={[styles.authorMetaText, { color: colors.textSecondary }]}>
+                {formatTimestamp(post.created_at)}
+              </Text>
+              <Text style={[styles.dot, { color: colors.textSecondary }]}>|</Text>
+              <Ionicons
+                name={post.visibility === "followers" ? "people" : "earth"}
+                size={12}
+                color={colors.textSecondary}
+              />
+            </View>
+          </View>
+          <TouchableOpacity
+            activeOpacity={0.78}
+            onPress={handleMoreOptions}
+            style={[styles.iconCircle, { backgroundColor: subtleBg }]}
+            accessibilityLabel="Post actions"
+          >
+            <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
+
+        {post.body ? <Text style={[styles.postBody, { color: colors.text }]}>{post.body}</Text> : null}
+
+        {post.media?.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.mediaScroll}
+          >
+            {post.media.map((media: any, index: number) => {
+              const previewUrl = media.thumbnail_url || media.url;
+              if (!previewUrl) return null;
+
+              return (
+                <View key={getMediaKey(media, index)} style={[styles.mediaFrame, { width: mediaWidth }]}>
+                  <CachedImage
+                    uri={previewUrl}
+                    style={styles.mediaImg}
+                    width={mediaWidth}
+                    height={230}
+                    contentFit="cover"
+                  />
+                  {media.media_type === "video" ? (
+                    <View style={styles.videoPlayBadge}>
+                      <Ionicons name="play" size={18} color="#FFFFFF" />
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })}
+          </ScrollView>
+        ) : null}
+
+        <View style={[styles.actionRow, { borderTopColor: borderCol, borderBottomColor: borderCol }]}>
+          <TouchableOpacity
+            activeOpacity={0.78}
+            accessibilityRole="button"
+            accessibilityLabel={`${post.my_reaction ? "Unlike" : "Like"} post, ${formatCountLabel(Number(post.reaction_count || 0), "like")}`}
+            onPress={handleReaction}
+            style={styles.actionBtn}
+          >
+            <Ionicons
+              name={post.my_reaction ? "heart" : "heart-outline"}
+              size={20}
+              color={post.my_reaction ? "#ef4444" : colors.textSecondary}
+            />
+            <Text style={[styles.actionCountText, { color: post.my_reaction ? "#ef4444" : colors.textSecondary }]}>
+              {formatEngagementCount(Number(post.reaction_count || 0))}
+            </Text>
+          </TouchableOpacity>
+          <View
+            accessibilityRole="text"
+            accessibilityLabel={`Comments, ${formatCountLabel(comments.length, "comment")}`}
+            style={styles.actionBtn}
+          >
+            <Ionicons name="chatbubble-outline" size={19} color={colors.textSecondary} />
+            <Text style={[styles.actionCountText, { color: colors.textSecondary }]}>
+              {formatEngagementCount(comments.length)}
+            </Text>
+          </View>
+          <TouchableOpacity
+            activeOpacity={0.78}
+            accessibilityRole="button"
+            accessibilityLabel={`Share post, ${formatCountLabel(Number(post.share_count || 0), "share")}`}
+            onPress={handleSharePost}
+            style={styles.actionBtn}
+          >
+            <Ionicons name="share-social-outline" size={19} color={colors.textSecondary} />
+            <Text style={[styles.actionCountText, { color: colors.textSecondary }]}>
+              {formatEngagementCount(Number(post.share_count || 0))}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.commentsSection}>
+          <Text style={[styles.commentsTitle, { color: colors.text }]}>Comments</Text>
+        </View>
+      </>
+    );
+  }, [
+    borderCol,
+    colors.text,
+    colors.textSecondary,
+    comments.length,
+    handleMoreOptions,
+    handleReaction,
+    handleSharePost,
+    isDark,
+    mediaWidth,
+    post,
+    subtleBg,
+  ]);
 
   return (
     <BottomModal
@@ -563,7 +822,7 @@ export default function PostDetailsModal({
       <View style={[styles.header, { borderBottomColor: borderCol }]}>
         <View style={{ width: 36 }} />
         <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
-          {post ? `${post.author_name}'s Post` : "Post"}
+          {isGigCommentThread ? "Gig comments" : post ? `${post.author_name}'s Post` : "Post"}
         </Text>
         <TouchableOpacity
           activeOpacity={0.78}
@@ -581,161 +840,23 @@ export default function PostDetailsModal({
         </View>
       ) : (
         <>
-          <ScrollView
+          <FlatList
+            data={comments}
+            keyExtractor={getCommentKey}
+            renderItem={renderComment}
+            ListHeaderComponent={listHeaderComponent}
+            ListEmptyComponent={listEmptyComponent}
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-          >
-            <View style={styles.authorRow}>
-              <ProfileAvatar
-                uri={post.author_avatar}
-                style={styles.avatar}
-                backgroundColor={isDark ? "#374151" : "#E5E7EB"}
-                iconColor={colors.textSecondary}
-              />
-              <View style={styles.authorText}>
-                <Text style={[styles.authorName, { color: colors.text }]} numberOfLines={1}>
-                  {post.author_name}
-                </Text>
-                <View style={styles.authorMetaRow}>
-                  <Text style={[styles.authorMetaText, { color: colors.textSecondary }]}>
-                    {formatTimestamp(post.created_at)}
-                  </Text>
-                  <Text style={[styles.dot, { color: colors.textSecondary }]}>|</Text>
-                  <Ionicons
-                    name={post.visibility === "followers" ? "people" : "earth"}
-                    size={12}
-                    color={colors.textSecondary}
-                  />
-                </View>
-              </View>
-              <TouchableOpacity
-                activeOpacity={0.78}
-                onPress={handleMoreOptions}
-                style={[styles.iconCircle, { backgroundColor: subtleBg }]}
-                accessibilityLabel="Post actions"
-              >
-                <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            {post.body ? <Text style={[styles.postBody, { color: colors.text }]}>{post.body}</Text> : null}
-
-            {post.media?.length > 0 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.mediaScroll}
-              >
-                {post.media.map((media: any, index: number) => {
-                  const previewUrl = media.thumbnail_url || media.url;
-                  if (!previewUrl) return null;
-
-                  return (
-                    <View key={getMediaKey(media, index)} style={[styles.mediaFrame, { width: mediaWidth }]}>
-                      <CachedImage
-                        uri={previewUrl}
-                        style={styles.mediaImg}
-                        width={mediaWidth}
-                        height={230}
-                        contentFit="cover"
-                      />
-                      {media.media_type === "video" ? (
-                        <View style={styles.videoPlayBadge}>
-                          <Ionicons name="play" size={18} color="#FFFFFF" />
-                        </View>
-                      ) : null}
-                    </View>
-                  );
-                })}
-              </ScrollView>
-            ) : null}
-
-            <View style={styles.countsRow}>
-              <View style={styles.countItem}>
-                {(post.reaction_count || 0) > 0 ? (
-                  <>
-                    <View style={styles.likeBadge}>
-                      <Ionicons name="heart" size={10} color="#FFFFFF" />
-                    </View>
-                    <Text style={[styles.countText, { color: colors.textSecondary }]}>
-                      {post.reaction_count}
-                    </Text>
-                  </>
-                ) : null}
-              </View>
-              <Text style={[styles.countText, { color: colors.textSecondary }]}>
-                {comments.length} {comments.length === 1 ? "comment" : "comments"}
-              </Text>
-              <Text style={[styles.countText, { color: colors.textSecondary }]}>
-                {formatCountLabel(Number(post.share_count || 0), "share")}
-              </Text>
-            </View>
-
-            <View style={[styles.actionRow, { borderTopColor: borderCol, borderBottomColor: borderCol }]}>
-              <TouchableOpacity activeOpacity={0.78} onPress={handleReaction} style={styles.actionBtn}>
-                <Ionicons
-                  name={post.my_reaction ? "heart" : "heart-outline"}
-                  size={20}
-                  color={post.my_reaction ? "#ef4444" : colors.textSecondary}
-                />
-                <Text style={[styles.actionText, { color: post.my_reaction ? "#ef4444" : colors.textSecondary }]}>
-                  Like
-                </Text>
-              </TouchableOpacity>
-              <View style={styles.actionBtn}>
-                <Ionicons name="chatbubble-outline" size={19} color={colors.textSecondary} />
-                <Text style={[styles.actionText, { color: colors.textSecondary }]}>Comment</Text>
-              </View>
-              <TouchableOpacity activeOpacity={0.78} onPress={handleSharePost} style={styles.actionBtn}>
-                <Ionicons name="share-social-outline" size={19} color={colors.textSecondary} />
-                <Text style={[styles.actionText, { color: colors.textSecondary }]}>Share</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.commentsSection}>
-              <Text style={[styles.commentsTitle, { color: colors.text }]}>Comments</Text>
-            </View>
-
-            {comments.length === 0 ? (
-              <View style={styles.emptyComments}>
-                <Text style={[styles.noComments, { color: colors.textSecondary }]}>
-                  No comments yet. Be the first to comment.
-                </Text>
-              </View>
-            ) : (
-              comments.map((comment: any, index: number) => (
-                <View key={getCommentKey(comment, index)} style={styles.commentRow}>
-                  <ProfileAvatar
-                    uri={comment.author_avatar}
-                    style={styles.commentAvatar}
-                    backgroundColor={isDark ? "#374151" : "#E5E7EB"}
-                    iconColor={colors.textSecondary}
-                  />
-                  <View style={styles.commentBodyWrap}>
-                    <View style={[styles.commentBubble, { backgroundColor: bubbleBg }]}>
-                      <Text style={[styles.commentAuthor, { color: colors.text }]} numberOfLines={1}>
-                        {comment.author_name}
-                      </Text>
-                      <Text style={[styles.commentBody, { color: colors.text }]}>{comment.body}</Text>
-                    </View>
-                    <View style={styles.commentMetaRow}>
-                      <Text style={[styles.commentMeta, { color: colors.textSecondary }]}>
-                        {formatTimestamp(comment.created_at)}
-                      </Text>
-                      {comment.author_id === userId ? (
-                        <TouchableOpacity activeOpacity={0.78} onPress={() => handleDeleteComment(comment.id)}>
-                          <Text style={[styles.commentMeta, { color: "#ef4444" }]}>Delete</Text>
-                        </TouchableOpacity>
-                      ) : null}
-                    </View>
-                  </View>
-                </View>
-              ))
-            )}
-          </ScrollView>
+            initialNumToRender={8}
+            maxToRenderPerBatch={8}
+            removeClippedSubviews={Platform.OS === "android"}
+            updateCellsBatchingPeriod={40}
+            windowSize={5}
+          />
 
           <SafeAreaView
             edges={footerSafeAreaEdges}
@@ -928,27 +1049,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(15,23,42,0.76)",
   },
-  countsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 10,
-  },
-  countItem: { minHeight: 18, flexDirection: "row", alignItems: "center", gap: 6 },
-  likeBadge: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: "#ef4444",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  countText: { fontSize: 13 },
   actionRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-around",
-    paddingVertical: 6,
+    marginTop: 10,
+    paddingVertical: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
@@ -958,9 +1064,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 8,
-    gap: 6,
+    gap: 8,
   },
-  actionText: { fontSize: 14, fontWeight: "600" },
+  actionCountText: {
+    minWidth: 18,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "700",
+    textAlignVertical: "center",
+  },
   commentsSection: { paddingTop: 16 },
   commentsTitle: { fontSize: 15, fontWeight: "700", marginBottom: 8 },
   commentRow: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 6 },

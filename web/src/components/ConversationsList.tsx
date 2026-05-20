@@ -284,7 +284,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                         No conversations yet
                     </Text>
                     <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
-                        Message musicians, studios, or venue owners directly from their profiles
+                        Message musicians, studios, or gig owners directly from their profiles
                     </Text>
                     <TouchableOpacity
                         style={[styles.newMessageButton, { backgroundColor: colors.primary }]}

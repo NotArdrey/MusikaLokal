@@ -46,7 +46,7 @@ type RecordingDurationIssue = RecordingDurationStatus & { bookingIndex: number }
 
 const HOURS_EPSILON = 1e-9;
 const STUDIO_UNAVAILABLE_MESSAGE =
-  "This studio or venue is no longer available. It may have been deleted by the owner. Please refresh and choose another listing.";
+  "This studio or gig is no longer available. It may have been deleted by the owner. Please refresh and choose another listing.";
 
 const supabaseUrl =
   Constants.expoConfig?.extra?.supabaseUrl ||

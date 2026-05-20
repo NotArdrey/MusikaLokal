@@ -27,6 +27,23 @@ import { useTheme } from "../src/context/ThemeContext";
 import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
 
 
+const DISALLOWED_PROFILE_SKILLS = new Set(["producer"]);
+
+const isAllowedProfileSkill = (value: unknown): value is string => {
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 && !DISALLOWED_PROFILE_SKILLS.has(normalized);
+};
+
+const normalizeProfileSkills = (items: unknown[]) =>
+  Array.from(
+    new Set(
+      items
+        .filter(isAllowedProfileSkill)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
 
 const ROLES = [
   "Vocalist",
@@ -35,7 +52,6 @@ const ROLES = [
   "Drummer",
   "Keyboardist",
   "DJ",
-  "Producer",
   "Sound Engineer",
   "Saxophonist",
   "Violinist",
@@ -280,14 +296,16 @@ export default function EditProfileScreen() {
         setLocation(resolvedProfile.address || resolvedProfile.location || "");
         setBio(resolvedProfile.bio || "");
         setAvatarUrl(resolvedProfile.avatar_url || DEFAULT_AVATAR);
-        setSelectedRoles(Array.isArray(resolvedProfile.skills) ? resolvedProfile.skills : []);
+        setSelectedRoles(normalizeProfileSkills(
+          Array.isArray(resolvedProfile.skills) ? resolvedProfile.skills : [],
+        ));
         setSelectedGenres(Array.isArray(resolvedProfile.genres) ? resolvedProfile.genres : []);
 
         initialSnapshotRef.current = {
           contactNumber: (resolvedProfile.contact_number || "").trim(),
           location: (resolvedProfile.address || resolvedProfile.location || "").trim(),
           bio: (resolvedProfile.bio || "").trim(),
-          roles: normalizeList(
+          roles: normalizeProfileSkills(
             Array.isArray(resolvedProfile.skills) ? resolvedProfile.skills : [],
           ),
           genres: normalizeList(
@@ -467,11 +485,17 @@ export default function EditProfileScreen() {
       showAlert("warning", "Required", "Please enter your address.");
       return;
     }
-    if (selectedRoles.length === 0) {
+
+    const cleanedRoles = normalizeProfileSkills(selectedRoles);
+    const cleanedGenres = Array.from(
+      new Set(selectedGenres.map((genre) => genre.trim()).filter(Boolean)),
+    );
+
+    if (cleanedRoles.length === 0) {
       showAlert("warning", "Required", "Please select at least one role or instrument.");
       return;
     }
-    if (selectedGenres.length === 0) {
+    if (cleanedGenres.length === 0) {
       showAlert("warning", "Required", "Please select at least one genre.");
       return;
     }
@@ -483,13 +507,6 @@ export default function EditProfileScreen() {
     setSaving(true);
 
     try {
-      const cleanedRoles = Array.from(
-        new Set(selectedRoles.map((role) => role.trim()).filter(Boolean)),
-      );
-      const cleanedGenres = Array.from(
-        new Set(selectedGenres.map((genre) => genre.trim()).filter(Boolean)),
-      );
-
       let uploadedAvatarUrl: string | null = null;
 
       if (pendingAvatar) {

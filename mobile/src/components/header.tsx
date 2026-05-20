@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect, usePathname } from "expo-router";
+import { router, useFocusEffect, usePathname, useSegments } from "expo-router";
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { InteractionManager, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { interpolateColor, useAnimatedProps, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -13,7 +13,20 @@ import { fetchActiveStaffAssignment, isStaffRole, normalizeStaffAccessLevel } fr
 const AnimatedIcon = Animated.createAnimatedComponent(Ionicons);
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
-const normalizeHeaderPathname = (value: string) => {
+const normalizeHeaderSegments = (segments: readonly string[]) => {
+    const normalizedSegments = segments
+        .map((segment) => String(segment || '').trim())
+        .filter((segment) => segment && !(segment.startsWith('(') && segment.endsWith(')')));
+
+    return `/${normalizedSegments.join('/')}`;
+};
+
+const normalizeHeaderPathname = (value: string, segments: readonly string[] = []) => {
+    const normalizedFromSegments = normalizeHeaderSegments(segments);
+    if (normalizedFromSegments !== '/') {
+        return normalizedFromSegments;
+    }
+
     const normalizedSegments = value
         .split('/')
         .filter((segment) => segment && !(segment.startsWith('(') && segment.endsWith(')')));
@@ -40,7 +53,8 @@ function Header({ title, overline, transparent, onBackPress, showBack, leftCompo
     const isFan = isFanUserRole(userRole);
 
     const pathname = usePathname();
-    const routePathname = useMemo(() => normalizeHeaderPathname(pathname), [pathname]);
+    const segments = useSegments();
+    const routePathname = useMemo(() => normalizeHeaderPathname(pathname, segments), [pathname, segments]);
     const [hasUnread, setHasUnread] = useState(false);
     const [hasUnreadChats, setHasUnreadChats] = useState(false);
     const [guestMenuVisible, setGuestMenuVisible] = useState(false);
@@ -61,9 +75,12 @@ function Header({ title, overline, transparent, onBackPress, showBack, leftCompo
         () => routePathname === "/my_group" || routePathname === "/my_venue" || routePathname === "/my_studio" || routePathname === "/my_production",
         [routePathname],
     );
+    const isRoundedMainHeader = isMainNavPath || isSettingsOrProfile || isMyListingPath || isBrandMainHeader;
 
     const computedBackVisible = !!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath || isBrandMainHeader);
     const backVisible = showBack === false ? false : showBack === true ? true : computedBackVisible;
+    const useMainTitleStyle = !backVisible;
+    const useCompactMainTitleStyle = useMainTitleStyle && isRoundedMainHeader;
     const staffCanUseAddButton = !isStaff || staffAccessLevel === 1;
     const addbtnvisible = useMemo(() => {
         if (!isMyListingPath) return false;
@@ -425,12 +442,12 @@ function Header({ title, overline, transparent, onBackPress, showBack, leftCompo
                         <Animated.Text
                             style={[
                                 styles.title,
-                                !backVisible && styles.mainTitle,
+                                useMainTitleStyle && styles.mainTitle,
+                                useCompactMainTitleStyle && styles.compactMainTitle,
                                 titleAnimatedStyle,
-                                overline && styles.wrappingTitle,
                             ]}
-                            numberOfLines={overline ? undefined : 1}
-                            ellipsizeMode={overline ? undefined : "tail"}
+                            numberOfLines={1}
+                            ellipsizeMode="tail"
                         >
                             {title}
                         </Animated.Text>
@@ -594,17 +611,17 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         fontFamily: 'Poppins_600SemiBold',
         letterSpacing: -0.3,
-        textAlign: 'center',
-    },
-    wrappingTitle: {
-        flexShrink: 1,
-        lineHeight: 24,
     },
     mainTitle: {
         fontSize: 28,
         fontWeight: '700',
         fontFamily: 'Poppins_700Bold',
         letterSpacing: -0.9,
+    },
+    compactMainTitle: {
+        fontSize: 18,
+        lineHeight: 24,
+        letterSpacing: 0,
     },
     iconButton: {
         width: 44,

@@ -1264,7 +1264,7 @@ async function deleteResource(client: any, resourceType: ResourceType, id: strin
       .eq("id", id)
       .maybeSingle();
     if (gigError) throw gigError;
-    if (!gig) return jsonResponse({ error: "Venue not found" }, 404);
+    if (!gig) return jsonResponse({ error: "Gig not found" }, 404);
 
     const { data: applications, error: applicationsError } = await client
       .from("gig_applications")
@@ -1278,8 +1278,8 @@ async function deleteResource(client: any, resourceType: ResourceType, id: strin
       .map((application: any) => ({
         user_id: application.applicant_id,
         type: application.status === "accepted" ? "error" : "warning",
-        title: "Venue gig removed",
-        message: `${gig.name || "A venue gig"} was removed by admin. ${reason}`.trim(),
+        title: "Gig removed",
+        message: `${gig.name || "A gig gig"} was removed by admin. ${reason}`.trim(),
         read: false,
         meta: {
           type: "admin_listing_deleted",
@@ -1292,7 +1292,7 @@ async function deleteResource(client: any, resourceType: ResourceType, id: strin
     if (notifications.length > 0) {
       const { error: notifyError } = await client.from("notifications").insert(notifications);
       if (notifyError) {
-        console.error("Failed to notify venue applicants", notifyError);
+        console.error("Failed to notify gig applicants", notifyError);
       } else {
         for (const notification of notifications) {
           scheduleCoreActionEmailForNotification(client, notification, { source: "admin-listings-management" });

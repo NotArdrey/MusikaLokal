@@ -320,7 +320,8 @@ export default function PostDetailsModal({
   };
 
   const modalMaxHeight = useMemo(() => Math.min(height - 80, 760), [height]);
-  const isOwner = post?.author_id === userId;
+  const isGigCommentThread = Boolean(post?.linked_gig_id);
+  const isOwner = post?.author_id === userId && !isGigCommentThread;
 
   if (!visible) return null;
 
@@ -342,7 +343,7 @@ export default function PostDetailsModal({
           <View style={[styles.header, { borderBottomColor: borderCol }]}>
             <View style={{ width: 32 }} />
             <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
-              {post ? `${post.author_name}'s Post` : "Post"}
+              {isGigCommentThread ? "Gig comments" : post ? `${post.author_name}'s Post` : "Post"}
             </Text>
             <TouchableOpacity
               activeOpacity={0.7}

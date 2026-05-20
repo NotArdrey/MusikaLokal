@@ -331,6 +331,17 @@ const normalizeListingKind = (value: unknown) => {
   return null;
 };
 
+const isVenueLikeStudioListing = (item: any) => {
+  const typeLabel = String(item?.type || item?.studio_type || "").trim().toLowerCase();
+  if (typeLabel === "venue" || typeLabel === "gig" || typeLabel.includes("venue")) {
+    return true;
+  }
+
+  return Array.isArray(item?.amenities)
+    ? item.amenities.some((amenity: any) => String(amenity || "").toLowerCase().includes("stage"))
+    : false;
+};
+
 const getInitialListingKind = (listing: any, listingId: string | null) => {
   if (!listing || !listingId || String(listing.id || "") !== String(listingId)) {
     return null;
@@ -357,7 +368,7 @@ const fetchListingBaseByKind = async (listingId: string, kind: string | null) =>
       .single();
     if (!data) return null;
 
-    const resolvedType = kind === "Venue" || data.amenities?.includes("Stage") ? "Venue" : "Studio";
+    const resolvedType = kind === "Venue" || isVenueLikeStudioListing(data) ? "Venue" : "Studio";
     return { data, ownerId: data.owner_id, type: resolvedType };
   }
 
@@ -491,7 +502,7 @@ const ListingDetailsSheet = forwardRef<
   const [isSendingRequest, setIsSendingRequest] = useState(false);
   const listingRequestInFlightRef = useRef(false);
 
-  // Venue Selection State (for venue owners sending invites)
+  // Gig Selection State (for gig owners sending invites)
   const [userVenues, setUserVenues] = useState<any[]>([]);
   const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
   const {
@@ -1582,7 +1593,7 @@ const ListingDetailsSheet = forwardRef<
       });
       const nextVenues = (venueRows.length > 0 ? venueRows : data || []).map((row: any) => ({
         id: row.id,
-        name: row.name || "Venue",
+        name: row.name || "Gig",
       }));
 
       setUserVenues(nextVenues);
@@ -1592,7 +1603,7 @@ const ListingDetailsSheet = forwardRef<
           : nextVenues[0]?.id || null,
       );
     } catch (err) {
-      console.error("Error fetching owned venues:", err);
+      console.error("Error fetching owned gigs:", err);
       setUserVenues([]);
       setSelectedVenueId(null);
     }
@@ -1813,7 +1824,7 @@ const ListingDetailsSheet = forwardRef<
       setSelectedProductionTeamId(null);
       setProductionRoster([]);
       setSelectedProductionRosterId(null);
-      // Reset venue selection state
+      // Reset gig selection state
       setSelectedVenueId(null);
       setUserVenues([]);
 
@@ -2032,7 +2043,7 @@ const ListingDetailsSheet = forwardRef<
             data = studioData;
             type = "Studio";
             ownerId = studioData.owner_id;
-            if (studioData.amenities?.includes("Stage")) type = "Venue";
+            if (isVenueLikeStudioListing(studioData)) type = "Venue";
           } else {
             // Try Gig
             const { data: gigData } = await supabase
@@ -2243,7 +2254,7 @@ const ListingDetailsSheet = forwardRef<
               : resolvedOpenGroupApplications ?? true,
         };
 
-        // If studio or venue, fetch availability from operating hours
+        // If studio or gig, fetch availability from operating hours
         if (type === "Studio" || type === "Venue") {
           debugLog("📅 Fetching studio availability data...");
           const [
@@ -3264,7 +3275,7 @@ const ListingDetailsSheet = forwardRef<
     />
   );
 
-  // Studio: Setup Tab (also used for Venue Specs)
+  // Studio: Setup Tab (also used for Gig Specs)
   const renderStudioSetup = () => (
     <StudioSetupTab
       group={group}
@@ -3720,7 +3731,7 @@ const ListingDetailsSheet = forwardRef<
 
     const receiverUserId = group?.owner_id || group?.organizer_id;
     if (!receiverUserId || !group?.id) {
-      showSheetAlert("error", "Apply Unavailable", "We couldn't identify this venue owner right now.");
+      showSheetAlert("error", "Apply Unavailable", "We couldn't identify this gig owner right now.");
       return;
     }
 
@@ -3730,12 +3741,12 @@ const ListingDetailsSheet = forwardRef<
       senderEntityName: selectedProductionTeam.name || "Production Team",
       senderEntityId: selectedProductionTeam.id,
       receiverEntityType: "venue",
-      receiverEntityName: group?.name || "Venue",
+      receiverEntityName: group?.name || "Gig",
       receiverEntityId: group?.id,
       studioId: group?.id,
       productionTeamId: selectedProductionTeam.id,
-      notificationTitle: "New venue application",
-      notificationMessage: `${selectedProductionTeam.name} wants to work with your venue.`,
+      notificationTitle: "New gig application",
+      notificationMessage: `${selectedProductionTeam.name} wants to work with your gig.`,
       notificationImage: selectedProductionTeam.logo_url || null,
       requestKind: "application",
       contextLabel: "Application Context",
@@ -3960,7 +3971,7 @@ const ListingDetailsSheet = forwardRef<
           {renderProductionTeamSelector()}
           {renderStructuredRequestFields({
             requestKind: "application",
-            pitchPlaceholder: `Tell ${group?.name || "this venue"} how your team can help and what you bring.`,
+            pitchPlaceholder: `Tell ${group?.name || "this gig"} how your team can help and what you bring.`,
             contextLabel: "Application Context",
             contextPlaceholder: "Add event context, availability, technical strengths, or other production notes.",
             showSlotSelector: true,
@@ -3977,7 +3988,7 @@ const ListingDetailsSheet = forwardRef<
                 <ActivityIndicator color="#FFF" />
                 <Text style={styles.primaryBtnText}>Sending Application...</Text>
               </View>
-            ) : <Text style={styles.primaryBtnText}>Send Venue Application</Text>}
+            ) : <Text style={styles.primaryBtnText}>Send Gig Application</Text>}
           </TouchableOpacity>
         </View>
       );

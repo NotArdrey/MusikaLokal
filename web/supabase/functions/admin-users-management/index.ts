@@ -570,7 +570,7 @@ function getStaffAssignmentLabel(assignment: any) {
 
   if (!entityType || !targetId || !level) return null;
 
-  const entityLabel = entityType === "venue" ? "Venue" : entityType === "production" ? "Production" : "Studio";
+  const entityLabel = entityType === "venue" ? "Gig" : entityType === "production" ? "Production" : "Studio";
   return `${entityLabel}: ${targetName || targetId} (Level ${level})`;
 }
 
@@ -595,7 +595,7 @@ async function validateStaffAssignmentTarget(
     assignment.entity_type === "studio"
       ? { table: "studios", id: assignment.studio_id, label: "studio" }
       : assignment.entity_type === "venue"
-        ? { table: "gigs", id: assignment.gig_id, label: "venue" }
+        ? { table: "gigs", id: assignment.gig_id, label: "gig" }
         : { table: "production_teams", id: assignment.production_team_id, label: "production team" };
 
   if (!target.id) {

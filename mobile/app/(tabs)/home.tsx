@@ -65,6 +65,12 @@ const debugLog = (..._args: unknown[]) => { };
 const HOME_HORIZONTAL_FLASHLIST_OVERRIDE_PROPS = { initialDrawBatchSize: 4 };
 const PENDING_REOPEN_LISTING_STORAGE_KEY = "pending_reopen_listing_id";
 const PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY = "pending_reopen_listing_type";
+const PROFILE_SKILL_DISPLAY_EXCLUSIONS = new Set(["producer"]);
+
+const isVisibleProfileSkill = (value: unknown) =>
+  typeof value === "string" &&
+  value.trim().length > 0 &&
+  !PROFILE_SKILL_DISPLAY_EXCLUSIONS.has(value.trim().toLowerCase());
 
 const firstRouteParam = (value?: string | string[] | null) =>
   Array.isArray(value) ? value[0] : value;
@@ -272,7 +278,7 @@ const collectProfileValues = (rows: any[] | null | undefined, valueKey: string) 
     }
 
     const nextValue = rawValue.trim();
-    if (!nextValue) {
+    if (!nextValue || (valueKey === "skill" && !isVisibleProfileSkill(nextValue))) {
       return;
     }
 
@@ -1571,7 +1577,7 @@ export default function HomeScreen() {
           const profileSignals = {
             skills: (skillsResult.data || [])
               .map((row: any) => row.skill)
-              .filter((value: any) => typeof value === "string" && value.trim().length > 0),
+              .filter(isVisibleProfileSkill),
             genres: (genresResult.data || [])
               .map((row: any) => row.genre)
               .filter((value: any) => typeof value === "string" && value.trim().length > 0),
@@ -2022,7 +2028,7 @@ export default function HomeScreen() {
         return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
       }
       if (item.budget && item.budget !== "0") {
-        return `₱${parseInt(item.budget).toLocaleString()}`;
+        return `₱${parseInt(item.budget).toLocaleString()}${item.type === "Gig" ? " Talent Fee" : ""}`;
       }
       if (item.rate && item.rate !== "0") {
         return `₱${parseInt(item.rate).toLocaleString()}`;
@@ -2247,7 +2253,7 @@ export default function HomeScreen() {
 
     openListingDetails(item.id);
     // The ListingDetailsSheet will show the "Connect" tab for Groups
-    // allowing venue/studio owners to send booking requests
+    // allowing gig/studio owners to send booking requests
   };
 
   // 3. New Arrivals Section - Custom Cards
@@ -2299,7 +2305,7 @@ export default function HomeScreen() {
         return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
       }
       if (item.budget && item.budget !== "0") {
-        return `₱${parseInt(item.budget).toLocaleString()}`;
+        return `₱${parseInt(item.budget).toLocaleString()}${item.type === "Gig" ? " Talent Fee" : ""}`;
       }
       if (item.rate && item.rate !== "0") {
         return `₱${parseInt(item.rate).toLocaleString()}`;
@@ -2842,7 +2848,7 @@ export default function HomeScreen() {
                           {item.hourly_rate
                             ? `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`
                             : item.budget
-                              ? `₱${parseInt(item.budget).toLocaleString()}`
+                              ? `₱${parseInt(item.budget).toLocaleString()}${item.type === "Gig" ? " Talent Fee" : ""}`
                               : `₱${parseInt(item.rate || "0").toLocaleString()}`}
                         </Text>
                       );

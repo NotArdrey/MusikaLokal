@@ -49,8 +49,8 @@ export const useBookingRequestAction = ({
           const router = require("expo-router").router;
           router.push("/add_studio");
         },
-        "No Venue Found",
-        "You need to create a venue first before sending booking requests. Would you like to create one now?",
+        "No Gig Found",
+        "You need to create a gig first before sending booking requests. Would you like to create one now?",
       );
       return;
     }
@@ -58,8 +58,8 @@ export const useBookingRequestAction = ({
     if (currentUserRole === "venue-owner" && !selectedVenueId) {
       setAlertConfig({
         type: "error",
-        title: "Select Venue",
-        message: "Please select which venue you are inviting the artist to.",
+        title: "Select Gig",
+        message: "Please select which gig you are inviting the artist to.",
       });
       setAlertVisible(true);
       return;
@@ -107,7 +107,7 @@ export const useBookingRequestAction = ({
             receiverUserId: receiverId,
             message: requestMessage,
             senderEntityType: "venue",
-            senderEntityName: selectedVenue?.name || "Venue",
+            senderEntityName: selectedVenue?.name || "Gig",
             senderEntityId: selectedVenueId,
             receiverEntityType: group.type === "Artist" ? "musician" : "group",
             receiverEntityName: group?.name || (group.type === "Artist" ? "Musician" : "Group"),
@@ -115,7 +115,7 @@ export const useBookingRequestAction = ({
             groupId,
             studioId: selectedVenueId,
             notificationTitle: "New booking request",
-            notificationMessage: `${selectedVenue?.name || "A venue"} sent you a booking request on MusikaLokal.`,
+            notificationMessage: `${selectedVenue?.name || "A gig"} sent you a booking request on MusikaLokal.`,
             routePath: "/bookings",
             routeParams: { tab: "Pending" },
             extraMeta: { source: "listing_details_booking_request" },

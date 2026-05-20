@@ -76,6 +76,12 @@ const moderateScale = (size: number, factor = 0.3) => {
   const scaled = Math.max((SCREEN_WIDTH / 375) * size, size * 0.85);
   return size + (scaled - size) * factor;
 };
+const PROFILE_SKILL_DISPLAY_EXCLUSIONS = new Set(["producer"]);
+
+const isVisibleProfileSkill = (value: unknown) =>
+  typeof value === "string" &&
+  value.trim().length > 0 &&
+  !PROFILE_SKILL_DISPLAY_EXCLUSIONS.has(value.trim().toLowerCase());
 
 type FeedTab = "for_you" | "talent" | "following";
 const isForYouFeedTab = (feedTab: FeedTab) => feedTab === "for_you";
@@ -123,6 +129,17 @@ const normalizeAiFeedMessage = (message: string) =>
 
 const formatCountLabel = (count: number, singular: string, plural = `${singular}s`) =>
   `${count} ${count === 1 ? singular : plural}`;
+
+const formatEngagementCount = (count: number) => {
+  const value = Math.max(0, Math.round(Number(count) || 0));
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  }
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  }
+  return String(value);
+};
 
 const logFeedInvokeError = (
   scope: string,
@@ -661,7 +678,7 @@ const formatProfileRoleLabel = (role: unknown) => {
   if (!normalized) return "Member";
   if (normalized === "musician") return "Musician";
   if (normalized === "producer") return "Producer";
-  if (normalized === "venue-owner") return "Venue owner";
+  if (normalized === "venue-owner") return "Gig owner";
   if (normalized === "studio-owner") return "Studio owner";
   return normalized
     .split("-")
@@ -890,6 +907,9 @@ const getFeedQuickInfoIconMetrics = (icon: FeedQuickInfoItem["icon"]) => {
       return { size: 16 };
     case "location":
       return { size: 18 };
+    case "musical-notes":
+    case "people":
+      return { size: 16 };
     case "chatbubble-ellipses":
       return { size: 17 };
     default:
@@ -902,30 +922,41 @@ const getFeedQuickInfoItems = (item: any): FeedQuickInfoItem[] => {
   const reviewCount = Number(item?.review_count || 0);
   const rawLocation = typeof item?.location === "string" ? item.location.trim() : "";
   const distanceKm = Number(item?.distance_km || item?.distanceKm || 0);
-  const reviewLabel =
-    reviewCount > 0
-      ? `${reviewCount} ${reviewCount === 1 ? "Review" : "Reviews"}`
-      : "No reviews yet";
-  const locationLabel =
-    distanceKm > 0
-      ? `${distanceKm.toFixed(distanceKm >= 10 ? 0 : 1)} km away`
-      : item?.type === "Studio" || item?.type === "Venue"
-        ? "Distance N/A"
-        : rawLocation.split(",")[0]?.trim() || "Local";
-  const ratingLabel =
-    rating > 0
-      ? `${rating.toFixed(1)} Rating`
-      : item?.type === "Studio" || item?.type === "Venue"
-        ? `New ${item?.type}`
-        : "Featured";
+  const genre = typeof item?.genre === "string" ? item.genre.trim() : "";
+  const memberCount = getPositiveInteger(item?.member_count ?? item?.members_count ?? item?.total_members);
+  const locationLabel = distanceKm > 0
+    ? `${distanceKm.toFixed(distanceKm >= 10 ? 0 : 1)} km away`
+    : rawLocation.split(",")[0]?.trim() || "";
 
-  const quickInfoItems: FeedQuickInfoItem[] = [
-    { icon: "star", label: ratingLabel },
-    { icon: "location", label: locationLabel },
-    { icon: "chatbubble-ellipses", label: reviewLabel },
-  ];
+  const quickInfoItems: FeedQuickInfoItem[] = [];
 
-  return quickInfoItems.filter((info) => info.label.length > 0);
+  if (rating > 0) {
+    quickInfoItems.push({ icon: "star", label: `${rating.toFixed(1)} Rating` });
+  }
+
+  if (locationLabel) {
+    quickInfoItems.push({ icon: "location", label: locationLabel });
+  }
+
+  if (genre && genre !== item?.type && genre !== "Venue") {
+    quickInfoItems.push({ icon: "musical-notes", label: genre });
+  }
+
+  if (memberCount > 0) {
+    quickInfoItems.push({
+      icon: "people",
+      label: `${memberCount} ${memberCount === 1 ? "Member" : "Members"}`,
+    });
+  }
+
+  if (reviewCount > 0) {
+    quickInfoItems.push({
+      icon: "chatbubble-ellipses",
+      label: `${reviewCount} ${reviewCount === 1 ? "Review" : "Reviews"}`,
+    });
+  }
+
+  return quickInfoItems.filter((info) => info.label.length > 0).slice(0, 3);
 };
 
 const getFeedPriceChips = (item: any) => {
@@ -942,7 +973,9 @@ const getFeedPriceChips = (item: any) => {
     if (recordingRate > 0) chips.push(formatFeedPrice(recordingRate, "/song", "Recording"));
     if (chips.length === 0 && hourlyRate > 0) chips.push(formatFeedPrice(hourlyRate, "/hr"));
   } else if (budget > 0) {
-    chips.push(formatFeedPrice(budget, "", "Budget"));
+    const normalizedType = String(type || "").toLowerCase();
+    const budgetLabel = normalizedType === "gig" || normalizedType === "venue" ? "Talent Fee" : "Budget";
+    chips.push(formatFeedPrice(budget, "", budgetLabel));
   } else if (numericRate > 0) {
     chips.push(formatFeedPrice(numericRate));
   } else if (typeof item?.rate === "string" && item.rate.trim() && item.rate !== "0") {
@@ -964,7 +997,7 @@ const getFeedServiceBadges = (item: any) => {
   const studioType = typeof item?.studio_type === "string" ? item.studio_type : "";
 
   if (type === "Studio" || type === "Venue") {
-    badges.push(type === "Venue" ? "Venue" : "Live Room");
+    badges.push(type === "Venue" ? "Gig" : "Live Room");
     if (/rehearsal/i.test(studioType) || getPositiveInteger(item?.rehearsal_rate) > 0) {
       badges.push("Rehearsal");
     }
@@ -988,6 +1021,30 @@ const getFeedServiceBadges = (item: any) => {
   if (item?.linked_product) badges.push("Merch");
 
   return Array.from(new Set(badges.filter(Boolean))).slice(0, 3);
+};
+
+const isFeedVenueLikeStudio = (item: any) => {
+  const typeLabel = String(item?.type || item?.studio_type || "").trim().toLowerCase();
+  if (typeLabel === "venue" || typeLabel === "gig" || typeLabel.includes("venue")) {
+    return true;
+  }
+
+  return Array.isArray(item?.amenities)
+    ? item.amenities.some((amenity: any) => String(amenity || "").toLowerCase().includes("stage"))
+    : false;
+};
+
+const getFeedHeaderBadge = (item: any) => {
+  if (item?.__feedKind !== "ai_card") {
+    return formatCompactPostType(item?.post_type);
+  }
+
+  const type = String(item?.type || "").trim();
+  if (!type) return "Featured";
+  if (type === "Venue") return "Gig";
+  if (type === "Duo") return "Duo";
+  if (type === "Production") return "Production";
+  return type;
 };
 
 const getFeedMediaUrls = (item: any) => {
@@ -1050,7 +1107,7 @@ const SocialMediaGallery = React.memo(function SocialMediaGallery({
 
   if (visibleMedia.length === 0) return null;
 
-  const singleHeight = 230;
+  const singleHeight = Math.min(240, Math.round(mediaWidth * 9 / 16));
   const halfWidth = (mediaWidth - SOCIAL_GALLERY_GAP) / 2;
 
   let galleryContent: React.ReactNode;
@@ -1060,14 +1117,14 @@ const SocialMediaGallery = React.memo(function SocialMediaGallery({
       height: singleHeight,
     });
   } else if (visibleMedia.length === 2) {
-    const rowHeight = Math.round(halfWidth);
+    const rowHeight = singleHeight;
     galleryContent = (
       <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
         {visibleMedia.map((uri, index) => renderImageCell(uri, index, halfWidth, rowHeight))}
       </View>
     );
   } else if (visibleMedia.length === 3) {
-    const rowHeight = Math.round(mediaWidth * 0.72);
+    const rowHeight = singleHeight;
     const stackedHeight = (rowHeight - SOCIAL_GALLERY_GAP) / 2;
     galleryContent = (
       <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
@@ -1079,7 +1136,7 @@ const SocialMediaGallery = React.memo(function SocialMediaGallery({
       </View>
     );
   } else {
-    const rowHeight = Math.round(halfWidth * 0.82);
+    const rowHeight = Math.round((singleHeight - SOCIAL_GALLERY_GAP) / 2);
     galleryContent = (
       <View style={styles.socialGalleryGrid}>
         <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
@@ -1143,7 +1200,7 @@ const getFeedReportTypeLabel = (item: any) => {
   const type = String(item?.type || "").trim();
   if (!type) return "Card";
   if (type.toLowerCase() === "artist") return "Artist";
-  return type;
+  return type === "Venue" ? "Gig" : type;
 };
 
 const isOwnFeedReportTarget = (item: any, currentUserId?: string | null) => {
@@ -1162,7 +1219,7 @@ const getFeedOptionViewLabel = (item: any) => {
   const type = String(item?.type || "").trim().toLowerCase();
   if (type === "artist" || type === "profile" || type === "musician") return "View Profile";
   if (type === "group" || type === "duo") return type === "duo" ? "View Duo" : "View Group";
-  if (type === "venue") return "View Venue";
+  if (type === "venue") return "View Gig";
   if (type === "studio") return "View Studio";
   if (type === "gig") return "View Gig";
   if (type === "production") return "View Team";
@@ -1178,7 +1235,9 @@ const getFeedMetaLabel = (item: any) => {
 
   const location = typeof item?.location === "string" ? item.location.trim() : "";
   const genre = typeof item?.genre === "string" ? item.genre.trim() : "";
-  return location || genre || item?.type || "Featured";
+  const displayGenre = genre === "Venue" ? "Gig" : genre;
+  const type = item?.type === "Venue" ? "Gig" : item?.type;
+  return location || displayGenre || type || "Featured";
 };
 
 const getFeedCaption = (item: any) => {
@@ -1190,7 +1249,12 @@ const getFeedCaption = (item: any) => {
   if (description) return description;
   const aiReason = typeof item?.aiReason === "string" ? item.aiReason.trim() : "";
   if (aiReason) return aiReason;
-  const type = item?.type === "Studio" ? "studio" : String(item?.type || "listing").toLowerCase();
+  const type =
+    item?.type === "Studio"
+      ? "studio"
+      : item?.type === "Venue"
+        ? "gig"
+        : String(item?.type || "listing").toLowerCase();
   return `Featured ${type} from the local music community.`;
 };
 
@@ -1203,13 +1267,33 @@ const getFeedTimestampLabel = (item: any, formatter: (value: string) => string) 
 const getFeedPrimaryCtaLabel = (item: any) => {
   if (item?.__feedKind !== "ai_card") return "View Post";
   if (item?.type === "Studio") return "View Studio";
-  if (item?.type === "Venue") return "View Venue";
+  if (item?.type === "Venue") return "View Gig";
   if (item?.type === "Artist") return "View Profile";
   if (item?.type === "Duo") return "View Duo";
   if (item?.type === "Group") return "View Group";
   if (item?.type === "Gig") return "View Gig";
   if (item?.type === "Production") return "View Team";
   return "View Details";
+};
+
+const getFeedCommentTargetPostId = (item: any) => {
+  const explicitPostId =
+    item?.post_id ||
+    item?.postId ||
+    item?.feed_post_id ||
+    item?.feedPostId ||
+    item?.linked_post_id ||
+    item?.linkedPostId;
+
+  if (typeof explicitPostId === "string" && explicitPostId.length > 0) {
+    return explicitPostId;
+  }
+
+  if (item?.__feedKind === "ai_card") {
+    return "";
+  }
+
+  return typeof item?.id === "string" ? item.id : "";
 };
 
 const getStationSlots = (station: any) => {
@@ -1784,10 +1868,12 @@ type SocialFeedCardProps = {
   onOpenProfile: (profileId: string) => void;
   onOpenProductionTeam: (teamId: string) => void;
   onOpenPlaylist: (playlistId: string) => void;
+  onOpenGigComments?: (card: any) => Promise<void> | void;
   onShareCard?: (card: any) => void;
   onSharePost?: (post: any) => void;
   onToggleCardFavorite?: (card: any) => void;
   onToggleReaction?: (post: any) => void;
+  enableGigComments?: boolean;
   showAuthorFollow: boolean;
   timeAgo: (value: string) => string;
 };
@@ -1810,21 +1896,28 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   onOpenProfile,
   onOpenProductionTeam,
   onOpenPlaylist,
+  onOpenGigComments,
   onShareCard,
   onSharePost,
   onToggleCardFavorite,
   onToggleReaction,
+  enableGigComments,
   showAuthorFollow,
   timeAgo,
 }: SocialFeedCardProps) {
   const isSuggestion = item?.__feedKind === "ai_card";
+  const suggestionType = String(item?.type || "").trim().toLowerCase();
+  const [commentBusy, setCommentBusy] = useState(false);
   const mediaUrls = useMemo(() => getFeedMediaUrls(item), [item]);
   const badges = useMemo(() => getFeedServiceBadges(item), [item]);
-  const headerBadge = badges[0] || "";
-  const bodyBadges = headerBadge ? badges.slice(1) : badges;
   const priceChips = useMemo(() => getFeedPriceChips(item), [item]);
   const quickInfoItems = useMemo(() => getFeedQuickInfoItems(item), [item]);
   const avatarUri = useMemo(() => getFeedAvatarUri(item), [item]);
+  const headerBadge = getFeedHeaderBadge(item);
+  const bodyBadges = useMemo(
+    () => badges.filter((badge) => badge && badge !== headerBadge),
+    [badges, headerBadge],
+  );
   const displayName = getFeedDisplayName(item);
   const metaLabel = getFeedMetaLabel(item);
   const caption = getFeedCaption(item);
@@ -1833,12 +1926,20 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
 
   const handleOpenPrimary = useCallback(() => {
     if (isSuggestion) {
-      if (item?.type === "Production") {
+      if (suggestionType === "production" || suggestionType === "production_team") {
         onOpenProductionTeam(item.id);
         return;
       }
-      if (item?.type === "Artist") {
+      if (suggestionType === "artist" || suggestionType === "profile" || suggestionType === "musician") {
         onOpenProfile(item.id);
+        return;
+      }
+      if (suggestionType === "product") {
+        onOpenProduct(item.id);
+        return;
+      }
+      if (suggestionType === "playlist" || suggestionType === "music") {
+        onOpenPlaylist(item.id);
         return;
       }
       onOpenListing(item.id);
@@ -1846,7 +1947,17 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
     }
 
     onOpenPost(item.id);
-  }, [isSuggestion, item?.id, item?.type, onOpenListing, onOpenPost, onOpenProductionTeam, onOpenProfile]);
+  }, [
+    isSuggestion,
+    item?.id,
+    onOpenListing,
+    onOpenPlaylist,
+    onOpenPost,
+    onOpenProduct,
+    onOpenProductionTeam,
+    onOpenProfile,
+    suggestionType,
+  ]);
 
   const handleFollow = useCallback(() => {
     if (!followTarget?.id || !followTarget?.type) return;
@@ -1882,14 +1993,23 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
 
   }, [handleOpenPrimary, isSuggestion, item, onOpenPostOptions]);
 
-  const reactionCount = Number(
+  const reactionCount = Math.max(0, Number(
     isSuggestion
       ? item?.favorites_count ?? item?.favorite_count ?? item?.reaction_count ?? 0
       : item?.reaction_count || 0,
-  );
-  const commentCount = Number(item?.comment_count || 0);
-  const shareCount = Number(item?.share_count || 0);
+  ) || 0);
   const actionTargetLabel = isSuggestion ? getFeedReportTypeLabel(item).toLowerCase() : "post";
+  const commentTargetPostId = getFeedCommentTargetPostId(item);
+  const canCommentOnGigSuggestion =
+    enableGigComments === true &&
+    isSuggestion &&
+    suggestionType === "gig" &&
+    typeof item?.id === "string" &&
+    item.id.length > 0;
+  const showCommentAction = Boolean(commentTargetPostId || canCommentOnGigSuggestion);
+  const commentCount = Math.max(0, Number(item?.comment_count || 0) || 0);
+  const visibleCommentCount = showCommentAction ? commentCount : 0;
+  const shareCount = Math.max(0, Number(item?.share_count || 0) || 0);
   const handleLikePress = useCallback(() => {
     if (isSuggestion) {
       onToggleCardFavorite?.(item);
@@ -1898,14 +2018,28 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
 
     onToggleReaction?.(item);
   }, [isSuggestion, item, onToggleCardFavorite, onToggleReaction]);
-  const handleCommentPress = useCallback(() => {
-    if (isSuggestion) {
-      handleOpenPrimary();
+  const handleCommentPress = useCallback(async () => {
+    if (commentTargetPostId) {
+      onOpenPost(commentTargetPostId);
       return;
     }
 
-    handleOpenPrimary();
-  }, [handleOpenPrimary, isSuggestion]);
+    if (canCommentOnGigSuggestion && onOpenGigComments) {
+      setCommentBusy(true);
+      try {
+        await onOpenGigComments(item);
+      } finally {
+        setCommentBusy(false);
+      }
+      return;
+    }
+
+    emitToast({
+      type: "info",
+      title: "Comments unavailable",
+      message: "This card is not a feed post yet.",
+    });
+  }, [canCommentOnGigSuggestion, commentTargetPostId, item, onOpenGigComments, onOpenPost]);
   const handleSharePress = useCallback(() => {
     if (isSuggestion) {
       onShareCard?.(item);
@@ -1944,14 +2078,23 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
         </TouchableOpacity>
 
         <TouchableOpacity activeOpacity={0.78} onPress={handleOpenPrimary} style={styles.socialHeaderText}>
-          <Text style={[styles.socialName, { color: colors.text }]} numberOfLines={1}>
-            {displayName}
-          </Text>
+          <View style={styles.socialNameRow}>
+            <Text style={[styles.socialName, { color: colors.text }]} numberOfLines={1}>
+              {displayName}
+            </Text>
+            {headerBadge ? (
+              <View style={[styles.socialHeaderBadgeChip, { backgroundColor: colors.primary + "12" }]}>
+                <Text style={[styles.socialHeaderBadgeText, { color: colors.primary }]} numberOfLines={1}>
+                  {headerBadge}
+                </Text>
+              </View>
+            ) : null}
+          </View>
           <View style={styles.socialMetaRow}>
             <Text style={[styles.socialMetaText, { color: colors.textSecondary }]} numberOfLines={1}>
               {metaLabel}
             </Text>
-            <Text style={[styles.socialMetaDot, { color: colors.textSecondary }]}>•</Text>
+            <Text style={[styles.socialMetaDot, { color: colors.textSecondary }]}>{"\u2022"}</Text>
             <Text style={[styles.socialMetaText, { color: colors.textSecondary }]} numberOfLines={1}>
               {timestamp}
             </Text>
@@ -1983,14 +2126,6 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
             </TouchableOpacity>
           ) : null}
 
-          {headerBadge ? (
-            <View style={[styles.socialHeaderBadgeChip, { backgroundColor: colors.primary + "12" }]}>
-              <Text style={[styles.socialHeaderBadgeText, { color: colors.primary }]} numberOfLines={1}>
-                {headerBadge}
-              </Text>
-            </View>
-          ) : null}
-
           <TouchableOpacity activeOpacity={0.78} accessibilityRole="button" accessibilityLabel="More options" onPress={handleMoreOptions} style={styles.socialMenuButton}>
             <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
           </TouchableOpacity>
@@ -2007,7 +2142,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
         <SocialMediaGallery mediaUrls={mediaUrls} mediaWidth={mediaWidth} onPress={handleOpenPrimary} />
       ) : null}
 
-      {bodyBadges.length > 0 || priceChips.length > 0 ? (
+      {!isSuggestion && (bodyBadges.length > 0 || priceChips.length > 0) ? (
         <View style={styles.socialChipRow}>
           {bodyBadges.map((badge) => (
             <View key={`badge-${badge}`} style={[styles.socialBadgeChip, { backgroundColor: colors.primary + "12" }]}>
@@ -2055,112 +2190,143 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
       ) : null}
 
       {isSuggestion ? (
-        <View style={[styles.socialQuickInfoRow, { borderTopColor: borderColor }]}>
-          {quickInfoItems.map((info, index) => {
-            const iconMetrics = getFeedQuickInfoIconMetrics(info.icon);
+        <View
+          style={[
+            styles.socialEntityModule,
+            {
+              backgroundColor: isDark ? "rgba(15,23,42,0.36)" : "#F8FAFC",
+              borderColor,
+            },
+          ]}
+        >
+          {bodyBadges.length > 0 || priceChips.length > 0 ? (
+            <View style={styles.socialEntityChipRow}>
+              {bodyBadges.map((badge) => (
+                <View key={`entity-badge-${badge}`} style={[styles.socialBadgeChip, { backgroundColor: colors.primary + "12" }]}>
+                  <Text style={[styles.socialBadgeText, { color: colors.primary }]} numberOfLines={1}>
+                    {badge}
+                  </Text>
+                </View>
+              ))}
+              {priceChips.map((price) => (
+                <View key={`entity-price-${price}`} style={[styles.socialPriceChip, { borderColor: colors.primary + "55" }]}>
+                  <Text style={[styles.socialPriceText, { color: colors.primary }]} numberOfLines={1}>
+                    {price}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
 
-            return (
-              <View
-                key={`${info.icon}-${info.label}`}
+          {quickInfoItems.length > 0 ? (
+            <View style={styles.socialQuickInfoRow}>
+              {quickInfoItems.map((info, index) => {
+                const iconMetrics = getFeedQuickInfoIconMetrics(info.icon);
+
+                return (
+                  <View
+                    key={`${info.icon}-${info.label}`}
+                    style={[
+                      styles.socialQuickInfoItem,
+                      index === 0 && styles.socialQuickInfoItemStart,
+                      index === quickInfoItems.length - 1 && styles.socialQuickInfoItemEnd,
+                    ]}
+                  >
+                    <View style={styles.socialQuickInfoIconBox}>
+                      <Ionicons
+                        name={info.icon}
+                        size={iconMetrics.size}
+                        color={info.icon === "star" ? "#F59E0B" : colors.primary}
+                        style={styles.socialQuickInfoIcon}
+                      />
+                    </View>
+                    <Text style={[styles.socialQuickInfoText, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {info.label}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+
+          <View style={styles.socialCtaRow}>
+            <TouchableOpacity
+              activeOpacity={0.78}
+              onPress={handleOpenPrimary}
+              style={[styles.socialPrimaryCta, { backgroundColor: colors.primary }]}
+            >
+              <Text style={styles.socialPrimaryCtaText}>{primaryCtaLabel}</Text>
+            </TouchableOpacity>
+
+            {followTarget ? (
+              <TouchableOpacity
+                activeOpacity={followBusy ? 1 : 0.78}
+                disabled={followBusy}
+                onPress={handleFollow}
                 style={[
-                  styles.socialQuickInfoItem,
-                  index === 0 && styles.socialQuickInfoItemStart,
-                  index === quickInfoItems.length - 1 && styles.socialQuickInfoItemEnd,
+                  styles.socialSecondaryCta,
+                  {
+                    borderColor,
+                    opacity: followBusy ? 0.7 : 1,
+                  },
                 ]}
               >
-                <View style={styles.socialQuickInfoIconBox}>
-                  <Ionicons
-                    name={info.icon}
-                    size={iconMetrics.size}
-                    color={info.icon === "star" ? "#F59E0B" : colors.primary}
-                    style={styles.socialQuickInfoIcon}
-                  />
-                </View>
-                <Text style={[styles.socialQuickInfoText, { color: colors.textSecondary }]} numberOfLines={1}>
-                  {info.label}
-                </Text>
-              </View>
-            );
-          })}
+                {followBusy ? (
+                  <ActivityIndicator size="small" color={colors.textSecondary} />
+                ) : (
+                  <Text style={[styles.socialSecondaryCtaText, { color: colors.textSecondary }]}>
+                    {isFollowing ? "Following" : "Follow"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            ) : null}
+          </View>
         </View>
       ) : null}
 
-      {isSuggestion ? (
-        <View style={styles.socialCtaRow}>
-          <TouchableOpacity
-            activeOpacity={0.78}
-            onPress={handleOpenPrimary}
-            style={[styles.socialPrimaryCta, { backgroundColor: colors.primary }]}
-          >
-            <Text style={styles.socialPrimaryCtaText}>{primaryCtaLabel}</Text>
-          </TouchableOpacity>
-
-          {followTarget ? (
-            <TouchableOpacity
-              activeOpacity={followBusy ? 1 : 0.78}
-              disabled={followBusy}
-              onPress={handleFollow}
-              style={[
-                styles.socialSecondaryCta,
-                {
-                  borderColor,
-                  opacity: followBusy ? 0.7 : 1,
-                },
-              ]}
-            >
-              {followBusy ? (
-                <ActivityIndicator size="small" color={colors.textSecondary} />
-              ) : (
-                <Text style={[styles.socialSecondaryCtaText, { color: colors.textSecondary }]}>
-                  {isFollowing ? "Following" : "Follow"}
-                </Text>
-              )}
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      ) : null}
-
-      <View style={styles.socialStatsRow}>
-        <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
-          {formatCountLabel(reactionCount, "like")}
-        </Text>
-        <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
-          {formatCountLabel(commentCount, "comment")}
-        </Text>
-        <Text style={[styles.socialStatsText, { color: colors.textSecondary }]}>
-          {formatCountLabel(shareCount, "share")}
-        </Text>
-      </View>
       <View style={[styles.socialActionRow, { borderTopColor: borderColor }]}>
         <TouchableOpacity
           activeOpacity={0.78}
           accessibilityRole="button"
-          accessibilityLabel={hasLiked ? `Unlike ${actionTargetLabel}` : `Like ${actionTargetLabel}`}
+          accessibilityLabel={`${hasLiked ? "Unlike" : "Like"} ${actionTargetLabel}, ${formatCountLabel(reactionCount, "like")}`}
           style={styles.socialActionButton}
           onPress={handleLikePress}
         >
           <Ionicons name={hasLiked ? "heart" : "heart-outline"} size={18} color={hasLiked ? "#EF4444" : colors.textSecondary} />
-          <Text style={[styles.socialActionText, { color: hasLiked ? "#EF4444" : colors.textSecondary }]}>Like</Text>
+          <Text style={[styles.socialActionCountText, { color: hasLiked ? "#EF4444" : colors.textSecondary }]}>
+            {formatEngagementCount(reactionCount)}
+          </Text>
         </TouchableOpacity>
+        {showCommentAction ? (
+          <TouchableOpacity
+            activeOpacity={commentBusy ? 1 : 0.78}
+            accessibilityRole="button"
+            accessibilityLabel={`Comment on ${actionTargetLabel}, ${formatCountLabel(visibleCommentCount, "comment")}`}
+            style={styles.socialActionButton}
+            onPress={handleCommentPress}
+            disabled={commentBusy}
+          >
+            {commentBusy ? (
+              <ActivityIndicator size="small" color={colors.textSecondary} />
+            ) : (
+              <Ionicons name="chatbubble-outline" size={17} color={colors.textSecondary} />
+            )}
+            <Text style={[styles.socialActionCountText, { color: colors.textSecondary }]}>
+              {formatEngagementCount(visibleCommentCount)}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity
           activeOpacity={0.78}
           accessibilityRole="button"
-          accessibilityLabel={`Comment on ${actionTargetLabel}`}
-          style={styles.socialActionButton}
-          onPress={handleCommentPress}
-        >
-          <Ionicons name="chatbubble-outline" size={17} color={colors.textSecondary} />
-          <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Comment</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          activeOpacity={0.78}
-          accessibilityRole="button"
-          accessibilityLabel={`Share ${actionTargetLabel}`}
+          accessibilityLabel={`Share ${actionTargetLabel}, ${formatCountLabel(shareCount, "share")}`}
           style={styles.socialActionButton}
           onPress={handleSharePress}
         >
           <Ionicons name="share-social-outline" size={17} color={colors.textSecondary} />
-          <Text style={[styles.socialActionText, { color: colors.textSecondary }]}>Share</Text>
+          <Text style={[styles.socialActionCountText, { color: colors.textSecondary }]}>
+            {formatEngagementCount(shareCount)}
+          </Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -2610,7 +2776,7 @@ export default function FeedScreen() {
     setIsAiCardsLoading(true);
 
     try {
-      const [groupsResult, studiosResult, artistsResult, teamsResult, viewerProfileResult, favoritesResult] = await Promise.all([
+      const [groupsResult, studiosResult, gigsResult, artistsResult, teamsResult, viewerProfileResult, favoritesResult] = await Promise.all([
         supabase
           .from("groups_with_stats")
           .select("*")
@@ -2619,6 +2785,13 @@ export default function FeedScreen() {
         supabase
           .from("studios_with_stats")
           .select("*")
+          .eq("permit_status", "approved")
+          .order("created_at", { ascending: false })
+          .limit(TALENT_CARD_LIMIT),
+        supabase
+          .from("gigs_with_stats")
+          .select("*")
+          .neq("status", "cancelled")
           .eq("permit_status", "approved")
           .order("created_at", { ascending: false })
           .limit(TALENT_CARD_LIMIT),
@@ -2643,7 +2816,7 @@ export default function FeedScreen() {
           .maybeSingle(),
         supabase
           .from("favorites")
-          .select("profile_id, group_id, studio_id, production_team_id")
+          .select("profile_id, group_id, studio_id, gig_id, production_team_id")
           .eq("user_id", resolvedUserId)
           .limit(1000),
       ]);
@@ -2661,6 +2834,8 @@ export default function FeedScreen() {
 
       const finalGroups = groupsResult.data || [];
       const finalStudios = (studiosResult.data || []).length > 0 ? studiosResult.data! : relaxedStudios;
+      const finalVenueStudios = finalStudios.filter(isFeedVenueLikeStudio);
+      const finalGigs = gigsResult.data || [];
       const finalArtists = artistsResult.data || [];
       const finalTeams = teamsResult.data || [];
       const viewerProfile = (viewerProfileResult.data || {}) as {
@@ -2673,13 +2848,14 @@ export default function FeedScreen() {
         if (typeof row?.profile_id === "string") favoriteKeys.add(`profile:${row.profile_id}`);
         if (typeof row?.group_id === "string") favoriteKeys.add(`group:${row.group_id}`);
         if (typeof row?.studio_id === "string") favoriteKeys.add(`studio:${row.studio_id}`);
+        if (typeof row?.gig_id === "string") favoriteKeys.add(`gig:${row.gig_id}`);
         if (typeof row?.production_team_id === "string") favoriteKeys.add(`production_team:${row.production_team_id}`);
       }
       const getFavoriteCount = (item: any) => {
         const count = Number(item?.favorites_count ?? item?.favorite_count ?? item?.reaction_count ?? 0);
         return Number.isFinite(count) && count > 0 ? count : 0;
       };
-      const withFavoriteState = (item: any, targetType: "group" | "studio" | "profile" | "production_team", targetId: string) => {
+      const withFavoriteState = (item: any, targetType: "group" | "studio" | "gig" | "profile" | "production_team", targetId: string) => {
         const favoritesCount = getFavoriteCount(item);
         const isFavorited = favoriteKeys.has(`${targetType}:${targetId}`);
         const visibleFavoriteCount = Math.max(favoritesCount, isFavorited ? 1 : 0);
@@ -2734,9 +2910,9 @@ export default function FeedScreen() {
 
         artistSkillsById = new Map<string, string[]>();
         for (const row of skillRows.data || []) {
-          if (typeof row?.profile_id !== "string" || typeof row?.skill !== "string") continue;
+          if (typeof row?.profile_id !== "string" || !isVisibleProfileSkill(row?.skill)) continue;
           const next = artistSkillsById.get(row.profile_id) || [];
-          next.push(row.skill);
+          next.push(row.skill.trim());
           artistSkillsById.set(row.profile_id, next);
         }
       }
@@ -2792,16 +2968,15 @@ export default function FeedScreen() {
         }, "group", item.id);
       });
 
-      const normalizedStudios = finalStudios.map((item: any) => {
-        const isVenue = Array.isArray(item?.amenities)
-          ? item.amenities.some((amenity: any) => String(amenity || "").toLowerCase().includes("stage"))
-          : false;
+      const normalizedStudios = finalVenueStudios.map((item: any) => {
+        const isVenue = isFeedVenueLikeStudio(item);
         const listingType = isVenue ? "Venue" : "Studio";
+        const displayListingType = isVenue ? "Gig" : "Studio";
 
         return withFavoriteState({
           id: item.id,
           type: listingType,
-          name: item.name || `Unnamed ${listingType}`,
+          name: item.name || `Unnamed ${displayListingType}`,
           image: Array.isArray(item.images) ? item.images[0] || null : null,
           images: Array.isArray(item.images) ? item.images : [],
           rating: Number(item.rating || 0),
@@ -2809,7 +2984,7 @@ export default function FeedScreen() {
           location: item.address || "",
           latitude: item.latitude ?? null,
           longitude: item.longitude ?? null,
-          genre: item.type || listingType,
+          genre: item.type === "Venue" ? displayListingType : item.type || displayListingType,
           created_at: item.created_at || null,
           updated_at: item.updated_at || null,
           owner_id: item.owner_id || null,
@@ -2821,6 +2996,31 @@ export default function FeedScreen() {
           social_follow_target_type: "profile",
         }, "studio", item.id);
       });
+
+      const normalizedGigs = finalGigs.map((item: any) => withFavoriteState({
+        id: item.id,
+        type: "Gig",
+        name: item.name || "Untitled Gig",
+        image: Array.isArray(item.images) ? item.images[0] || null : null,
+        images: Array.isArray(item.images) ? item.images : [],
+        rating: Number(item.rating || 0),
+        review_count: Number(item.review_count || 0),
+        location: item.location || "",
+        latitude: item.latitude ?? null,
+        longitude: item.longitude ?? null,
+        genre: Array.isArray(item?.requirements?.genres)
+          ? item.requirements.genres.join(", ")
+          : item?.requirements?.genre || "",
+        created_at: item.created_at || null,
+        updated_at: item.updated_at || null,
+        organizer_id: item.organizer_id || null,
+        owner_id: item.organizer_id || null,
+        budget: item.budget?.toString() || null,
+        rate: item.rate?.toString() || null,
+        requirements: item.requirements || null,
+        social_follow_target_id: item.organizer_id || null,
+        social_follow_target_type: "profile",
+      }, "gig", item.id));
 
       const normalizedArtists = finalArtists.map((item: any) => withFavoriteState({
         id: item.id,
@@ -2871,6 +3071,7 @@ export default function FeedScreen() {
       const allCandidates = [
         ...normalizedGroups,
         ...normalizedStudios,
+        ...normalizedGigs,
         ...normalizedArtists,
         ...normalizedTeams,
       ]
@@ -3109,16 +3310,15 @@ export default function FeedScreen() {
     };
     const toStudioCard = (item: any) => {
       const images = normalizeImages(item?.images);
-      const isVenue = Array.isArray(item?.amenities)
-        ? item.amenities.some((amenity: any) => String(amenity || "").toLowerCase().includes("stage"))
-        : false;
+      const isVenue = isFeedVenueLikeStudio(item);
       const listingType = isVenue ? "Venue" : "Studio";
+      const displayListingType = isVenue ? "Gig" : "Studio";
 
       return ensureFeedCardImage({
         __feedKind: "ai_card",
         id: item.id,
         type: listingType,
-        name: item.name || `Unnamed ${listingType}`,
+        name: item.name || `Unnamed ${displayListingType}`,
         image: images[0] || null,
         images,
         rating: Number(item.rating || 0),
@@ -3126,7 +3326,7 @@ export default function FeedScreen() {
         location: item.address || item.location || "",
         latitude: item.latitude ?? null,
         longitude: item.longitude ?? null,
-        genre: item.type || listingType,
+        genre: item.type === "Venue" ? displayListingType : item.type || displayListingType,
         created_at: item.created_at || null,
         updated_at: item.updated_at || null,
         owner_id: item.owner_id || null,
@@ -4050,6 +4250,69 @@ export default function FeedScreen() {
     setSelectedPostId(postId);
   }, []);
 
+  const patchTalentGigCommentPost = useCallback((gigId: string, postId: string, commentCount?: number) => {
+    if (!gigId || !postId) return;
+
+    const updateCards = (cards: any[]) =>
+      cards.map((card) => {
+        const type = String(card?.type || "").toLowerCase();
+        if (card?.__feedKind === "ai_card" && type === "gig" && card?.id === gigId) {
+          return {
+            ...card,
+            linked_post_id: postId,
+            comment_count: Number.isFinite(Number(commentCount))
+              ? Math.max(0, Number(commentCount))
+              : Number(card?.comment_count || 0),
+          };
+        }
+        return card;
+      });
+
+    setAiCards(updateCards);
+    feedCacheRef.current = {
+      ...feedCacheRef.current,
+      talent: {
+        ...feedCacheRef.current.talent,
+        aiCards: updateCards(feedCacheRef.current.talent.aiCards),
+      },
+    };
+  }, []);
+
+  const openGigCommentThread = useCallback(async (card: any) => {
+    const gigId = typeof card?.id === "string" ? card.id : "";
+    if (!gigId) return;
+
+    if (!canUseSocialActions) {
+      emitToast({
+        type: "info",
+        title: "Sign in to comment",
+        message: "Create an account or sign in to join gig comments.",
+      });
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+        body: { action: "get_or_create_gig_comment_post", gig_id: gigId },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+
+      const postId = data?.data?.post_id || data?.post_id;
+      if (!postId) throw new Error("Gig comment thread was not returned.");
+
+      patchTalentGigCommentPost(gigId, postId, data?.data?.comment_count);
+      openPostDetails(postId);
+    } catch (e: any) {
+      emitToast({
+        type: "error",
+        title: "Comments unavailable",
+        message: e?.message || "Could not open gig comments.",
+      });
+    }
+  }, [canUseSocialActions, openPostDetails, patchTalentGigCommentPost]);
+
   const closePostDetails = useCallback(() => {
     setSelectedPostId(null);
   }, []);
@@ -4093,6 +4356,18 @@ export default function FeedScreen() {
     setPosts((current) =>
       current.map((post) => (post.id === postId ? { ...post, comment_count: commentCount } : post)),
     );
+    setAiCards((current) =>
+      current.map((card) => (card.linked_post_id === postId ? { ...card, comment_count: commentCount } : card)),
+    );
+    feedCacheRef.current = {
+      ...feedCacheRef.current,
+      talent: {
+        ...feedCacheRef.current.talent,
+        aiCards: feedCacheRef.current.talent.aiCards.map((card) =>
+          card.linked_post_id === postId ? { ...card, comment_count: commentCount } : card,
+        ),
+      },
+    };
   }, []);
 
   const handleModalShareChanged = useCallback((postId: string, shareCount: number) => {
@@ -4568,10 +4843,12 @@ export default function FeedScreen() {
           onOpenProfile={openProfileDetails}
           onOpenProductionTeam={openProductionTeamDetails}
           onOpenPlaylist={openPlaylistDetails}
+          onOpenGigComments={openGigCommentThread}
           onShareCard={handleShareCard}
           onSharePost={handleSharePost}
           onToggleCardFavorite={handleToggleCardFavorite}
           onToggleReaction={handleTogglePostReaction}
+          enableGigComments={tab === "talent"}
           showAuthorFollow={false}
           timeAgo={timeAgo}
         />
@@ -4610,10 +4887,12 @@ export default function FeedScreen() {
         onOpenProfile={openProfileDetails}
         onOpenProductionTeam={openProductionTeamDetails}
         onOpenPlaylist={openPlaylistDetails}
+        onOpenGigComments={openGigCommentThread}
         onShareCard={handleShareCard}
         onSharePost={handleSharePost}
         onToggleCardFavorite={handleToggleCardFavorite}
         onToggleReaction={handleTogglePostReaction}
+        enableGigComments={false}
         showAuthorFollow={Boolean(authorFollowTarget)}
         timeAgo={timeAgo}
       />
@@ -4630,6 +4909,7 @@ export default function FeedScreen() {
     handleTogglePostReaction,
     isDark,
     openListingDetails,
+    openGigCommentThread,
     openPlaylistDetails,
     openPostOptions,
     openPostDetails,
@@ -4637,6 +4917,7 @@ export default function FeedScreen() {
     openProfileDetails,
     openProductionTeamDetails,
     resolvedUserId,
+    tab,
     timeAgo,
   ]);
 
@@ -4889,10 +5170,10 @@ export default function FeedScreen() {
           </Text>
           <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
             {tab === "following"
-              ? "Follow musicians, groups, and creators to see their latest posts and newly created listings here."
-              : tab === "talent"
-                ? "Newest musicians, groups, duos, studios, venues, and production teams will appear here."
-                : "Posts from the community will appear here newest first."}
+                          ? "Follow musicians, groups, and creators to see their latest posts and newly created listings here."
+                          : tab === "talent"
+                            ? "Newest artists, duos, groups, venues, productions, and gigs will appear here."
+                            : "Posts from the community will appear here newest first."}
           </Text>
 
           <TouchableOpacity
@@ -4959,7 +5240,7 @@ export default function FeedScreen() {
   if (isGuest) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title={feedHeaderName} overline="Welcome" />
+        <Header title={feedHeaderName} overline="Welcome" showBack={false} />
         <GuestSignInGate message="Sign in to see your social feed" />
         <Navbar />
       </View>
@@ -4968,7 +5249,7 @@ export default function FeedScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: isDark ? "#0F172A" : "#FFFFFF" }]}>
-      <Header title={feedHeaderName} overline="Welcome" />
+      <Header title={feedHeaderName} overline="Welcome" showBack={false} />
       {showInitialFeedSkeleton ? (
         renderFeedSkeleton()
       ) : feedItems.length === 0 ? (
@@ -5565,21 +5846,21 @@ const styles = StyleSheet.create({
 
   socialPostCard: {
     marginHorizontal: 16,
-    marginTop: 15,
-    borderRadius: 18,
+    marginTop: 12,
+    borderRadius: 14,
     borderWidth: 1,
     paddingTop: 12,
-    paddingBottom: 14,
+    paddingBottom: 12,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
     elevation: 2,
   },
   socialPostHeader: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
-    gap: 9,
+    paddingHorizontal: 16,
+    gap: 10,
   },
   socialAvatarWrap: {
     width: 44,
@@ -5602,34 +5883,41 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  socialHeaderActions: {
-    height: 30,
+  socialNameRow: {
+    minHeight: 22,
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
+    gap: 7,
+  },
+  socialHeaderActions: {
+    minHeight: 30,
+    flexDirection: "row",
+    alignItems: "center",
     alignSelf: "flex-start",
     gap: 6,
     flexShrink: 0,
-    marginTop: 1,
   },
   socialHeaderBadgeChip: {
-    height: 28,
-    maxWidth: 82,
+    height: 22,
+    maxWidth: 90,
     borderRadius: 999,
-    paddingHorizontal: 9,
+    paddingHorizontal: 8,
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
   socialHeaderBadgeText: {
-    fontSize: moderateScale(10),
-    lineHeight: 14,
+    fontSize: moderateScale(9),
+    lineHeight: 12,
     fontFamily: "Poppins_700Bold",
     includeFontPadding: false,
     textAlignVertical: "center",
   },
   socialName: {
-    fontSize: moderateScale(14),
+    flexShrink: 1,
+    fontSize: moderateScale(15),
     fontFamily: "Poppins_700Bold",
-    lineHeight: 19,
+    lineHeight: 21,
   },
   socialMetaRow: {
     flexDirection: "row",
@@ -5639,9 +5927,9 @@ const styles = StyleSheet.create({
   },
   socialMetaText: {
     maxWidth: "48%",
-    fontSize: moderateScale(11),
+    fontSize: moderateScale(12),
     fontFamily: "Poppins_400Regular",
-    lineHeight: 15,
+    lineHeight: 16,
   },
   socialMetaDot: {
     fontSize: moderateScale(10),
@@ -5649,7 +5937,7 @@ const styles = StyleSheet.create({
   },
   socialFollowButton: {
     minWidth: 68,
-    height: 28,
+    height: 30,
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 10,
@@ -5670,7 +5958,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   socialCaption: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingTop: 10,
     marginBottom: 10,
     fontSize: moderateScale(14),
@@ -5678,7 +5966,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   socialMediaWrap: {
-    marginHorizontal: 12,
+    marginHorizontal: 16,
     marginTop: 0,
     borderRadius: 12,
     overflow: "hidden",
@@ -5705,7 +5993,7 @@ const styles = StyleSheet.create({
   socialGalleryImage: {
     width: "100%",
     height: "100%",
-    borderRadius: 12,
+    borderRadius: 0,
   },
   socialGalleryMoreOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -5739,7 +6027,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingTop: 10,
   },
   socialBadgeChip: {
@@ -5775,7 +6063,7 @@ const styles = StyleSheet.create({
     textAlignVertical: "center",
   },
   socialLinkedCard: {
-    marginHorizontal: 12,
+    marginHorizontal: 16,
     marginTop: 9,
     borderRadius: 12,
     borderWidth: 1,
@@ -5790,17 +6078,26 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(12),
     fontFamily: "Poppins_600SemiBold",
   },
-  socialQuickInfoRow: {
-    marginHorizontal: 12,
+  socialEntityModule: {
+    marginHorizontal: 16,
     marginTop: 10,
-    paddingTop: 11,
-    paddingBottom: 7,
-    minHeight: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 9,
+  },
+  socialEntityChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  socialQuickInfoRow: {
+    minHeight: 30,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderTopWidth: 1,
-    gap: 10,
+    gap: 8,
   },
   socialQuickInfoItem: {
     flex: 1,
@@ -5842,51 +6139,41 @@ const styles = StyleSheet.create({
   },
   socialActionRow: {
     flexDirection: "row",
-    paddingHorizontal: 6,
-    paddingTop: 3,
+    alignItems: "center",
+    paddingHorizontal: 2,
+    paddingTop: 8,
     borderTopWidth: 1,
-    marginHorizontal: 12,
+    marginHorizontal: 16,
     marginTop: 8,
   },
   socialActionButton: {
     flex: 1,
-    minHeight: 38,
+    minHeight: 40,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
+    gap: 8,
     borderRadius: 10,
   },
-  socialActionText: {
-    fontSize: moderateScale(12),
-    fontFamily: "Poppins_600SemiBold",
-  },
-  socialStatsRow: {
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  socialStatsText: {
-    flex: 1,
-    fontSize: moderateScale(11),
-    fontFamily: "Poppins_500Medium",
-    textAlign: "center",
+  socialActionCountText: {
+    minWidth: 18,
+    fontSize: moderateScale(13),
+    lineHeight: moderateScale(18),
+    fontFamily: "Poppins_700Bold",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   socialCtaRow: {
     flexDirection: "row",
     gap: 8,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 4,
   },
   socialPrimaryCta: {
     flex: 1,
-    minHeight: 38,
-    borderRadius: 12,
+    minHeight: 34,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
   },
   socialPrimaryCtaText: {
     color: "#FFFFFF",
@@ -5894,9 +6181,9 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_700Bold",
   },
   socialSecondaryCta: {
-    minWidth: 90,
-    minHeight: 38,
-    borderRadius: 12,
+    minWidth: 86,
+    minHeight: 34,
+    borderRadius: 10,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",

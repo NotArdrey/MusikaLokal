@@ -1212,7 +1212,7 @@ serve(async (req: Request) => {
                           ? "Refunded"
                           : "Declined"
                         : b.status,
-            type: isVenue ? "Venue Booking" : "Studio Booking",
+            type: isVenue ? "Gig Booking" : "Studio Booking",
             isCancelled: b.status === "cancelled",
             action:
               b.status === "pending_relocation"
@@ -1416,7 +1416,7 @@ serve(async (req: Request) => {
                             ? "Refunded"
                             : "Declined"
                           : b.status,
-              type: isVenue ? "Venue Booking" : "Studio Booking",
+              type: isVenue ? "Gig Booking" : "Studio Booking",
               isCancelled: b.status === "cancelled",
               action: b.status === "pending_relocation" ? "Awaiting musician response" : "Details", // No confirmation needed - payment auto-confirms
               raw_status: b.status,
@@ -1601,7 +1601,7 @@ serve(async (req: Request) => {
                 // @ts-ignore
                 categorized.Ongoing.push({ ...item, status: "Happening Now" });
               } else if (now > eventDate) {
-                // Keep completed accepted gigs visible for My Venue and history.
+                // Keep completed accepted gigs visible for My Gig and history.
                 // @ts-ignore
                 categorized.Review.push({ ...item, status: "Completed" });
               } else {
@@ -1814,7 +1814,7 @@ serve(async (req: Request) => {
                   // @ts-ignore
                   categorized.Ongoing.push({ ...item, status: "Happening Now" });
                 } else if (now > eventDate) {
-                  // Keep completed accepted gigs visible for My Venue and history.
+                  // Keep completed accepted gigs visible for My Gig and history.
                   // @ts-ignore
                   categorized.Review.push({ ...item, status: "Completed" });
                 } else {
@@ -1844,7 +1844,7 @@ serve(async (req: Request) => {
         }
       }
 
-      // D. For Venue Owners: Fetch accepted applications for their gigs
+      // D. For Gig Owners: Fetch accepted applications for their gigs
       if (activityRole === "venue-owner") {
         // First get their gigs
         const { data: gigs } = staffAssignment?.entity_type === "venue" && staffAssignment.gig_id
@@ -1984,14 +1984,14 @@ serve(async (req: Request) => {
                 categorized.Upcoming.push(item);
               }
             } else if (app.status === "rejected" || app.status === "cancelled" || app.status === "resigned" || app.status === "fired") {
-              // Terminal applications go to the venue owner's history bucket.
+              // Terminal applications go to the gig owner's history bucket.
               // @ts-ignore
               categorized.Review.push({
                 ...item,
                 status: getGigApplicationStatusLabel(app.status),
               });
             } else if (app.status === "completed") {
-              // Completed contracts go to the venue owner's history bucket - can be renewed.
+              // Completed contracts go to the gig owner's history bucket - can be renewed.
               // @ts-ignore
               categorized.Review.push({ ...item, status: "Completed" });
             }
@@ -3454,7 +3454,7 @@ serve(async (req: Request) => {
                 notificationTitle = "Removed from Gig";
                 notificationMessage = actorIsProductionManager
                   ? `Your contract for ${gigName} has been ended by the production team.`
-                  : `Your contract for ${gigName} has been ended by the venue.`;
+                  : `Your contract for ${gigName} has been ended by the gig.`;
                 notificationType = "error";
               } else if (new_status === "resigned") {
                 notificationTitle = "Musician Resigned";
@@ -4341,7 +4341,7 @@ serve(async (req: Request) => {
       });
     }
 
-    // 8. RENEW CONTRACT (Venue Owner re-hires a musician)
+    // 8. RENEW CONTRACT (Gig Owner re-hires a musician)
     if (action === "renew_contract") {
       const { application_id } = params;
 
@@ -4376,7 +4376,7 @@ serve(async (req: Request) => {
         );
       }
 
-      // 2. Verify the user is the gig organizer or assigned venue staff with booking actions.
+      // 2. Verify the user is the gig organizer or assigned gig staff with booking actions.
       const renewalStaffAccessLevel = originalApp.gig_id
         ? await getStaffAccessForGig(supabaseAdmin, authUser.id, originalApp.gig_id)
         : null;
@@ -4445,7 +4445,7 @@ serve(async (req: Request) => {
         originalApp.applicant?.full_name ||
         originalApp.applicant?.email ||
         "Musician";
-      const senderEntityName = organizerProfile?.full_name || "Venue";
+      const senderEntityName = organizerProfile?.full_name || "Gig";
       const renewalMessage = `Renewal offer for "${gigName}".`;
       const renewalEventDetails = {
         type: "listing_connection_request",

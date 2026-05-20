@@ -673,7 +673,7 @@ Block the image ONLY if it contains one of these categories:
 - hate symbols, extremist symbols, or offensive hateful content
 - illegal content
 
-Allow everything else, including ordinary selfies, profile photos, venue photos, posters, landscapes, food, screenshots, documents, and non-music images.
+Allow everything else, including ordinary selfies, profile photos, gig photos, posters, landscapes, food, screenshots, documents, and non-music images.
 Do not block an image because it lacks music, instruments, performances, artists, stages, or other musical content.
 
 Return ONLY valid JSON:
@@ -1013,7 +1013,7 @@ ${fileDescriptions}
 
 Review guidelines:
 - ALLOW all ordinary uploads, even when they are not related to music
-- ALLOW profile photos, gig photos, studio photos, event photos, ID documents, PDF contracts, PDF permits, document images, performance videos, audition videos, rehearsal videos, and venue walkthrough videos
+- ALLOW profile photos, gig photos, studio photos, event photos, ID documents, PDF contracts, PDF permits, document images, performance videos, audition videos, rehearsal videos, and gig walkthrough videos
 - BLOCK only files with names clearly suggesting pornographic/sexual content, nudity, violence, gore, hate symbols, offensive hateful content, or illegal material
 - Do not block because the file lacks music, instruments, performances, artists, stages, or other musical content
 

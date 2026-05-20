@@ -188,7 +188,7 @@ export default function AddProductionScreen() {
             <Ionicons name="people-outline" size={24} color={colors.primary} />
           </View>
           <Text style={[styles.heroTitle, { color: colors.text }]}>Create your production team</Text>
-          <Text style={[styles.heroText, { color: colors.textSecondary }]}>Set up the team profile you will use for venue partnerships, member management, and production coordination.</Text>
+          <Text style={[styles.heroText, { color: colors.textSecondary }]}>Set up the team profile you will use for gig partnerships, member management, and production coordination.</Text>
         </View>
 
         <View style={[styles.formCard, { backgroundColor: colors.surface, borderColor: isDark ? '#334155' : '#E2E8F0' }]}>

@@ -337,7 +337,7 @@ export default function ShopScreen() {
   const handleSubmitProduct = async () => {
     if (adding) return;
     if (!canSell) {
-      setAlert({ type: "warning", title: "Selling Unavailable", message: "Only producer, venue, and studio-owner accounts can create listings." });
+      setAlert({ type: "warning", title: "Selling Unavailable", message: "Only producer, gig owner, and studio-owner accounts can create listings." });
       return;
     }
     if (!newTitle.trim()) {

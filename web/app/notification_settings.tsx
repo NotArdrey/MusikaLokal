@@ -137,7 +137,7 @@ export default function NotificationSettingsScreen() {
             <>
           {renderToggle(
             "Booking Confirmed",
-            "Receive updates when your booking at a venue or studio is confirmed.",
+            "Receive updates when your booking at a gig or studio is confirmed.",
             bookingConfirmed,
             handleToggle(setBookingConfirmed, 'booking_confirmed')
           )}

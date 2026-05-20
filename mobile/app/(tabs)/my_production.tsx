@@ -213,7 +213,7 @@ export default function MyProductionScreen() {
             <View style={styles.emptyState}>
               <Ionicons name="people-outline" size={48} color={colors.textSecondary} />
               <Text style={[styles.emptyTitle, { color: colors.text }]}>No production teams yet</Text>
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Create your first production team to manage members and venue partnerships.</Text>
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Create your first production team to manage members and gig partnerships.</Text>
             </View>
           ) : (
             teams.map((team) => {

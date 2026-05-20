@@ -28,6 +28,23 @@ import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyS
 import { isE2EFixtureMode } from "../src/utils/e2eFixtures";
 
 
+const DISALLOWED_PROFILE_SKILLS = new Set(["producer"]);
+
+const isAllowedProfileSkill = (value: unknown): value is string => {
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 && !DISALLOWED_PROFILE_SKILLS.has(normalized);
+};
+
+const normalizeProfileSkills = (items: unknown[]) =>
+  Array.from(
+    new Set(
+      items
+        .filter(isAllowedProfileSkill)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
 
 const ROLES = [
   "Vocalist",
@@ -36,7 +53,6 @@ const ROLES = [
   "Drummer",
   "Keyboardist",
   "DJ",
-  "Producer",
   "Sound Engineer",
   "Saxophonist",
   "Violinist",
@@ -300,11 +316,11 @@ export default function EditProfileScreen() {
           throw normalizedGenresResult.error;
         }
 
-        const resolvedSkills = profileSkills.length > 0
+        const resolvedSkills = normalizeProfileSkills(profileSkills.length > 0
           ? profileSkills
           : (normalizedSkillsResult.data || [])
               .map((item: any) => item.skill)
-              .filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0);
+              .filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0));
         const resolvedGenres = profileGenres.length > 0
           ? profileGenres
           : (normalizedGenresResult.data || [])
@@ -500,11 +516,17 @@ export default function EditProfileScreen() {
       showAlert("warning", "Required", "Please enter your address.");
       return;
     }
-    if (selectedRoles.length === 0) {
+
+    const cleanedRoles = normalizeProfileSkills(selectedRoles);
+    const cleanedGenres = Array.from(
+      new Set(selectedGenres.map((genre) => genre.trim()).filter(Boolean)),
+    );
+
+    if (cleanedRoles.length === 0) {
       showAlert("warning", "Required", "Please select at least one role or instrument.");
       return;
     }
-    if (selectedGenres.length === 0) {
+    if (cleanedGenres.length === 0) {
       showAlert("warning", "Required", "Please select at least one genre.");
       return;
     }
@@ -516,13 +538,6 @@ export default function EditProfileScreen() {
     setSaving(true);
 
     try {
-      const cleanedRoles = Array.from(
-        new Set(selectedRoles.map((role) => role.trim()).filter(Boolean)),
-      );
-      const cleanedGenres = Array.from(
-        new Set(selectedGenres.map((genre) => genre.trim()).filter(Boolean)),
-      );
-
       let uploadedAvatarUrl: string | null = null;
 
       if (pendingAvatar) {

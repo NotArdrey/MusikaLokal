@@ -383,7 +383,7 @@ export default function MyVenueScreen() {
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;
         if (userRole === 'staff') {
-            showAlert('warning', 'Action blocked', 'Staff accounts cannot delete venues.');
+            showAlert('warning', 'Action blocked', 'Staff accounts cannot delete gigs.');
             return;
         }
         const reason = normalizeVisibleInput(cancellationReason);
@@ -444,7 +444,7 @@ export default function MyVenueScreen() {
 
     const handleOpenGigChat = (gig: any) => {
         if (!gig?.organizer_id) {
-            showAlert('warning', 'Chat Unavailable', 'Venue organizer is unavailable for this gig.');
+            showAlert('warning', 'Chat Unavailable', 'Gig organizer is unavailable for this gig.');
             return;
         }
 
@@ -461,7 +461,7 @@ export default function MyVenueScreen() {
         <>
             <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
                 <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
-                    <Header title="My Venue" />
+                    <Header title="My Gig" />
 
                     <ScrollView
                         showsVerticalScrollIndicator={false}
@@ -495,9 +495,9 @@ export default function MyVenueScreen() {
                         ) : gigs.length === 0 ? (
                             <View style={styles.emptyState}>
                                 <Ionicons name="musical-notes-outline" size={48} color={colors.textSecondary} />
-                                <Text style={[styles.emptyTitle, { color: colors.text }]}>{isMusicianView ? 'No joined venues yet' : 'No gigs yet'}</Text>
+                                <Text style={[styles.emptyTitle, { color: colors.text }]}>{isMusicianView ? 'No joined gigs yet' : 'No gigs yet'}</Text>
                                 <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                                    {isMusicianView ? 'Accepted venue gigs will appear here.' : 'Create your first gig to manage applications and event details.'}
+                                    {isMusicianView ? 'Accepted gigs will appear here.' : 'Create your first gig to manage applications and event details.'}
                                 </Text>
                             </View>
                         ) : (

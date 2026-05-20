@@ -190,7 +190,7 @@ const StudioGigVenueAboutTab = ({
             },
           ]}
         >
-          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Budget</Text>
+          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Talent Fee</Text>
           <Text
             style={[styles.statValue, { color: colors.text }]}
             numberOfLines={1}
@@ -310,7 +310,7 @@ const StudioGigVenueAboutTab = ({
             >
               <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
                 {group.type === "Venue"
-                  ? "Venue Rate"
+                  ? "Gig Rate"
                   : recordingRate && !rehearsalRate
                     ? "Recording Rate"
                     : rehearsalRate && !recordingRate
