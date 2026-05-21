@@ -129,6 +129,36 @@ function toManilaDateTime(dateValue: string, timeValue: string): Date | null {
   return parsed;
 }
 
+function toGigEventStart(value: unknown): Date | null {
+  if (!value) return null;
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
+}
+
+function shouldPenalizeAcceptedGigWithdrawal({
+  newStatus,
+  previousStatus,
+  eventDate,
+  isApplicant,
+  isOrganizer,
+}: {
+  newStatus: string;
+  previousStatus: unknown;
+  eventDate: unknown;
+  isApplicant: boolean;
+  isOrganizer: boolean;
+}) {
+  const normalizedPreviousStatus = String(previousStatus || "").trim().toLowerCase();
+  if (newStatus !== "cancelled") return false;
+  if (!isApplicant || isOrganizer) return false;
+  if (!["accepted", "approved"].includes(normalizedPreviousStatus)) return false;
+
+  const eventStart = toGigEventStart(eventDate);
+  return Boolean(eventStart && new Date() < eventStart);
+}
+
 function toPositiveInteger(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number.parseInt(String(value).trim(), 10);
@@ -936,15 +966,20 @@ function getProductionApplicationType(app: any) {
   return "Solo Application";
 }
 
-function getGigApplicationStatusLabel(status: unknown, fallback: unknown = status) {
+function getGigApplicationStatusLabel(
+  status: unknown,
+  fallback: unknown = status,
+  completionRatePenalty = false,
+) {
   const normalizedStatus = String(status || "").trim().toLowerCase();
 
   if (normalizedStatus === "pending") return "Applied";
   if (normalizedStatus === "accepted" || normalizedStatus === "approved") return "Accepted";
   if (normalizedStatus === "completed") return "Completed";
   if (normalizedStatus === "rejected") return "Declined";
+  if (normalizedStatus === "cancelled" && completionRatePenalty) return "Withdrawn";
   if (normalizedStatus === "cancelled") return "Cancelled";
-  if (normalizedStatus === "resigned") return "Resigned";
+  if (normalizedStatus === "resigned") return "Withdrawn";
   if (normalizedStatus === "fired") return "Fired";
 
   return fallback || status;
@@ -1653,7 +1688,7 @@ serve(async (req: Request) => {
                 ?.media_url ||
               gig?.organizer?.avatar_url ||
               "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop",
-            status: getGigApplicationStatusLabel(normalizedStatus, g.status),
+            status: getGigApplicationStatusLabel(normalizedStatus, g.status, g.completion_rate_penalty === true),
             type: getProductionApplicationType(g),
             isCancelled:
               normalizedStatus === "cancelled" ||
@@ -1707,7 +1742,11 @@ serve(async (req: Request) => {
             // @ts-ignore
             categorized.Review.push({
               ...item,
-              status: getGigApplicationStatusLabel(normalizedStatus, g.status),
+              status: getGigApplicationStatusLabel(
+                normalizedStatus,
+                g.status,
+                g.completion_rate_penalty === true,
+              ),
             });
           } else if (normalizedStatus === "completed") {
             // @ts-ignore
@@ -2018,7 +2057,7 @@ serve(async (req: Request) => {
                   ? "Action Required"
                   : app.status === "accepted" || app.status === "approved"
                     ? "Confirmed"
-                    : getGigApplicationStatusLabel(app.status),
+                    : getGigApplicationStatusLabel(app.status, app.status, app.completion_rate_penalty === true),
               type: getProductionApplicationType(app),
               isCancelled: app.status === "rejected" || app.status === "cancelled" || app.status === "fired",
               action: app.status === "pending" ? "Confirm Now" : "View Details",
@@ -2072,7 +2111,7 @@ serve(async (req: Request) => {
               // @ts-ignore
               categorized.Review.push({
                 ...item,
-                status: getGigApplicationStatusLabel(app.status),
+                status: getGigApplicationStatusLabel(app.status, app.status, app.completion_rate_penalty === true),
               });
             } else if (app.status === "completed") {
               // Completed contracts go to the gig owner's history bucket - can be renewed.
@@ -3295,7 +3334,7 @@ serve(async (req: Request) => {
       if (table === "gig_applications") {
         const { data: targetApplication, error: targetError } = await supabaseAdmin
           .from("gig_applications")
-          .select("id, applicant_id, submitted_by_user_id, gig_id, production_team_id")
+          .select("id, applicant_id, submitted_by_user_id, gig_id, production_team_id, status")
           .eq("id", booking_id)
           .maybeSingle();
 
@@ -3310,7 +3349,7 @@ serve(async (req: Request) => {
 
         const { data: targetGig, error: targetGigError } = await supabaseAdmin
           .from("gigs")
-          .select("id, organizer_id")
+          .select("id, organizer_id, event_date")
           .eq("id", targetApplication.gig_id)
           .maybeSingle();
 
@@ -3358,6 +3397,14 @@ serve(async (req: Request) => {
             status: 403,
           });
         }
+
+        updateData.completion_rate_penalty = shouldPenalizeAcceptedGigWithdrawal({
+          newStatus: new_status,
+          previousStatus: targetApplication.status,
+          eventDate: targetGig?.event_date,
+          isApplicant,
+          isOrganizer,
+        });
       }
 
       // Add cancellation_reason if status is a terminal negative outcome and reason is provided
@@ -3584,15 +3631,15 @@ serve(async (req: Request) => {
                   : `Your contract for ${gigName} has been ended by the gig.`;
                 notificationType = "error";
               } else if (new_status === "resigned") {
-                notificationTitle = "Musician Resigned";
-                notificationMessage = `A musician has resigned from ${gigName}.`;
+                notificationTitle = "Musician Withdrew";
+                notificationMessage = `A musician withdrew from ${gigName}.`;
                 notificationType = "warning";
               } else if (new_status === "cancelled") {
                 notificationTitle = cancelledByApplicant
-                  ? "Musician Resigned"
+                  ? "Musician Withdrew"
                   : "Gig Cancelled";
                 notificationMessage = cancelledByApplicant
-                  ? `A musician has resigned from ${gigName}.`
+                  ? `A musician withdrew from ${gigName}.`
                   : `Your contract for ${gigName} has been cancelled.`;
                 notificationType = cancelledByApplicant ? "warning" : "error";
               }

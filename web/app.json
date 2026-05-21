@@ -14,6 +14,7 @@
       "bundleIdentifier": "com.anonymous.musikalokal",
       "infoPlist": {
         "CADisableMinimumFrameDurationOnPhone": true,
+        "NSLocationWhenInUseUsageDescription": "Allow MusikaLokal to use your location to help pin addresses.",
         "CFBundleURLTypes": [
           {
             "CFBundleURLSchemes": [
@@ -25,6 +26,12 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow MusikaLokal to use your location to help pin addresses."
+        }
+      ],
       [
         "expo-splash-screen",
         {
@@ -61,6 +68,8 @@
       "package": "com.anonymous.musikalokal",
       "permissions": [
         "android.permission.CAMERA",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],

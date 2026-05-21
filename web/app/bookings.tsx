@@ -652,10 +652,33 @@ const getGigApplicationStatusLabel = (
   if (normalizedStatus === "completed") return "Completed";
   if (normalizedStatus === "rejected") return "Declined";
   if (normalizedStatus === "cancelled") return "Cancelled";
-  if (normalizedStatus === "resigned") return "Resigned";
+  if (normalizedStatus === "resigned") return "Withdrawn";
   if (normalizedStatus === "fired") return "Fired";
 
   return fallback || status;
+};
+
+const normalizeGigApplicationStatusValue = (status: unknown) =>
+  String(status || "").trim().toLowerCase();
+
+const isAcceptedGigApplicationItem = (item: any) =>
+  item?.type_id === "gig_application" &&
+  ["accepted", "approved"].includes(
+    normalizeGigApplicationStatusValue(item?.raw_status || item?.status),
+  );
+
+const isUpcomingAcceptedGigApplicationItem = (item: any) => {
+  if (!isAcceptedGigApplicationItem(item)) return false;
+  const eventStart = new Date(String(item?.raw_date || item?.date || ""));
+  if (Number.isNaN(eventStart.getTime())) return false;
+  eventStart.setHours(0, 0, 0, 0);
+  return new Date() < eventStart;
+};
+
+const getGigApplicationCancelStatusForViewer = (item: any, role: unknown) => {
+  if (item?.type_id !== "gig_application") return "cancelled";
+  if (normalizeActivityRole(role) !== "musician") return "cancelled";
+  return isUpcomingAcceptedGigApplicationItem(item) ? "cancelled" : "resigned";
 };
 
 type Tab =
@@ -4524,7 +4547,7 @@ export default function BookingsScreen() {
                               backgroundColor:
                                 item.status === "Accepted"
                                   ? "rgba(16, 185, 129, 0.85)"
-                                  : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired"
+                                  : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Withdrawn"
                                     ? "rgba(239, 68, 68, 0.85)"
                                     : "rgba(0,0,0,0.6)",
                             },
@@ -4803,7 +4826,7 @@ export default function BookingsScreen() {
                   item.status === "Declined" ||
                   item.status === "Cancelled" ||
                   item.status === "Fired" ||
-                  item.status === "Resigned";
+                  item.status === "Withdrawn";
                 const isPositiveApplicationStatus =
                   item.status === "Accepted" ||
                   item.status === "Happening Now" ||
@@ -6947,7 +6970,7 @@ export default function BookingsScreen() {
                                           : { color: "#DC2626" },
                                       ]}
                                     >
-                                      Cancel
+                                      {item.type_id === "gig_application" ? "Withdraw" : "Cancel"}
                                     </Text>
                                   </TouchableOpacity>
                                 )}
@@ -7039,26 +7062,13 @@ export default function BookingsScreen() {
                             // For gig applications
                             if (userRole === "venue-owner") {
                               return "Are you sure you want to revoke this accepted application? The musician will be notified.";
-                            } else {
-                              // Musician withdrawing
-                              if (selectedItem?.raw_date) {
-                                const eventDate = new Date(selectedItem.raw_date);
-                                const now = new Date();
-                                const diffTime =
-                                  eventDate.getTime() - now.getTime();
-                                const diffDays = Math.ceil(
-                                  diffTime / (1000 * 60 * 60 * 24),
-                                );
-
-                                if (diffDays > 7) {
-                                  return "Warning: You are withdrawing from an accepted gig with more than 7 days notice. This may affect your reputation with this gig.";
-                                } else if (diffDays >= 3) {
-                                  return "Warning: You are withdrawing within 3-7 days. This may significantly affect your reputation with this gig.";
-                                }
-                                return "You are withdrawing with less than 3 days notice. This may severely damage your reputation with this gig.";
-                              }
-                              return "Are you sure you want to withdraw from this gig? The gig owner will be notified.";
                             }
+
+                            if (isUpcomingAcceptedGigApplicationItem(selectedItem)) {
+                              return "Are you sure you want to withdraw from this accepted gig? The gig owner will be notified and this will affect your completion rate.";
+                            }
+
+                            return "Are you sure you want to withdraw this application? The gig owner will be notified.";
                           } else {
                             // For studio bookings - strictly no-refund policy
                             const paidAmount = getBookingPaidAmount(selectedItem);
@@ -7108,7 +7118,9 @@ export default function BookingsScreen() {
                           ? "Submit"
                           : modalMode === "report_access"
                             ? "Submit Report"
-                            : "Yes, Cancel Booking"
+                            : selectedItem?.type_id === "gig_application"
+                              ? "Yes, Withdraw"
+                              : "Yes, Cancel Booking"
         }
         showInput={
           modalMode !== "confirm" &&
@@ -7213,9 +7225,7 @@ export default function BookingsScreen() {
               // Cancel mode (from Upcoming tab)
               status =
                 selectedItem.type_id === "gig_application"
-                  ? userRole === "musician"
-                    ? "resigned"
-                    : "cancelled"
+                  ? getGigApplicationCancelStatusForViewer(selectedItem, userRole)
                   : "cancelled";
             } else if (modalMode === "fire") {
               status =

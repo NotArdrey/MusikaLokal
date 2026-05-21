@@ -29,6 +29,12 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
 import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
+import {
+    getDefaultStudioDateOverrideSlot,
+    getStudioAvailabilityMinDateKey,
+    getStudioDateOverrideLeadTimeError,
+    isStudioDateOverrideDateSelectable,
+} from "../src/utils/studioAvailabilityLeadTime";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
 const base64ToUint8Array = (base64: string): Uint8Array => {
@@ -614,7 +620,7 @@ export default function EditStudioScreen() {
   }, [handleReturnToTabs, saving]);
 
   const toggleCalendarDate = (dateStr: string) => {
-    if (dateStr < getLocalDateKey()) {
+    if (!isStudioDateOverrideDateSelectable(dateStr)) {
       return;
     }
 
@@ -625,7 +631,7 @@ export default function EditStudioScreen() {
       } else {
         next[dateStr] = {
           selected: true,
-          slots: [{ start: "09:00 AM", end: "05:00 PM" }],
+          slots: [getDefaultStudioDateOverrideSlot(dateStr)],
           sessionType: getDefaultDateOverrideSessionType(studioType),
         };
       }
@@ -2253,6 +2259,14 @@ export default function EditStudioScreen() {
       return false;
     }
     if (!validateScheduleConflicts()) {
+      return false;
+    }
+    const leadTimeError = getStudioDateOverrideLeadTimeError(
+      selectedDates,
+      originalSelectedDatesRef.current,
+    );
+    if (leadTimeError) {
+      showAlert("warning", "Advance Notice Required", leadTimeError);
       return false;
     }
     if (!isWeeklyScheduleScopeValid()) {
@@ -5839,8 +5853,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
               ]}
             >
               <Calendar
-                current={getLocalDateKey()}
-                minDate={getLocalDateKey()}
+                current={getStudioAvailabilityMinDateKey()}
+                minDate={getStudioAvailabilityMinDateKey()}
                 maxDate={(() => {
                   const maxDate = new Date();
                   maxDate.setDate(maxDate.getDate() + 90);
@@ -5863,7 +5877,9 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 dayComponent={({ date, state, marking }) => {
                   if (!date) return null;
                   const isSelected = !!marking?.selected;
-                  const isDisabled = state === "disabled";
+                  const isDisabled =
+                    state === "disabled" ||
+                    !isStudioDateOverrideDateSelectable(date.dateString);
 
                   return (
                     <TouchableOpacity
@@ -6304,10 +6320,12 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             <TouchableOpacity activeOpacity={1}
                               onPress={() => {
                                 const newDates = { ...selectedDates };
-                                newDates[dateStr].slots.push({
-                                  start: "06:00 PM",
-                                  end: "09:00 PM",
-                                });
+                                newDates[dateStr].slots.push(
+                                  getDefaultStudioDateOverrideSlot(dateStr, {
+                                    start: "06:00 PM",
+                                    end: "09:00 PM",
+                                  }),
+                                );
                                 setSelectedDates(newDates);
                               }}
                               style={{

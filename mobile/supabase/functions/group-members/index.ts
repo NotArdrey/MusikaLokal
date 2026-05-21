@@ -1,6 +1,9 @@
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { buildNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
+import {
+    buildNotificationRouteMeta,
+    withNotificationSeverityType,
+} from "../_shared/notificationRoutes.ts";
 import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 
 const corsHeaders = {
@@ -26,8 +29,9 @@ const GROUP_APPLICATION_STATUSES = [
 ];
 
 async function insertCoreNotifications(supabaseClient: any, payload: Record<string, unknown> | Record<string, unknown>[]) {
-    const payloads = Array.isArray(payload) ? payload : [payload];
-    const { error } = await supabaseClient.from('notifications').insert(payload);
+    const payloads = (Array.isArray(payload) ? payload : [payload]).map(withNotificationSeverityType);
+    const insertPayload = Array.isArray(payload) ? payloads : payloads[0];
+    const { error } = await supabaseClient.from('notifications').insert(insertPayload);
 
     if (error) {
         console.error('group_member_notification_failed', { message: error.message });

@@ -37,6 +37,9 @@ interface GigApplyTabProps {
   isSubmittingApplication: boolean;
   hasExistingApplication: boolean;
   existingApplicationStatus: string | null;
+  isReapplicationCooldownActive: boolean;
+  reapplicationCooldownReason: string | null;
+  reapplicationCooldownDaysRemaining: number | null;
   isBlocked: boolean;
   blockReason: string | null;
   userGroups: any[];
@@ -74,6 +77,9 @@ const GigApplyTab = ({
   isSubmittingApplication,
   hasExistingApplication,
   existingApplicationStatus,
+  isReapplicationCooldownActive,
+  reapplicationCooldownReason,
+  reapplicationCooldownDaysRemaining,
   isBlocked,
   blockReason,
   userGroups,
@@ -252,6 +258,7 @@ const GigApplyTab = ({
   const isSubmitDisabled =
     isSubmittingApplication ||
     hasExistingApplication ||
+    isReapplicationCooldownActive ||
     isBlocked ||
     groupAlreadyApplied ||
     isFormIncomplete;
@@ -848,6 +855,35 @@ const GigApplyTab = ({
         </View>
       )}
 
+      {isReapplicationCooldownActive && (
+        <View
+          style={[
+            styles.infoBox,
+            {
+              backgroundColor: "#F59E0B20",
+              borderColor: "#F59E0B",
+              marginBottom: 24,
+            },
+          ]}
+        >
+          <Ionicons name="time-outline" size={24} color="#F59E0B" />
+          <View style={{ flex: 1 }}>
+            <Text
+              style={[
+                styles.infoText,
+                { color: colors.text, fontFamily: "Poppins_600SemiBold" },
+              ]}
+            >
+              Reapplication Cooldown
+            </Text>
+            <Text style={[styles.infoText, { color: colors.text }]}>
+              {reapplicationCooldownReason ||
+                "Your last application was declined. Please wait before applying again."}
+            </Text>
+          </View>
+        </View>
+      )}
+
       {!isGroupApplicationFlow && groupAlreadyApplied && selectedGroupId && (
         <View
           style={[
@@ -893,6 +929,10 @@ const GigApplyTab = ({
                     existingApplicationStatus === "approved"
                   ? "Application Accepted"
                   : "Already Applied"
+              : isReapplicationCooldownActive
+                ? reapplicationCooldownDaysRemaining
+                  ? `Reapply in ${reapplicationCooldownDaysRemaining} day${reapplicationCooldownDaysRemaining === 1 ? "" : "s"}`
+                  : "Reapply Later"
               : groupAlreadyApplied
                 ? "Group Already Applied"
                 : isApplicationsClosed

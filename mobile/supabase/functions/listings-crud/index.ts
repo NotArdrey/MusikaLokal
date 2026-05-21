@@ -2,7 +2,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
+import {
+    withNotificationRouteMeta,
+    withNotificationSeverityType,
+} from "../_shared/notificationRoutes.ts";
 import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 
 const corsHeaders = {
@@ -11,10 +14,11 @@ const corsHeaders = {
 }
 
 async function insertCoreNotifications(supabaseClient: any, payload: Record<string, unknown> | Record<string, unknown>[]) {
-    const payloads = Array.isArray(payload) ? payload : [payload]
+    const payloads = (Array.isArray(payload) ? payload : [payload]).map(withNotificationSeverityType)
+    const insertPayload = Array.isArray(payload) ? payloads : payloads[0]
     const { data, error } = await supabaseClient
         .from('notifications')
-        .insert(payload)
+        .insert(insertPayload)
         .select()
 
     if (error) throw error

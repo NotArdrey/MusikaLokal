@@ -1,6 +1,9 @@
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { buildNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
+import {
+    buildNotificationRouteMeta,
+    withNotificationSeverityType,
+} from "../_shared/notificationRoutes.ts";
 import {
     buildGigApplicationAudienceMeta,
     resolveGigApplicationAudience,
@@ -29,16 +32,18 @@ const ALLOWED_LEADER_DECISIONS = new Set(['approved', 'rejected'])
 const ACTIVE_GIG_APPLICATION_STATUSES = ['pending', 'accepted', 'approved']
 
 async function insertCoreNotification(supabaseClient: any, payload: Record<string, unknown>) {
+    const notificationPayload = withNotificationSeverityType(payload)
+
     const { error } = await supabaseClient
         .from('notifications')
-        .insert(payload)
+        .insert(notificationPayload)
 
     if (error) {
         console.error('gig_application_notification_failed', { message: error.message })
         return
     }
 
-    scheduleCoreActionEmailForNotification(supabaseClient, payload, { source: 'gig-applications' })
+    scheduleCoreActionEmailForNotification(supabaseClient, notificationPayload, { source: 'gig-applications' })
 }
 
 async function getVenueStaffAccessLevel(client: any, userId: string, gigId: string): Promise<number | null> {
@@ -141,8 +146,8 @@ function getApplicationStatusNotification(
     if (normalizedStatus === 'resigned') {
         return {
             type: 'warning',
-            title: 'Musician Resigned',
-            message: `A performer has resigned from "${gigName}"${productionLabel}.`,
+            title: 'Musician Withdrew',
+            message: `A performer withdrew from "${gigName}"${productionLabel}.`,
         }
     }
 

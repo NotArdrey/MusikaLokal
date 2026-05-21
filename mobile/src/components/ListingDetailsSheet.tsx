@@ -41,6 +41,7 @@ import { useListingSheetDerived } from "../hooks/useListingSheetDerived";
 import { useListingSheetEffects } from "../hooks/useListingSheetEffects";
 import { useProfileCompletion } from "../hooks/useProfileCompletion";
 import { emitFavoriteChanged } from "../utils/favoriteEvents";
+import { getGigReapplicationCooldownInfo } from "../utils/gigReapplicationCooldown";
 import { submitListingRequest, uploadListingRequestDocument } from "../utils/listingRequests";
 import {
   clearListingDetailsRequestInFlight,
@@ -508,6 +509,14 @@ const ListingDetailsSheet = forwardRef<
   const [existingApplicationStatus, setExistingApplicationStatus] = useState<
     string | null
   >(null);
+  const [isReapplicationCooldownActive, setIsReapplicationCooldownActive] =
+    useState(false);
+  const [reapplicationCooldownReason, setReapplicationCooldownReason] =
+    useState<string | null>(null);
+  const [
+    reapplicationCooldownDaysRemaining,
+    setReapplicationCooldownDaysRemaining,
+  ] = useState<number | null>(null);
 
   // Studio Booking State (prevent spam)
   const [hasExistingStudioBooking, setHasExistingStudioBooking] =
@@ -1394,6 +1403,12 @@ const ListingDetailsSheet = forwardRef<
     }
   };
 
+  const resetReapplicationCooldown = useCallback(() => {
+    setIsReapplicationCooldownActive(false);
+    setReapplicationCooldownReason(null);
+    setReapplicationCooldownDaysRemaining(null);
+  }, []);
+
   // Check if user has already applied to this gig
   const checkExistingApplication = async () => {
     if (!userId || !listingId || !group) return;
@@ -1521,6 +1536,70 @@ const ListingDetailsSheet = forwardRef<
       console.error("Error checking application:", err);
     }
   };
+
+  const checkReapplicationCooldown = useCallback(async () => {
+    if (!userId || !listingId || !group || group.type !== "Gig") {
+      resetReapplicationCooldown();
+      return;
+    }
+
+    const cooldownDays = group.reapplication_cooldown_days ?? 30;
+    if (Number(cooldownDays) <= 0) {
+      resetReapplicationCooldown();
+      return;
+    }
+
+    try {
+      let query = supabase
+        .from("gig_applications")
+        .select("id, rejected_at, created_at")
+        .eq("gig_id", listingId)
+        .eq("status", "rejected")
+        .order("rejected_at", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (userRole === "producer") {
+        if (!selectedProductionTeamId) {
+          resetReapplicationCooldown();
+          return;
+        }
+        query = query.eq("production_team_id", selectedProductionTeamId);
+      } else {
+        query = query.eq("applicant_id", userId);
+      }
+
+      const { data, error } = await query.maybeSingle();
+
+      if (error) {
+        console.error("Error checking reapplication cooldown:", error);
+        resetReapplicationCooldown();
+        return;
+      }
+
+      const cooldownInfo = getGigReapplicationCooldownInfo({
+        cooldownDays,
+        rejectedAt: data?.rejected_at,
+        createdAt: data?.created_at,
+      });
+
+      setIsReapplicationCooldownActive(cooldownInfo.isActive);
+      setReapplicationCooldownReason(cooldownInfo.message);
+      setReapplicationCooldownDaysRemaining(
+        cooldownInfo.isActive ? cooldownInfo.daysRemaining : null,
+      );
+    } catch (err) {
+      console.error("Error checking reapplication cooldown:", err);
+      resetReapplicationCooldown();
+    }
+  }, [
+    group,
+    listingId,
+    resetReapplicationCooldown,
+    selectedProductionTeamId,
+    userId,
+    userRole,
+  ]);
 
   const fetchProductionTeamRoster = async (teamId: string) => {
     if (!teamId) {
@@ -1848,6 +1927,8 @@ const ListingDetailsSheet = forwardRef<
     setAlertConfig,
     setAlertVisible,
     requestConfirmation: handleConfirm,
+    isReapplicationCooldownActive,
+    reapplicationCooldownReason,
     setIsSubmittingApplication,
     setHasExistingApplication,
     setExistingApplicationStatus,
@@ -1896,6 +1977,7 @@ const ListingDetailsSheet = forwardRef<
       setVideoUrl("");
       setHasExistingApplication(false);
       setExistingApplicationStatus(null);
+      resetReapplicationCooldown();
       setRequestMessage("");
       setRequestPitchMessage("");
       setRequestApplicationContext("");
@@ -1929,7 +2011,7 @@ const ListingDetailsSheet = forwardRef<
     setGroup(null);
     setExistingBookings([]);
     setLoading(false);
-  }, [listingId]);
+  }, [listingId, resetReapplicationCooldown]);
 
   // Check for existing application when group data is loaded
   useEffect(() => {
@@ -2019,6 +2101,11 @@ const ListingDetailsSheet = forwardRef<
       checkEligibility(group.id);
     }
   }, [group?.id, group?.type, selectedGroupId, selectedProductionTeamId, userId, userRole]);
+
+  // Re-check rejected-application cooldown when the applicant entity changes.
+  useEffect(() => {
+    checkReapplicationCooldown();
+  }, [checkReapplicationCooldown]);
 
   // Check if selected group has already applied (group-level deduplication)
   useEffect(() => {
@@ -3488,6 +3575,9 @@ const ListingDetailsSheet = forwardRef<
       isSubmittingApplication={isSubmittingApplication}
       hasExistingApplication={hasExistingApplication}
       existingApplicationStatus={existingApplicationStatus}
+      isReapplicationCooldownActive={isReapplicationCooldownActive}
+      reapplicationCooldownReason={reapplicationCooldownReason}
+      reapplicationCooldownDaysRemaining={reapplicationCooldownDaysRemaining}
       isBlocked={isBlocked}
       blockReason={blockReason}
       userGroups={userGroups}
@@ -3527,6 +3617,9 @@ const ListingDetailsSheet = forwardRef<
       isSubmittingApplication={isSubmittingApplication}
       hasExistingApplication={hasExistingApplication}
       existingApplicationStatus={existingApplicationStatus}
+      isReapplicationCooldownActive={isReapplicationCooldownActive}
+      reapplicationCooldownReason={reapplicationCooldownReason}
+      reapplicationCooldownDaysRemaining={reapplicationCooldownDaysRemaining}
       isBlocked={isBlocked}
       blockReason={blockReason}
       userGroups={userGroups}

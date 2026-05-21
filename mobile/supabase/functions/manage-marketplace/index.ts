@@ -1,6 +1,9 @@
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
+import {
+  withNotificationRouteMeta,
+  withNotificationSeverityType,
+} from "../_shared/notificationRoutes.ts";
 import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 
 const corsHeaders = {
@@ -157,13 +160,14 @@ async function insertNotification(
     meta: withNotificationRouteMeta(payload.meta),
     read: false,
   };
+  const safeNotificationPayload = withNotificationSeverityType(notificationPayload);
 
-  const { error } = await supabaseAdmin.from("notifications").insert(notificationPayload);
+  const { error } = await supabaseAdmin.from("notifications").insert(safeNotificationPayload);
   if (error) {
     console.error("manage_marketplace_notification_failed", { message: error.message });
     return;
   }
-  scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "manage-marketplace" });
+  scheduleCoreActionEmailForNotification(supabaseAdmin, safeNotificationPayload, { source: "manage-marketplace" });
 }
 
 Deno.serve(async (req: Request) => {
@@ -670,7 +674,7 @@ Deno.serve(async (req: Request) => {
       const { data: buyer } = await supabaseAdmin.from("profiles").select("full_name, avatar_url").eq("id", uid).single();
       await insertNotification(supabaseAdmin, {
         user_id: sellerId!,
-        type: "order",
+        type: "info",
         title: "New Order!",
         message: `${buyer?.full_name || "A buyer"} placed an order (${order.order_number})`,
         image: buyer?.avatar_url || null,
@@ -798,7 +802,7 @@ Deno.serve(async (req: Request) => {
       const notifyUserId = isSeller ? order.buyer_id : order.seller_id;
       await insertNotification(supabaseAdmin, {
         user_id: notifyUserId,
-        type: "order",
+        type: "info",
         title: "Order Update",
         message: `Order ${order.order_number} status changed to ${newStatus}`,
         meta: { event_type: "order_status_updated", order_id, new_status: newStatus },
@@ -838,7 +842,7 @@ Deno.serve(async (req: Request) => {
 
       await insertNotification(supabaseAdmin, {
         user_id: order.buyer_id,
-        type: "order",
+        type: "info",
         title: "Fulfillment Created",
         message: `Fulfillment added for order ${order.order_number}${tracking_number ? ` - Tracking: ${tracking_number}` : ""}`,
         meta: { event_type: "fulfillment_created", order_id, fulfillment_id: data.id },

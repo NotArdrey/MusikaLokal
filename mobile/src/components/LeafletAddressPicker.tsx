@@ -13,6 +13,9 @@ import {
 import { WebView } from "react-native-webview";
 import { useTheme } from "../context/ThemeContext";
 
+const LOCATION_UNAVAILABLE_MESSAGE =
+    "Current location is unavailable. Turn on Location Services or search/tap the map to choose the address.";
+
 interface LeafletAddressPickerProps {
     value: string;
     onAddressSelect: (address: string, lat?: number, lng?: number) => void;
@@ -29,7 +32,9 @@ export default function LeafletAddressPicker({
     const [searchQuery, setSearchQuery] = useState("");
     const [searching, setSearching] = useState(false);
     const [currentAddress, setCurrentAddress] = useState(value);
+    const [currentCoordinates, setCurrentCoordinates] = useState<{ lat: number; lng: number } | null>(null);
     const [gettingLocation, setGettingLocation] = useState(false);
+    const [locationMessage, setLocationMessage] = useState<string | null>(null);
     const webViewRef = useRef<WebView>(null);
 
     const leafletHTML = `
@@ -131,29 +136,67 @@ export default function LeafletAddressPicker({
 
     const handleSearch = () => {
         if (!searchQuery.trim()) return;
+        setLocationMessage(null);
         setSearching(true);
         webViewRef.current?.injectJavaScript(
-            `searchLocation("${searchQuery.replace(/"/g, '\\"')}"); true;`
+            `searchLocation(${JSON.stringify(searchQuery.trim())}); true;`
         );
         setTimeout(() => setSearching(false), 2000);
     };
 
+    const applyDeviceLocation = async (loc: Location.LocationObject, isLastKnown = false) => {
+        webViewRef.current?.injectJavaScript(
+            `setCurrentLocation(${loc.coords.latitude}, ${loc.coords.longitude}); true;`
+        );
+        setLocationMessage(
+            isLastKnown
+                ? "Using your last known location. Drag the marker or search if it needs updating."
+                : null
+        );
+    };
+
+    const getLastKnownDeviceLocation = async () => {
+        try {
+            return await Location.getLastKnownPositionAsync({
+                maxAge: 5 * 60 * 1000,
+            });
+        } catch {
+            return null;
+        }
+    };
+
     const handleGetCurrentLocation = async () => {
         setGettingLocation(true);
+        setLocationMessage(null);
         try {
             const { status } = await Location.requestForegroundPermissionsAsync();
             if (status !== "granted") {
-                setGettingLocation(false);
+                setLocationMessage("Allow location permission to use current address, or search manually.");
                 return;
             }
-            const loc = await Location.getCurrentPositionAsync({});
-            webViewRef.current?.injectJavaScript(
-                `setCurrentLocation(${loc.coords.latitude}, ${loc.coords.longitude}); true;`
-            );
+
+            const servicesEnabled = await Location.hasServicesEnabledAsync();
+            if (!servicesEnabled) {
+                setLocationMessage(LOCATION_UNAVAILABLE_MESSAGE);
+                return;
+            }
+
+            const loc = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+            });
+            await applyDeviceLocation(loc);
         } catch (err) {
-            console.error("Location error:", err);
+            const lastKnown = await getLastKnownDeviceLocation();
+
+            if (lastKnown) {
+                await applyDeviceLocation(lastKnown, true);
+                return;
+            }
+
+            setLocationMessage(LOCATION_UNAVAILABLE_MESSAGE);
+        } finally {
+            setGettingLocation(false);
         }
-        setGettingLocation(false);
     };
 
     const handleMessage = (event: any) => {
@@ -161,6 +204,11 @@ export default function LeafletAddressPicker({
             const data = JSON.parse(event.nativeEvent.data);
             if (data.type === "address") {
                 setCurrentAddress(data.address);
+                setCurrentCoordinates({ lat: data.lat, lng: data.lng });
+                setLocationMessage(null);
+                setSearching(false);
+            } else if (data.type === "error") {
+                setLocationMessage(data.message || "Unable to find that location.");
                 setSearching(false);
             }
         } catch (e) {
@@ -169,7 +217,7 @@ export default function LeafletAddressPicker({
     };
 
     const handleConfirm = () => {
-        onAddressSelect(currentAddress);
+        onAddressSelect(currentAddress, currentCoordinates?.lat, currentCoordinates?.lng);
         setModalVisible(false);
     };
 
@@ -271,6 +319,15 @@ export default function LeafletAddressPicker({
                                 numberOfLines={2}
                             >
                                 {currentAddress}
+                            </Text>
+                        </View>
+                    ) : null}
+
+                    {locationMessage ? (
+                        <View style={[styles.locationMessage, { backgroundColor: isDark ? "#3F2E14" : "#FEF3C7" }]}>
+                            <Ionicons name="information-circle-outline" size={16} color="#D97706" />
+                            <Text style={[styles.locationMessageText, { color: isDark ? "#FDE68A" : "#92400E" }]}>
+                                {locationMessage}
                             </Text>
                         </View>
                     ) : null}
@@ -387,6 +444,22 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 13,
         fontFamily: "Poppins_400Regular",
+    },
+    locationMessage: {
+        flexDirection: "row",
+        alignItems: "center",
+        marginHorizontal: 12,
+        marginTop: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderRadius: 10,
+        gap: 8,
+    },
+    locationMessageText: {
+        flex: 1,
+        fontSize: 12,
+        fontFamily: "Poppins_400Regular",
+        lineHeight: 17,
     },
     mapContainer: {
         flex: 1,

@@ -26,6 +26,12 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import {
+  getDefaultStudioDateOverrideSlot,
+  getStudioAvailabilityMinDateKey,
+  getStudioDateOverrideLeadTimeError,
+  isStudioDateOverrideDateSelectable,
+} from "../src/utils/studioAvailabilityLeadTime";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
 const base64ToUint8Array = (base64: string): Uint8Array => {
@@ -1032,6 +1038,15 @@ export default function AddStudioScreen() {
         }
       }
     }
+
+    if (currentStep === 3) {
+      const leadTimeError = getStudioDateOverrideLeadTimeError(selectedDates);
+      if (leadTimeError) {
+        showAlert("warning", "Advance Notice Required", leadTimeError);
+        return false;
+      }
+    }
+
     return true;
   };
 
@@ -1110,6 +1125,10 @@ export default function AddStudioScreen() {
   };
 
   const toggleCalendarDate = (dateStr: string) => {
+    if (!isStudioDateOverrideDateSelectable(dateStr)) {
+      return;
+    }
+
     setSelectedDates((prev) => {
       const next = { ...prev };
       if (next[dateStr]?.selected) {
@@ -1117,7 +1136,7 @@ export default function AddStudioScreen() {
       } else {
         next[dateStr] = {
           selected: true,
-          slots: [{ start: "09:00 AM", end: "05:00 PM" }],
+          slots: [getDefaultStudioDateOverrideSlot(dateStr)],
           sessionType: getDefaultDateOverrideSessionType(studioType),
         };
       }
@@ -1233,6 +1252,12 @@ export default function AddStudioScreen() {
         }
         return `${hours}:${minutes}`;
       };
+
+      const leadTimeError = getStudioDateOverrideLeadTimeError(selectedDates);
+      if (leadTimeError) {
+        showAlert("warning", "Advance Notice Required", leadTimeError);
+        return;
+      }
 
       // Convert calendar-based availability to the payload format
       const calendarAvailability = Object.entries(selectedDates)
@@ -4101,8 +4126,8 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                   ]}
                 >
                   <Calendar
-                    current={new Date().toISOString().split("T")[0]}
-                    minDate={new Date().toISOString().split("T")[0]}
+                    current={getStudioAvailabilityMinDateKey()}
+                    minDate={getStudioAvailabilityMinDateKey()}
                     maxDate={(() => {
                       const maxDate = new Date();
                       maxDate.setDate(maxDate.getDate() + 90);
@@ -4125,12 +4150,18 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     dayComponent={({ date, state, marking }) => {
                       if (!date) return null;
                       const isSelected = !!marking?.selected;
-                      const isDisabled = state === "disabled";
+                      const isDisabled =
+                        state === "disabled" ||
+                        !isStudioDateOverrideDateSelectable(date.dateString);
 
                       return (
                         <TouchableOpacity
                           activeOpacity={1}
-                          onPress={() => toggleCalendarDate(date.dateString)}
+                          onPress={() => {
+                            if (!isDisabled) {
+                              toggleCalendarDate(date.dateString);
+                            }
+                          }}
                           style={{
                             width: 32,
                             height: 32,
@@ -4584,10 +4615,12 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                                 <TouchableOpacity activeOpacity={1}
                                   onPress={() => {
                                     const newDates = { ...selectedDates };
-                                    newDates[dateStr].slots.push({
-                                      start: "06:00 PM",
-                                      end: "09:00 PM",
-                                    });
+                                    newDates[dateStr].slots.push(
+                                      getDefaultStudioDateOverrideSlot(dateStr, {
+                                        start: "06:00 PM",
+                                        end: "09:00 PM",
+                                      }),
+                                    );
                                     setSelectedDates(newDates);
                                   }}
                                   style={{

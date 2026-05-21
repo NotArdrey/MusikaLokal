@@ -14,7 +14,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   !!value && typeof value === "object" && !Array.isArray(value)
 );
 
-const NOTIFICATION_SEVERITY_TYPES = new Set(["success", "info", "warning", "error"]);
+export type NotificationSeverityType = "success" | "info" | "warning" | "error";
+
+const NOTIFICATION_SEVERITY_TYPES = new Set<NotificationSeverityType>([
+  "success",
+  "info",
+  "warning",
+  "error",
+]);
 
 const readString = (...values: unknown[]) => {
   for (const value of values) {
@@ -34,13 +41,51 @@ const readString = (...values: unknown[]) => {
 const readEventType = (...values: unknown[]) => {
   for (const value of values) {
     const eventType = readString(value)?.toLowerCase();
-    if (eventType && !NOTIFICATION_SEVERITY_TYPES.has(eventType)) {
+    if (eventType && !NOTIFICATION_SEVERITY_TYPES.has(eventType as NotificationSeverityType)) {
       return eventType;
     }
   }
 
   return null;
 };
+
+export function normalizeNotificationSeverityType(
+  value: unknown,
+  fallback: NotificationSeverityType = "info",
+): NotificationSeverityType {
+  const normalized = readString(value)?.toLowerCase();
+
+  return normalized && NOTIFICATION_SEVERITY_TYPES.has(normalized as NotificationSeverityType)
+    ? (normalized as NotificationSeverityType)
+    : fallback;
+}
+
+export function withNotificationSeverityType<T extends Record<string, unknown>>(payload: T) {
+  const rawType = readString(payload.type)?.toLowerCase();
+  const severityType = normalizeNotificationSeverityType(rawType);
+  const nextPayload: Record<string, unknown> = {
+    ...payload,
+    type: severityType,
+  };
+
+  if (rawType && rawType !== severityType) {
+    const meta = isRecord(payload.meta) ? { ...payload.meta } : {};
+    const existingEventType = readString(
+      meta.event_type,
+      meta.eventType,
+      meta.notification_type,
+      meta.notificationType,
+    );
+
+    if (!existingEventType) {
+      meta.event_type = rawType;
+    }
+
+    nextPayload.meta = meta;
+  }
+
+  return nextPayload as T & { type: NotificationSeverityType };
+}
 
 const normalizePathname = (value: unknown) => {
   const pathname = readString(value);

@@ -31,6 +31,12 @@ import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation"
 import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
 import { clearListingDetailsCache } from "../src/utils/listingDetailsCache";
+import {
+    getDefaultStudioDateOverrideSlot,
+    getStudioAvailabilityMinDateKey,
+    getStudioDateOverrideLeadTimeError,
+    isStudioDateOverrideDateSelectable,
+} from "../src/utils/studioAvailabilityLeadTime";
 import { sanitizeStorageFileName, uploadStorageObject } from "../src/utils/storageUpload";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
@@ -648,7 +654,7 @@ export default function EditStudioScreen() {
   }, [handleReturnToTabs, saving]);
 
   const toggleCalendarDate = (dateStr: string) => {
-    if (dateStr < getLocalDateKey()) {
+    if (!isStudioDateOverrideDateSelectable(dateStr)) {
       return;
     }
 
@@ -659,7 +665,7 @@ export default function EditStudioScreen() {
       } else {
         next[dateStr] = {
           selected: true,
-          slots: [{ start: "09:00 AM", end: "05:00 PM" }],
+          slots: [getDefaultStudioDateOverrideSlot(dateStr)],
           sessionType: getDefaultDateOverrideSessionType(studioType),
         };
       }
@@ -2029,6 +2035,14 @@ export default function EditStudioScreen() {
       return false;
     }
     if (!validateScheduleConflicts()) {
+      return false;
+    }
+    const leadTimeError = getStudioDateOverrideLeadTimeError(
+      selectedDates,
+      originalSelectedDatesRef.current,
+    );
+    if (leadTimeError) {
+      showAlert("warning", "Advance Notice Required", leadTimeError);
       return false;
     }
     if (!isWeeklyScheduleScopeValid()) {
@@ -5637,8 +5651,8 @@ export default function EditStudioScreen() {
               ]}
             >
               <Calendar
-                current={getLocalDateKey()}
-                minDate={getLocalDateKey()}
+                current={getStudioAvailabilityMinDateKey()}
+                minDate={getStudioAvailabilityMinDateKey()}
                 maxDate={(() => {
                   const maxDate = new Date();
                   maxDate.setDate(maxDate.getDate() + 90);
@@ -5661,7 +5675,9 @@ export default function EditStudioScreen() {
                 dayComponent={({ date, state, marking }) => {
                   if (!date) return null;
                   const isSelected = !!marking?.selected;
-                  const isDisabled = state === "disabled";
+                  const isDisabled =
+                    state === "disabled" ||
+                    !isStudioDateOverrideDateSelectable(date.dateString);
 
                   return (
                     <TouchableOpacity
@@ -6102,10 +6118,12 @@ export default function EditStudioScreen() {
                             <TouchableOpacity activeOpacity={1}
                               onPress={() => {
                                 const newDates = { ...selectedDates };
-                                newDates[dateStr].slots.push({
-                                  start: "06:00 PM",
-                                  end: "09:00 PM",
-                                });
+                                newDates[dateStr].slots.push(
+                                  getDefaultStudioDateOverrideSlot(dateStr, {
+                                    start: "06:00 PM",
+                                    end: "09:00 PM",
+                                  }),
+                                );
                                 setSelectedDates(newDates);
                               }}
                               style={{

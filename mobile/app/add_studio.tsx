@@ -28,6 +28,12 @@ import { useTheme } from "../src/context/ThemeContext";
 import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../src/utils/e2eFixtures";
 import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
 import { clearListingDetailsCache } from "../src/utils/listingDetailsCache";
+import {
+  getDefaultStudioDateOverrideSlot,
+  getStudioAvailabilityMinDateKey,
+  getStudioDateOverrideLeadTimeError,
+  isStudioDateOverrideDateSelectable,
+} from "../src/utils/studioAvailabilityLeadTime";
 import { sanitizeStorageFileName, uploadStorageObject } from "../src/utils/storageUpload";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
@@ -1082,6 +1088,15 @@ export default function AddStudioScreen() {
         }
       }
     }
+
+    if (currentStep === 3) {
+      const leadTimeError = getStudioDateOverrideLeadTimeError(selectedDates);
+      if (leadTimeError) {
+        showAlert("warning", "Advance Notice Required", leadTimeError);
+        return false;
+      }
+    }
+
     return true;
   };
 
@@ -1160,6 +1175,10 @@ export default function AddStudioScreen() {
   };
 
   const toggleCalendarDate = (dateStr: string) => {
+    if (!isStudioDateOverrideDateSelectable(dateStr)) {
+      return;
+    }
+
     setSelectedDates((prev) => {
       const next = { ...prev };
       if (next[dateStr]?.selected) {
@@ -1167,7 +1186,7 @@ export default function AddStudioScreen() {
       } else {
         next[dateStr] = {
           selected: true,
-          slots: [{ start: "09:00 AM", end: "05:00 PM" }],
+          slots: [getDefaultStudioDateOverrideSlot(dateStr)],
           sessionType: getDefaultDateOverrideSessionType(studioType),
         };
       }
@@ -1283,6 +1302,12 @@ export default function AddStudioScreen() {
         }
         return `${hours}:${minutes}`;
       };
+
+      const leadTimeError = getStudioDateOverrideLeadTimeError(selectedDates);
+      if (leadTimeError) {
+        showAlert("warning", "Advance Notice Required", leadTimeError);
+        return;
+      }
 
       // Convert calendar-based availability to the payload format
       const calendarAvailability = Object.entries(selectedDates)
@@ -4160,8 +4185,8 @@ export default function AddStudioScreen() {
                   ]}
                 >
                   <Calendar
-                    current={new Date().toISOString().split("T")[0]}
-                    minDate={new Date().toISOString().split("T")[0]}
+                    current={getStudioAvailabilityMinDateKey()}
+                    minDate={getStudioAvailabilityMinDateKey()}
                     maxDate={(() => {
                       const maxDate = new Date();
                       maxDate.setDate(maxDate.getDate() + 90);
@@ -4184,12 +4209,18 @@ export default function AddStudioScreen() {
                     dayComponent={({ date, state, marking }) => {
                       if (!date) return null;
                       const isSelected = !!marking?.selected;
-                      const isDisabled = state === "disabled";
+                      const isDisabled =
+                        state === "disabled" ||
+                        !isStudioDateOverrideDateSelectable(date.dateString);
 
                       return (
                         <TouchableOpacity
                           activeOpacity={1}
-                          onPress={() => toggleCalendarDate(date.dateString)}
+                          onPress={() => {
+                            if (!isDisabled) {
+                              toggleCalendarDate(date.dateString);
+                            }
+                          }}
                           style={{
                             width: 32,
                             height: 32,
@@ -4643,10 +4674,12 @@ export default function AddStudioScreen() {
                                 <TouchableOpacity activeOpacity={1}
                                   onPress={() => {
                                     const newDates = { ...selectedDates };
-                                    newDates[dateStr].slots.push({
-                                      start: "06:00 PM",
-                                      end: "09:00 PM",
-                                    });
+                                    newDates[dateStr].slots.push(
+                                      getDefaultStudioDateOverrideSlot(dateStr, {
+                                        start: "06:00 PM",
+                                        end: "09:00 PM",
+                                      }),
+                                    );
                                     setSelectedDates(newDates);
                                   }}
                                   style={{

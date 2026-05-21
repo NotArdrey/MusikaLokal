@@ -5,6 +5,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
     buildNotificationRouteMeta,
     withNotificationRouteMeta,
+    withNotificationSeverityType,
 } from "../_shared/notificationRoutes.ts";
 import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 
@@ -14,10 +15,11 @@ const corsHeaders = {
 }
 
 async function insertCoreNotifications(supabaseClient: any, payload: Record<string, unknown> | Record<string, unknown>[]) {
-    const payloads = Array.isArray(payload) ? payload : [payload]
+    const payloads = (Array.isArray(payload) ? payload : [payload]).map(withNotificationSeverityType)
+    const insertPayload = Array.isArray(payload) ? payloads : payloads[0]
     const { data, error } = await supabaseClient
         .from('notifications')
-        .insert(payload)
+        .insert(insertPayload)
         .select()
 
     if (error) throw error

@@ -1,6 +1,9 @@
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
+import {
+  withNotificationRouteMeta,
+  withNotificationSeverityType,
+} from "../_shared/notificationRoutes.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -702,11 +705,16 @@ async function insertNotification(
     meta?: Record<string, any>;
   },
 ) {
-  await supabaseAdmin.from("notifications").insert({
+  const notificationPayload = withNotificationSeverityType({
     ...payload,
     meta: withNotificationRouteMeta(payload.meta),
     read: false,
   });
+
+  const { error } = await supabaseAdmin.from("notifications").insert(notificationPayload);
+  if (error) {
+    console.error("manage_social_feed_notification_failed", { message: error.message });
+  }
 }
 
 Deno.serve(async (req: Request) => {
@@ -834,7 +842,7 @@ Deno.serve(async (req: Request) => {
       if (notificationUserId) {
         await insertNotification(supabaseAdmin, {
           user_id: notificationUserId,
-          type: "follow",
+          type: "info",
           title: notificationTitle,
           message:
             targetType === "profile"
@@ -1862,7 +1870,7 @@ Deno.serve(async (req: Request) => {
         const { data: reactor } = await supabaseAdmin.from("profiles").select("full_name, avatar_url").eq("id", uid).single();
         await insertNotification(supabaseAdmin, {
           user_id: post.author_id,
-          type: "reaction",
+          type: "info",
           title: "New Reaction",
           message: `${reactor?.full_name || "Someone"} reacted to your post`,
           image: reactor?.avatar_url || null,
@@ -2024,7 +2032,7 @@ Deno.serve(async (req: Request) => {
         const { data: commenter } = await supabaseAdmin.from("profiles").select("full_name, avatar_url").eq("id", uid).single();
         await insertNotification(supabaseAdmin, {
           user_id: post.author_id,
-          type: "comment",
+          type: "info",
           title: "New Comment",
           message: `${commenter?.full_name || "Someone"} commented on your post`,
           image: commenter?.avatar_url || null,

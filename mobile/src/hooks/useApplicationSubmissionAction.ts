@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import { supabase } from "../../lib/supabase";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
+import { getGigReapplicationCooldownInfo } from "../utils/gigReapplicationCooldown";
 import { submitListingRequest } from "../utils/listingRequests";
 import { buildNotificationRouteMeta } from "../utils/notificationNavigation";
 import { sanitizeStorageFileName, uploadStorageObject } from "../utils/storageUpload";
@@ -30,6 +31,8 @@ interface UseApplicationSubmissionActionParams {
   userGroups: any[];
   setAlertConfig: (config: AlertConfig) => void;
   setAlertVisible: (visible: boolean) => void;
+  isReapplicationCooldownActive?: boolean;
+  reapplicationCooldownReason?: string | null;
   requestConfirmation: (
     action: () => void,
     title: string,
@@ -92,6 +95,8 @@ export const useApplicationSubmissionAction = ({
   userGroups,
   setAlertConfig,
   setAlertVisible,
+  isReapplicationCooldownActive = false,
+  reapplicationCooldownReason = null,
   requestConfirmation,
   setIsSubmittingApplication,
   setHasExistingApplication,
@@ -212,6 +217,108 @@ export const useApplicationSubmissionAction = ({
     setAlertVisible,
   ]);
 
+  const fetchCurrentReapplicationCooldown = useCallback(async () => {
+    const inactive = {
+      isActive: false,
+      daysRemaining: 0,
+      cooldownEndsAt: null,
+      message: null,
+    };
+
+    if (group?.type !== "Gig" || !listingId || !userId) {
+      return inactive;
+    }
+
+    const cooldownDays = group.reapplication_cooldown_days ?? 30;
+    if (Number(cooldownDays) <= 0) {
+      return inactive;
+    }
+
+    let query = supabase
+      .from("gig_applications")
+      .select("id, rejected_at, created_at")
+      .eq("gig_id", listingId)
+      .eq("status", "rejected")
+      .order("rejected_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (userRole === "producer") {
+      if (!selectedProductionTeamId) {
+        return inactive;
+      }
+      query = query.eq("production_team_id", selectedProductionTeamId);
+    } else {
+      query = query.eq("applicant_id", userId);
+    }
+
+    const { data, error } = await query.maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return getGigReapplicationCooldownInfo({
+      cooldownDays,
+      rejectedAt: data?.rejected_at,
+      createdAt: data?.created_at,
+    });
+  }, [
+    group?.reapplication_cooldown_days,
+    group?.type,
+    listingId,
+    selectedProductionTeamId,
+    userId,
+    userRole,
+  ]);
+
+  const ensureReapplicationCooldownHasPassed = useCallback(async () => {
+    if (isReapplicationCooldownActive) {
+      setAlertConfig({
+        type: "warning",
+        title: "Reapplication Cooldown",
+        message:
+          reapplicationCooldownReason ||
+          "Your last application was declined. Please wait before applying again.",
+      });
+      setAlertVisible(true);
+      return false;
+    }
+
+    try {
+      const cooldownInfo = await fetchCurrentReapplicationCooldown();
+
+      if (cooldownInfo.isActive) {
+        setAlertConfig({
+          type: "warning",
+          title: "Reapplication Cooldown",
+          message:
+            cooldownInfo.message ||
+            "Your last application was declined. Please wait before applying again.",
+        });
+        setAlertVisible(true);
+        return false;
+      }
+    } catch (error) {
+      console.error("Error checking reapplication cooldown:", error);
+      setAlertConfig({
+        type: "error",
+        title: "Eligibility Check Failed",
+        message: "We could not verify whether you can reapply yet. Please try again.",
+      });
+      setAlertVisible(true);
+      return false;
+    }
+
+    return true;
+  }, [
+    fetchCurrentReapplicationCooldown,
+    isReapplicationCooldownActive,
+    reapplicationCooldownReason,
+    setAlertConfig,
+    setAlertVisible,
+  ]);
+
   const formatSlotLabel = (slotType: "solo" | "duo" | "band" | null) => {
     if (slotType === "solo") return "Solo";
     if (slotType === "duo") return "Duo";
@@ -303,6 +410,11 @@ export const useApplicationSubmissionAction = ({
       } else {
         const gigIsStillAvailable = await ensureGigIsStillAvailable();
         if (!gigIsStillAvailable) {
+          return;
+        }
+
+        const cooldownHasPassed = await ensureReapplicationCooldownHasPassed();
+        if (!cooldownHasPassed) {
           return;
         }
       }
@@ -766,6 +878,7 @@ export const useApplicationSubmissionAction = ({
     cvUrl,
     ensureGigIsStillAvailable,
     ensureGroupListingIsStillAvailable,
+    ensureReapplicationCooldownHasPassed,
     group,
     listingId,
     pitchMessage,
@@ -894,6 +1007,11 @@ export const useApplicationSubmissionAction = ({
 
     const gigIsStillAvailable = await ensureGigIsStillAvailable();
     if (!gigIsStillAvailable) {
+      return;
+    }
+
+    const cooldownHasPassed = await ensureReapplicationCooldownHasPassed();
+    if (!cooldownHasPassed) {
       return;
     }
 
@@ -1135,6 +1253,7 @@ export const useApplicationSubmissionAction = ({
     groupApplicationBy,
     ensureGigIsStillAvailable,
     ensureGroupListingIsStillAvailable,
+    ensureReapplicationCooldownHasPassed,
     listingId,
     pitchMessage,
     processApplicationSubmission,

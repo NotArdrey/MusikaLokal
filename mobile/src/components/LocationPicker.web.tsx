@@ -4,6 +4,8 @@ import { ActivityIndicator, Modal, StyleSheet, Text, TextInput, TouchableOpacity
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
+const BROWSER_LOCATION_UNAVAILABLE_MESSAGE =
+    'Current location is unavailable. Turn on Location Services, allow browser access, then try again.';
 
 interface LocationPickerProps {
     visible: boolean;
@@ -32,6 +34,22 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
     const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
         setAlertConfig({ type, title, message, buttons });
         setAlertVisible(true);
+    };
+
+    const getBrowserLocationErrorMessage = (error: unknown) => {
+        const code = typeof error === 'object' && error !== null && 'code' in error
+            ? (error as { code?: number }).code
+            : undefined;
+
+        if (code === 1) {
+            return 'Allow browser location access to use current address, or search manually.';
+        }
+
+        if (code === 3) {
+            return 'Location lookup timed out. Try again near a window, or search the address manually.';
+        }
+
+        return BROWSER_LOCATION_UNAVAILABLE_MESSAGE;
     };
 
     // Initialize with something if needed, but on web without map, maybe just wait for search
@@ -125,8 +143,7 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                 address: data?.display_name || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
             });
         } catch (error) {
-            console.error(error);
-            showAlert('error', 'Location Failed', 'Unable to get your current address.');
+            showAlert('warning', 'Location Unavailable', getBrowserLocationErrorMessage(error));
         } finally {
             setGettingLocation(false);
         }

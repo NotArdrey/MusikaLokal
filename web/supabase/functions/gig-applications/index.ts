@@ -140,8 +140,8 @@ function getApplicationStatusNotification(
     if (normalizedStatus === 'resigned') {
         return {
             type: 'warning',
-            title: 'Musician Resigned',
-            message: `A performer has resigned from "${gigName}"${productionLabel}.`,
+            title: 'Musician Withdrew',
+            message: `A performer withdrew from "${gigName}"${productionLabel}.`,
         }
     }
 

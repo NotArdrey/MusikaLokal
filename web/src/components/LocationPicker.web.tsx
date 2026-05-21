@@ -14,6 +14,8 @@ interface LocationPickerProps {
 
 const DEFAULT_LOCATION = { lat: 14.5995, lng: 120.9842 };
 const MAP_DELTA = 0.02;
+const BROWSER_LOCATION_UNAVAILABLE_MESSAGE =
+    'Current location is unavailable. Turn on Location Services, allow browser access, then try again.';
 
 const toMapEmbedUrl = (lat: number, lng: number): string => {
     const left = (lng - MAP_DELTA).toFixed(6);
@@ -54,6 +56,22 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
     const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
         setAlertConfig({ type, title, message, buttons });
         setAlertVisible(true);
+    };
+
+    const getBrowserLocationErrorMessage = (error: unknown) => {
+        const code = typeof error === 'object' && error !== null && 'code' in error
+            ? (error as { code?: number }).code
+            : undefined;
+
+        if (code === 1) {
+            return 'Allow browser location access to use current address, or search manually.';
+        }
+
+        if (code === 3) {
+            return 'Location lookup timed out. Try again near a window, or search the address manually.';
+        }
+
+        return BROWSER_LOCATION_UNAVAILABLE_MESSAGE;
     };
 
     useEffect(() => {
@@ -164,8 +182,7 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
             });
             setMapCenter({ lat: latitude, lng: longitude });
         } catch (error) {
-            console.error(error);
-            showAlert('error', 'Location Failed', 'Unable to get your current address.');
+            showAlert('warning', 'Location Unavailable', getBrowserLocationErrorMessage(error));
         } finally {
             setGettingLocation(false);
         }

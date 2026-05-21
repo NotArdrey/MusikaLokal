@@ -875,10 +875,33 @@ const getGigApplicationStatusLabel = (
   if (normalizedStatus === "completed") return "Completed";
   if (normalizedStatus === "rejected") return "Declined";
   if (normalizedStatus === "cancelled") return "Cancelled";
-  if (normalizedStatus === "resigned") return "Resigned";
+  if (normalizedStatus === "resigned") return "Withdrawn";
   if (normalizedStatus === "fired") return "Fired";
 
   return fallback || status;
+};
+
+const normalizeGigApplicationStatusValue = (status: unknown) =>
+  String(status || "").trim().toLowerCase();
+
+const isAcceptedGigApplicationItem = (item: any) =>
+  item?.type_id === "gig_application" &&
+  ["accepted", "approved"].includes(
+    normalizeGigApplicationStatusValue(item?.raw_status || item?.status),
+  );
+
+const isUpcomingAcceptedGigApplicationItem = (item: any) => {
+  if (!isAcceptedGigApplicationItem(item)) return false;
+  const eventStart = new Date(String(item?.raw_date || item?.date || ""));
+  if (Number.isNaN(eventStart.getTime())) return false;
+  eventStart.setHours(0, 0, 0, 0);
+  return new Date() < eventStart;
+};
+
+const getGigApplicationCancelStatusForViewer = (item: any, role: unknown) => {
+  if (item?.type_id !== "gig_application") return "cancelled";
+  if (normalizeActivityRole(role) !== "musician") return "cancelled";
+  return isUpcomingAcceptedGigApplicationItem(item) ? "cancelled" : "resigned";
 };
 
 const getActivityItemFilterLabel = (item: any) => {
@@ -942,11 +965,13 @@ const getStatusActionLoadingMessage = (status: string, typeId: string = "studio_
     return normalizedType === "gig_application" ? "Accepting application" : "Accepting request";
   }
   if (normalizedStatus === "rejected") return "Declining application";
-  if (normalizedStatus === "resigned") return "Resigning from gig";
+  if (normalizedStatus === "resigned") return "Withdrawing application";
   if (normalizedStatus === "fired") return "Terminating agreement";
   if (normalizedStatus === "completed") return "Completing contract";
   if (normalizedStatus === "late") return "Sending late report";
-  if (normalizedStatus === "cancelled") return "Cancelling booking";
+  if (normalizedStatus === "cancelled") {
+    return normalizedType === "gig_application" ? "Withdrawing from gig" : "Cancelling booking";
+  }
 
   return "Updating booking";
 };
@@ -5172,7 +5197,7 @@ export default function BookingsScreen() {
                               backgroundColor:
                                 item.status === "Accepted"
                                   ? "rgba(16, 185, 129, 0.85)"
-                                  : item.status === "Declined" || item.status === "Cancelled"
+                                  : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Withdrawn"
                                     ? "rgba(239, 68, 68, 0.85)"
                                     : "rgba(0,0,0,0.6)",
                             },
@@ -5576,7 +5601,7 @@ export default function BookingsScreen() {
                                   item.status === "Happening Now" ||
                                   item.status === "Confirmed"
                                   ? "rgba(16, 185, 129, 0.85)"
-                                  : item.status === "Declined" || item.status === "Cancelled"
+                                  : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Withdrawn"
                                     ? "rgba(239, 68, 68, 0.85)"
                                     : "rgba(0,0,0,0.6)",
                             },
@@ -5780,7 +5805,7 @@ export default function BookingsScreen() {
                           <View style={styles.statusContainer}>
                             {item.status === "Happening Now" || item.status === "Accepted" || item.status === "Confirmed" || item.status === "Completed" ? (
                               <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                            ) : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Resigned" ? (
+                            ) : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Withdrawn" ? (
                               <Ionicons name="close-circle" size={16} color="#EF4444" />
                             ) : (
                               <Ionicons name="time-outline" size={16} color="#F59E0B" />
@@ -5795,7 +5820,7 @@ export default function BookingsScreen() {
                                       item.status === "Confirmed" ||
                                       item.status === "Completed"
                                       ? "#10B981"
-                                      : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Resigned"
+                                      : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Withdrawn"
                                         ? "#EF4444"
                                         : "#F59E0B",
                                 },
@@ -7265,8 +7290,8 @@ export default function BookingsScreen() {
                             </TouchableOpacity>
 
                             <TouchableOpacity activeOpacity={1}
-                              testID={bookingActionTestId(item, "resign")}
-                              accessibilityLabel={bookingActionTestId(item, "resign")}
+                              testID={bookingActionTestId(item, "withdraw")}
+                              accessibilityLabel={bookingActionTestId(item, "withdraw")}
                               onPress={() => {
                                 setSelectedItem(item);
                                 setModalMode("cancel");
@@ -7290,7 +7315,7 @@ export default function BookingsScreen() {
                                   fontSize: 12,
                                 }}
                               >
-                                Resign
+                                Withdraw
                               </Text>
                             </TouchableOpacity>
                           </View>
@@ -7703,8 +7728,8 @@ export default function BookingsScreen() {
                                   userRole === "musician" &&
                                   item.type_id === "gig_application")) && (
                                   <TouchableOpacity activeOpacity={1}
-                                    testID={bookingActionTestId(item, item.type_id === "gig_application" ? "resign" : "cancel")}
-                                    accessibilityLabel={bookingActionTestId(item, item.type_id === "gig_application" ? "resign" : "cancel")}
+                                    testID={bookingActionTestId(item, item.type_id === "gig_application" ? "withdraw" : "cancel")}
+                                    accessibilityLabel={bookingActionTestId(item, item.type_id === "gig_application" ? "withdraw" : "cancel")}
                                     onPress={() => {
                                       setSelectedItem(item);
                                       setModalMode("cancel");
@@ -7731,7 +7756,7 @@ export default function BookingsScreen() {
                                           : { color: "#DC2626" },
                                       ]}
                                     >
-                                      {item.type_id === "gig_application" ? "Resign" : "Cancel"}
+                                      {item.type_id === "gig_application" ? "Withdraw" : "Cancel"}
                                     </Text>
                                   </TouchableOpacity>
                                 )}
@@ -7785,7 +7810,7 @@ export default function BookingsScreen() {
                       : modalMode === "late"
                         ? "Report Late"
                         : selectedItem?.type_id === "gig_application"
-                          ? "Resign from Gig"
+                          ? "Withdraw from Gig"
                           : "Cancel Booking"
         }
         message={
@@ -7822,9 +7847,13 @@ export default function BookingsScreen() {
                           if (selectedItem?.type_id === "gig_application") {
                             if (userRole === "venue-owner") {
                               return "Are you sure you want to revoke this accepted application? The musician will be notified.";
-                            } else {
-                              return "Are you sure you want to resign from this gig? The gig owner will be notified and your completion rate will not be affected.";
                             }
+
+                            if (isUpcomingAcceptedGigApplicationItem(selectedItem)) {
+                              return "Are you sure you want to withdraw from this accepted gig? The gig owner will be notified and this will affect your completion rate.";
+                            }
+
+                            return "Are you sure you want to withdraw this application? The gig owner will be notified.";
                           } else {
                             // For studio bookings - strictly no-refund policy
                             const paidAmount = getBookingPaidAmount(selectedItem);
@@ -7873,7 +7902,7 @@ export default function BookingsScreen() {
                         : modalMode === "late"
                           ? "Submit"
                           : selectedItem?.type_id === "gig_application"
-                            ? "Yes, Resign"
+                            ? "Yes, Withdraw"
                             : "Yes, Cancel Booking"
         }
         showInput={
@@ -7982,9 +8011,7 @@ export default function BookingsScreen() {
               // Cancel mode (from Upcoming tab)
               status =
                 selectedItem.type_id === "gig_application"
-                  ? userRole === "musician"
-                    ? "resigned"
-                    : "cancelled"
+                  ? getGigApplicationCancelStatusForViewer(selectedItem, userRole)
                   : "cancelled";
             } else if (modalMode === "fire") {
               status =

@@ -3839,7 +3839,7 @@ export default function SignupScreen() {
                         <ActivityIndicator size="large" color={colors.primary} style={{ marginBottom: 24 }} />
                         <Text style={[styles.stepTitle, themeStyles.text, { textAlign: 'center' }]}>Processing...</Text>
                         <Text style={[styles.stepSubtitle, themeStyles.textSecondary, { textAlign: 'center', maxWidth: 400 }]}>
-                            Verifying your identity and creating your account.
+                            Verifying your identity.
                         </Text>
 
                         {!loading && (

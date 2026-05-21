@@ -4,7 +4,10 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // @ts-ignore
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
-import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
+import {
+  withNotificationRouteMeta,
+  withNotificationSeverityType,
+} from "../_shared/notificationRoutes.ts";
 import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 
 const corsHeaders = {
@@ -358,13 +361,14 @@ async function insertNotification(
     meta: withNotificationRouteMeta(payload.meta),
     read: payload.read ?? false,
   };
+  const safeNotificationPayload = withNotificationSeverityType(notificationPayload);
 
-  const { error } = await supabaseAdmin.from("notifications").insert(notificationPayload);
+  const { error } = await supabaseAdmin.from("notifications").insert(safeNotificationPayload);
   if (error) {
     console.error("paymongo_notification_failed", { message: error.message });
     return;
   }
-  scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "paymongo" });
+  scheduleCoreActionEmailForNotification(supabaseAdmin, safeNotificationPayload, { source: "paymongo" });
 }
 
 // Helper to credit owner's wallet when a booking payment is received

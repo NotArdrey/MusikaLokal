@@ -6,6 +6,8 @@ import { WebView } from 'react-native-webview';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
+const LOCATION_UNAVAILABLE_MESSAGE =
+    'Current location is unavailable. Turn on Location Services, then try again, or search/select the address manually.';
 
 interface LocationPickerProps {
     visible: boolean;
@@ -210,6 +212,29 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
         }
     };
 
+    const applyDeviceLocation = async (loc: Location.LocationObject) => {
+        const latitude = loc.coords.latitude;
+        const longitude = loc.coords.longitude;
+
+        webviewRef.current?.postMessage(JSON.stringify({
+            type: 'updateLocation',
+            lat: latitude,
+            lng: longitude
+        }));
+
+        await fetchAddress(latitude, longitude);
+    };
+
+    const getLastKnownDeviceLocation = async () => {
+        try {
+            return await Location.getLastKnownPositionAsync({
+                maxAge: 5 * 60 * 1000,
+            });
+        } catch {
+            return null;
+        }
+    };
+
     const handleGetCurrentAddress = async () => {
         setGettingLocation(true);
         try {
@@ -219,20 +244,29 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                 return;
             }
 
-            const current = await Location.getCurrentPositionAsync({});
-            const latitude = current.coords.latitude;
-            const longitude = current.coords.longitude;
+            const servicesEnabled = await Location.hasServicesEnabledAsync();
+            if (!servicesEnabled) {
+                showAlert('warning', 'Location Services Off', LOCATION_UNAVAILABLE_MESSAGE);
+                return;
+            }
 
-            webviewRef.current?.postMessage(JSON.stringify({
-                type: 'updateLocation',
-                lat: latitude,
-                lng: longitude
-            }));
-
-            await fetchAddress(latitude, longitude);
+            const current = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+            });
+            await applyDeviceLocation(current);
         } catch (error) {
-            console.error(error);
-            showAlert('error', 'Location Failed', 'Unable to get your current address.');
+            const lastKnown = await getLastKnownDeviceLocation();
+            if (lastKnown) {
+                await applyDeviceLocation(lastKnown);
+                showAlert(
+                    'info',
+                    'Using Last Known Location',
+                    'A fresh location was not available, so the map used your last known position.'
+                );
+                return;
+            }
+
+            showAlert('error', 'Location Unavailable', LOCATION_UNAVAILABLE_MESSAGE);
         } finally {
             setGettingLocation(false);
         }
