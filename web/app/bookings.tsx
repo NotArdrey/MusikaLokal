@@ -626,6 +626,27 @@ const isProductionTeamInviteEvent = (eventDetails: any, requestKind: unknown) =>
   String(requestKind || eventDetails?.request_kind || "").trim().toLowerCase() === "invite" &&
   Boolean(eventDetails?.production_team_id || eventDetails?.sender_entity_id);
 
+const getConnectionEventValue = (eventDetails: any, key: string) =>
+  toNonEmptyString(eventDetails?.[key]) ||
+  toNonEmptyString(eventDetails?.request_details?.[key]);
+
+const isGroupMemberInviteEvent = (eventDetails: any, requestKind?: unknown) =>
+  String(eventDetails?.sender_entity_type || "").trim().toLowerCase() === "group" &&
+  String(eventDetails?.receiver_entity_type || "").trim().toLowerCase() === "musician" &&
+  String(
+    requestKind ||
+      getConnectionEventValue(eventDetails, "request_kind") ||
+      "",
+  ).trim().toLowerCase() === "invite" &&
+  String(getConnectionEventValue(eventDetails, "application_scope") || "")
+    .trim()
+    .toLowerCase() === "group_member";
+
+const isGroupMemberInviteRequest = (item: any) =>
+  item?.type_id === "booking_request" &&
+  isGroupMemberInviteEvent(item, item?.request_kind) &&
+  Boolean(item?.group_id);
+
 const getProductionInviteStatusLabel = (status: unknown) => {
   const normalized = String(status || "").trim().toLowerCase();
 
@@ -2053,12 +2074,17 @@ export default function BookingsScreen() {
               eventDetails.receiver_entity_name ||
               profileMap.get(request.receiver_id)?.full_name ||
               "User";
+            const isGroupMemberInvite = isGroupMemberInviteEvent(
+              eventDetails,
+              requestDetails.requestKind,
+            );
             const isIncoming =
               request.receiver_id === targetUserId ||
               Boolean(
                 request.group_id &&
                   ownedGroupIdSet.has(request.group_id) &&
-                  request.sender_id !== targetUserId,
+                  request.sender_id !== targetUserId &&
+                  !isGroupMemberInvite,
               );
             const counterpartyId = isIncoming ? request.sender_id : request.receiver_id;
             const counterpartyProfile = counterpartyId ? profileMap.get(counterpartyId) : null;
@@ -2097,6 +2123,7 @@ export default function BookingsScreen() {
               listing_id: eventDetails.listing_id || null,
               listing_type: eventDetails.listing_type || null,
               request_kind: requestDetails.requestKind,
+              application_scope: eventDetails.application_scope || null,
               request_application_context: requestDetails.applicationContext,
               request_context_title: requestDetails.contextLabel,
               request_contract_url: requestDetails.contractUrl,
@@ -2778,6 +2805,10 @@ export default function BookingsScreen() {
     if (item?.type_id !== "booking_request") return false;
     if (!userId) return false;
     if (item?.request_direction !== "incoming") return false;
+
+    if (isGroupMemberInviteRequest(item)) {
+      return item?.receiver_id === userId;
+    }
 
     return item?.receiver_id === userId || item?.viewer_is_group_owner === true;
   };

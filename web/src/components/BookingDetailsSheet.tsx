@@ -53,6 +53,15 @@ const moderateScale = (size: number, factor = 0.3) => {
   return size + (scaled - size) * factor;
 };
 
+const formatStatusLabel = (value?: unknown, fallback = "Pending") => {
+  const raw = typeof value === "string" ? value : "";
+  if (!raw.trim()) return fallback;
+  return raw
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+};
+
 interface BookingDetailsSheetProps {
   booking: any;
   readOnly?: boolean;
@@ -208,6 +217,8 @@ const BookingDetailsSheet = forwardRef<
         return "#10B981"; // Gig application accepted
       case "pending":
         return "#F59E0B";
+      case "pending_relocation":
+        return colors.primary;
       case "cancelled":
         return "#EF4444";
       case "refunded":
@@ -231,6 +242,8 @@ const BookingDetailsSheet = forwardRef<
         return "checkmark-circle"; // Gig application accepted
       case "pending":
         return "time-outline";
+      case "pending_relocation":
+        return "swap-horizontal-outline";
       case "cancelled":
         return "close-circle";
       case "refunded":
@@ -452,7 +465,7 @@ const BookingDetailsSheet = forwardRef<
                   { color: getStatusColor(booking.status) },
                 ]}
               >
-                {booking.status?.toUpperCase()}
+                {formatStatusLabel(booking.status).toUpperCase()}
               </Text>
             </View>
           </View>

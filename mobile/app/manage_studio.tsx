@@ -2266,7 +2266,7 @@ export default function StudioDetailsScreen() {
                                 { color: colors.textSecondary },
                               ]}
                             >
-                              {booking.status}
+                              {formatStatusLabel(booking.status)}
                             </Text>
                           </View>
                         </View>

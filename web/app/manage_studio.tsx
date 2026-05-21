@@ -57,6 +57,15 @@ const inferStudioTypeFromRows = (rows: unknown[]): "Rehearsal" | "Recording" | "
   return canonical[0] || "Both";
 };
 
+const formatStatusLabel = (value?: unknown) => {
+  const raw = typeof value === "string" ? value : "";
+  if (!raw.trim()) return "Not submitted";
+  return raw
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+};
+
 export default function StudioDetailsScreen() {
   const { colors, isDark } = useTheme();
   const { width: viewportWidth } = useWindowDimensions();
@@ -1630,7 +1639,7 @@ export default function StudioDetailsScreen() {
                                           color: colors.textSecondary,
                                         }}
                                       >
-                                        {booking.status}
+                                        {formatStatusLabel(booking.status)}
                                       </Text>
                                     </View>
                                   </View>
@@ -1724,7 +1733,7 @@ export default function StudioDetailsScreen() {
                                 { color: colors.textSecondary },
                               ]}
                             >
-                              {booking.status}
+                              {formatStatusLabel(booking.status)}
                             </Text>
                           </View>
                         </View>

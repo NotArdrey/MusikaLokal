@@ -249,6 +249,55 @@ const reportHasBanAccountAction = (report: Pick<ReportEntry, 'target_account_act
   return reportBanAccountActions.has(report.target_account_action);
 };
 
+const reportStatusLabels: Record<ReportStatus, string> = {
+  pending: 'Active',
+  resolved: 'Resolved',
+  dismissed: 'Dismissed',
+};
+
+const normalizeReportEntry = (item: any, fallback?: ReportEntry): ReportEntry => ({
+  id: String(item?.id || fallback?.id || ''),
+  reporter_id: item?.reporter_id !== undefined
+    ? (item.reporter_id ? String(item.reporter_id) : null)
+    : fallback?.reporter_id ?? null,
+  reporter_name: String(item?.reporter_name || fallback?.reporter_name || 'Unknown'),
+  reporter_email: String(item?.reporter_email || fallback?.reporter_email || ''),
+  target_type: String(item?.target_type || fallback?.target_type || ''),
+  target_id: String(item?.target_id || fallback?.target_id || ''),
+  reason: String(item?.reason || fallback?.reason || 'No reason provided'),
+  details: item?.details !== undefined
+    ? (item.details ? String(item.details) : null)
+    : fallback?.details ?? null,
+  status: (String(item?.status || fallback?.status || 'pending') as ReportStatus),
+  created_at: String(item?.created_at || fallback?.created_at || ''),
+  reviewed_by: item?.reviewed_by !== undefined
+    ? (item.reviewed_by ? String(item.reviewed_by) : null)
+    : fallback?.reviewed_by ?? null,
+  reviewed_at: item?.reviewed_at !== undefined
+    ? (item.reviewed_at ? String(item.reviewed_at) : null)
+    : fallback?.reviewed_at ?? null,
+  reviewer_name: String(item?.reviewer_name || fallback?.reviewer_name || ''),
+  moderation_action: (String(item?.moderation_action || fallback?.moderation_action || 'none') as ReportModerationAction),
+  moderation_notes: item?.moderation_notes !== undefined
+    ? (item.moderation_notes ? String(item.moderation_notes) : null)
+    : fallback?.moderation_notes ?? null,
+  target_account_action: (String(item?.target_account_action || fallback?.target_account_action || 'none') as ReportTargetAccountAction),
+  target_account_action_expires_at: item?.target_account_action_expires_at !== undefined
+    ? (item.target_account_action_expires_at ? String(item.target_account_action_expires_at) : null)
+    : fallback?.target_account_action_expires_at ?? null,
+  escalation_status: (String(item?.escalation_status || fallback?.escalation_status || 'none') as ReportEscalationStatus),
+  escalated_at: item?.escalated_at !== undefined
+    ? (item.escalated_at ? String(item.escalated_at) : null)
+    : fallback?.escalated_at ?? null,
+  escalation_reason: item?.escalation_reason !== undefined
+    ? (item.escalation_reason ? String(item.escalation_reason) : null)
+    : fallback?.escalation_reason ?? null,
+});
+
+const reportMatchesFilter = (report: ReportEntry, filter: ReportFilter) => (
+  filter === 'all' || report.status === filter
+);
+
 const reportTargetLabels: Record<string, string> = {
   feed_post: 'Feed post',
   gig: 'Gig',
@@ -386,6 +435,31 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     alignItems: 'stretch',
     gap: 8,
+  },
+  reportCardActionsRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'stretch',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  reportActionButton: {
+    flexGrow: 0,
+    flexBasis: 126,
+    minWidth: 112,
+  },
+  reportCardHeader: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  reportCardTitleBlock: {
+    flex: 1,
+    minWidth: 220,
+    gap: 3,
   },
   cardMeta: {
     fontSize: 12,
@@ -658,6 +732,75 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Poppins_400Regular',
   },
+  reportCountPill: {
+    borderWidth: 1,
+    borderRadius: 999,
+    minWidth: 38,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reportCountText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  reportEmptyPanel: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  reportListHeader: {
+    borderBottomWidth: 1,
+    paddingBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  reportListHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  reportListSection: {
+    gap: 10,
+  },
+  reportListSubtitle: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: 'Poppins_400Regular',
+  },
+  reportListTitle: {
+    fontSize: 15,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  reportListTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  reportMetaGrid: {
+    marginTop: 4,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    columnGap: 18,
+    rowGap: 2,
+  },
+  reportMetaLabel: {
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  reportMetaText: {
+    flexGrow: 1,
+    flexBasis: 280,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'Poppins_400Regular',
+  },
+  reportMetaTextFull: {
+    flexBasis: '100%',
+  },
   sectionGap: {
     gap: 12,
   },
@@ -751,6 +894,16 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     textAlign: 'center',
   },
+  statusPill: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  statusPillText: {
+    fontSize: 11,
+    fontFamily: 'Poppins_600SemiBold',
+  },
   tabButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -842,6 +995,32 @@ export default function AdminReportsPage() {
     [reportFilter],
   );
 
+  const mergeReportItemIntoState = useCallback((rawItem: any) => {
+    if (!rawItem?.id) return;
+
+    setReports((previousReports) => {
+      const updatedReportId = String(rawItem.id);
+      let found = false;
+      let nextReports = previousReports.flatMap((existingReport) => {
+        if (existingReport.id !== updatedReportId) return [existingReport];
+
+        found = true;
+        const updatedReport = normalizeReportEntry(rawItem, existingReport);
+        return reportMatchesFilter(updatedReport, reportFilter) ? [updatedReport] : [];
+      });
+
+      if (!found) {
+        const updatedReport = normalizeReportEntry(rawItem);
+        if (reportMatchesFilter(updatedReport, reportFilter)) {
+          nextReports = [updatedReport, ...nextReports];
+        }
+      }
+
+      writeAdminPageCache(reportsCacheKey, { items: nextReports });
+      return nextReports;
+    });
+  }, [reportFilter, reportsCacheKey]);
+
   const incidentsCacheKey = useMemo(
     () => getAdminPageCacheKey('booking-incidents', { incidentFilter }),
     [incidentFilter],
@@ -922,30 +1101,7 @@ export default function AdminReportsPage() {
       if (data?.error) throw new Error(String(data.error));
 
       const rawItems = Array.isArray(data?.items) ? data.items : [];
-      const normalizedItems: ReportEntry[] = rawItems.map((item: any) => ({
-        id: String(item?.id || ''),
-        reporter_id: item?.reporter_id ? String(item.reporter_id) : null,
-        reporter_name: String(item?.reporter_name || 'Unknown'),
-        reporter_email: String(item?.reporter_email || ''),
-        target_type: String(item?.target_type || ''),
-        target_id: String(item?.target_id || ''),
-        reason: String(item?.reason || 'No reason provided'),
-        details: item?.details ? String(item.details) : null,
-        status: (String(item?.status || 'pending') as ReportStatus),
-        created_at: String(item?.created_at || ''),
-        reviewed_by: item?.reviewed_by ? String(item.reviewed_by) : null,
-        reviewed_at: item?.reviewed_at ? String(item.reviewed_at) : null,
-        reviewer_name: String(item?.reviewer_name || ''),
-        moderation_action: (String(item?.moderation_action || 'none') as ReportModerationAction),
-        moderation_notes: item?.moderation_notes ? String(item.moderation_notes) : null,
-        target_account_action: (String(item?.target_account_action || 'none') as ReportTargetAccountAction),
-        target_account_action_expires_at: item?.target_account_action_expires_at
-          ? String(item.target_account_action_expires_at)
-          : null,
-        escalation_status: (String(item?.escalation_status || 'none') as ReportEscalationStatus),
-        escalated_at: item?.escalated_at ? String(item.escalated_at) : null,
-        escalation_reason: item?.escalation_reason ? String(item.escalation_reason) : null,
-      }));
+      const normalizedItems: ReportEntry[] = rawItems.map((item: any) => normalizeReportEntry(item));
 
       setReports(normalizedItems);
       writeAdminPageCache(reportsCacheKey, {
@@ -1109,6 +1265,9 @@ export default function AdminReportsPage() {
 
         if (error) throw error;
         if (data?.error) throw new Error(String(data.error));
+        if (data?.item) {
+          mergeReportItemIntoState(data.item);
+        }
 
         const moderationLabel = moderationAction.replace(/_/g, ' ');
         const statusLabel = nextStatus.replace(/_/g, ' ');
@@ -1118,7 +1277,7 @@ export default function AdminReportsPage() {
             : ` ${reportTargetAccountActionLabels[targetAccountAction]} applied to the reported account.`;
         invalidateAdminPageCache();
         showAlert('success', 'Report updated', `Status set to ${statusLabel}. Action: ${moderationLabel}.${accountActionLabel}`);
-        await fetchReports();
+        void fetchReports({ silent: true });
         return true;
       } catch (error) {
         const message = await getErrorMessage(error, 'Unable to update report.');
@@ -1128,7 +1287,7 @@ export default function AdminReportsPage() {
         setReportActionLoadingId(null);
       }
     },
-    [fetchReports, showAlert],
+    [fetchReports, mergeReportItemIntoState, showAlert],
   );
 
   const liftReportedAccountBan = useCallback(
@@ -1158,10 +1317,13 @@ export default function AdminReportsPage() {
 
         if (error) throw error;
         if (data?.error) throw new Error(String(data.error));
+        if (data?.item) {
+          mergeReportItemIntoState(data.item);
+        }
 
         invalidateAdminPageCache();
         showAlert('success', 'Account unbanned', 'The reported account ban has been lifted.');
-        await fetchReports();
+        void fetchReports({ silent: true });
       } catch (error) {
         const message = await getErrorMessage(error, 'Unable to unban the reported account.');
         showAlert('error', 'Failed to unban account', message);
@@ -1169,7 +1331,7 @@ export default function AdminReportsPage() {
         setReportActionLoadingId(null);
       }
     },
-    [fetchReports, showAlert],
+    [fetchReports, mergeReportItemIntoState, showAlert],
   );
 
   const openReportModerationModal = useCallback(
@@ -1563,6 +1725,19 @@ export default function AdminReportsPage() {
     });
   }, [reports, reportSearch]);
 
+  const activeReports = useMemo(
+    () => filteredReports.filter((report) => report.status === 'pending'),
+    [filteredReports],
+  );
+
+  const historyReports = useMemo(
+    () => filteredReports.filter((report) => report.status !== 'pending'),
+    [filteredReports],
+  );
+
+  const showActiveReports = reportFilter === 'all' || reportFilter === 'pending';
+  const showHistoryReports = reportFilter === 'all' || reportFilter === 'resolved' || reportFilter === 'dismissed';
+
   const incidentActionable = useCallback((status: string) => {
     return ['open', 'responded', 'manual_review'].includes(status);
   }, []);
@@ -1653,6 +1828,265 @@ export default function AdminReportsPage() {
     );
   }, [colors.border, colors.primary, colors.text, colors.textSecondary, isDark]);
 
+  const getReportStatusTone = (status: ReportStatus) => {
+    if (status === 'pending') {
+      return {
+        backgroundColor: isDark ? '#451A03' : '#FEF3C7',
+        borderColor: isDark ? '#92400E' : '#F59E0B',
+        color: isDark ? '#FDE68A' : '#92400E',
+      };
+    }
+
+    if (status === 'resolved') {
+      return {
+        backgroundColor: isDark ? '#052E16' : '#DCFCE7',
+        borderColor: isDark ? '#166534' : '#22C55E',
+        color: isDark ? '#BBF7D0' : '#166534',
+      };
+    }
+
+    return {
+      backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
+      borderColor: colors.border,
+      color: colors.textSecondary,
+    };
+  };
+
+  const renderReportMeta = (
+    label: string,
+    value: string,
+    options?: { fullWidth?: boolean },
+  ) => (
+    <Text
+      style={[
+        styles.reportMetaText,
+        options?.fullWidth ? styles.reportMetaTextFull : null,
+        { color: colors.textSecondary },
+      ]}
+    >
+      <Text style={[styles.reportMetaLabel, { color: colors.text }]}>{label}: </Text>
+      {value}
+    </Text>
+  );
+
+  const renderReportCard = (report: ReportEntry) => {
+    const hasReportBanAction = reportHasBanAccountAction(report);
+    const statusTone = getReportStatusTone(report.status);
+    const reviewerText = report.reviewed_at
+      ? `${formatDateTime(report.reviewed_at)}${report.reviewer_name ? ` by ${report.reviewer_name}` : ''}`
+      : '';
+
+    return (
+      <View
+        key={report.id}
+        testID={`admin-report-card-${report.id}`}
+        accessibilityLabel={`admin-report-card-${report.id}`}
+        style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+      >
+        <View style={styles.reportCardHeader}>
+          <View style={styles.reportCardTitleBlock}>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>{report.reason}</Text>
+            {report.details ? (
+              <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>{report.details}</Text>
+            ) : null}
+          </View>
+          <View
+            style={[
+              styles.statusPill,
+              { backgroundColor: statusTone.backgroundColor, borderColor: statusTone.borderColor },
+            ]}
+          >
+            <Text style={[styles.statusPillText, { color: statusTone.color }]}>
+              {reportStatusLabels[report.status] || report.status}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.reportMetaGrid}>
+          {renderReportMeta('Reporter', `${report.reporter_name || 'Unknown'} (${report.reporter_email || 'no email'})`)}
+          {renderReportMeta('Reported item', formatReportTargetType(report.target_type))}
+          {renderReportMeta('Created', formatDateTime(report.created_at))}
+          {reviewerText ? renderReportMeta('Reviewed', reviewerText) : null}
+          {report.moderation_action && report.moderation_action !== 'none'
+            ? renderReportMeta('Action', report.moderation_action.replace(/_/g, ' '))
+            : null}
+          {report.target_account_action && report.target_account_action !== 'none'
+            ? renderReportMeta(
+              'Account action',
+              `${reportTargetAccountActionLabels[report.target_account_action]}${
+                report.target_account_action_expires_at
+                  ? ` until ${formatDateTime(report.target_account_action_expires_at)}`
+                  : ''
+              }`,
+              { fullWidth: true },
+            )
+            : null}
+          {report.moderation_notes ? renderReportMeta('Notes', report.moderation_notes, { fullWidth: true }) : null}
+        </View>
+
+        <View style={styles.reportCardActionsRow}>
+          <TouchableOpacity
+            testID={`admin-report-view-${report.id}`}
+            accessibilityLabel={`admin-report-view-${report.id}`}
+            activeOpacity={1}
+            disabled={reportViewLoadingId === report.id}
+            onPress={() => void openReportDetailsModal(report.id)}
+            style={[
+              styles.smallActionButton,
+              styles.reportActionButton,
+              {
+                borderColor: colors.border,
+                backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
+                opacity: reportViewLoadingId === report.id ? 0.6 : 1,
+              },
+            ]}
+          >
+            {reportViewLoadingId === report.id ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <>
+                <Ionicons name="eye-outline" size={14} color={colors.text} />
+                <Text style={[styles.smallActionText, { color: colors.text }]}>View</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {hasReportBanAction ? (
+            <TouchableOpacity
+              testID={`admin-report-unban-${report.id}`}
+              accessibilityLabel={`admin-report-unban-${report.id}`}
+              activeOpacity={1}
+              disabled={reportActionLoadingId === report.id}
+              onPress={() => void liftReportedAccountBan(report)}
+              style={[
+                styles.smallActionButtonFilled,
+                styles.reportActionButton,
+                { backgroundColor: '#16A34A', opacity: reportActionLoadingId === report.id ? 0.6 : 1 },
+              ]}
+            >
+              {reportActionLoadingId === report.id ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Ionicons name="lock-open-outline" size={14} color="#FFFFFF" />
+                  <Text style={styles.smallActionTextFilled}>Unban</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          ) : null}
+
+          {report.status === 'pending' ? (
+            <>
+              <TouchableOpacity
+                testID={`admin-report-resolve-${report.id}`}
+                accessibilityLabel={`admin-report-resolve-${report.id}`}
+                activeOpacity={1}
+                disabled={reportActionLoadingId === report.id}
+                onPress={() => openReportModerationModal(report, 'resolved')}
+                style={[
+                  styles.smallActionButtonFilled,
+                  styles.reportActionButton,
+                  { backgroundColor: '#16A34A', opacity: reportActionLoadingId === report.id ? 0.6 : 1 },
+                ]}
+              >
+                <Ionicons name="checkmark-circle-outline" size={14} color="#FFFFFF" />
+                <Text style={styles.smallActionTextFilled}>Resolve</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID={`admin-report-dismiss-${report.id}`}
+                accessibilityLabel={`admin-report-dismiss-${report.id}`}
+                activeOpacity={1}
+                disabled={reportActionLoadingId === report.id}
+                onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'dismissed' })}
+                style={[
+                  styles.smallActionButtonFilled,
+                  styles.reportActionButton,
+                  { backgroundColor: '#64748B', opacity: reportActionLoadingId === report.id ? 0.6 : 1 },
+                ]}
+              >
+                <Ionicons name="close-circle-outline" size={14} color="#FFFFFF" />
+                <Text style={styles.smallActionTextFilled}>Dismiss</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity
+              testID={`admin-report-reopen-${report.id}`}
+              accessibilityLabel={`admin-report-reopen-${report.id}`}
+              activeOpacity={1}
+              disabled={reportActionLoadingId === report.id}
+              onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'pending' })}
+              style={[
+                styles.smallActionButtonFilled,
+                styles.reportActionButton,
+                { backgroundColor: '#0EA5E9', opacity: reportActionLoadingId === report.id ? 0.6 : 1 },
+              ]}
+            >
+              <Ionicons name="refresh-outline" size={14} color="#FFFFFF" />
+              <Text style={styles.smallActionTextFilled}>Reopen</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  };
+
+  const renderReportListSection = ({
+    title,
+    subtitle,
+    iconName,
+    sectionReports,
+    emptyMessage,
+  }: {
+    title: string;
+    subtitle: string;
+    iconName: string;
+    sectionReports: ReportEntry[];
+    emptyMessage: string;
+  }) => (
+    <View style={styles.reportListSection}>
+      <View style={[styles.reportListHeader, { borderBottomColor: colors.border }]}>
+        <View style={styles.reportListHeaderCopy}>
+          <View style={styles.reportListTitleRow}>
+            <Ionicons name={iconName as any} size={16} color={colors.primary} />
+            <Text style={[styles.reportListTitle, { color: colors.text }]}>{title}</Text>
+          </View>
+          <Text style={[styles.reportListSubtitle, { color: colors.textSecondary }]}>{subtitle}</Text>
+        </View>
+        <View
+          style={[
+            styles.reportCountPill,
+            {
+              backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <Text style={[styles.reportCountText, { color: colors.text }]}>{sectionReports.length}</Text>
+        </View>
+      </View>
+
+      {sectionReports.length === 0 ? (
+        <View
+          style={[
+            styles.reportEmptyPanel,
+            {
+              backgroundColor: isDark ? '#111827' : '#F8FAFC',
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <Text style={[styles.emptyText, { color: colors.textSecondary, paddingVertical: 0 }]}>
+            {emptyMessage}
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.sectionGap}>
+          {sectionReports.map(renderReportCard)}
+        </View>
+      )}
+    </View>
+  );
+
   const renderReportsManagementSection = () => (
     <View style={styles.sectionGap}>
       <TextInput
@@ -1691,7 +2125,7 @@ export default function AdminReportsPage() {
                 ]}
               >
                 <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                  {status}
+                  {status === 'pending' ? 'active' : status}
                 </Text>
               </TouchableOpacity>
             );
@@ -1707,128 +2141,24 @@ export default function AdminReportsPage() {
         <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No reports found.</Text>
       ) : (
         <View style={styles.sectionGap}>
-          {filteredReports.map((report) => {
-            const hasReportBanAction = reportHasBanAccountAction(report);
-
-            return (
-              <View
-                key={report.id}
-                testID={`admin-report-card-${report.id}`}
-                accessibilityLabel={`admin-report-card-${report.id}`}
-                style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-              >
-                <Text style={[styles.cardTitle, { color: colors.text }]}>{report.reason}</Text>
-                {report.details ? (
-                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>{report.details}</Text>
-                ) : null}
-                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Status: {report.status}</Text>
-                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reporter: {report.reporter_name || 'Unknown'} ({report.reporter_email || 'no email'})</Text>
-                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reported item: {formatReportTargetType(report.target_type)}</Text>
-                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Created: {formatDateTime(report.created_at)}</Text>
-                {report.reviewed_at ? (
-                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reviewed: {formatDateTime(report.reviewed_at)} {report.reviewer_name ? `by ${report.reviewer_name}` : ''}</Text>
-                ) : null}
-                {report.moderation_action && report.moderation_action !== 'none' ? (
-                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Action: {report.moderation_action.replace(/_/g, ' ')}</Text>
-                ) : null}
-                {report.target_account_action && report.target_account_action !== 'none' ? (
-                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
-                    Account action: {reportTargetAccountActionLabels[report.target_account_action]}
-                    {report.target_account_action_expires_at ? ` until ${formatDateTime(report.target_account_action_expires_at)}` : ''}
-                  </Text>
-                ) : null}
-                {report.moderation_notes ? (
-                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Notes: {report.moderation_notes}</Text>
-                ) : null}
-
-                <View style={styles.cardActionsRow}>
-                  <TouchableOpacity
-                    testID={`admin-report-view-${report.id}`}
-                    accessibilityLabel={`admin-report-view-${report.id}`}
-                    activeOpacity={1}
-                    disabled={reportViewLoadingId === report.id}
-                    onPress={() => void openReportDetailsModal(report.id)}
-                    style={[
-                      styles.smallActionButton,
-                      {
-                        borderColor: colors.border,
-                        backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
-                        opacity: reportViewLoadingId === report.id ? 0.6 : 1,
-                      },
-                    ]}
-                  >
-                    {reportViewLoadingId === report.id ? (
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                      <>
-                        <Ionicons name="eye-outline" size={14} color={colors.text} />
-                        <Text style={[styles.smallActionText, { color: colors.text }]}>View</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-
-                  {hasReportBanAction ? (
-                    <TouchableOpacity
-                      testID={`admin-report-unban-${report.id}`}
-                      accessibilityLabel={`admin-report-unban-${report.id}`}
-                      activeOpacity={1}
-                      disabled={reportActionLoadingId === report.id}
-                      onPress={() => void liftReportedAccountBan(report)}
-                      style={[styles.smallActionButtonFilled, { backgroundColor: '#16A34A', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
-                    >
-                      {reportActionLoadingId === report.id ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <>
-                          <Ionicons name="lock-open-outline" size={14} color="#FFFFFF" />
-                          <Text style={styles.smallActionTextFilled}>Unban</Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
-                  ) : null}
-
-                  {report.status === 'pending' ? (
-                    <>
-                      <TouchableOpacity
-                        testID={`admin-report-resolve-${report.id}`}
-                        accessibilityLabel={`admin-report-resolve-${report.id}`}
-                        activeOpacity={1}
-                        disabled={reportActionLoadingId === report.id}
-                        onPress={() => openReportModerationModal(report, 'resolved')}
-                        style={[styles.smallActionButtonFilled, { backgroundColor: '#16A34A', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
-                      >
-                        <Ionicons name="checkmark-circle-outline" size={14} color="#FFFFFF" />
-                        <Text style={styles.smallActionTextFilled}>Resolve</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        testID={`admin-report-dismiss-${report.id}`}
-                        accessibilityLabel={`admin-report-dismiss-${report.id}`}
-                        activeOpacity={1}
-                        disabled={reportActionLoadingId === report.id}
-                        onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'dismissed' })}
-                        style={[styles.smallActionButtonFilled, { backgroundColor: '#64748B', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
-                      >
-                        <Ionicons name="close-circle-outline" size={14} color="#FFFFFF" />
-                        <Text style={styles.smallActionTextFilled}>Dismiss</Text>
-                      </TouchableOpacity>
-                    </>
-                  ) : (
-                    <TouchableOpacity
-                      testID={`admin-report-reopen-${report.id}`}
-                      accessibilityLabel={`admin-report-reopen-${report.id}`}
-                      activeOpacity={1}
-                      disabled={reportActionLoadingId === report.id}
-                      onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'pending' })}
-                      style={[styles.smallActionButtonFilled, { backgroundColor: '#0EA5E9', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
-                    >
-                      <Ionicons name="refresh-outline" size={14} color="#FFFFFF" />
-                      <Text style={styles.smallActionTextFilled}>Reopen</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            );
-          })}
+          {showActiveReports
+            ? renderReportListSection({
+              title: 'Active Reports',
+              subtitle: 'Pending reports awaiting moderation.',
+              iconName: 'alert-circle-outline',
+              sectionReports: activeReports,
+              emptyMessage: 'No active reports.',
+            })
+            : null}
+          {showHistoryReports
+            ? renderReportListSection({
+              title: 'Report History',
+              subtitle: reportFilter === 'all' ? 'Resolved and dismissed reports.' : `${reportFilter} reports.`,
+              iconName: 'time-outline',
+              sectionReports: historyReports,
+              emptyMessage: 'No report history.',
+            })
+            : null}
         </View>
       )}
     </View>

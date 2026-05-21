@@ -57,7 +57,8 @@ const getActiveLoginBan = (profile: any): LoginBanStatus | null => {
 };
 
 const formatBanDuration = (ban: LoginBanStatus) => {
-  if (ban.permanent || !ban.bannedUntil) return 'permanently';
+  if (ban.permanent) return 'permanently';
+  if (!ban.bannedUntil) return 'temporarily';
 
   const expiry = new Date(ban.bannedUntil);
   if (Number.isNaN(expiry.getTime())) return 'permanently';
@@ -73,8 +74,12 @@ const formatBanDuration = (ban: LoginBanStatus) => {
 
 const buildBanMessage = (ban: LoginBanStatus) => {
   const reasonText = ban.reason ? `\n\nReason: ${ban.reason}` : '';
-  if (ban.permanent || !ban.bannedUntil) {
+  if (ban.permanent) {
     return `Your account has been banned permanently.${reasonText}`;
+  }
+
+  if (!ban.bannedUntil) {
+    return `Your account is currently banned. Please check with an administrator for the ban duration.${reasonText}`;
   }
 
   return `Your account is currently banned. Please try again in about ${formatBanDuration(ban)}.\n\nBan ends: ${new Date(ban.bannedUntil).toLocaleString('en-PH', {
@@ -379,7 +384,7 @@ export default function LoginScreen() {
         if (activeBanAfterError) {
           showBannedAccountError(activeBanAfterError);
         } else if (/bann?ed/i.test(error.message || '')) {
-          showBannedAccountError({ permanent: true, bannedUntil: null, reason: null });
+          showBannedAccountError({ permanent: false, bannedUntil: null, reason: null });
         } else {
           // Handle specific error cases
           if (error.message.includes('Invalid login credentials')) {
