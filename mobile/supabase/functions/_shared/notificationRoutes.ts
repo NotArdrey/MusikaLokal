@@ -154,6 +154,14 @@ const inferNotificationRoute = (
     };
   }
 
+  if (eventType === "listing_connection_request_status") {
+    const status = readString(meta.request_status, meta.requestStatus, meta.status)?.toLowerCase();
+    return {
+      pathname: "/bookings",
+      routeParams: { tab: !status || status !== "pending" ? "History" : "Pending" },
+    };
+  }
+
   if (
     eventType === "listing_connection_request" &&
     (senderEntityType === "production_team" || requestKind === "invite")

@@ -158,7 +158,7 @@ export default function AdminPostsPage() {
   };
 
   if (loading || !roleResolved) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /></View>;
-  if (!isAdmin) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Access denied</Text></View></View>;
+  if (!isAdmin) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>Access denied</Text></View></View>;
 
   return (
     <View
@@ -198,7 +198,7 @@ export default function AdminPostsPage() {
               onPress={() => setFilter(f)}
               style={[styles.filterChip, { backgroundColor: filter === f ? colors.primary : colors.card, borderColor: filter === f ? colors.primary : colors.border }]}
             >
-              <Text style={{ color: filter === f ? '#fff' : colors.text, fontSize: 13, textTransform: 'capitalize' }}>{f}</Text>
+              <Text style={{ color: filter === f ? '#fff' : colors.text, fontSize: 13, fontFamily: 'Poppins_500Medium', textTransform: 'capitalize' }}>{f}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -211,30 +211,30 @@ export default function AdminPostsPage() {
           ListHeaderComponent={(
             <View style={[styles.reviewPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.reviewHeader}>
-                <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700' }}>AI Comment Review</Text>
+                <Text style={{ color: colors.text, fontSize: 16, fontFamily: 'Poppins_700Bold' }}>AI Comment Review</Text>
                 {loadingComments && <ActivityIndicator size="small" color={colors.primary} />}
               </View>
               {!loadingComments && commentReviews.length === 0 ? (
-                <Text style={{ color: colors.textSecondary, fontSize: 13 }}>No hidden or flagged comments right now.</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 13, fontFamily: 'Poppins_400Regular' }}>No hidden or flagged comments right now.</Text>
               ) : (
                 commentReviews.slice(0, 6).map((comment) => (
                   <View key={comment.id} style={[styles.commentReviewCard, { borderColor: colors.border }]}>
-                    <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }} numberOfLines={3}>{comment.content}</Text>
-                    <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }}>
+                    <Text style={{ color: colors.text, fontSize: 13, fontFamily: 'Poppins_600SemiBold' }} numberOfLines={3}>{comment.content}</Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 4 }}>
                       {comment.author_name || comment.author_id?.slice(0, 8)} • {comment.moderation_status || 'review'}
                     </Text>
                     {!!comment.moderation_reason && (
-                      <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }} numberOfLines={2}>{comment.moderation_reason}</Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 4 }} numberOfLines={2}>{comment.moderation_reason}</Text>
                     )}
                     <View style={styles.actionRow}>
                       <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: '#22c55e20' }]} onPress={() => handleModerateComment(comment.id, 'approved')}>
-                        <Text style={{ color: '#16a34a', fontSize: 12, fontWeight: '600' }}>Approve</Text>
+                        <Text style={{ color: '#16a34a', fontSize: 12, fontFamily: 'Poppins_600SemiBold' }}>Approve</Text>
                       </TouchableOpacity>
                       <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: '#eab30820' }]} onPress={() => handleModerateComment(comment.id, 'blocked')}>
-                        <Text style={{ color: '#eab308', fontSize: 12, fontWeight: '600' }}>Hide</Text>
+                        <Text style={{ color: '#eab308', fontSize: 12, fontFamily: 'Poppins_600SemiBold' }}>Hide</Text>
                       </TouchableOpacity>
                       <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: '#ef444420' }]} onPress={() => handleDeleteComment(comment.id)}>
-                        <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '600' }}>Delete</Text>
+                        <Text style={{ color: '#ef4444', fontSize: 12, fontFamily: 'Poppins_600SemiBold' }}>Delete</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -250,13 +250,13 @@ export default function AdminPostsPage() {
             >
               <View style={styles.cardRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }} numberOfLines={2}>{item.body || '(no text)'}</Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 4 }}>By: {item.author_name || item.author_id?.slice(0, 8)}</Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>{new Date(item.created_at).toLocaleString()}</Text>
+                  <Text style={{ color: colors.text, fontSize: 14, fontFamily: 'Poppins_600SemiBold' }} numberOfLines={2}>{item.body || '(no text)'}</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 4 }}>By: {item.author_name || item.author_id?.slice(0, 8)}</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 2 }}>{new Date(item.created_at).toLocaleString()}</Text>
                 </View>
                 {item.report_count > 0 && (
                   <View style={[styles.badge, { backgroundColor: '#ef444420' }]}>
-                    <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: '600' }}>{item.report_count} reports</Text>
+                    <Text style={{ color: '#ef4444', fontSize: 11, fontFamily: 'Poppins_600SemiBold' }}>{item.report_count} reports</Text>
                   </View>
                 )}
               </View>
@@ -268,7 +268,7 @@ export default function AdminPostsPage() {
                   style={[styles.actionBtn, { backgroundColor: '#eab30820' }]}
                   onPress={() => handleHidePost(item.id)}
                 >
-                  <Text style={{ color: '#eab308', fontSize: 12, fontWeight: '600' }}>{item.is_hidden ? 'Restore' : 'Hide'}</Text>
+                  <Text style={{ color: '#eab308', fontSize: 12, fontFamily: 'Poppins_600SemiBold' }}>{item.is_hidden ? 'Restore' : 'Hide'}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   activeOpacity={1}
@@ -277,12 +277,12 @@ export default function AdminPostsPage() {
                   style={[styles.actionBtn, { backgroundColor: '#ef444420' }]}
                   onPress={() => handleDeletePost(item.id)}
                 >
-                  <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '600' }}>Delete</Text>
+                  <Text style={{ color: '#ef4444', fontSize: 12, fontFamily: 'Poppins_600SemiBold' }}>Delete</Text>
                 </TouchableOpacity>
               </View>
             </View>
           )}
-          ListEmptyComponent={<Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 40 }}>No posts found</Text>}
+          ListEmptyComponent={<Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', textAlign: 'center', marginTop: 40 }}>No posts found</Text>}
         />
       )}
     </View>
@@ -294,8 +294,8 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   tabsRow: { paddingHorizontal: 16, paddingTop: 8, gap: 8 },
   tabButton: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, gap: 6 },
-  tabText: { fontSize: 13, fontWeight: '600' },
-  searchInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14 },
+  tabText: { fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
+  searchInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, fontFamily: 'Poppins_400Regular' },
   filterChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, borderWidth: 1, marginRight: 8 },
   card: { padding: 14, borderRadius: 12, borderWidth: 1, marginBottom: 10 },
   cardRow: { flexDirection: 'row', alignItems: 'flex-start' },

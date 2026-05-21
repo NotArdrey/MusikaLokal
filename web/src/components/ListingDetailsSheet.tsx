@@ -1274,6 +1274,8 @@ const ListingDetailsSheet = forwardRef<
         cooldownDays,
         rejectedAt: data?.rejected_at,
         createdAt: data?.created_at,
+        eventDate: group.event_date,
+        eventStartTime: group.requirements?.event_start_time,
       });
 
       setIsReapplicationCooldownActive(cooldownInfo.isActive);

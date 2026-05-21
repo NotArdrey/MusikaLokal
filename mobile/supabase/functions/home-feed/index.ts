@@ -74,7 +74,7 @@ const createDbClient = (req: Request) => {
     );
 };
 
-type FeedAction = "featured" | "for-you" | "skill-suggestions" | "ai-status";
+type FeedAction = "featured" | "for-you" | "skill-suggestions" | "ai-status" | "mobile_home";
 type RecommendationMode = "for-you" | "skill-suggestions";
 
 interface FeedRequestBody {
@@ -526,6 +526,37 @@ const scoreCandidate = (
         score: Math.round(clamp(score / 100) * 100),
         reason: activityMatch.reason || buildFallbackReason(matchedSkills, matchedGenres, candidate.type),
     };
+};
+
+const ensureRecommendationTypeCoverage = (
+    ranked: Array<{ item: CandidateItem; score: number; reason: string }>,
+    candidates: Array<{ item: CandidateItem; score: number; reason: string }>,
+    requiredTypes: RecommendationItemType[],
+    limit: number,
+) => {
+    if (requiredTypes.length === 0) {
+        return ranked.slice(0, limit);
+    }
+
+    const out = ranked.slice(0, limit);
+    const usedIds = new Set(out.map((entry) => entry.item.id));
+
+    for (const type of requiredTypes) {
+        if (out.some((entry) => entry.item.type === type)) continue;
+
+        const candidate = candidates.find((entry) => entry.item.type === type && !usedIds.has(entry.item.id));
+        if (!candidate) continue;
+
+        const insertIndex = Math.min(out.length, type === "Gig" ? 4 : out.length);
+        out.splice(insertIndex, 0, candidate);
+        usedIds.add(candidate.item.id);
+
+        if (out.length > limit) {
+            out.splice(limit, out.length - limit);
+        }
+    }
+
+    return out.slice(0, limit);
 };
 
 const extractJsonObject = (content: string) => {
@@ -1039,9 +1070,15 @@ const getRecommendations = async (
         })
         .sort((a, b) => b.score - a.score)
         .slice(0, Math.max(20, limit));
+    const requiredTypes: RecommendationItemType[] = mode === "for-you" ? ["Gig"] : [];
 
     if (LOCAL_ONLY_MODE) {
-        const fallbackRank = deterministicRank.slice(0, limit);
+        const fallbackRank = ensureRecommendationTypeCoverage(
+            deterministicRank,
+            deterministicRank,
+            requiredTypes,
+            limit,
+        );
         return {
             recommendations: buildRecommendationResponse(fallbackRank, false, "Local Ranker"),
             aiPowered: false,
@@ -1053,8 +1090,14 @@ const getRecommendations = async (
     const aiRank = await rankWithGroq(groqApiKey, profile, mode, deterministicRank, limit, activity);
 
     if (aiRank && aiRank.ranked.length > 0) {
+        const coveredRank = ensureRecommendationTypeCoverage(
+            aiRank.ranked,
+            deterministicRank,
+            requiredTypes,
+            limit,
+        );
         return {
-            recommendations: buildRecommendationResponse(aiRank.ranked, true, aiRank.provider),
+            recommendations: buildRecommendationResponse(coveredRank, true, aiRank.provider),
             aiPowered: true,
             aiProvider: aiRank.provider,
             message: mode === "for-you"
@@ -1063,7 +1106,12 @@ const getRecommendations = async (
         };
     }
 
-    const fallbackRank = deterministicRank.slice(0, limit);
+    const fallbackRank = ensureRecommendationTypeCoverage(
+        deterministicRank,
+        deterministicRank,
+        requiredTypes,
+        limit,
+    );
     return {
         recommendations: buildRecommendationResponse(fallbackRank, false, "Local Ranker"),
         aiPowered: false,

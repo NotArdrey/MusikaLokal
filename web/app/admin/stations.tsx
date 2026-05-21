@@ -478,7 +478,7 @@ export default function AdminStationsPage() {
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Header title="Admin" hideBackButton />
         <View style={styles.centered}>
-          <Text style={{ color: colors.textSecondary }}>Access denied</Text>
+          <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>Access denied</Text>
         </View>
       </View>
     );
@@ -529,7 +529,7 @@ export default function AdminStationsPage() {
                 ) : (
                   <Ionicons name="sparkles-outline" size={17} color={colors.primary} />
                 )}
-                <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '800' }}>Auto Create</Text>
+                <Text style={{ color: colors.primary, fontSize: 13, fontFamily: 'Poppins_700Bold' }}>Auto Create</Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -568,7 +568,7 @@ export default function AdminStationsPage() {
                     },
                   ]}
                 >
-                  <Text style={{ color: stationFilter === nextFilter ? '#FFFFFF' : colors.text, fontSize: 13, textTransform: 'capitalize' }}>
+                  <Text style={{ color: stationFilter === nextFilter ? '#FFFFFF' : colors.text, fontSize: 13, fontFamily: 'Poppins_500Medium', textTransform: 'capitalize' }}>
                     {nextFilter}
                   </Text>
                 </TouchableOpacity>
@@ -587,7 +587,7 @@ export default function AdminStationsPage() {
                 accessibilityLabel="admin-stations-load-error"
                 style={[styles.errorBanner, { borderColor: '#EF4444', backgroundColor: '#EF444420' }]}
               >
-                <Text style={{ color: '#EF4444', fontSize: 13, fontWeight: '700' }}>
+                <Text style={{ color: '#EF4444', fontSize: 13, fontFamily: 'Poppins_700Bold' }}>
                   {dataError}
                 </Text>
               </View>
@@ -600,7 +600,7 @@ export default function AdminStationsPage() {
                 style={[styles.infoBanner, { borderColor: colors.border, backgroundColor: colors.primary + '14' }]}
               >
                 <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
-                <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700', flex: 1 }}>
+                <Text style={{ color: colors.text, fontSize: 13, fontFamily: 'Poppins_700Bold', flex: 1 }}>
                   {stationActionMessage}
                 </Text>
               </View>
@@ -626,25 +626,25 @@ export default function AdminStationsPage() {
                   <Ionicons name="radio-outline" size={22} color={isLive ? colors.primary : colors.textSecondary} />
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700' }} numberOfLines={1}>
+                  <Text style={{ color: colors.text, fontSize: 15, fontFamily: 'Poppins_700Bold' }} numberOfLines={1}>
                     {item.name || 'Untitled station'}
                   </Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 2 }} numberOfLines={1}>
                     {getOwnerName(owner)}{item.genre ? ` - ${item.genre}` : ''}
                   </Text>
                 </View>
                 <View style={[styles.statusBadge, { backgroundColor: isLive ? '#22C55E20' : '#64748B20' }]}>
-                  <Text style={{ color: isLive ? '#22C55E' : colors.textSecondary, fontSize: 11, fontWeight: '700' }}>
+                  <Text style={{ color: isLive ? '#22C55E' : colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_700Bold' }}>
                     {isLive ? 'LIVE' : 'OFFLINE'}
                   </Text>
                 </View>
               </View>
 
               <View style={styles.metaRow}>
-                <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular' }}>
                   {item.slot_count} playlist{item.slot_count === 1 ? '' : 's'}
                 </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular' }}>
                   Continuous loop
                 </Text>
               </View>
@@ -652,19 +652,19 @@ export default function AdminStationsPage() {
               {queuePreview.current ? (
                 <View style={[styles.queuePreview, { backgroundColor: isDark ? '#0F172A' : '#F8FAFC', borderColor: colors.border }]}>
                   <View style={styles.queuePreviewItem}>
-                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' }}>
                       On air
                     </Text>
-                    <Text style={{ color: colors.text, fontSize: 13, fontWeight: '800' }} numberOfLines={1}>
+                    <Text style={{ color: colors.text, fontSize: 13, fontFamily: 'Poppins_700Bold' }} numberOfLines={1}>
                       {queuePreview.current?.title || 'Playlist'}
                     </Text>
                   </View>
                   <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
                   <View style={styles.queuePreviewItem}>
-                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '800', textTransform: 'uppercase' }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' }}>
                       {queuePreview.loops ? 'Loops to' : 'Up next'}
                     </Text>
-                    <Text style={{ color: colors.text, fontSize: 13, fontWeight: '800' }} numberOfLines={1}>
+                    <Text style={{ color: colors.text, fontSize: 13, fontFamily: 'Poppins_700Bold' }} numberOfLines={1}>
                       {queuePreview.next?.title || 'Playlist'}
                     </Text>
                   </View>
@@ -717,7 +717,7 @@ export default function AdminStationsPage() {
 
             {visibleStations.length === 0 ? (
               hasStations ? (
-                <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 28 }}>
+                <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', textAlign: 'center', marginTop: 28 }}>
                   No stations match your filters.
                 </Text>
               ) : (
@@ -769,7 +769,7 @@ export default function AdminStationsPage() {
                         ) : (
                           <Ionicons name="sparkles-outline" size={17} color={colors.primary} />
                         )}
-                        <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '800' }}>Auto Create</Text>
+                        <Text style={{ color: colors.primary, fontSize: 13, fontFamily: 'Poppins_700Bold' }}>Auto Create</Text>
                       </TouchableOpacity>
                     ) : null}
                   </View>
@@ -789,10 +789,10 @@ export default function AdminStationsPage() {
           >
             <View style={styles.modalHeader}>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }}>
+                <Text style={{ color: colors.text, fontSize: 17, fontFamily: 'Poppins_700Bold' }}>
                   Add Station
                 </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 2 }}>
                   Choose the main station owner, then add any playlists to its radio queue.
                 </Text>
               </View>
@@ -850,10 +850,10 @@ export default function AdminStationsPage() {
                         <Ionicons name={source?.kind === 'group' ? 'people-outline' : 'person-outline'} size={20} color={colors.primary} />
                       </View>
                       <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800' }} numberOfLines={1}>
+                        <Text style={{ color: colors.text, fontSize: 14, fontFamily: 'Poppins_700Bold' }} numberOfLines={1}>
                           {source?.name || 'Untitled source'}
                         </Text>
-                        <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+                        <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 2 }} numberOfLines={1}>
                           {source?.genre || source?.kind || 'Music'} - {source?.playlist_count || 0} playlist{source?.playlist_count === 1 ? '' : 's'} - {source?.track_count || 0} track{source?.track_count === 1 ? '' : 's'}
                         </Text>
                       </View>
@@ -868,10 +868,10 @@ export default function AdminStationsPage() {
                   style={[styles.sourceEmpty, { borderColor: colors.border, backgroundColor: colors.primary + '10' }]}
                 >
                   <Ionicons name="musical-notes-outline" size={28} color={colors.primary} />
-                  <Text style={{ color: colors.text, fontSize: 15, fontWeight: '800', marginTop: 8 }}>
+                  <Text style={{ color: colors.text, fontSize: 15, fontFamily: 'Poppins_700Bold', marginTop: 8 }}>
                     {manualStationSources.length > 0 ? 'No matching sources' : 'No eligible playlist sources'}
                   </Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginTop: 5, lineHeight: 19 }}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13, fontFamily: 'Poppins_400Regular', textAlign: 'center', marginTop: 5, lineHeight: 19 }}>
                     {manualStationSources.length > 0
                       ? 'Try a source name, genre, kind, or playlist title.'
                       : 'Create a public musician or group playlist first, then add it as a station.'}
@@ -892,10 +892,10 @@ export default function AdminStationsPage() {
           >
             <View style={styles.modalHeader}>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }}>
+                <Text style={{ color: colors.text, fontSize: 17, fontFamily: 'Poppins_700Bold' }}>
                   {editingSource?.station?.id ? 'Edit Station' : 'Make Station'}
                 </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 2 }}>
                   {editingSource?.name || ''}
                 </Text>
               </View>
@@ -971,7 +971,7 @@ export default function AdminStationsPage() {
                           },
                         ]}
                       >
-                        <Text style={{ color: selected ? '#FFFFFF' : colors.text, fontSize: 12, fontWeight: '700' }}>
+                        <Text style={{ color: selected ? '#FFFFFF' : colors.text, fontSize: 12, fontFamily: 'Poppins_700Bold' }}>
                           {status.label}
                         </Text>
                       </TouchableOpacity>
@@ -981,10 +981,10 @@ export default function AdminStationsPage() {
               </View>
             </View>
 
-            <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700', marginTop: 6, marginBottom: 8 }}>
+            <Text style={{ color: colors.text, fontSize: 13, fontFamily: 'Poppins_700Bold', marginTop: 6, marginBottom: 8 }}>
               Station playlists
             </Text>
-            <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 18, marginBottom: 10 }}>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', lineHeight: 18, marginBottom: 10 }}>
               Pick one or more playlists from any owner. They play as one continuous queue and loop after the final track.
             </Text>
             <View style={[styles.modalSearchBox, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
@@ -1027,10 +1027,10 @@ export default function AdminStationsPage() {
                     >
                       <Ionicons name={selected ? 'checkbox' : 'square-outline'} size={20} color={selected ? colors.primary : colors.textSecondary} />
                       <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }} numberOfLines={1}>
+                        <Text style={{ color: colors.text, fontSize: 13, fontFamily: 'Poppins_700Bold' }} numberOfLines={1}>
                           {playlist.title || 'Untitled playlist'}
                         </Text>
-                        <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
+                        <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
                           {playlist.source_name || 'Unknown source'} - {playlist.track_count || 0} track{playlist.track_count === 1 ? '' : 's'}
                         </Text>
                       </View>
@@ -1044,10 +1044,10 @@ export default function AdminStationsPage() {
                   style={[styles.sourceEmpty, { borderColor: colors.border, backgroundColor: colors.primary + '10' }]}
                 >
                   <Ionicons name="search-outline" size={28} color={colors.primary} />
-                  <Text style={{ color: colors.text, fontSize: 15, fontWeight: '800', marginTop: 8 }}>
+                  <Text style={{ color: colors.text, fontSize: 15, fontFamily: 'Poppins_700Bold', marginTop: 8 }}>
                     {editorPlaylistOptions.length > 0 ? 'No matching playlists' : 'No playlists available'}
                   </Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginTop: 5, lineHeight: 19 }}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13, fontFamily: 'Poppins_400Regular', textAlign: 'center', marginTop: 5, lineHeight: 19 }}>
                     {editorPlaylistOptions.length > 0
                       ? 'Try a playlist title, owner name, genre, or visibility.'
                       : 'Create a public playlist first, then add it to the station.'}
@@ -1064,7 +1064,7 @@ export default function AdminStationsPage() {
                 onPress={closeEditor}
                 style={[styles.secondaryBtn, { borderColor: colors.border }]}
               >
-                <Text style={{ color: colors.text, fontWeight: '700' }}>Cancel</Text>
+                <Text style={{ color: colors.text, fontFamily: 'Poppins_700Bold' }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 testID="admin-station-editor-save-button"
@@ -1108,6 +1108,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
     marginTop: 12,
   },
   primaryBtn: {
@@ -1120,7 +1121,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 7,
   },
-  primaryBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  primaryBtnText: { color: '#FFFFFF', fontSize: 13, fontFamily: 'Poppins_700Bold' },
   secondaryBtn: {
     minHeight: 40,
     paddingHorizontal: 14,
@@ -1141,8 +1142,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   headerActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 },
-  sectionTitle: { fontSize: 16, fontWeight: '800' },
-  sectionSub: { fontSize: 12, marginTop: 3 },
+  sectionTitle: { fontSize: 16, fontFamily: 'Poppins_700Bold' },
+  sectionSub: { fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 3 },
   filterRow: { paddingVertical: 10, gap: 8 },
   filterChip: {
     paddingHorizontal: 14,
@@ -1190,7 +1191,7 @@ const styles = StyleSheet.create({
   },
   actionBtnText: {
     fontSize: 12,
-    fontWeight: '700',
+    fontFamily: 'Poppins_700Bold',
     lineHeight: 14,
     includeFontPadding: false,
   },
@@ -1220,8 +1221,8 @@ const styles = StyleSheet.create({
     padding: 22,
     marginTop: 18,
   },
-  emptyTitle: { fontSize: 17, fontWeight: '800', marginTop: 10 },
-  emptyDescription: { fontSize: 13, textAlign: 'center', marginTop: 5, lineHeight: 19 },
+  emptyTitle: { fontSize: 17, fontFamily: 'Poppins_700Bold', marginTop: 10 },
+  emptyDescription: { fontSize: 13, fontFamily: 'Poppins_400Regular', textAlign: 'center', marginTop: 5, lineHeight: 19 },
   emptyActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: 16 },
   modalBackdrop: {
     flex: 1,
@@ -1254,6 +1255,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
     paddingVertical: 9,
   },
   searchClearButton: {
@@ -1286,12 +1288,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
     marginBottom: 10,
   },
   descriptionInput: { minHeight: 70, textAlignVertical: 'top' },
   modalInputRow: { flexDirection: 'row', gap: 10 },
   field: { marginBottom: 10 },
-  fieldLabel: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
+  fieldLabel: { fontSize: 12, fontFamily: 'Poppins_700Bold', marginBottom: 6 },
   halfField: { flex: 1 },
   statusSelectorRow: { flexDirection: 'row', gap: 8 },
   statusSelectorButton: {

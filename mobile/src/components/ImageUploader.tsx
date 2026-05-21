@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
+import { screenUploadsWithAiDecisions } from '../services/uploadSafetyScreen';
 import { createE2EImageFixtureUrls, isE2EFixtureMode } from '../utils/e2eFixtures';
 import CustomAlert, { AlertType } from './CustomAlert';
 
@@ -101,6 +102,7 @@ interface PreparedImageUpload {
   extension: string;
   mimeType: string;
   size: number;
+  contentDataUrl: string;
   uploadBody: ArrayBuffer | Blob | Uint8Array;
 }
 
@@ -166,6 +168,7 @@ const prepareImageForUpload = async (
     extension,
     mimeType,
     size,
+    contentDataUrl: `data:${mimeType};base64,${base64}`,
     uploadBody,
   };
 };
@@ -198,6 +201,7 @@ export default function ImageUploader({
   bucketName = 'listings',
   userId,
   folder = 'general',
+  safetyContext = 'add_edit_upload',
 }: ImageUploaderProps) {
   const { colors, isDark } = useTheme();
   const uploadingRef = useRef(false);
@@ -311,11 +315,46 @@ export default function ImageUploader({
         return;
       }
 
+      setUploadMessage('Checking photos...');
+      const safetyDecisions = await screenUploadsWithAiDecisions(
+        preparedUploads.map((item) => ({
+          name: item.originalName,
+          mimeType: item.mimeType,
+          size: item.size,
+          uri: item.asset.uri,
+          kind: 'photo' as const,
+          contentDataUrl: item.contentDataUrl,
+        })),
+        safetyContext,
+      );
+
+      const skippedImages: SkippedImageFeedback[] = [...skippedBeforeScreening];
+      const approvedUploads = preparedUploads.filter((item, index) => {
+        const decision = safetyDecisions[index];
+        if (decision?.allowed === true) {
+          return true;
+        }
+
+        skippedImages.push({
+          name: item.originalName,
+          reason: decision?.reason || 'This image did not pass safety screening.',
+        });
+        return false;
+      });
+
+      if (approvedUploads.length === 0) {
+        showAlert(
+          'error',
+          'Upload Blocked',
+          `No images were uploaded.${formatSkippedImageFeedback(skippedImages)}`,
+        );
+        return;
+      }
+
       setUploadMessage('Uploading photos...');
       const uploadedUrls: string[] = [];
-      const skippedImages: SkippedImageFeedback[] = [...skippedBeforeScreening];
 
-      for (const item of preparedUploads) {
+      for (const item of approvedUploads) {
         try {
           const fileName = `${userId}/${folder}/${Date.now()}_${Math.random().toString(36).substring(7)}.${item.extension}`;
 

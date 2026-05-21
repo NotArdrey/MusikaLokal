@@ -22,8 +22,9 @@ import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import {
-  ensurePlaylistAudioPassesCopyrightScreening,
+  applyPlaylistAudioCopyrightDecision,
   pickPlaylistAudioFile,
+  screenPlaylistAudioForCopyright,
   uploadPlaylistAudioFile,
   type PlaylistAudioFile,
 } from "../src/utils/playlistAudio";
@@ -36,9 +37,9 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const PLAYLIST_COVER_BUCKET = "post-media";
 const PLAYLIST_COVER_FOLDER = "playlist-covers";
 const PLAYLIST_TRACK_IMAGE_FOLDER = "playlist-track-images";
-const COPYRIGHT_MATCH_PATTERN = /this (?:audio|track) appears to match|appears to be copyrighted|permission to share/i;
+const COPYRIGHT_MATCH_PATTERN = /this (?:audio|track) appears to match|appears to be copyrighted|ownership request|identity review|admin approval|permission to share/i;
 const EXPECTED_UPLOAD_FEEDBACK_PATTERN =
-  /(blocked by safety screening|safety check|copyright check|appears to match|appears to be copyrighted|permission to share|please upload music you own|licensed to share|playlist tracks must be|tracks must be|only mp3)/i;
+  /(blocked by safety screening|safety check|copyright check|appears to match|appears to be copyrighted|ownership request|identity review|admin approval|permission to share|please upload music you own|licensed to share|playlist tracks must be|tracks must be|only mp3)/i;
 const PLAYLIST_COPYRIGHT_TERMS_BODY =
   "Under the Intellectual Property Code (RA 8293), protection is automatic from the moment of creation, securing creators' economic and moral rights. Unauthorized public performance, reproduction, or streaming without a license constitutes copyright infringement.";
 const PLAYLIST_COPYRIGHT_ACKNOWLEDGEMENT =
@@ -108,6 +109,19 @@ const isExpectedUploadFeedback = (message: string) =>
 
 const formatUploadFeedbackMessage = (message: string) =>
   message.replace(/^.+? was blocked by safety screening\.\s*/i, "").trim() || message;
+
+const formatCopyrightPendingMessage = (reason?: string) =>
+  reason || "This MP3 appears to be copyrighted and was sent to admin review. You can still create the playlist; this track will stay unavailable publicly until admin approves it.";
+
+const getCopyrightPayload = (source?: Partial<PlaylistAudioFile> | null) => ({
+  copyright_status: source?.copyrightStatus || "not_required",
+  copyright_review_id: source?.copyrightReviewId || null,
+  copyright_metadata: source?.copyrightMetadata || (
+    source?.copyrightTrackKey
+      ? { copyright_track_key: source.copyrightTrackKey }
+      : {}
+  ),
+});
 
 const logCreatePlaylistMp3 = (event: string, payload: Record<string, unknown> = {}) => {
   console.log("[CreatePlaylist][MP3]", event, payload);
@@ -378,13 +392,26 @@ export default function CreatePlaylistScreen() {
         traceId: audioFile.debugTraceId || null,
         name: audioFile.name,
       });
-      await ensurePlaylistAudioPassesCopyrightScreening(audioFile);
+      const copyrightScreening = await screenPlaylistAudioForCopyright(audioFile);
       logCreatePlaylistMp3("copyright_check_done", {
         trackId,
         traceId: audioFile.debugTraceId || null,
+        requiresAdminReview: Boolean(copyrightScreening.decision.requiresAdminReview),
+        copyrightStatus: copyrightScreening.decision.copyrightStatus || null,
+        copyrightReviewId: copyrightScreening.decision.copyrightReviewId || null,
         elapsedMs: Date.now() - startedAt,
       });
-      setTrackAudioFile(trackId, audioFile);
+      const reviewedAudioFile = applyPlaylistAudioCopyrightDecision(audioFile, copyrightScreening.decision);
+      setTrackAudioFile(trackId, reviewedAudioFile);
+
+      if (copyrightScreening.decision.requiresAdminReview) {
+        setAlert({
+          type: "warning",
+          title: "Copyright Match Found",
+          message: formatCopyrightPendingMessage(copyrightScreening.decision.reason),
+          forceModal: true,
+        });
+      }
     } catch (error: any) {
       const pickerErrorMessage = getFriendlyUploadErrorMessage(error);
       const displayMessage = isExpectedUploadFeedback(pickerErrorMessage)
@@ -517,10 +544,12 @@ export default function CreatePlaylistScreen() {
 
         if (!isEditing && playlistId && draftItems.length > 0) {
           const failedTracks: { title: string; reason?: string }[] = [];
+          const pendingReviewTracks: string[] = [];
 
           for (const track of draftItems) {
             try {
               let sourceUrl: string | null = null;
+              let copyrightPayload = getCopyrightPayload(track.audio_file);
               if (track.audio_file) {
                 if (isE2EFixtureMode()) {
                   sourceUrl = track.audio_file.uri;
@@ -539,6 +568,15 @@ export default function CreatePlaylistScreen() {
                   });
                   const upload = await uploadPlaylistAudioFile(track.audio_file, playlistId);
                   sourceUrl = upload.publicUrl;
+                  copyrightPayload = getCopyrightPayload({
+                    copyrightStatus: upload.copyrightStatus,
+                    copyrightReviewId: upload.copyrightReviewId,
+                    copyrightTrackKey: upload.copyrightTrackKey,
+                    copyrightMetadata: upload.copyrightMetadata,
+                  });
+                  if (upload.copyrightRequiresAdminReview || upload.copyrightStatus === "pending_review") {
+                    pendingReviewTracks.push(track.title);
+                  }
                   logCreatePlaylistMp3("save_upload_done", {
                     trackId: track.id,
                     traceId: track.audio_file.debugTraceId || null,
@@ -558,6 +596,7 @@ export default function CreatePlaylistScreen() {
                 cover_image_url: track.cover_image_url,
                 audio_url: sourceUrl,
                 duration_seconds: track.duration_seconds,
+                ...copyrightPayload,
               };
 
               const { error: itemError } = await supabase.functions.invoke("manage-playlists", {
@@ -593,6 +632,28 @@ export default function CreatePlaylistScreen() {
                 ? "Copyright Match Found"
                 : "Track Upload Feedback",
               message: displayReason || `${failedTracks.length} track${failedTracks.length === 1 ? "" : "s"} could not be uploaded.`,
+              forceModal: true,
+              buttons: [
+                {
+                  text: isGroupPlaylistCreate ? "Back to Group" : "View Playlist",
+                  onPress: () => {
+                    if (isGroupPlaylistCreate) {
+                      returnToGroupScreen(playlistId);
+                    } else {
+                      router.replace({ pathname: "/playlist_details", params: { playlist_id: playlistId } });
+                    }
+                  },
+                },
+              ],
+            });
+            return;
+          }
+
+          if (pendingReviewTracks.length > 0) {
+            setAlert({
+              type: "warning",
+              title: "Playlist Created",
+              message: `${pendingReviewTracks.length} copyrighted MP3${pendingReviewTracks.length === 1 ? "" : "s"} were sent to admin review. Non-copyrighted tracks are available now; reviewed tracks will become available after approval.`,
               forceModal: true,
               buttons: [
                 {
@@ -685,6 +746,7 @@ export default function CreatePlaylistScreen() {
             bucketName={PLAYLIST_COVER_BUCKET}
             userId={userId}
             folder={PLAYLIST_COVER_FOLDER}
+            safetyContext="playlist_cover_upload"
           />
         ) : null}
 
@@ -840,6 +902,7 @@ export default function CreatePlaylistScreen() {
                         bucketName={PLAYLIST_COVER_BUCKET}
                         userId={userId}
                         folder={PLAYLIST_TRACK_IMAGE_FOLDER}
+                        safetyContext="playlist_track_image_upload"
                       />
                     </>
                   ) : null}

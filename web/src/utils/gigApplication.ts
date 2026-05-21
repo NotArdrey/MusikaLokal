@@ -48,7 +48,7 @@ export const getGigApplicationDeadlineInfo = (
     }
   }
 
-  const deadline = new Date(eventDate.getTime() - 24 * 60 * 60 * 1000);
+  const deadline = new Date(eventDate.getTime());
   const now = new Date();
   const hoursUntilDeadline = (deadline.getTime() - now.getTime()) / (1000 * 60 * 60);
 

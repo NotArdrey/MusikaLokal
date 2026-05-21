@@ -314,6 +314,39 @@ const defaultPaymentTotals: AdminPaymentTotals = {
 
 const ADMIN_WITHDRAW_QUICK_AMOUNTS = [100, 500, 1000];
 
+const sanitizeCurrencyInput = (value: string) => {
+  const cleaned = value.replace(/[^\d.]/g, '');
+  if (!cleaned) return '';
+
+  const [wholePart, ...decimalParts] = cleaned.split('.');
+  const whole = wholePart.replace(/^0+(?=\d)/, '');
+
+  if (decimalParts.length === 0) {
+    return whole;
+  }
+
+  const decimal = decimalParts.join('').slice(0, 2);
+  return `${whole || '0'}.${decimal}`;
+};
+
+const parseCurrencyInputAmount = (value: string) => {
+  const normalized = sanitizeCurrencyInput(value);
+  if (!normalized) return Number.NaN;
+
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : Number.NaN;
+};
+
+const formatCurrencyInputAmount = (value?: number | null) => {
+  const amount = Math.max(Number(value || 0), 0);
+  if (!Number.isFinite(amount)) return '';
+
+  const rounded = Math.round(amount * 100) / 100;
+  return Number.isInteger(rounded)
+    ? String(rounded)
+    : rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+};
+
 const formatCurrency = (value?: number | null) => {
   const safeValue = Number(value || 0);
   return `₱${safeValue.toLocaleString('en-PH', {
@@ -1651,8 +1684,12 @@ export default function AdminDashboardPage() {
     adminWithdrawSheetRef.current?.dismiss();
   }, []);
 
+  const handleAdminWithdrawAmountChange = useCallback((value: string) => {
+    setAdminWithdrawAmount(sanitizeCurrencyInput(value));
+  }, []);
+
   const adminWithdrawAvailable = Math.max(Number(metrics.platformAvailable ?? metrics.netRevenue ?? 0), 0);
-  const parsedAdminWithdrawAmount = Number(adminWithdrawAmount);
+  const parsedAdminWithdrawAmount = parseCurrencyInputAmount(adminWithdrawAmount);
   const isAdminWithdrawReady =
     Number.isFinite(parsedAdminWithdrawAmount) &&
     parsedAdminWithdrawAmount >= 100 &&
@@ -1661,7 +1698,7 @@ export default function AdminDashboardPage() {
   const handleAdminWithdrawSubmit = useCallback(async () => {
     if (adminWithdrawSubmitting) return;
 
-    const amount = Number(adminWithdrawAmount);
+    const amount = parseCurrencyInputAmount(adminWithdrawAmount);
     if (!Number.isFinite(amount) || amount < 100 || amount > adminWithdrawAvailable) {
       showAlert('error', 'Invalid Amount', 'Enter an amount within the available platform net.');
       return;
@@ -2564,28 +2601,37 @@ export default function AdminDashboardPage() {
                 testID="admin-platform-withdrawal-amount-input"
                 accessibilityLabel="admin-platform-withdrawal-amount-input"
                 value={adminWithdrawAmount}
-                onChangeText={setAdminWithdrawAmount}
+                onChangeText={handleAdminWithdrawAmountChange}
+                inputMode="decimal"
                 keyboardType="decimal-pad"
-                placeholder="0.00"
+                placeholder="Enter custom amount"
                 placeholderTextColor={colors.textSecondary}
+                selectTextOnFocus
                 style={[styles.adminWithdrawInput, { color: colors.text }]}
               />
             </View>
-            <Text style={[styles.adminWithdrawHint, { color: colors.textSecondary }]}>Minimum withdrawal: PHP 100</Text>
+            <Text style={[styles.adminWithdrawHint, { color: colors.textSecondary }]}>
+              {adminWithdrawAvailable >= 100
+                ? `Enter any amount from PHP 100 up to ${formatCurrency(adminWithdrawAvailable)}.`
+                : 'No platform net is available to withdraw yet.'}
+            </Text>
           </View>
 
           <View style={styles.adminWithdrawQuickGrid}>
             {[...ADMIN_WITHDRAW_QUICK_AMOUNTS, adminWithdrawAvailable].map((amount, index) => {
               const isMax = index === ADMIN_WITHDRAW_QUICK_AMOUNTS.length;
               const normalizedAmount = Math.max(Number(amount || 0), 0);
-              const isActive = Number(adminWithdrawAmount) === normalizedAmount && normalizedAmount > 0;
+              const isActive =
+                Number.isFinite(parsedAdminWithdrawAmount) &&
+                Math.abs(parsedAdminWithdrawAmount - normalizedAmount) < 0.005 &&
+                normalizedAmount > 0;
               return (
                 <TouchableOpacity
                   testID={isMax ? 'admin-platform-withdrawal-quick-max' : `admin-platform-withdrawal-quick-${normalizedAmount}`}
                   accessibilityLabel={isMax ? 'admin-platform-withdrawal-quick-max' : `admin-platform-withdrawal-quick-${normalizedAmount}`}
                   key={isMax ? 'max' : String(amount)}
                   activeOpacity={0.8}
-                  onPress={() => setAdminWithdrawAmount(String(normalizedAmount))}
+                  onPress={() => setAdminWithdrawAmount(formatCurrencyInputAmount(normalizedAmount))}
                   style={[
                     styles.adminWithdrawQuickButton,
                     {

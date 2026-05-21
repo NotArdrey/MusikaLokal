@@ -273,9 +273,13 @@ export const useApplicationSubmissionAction = ({
       cooldownDays,
       rejectedAt: data?.rejected_at,
       createdAt: data?.created_at,
+      eventDate: group.event_date,
+      eventStartTime: group.requirements?.event_start_time,
     });
   }, [
+    group?.event_date,
     group?.reapplication_cooldown_days,
+    group?.requirements?.event_start_time,
     group?.type,
     listingId,
     selectedProductionTeamId,
@@ -954,7 +958,7 @@ export const useApplicationSubmissionAction = ({
         type: "error",
         title: "Applications Closed",
         message:
-          "Applications for this gig are already closed (deadline is 24 hours before the event).",
+          "Applications for this gig are already closed because the event has already started.",
       });
       setAlertVisible(true);
       return;

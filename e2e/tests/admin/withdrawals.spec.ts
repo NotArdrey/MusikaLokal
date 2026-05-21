@@ -72,7 +72,7 @@ test.describe('admin platform withdrawals CRUD', () => {
     await page.getByTestId('admin-platform-withdrawal-open-button').click();
     await expectVisible(page.getByTestId('admin-platform-withdrawal-modal'));
 
-    await page.getByTestId('admin-platform-withdrawal-amount-input').fill('100');
+    await page.getByTestId('admin-platform-withdrawal-amount-input').fill('350');
     await expect(page.getByTestId('admin-platform-withdrawal-submit-button')).toBeEnabled({ timeout: 45_000 });
     await page.getByTestId('admin-platform-withdrawal-submit-button').click();
     await expect(page.getByText('Platform Withdrawal Recorded')).toBeVisible({ timeout: 45_000 });
@@ -83,7 +83,7 @@ test.describe('admin platform withdrawals CRUD', () => {
           .from('platform_withdrawals')
           .select('*')
           .eq('processed_by', adminId)
-          .eq('amount', 100)
+          .eq('amount', 350)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -97,7 +97,7 @@ test.describe('admin platform withdrawals CRUD', () => {
       .from('platform_withdrawals')
       .select('*')
       .eq('processed_by', adminId)
-      .eq('amount', 100)
+      .eq('amount', 350)
       .order('created_at', { ascending: false })
       .limit(1)
       .single();

@@ -1145,6 +1145,7 @@ export default function ProfileScreen() {
   const [loadingProfilePosts, setLoadingProfilePosts] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
   const isProfileFan = isFanUserRole(profile?.role) || (isOwner && isFanUserRole(userRole));
+  const shouldHideProfessionalProfileStats = isFan || isProfileFan;
   const [, setGigStats] = useState({ active: 0, upcoming: 0, done: 0 });
   const [gigTimeline, setGigTimeline] = useState<{
     active: any[];
@@ -3711,28 +3712,32 @@ export default function ProfileScreen() {
             )}
 
             <View style={styles.statsContainer}>
-              <View style={styles.statItem}>
-                <Text style={[styles.statValue, { color: colors.text }]}>
-                  {profile?.rating
-                    ? `${Math.round(profile.rating * 20)}%`
-                    : "N/A"}
-                </Text>
-                <Text
-                  style={[styles.statLabel, { color: colors.textSecondary }]}
-                >
-                  Rating
-                </Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={[styles.statValue, { color: colors.text }]}>
-                  {formatProfileCompletionRate(profile?.completion_rate)}
-                </Text>
-                <Text
-                  style={[styles.statLabel, { color: colors.textSecondary }]}
-                >
-                  Completion
-                </Text>
-              </View>
+              {!shouldHideProfessionalProfileStats && (
+                <>
+                  <View style={styles.statItem}>
+                    <Text style={[styles.statValue, { color: colors.text }]}>
+                      {profile?.rating
+                        ? `${Math.round(profile.rating * 20)}%`
+                        : "N/A"}
+                    </Text>
+                    <Text
+                      style={[styles.statLabel, { color: colors.textSecondary }]}
+                    >
+                      Rating
+                    </Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={[styles.statValue, { color: colors.text }]}>
+                      {formatProfileCompletionRate(profile?.completion_rate)}
+                    </Text>
+                    <Text
+                      style={[styles.statLabel, { color: colors.textSecondary }]}
+                    >
+                      Completion
+                    </Text>
+                  </View>
+                </>
+              )}
               <TouchableOpacity
                 activeOpacity={0.8}
                 accessibilityRole="button"

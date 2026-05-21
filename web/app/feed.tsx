@@ -612,6 +612,101 @@ const normalizeFeedPost = (post: any) => {
   };
 };
 
+const FEED_FALLBACK_IMAGES: Record<string, string[]> = {
+  Artist: [
+    "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=900&q=75",
+    "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=900&q=75",
+    "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=900&q=75",
+  ],
+  Gig: [
+    "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=1000&q=75",
+  ],
+  Group: [
+    "https://images.unsplash.com/photo-1521335629791-ce4aec67dd47?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1000&q=75",
+  ],
+  Production: [
+    "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?auto=format&fit=crop&w=1000&q=75",
+  ],
+  Studio: [
+    "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1000&q=75",
+  ],
+  Venue: [
+    "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=1000&q=75",
+    "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=1000&q=75",
+  ],
+};
+
+const getFeedFallbackImage = (type: string, id?: string | null) => {
+  const images = FEED_FALLBACK_IMAGES[type] || FEED_FALLBACK_IMAGES.Group;
+  const seed = String(id || type || "").split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return images[seed % images.length];
+};
+
+const getFeedImageIdentityKey = (value?: string | null) => {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return "";
+  return raw
+    .replace("/storage/v1/object/avatars/", "/storage/v1/object/public/avatars/")
+    .split("#")[0]
+    .split("?")[0]
+    .replace(/\/+$/, "")
+    .toLowerCase();
+};
+
+const getDistinctFeedFallbackImage = (
+  type: string,
+  id: string | null | undefined,
+  blockedImages: Array<string | null | undefined>,
+) => {
+  const images = FEED_FALLBACK_IMAGES[type] || FEED_FALLBACK_IMAGES.Group;
+  const blockedKeys = new Set(
+    blockedImages
+      .map(getFeedImageIdentityKey)
+      .filter((key) => key.length > 0),
+  );
+  const seed = String(id || type || "").split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+
+  for (let offset = 0; offset < images.length; offset += 1) {
+    const candidate = images[(seed + offset) % images.length];
+    if (!blockedKeys.has(getFeedImageIdentityKey(candidate))) {
+      return candidate;
+    }
+  }
+
+  return getFeedFallbackImage(type, id);
+};
+
+const getDistinctFeedCardImages = (
+  type: string,
+  id: string | null | undefined,
+  preferredImages: Array<string | null | undefined>,
+  blockedImages: Array<string | null | undefined>,
+) => {
+  const blockedKeys = new Set(
+    blockedImages
+      .map(getFeedImageIdentityKey)
+      .filter((key) => key.length > 0),
+  );
+  const distinctImages = preferredImages
+    .filter((image): image is string => typeof image === "string" && image.trim().length > 0)
+    .filter((image) => !blockedKeys.has(getFeedImageIdentityKey(image)));
+
+  if (distinctImages.length > 0) {
+    return Array.from(new Set(distinctImages));
+  }
+
+  return [getDistinctFeedFallbackImage(type, id, blockedImages)];
+};
+
 const normalizeAiRecommendationCard = (item: any) => {
   const type = typeof item?.type === "string" && item.type.trim().length > 0 ? item.type.trim() : "Group";
   const displayType = type === "Venue" ? "Gig" : type;
@@ -630,6 +725,16 @@ const normalizeAiRecommendationCard = (item: any) => {
         : typeof item?.logo_url === "string" && item.logo_url.trim().length > 0
           ? item.logo_url
           : null;
+  const sourceImages = Array.isArray(item?.images) && item.images.length > 0
+    ? item.images
+    : primaryImage
+      ? [primaryImage]
+      : [];
+  const uploaderAvatar = isProfile
+    ? primaryImage
+    : item?.uploader_avatar || item?.owner_avatar || item?.organizer_avatar || null;
+  const images = getDistinctFeedCardImages(type, item?.id, sourceImages, [uploaderAvatar]);
+  const cardImage = images[0] || null;
   const description = typeof item?.description === "string" ? item.description.trim() : "";
 
   return {
@@ -638,8 +743,8 @@ const normalizeAiRecommendationCard = (item: any) => {
     id: item?.id,
     type,
     name: item?.name || `Recommended ${displayType}`,
-    image: primaryImage,
-    images: Array.isArray(item?.images) && item.images.length > 0 ? item.images : primaryImage ? [primaryImage] : [],
+    image: cardImage,
+    images,
     body: typeof item?.aiReason === "string" && item.aiReason.trim()
       ? item.aiReason.trim()
       : description || `Recommended ${displayType.toLowerCase()} for your profile.`,
@@ -658,6 +763,7 @@ const normalizeAiRecommendationCard = (item: any) => {
     similarity: Number(item?.similarity || 0),
     aiReason: typeof item?.aiReason === "string" ? item.aiReason : "",
     aiScore: Number(item?.aiScore || 0),
+    uploader_avatar: uploaderAvatar,
     social_follow_target_id: typeof targetId === "string" && targetId.length > 0 ? targetId : null,
     social_follow_target_type: isGroup ? "group" : "profile",
   };
@@ -723,11 +829,12 @@ const normalizeRecentProfileCard = (item: any) =>
     type: "Artist",
     name: item?.full_name || "Solo Artist",
     image: item?.avatar_url || null,
-    images: item?.avatar_url ? [item.avatar_url] : [],
+    images: getDistinctFeedCardImages("Artist", item?.id, item?.avatar_url ? [item.avatar_url] : [], [item?.avatar_url]),
     body: item?.bio || "Solo artist on MusikaLokal.",
     location: item?.address || item?.location || "",
     genre: "Solo Artist",
     owner_id: item?.id || null,
+    uploader_avatar: item?.avatar_url || null,
   });
 
 const normalizeRecentProductionCard = (item: any) =>
@@ -936,7 +1043,10 @@ const SocialMediaGallery = React.memo(function SocialMediaGallery({
 
 const getSocialAvatarUri = (item: any) =>
   resolveFeedMediaUrl(
-    item?.author_avatar ||
+    item?.uploader_avatar ||
+      item?.owner_avatar ||
+      item?.organizer_avatar ||
+      item?.author_avatar ||
       item?.image ||
       item?.studio?.image ||
       item?.studio?.avatar_url ||
@@ -2064,15 +2174,18 @@ export default function FeedScreen() {
             return;
           }
 
-          const feedResult = await supabase.functions.invoke("manage-social-feed", {
-            body: {
-              action: "get_feed",
-              feed_type: "for_you",
-              include_entities: false,
-              limit: FEED_PAGE_SIZE,
-              offset: 0,
-            },
-          });
+          const [feedResult, aiCards] = await Promise.all([
+            supabase.functions.invoke("manage-social-feed", {
+              body: {
+                action: "get_feed",
+                feed_type: "for_you",
+                include_entities: false,
+                limit: FEED_PAGE_SIZE,
+                offset: 0,
+              },
+            }),
+            fetchAiRecommendationCards("for_you"),
+          ]);
 
           if (feedResult.error) {
             logFeedInvokeError("manage-social-feed:get_feed", feedResult.error, {
@@ -2088,7 +2201,7 @@ export default function FeedScreen() {
             ? feedResult.data.data.map(normalizeFeedPost)
             : [];
           setPosts(page);
-          setListingCards([]);
+          setListingCards(aiCards);
           setHasMore(page.length === FEED_PAGE_SIZE);
           return;
         }
@@ -2129,7 +2242,7 @@ export default function FeedScreen() {
         setLoadingMore(false);
       }
     },
-    [fetchTalentCards, isGuest, posts.length, session],
+    [fetchAiRecommendationCards, fetchTalentCards, isGuest, posts.length, session],
   );
 
   const presentListingDetailsWithRetry = useCallback(() => {
@@ -2799,8 +2912,9 @@ export default function FeedScreen() {
       if (tab === "following") {
         return sortFeedItemsNewestFirst(dedupeFeedItems(posts));
       }
+      const rankedCards = listingCards.filter((item) => item?.__feedKind === "ai_card");
       const socialPosts = sortFeedItemsNewestFirst(posts.filter((item) => item?.__feedKind !== "ai_card"));
-      return dedupeFeedItems(socialPosts);
+      return dedupeFeedItems([...rankedCards, ...socialPosts]);
     },
     [listingCards, posts, tab],
   );

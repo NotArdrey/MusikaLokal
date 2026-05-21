@@ -227,6 +227,30 @@ const resolveBookingRequestNotificationTarget = (
   };
 };
 
+const resolveListingConnectionStatusNotificationTarget = (
+  notificationType: string | undefined,
+  record: Record<string, unknown>,
+  meta: Record<string, unknown>,
+): NotificationNavigationTarget | null => {
+  if (notificationType !== "listing_connection_request_status") {
+    return null;
+  }
+
+  const requestStatus = readStringId(
+    meta.request_status,
+    meta.requestStatus,
+    record.request_status,
+    record.requestStatus,
+    meta.status,
+    record.status,
+  )?.toLowerCase();
+
+  return {
+    pathname: "/bookings",
+    params: { tab: !requestStatus || requestStatus !== "pending" ? "History" : "Pending" },
+  };
+};
+
 const isGigApplicationNotification = (
   notificationType: string | undefined,
   record: Record<string, unknown>,
@@ -367,6 +391,11 @@ export const resolveNotificationNavigationTarget = (
   const bookingRequestTarget = resolveBookingRequestNotificationTarget(notificationType, record, meta);
   if (bookingRequestTarget) {
     return bookingRequestTarget;
+  }
+
+  const listingConnectionStatusTarget = resolveListingConnectionStatusNotificationTarget(notificationType, record, meta);
+  if (listingConnectionStatusTarget) {
+    return listingConnectionStatusTarget;
   }
 
   const bookingId = readStringId(

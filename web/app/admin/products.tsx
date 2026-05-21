@@ -110,7 +110,7 @@ export default function AdminProductsPage() {
   };
 
   if (loading || !roleResolved) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /></View>;
-  if (!isAdmin) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Access denied</Text></View></View>;
+  if (!isAdmin) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>Access denied</Text></View></View>;
 
   return (
     <View
@@ -150,7 +150,7 @@ export default function AdminProductsPage() {
               onPress={() => setFilter(f)}
               style={[styles.filterChip, { backgroundColor: filter === f ? colors.primary : colors.card, borderColor: filter === f ? colors.primary : colors.border }]}
             >
-              <Text style={{ color: filter === f ? '#fff' : colors.text, fontSize: 13, textTransform: 'capitalize' }}>{f}</Text>
+              <Text style={{ color: filter === f ? '#fff' : colors.text, fontSize: 13, fontFamily: 'Poppins_500Medium', textTransform: 'capitalize' }}>{f}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -168,10 +168,10 @@ export default function AdminProductsPage() {
             >
               <View style={styles.cardRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>{item.title}</Text>
-                  <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '700', marginTop: 2 }}>₱{Number(item.price || 0).toFixed(2)}</Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>Seller: {item.seller_name || item.seller_id?.slice(0, 8)}</Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>Status: {item.status} | Type: {item.product_type}</Text>
+                  <Text style={{ color: colors.text, fontSize: 14, fontFamily: 'Poppins_600SemiBold' }} numberOfLines={1}>{item.title}</Text>
+                  <Text style={{ color: colors.primary, fontSize: 13, fontFamily: 'Poppins_700Bold', marginTop: 2 }}>₱{Number(item.price || 0).toFixed(2)}</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 2 }}>Seller: {item.seller_name || item.seller_id?.slice(0, 8)}</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 2 }}>Status: {item.status} | Type: {item.product_type}</Text>
                 </View>
               </View>
               <View style={styles.actionRow}>
@@ -183,7 +183,7 @@ export default function AdminProductsPage() {
                     style={[styles.actionBtn, { backgroundColor: '#ef444420' }]}
                     onPress={() => handleSuspend(item.id)}
                   >
-                    <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: '600' }}>Suspend</Text>
+                    <Text style={{ color: '#ef4444', fontSize: 12, fontFamily: 'Poppins_600SemiBold' }}>Suspend</Text>
                   </TouchableOpacity>
                 )}
                 {item.status === 'suspended' && (
@@ -194,13 +194,13 @@ export default function AdminProductsPage() {
                     style={[styles.actionBtn, { backgroundColor: '#22c55e20' }]}
                     onPress={() => handleActivate(item.id)}
                   >
-                    <Text style={{ color: '#22c55e', fontSize: 12, fontWeight: '600' }}>Activate</Text>
+                    <Text style={{ color: '#22c55e', fontSize: 12, fontFamily: 'Poppins_600SemiBold' }}>Activate</Text>
                   </TouchableOpacity>
                 )}
               </View>
             </View>
           )}
-          ListEmptyComponent={<Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 40 }}>No products found</Text>}
+          ListEmptyComponent={<Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', textAlign: 'center', marginTop: 40 }}>No products found</Text>}
         />
       )}
     </View>
@@ -212,8 +212,8 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   tabsRow: { paddingHorizontal: 16, paddingTop: 8, gap: 8 },
   tabButton: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, gap: 6 },
-  tabText: { fontSize: 13, fontWeight: '600' },
-  searchInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14 },
+  tabText: { fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
+  searchInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, fontFamily: 'Poppins_400Regular' },
   filterChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, borderWidth: 1, marginRight: 8 },
   card: { padding: 14, borderRadius: 12, borderWidth: 1, marginBottom: 10 },
   cardRow: { flexDirection: 'row', alignItems: 'flex-start' },

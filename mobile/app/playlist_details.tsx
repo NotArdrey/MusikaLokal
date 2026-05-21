@@ -30,7 +30,9 @@ import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import {
+  applyPlaylistAudioCopyrightDecision,
   pickPlaylistAudioFile,
+  screenPlaylistAudioForCopyright,
   uploadPlaylistAudioFile,
   type PlaylistAudioFile,
 } from "../src/utils/playlistAudio";
@@ -53,15 +55,28 @@ type PlaylistAlert = {
   forceModal?: boolean;
 };
 
-const COPYRIGHT_MATCH_PATTERN = /this (?:audio|track) appears to match|appears to be copyrighted|permission to share/i;
+const COPYRIGHT_MATCH_PATTERN = /this (?:audio|track) appears to match|appears to be copyrighted|ownership request|identity review|admin approval|permission to share/i;
 const EXPECTED_UPLOAD_FEEDBACK_PATTERN =
-  /(blocked by safety screening|safety check|copyright check|appears to match|appears to be copyrighted|permission to share|please upload music you own|licensed to share|playlist tracks must be|tracks must be|only mp3)/i;
+  /(blocked by safety screening|safety check|copyright check|appears to match|appears to be copyrighted|ownership request|identity review|admin approval|permission to share|please upload music you own|licensed to share|playlist tracks must be|tracks must be|only mp3)/i;
 
 const isExpectedUploadFeedback = (message: string) =>
   EXPECTED_UPLOAD_FEEDBACK_PATTERN.test(message);
 
 const formatUploadFeedbackMessage = (message: string) =>
   message.replace(/^.+? was blocked by safety screening\.\s*/i, "").trim() || message;
+
+const formatCopyrightPendingMessage = (reason?: string) =>
+  reason || "This MP3 appears to be copyrighted and was sent to admin review. You can still save it; this track will stay unavailable publicly until admin approves it.";
+
+const getCopyrightPayload = (source?: Partial<PlaylistAudioFile> | null) => ({
+  copyright_status: source?.copyrightStatus || "not_required",
+  copyright_review_id: source?.copyrightReviewId || null,
+  copyright_metadata: source?.copyrightMetadata || (
+    source?.copyrightTrackKey
+      ? { copyright_track_key: source.copyrightTrackKey }
+      : {}
+  ),
+});
 
 const readFunctionErrorBody = async (error: any) => {
   const response = error?.context;
@@ -609,6 +624,8 @@ export default function PlaylistDetailsScreen() {
     try {
       let sourceUrl = newTrackAudioUrl.trim() || null;
       let durationSeconds = newTrackDurationSeconds.trim() ? Number(newTrackDurationSeconds.trim()) : null;
+      let copyrightPayload: Record<string, unknown> = {};
+      let pendingCopyrightReview = false;
       if (newTrackAudioFile) {
         logAddTrackModal("copyright_check_upload_start", {
           fileName: newTrackAudioFile.name,
@@ -621,12 +638,21 @@ export default function PlaylistDetailsScreen() {
         const upload = await uploadPlaylistAudioFile(newTrackAudioFile, playlist.id);
         sourceUrl = upload.publicUrl;
         durationSeconds = upload.durationSeconds;
+        pendingCopyrightReview = Boolean(upload.copyrightRequiresAdminReview || upload.copyrightStatus === "pending_review");
+        copyrightPayload = getCopyrightPayload({
+          copyrightStatus: upload.copyrightStatus,
+          copyrightReviewId: upload.copyrightReviewId,
+          copyrightTrackKey: upload.copyrightTrackKey,
+          copyrightMetadata: upload.copyrightMetadata,
+        });
 
         logAddTrackModal("copyright_check_upload_passed", {
           storagePath: upload.storagePath,
           traceId: newTrackAudioFile.debugTraceId || null,
           uploadedDurationSeconds: upload.durationSeconds,
           hasPublicUrl: Boolean(upload.publicUrl),
+          copyrightStatus: upload.copyrightStatus,
+          copyrightReviewId: upload.copyrightReviewId || null,
         });
       } else {
         logAddTrackModal("save_without_new_audio_file", {
@@ -642,6 +668,7 @@ export default function PlaylistDetailsScreen() {
         cover_image_url: newTrackCoverImages[0] || null,
         audio_url: sourceUrl,
         duration_seconds: durationSeconds,
+        ...copyrightPayload,
       };
 
       logAddTrackModal("manage_playlists_invoke_start", {
@@ -674,8 +701,18 @@ export default function PlaylistDetailsScreen() {
         emitToast({
           type: "success",
           title: editingTrackId ? "Track Updated" : "Track Added",
-          message: editingTrackId ? "Track changes saved." : "Track added to playlist.",
+          message: pendingCopyrightReview
+            ? "Track saved for admin review."
+            : editingTrackId ? "Track changes saved." : "Track added to playlist.",
         });
+        if (pendingCopyrightReview) {
+          setAlert({
+            type: "warning",
+            title: "Track Sent for Review",
+            message: "This copyrighted MP3 is saved but will stay unavailable publicly until admin approves it.",
+            forceModal: true,
+          });
+        }
         resetAddTrackForm();
         fetchPlaylist();
       } else {
@@ -758,9 +795,20 @@ export default function PlaylistDetailsScreen() {
         extension: audioFile.extension,
       });
 
-      setNewTrackAudioFile(audioFile);
+      const copyrightScreening = await screenPlaylistAudioForCopyright(audioFile);
+      const reviewedAudioFile = applyPlaylistAudioCopyrightDecision(audioFile, copyrightScreening.decision);
+      setNewTrackAudioFile(reviewedAudioFile);
       setNewTrackAudioUrl("");
       setNewTrackDurationSeconds(String(audioFile.durationSeconds));
+
+      if (copyrightScreening.decision.requiresAdminReview) {
+        setAlert({
+          type: "warning",
+          title: "Copyright Match Found",
+          message: formatCopyrightPendingMessage(copyrightScreening.decision.reason),
+          forceModal: true,
+        });
+      }
     } catch (error: any) {
       const pickerErrorMessage = error?.message || String(error);
       const isUploadFeedback = isExpectedUploadFeedback(pickerErrorMessage);

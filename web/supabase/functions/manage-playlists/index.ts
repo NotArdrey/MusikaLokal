@@ -20,6 +20,8 @@ const KNOWN_PLAYLIST_AUDIO_BUCKETS = new Set(["documents", "playlist-assets"]);
 const KNOWN_PLAYLIST_STORAGE_BUCKETS = new Set(["documents", "playlist-assets", "post-media"]);
 const PLAYLIST_ASSET_BUCKET = "playlist-assets";
 const PLAYLIST_RADIO_ID_PREFIX = "playlist-radio:";
+const COPYRIGHT_OWNERSHIP_REVIEW_SOURCE = "COPYRIGHT_OWNERSHIP";
+const PUBLIC_PLAYLIST_ITEM_COPYRIGHT_STATUSES = new Set(["not_required", "approved"]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")?.trim() || "";
@@ -101,6 +103,90 @@ function normalizeOptionalAudioUrl(value: unknown): string | null {
 function normalizeOptionalImageUrl(value: unknown): string | null {
   const trimmed = typeof value === "string" ? value.trim() : "";
   return trimmed || null;
+}
+
+function normalizeOptionalReviewId(value: unknown): string | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed) return null;
+  if (!UUID_PATTERN.test(trimmed)) {
+    throw new Error("copyright_review_id must be a valid review ID");
+  }
+  return trimmed;
+}
+
+function normalizePlaylistItemCopyrightStatus(value: unknown, fallback = "not_required") {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!normalized) return fallback;
+  if (normalized === "pending") return "pending_review";
+  if (["not_required", "pending_review", "approved", "declined"].includes(normalized)) {
+    return normalized;
+  }
+  throw new Error("copyright_status must be not_required, pending_review, approved, or declined");
+}
+
+function normalizeCopyrightMetadata(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, unknown>;
+}
+
+function mapReviewStatusToPlaylistCopyrightStatus(status: unknown) {
+  const normalized = String(status || "").trim().toUpperCase();
+  if (normalized === "APPROVED") return "approved";
+  if (normalized === "DECLINED") return "declined";
+  return "pending_review";
+}
+
+function isPlaylistItemPubliclyAvailable(item: any) {
+  const status = normalizePlaylistItemCopyrightStatus(item?.copyright_status, "not_required");
+  return PUBLIC_PLAYLIST_ITEM_COPYRIGHT_STATUSES.has(status);
+}
+
+async function normalizePlaylistItemCopyrightFields(
+  supabaseAdmin: any,
+  params: Record<string, unknown>,
+  ownerUserId: string | null,
+) {
+  const reviewId = normalizeOptionalReviewId(params.copyright_review_id);
+  let status = normalizePlaylistItemCopyrightStatus(params.copyright_status, reviewId ? "pending_review" : "not_required");
+  let metadata = normalizeCopyrightMetadata(params.copyright_metadata);
+
+  if (reviewId) {
+    const { data: review, error } = await supabaseAdmin
+      .from("manual_identity_reviews")
+      .select("id, user_id, source, status, metadata")
+      .eq("id", reviewId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message || "Unable to verify copyright review");
+    }
+
+    if (!review || String(review.source || "").trim().toUpperCase() !== COPYRIGHT_OWNERSHIP_REVIEW_SOURCE) {
+      throw new Error("Linked copyright review was not found");
+    }
+
+    if (ownerUserId && String(review.user_id || "") !== ownerUserId) {
+      throw new Error("Linked copyright review does not belong to this user");
+    }
+
+    status = mapReviewStatusToPlaylistCopyrightStatus(review.status);
+    metadata = {
+      ...(review.metadata && typeof review.metadata === "object" ? review.metadata : {}),
+      ...metadata,
+      manual_identity_review_id: reviewId,
+      review_status: review.status || null,
+    };
+  } else if (status !== "not_required") {
+    throw new Error("copyright_review_id is required for copyrighted tracks");
+  }
+
+  return {
+    copyright_status: status,
+    copyright_review_id: reviewId,
+    copyright_metadata: metadata,
+  };
 }
 
 function normalizePositiveInteger(
@@ -208,6 +294,10 @@ function getSlotFallbackDurationSeconds(slot: any, rotationIntervalMinutes: numb
 }
 
 function hasPlaylistItemAudioSource(item: any) {
+  if (!isPlaylistItemPubliclyAvailable(item)) {
+    return false;
+  }
+
   return Boolean(
     (typeof item?.audio_url === "string" && item.audio_url.trim().length > 0) ||
     (typeof item?.storage_path === "string" && item.storage_path.trim().length > 0) ||
@@ -1783,7 +1873,7 @@ async function attachPlaylistItemsToSlots(supabaseAdmin: any, slots: any[], item
   );
 
   const limitedItems: any[] = [];
-  for (const item of items || []) {
+  for (const item of (items || []).filter(isPlaylistItemPubliclyAvailable)) {
     const playlistId = typeof item?.playlist_id === "string" ? item.playlist_id : "";
     if (!playlistId) continue;
 
@@ -2061,7 +2151,7 @@ Deno.serve(async (req: Request) => {
       if (items && Array.isArray(items) && items.length > 0) {
         let itemRows;
         try {
-          itemRows = items.map((item: any, i: number) => ({
+          itemRows = await Promise.all(items.map(async (item: any, i: number) => ({
             playlist_id: playlist.id,
             title: String(item?.title || "").trim(),
             artist_name: item?.artist_name ? String(item.artist_name).trim() : null,
@@ -2070,7 +2160,8 @@ Deno.serve(async (req: Request) => {
             duration_seconds: normalizeOptionalDurationSeconds(item?.duration_seconds),
             teaser_asset_id: item?.teaser_asset_id || null,
             position: i,
-          }));
+            ...(await normalizePlaylistItemCopyrightFields(supabaseAdmin, item || {}, uid)),
+          })));
         } catch (validationError: any) {
           return jsonResponse({ error: validationError.message || "Invalid track data" }, 400);
         }
@@ -2239,6 +2330,13 @@ Deno.serve(async (req: Request) => {
         .eq("playlist_id", playlist_id)
         .order("position");
 
+      const canViewRestrictedItems = uid
+        ? await canManagePlaylist(supabaseAdmin, playlist, uid, requesterRole)
+        : false;
+      const visibleItems = canViewRestrictedItems
+        ? (items || [])
+        : (items || []).filter(isPlaylistItemPubliclyAvailable);
+
       const { data: teaserAssets } = await supabaseAdmin
         .from("playlist_teaser_assets")
         .select("*")
@@ -2255,7 +2353,7 @@ Deno.serve(async (req: Request) => {
         success: true,
         data: {
           ...playlist,
-          items: items || [],
+          items: visibleItems,
           teaser_assets: teaserAssets || [],
           external_links: externalLinks || [],
         },
@@ -2340,10 +2438,12 @@ Deno.serve(async (req: Request) => {
       let normalizedDuration: number | null;
       let normalizedAudioUrl: string | null;
       let normalizedCoverImageUrl: string | null;
+      let copyrightFields: Record<string, unknown>;
       try {
         normalizedDuration = normalizeOptionalDurationSeconds(duration_seconds);
         normalizedAudioUrl = normalizeOptionalAudioUrl(audio_url);
         normalizedCoverImageUrl = normalizeOptionalImageUrl(cover_image_url);
+        copyrightFields = await normalizePlaylistItemCopyrightFields(supabaseAdmin, params, uid);
       } catch (validationError: any) {
         return jsonResponse({ error: validationError.message || "Invalid track data" }, 400);
       }
@@ -2360,6 +2460,7 @@ Deno.serve(async (req: Request) => {
           teaser_asset_id: teaser_asset_id || null,
           external_link_id: external_link_id || null,
           audio_url: normalizedAudioUrl,
+          ...copyrightFields,
         })
         .select()
         .single();
@@ -2392,10 +2493,18 @@ Deno.serve(async (req: Request) => {
       let normalizedDuration: number | null;
       let normalizedAudioUrl: string | null;
       let normalizedCoverImageUrl: string | null;
+      let copyrightFields: Record<string, unknown> = {};
+      const hasCopyrightParams =
+        "copyright_status" in params ||
+        "copyright_review_id" in params ||
+        "copyright_metadata" in params;
       try {
         normalizedDuration = normalizeOptionalDurationSeconds(duration_seconds);
         normalizedAudioUrl = normalizeOptionalAudioUrl(audio_url);
         normalizedCoverImageUrl = normalizeOptionalImageUrl(cover_image_url);
+        if (hasCopyrightParams) {
+          copyrightFields = await normalizePlaylistItemCopyrightFields(supabaseAdmin, params, uid);
+        }
       } catch (validationError: any) {
         return jsonResponse({ error: validationError.message || "Invalid track data" }, 400);
       }
@@ -2410,6 +2519,7 @@ Deno.serve(async (req: Request) => {
           teaser_asset_id: teaser_asset_id || null,
           external_link_id: external_link_id || null,
           audio_url: normalizedAudioUrl,
+          ...copyrightFields,
         })
         .eq("id", item_id)
         .select()

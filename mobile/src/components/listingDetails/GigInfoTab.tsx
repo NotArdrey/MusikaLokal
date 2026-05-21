@@ -11,7 +11,6 @@ interface GigInfoTabProps {
 
 const GigInfoTab = ({ group, colors, isDark, styles }: GigInfoTabProps) => {
   const requirements = group.requirements || {};
-  const capacity = requirements.capacity || "Not specified";
   const audioSetup =
     requirements.audio || requirements.sound_system || "Standard PA";
 
@@ -29,15 +28,6 @@ const GigInfoTab = ({ group, colors, isDark, styles }: GigInfoTabProps) => {
   return (
     <View style={styles.tabContent}>
       <View style={{ flexDirection: "row", gap: 16 }}>
-        <View
-          style={[
-            styles.infoCard,
-            { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
-          ]}
-        >
-          <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Capacity</Text>
-          <Text style={[styles.infoValue, { color: colors.text }]}>{capacity}</Text>
-        </View>
         <View
           style={[
             styles.infoCard,

@@ -18,15 +18,29 @@ export interface UploadSafetyScreeningSummary {
   blockedCount: number;
 }
 
+export type UploadSafetyCopyrightStatus = "not_required" | "pending_review" | "approved" | "declined";
+
 export interface UploadSafetyFileDecision {
   input: UploadSafetyFileInput;
   allowed: boolean;
   reason?: string;
+  requiresAdminReview?: boolean;
+  publiclyAvailable?: boolean;
+  copyrightStatus?: UploadSafetyCopyrightStatus;
+  copyrightReviewId?: string | null;
+  copyrightTrackKey?: string | null;
+  copyrightMetadata?: Record<string, unknown>;
 }
 
 interface CachedUploadSafetyDecision {
   allowed: boolean;
   reason?: string;
+  requiresAdminReview?: boolean;
+  publiclyAvailable?: boolean;
+  copyrightStatus?: UploadSafetyCopyrightStatus;
+  copyrightReviewId?: string | null;
+  copyrightTrackKey?: string | null;
+  copyrightMetadata?: Record<string, unknown>;
   reviewedAt: number;
   expiresAt: number;
 }
@@ -36,9 +50,15 @@ interface RemoteUploadSafetyResult {
   fingerprint?: string;
   allowed?: boolean;
   reason?: string;
+  requiresAdminReview?: boolean;
+  publiclyAvailable?: boolean;
+  copyrightStatus?: UploadSafetyCopyrightStatus;
+  copyrightReviewId?: string | null;
+  copyrightTrackKey?: string | null;
+  copyrightMetadata?: Record<string, unknown>;
 }
 
-const SAFETY_CACHE_PREFIX = "upload_safety_screen:v8:";
+const SAFETY_CACHE_PREFIX = "upload_safety_screen:v11:";
 const SAFETY_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SAFETY_UNAVAILABLE_CACHE_TTL_MS = 5 * 60 * 1000;
 const SAFETY_OWNERSHIP_REVIEW_CACHE_TTL_MS = 30 * 1000;
@@ -158,14 +178,20 @@ const buildRemoteDecision = (
   allowed: boolean,
   reason?: string,
   ttlMs: number = SAFETY_CACHE_TTL_MS,
+  extra: Partial<CachedUploadSafetyDecision> = {},
 ): CachedUploadSafetyDecision => ({
   allowed,
   reason,
+  ...extra,
   reviewedAt: Date.now(),
   expiresAt: Date.now() + ttlMs,
 });
 
-const getDecisionCacheTtlMs = (allowed: boolean, reason?: string): number => {
+const getDecisionCacheTtlMs = (allowed: boolean, reason?: string, requiresAdminReview = false): number => {
+  if (requiresAdminReview) {
+    return SAFETY_OWNERSHIP_REVIEW_CACHE_TTL_MS;
+  }
+
   if (allowed) {
     return SAFETY_CACHE_TTL_MS;
   }
@@ -322,11 +348,26 @@ const screenChunkWithRemoteAi = async (
     }
 
     const allowed = remote.allowed !== false;
-    const reason = allowed ? undefined : resolveDecisionReason(item.input, remote.reason);
+    const requiresAdminReview = Boolean(remote.requiresAdminReview);
+    const reason = allowed
+      ? requiresAdminReview
+        ? sanitizeUploadSafetyReason(remote.reason)
+        : undefined
+      : resolveDecisionReason(item.input, remote.reason);
     const decision = buildRemoteDecision(
       allowed,
       reason,
-      getDecisionCacheTtlMs(allowed, reason),
+      getDecisionCacheTtlMs(allowed, reason, requiresAdminReview),
+      {
+        requiresAdminReview,
+        publiclyAvailable: typeof remote.publiclyAvailable === "boolean"
+          ? remote.publiclyAvailable
+          : allowed && !requiresAdminReview,
+        copyrightStatus: remote.copyrightStatus,
+        copyrightReviewId: remote.copyrightReviewId || null,
+        copyrightTrackKey: remote.copyrightTrackKey || null,
+        copyrightMetadata: remote.copyrightMetadata,
+      },
     );
 
     console.log("[UploadSafetyScreen] remote_decision", {
@@ -334,6 +375,10 @@ const screenChunkWithRemoteAi = async (
       fileName: item.input.name,
       kind: item.input.kind,
       allowed,
+      requiresAdminReview,
+      publiclyAvailable: decision.publiclyAvailable,
+      copyrightStatus: decision.copyrightStatus || null,
+      copyrightReviewId: decision.copyrightReviewId || null,
       reason: decision.reason || null,
     });
 
@@ -472,11 +517,21 @@ export const screenUploadsWithAiDecisions = async (
     return {
       input,
       allowed: decision?.allowed === true,
-      reason: decision?.allowed === false
-        ? sanitizeUploadSafetyReason(decision.reason) || `${input.name} was blocked by safety screening.`
-        : decision
-          ? undefined
-          : SCREENING_UNAVAILABLE_BLOCK_MESSAGE,
+      reason: decision?.reason
+        ? sanitizeUploadSafetyReason(decision.reason)
+        : decision?.allowed === false
+          ? `${input.name} was blocked by safety screening.`
+          : decision
+            ? undefined
+            : SCREENING_UNAVAILABLE_BLOCK_MESSAGE,
+      requiresAdminReview: Boolean(decision?.requiresAdminReview),
+      publiclyAvailable: typeof decision?.publiclyAvailable === "boolean"
+        ? decision.publiclyAvailable
+        : decision?.allowed === true,
+      copyrightStatus: decision?.copyrightStatus,
+      copyrightReviewId: decision?.copyrightReviewId || null,
+      copyrightTrackKey: decision?.copyrightTrackKey || null,
+      copyrightMetadata: decision?.copyrightMetadata,
     };
   });
 };

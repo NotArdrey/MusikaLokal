@@ -1,7 +1,11 @@
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system/src/legacy";
 import { supabase } from "../../lib/supabase";
-import { ensureUploadPassesSafetyScreening } from "../services/uploadSafetyScreen";
+import {
+  screenUploadsWithAiDecisions,
+  type UploadSafetyCopyrightStatus,
+  type UploadSafetyFileDecision,
+} from "../services/uploadSafetyScreen";
 
 export const MAX_PLAYLIST_AUDIO_DURATION_SECONDS = 300;
 
@@ -24,6 +28,18 @@ export type PlaylistAudioFile = {
   durationSeconds: number;
   extension: string;
   debugTraceId?: string;
+  copyrightStatus?: UploadSafetyCopyrightStatus;
+  copyrightReviewId?: string | null;
+  copyrightTrackKey?: string | null;
+  copyrightReviewReason?: string;
+  copyrightRequiresAdminReview?: boolean;
+  copyrightPubliclyAvailable?: boolean;
+  copyrightMetadata?: Record<string, unknown>;
+};
+
+export type PlaylistAudioCopyrightScreening = {
+  base64: string;
+  decision: UploadSafetyFileDecision;
 };
 
 type PlaylistAudioLogMeta = Record<string, unknown>;
@@ -336,9 +352,27 @@ export const pickPlaylistAudioFile = async (): Promise<PlaylistAudioFile | null>
   };
 };
 
-export const ensurePlaylistAudioPassesCopyrightScreening = async (
+const attachCopyrightDecisionToAudioFile = (
   audioFile: PlaylistAudioFile,
-) => {
+  decision: UploadSafetyFileDecision,
+): PlaylistAudioFile => ({
+  ...audioFile,
+  copyrightStatus: decision.copyrightStatus || "not_required",
+  copyrightReviewId: decision.copyrightReviewId || null,
+  copyrightTrackKey: decision.copyrightTrackKey || null,
+  copyrightReviewReason: decision.reason,
+  copyrightRequiresAdminReview: Boolean(decision.requiresAdminReview),
+  copyrightPubliclyAvailable: typeof decision.publiclyAvailable === "boolean"
+    ? decision.publiclyAvailable
+    : decision.allowed,
+  copyrightMetadata: decision.copyrightMetadata,
+});
+
+export const applyPlaylistAudioCopyrightDecision = attachCopyrightDecisionToAudioFile;
+
+export const screenPlaylistAudioForCopyright = async (
+  audioFile: PlaylistAudioFile,
+): Promise<PlaylistAudioCopyrightScreening> => {
   const traceId = audioFile.debugTraceId || createPlaylistAudioTraceId();
   const startedAt = Date.now();
 
@@ -391,17 +425,44 @@ export const ensurePlaylistAudioPassesCopyrightScreening = async (
   });
 
   try {
-    await ensureUploadPassesSafetyScreening(
-      {
+    const [decision] = await screenUploadsWithAiDecisions(
+      [{
         name: audioFile.name,
         mimeType: audioFile.mimeType,
         size: audioFile.sizeBytes || undefined,
         uri: audioFile.uri,
         kind: "audio",
         contentDataUrl: safetyDataUrl,
-      },
+      }],
       "playlist_audio_upload",
     );
+
+    if (!decision) {
+      throw new Error("Audio copyright check did not return a valid decision.");
+    }
+
+    if (!decision.allowed) {
+      throw new Error(decision.reason || "Upload blocked by safety screening.");
+    }
+
+    if (decision.requiresAdminReview) {
+      logPlaylistAudio("copyright_screen_pending_review", traceId, {
+        reviewId: decision.copyrightReviewId || null,
+        copyrightTrackKey: decision.copyrightTrackKey || null,
+        reason: decision.reason || null,
+      });
+    }
+
+    logPlaylistAudio("copyright_screen_done", traceId, {
+      elapsedMs: Date.now() - startedAt,
+      base64ReadMs,
+      requiresAdminReview: Boolean(decision.requiresAdminReview),
+      publiclyAvailable: decision.publiclyAvailable,
+      copyrightStatus: decision.copyrightStatus || null,
+      copyrightReviewId: decision.copyrightReviewId || null,
+    });
+
+    return { base64, decision };
   } catch (error) {
     logPlaylistAudioError("copyright_screen_failed", traceId, error, {
       elapsedMs: Date.now() - startedAt,
@@ -410,12 +471,13 @@ export const ensurePlaylistAudioPassesCopyrightScreening = async (
     throw error;
   }
 
-  logPlaylistAudio("copyright_screen_done", traceId, {
-    elapsedMs: Date.now() - startedAt,
-    base64ReadMs,
-  });
+};
 
-  return base64;
+export const ensurePlaylistAudioPassesCopyrightScreening = async (
+  audioFile: PlaylistAudioFile,
+) => {
+  const result = await screenPlaylistAudioForCopyright(audioFile);
+  return result.base64;
 };
 
 export const uploadPlaylistAudioFile = async (
@@ -451,7 +513,7 @@ export const uploadPlaylistAudioFile = async (
     elapsedMs: Date.now() - startedAt,
   });
 
-  const base64 = await ensurePlaylistAudioPassesCopyrightScreening(audioFile);
+  const { base64, decision } = await screenPlaylistAudioForCopyright(audioFile);
   const convertStartedAt = Date.now();
 
   logPlaylistAudio("base64_to_bytes_start", traceId, {
@@ -534,5 +596,14 @@ export const uploadPlaylistAudioFile = async (
     publicUrl,
     durationSeconds: audioFile.durationSeconds,
     storagePath,
+    copyrightStatus: decision.copyrightStatus || "not_required",
+    copyrightReviewId: decision.copyrightReviewId || null,
+    copyrightTrackKey: decision.copyrightTrackKey || null,
+    copyrightReviewReason: decision.reason,
+    copyrightRequiresAdminReview: Boolean(decision.requiresAdminReview),
+    copyrightPubliclyAvailable: typeof decision.publiclyAvailable === "boolean"
+      ? decision.publiclyAvailable
+      : decision.allowed,
+    copyrightMetadata: decision.copyrightMetadata,
   };
 };

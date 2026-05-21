@@ -1474,6 +1474,7 @@ serve(async (req: Request) => {
           ? `${eventDetails.sender_entity_type} request`
           : "connection request",
       ).toLowerCase();
+      const statusRouteParams = { tab: decision === "pending" ? "Pending" : "History" };
 
       try {
         await insertNotification(supabaseAdmin, {
@@ -1485,6 +1486,7 @@ serve(async (req: Request) => {
             type: "listing_connection_request_status",
             request_id: requestId,
             request_status: decision,
+            status: decision,
             sender_entity_type: eventDetails.sender_entity_type || null,
             sender_entity_name: eventDetails.sender_entity_name || null,
             receiver_entity_type: eventDetails.receiver_entity_type || null,
@@ -1492,8 +1494,8 @@ serve(async (req: Request) => {
             listing_id: eventDetails.listing_id || null,
             listing_type: eventDetails.listing_type || null,
             production_team_id: eventDetails.production_team_id || null,
-            route: eventDetails.route || null,
-            route_params: eventDetails.route_params || null,
+            route: "/bookings",
+            route_params: statusRouteParams,
           },
         });
       } catch (notificationError) {
@@ -2157,13 +2159,14 @@ serve(async (req: Request) => {
           type: "listing_connection_request_status",
           request_id,
           request_status: decision,
+          status: decision,
           sender_entity_type: eventDetails.sender_entity_type || null,
           sender_entity_name: eventDetails.sender_entity_name || null,
           receiver_entity_type: eventDetails.receiver_entity_type || null,
           receiver_entity_name: responderName,
           production_team_id: productionTeamId,
-          route: "/production_team",
-          route_params: { teamId: productionTeamId },
+          route: "/bookings",
+          route_params: { tab: decision === "pending" ? "Pending" : "History" },
         },
       });
 

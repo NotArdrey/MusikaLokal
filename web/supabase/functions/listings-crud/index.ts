@@ -10,6 +10,39 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
+const parseGigEventStartTime = (value: unknown) => {
+    const trimmed = String(value || '').trim()
+    const match = trimmed.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)
+    if (!match) return null
+
+    const hours = Number(match[1])
+    const minutes = Number(match[2])
+    const period = match[3].toUpperCase()
+
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null
+    if (hours < 1 || hours > 12 || minutes < 0 || minutes > 59) return null
+
+    let hour24 = hours
+    if (period === 'PM' && hours !== 12) hour24 += 12
+    if (period === 'AM' && hours === 12) hour24 = 0
+
+    return { hour24, minutes }
+}
+
+const getGigEventStartDate = (eventDate: unknown, eventStartTime: unknown) => {
+    if (!eventDate) return null
+
+    const parsedDate = new Date(String(eventDate))
+    if (!Number.isFinite(parsedDate.getTime())) return null
+
+    const parsedTime = parseGigEventStartTime(eventStartTime)
+    if (parsedTime) {
+        parsedDate.setHours(parsedTime.hour24, parsedTime.minutes, 0, 0)
+    }
+
+    return parsedDate
+}
+
 async function insertCoreNotifications(supabaseClient: any, payload: Record<string, unknown> | Record<string, unknown>[]) {
     const payloads = Array.isArray(payload) ? payload : [payload]
     const { data, error } = await supabaseClient
@@ -444,7 +477,7 @@ serve(async (req: Request) => {
 
                 const { data: gigData, error: gigError } = await supabaseClient
                     .from('gigs')
-                    .select('reapplication_cooldown_days, total_slots_filled, status')
+                    .select('reapplication_cooldown_days, total_slots_filled, status, event_date')
                     .eq('id', gig_id)
                     .single();
 
@@ -461,6 +494,11 @@ serve(async (req: Request) => {
 
                 if (gigData.status !== 'open') {
                     throw new Error('This gig is no longer accepting applications.');
+                }
+
+                const eventStartsAt = getGigEventStartDate(gigData.event_date, gigRequirements?.event_start_time);
+                if (eventStartsAt && eventStartsAt.getTime() <= Date.now()) {
+                    throw new Error('This gig has already started and is no longer accepting applications.');
                 }
 
                 const totalSlotsNeeded = gigRequirements?.total_slots_needed || 999;
@@ -528,8 +566,13 @@ serve(async (req: Request) => {
                         const cooldownEnds = new Date(rejectionDate);
                         cooldownEnds.setDate(cooldownEnds.getDate() + cooldownDays);
 
-                        if (new Date() < cooldownEnds) {
-                            const daysRemaining = Math.ceil((cooldownEnds.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                        const nowTime = Date.now();
+                        if (nowTime < cooldownEnds.getTime()) {
+                            if (eventStartsAt && eventStartsAt.getTime() <= cooldownEnds.getTime()) {
+                                throw new Error('Your application was declined. This gig starts before your reapplication cooldown ends, so you cannot reapply.');
+                            }
+
+                            const daysRemaining = Math.ceil((cooldownEnds.getTime() - nowTime) / (1000 * 60 * 60 * 24));
                             throw new Error(`You cannot reapply to this gig yet. Please wait ${daysRemaining} more day(s).`);
                         }
                     }

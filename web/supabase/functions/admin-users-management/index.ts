@@ -2278,12 +2278,24 @@ serve(async (req: Request) => {
           return jsonResponse({ error: updateReviewError.message }, 400);
         }
 
+        const nextPlaylistItemCopyrightStatus = decision === "APPROVED" ? "approved" : "declined";
+        const { error: updatePlaylistItemsError } = await client
+          .from("playlist_items")
+          .update({
+            copyright_status: nextPlaylistItemCopyrightStatus,
+          })
+          .eq("copyright_review_id", reviewId);
+
+        if (updatePlaylistItemsError) {
+          return jsonResponse({ error: updatePlaylistItemsError.message }, 400);
+        }
+
         await client.from("notifications").insert({
           user_id: review.user_id,
           type: decision === "APPROVED" ? "success" : "warning",
           title: decision === "APPROVED" ? "Track Ownership Approved" : "Track Ownership Declined",
           message: decision === "APPROVED"
-            ? `Your ownership review for ${trackLabel} was approved. You can try uploading the track again.`
+            ? `Your ownership review for ${trackLabel} was approved. The track is now available in your playlist.`
             : `Your ownership review for ${trackLabel} was declined.`,
           meta: {
             manual_identity_review_id: reviewId,
@@ -2304,6 +2316,7 @@ serve(async (req: Request) => {
             decision_email_error: null,
             declined_account_delete_attempted: false,
             declined_account_deleted: false,
+            playlist_item_copyright_status: nextPlaylistItemCopyrightStatus,
           },
         });
       }

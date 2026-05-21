@@ -73,7 +73,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
     [hasGroups, item.requirements?.musician_type, item.type, userRole],
   );
 
-  // Gig Application Deadline Logic (24hrs before event)
+  // Gig Application Deadline Logic (closes when the event starts)
   const gigDeadlineInfo = useMemo(() => {
     if (item.type !== "Gig" || !item.event_date) return null;
     const eventDate = new Date(item.event_date);
@@ -86,7 +86,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
       if (period === "AM" && hours === 12) hour24 = 0;
       eventDate.setHours(hour24, minutes, 0, 0);
     }
-    const deadline = new Date(eventDate.getTime() - 24 * 60 * 60 * 1000);
+    const deadline = new Date(eventDate.getTime());
     const now = new Date();
     const hoursUntilDeadline =
       (deadline.getTime() - now.getTime()) / (1000 * 60 * 60);

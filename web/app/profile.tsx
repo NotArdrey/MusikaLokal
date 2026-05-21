@@ -42,8 +42,9 @@ import { screenUploadsWithAi } from "../src/services/uploadSafetyScreen";
 import { isFanUserRole } from "../src/utils/roleRouting";
 import { isStaffRole } from "../src/utils/staffAccess";
 import {
-  ensurePlaylistAudioPassesCopyrightScreening,
+  applyPlaylistAudioCopyrightDecision,
   pickPlaylistAudioFile,
+  screenPlaylistAudioForCopyright,
   uploadPlaylistAudioFile,
   type PlaylistAudioFile,
 } from "../src/utils/playlistAudio";
@@ -182,9 +183,9 @@ const PLAYLIST_GENRES = ["Pop", "Rock", "Hip-Hop", "R&B", "Jazz", "Classical", "
 const PLAYLIST_COVER_BUCKET = "post-media";
 const PLAYLIST_COVER_FOLDER = "playlist-covers";
 const PLAYLIST_TRACK_IMAGE_FOLDER = "playlist-track-images";
-const PLAYLIST_COPYRIGHT_MATCH_PATTERN = /this (?:audio|track) appears to match|appears to be copyrighted|permission to share/i;
+const PLAYLIST_COPYRIGHT_MATCH_PATTERN = /this (?:audio|track) appears to match|appears to be copyrighted|ownership request|identity review|admin approval|permission to share/i;
 const PLAYLIST_EXPECTED_UPLOAD_FEEDBACK_PATTERN =
-  /(blocked by safety screening|safety check|copyright check|appears to match|appears to be copyrighted|permission to share|please upload music you own|licensed to share|playlist tracks must be|tracks must be|only mp3)/i;
+  /(blocked by safety screening|safety check|copyright check|appears to match|appears to be copyrighted|ownership request|identity review|admin approval|permission to share|please upload music you own|licensed to share|playlist tracks must be|tracks must be|only mp3)/i;
 const PLAYLIST_COPYRIGHT_TERMS_BODY =
   "Under the Intellectual Property Code (RA 8293), protection is automatic from the moment of creation, securing creators' economic and moral rights. Unauthorized public performance, reproduction, or streaming without a license constitutes copyright infringement.";
 const PLAYLIST_COPYRIGHT_ACKNOWLEDGEMENT =
@@ -240,6 +241,19 @@ const isExpectedPlaylistUploadFeedback = (message: string) =>
 
 const formatPlaylistUploadFeedbackMessage = (message: string) =>
   message.replace(/^.+? was blocked by safety screening\.\s*/i, "").trim() || message;
+
+const formatPlaylistCopyrightPendingMessage = (reason?: string) =>
+  reason || "This MP3 appears to be copyrighted and was sent to admin review. You can still create the playlist; this track will stay unavailable publicly until admin approves it.";
+
+const getPlaylistTrackCopyrightPayload = (source?: Partial<PlaylistAudioFile> | null) => ({
+  copyright_status: source?.copyrightStatus || "not_required",
+  copyright_review_id: source?.copyrightReviewId || null,
+  copyright_metadata: source?.copyrightMetadata || (
+    source?.copyrightTrackKey
+      ? { copyright_track_key: source.copyrightTrackKey }
+      : {}
+  ),
+});
 
 const sanitizeAvatarUrl = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
@@ -2051,8 +2065,19 @@ export default function ProfileScreen() {
       if (!audioFile) return;
 
       setPlaylistAudioUploadMessage("Checking MP3...");
-      await ensurePlaylistAudioPassesCopyrightScreening(audioFile);
-      setPlaylistTrackAudioFile(trackId, audioFile);
+      const copyrightScreening = await screenPlaylistAudioForCopyright(audioFile);
+      const reviewedAudioFile = applyPlaylistAudioCopyrightDecision(audioFile, copyrightScreening.decision);
+      setPlaylistTrackAudioFile(trackId, reviewedAudioFile);
+
+      if (copyrightScreening.decision.requiresAdminReview) {
+        showAlert(
+          "warning",
+          "Copyright Match Found",
+          formatPlaylistCopyrightPendingMessage(copyrightScreening.decision.reason),
+          undefined,
+          true,
+        );
+      }
     } catch (error: any) {
       const pickerErrorMessage = getFriendlyPlaylistUploadErrorMessage(error);
       const displayMessage = isExpectedPlaylistUploadFeedback(pickerErrorMessage)
@@ -2154,11 +2179,13 @@ export default function ProfileScreen() {
       const createdPlaylist = data?.data || data?.playlist || null;
       const playlistId = createdPlaylist?.id || "";
       const failedTracks: { title: string; reason?: string }[] = [];
+      const pendingReviewTracks: string[] = [];
 
       if (playlistId && draftItems.length > 0) {
         for (const track of draftItems) {
           try {
             let sourceUrl: string | null = null;
+            let copyrightPayload = getPlaylistTrackCopyrightPayload(track.audio_file);
             if (track.audio_file) {
               if (isE2EFixtureMode()) {
                 sourceUrl = track.audio_file.uri;
@@ -2167,6 +2194,15 @@ export default function ProfileScreen() {
                 setPlaylistAudioUploadMessage(`Uploading ${track.title}...`);
                 const upload = await uploadPlaylistAudioFile(track.audio_file, playlistId);
                 sourceUrl = upload.publicUrl;
+                copyrightPayload = getPlaylistTrackCopyrightPayload({
+                  copyrightStatus: upload.copyrightStatus,
+                  copyrightReviewId: upload.copyrightReviewId,
+                  copyrightTrackKey: upload.copyrightTrackKey,
+                  copyrightMetadata: upload.copyrightMetadata,
+                });
+                if (upload.copyrightRequiresAdminReview || upload.copyrightStatus === "pending_review") {
+                  pendingReviewTracks.push(track.title);
+                }
               }
             }
 
@@ -2178,6 +2214,7 @@ export default function ProfileScreen() {
               cover_image_url: track.cover_image_url,
               audio_url: sourceUrl,
               duration_seconds: track.duration_seconds,
+              ...copyrightPayload,
             };
 
             const { data: itemData, error: itemError } = await supabase.functions.invoke("manage-playlists", {
@@ -2216,6 +2253,16 @@ export default function ProfileScreen() {
             ? "Copyright Match Found"
             : "Track Upload Feedback",
           displayReason || `${failedTracks.length} track${failedTracks.length === 1 ? "" : "s"} could not be uploaded.`,
+          undefined,
+          true,
+        );
+        return;
+      }
+      if (pendingReviewTracks.length > 0) {
+        showAlert(
+          "warning",
+          "Playlist Created",
+          `${pendingReviewTracks.length} copyrighted MP3${pendingReviewTracks.length === 1 ? "" : "s"} were sent to admin review. Non-copyrighted tracks are available now; reviewed tracks will become available after approval.`,
           undefined,
           true,
         );
@@ -3828,6 +3875,7 @@ export default function ProfileScreen() {
                       bucketName={PLAYLIST_COVER_BUCKET}
                       userId={currentUserId}
                       folder={PLAYLIST_COVER_FOLDER}
+                      safetyContext="playlist_cover_upload"
                     />
                   ) : (
                     <View style={[styles.playlistUploadUnavailable, { backgroundColor: surfaceBackground, borderColor: borderSoft }]}>
@@ -3998,6 +4046,7 @@ export default function ProfileScreen() {
                               bucketName={PLAYLIST_COVER_BUCKET}
                               userId={currentUserId}
                               folder={PLAYLIST_TRACK_IMAGE_FOLDER}
+                              safetyContext="playlist_track_image_upload"
                             />
                           </>
                         ) : null}

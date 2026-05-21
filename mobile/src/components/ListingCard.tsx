@@ -312,7 +312,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
     [hasGroups, item.requirements?.musician_type, item.type, userRole],
   );
 
-  // Gig Application Deadline Logic (24hrs before event)
+  // Gig Application Deadline Logic (closes when the event starts)
   const gigDeadlineInfo = useMemo(() => {
     return getGigApplicationDeadlineInfo(item);
   }, [item]);

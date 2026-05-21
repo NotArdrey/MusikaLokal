@@ -91,6 +91,7 @@ const FEED_TABS = [
   { key: "talent", label: "Talent" },
   { key: "following", label: "Following" },
 ] as const;
+const FAN_FEED_TABS = FEED_TABS.filter((feedTab) => feedTab.key !== "talent");
 
 type FeedAiCardsResult = {
   cards: any[];
@@ -287,6 +288,62 @@ const getFeedFallbackImage = (type: string, id?: string | null) => {
   const images = FEED_FALLBACK_IMAGES[type] || FEED_FALLBACK_IMAGES.Group;
   const seed = String(id || type || "").split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
   return images[seed % images.length];
+};
+
+const getFeedImageIdentityKey = (value?: string | null) => {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return "";
+  return raw
+    .replace("/storage/v1/object/avatars/", "/storage/v1/object/public/avatars/")
+    .split("#")[0]
+    .split("?")[0]
+    .replace(/\/+$/, "")
+    .toLowerCase();
+};
+
+const getDistinctFeedFallbackImage = (
+  type: string,
+  id: string | null | undefined,
+  blockedImages: Array<string | null | undefined>,
+) => {
+  const images = FEED_FALLBACK_IMAGES[type] || FEED_FALLBACK_IMAGES.Group;
+  const blockedKeys = new Set(
+    blockedImages
+      .map(getFeedImageIdentityKey)
+      .filter((key) => key.length > 0),
+  );
+  const seed = String(id || type || "").split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+
+  for (let offset = 0; offset < images.length; offset += 1) {
+    const candidate = images[(seed + offset) % images.length];
+    if (!blockedKeys.has(getFeedImageIdentityKey(candidate))) {
+      return candidate;
+    }
+  }
+
+  return getFeedFallbackImage(type, id);
+};
+
+const getDistinctFeedCardImages = (
+  type: string,
+  id: string | null | undefined,
+  preferredImages: Array<string | null | undefined>,
+  blockedImages: Array<string | null | undefined>,
+) => {
+  const blockedKeys = new Set(
+    blockedImages
+      .map(getFeedImageIdentityKey)
+      .filter((key) => key.length > 0),
+  );
+  const distinctImages = preferredImages
+    .filter((image): image is string => typeof image === "string" && image.trim().length > 0)
+    .filter((image) => !blockedKeys.has(getFeedImageIdentityKey(image)));
+
+  if (distinctImages.length > 0) {
+    return Array.from(new Set(distinctImages));
+  }
+
+  return [getDistinctFeedFallbackImage(type, id, blockedImages)];
 };
 
 const ensureFeedCardImage = <T extends { id?: string | null; type?: string; image?: string | null; images?: string[] }>(item: T): T => {
@@ -991,6 +1048,55 @@ const dedupeFeedItems = (items: any[]) => {
 const normalizeFeedUserRole = (role: unknown) =>
   typeof role === "string" ? role.trim().toLowerCase().replace(/[_\s]+/g, "-") : "";
 
+const getFeedRecommendationTypeKey = (item: any) =>
+  typeof item?.type === "string" ? item.type.trim().toLowerCase().replace(/[_\s]+/g, "-") : "";
+
+const FAN_VISIBLE_RECOMMENDATION_TYPE_PRIORITY: Record<string, number> = {
+  gig: 0,
+  artist: 1,
+  profile: 1,
+  musician: 1,
+  group: 2,
+  duo: 2,
+};
+
+const getFanVisibleFeedItemPriority = (item: any) => {
+  if (item?.__feedKind === "following_entity") {
+    return item.followed_type === "group" ? 2 : 1;
+  }
+
+  return FAN_VISIBLE_RECOMMENDATION_TYPE_PRIORITY[getFeedRecommendationTypeKey(item)] ?? 99;
+};
+
+const isFanVisibleFeedItem = (item: any) => {
+  if (!item) return false;
+  if (item.__feedKind === "ai_card") {
+    return FAN_VISIBLE_RECOMMENDATION_TYPE_PRIORITY[getFeedRecommendationTypeKey(item)] !== undefined;
+  }
+
+  if (item.__feedKind === "following_entity") {
+    if (item.followed_type === "group") return true;
+    return normalizeFeedUserRole(item.role) === "musician";
+  }
+
+  return true;
+};
+
+const filterFanVisibleFeedItems = (items: any[]) =>
+  items.filter(isFanVisibleFeedItem);
+
+const sortFanRecommendationCards = (items: any[]) =>
+  [...items].sort((a, b) => {
+    const priorityA = getFanVisibleFeedItemPriority(a);
+    const priorityB = getFanVisibleFeedItemPriority(b);
+
+    if (priorityA !== priorityB) {
+      return priorityA - priorityB;
+    }
+
+    return getFeedItemCreatedTime(b) - getFeedItemCreatedTime(a);
+  });
+
 const getPositiveInteger = (value: unknown) => {
   if (value === null || value === undefined || value === "") return 0;
   const parsed =
@@ -1267,7 +1373,7 @@ const normalizeFeedAiRecommendationCard = (item: any) => {
         : typeof item?.logo_url === "string" && item.logo_url.trim().length > 0
           ? item.logo_url
           : null;
-  const images = Array.isArray(item?.images) && item.images.length > 0
+  const sourceImages = Array.isArray(item?.images) && item.images.length > 0
     ? item.images
     : primaryImage
       ? [primaryImage]
@@ -1276,6 +1382,11 @@ const normalizeFeedAiRecommendationCard = (item: any) => {
   const description = typeof item?.description === "string" ? item.description.trim() : "";
   const displayName = item?.name || `Recommended ${displayType}`;
   const uploaderId = isProfile ? itemId : ownerId || organizerId;
+  const uploaderAvatar = isProfile
+    ? primaryImage
+    : item?.uploader_avatar || item?.owner_avatar || item?.organizer_avatar || null;
+  const images = getDistinctFeedCardImages(type, itemId, sourceImages, [uploaderAvatar]);
+  const cardImage = images[0] || null;
 
   return ensureFeedCardImage({
     ...item,
@@ -1283,7 +1394,7 @@ const normalizeFeedAiRecommendationCard = (item: any) => {
     id: itemId,
     type,
     name: displayName,
-    image: primaryImage,
+    image: cardImage,
     images,
     body: aiReason || description || `Recommended ${displayType.toLowerCase()} for your profile.`,
     rating: Number(item?.rating || 0),
@@ -1297,7 +1408,7 @@ const normalizeFeedAiRecommendationCard = (item: any) => {
     organizer_id: organizerId,
     uploader_id: uploaderId,
     uploader_name: isProfile ? displayName : item?.uploader_name || item?.owner_name || item?.organizer_name || null,
-    uploader_avatar: isProfile ? primaryImage : item?.uploader_avatar || item?.owner_avatar || item?.organizer_avatar || null,
+    uploader_avatar: uploaderAvatar,
     owner_name: item?.owner_name || null,
     owner_avatar: item?.owner_avatar || null,
     organizer_name: item?.organizer_name || null,
@@ -3132,6 +3243,11 @@ export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const groqModelLabel = getGroqModelInfo().modelLabel;
   const feedIdentityKey = resolvedUserId ?? "guest";
+  const isFan = normalizeFeedUserRole(userRole) === "fan";
+  const visibleFeedTabs = useMemo(
+    () => (isFan ? FAN_FEED_TABS : FEED_TABS),
+    [isFan],
+  );
 
   const [tab, setTab] = useState<FeedTab>("for_you");
   const [posts, setPosts] = useState<any[]>([]);
@@ -3437,21 +3553,21 @@ export default function FeedScreen() {
   const applyFeedSnapshot = useCallback((snapshot: FeedCacheEntry, feedTab: FeedTab = activeTabRef.current) => {
     visibleFeedTabRef.current = feedTab;
     setPosts(snapshot.posts);
-    setAiCards(snapshot.aiCards);
+    setAiCards(isFan ? filterFanVisibleFeedItems(snapshot.aiCards) : snapshot.aiCards);
     setAiFeedMessage(normalizeAiFeedMessage(snapshot.aiFeedMessage || ""));
     setAiFeedProvider(normalizeAiFeedProvider(snapshot.aiFeedProvider || groqModelLabel));
     setHasMore(snapshot.hasMore);
     setLoading(false);
     setRefreshing(false);
     setLoadingMore(false);
-  }, [groqModelLabel]);
+  }, [groqModelLabel, isFan]);
 
   const hasVisibleForYouPost = useCallback((items: any[]) => (
     items.some((item) => item?.__feedKind !== "ai_card")
   ), []);
 
   const isEmptyForYouSnapshot = useCallback((snapshot: FeedCacheEntry) => (
-    !hasVisibleForYouPost(snapshot.posts)
+    !hasVisibleForYouPost(snapshot.posts) && snapshot.aiCards.length === 0
   ), [hasVisibleForYouPost]);
 
   const isEmptyBlockingFeedSnapshot = useCallback((feedTab: FeedTab, snapshot: FeedCacheEntry) => (
@@ -3553,7 +3669,7 @@ export default function FeedScreen() {
 
     feedCacheRef.current[snapshotTab] = {
       posts: snapshotTab === "talent" ? [] : posts,
-      aiCards: snapshotTab === "talent" ? aiCards : [],
+      aiCards: snapshotTab === "talent" || snapshotTab === "for_you" ? aiCards : [],
       aiFeedMessage,
       aiFeedProvider,
       hasMore,
@@ -3943,12 +4059,18 @@ export default function FeedScreen() {
         const groupType = String(item?.group_type || "").toLowerCase();
         const listingType = groupType.includes("duo") ? "Duo" : "Group";
         const owner = getUploaderProfile(item.owner_id);
+        const images = getDistinctFeedCardImages(
+          listingType,
+          item.id,
+          Array.isArray(item.images) ? item.images : [],
+          [owner?.avatar_url],
+        );
         return withFavoriteState({
           id: item.id,
           type: listingType,
           name: item.name || `Unnamed ${listingType}`,
-          image: Array.isArray(item.images) ? item.images[0] || null : null,
-          images: Array.isArray(item.images) ? item.images : [],
+          image: images[0] || null,
+          images,
           rating: Number(item.rating || 0),
           review_count: Number(item.review_count || 0),
           location: item.location || "",
@@ -3974,13 +4096,19 @@ export default function FeedScreen() {
         const listingType = isVenue ? "Venue" : "Studio";
         const displayListingType = isVenue ? "Gig" : "Studio";
         const owner = getUploaderProfile(item.owner_id);
+        const images = getDistinctFeedCardImages(
+          listingType,
+          item.id,
+          Array.isArray(item.images) ? item.images : [],
+          [owner?.avatar_url],
+        );
 
         return withFavoriteState({
           id: item.id,
           type: listingType,
           name: item.name || `Unnamed ${displayListingType}`,
-          image: Array.isArray(item.images) ? item.images[0] || null : null,
-          images: Array.isArray(item.images) ? item.images : [],
+          image: images[0] || null,
+          images,
           rating: Number(item.rating || 0),
           review_count: Number(item.review_count || 0),
           location: item.address || "",
@@ -4006,12 +4134,18 @@ export default function FeedScreen() {
 
       const normalizedGigs = finalGigs.map((item: any) => {
         const organizer = getUploaderProfile(item.organizer_id);
+        const images = getDistinctFeedCardImages(
+          "Gig",
+          item.id,
+          Array.isArray(item.images) ? item.images : [],
+          [organizer?.avatar_url],
+        );
         return withFavoriteState({
           id: item.id,
           type: "Gig",
           name: item.name || "Untitled Gig",
-          image: Array.isArray(item.images) ? item.images[0] || null : null,
-          images: Array.isArray(item.images) ? item.images : [],
+          image: images[0] || null,
+          images,
           rating: Number(item.rating || 0),
           review_count: Number(item.review_count || 0),
           location: item.location || "",
@@ -4037,39 +4171,52 @@ export default function FeedScreen() {
         }, "gig", item.id);
       });
 
-      const normalizedArtists = finalArtists.map((item: any) => withFavoriteState({
-        id: item.id,
-        type: "Artist",
-        name: item.full_name || "Artist",
-        image: item.avatar_url || null,
-        images: item.avatar_url ? [item.avatar_url] : [],
-        rating: 0,
-        review_count: 0,
-        location: item.address || item.location || "",
-        genre: (artistGenresById.get(item.id) || []).join(", "),
-        genres: artistGenresById.get(item.id) || [],
-        skills: artistSkillsById.get(item.id) || [],
-        description: item.bio || "",
-        created_at: item.created_at || null,
-        updated_at: item.updated_at || null,
-        owner_id: item.id,
-        uploader_id: item.id,
-        uploader_name: item.full_name || "Artist",
-        uploader_avatar: item.avatar_url || null,
-        social_follow_target_id: item.id,
-        social_follow_target_type: "profile",
-      }, "profile", item.id));
+      const normalizedArtists = finalArtists.map((item: any) => {
+        const avatarUrl = typeof item?.avatar_url === "string" && item.avatar_url.trim().length > 0
+          ? item.avatar_url
+          : null;
+        const images = getDistinctFeedCardImages("Artist", item.id, avatarUrl ? [avatarUrl] : [], [avatarUrl]);
+
+        return withFavoriteState({
+          id: item.id,
+          type: "Artist",
+          name: item.full_name || "Artist",
+          image: images[0] || null,
+          images,
+          rating: 0,
+          review_count: 0,
+          location: item.address || item.location || "",
+          genre: (artistGenresById.get(item.id) || []).join(", "),
+          genres: artistGenresById.get(item.id) || [],
+          skills: artistSkillsById.get(item.id) || [],
+          description: item.bio || "",
+          created_at: item.created_at || null,
+          updated_at: item.updated_at || null,
+          owner_id: item.id,
+          uploader_id: item.id,
+          uploader_name: item.full_name || "Artist",
+          uploader_avatar: avatarUrl,
+          social_follow_target_id: item.id,
+          social_follow_target_type: "profile",
+        }, "profile", item.id);
+      });
 
       const normalizedTeams = finalTeams.map((item: any) => {
         const owner = getUploaderProfile(item.owner_id);
-        const primaryImage = item.logo_url || owner?.avatar_url || null;
+        const images = getDistinctFeedCardImages(
+          "Production",
+          item.id,
+          item.logo_url ? [item.logo_url] : owner?.avatar_url ? [owner.avatar_url] : [],
+          [owner?.avatar_url],
+        );
+        const primaryImage = images[0] || null;
 
         return withFavoriteState({
           id: item.id,
           type: "Production",
           name: item.name || "Production Team",
           image: primaryImage,
-          images: primaryImage ? [primaryImage] : [],
+          images,
           rating: 0,
           review_count: 0,
           location: item.description || owner?.full_name || "Production Team",
@@ -4321,13 +4468,14 @@ export default function FeedScreen() {
         : [];
     const toProfileCard = (profile: any) => {
       const avatar = resolveFeedMediaUrl(profile?.avatar_url || "");
+      const images = getDistinctFeedCardImages("Artist", profile.id, avatar ? [avatar] : [], [avatar]);
       return ensureFeedCardImage({
         __feedKind: "ai_card",
         id: profile.id,
         type: "Artist",
         name: profile.full_name || "Musician",
-        image: avatar || null,
-        images: avatar ? [avatar] : [],
+        image: images[0] || null,
+        images,
         rating: 0,
         review_count: 0,
         location: profile.address || "",
@@ -4344,8 +4492,13 @@ export default function FeedScreen() {
       });
     };
     const toGroupCard = (item: any) => {
-      const images = normalizeImages(item?.images);
       const owner = getUploaderProfile(item.owner_id);
+      const images = getDistinctFeedCardImages(
+        "Group",
+        item.id,
+        normalizeImages(item?.images),
+        [owner?.avatar_url],
+      );
       return ensureFeedCardImage({
         __feedKind: "ai_card",
         id: item.id,
@@ -4374,11 +4527,16 @@ export default function FeedScreen() {
       });
     };
     const toStudioCard = (item: any) => {
-      const images = normalizeImages(item?.images);
       const isVenue = isFeedVenueLikeStudio(item);
       const listingType = isVenue ? "Venue" : "Studio";
       const displayListingType = isVenue ? "Gig" : "Studio";
       const owner = getUploaderProfile(item.owner_id);
+      const images = getDistinctFeedCardImages(
+        listingType,
+        item.id,
+        normalizeImages(item?.images),
+        [owner?.avatar_url],
+      );
 
       return ensureFeedCardImage({
         __feedKind: "ai_card",
@@ -4411,8 +4569,13 @@ export default function FeedScreen() {
       });
     };
     const toGigCard = (item: any) => {
-      const images = normalizeImages(item?.images);
       const organizer = getUploaderProfile(item.organizer_id);
+      const images = getDistinctFeedCardImages(
+        "Gig",
+        item.id,
+        normalizeImages(item?.images),
+        [organizer?.avatar_url],
+      );
       return ensureFeedCardImage({
         __feedKind: "ai_card",
         id: item.id,
@@ -4448,7 +4611,13 @@ export default function FeedScreen() {
     const toTeamCard = (item: any) => {
       const owner = getUploaderProfile(item.owner_id) || followedProfilesById.get(item.owner_id);
       const ownerAvatar = resolveFeedMediaUrl(owner?.avatar_url || "");
-      const primaryImage = resolveFeedMediaUrl(item.logo_url || "") || ownerAvatar || null;
+      const images = getDistinctFeedCardImages(
+        "Production",
+        item.id,
+        [resolveFeedMediaUrl(item.logo_url || "") || ownerAvatar || null],
+        [ownerAvatar],
+      );
+      const primaryImage = images[0] || null;
 
       return ensureFeedCardImage({
         __feedKind: "ai_card",
@@ -4456,7 +4625,7 @@ export default function FeedScreen() {
         type: "Production",
         name: item.name || "Production Team",
         image: primaryImage,
-        images: primaryImage ? [primaryImage] : [],
+        images,
         rating: 0,
         review_count: 0,
         location: item.description || owner?.full_name || "Production Team",
@@ -4478,34 +4647,39 @@ export default function FeedScreen() {
       });
     };
 
+    const latestEntityCandidates = [
+      ...followedProfiles
+        .filter((profile: any) => normalizeFeedUserRole(profile?.role) === "musician")
+        .map(toProfileCard),
+      ...(followedGroupsResult.data || []).map(toGroupCard),
+      ...(ownedGroupsResult.data || [])
+        .filter((item: any) => visibleFollowedProfileIds.has(item?.owner_id))
+        .map(toGroupCard),
+      ...(studiosResult.data || [])
+        .filter((item: any) => visibleFollowedProfileIds.has(item?.owner_id))
+        .map(toStudioCard),
+      ...(gigsResult.data || [])
+        .filter((item: any) => visibleFollowedProfileIds.has(item?.organizer_id))
+        .map(toGigCard),
+      ...(teamsResult.data || [])
+        .filter((item: any) => visibleFollowedProfileIds.has(item?.owner_id))
+        .map(toTeamCard),
+    ];
+    const fanScopedEntityCandidates = isFan
+      ? filterFanVisibleFeedItems(latestEntityCandidates)
+      : latestEntityCandidates;
     const latestEntityCards = dedupeFeedItems(
-      sortFeedItemsNewestFirst([
-        ...followedProfiles
-          .filter((profile: any) => normalizeFeedUserRole(profile?.role) === "musician")
-          .map(toProfileCard),
-        ...(followedGroupsResult.data || []).map(toGroupCard),
-        ...(ownedGroupsResult.data || [])
-          .filter((item: any) => visibleFollowedProfileIds.has(item?.owner_id))
-          .map(toGroupCard),
-        ...(studiosResult.data || [])
-          .filter((item: any) => visibleFollowedProfileIds.has(item?.owner_id))
-          .map(toStudioCard),
-        ...(gigsResult.data || [])
-          .filter((item: any) => visibleFollowedProfileIds.has(item?.organizer_id))
-          .map(toGigCard),
-        ...(teamsResult.data || [])
-          .filter((item: any) => visibleFollowedProfileIds.has(item?.owner_id))
-          .map(toTeamCard),
-      ]),
+      sortFeedItemsNewestFirst(fanScopedEntityCandidates),
     ).slice(0, AI_CARD_LIMIT);
-    const entities = latestEntityCards.length > 0 ? latestEntityCards : fallbackEntities;
+    const visibleFallbackEntities = isFan ? filterFanVisibleFeedItems(fallbackEntities) : fallbackEntities;
+    const entities = latestEntityCards.length > 0 ? latestEntityCards : visibleFallbackEntities;
 
     followingKeysRef.current = keys;
     setFollowingKeys(keys);
     setFollowingEntities(entities);
 
     return { keys, entities };
-  }, [session]);
+  }, [isFan, session]);
 
   /* ── Data fetching ── */
   const fetchFeed = useCallback(async (feedTab: FeedTab, append = false, currentLength = 0) => {
@@ -4668,12 +4842,17 @@ export default function FeedScreen() {
         const postSnapshot = queryResult.error
           ? null
           : buildFeedSnapshotFromPages(feedTab, queryResult.data);
+        const aiResult = await fetchAiRecommendationCards("for_you");
+
+        if (requestId !== feedRequestIdRef.current[feedTab]) {
+          return;
+        }
 
         const nextSnapshot: FeedCacheEntry = {
           posts: postSnapshot?.posts || [],
-          aiCards: [],
-          aiFeedMessage: "",
-          aiFeedProvider: groqModelLabel,
+          aiCards: applyFollowingStateToRecommendationCards(aiResult.cards),
+          aiFeedMessage: normalizeAiFeedMessage(aiResult.message || ""),
+          aiFeedProvider: normalizeAiFeedProvider(aiResult.provider || groqModelLabel),
           hasMore: postSnapshot?.hasMore || false,
           loaded: true,
         };
@@ -4823,6 +5002,7 @@ export default function FeedScreen() {
     applyFeedSnapshot,
     authLoading,
     buildFeedSnapshotFromPages,
+    fetchAiRecommendationCards,
     fetchTalentCards,
     groqModelLabel,
     isGuest,
@@ -5013,7 +5193,7 @@ export default function FeedScreen() {
     setRefreshing(true);
     if (
       (tab === "talent" && aiCards.length === 0) ||
-      (tab === "for_you" && !hasVisibleForYouPost(posts))
+      (tab === "for_you" && !hasVisibleForYouPost(posts) && aiCards.length === 0)
     ) {
       setIsAiCardsLoading(true);
     }
@@ -5033,50 +5213,58 @@ export default function FeedScreen() {
   }, [groqModelLabel]);
 
   const handleFeedTabChange = useCallback((nextTab: FeedTab) => {
+    const targetTab: FeedTab = isFan && nextTab === "talent" ? "for_you" : nextTab;
     const currentTab = activeTabRef.current;
-    if (currentTab === nextTab) {
+    if (currentTab === targetTab) {
       return;
     }
 
-    const cached = feedCacheRef.current[nextTab];
+    const cached = feedCacheRef.current[targetTab];
     const cacheIsUsable =
       cached.loaded &&
-      isFeedCacheValidForTab(nextTab, cached);
+      isFeedCacheValidForTab(targetTab, cached);
     const cacheNeedsRefresh =
       !cacheIsUsable ||
-      isEmptyBlockingFeedSnapshot(nextTab, cached) ||
-      Date.now() - feedLastFetchAt[nextTab] >= FEED_FOCUS_REFRESH_COOLDOWN_MS;
+      isEmptyBlockingFeedSnapshot(targetTab, cached) ||
+      Date.now() - feedLastFetchAt[targetTab] >= FEED_FOCUS_REFRESH_COOLDOWN_MS;
 
-    activeTabRef.current = nextTab;
+    activeTabRef.current = targetTab;
     logLoadTime("Feed", "tab-change", {
       cacheIsUsable,
       cacheNeedsRefresh,
       from: currentTab,
-      to: nextTab,
+      to: targetTab,
     });
 
     if (cacheIsUsable) {
-      applyFeedSnapshot(cached, nextTab);
+      applyFeedSnapshot(cached, targetTab);
     } else {
-      resetVisibleFeedForTab(nextTab);
+      resetVisibleFeedForTab(targetTab);
     }
 
-    if ((nextTab === "for_you" || nextTab === "talent") && cacheNeedsRefresh) {
+    if ((targetTab === "for_you" || targetTab === "talent") && cacheNeedsRefresh) {
       setIsAiCardsLoading(true);
     }
 
-    setSmoothTab(setTab, nextTab);
+    setSmoothTab(setTab, targetTab);
 
-    if (cacheNeedsRefresh && !feedInFlightRef.current[nextTab]) {
-      void fetchFeed(nextTab);
+    if (cacheNeedsRefresh && !feedInFlightRef.current[targetTab]) {
+      void fetchFeed(targetTab);
     }
   }, [
     applyFeedSnapshot,
     fetchFeed,
+    isFan,
     isEmptyBlockingFeedSnapshot,
     isFeedCacheValidForTab,
     resetVisibleFeedForTab,
   ]);
+
+  useEffect(() => {
+    if (isFan && tab === "talent") {
+      handleFeedTabChange("for_you");
+    }
+  }, [handleFeedTabChange, isFan, tab]);
 
   const loadMore = useCallback(() => {
     if (
@@ -5112,7 +5300,7 @@ export default function FeedScreen() {
 
     prefetchedTabsIdentityRef.current = feedIdentityKey;
     const activeFeedTab = activeTabRef.current;
-    const prefetchTabs = FEED_TABS
+    const prefetchTabs = visibleFeedTabs
       .map((feedTab) => feedTab.key)
       .filter((feedTab) => feedTab !== activeFeedTab);
     const timers = prefetchTabs.map((feedTab, index) =>
@@ -5142,6 +5330,7 @@ export default function FeedScreen() {
     resolvedUserId,
     roleResolved,
     session,
+    visibleFeedTabs,
   ]);
 
   /* ── Actions ── */
@@ -5571,6 +5760,10 @@ export default function FeedScreen() {
     setAiCards(updateCards);
     feedCacheRef.current = {
       ...feedCacheRef.current,
+      for_you: {
+        ...feedCacheRef.current.for_you,
+        aiCards: updateCards(feedCacheRef.current.for_you.aiCards),
+      },
       talent: {
         ...feedCacheRef.current.talent,
         aiCards: updateCards(feedCacheRef.current.talent.aiCards),
@@ -6289,7 +6482,7 @@ export default function FeedScreen() {
           >
             <Ionicons name="search" size={20} color={colors.textSecondary} />
             <Text style={[styles.composerSearchText, { color: colors.textSecondary }]} numberOfLines={1}>
-              Search musicians, studios, gigs
+              {isFan ? "Search posts, gigs, artists, groups" : "Search musicians, studios, gigs"}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -6347,7 +6540,7 @@ export default function FeedScreen() {
           borderColor={isDark ? "#334155" : "#E2E8F0"}
           indicatorWidthRatio={0.28}
           onChange={handleFeedTabChange}
-          tabs={FEED_TABS}
+          tabs={visibleFeedTabs}
           textStyle={styles.tabText}
         />
         <View style={[styles.feedTabBottomSpacer, { backgroundColor: cardBg }]} />
@@ -6360,6 +6553,7 @@ export default function FeedScreen() {
     colors.text,
     colors.textSecondary,
     canCreatePosts,
+    isFan,
     isDark,
     handleFeedTabChange,
     openCreateComposer,
@@ -6368,6 +6562,7 @@ export default function FeedScreen() {
     roleResolved,
     shouldPersonalizeForYouFeed,
     tab,
+    visibleFeedTabs,
   ]);
 
   const activeFeedSnapshot = feedCacheRef.current[tab];
@@ -6381,7 +6576,7 @@ export default function FeedScreen() {
     tab === "talent"
       ? aiCards.length > 0
       : tab === "for_you"
-        ? hasVisibleForYouPost(posts)
+        ? hasVisibleForYouPost(posts) || aiCards.length > 0
         : posts.length > 0 || followingEntities.length > 0;
   const activeTabIsFetching =
     fetchingByTab[tab] ||
@@ -6430,8 +6625,8 @@ export default function FeedScreen() {
         </View>
 
         <View style={[styles.tabRow, { backgroundColor: cardBg, borderBottomColor: skeletonBorder }]}>
-          {[1, 2, 3].map((item) => (
-            <View key={`feed-tab-skeleton-${item}`} style={styles.feedSkeletonTab}>
+          {visibleFeedTabs.map((item) => (
+            <View key={`feed-tab-skeleton-${item.key}`} style={styles.feedSkeletonTab}>
               <Skeleton width={82} height={18} borderRadius={8} />
             </View>
           ))}
@@ -6482,29 +6677,45 @@ export default function FeedScreen() {
   const feedItems = useMemo(() => {
     if (loading) return [];
     if (tab === "for_you") {
+      const rankedCards = aiCards.filter((item) => item?.__feedKind === "ai_card");
       const socialPosts = sortFeedItemsNewestFirst(posts.filter((item) => item?.__feedKind !== "ai_card"));
-      return dedupeFeedItems(socialPosts);
+      if (isFan) {
+        return dedupeFeedItems([
+          ...socialPosts,
+          ...sortFanRecommendationCards(filterFanVisibleFeedItems(rankedCards)),
+        ]);
+      }
+      return dedupeFeedItems([...rankedCards, ...socialPosts]);
     }
     if (tab === "talent") {
       return dedupeFeedItems(aiCards);
     }
     if (tab === "following") {
-      return sortFeedItemsNewestFirst(dedupeFeedItems([...posts, ...followingEntities]));
+      if (isFan) {
+        const socialPosts = sortFeedItemsNewestFirst(posts.filter((item) => item?.__feedKind !== "ai_card"));
+        return dedupeFeedItems([
+          ...socialPosts,
+          ...sortFanRecommendationCards(filterFanVisibleFeedItems(followingEntities)),
+        ]);
+      }
+      const followingItems = dedupeFeedItems([...posts, ...followingEntities]);
+      return sortFeedItemsNewestFirst(followingItems);
     }
     return sortFeedItemsNewestFirst(dedupeFeedItems(posts));
-  }, [aiCards, followingEntities, loading, posts, tab]);
+  }, [aiCards, followingEntities, isFan, loading, posts, tab]);
 
   const isShowingAiCards = tab === "talent" && aiCards.length > 0;
   const showRecommendationLoadingState =
-    tab === "talent" &&
+    (tab === "talent" || tab === "for_you") &&
     aiCards.length === 0 &&
-    (isAiCardsLoading || fetchingByTab.talent);
+    (isAiCardsLoading || fetchingByTab[tab]);
   const showFeedEmptyLoadingState =
     shouldHoldFeedEmptyState ||
     showRecommendationLoadingState ||
     (
       tab === "for_you" &&
       !hasVisibleForYouPost(posts) &&
+      aiCards.length === 0 &&
       (
         fetchingByTab.for_you ||
         forYouFeedQuery.isFetching

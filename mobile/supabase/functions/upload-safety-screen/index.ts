@@ -144,6 +144,12 @@ type ScreeningResult = {
   id: string;
   allowed: boolean;
   reason?: string;
+  requiresAdminReview?: boolean;
+  publiclyAvailable?: boolean;
+  copyrightStatus?: "not_required" | "pending_review" | "approved" | "declined";
+  copyrightReviewId?: string | null;
+  copyrightTrackKey?: string | null;
+  copyrightMetadata?: Record<string, unknown>;
 };
 
 type CopyrightScreeningContext = {
@@ -531,7 +537,15 @@ async function queueCopyrightOwnershipReview(
 ) {
   const userId = String(user?.id || "").trim();
   if (!supabaseAdmin || !userId) {
-    return { approved: false, queued: false, reviewId: null, trackKey: buildCopyrightTrackKey(match) };
+    const metadata = buildCopyrightMatchMetadata(match);
+    return {
+      approved: false,
+      queued: false,
+      reviewId: null,
+      reviewStatus: null,
+      trackKey: metadata.copyright_track_key,
+      metadata,
+    };
   }
 
   const matchMetadata = buildCopyrightMatchMetadata(match);
@@ -544,11 +558,25 @@ async function queueCopyrightOwnershipReview(
   );
 
   if (existingReview?.status === "APPROVED") {
-    return { approved: true, queued: false, reviewId: existingReview.id, trackKey };
+    return {
+      approved: true,
+      queued: false,
+      reviewId: existingReview.id,
+      reviewStatus: "APPROVED",
+      trackKey,
+      metadata: matchMetadata,
+    };
   }
 
   if (existingReview?.status === "PENDING_REVIEW") {
-    return { approved: false, queued: false, reviewId: existingReview.id, trackKey };
+    return {
+      approved: false,
+      queued: false,
+      reviewId: existingReview.id,
+      reviewStatus: "PENDING_REVIEW",
+      trackKey,
+      metadata: matchMetadata,
+    };
   }
 
   const { data: profile } = await supabaseAdmin
@@ -597,7 +625,14 @@ async function queueCopyrightOwnershipReview(
       trackKey,
       message: insertError.message,
     });
-    return { approved: false, queued: false, reviewId: null, trackKey };
+    return {
+      approved: false,
+      queued: false,
+      reviewId: null,
+      reviewStatus: null,
+      trackKey,
+      metadata: matchMetadata,
+    };
   }
 
   await supabaseAdmin.from("notifications").insert({
@@ -620,7 +655,14 @@ async function queueCopyrightOwnershipReview(
     trackKey,
   });
 
-  return { approved: false, queued: true, reviewId: insertedReview?.id || null, trackKey };
+  return {
+    approved: false,
+    queued: true,
+    reviewId: insertedReview?.id || null,
+    reviewStatus: "PENDING_REVIEW",
+    trackKey,
+    metadata: matchMetadata,
+  };
 }
 
 function getBestAcrMusicMatch(response: any): any | null {
@@ -643,7 +685,7 @@ function summarizeAcrMusicMatch(match: any): string {
 async function screenAudioCopyright(
   file: FileCandidate,
   screeningContext: CopyrightScreeningContext = {},
-): Promise<{ allowed: boolean; reason?: string }> {
+): Promise<Omit<ScreeningResult, "id">> {
   console.log("[upload-safety-screen] acrcloud_copyright_check_start", {
     fileName: file.fileName || "(unknown)",
     mimeType: file.mimeType || null,
@@ -657,7 +699,7 @@ async function screenAudioCopyright(
       fileName: file.fileName || "(unknown)",
       reason: "no_inline_audio_content",
     });
-    return { allowed: true };
+    return { allowed: true, publiclyAvailable: true, copyrightStatus: "not_required" };
   }
 
   if (!ACRCLOUD_HOST || !ACRCLOUD_ACCESS_KEY || !ACRCLOUD_ACCESS_SECRET) {
@@ -750,7 +792,7 @@ async function screenAudioCopyright(
       reason: "no_match",
       statusCode,
     });
-    return { allowed: true };
+    return { allowed: true, publiclyAvailable: true, copyrightStatus: "not_required" };
   }
 
   if (statusCode !== 0) {
@@ -796,7 +838,14 @@ async function screenAudioCopyright(
         reviewId: ownershipReview.reviewId,
         trackKey: ownershipReview.trackKey,
       });
-      return { allowed: true };
+      return {
+        allowed: true,
+        publiclyAvailable: true,
+        copyrightStatus: "approved",
+        copyrightReviewId: ownershipReview.reviewId,
+        copyrightTrackKey: ownershipReview.trackKey,
+        copyrightMetadata: ownershipReview.metadata,
+      };
     }
 
     console.warn("[upload-safety-screen] acrcloud_copyright_check_blocked", {
@@ -808,9 +857,23 @@ async function screenAudioCopyright(
       ownershipReviewId: ownershipReview.reviewId,
       ownershipReviewQueued: ownershipReview.queued,
     });
+
+    if (!ownershipReview.reviewId && !ownershipReview.queued) {
+      return {
+        allowed: false,
+        reason: "This track appears to match a released recording, but the ownership review could not be sent. Please try again.",
+      };
+    }
+
     return {
-      allowed: false,
+      allowed: true,
       reason: summarizeAcrMusicMatch(bestMatch),
+      requiresAdminReview: true,
+      publiclyAvailable: false,
+      copyrightStatus: "pending_review",
+      copyrightReviewId: ownershipReview.reviewId,
+      copyrightTrackKey: ownershipReview.trackKey,
+      copyrightMetadata: ownershipReview.metadata,
     };
   }
 
@@ -821,7 +884,7 @@ async function screenAudioCopyright(
     minScore,
   });
 
-  return { allowed: true };
+  return { allowed: true, publiclyAvailable: true, copyrightStatus: "not_required" };
 }
 
 function getFileId(file: FileCandidate, index: number): string {
@@ -1510,8 +1573,8 @@ serve(async (req: Request) => {
             : await screenVisualContent(context, file);
           results.push({
             id: fileId,
-            allowed: decision.allowed,
-            reason: decision.allowed ? undefined : decision.reason,
+            ...decision,
+            reason: decision.reason,
           });
         } catch (mediaError) {
           results.push({
