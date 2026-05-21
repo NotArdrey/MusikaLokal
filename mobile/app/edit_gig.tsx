@@ -102,6 +102,10 @@ const toCalendarDateString = (value: unknown): string => {
   return `${year}-${month}-${day}`;
 };
 
+const getLocalCalendarDate = () => toCalendarDateString(new Date());
+const isPastCalendarDate = (dateString: string, today = getLocalCalendarDate()) =>
+  Boolean(dateString) && dateString < today;
+
 const toDisplayTimeString = (value: unknown): string => {
   if (!value) return "";
 
@@ -134,6 +138,7 @@ const normalizeEventSchedules = (items: any[]): EventSchedule[] =>
 
 export default function EditGigScreen() {
   const { colors, isDark } = useTheme();
+  const todayCalendarDate = getLocalCalendarDate();
   const { id, reapply } = useLocalSearchParams<{
     id?: string | string[];
     reapply?: string | string[];
@@ -314,6 +319,11 @@ export default function EditGigScreen() {
   const handleAddEventCondition = () => {
     if (!eventDate.trim()) {
       showAlert("warning", "Required Field", "Please select an event date first");
+      return;
+    }
+
+    if (isPastCalendarDate(eventDate)) {
+      showAlert("warning", "Invalid Date", "Please select today or a future event date.");
       return;
     }
 
@@ -728,6 +738,14 @@ export default function EditGigScreen() {
         "warning",
         "Required Field",
         "Please add at least one event date and time condition",
+      );
+      return false;
+    }
+    if (schedules.some((schedule) => isPastCalendarDate(schedule.date))) {
+      showAlert(
+        "warning",
+        "Invalid Date",
+        "Event dates cannot be yesterday or any past date.",
       );
       return false;
     }
@@ -1468,7 +1486,13 @@ export default function EditGigScreen() {
               ]}
             >
               <Calendar
-                current={eventDate || new Date().toISOString().split("T")[0]}
+                current={
+                  eventDate && !isPastCalendarDate(eventDate, todayCalendarDate)
+                    ? eventDate
+                    : todayCalendarDate
+                }
+                minDate={todayCalendarDate}
+                disableAllTouchEventsForDisabledDays
                 markedDates={{
                   [eventDate]: {
                     selected: true,
@@ -1477,6 +1501,7 @@ export default function EditGigScreen() {
                   },
                 }}
                 onDayPress={(day) => {
+                  if (isPastCalendarDate(day.dateString, todayCalendarDate)) return;
                   setEventDate(day.dateString);
                 }}
                 theme={{

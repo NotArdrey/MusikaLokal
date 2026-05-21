@@ -66,7 +66,36 @@ const formatTimeInput = (text: string): string => {
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
 const normalizeE2ETestId = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-const getE2EEventDate = () => new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const DATE_ONLY_PREFIX = /^(\d{4}-\d{2}-\d{2})/;
+
+const toCalendarDateString = (value: unknown): string => {
+  if (!value) return "";
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return "";
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const raw = String(value).trim();
+  const dateOnlyMatch = raw.match(DATE_ONLY_PREFIX);
+  if (dateOnlyMatch) return dateOnlyMatch[1];
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getLocalCalendarDate = () => toCalendarDateString(new Date());
+const isPastCalendarDate = (dateString: string, today = getLocalCalendarDate()) =>
+  Boolean(dateString) && dateString < today;
+const getE2EEventDate = () => toCalendarDateString(new Date(Date.now() + 8 * 24 * 60 * 60 * 1000));
 
 const GENRES = [
   "Rock",
@@ -110,6 +139,7 @@ type EventSchedule = {
 export default function AddGigScreen() {
   const { colors, isDark } = useTheme();
   const params = useLocalSearchParams();
+  const todayCalendarDate = getLocalCalendarDate();
   const [step, setStep] = useState(1);
   const [gigName, setGigName] = useState("");
   const [description, setDescription] = useState("");
@@ -316,6 +346,11 @@ export default function AddGigScreen() {
       return;
     }
 
+    if (isPastCalendarDate(nextEventDate)) {
+      showAlert("warning", "Invalid Date", "Please select today or a future event date.");
+      return;
+    }
+
     if (!eventStartTime || !eventEndTime) {
       showAlert("warning", "Required Field", "Please set both start and end time first");
       return;
@@ -416,6 +451,14 @@ export default function AddGigScreen() {
           "warning",
           "Required Field",
           "Please add at least one event date and time condition",
+        );
+        return false;
+      }
+      if (schedules.some((schedule) => isPastCalendarDate(schedule.date))) {
+        showAlert(
+          "warning",
+          "Invalid Date",
+          "Event dates cannot be yesterday or any past date.",
         );
         return false;
       }
@@ -1480,8 +1523,13 @@ export default function AddGigScreen() {
                   ]}
                 >
                   <Calendar
-                    current={new Date().toISOString().split("T")[0]}
-                    minDate={new Date().toISOString().split("T")[0]}
+                    current={
+                      eventDate && !isPastCalendarDate(eventDate, todayCalendarDate)
+                        ? eventDate
+                        : todayCalendarDate
+                    }
+                    minDate={todayCalendarDate}
+                    disableAllTouchEventsForDisabledDays
                     markedDates={{
                       [eventDate]: {
                         selected: true,
@@ -1490,6 +1538,7 @@ export default function AddGigScreen() {
                       },
                     }}
                     onDayPress={(day) => {
+                      if (isPastCalendarDate(day.dateString, todayCalendarDate)) return;
                       setEventDate(day.dateString);
                     }}
                     theme={{
