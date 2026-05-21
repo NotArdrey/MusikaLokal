@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -415,41 +414,6 @@ export default function DiscoverScreen() {
 				showsVerticalScrollIndicator={false}
 				contentContainerStyle={{ paddingBottom: isWebDesktop ? 56 : 120 }}
 			>
-				<View
-					style={[
-						styles.heroContainer,
-						isWebDesktop && styles.heroContainerWeb,
-						{ marginHorizontal: frameHorizontalPadding },
-					]}
-				>
-					<LinearGradient
-						colors={
-							isDark
-								? ["#0B1224", "#17233E", "#1D4ED8"]
-								: ["#0F172A", "#1E293B", "#2563EB"]
-						}
-						style={styles.heroGradient}
-					>
-						<View style={styles.heroHeaderRow}>
-							<View style={{ flex: 1 }}>
-								<Text style={styles.heroTitle}>Discover</Text>
-								<Text style={styles.heroSubtitle}>
-									Browse cards directly on this page.
-								</Text>
-							</View>
-
-							<TouchableOpacity
-								activeOpacity={1}
-								onPress={() => router.replace("/ai_suggestions")}
-								style={styles.aiShortcut}
-							>
-								<Ionicons name="sparkles" size={16} color="#FFFFFF" />
-								<Text style={styles.aiShortcutText}>AI</Text>
-							</TouchableOpacity>
-						</View>
-					</LinearGradient>
-				</View>
-
 				<View style={{ paddingHorizontal: frameHorizontalPadding, marginTop: 18 }}>
 					<View
 						style={[
@@ -1051,55 +1015,6 @@ export default function DiscoverScreen() {
 const styles = StyleSheet.create({
 	container: {
 		flex: 1,
-	},
-	heroContainer: {
-		marginTop: 12,
-		borderRadius: 20,
-		overflow: "hidden",
-	},
-	heroContainerWeb: {
-		marginTop: 14,
-	},
-	heroGradient: {
-		paddingHorizontal: 20,
-		paddingTop: 20,
-		paddingBottom: 20,
-		borderWidth: 1,
-		borderColor: "rgba(255,255,255,0.08)",
-	},
-	heroHeaderRow: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 12,
-	},
-	heroTitle: {
-		color: "#F8FAFC",
-		fontFamily: "Poppins_700Bold",
-		fontSize: 32,
-		letterSpacing: -0.5,
-	},
-	heroSubtitle: {
-		color: "#CBD5E1",
-		fontFamily: "Poppins_400Regular",
-		fontSize: 15,
-		marginTop: 2,
-	},
-	aiShortcut: {
-		flexDirection: "row",
-		alignItems: "center",
-		justifyContent: "center",
-		backgroundColor: "rgba(255,255,255,0.18)",
-		borderWidth: 1,
-		borderColor: "rgba(255,255,255,0.28)",
-		borderRadius: 12,
-		paddingHorizontal: 10,
-		paddingVertical: 8,
-		gap: 5,
-	},
-	aiShortcutText: {
-		color: "#FFFFFF",
-		fontFamily: "Poppins_600SemiBold",
-		fontSize: 12,
 	},
 	searchRow: {
 		height: 56,
