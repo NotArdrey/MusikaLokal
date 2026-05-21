@@ -98,6 +98,7 @@ export default function PostDetailsScreen() {
   const [commentText, setCommentText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+  const [deleteCommentTargetId, setDeleteCommentTargetId] = useState<string | null>(null);
 
   const cardBg = isDark ? "#1E293B" : "#FFFFFF";
   const borderCol = isDark ? "#334155" : "#E2E8F0";
@@ -216,13 +217,24 @@ export default function PostDetailsScreen() {
   const canSubmitComment = commentText.trim().length > 0;
 
   const handleDeleteComment = async (commentId: string) => {
-    const { data } = await supabase.functions.invoke("manage-social-feed", {
-      body: { action: "delete_comment", comment_id: commentId },
-    });
-    if (data?.success) {
-      emitToast({ type: "info", title: "Deleted", message: "Comment deleted." });
-      fetchPost();
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-social-feed", {
+        body: { action: "delete_comment", comment_id: commentId },
+      });
+      if (error) throw error;
+      if (data?.success) {
+        emitToast({ type: "info", title: "Deleted", message: "Comment deleted." });
+        fetchPost();
+      } else {
+        setAlert({ type: "error", title: "Delete Failed", message: data?.error || "Failed to delete comment." });
+      }
+    } catch (e: any) {
+      setAlert({ type: "error", title: "Delete Failed", message: e?.message || "Please try again." });
     }
+  };
+
+  const promptDeleteComment = (commentId: string) => {
+    setDeleteCommentTargetId(commentId);
   };
 
   const handleDeletePost = async () => {
@@ -493,7 +505,7 @@ export default function PostDetailsScreen() {
                       {formatTimestamp(c.created_at)}
                     </Text>
                     {c.author_id === userId ? (
-                      <TouchableOpacity activeOpacity={0.7} onPress={() => handleDeleteComment(c.id)}>
+                      <TouchableOpacity activeOpacity={0.7} onPress={() => promptDeleteComment(c.id)}>
                         <Text style={[styles.commentMeta, { color: "#ef4444" }]}>Delete</Text>
                       </TouchableOpacity>
                     ) : null}
@@ -572,6 +584,26 @@ export default function PostDetailsScreen() {
             onClose={() => setAlert(null)}
           />
         )}
+        {deleteCommentTargetId && (
+          <CustomAlert
+            visible
+            forceModal
+            type="warning"
+            title="Delete comment"
+            message="This comment will be removed from the post."
+            buttons={[
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Delete",
+                style: "destructive",
+                onPress: () => {
+                  void handleDeleteComment(deleteCommentTargetId);
+                },
+              },
+            ]}
+            onClose={() => setDeleteCommentTargetId(null)}
+          />
+        )}
       </View>
     );
   }
@@ -587,6 +619,26 @@ export default function PostDetailsScreen() {
           title={alert.title}
           message={alert.message}
           onClose={() => setAlert(null)}
+        />
+      )}
+      {deleteCommentTargetId && (
+        <CustomAlert
+          visible
+          forceModal
+          type="warning"
+          title="Delete comment"
+          message="This comment will be removed from the post."
+          buttons={[
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Delete",
+              style: "destructive",
+              onPress: () => {
+                void handleDeleteComment(deleteCommentTargetId);
+              },
+            },
+          ]}
+          onClose={() => setDeleteCommentTargetId(null)}
         />
       )}
       <Navbar />

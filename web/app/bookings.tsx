@@ -197,6 +197,43 @@ const isGigApplicationEventFinished = (item: any, referenceDate = new Date()) =>
   return eventEndTimestamp !== null && eventEndTimestamp < referenceDate.getTime();
 };
 
+const getStudioBookingStartTimestamp = (item: any) => {
+  if (item?.type_id !== "studio_booking") return null;
+
+  const dateMatch = String(item?.raw_date || item?.date || "").match(
+    /^(\d{4})-(\d{2})-(\d{2})/,
+  );
+  if (!dateMatch) return null;
+
+  const timeMatch = String(item?.start_time || "00:00:00").match(
+    /^(\d{1,2}):(\d{2})(?::(\d{2}))?/,
+  );
+  if (!timeMatch) return null;
+
+  const [, year, month, day] = dateMatch;
+  const [, hour, minute, second = "0"] = timeMatch;
+  const startDate = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+  );
+
+  return Number.isNaN(startDate.getTime()) ? null : startDate.getTime();
+};
+
+const isStudioBookingSessionStarted = (item: any, referenceDate = new Date()) => {
+  const startTimestamp = getStudioBookingStartTimestamp(item);
+  return startTimestamp !== null && startTimestamp <= referenceDate.getTime();
+};
+
+const canCompleteBookingItem = (item: any, referenceDate = new Date()) =>
+  item?.type_id === "studio_booking"
+    ? isStudioBookingSessionStarted(item, referenceDate)
+    : isGigApplicationEventFinished(item, referenceDate);
+
 const formatApplicationReceivedDateTime = (item: any) => {
   const raw =
     toNonEmptyString(item?.submitted_at) ||
@@ -864,28 +901,30 @@ export default function BookingsScreen() {
               if (bookingId) {
                 const { data: booking } = await supabase
                   .from("studio_bookings")
-                  .select("id, status, payment_status")
+                  .select("id, status, payment_status, remaining_balance")
                   .eq("id", bookingId)
                   .single();
 
-                if (booking?.payment_status === "paid") {
+                if (booking?.payment_status === "paid" || booking?.payment_status === "partial") {
                   paymentConfirmed = true;
-                  debugLog("? Payment confirmed for booking:", bookingId);
+                  const isPartial = booking.payment_status === "partial" && (booking.remaining_balance || 0) > 0;
+                  debugLog("? Payment confirmed for booking:", bookingId, isPartial ? "(partial)" : "(full)");
                   break;
                 }
               } else {
-                // Check if any recent booking moved to paid
+                // Check if any recent booking moved to paid or partial
                 const { data: recentPaid } = await supabase
                   .from("studio_bookings")
-                  .select("id, status, payment_status")
+                  .select("id, status, payment_status, remaining_balance")
                   .eq("user_id", userId)
-                  .eq("payment_status", "paid")
+                  .in("payment_status", ["paid", "partial"])
                   .order("paid_at", { ascending: false })
                   .limit(1);
 
                 if (recentPaid && recentPaid.length > 0) {
                   paymentConfirmed = true;
-                  debugLog("? Found recently paid booking");
+                  const isPartial = recentPaid[0].payment_status === "partial" && (recentPaid[0].remaining_balance || 0) > 0;
+                  debugLog("? Found recently paid booking", isPartial ? "(partial)" : "(full)");
                   break;
                 }
               }
@@ -1359,10 +1398,7 @@ export default function BookingsScreen() {
       if (b.status === "pending" || b.status === "pending_relocation") {
         fallback.Pending.push(item);
       } else if (b.status === "confirmed") {
-        if (role === "musician" && b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
-          // Downpayment paid but balance still owed - keep in Pending so musician can pay balance
-          fallback.Pending.push({ ...item, status: "Balance Due" });
-        } else if (now > endDate) {
+        if (now > endDate) {
           fallback.Review.push({ ...item, status: "Completed" });
         } else if (now >= startDate && now <= endDate) {
           fallback.Ongoing.push({ ...item, status: "In Progress" });
@@ -3776,7 +3812,7 @@ export default function BookingsScreen() {
         Alert.alert(
           "Success",
           data?.payment_status === "partial"
-            ? "Downpayment confirmed. The remaining balance is in Pending."
+            ? "Downpayment confirmed. Your booking is now in Upcoming with a remaining balance due."
             : "Payment confirmed! Your booking is now in Upcoming.",
         );
         if (userId) fetchBookings(userId);
@@ -6633,22 +6669,63 @@ export default function BookingsScreen() {
                             )}
                           </View>
                         ) : activeTab === "Review" ? (
-                          <TouchableOpacity activeOpacity={1}
-                            onPress={() => handleLeaveReview(item)}
-                            style={[
-                              styles.outlineButton,
-                              { borderColor: colors.primary },
-                            ]}
-                          >
-                            <Text
+                          item.type_id === "studio_booking" &&
+                          (userRole === "studio-owner" || userRole === "venue-owner") &&
+                          item.raw_status !== "completed" &&
+                          !isReadOnlyBookingItem(item) ? (
+                            <TouchableOpacity activeOpacity={1}
+                              onPress={() => {
+                                setSelectedItem(item);
+                                setModalMode("complete");
+                                setModalVisible(true);
+                              }}
                               style={[
-                                styles.outlineButtonText,
-                                { color: colors.primary },
+                                styles.actionButton,
+                                {
+                                  backgroundColor: "#10B981",
+                                  width: "100%",
+                                  alignItems: "center",
+                                  flexDirection: "row",
+                                  justifyContent: "center",
+                                  borderRadius: 100,
+                                },
                               ]}
                             >
-                              Leave Review
-                            </Text>
-                          </TouchableOpacity>
+                              <Ionicons
+                                name="checkmark-circle-outline"
+                                size={18}
+                                color="white"
+                                style={{ marginRight: 8 }}
+                              />
+                              <Text
+                                style={[
+                                  styles.actionButtonText,
+                                  { color: "white" },
+                                ]}
+                              >
+                                {getBookingRemainingBalance(item) > 0 && !isBookingPaymentSettled(item)
+                                  ? "Complete & Mark Paid"
+                                  : "Complete"}
+                              </Text>
+                            </TouchableOpacity>
+                          ) : (
+                            <TouchableOpacity activeOpacity={1}
+                              onPress={() => handleLeaveReview(item)}
+                              style={[
+                                styles.outlineButton,
+                                { borderColor: colors.primary },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.outlineButtonText,
+                                  { color: colors.primary },
+                                ]}
+                              >
+                                Leave Review
+                              </Text>
+                            </TouchableOpacity>
+                          )
                         ) : (
                           // Default / Upcoming Buttons
                           <View
@@ -6718,8 +6795,53 @@ export default function BookingsScreen() {
                               </TouchableOpacity>
                             )}
 
+                            {activeTab === "Ongoing" &&
+                              item.type_id === "studio_booking" &&
+                              (userRole === "studio-owner" || userRole === "venue-owner") &&
+                              item.raw_status !== "completed" &&
+                              !isReadOnlyBookingItem(item) && (
+                                <TouchableOpacity activeOpacity={1}
+                                  onPress={() => {
+                                    setSelectedItem(item);
+                                    setModalMode("complete");
+                                    setModalVisible(true);
+                                  }}
+                                  style={[
+                                    styles.actionButton,
+                                    {
+                                      backgroundColor: "#10B981",
+                                      width: "100%",
+                                      alignItems: "center",
+                                      flexDirection: "row",
+                                      justifyContent: "center",
+                                      borderRadius: 100,
+                                    },
+                                  ]}
+                                >
+                                  <Ionicons
+                                    name="checkmark-circle-outline"
+                                    size={18}
+                                    color="white"
+                                    style={{ marginRight: 8 }}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.actionButtonText,
+                                      {
+                                        color: "white",
+                                        fontSize: moderateScale(14),
+                                      },
+                                    ]}
+                                  >
+                                    {getBookingRemainingBalance(item) > 0 && !isBookingPaymentSettled(item)
+                                      ? "Complete & Mark Paid"
+                                      : "Complete"}
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+
                             {/* Pay Balance / Clear Balance (F2F) Buttons */}
-                            {activeTab === "Upcoming" &&
+                            {(activeTab === "Upcoming" || activeTab === "Ongoing") &&
                               item.type_id === "studio_booking" &&
                               canPayRemainingBalance(item) && (
                                 <>
@@ -6939,7 +7061,11 @@ export default function BookingsScreen() {
               : modalMode === "fire"
                 ? "Are you sure you want to fire this musician? This will cancel their upcoming gigs with you."
                 : modalMode === "complete"
-                  ? "Confirm efficient completion of this gig? You will be redirected to review the musician."
+                  ? selectedItem?.type_id === "studio_booking"
+                    ? getBookingRemainingBalance(selectedItem) > 0 && !isBookingPaymentSettled(selectedItem)
+                      ? `Complete this booking and mark ${formatPesoAmount(selectedItem?.remaining_balance)} as paid via face-to-face payment?`
+                      : "Mark this studio booking as completed?"
+                    : "Confirm efficient completion of this gig? You will be redirected to review the musician."
                     : modalMode === "clear_balance"
                       ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
                       : modalMode === "late_confirm"
@@ -7008,7 +7134,13 @@ export default function BookingsScreen() {
               : modalMode === "fire"
                 ? "Fire Musician"
                 : modalMode === "complete"
-                  ? "Complete & Review"
+                  ? selectedItem?.type_id === "studio_booking" &&
+                    getBookingRemainingBalance(selectedItem) > 0 &&
+                    !isBookingPaymentSettled(selectedItem)
+                    ? "Complete & Mark Paid"
+                    : selectedItem?.type_id === "studio_booking"
+                      ? "Complete"
+                      : "Complete & Review"
                     : modalMode === "clear_balance"
                         ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
                         : modalMode === "late_confirm"
@@ -7096,11 +7228,13 @@ export default function BookingsScreen() {
               return;
             }
 
-            if (modalMode === "complete" && !isGigApplicationEventFinished(selectedItem)) {
+            if (modalMode === "complete" && !canCompleteBookingItem(selectedItem)) {
               showAlert(
                 "warning",
-                "Event Not Finished",
-                "You can complete this contract after the event date has passed.",
+                selectedItem?.type_id === "studio_booking" ? "Booking Not Started" : "Event Not Finished",
+                selectedItem?.type_id === "studio_booking"
+                  ? "You can complete this booking once the scheduled start time has arrived."
+                  : "You can complete this contract after the event date has passed.",
               );
               return;
             }
@@ -7248,7 +7382,7 @@ export default function BookingsScreen() {
               {getPaymentItemTotalAmount(paymentItem).toLocaleString()}
             </Text>
             <Text style={[styles.paymentOptionHint, { color: colors.textSecondary }]}>
-              Choose whether to settle everything now or leave the other half as a Pending balance.
+              Choose whether to settle everything now or leave the other half as a balance due.
             </Text>
 
             {/* Full Payment Option */}

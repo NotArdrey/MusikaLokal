@@ -4027,7 +4027,7 @@ const ListingDetailsSheet = forwardRef<
                 Total booking amount: ?{paymentModalTotalAmount.toLocaleString()}
               </Text>
               <Text style={[styles.paymentOptionHint, { color: colors.textSecondary }]}>
-                Full payment settles the booking. Downpayment leaves the other half in Pending as Balance Due.
+                Full payment settles the booking. Downpayment leaves the other half as Balance Due.
               </Text>
 
               {/* Full Payment Option */}

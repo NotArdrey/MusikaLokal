@@ -83,6 +83,7 @@ export default function PostDetailsScreen() {
   const [commentText, setCommentText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+  const [deleteCommentTargetId, setDeleteCommentTargetId] = useState<string | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [keyboardAvoidingResetKey, setKeyboardAvoidingResetKey] = useState(0);
 
@@ -242,6 +243,10 @@ export default function PostDetailsScreen() {
     } catch (e: any) {
       setAlert({ type: "error", title: "Error", message: e.message });
     }
+  };
+
+  const promptDeleteComment = (commentId: string) => {
+    setDeleteCommentTargetId(commentId);
   };
 
   const handleDeletePost = async () => {
@@ -406,7 +411,7 @@ export default function PostDetailsScreen() {
                   </Text>
                 </View>
                 {c.author_id === userId && (
-                  <TouchableOpacity activeOpacity={1} onPress={() => handleDeleteComment(c.id)}>
+                  <TouchableOpacity activeOpacity={1} onPress={() => promptDeleteComment(c.id)}>
                     <Ionicons name="trash-outline" size={16} color="#ef4444" />
                   </TouchableOpacity>
                 )}
@@ -418,6 +423,27 @@ export default function PostDetailsScreen() {
         </View>
 
       </ScrollView>
+
+      {deleteCommentTargetId && (
+        <CustomAlert
+          visible
+          forceModal
+          type="warning"
+          title="Delete comment"
+          message="This comment will be removed from the post."
+          buttons={[
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Delete",
+              style: "destructive",
+              onPress: () => {
+                void handleDeleteComment(deleteCommentTargetId);
+              },
+            },
+          ]}
+          onClose={() => setDeleteCommentTargetId(null)}
+        />
+      )}
 
       {/* Comment input */}
       <SafeAreaView

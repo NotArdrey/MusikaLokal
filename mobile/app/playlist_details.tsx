@@ -187,6 +187,7 @@ export default function PlaylistDetailsScreen() {
   const [playlist, setPlaylist] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState<PlaylistAlert | null>(null);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
 
   // Add track modal state
   const [addTrackVisible, setAddTrackVisible] = useState(false);
@@ -566,6 +567,10 @@ export default function PlaylistDetailsScreen() {
     } catch (e: any) {
       setAlert({ type: "error", title: "Error", message: e.message });
     }
+  };
+
+  const promptDeletePlaylist = () => {
+    setDeleteConfirmVisible(true);
   };
 
   const openEditTrackModal = useCallback((item: any) => {
@@ -1038,7 +1043,7 @@ export default function PlaylistDetailsScreen() {
               </TouchableOpacity>
               <TouchableOpacity activeOpacity={1}
                 style={[styles.actionBtn, { backgroundColor: "#ef4444" }]}
-                onPress={handleDelete}
+                onPress={promptDeletePlaylist}
               >
                 <Ionicons name="trash" size={16} color="#fff" />
                 <Text style={styles.actionBtnText}>Delete</Text>
@@ -1057,6 +1062,27 @@ export default function PlaylistDetailsScreen() {
         title="Report Music"
         reportType="music"
       />
+
+      {deleteConfirmVisible && playlist && (
+        <CustomAlert
+          visible
+          forceModal
+          type="warning"
+          title="Delete playlist"
+          message={`Delete "${playlist?.title || "this playlist"}"? This cannot be undone.`}
+          buttons={[
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Delete",
+              style: "destructive",
+              onPress: () => {
+                void handleDelete();
+              },
+            },
+          ]}
+          onClose={() => setDeleteConfirmVisible(false)}
+        />
+      )}
 
       {alert && (
         <CustomAlert

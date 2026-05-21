@@ -1193,13 +1193,13 @@ serve(async (req: Request) => {
           const studioImage = fullBooking.studio?.images?.[0];
           const userAvatar = fullBooking.profile?.avatar_url;
 
-          // Notify musician — downpayment lands in Pending (balance due), full payment lands in Upcoming
+          // Notify musician: downpayment leaves a balance due, full payment is fully settled.
           await insertNotification(supabaseAdmin, {
             user_id: fullBooking.user_id,
             type: "success",
             title: "Payment Successful!",
             message: isDownpayment
-              ? `Downpayment received for ${fullBooking.studio?.name}. Pay the remaining balance in your Pending bookings.`
+              ? `Downpayment received for ${fullBooking.studio?.name}. The booking is scheduled with a remaining balance due.`
               : `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`,
             image: studioImage,
             meta: {

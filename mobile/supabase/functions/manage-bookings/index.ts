@@ -316,6 +316,98 @@ const toMoneyNumber = (value: unknown) => {
   return Number.isFinite(amount) ? amount : 0;
 };
 
+function getStudioBookingBalanceSettlementFields(booking: any) {
+  const remainingBalance = toMoneyNumber(booking?.remaining_balance);
+  if (remainingBalance <= 0) return null;
+
+  const paymentStatus = String(booking?.payment_status || "").toLowerCase();
+  if (!["partial", "paid"].includes(paymentStatus)) return null;
+
+  const finalPrice = toMoneyNumber(booking?.final_price);
+
+  return {
+    remainingBalance,
+    fields: {
+      remaining_balance: 0,
+      payment_status: "paid",
+      payment_amount: finalPrice > 0 ? finalPrice : toMoneyNumber(booking?.payment_amount),
+      paid_at: booking?.paid_at || new Date().toISOString(),
+    },
+  };
+}
+
+async function creditStudioBookingBalanceToOwner(
+  supabaseAdmin: any,
+  booking: any,
+  balanceAmount: number,
+) {
+  const amount = toMoneyNumber(balanceAmount);
+  const ownerId = booking?.studio?.owner_id;
+  if (!booking?.id || !ownerId || amount <= 0) {
+    return { credited: false, amount: 0, skipped: "invalid_balance_credit" };
+  }
+
+  const { data: existingTx, error: existingTxError } = await supabaseAdmin
+    .from("wallet_transactions")
+    .select("id")
+    .eq("reference_id", booking.id)
+    .eq("reference_type", "booking_balance")
+    .eq("type", "earning")
+    .limit(1);
+
+  if (existingTxError) throw existingTxError;
+
+  if (existingTx && existingTx.length > 0) {
+    return { credited: false, amount, already_credited: true };
+  }
+
+  let { data: wallet, error: walletError } = await supabaseAdmin
+    .from("wallets")
+    .select("id, balance")
+    .eq("user_id", ownerId)
+    .maybeSingle();
+
+  if (walletError) throw walletError;
+
+  if (!wallet) {
+    const { data: createdWallet, error: createWalletError } = await supabaseAdmin
+      .from("wallets")
+      .insert({ user_id: ownerId, balance: 0 })
+      .select("id, balance")
+      .single();
+
+    if (createWalletError) throw createWalletError;
+    wallet = createdWallet;
+  }
+
+  const { error: walletUpdateError } = await supabaseAdmin
+    .from("wallets")
+    .update({
+      balance: toMoneyNumber(wallet.balance) + amount,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", wallet.id);
+
+  if (walletUpdateError) throw walletUpdateError;
+
+  const { error: transactionError } = await supabaseAdmin
+    .from("wallet_transactions")
+    .insert({
+      wallet_id: wallet.id,
+      amount,
+      type: "earning",
+      description: `Remaining balance payment received for booking at ${booking?.studio?.name || "Studio"}`,
+      reference_id: booking.id,
+      reference_type: "booking_balance",
+      is_credit: true,
+      status: "completed",
+    });
+
+  if (transactionError) throw transactionError;
+
+  return { credited: true, amount };
+}
+
 async function refundStudioOwnerCancelledBookingToWallet(
   supabaseAdmin: any,
   bookingId: string,
@@ -1255,10 +1347,6 @@ serve(async (req: Request) => {
           if (b.status === "pending" || b.status === "pending_relocation") {
             // @ts-ignore
             categorized.Pending.push(item);
-          } else if (b.status === "confirmed" && b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
-            // Downpayment paid but balance still owed — keep in Pending so musician can pay the rest
-            // @ts-ignore
-            categorized.Pending.push({ ...item, status: "Balance Due" });
           } else if (b.status === "confirmed") {
             if (now > endDate) {
               // AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
@@ -1465,10 +1553,6 @@ serve(async (req: Request) => {
             if (b.status === "pending" || b.status === "pending_relocation") {
               // @ts-ignore
               categorized.Pending.push(item);
-            } else if (b.status === "confirmed" && b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
-              // Downpayment paid but balance still owed — show in Pending so owner sees it awaiting full payment
-              // @ts-ignore
-              categorized.Pending.push({ ...item, status: "Balance Due" });
             } else if (b.status === "confirmed") {
               if (now > endDate) {
                 // AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
@@ -3153,11 +3237,13 @@ serve(async (req: Request) => {
       }
 
       const updateData: any = { status: new_status };
+      let studioBalanceSettlement: any = null;
+      let studioBalanceSettlementBooking: any = null;
 
       if (table === "studio_bookings") {
         const { data: targetBooking, error: targetBookingError } = await supabaseAdmin
           .from("studio_bookings")
-          .select("id, user_id, studio_id, studio:studios(owner_id)")
+          .select("id, user_id, studio_id, payment_status, payment_amount, final_price, remaining_balance, paid_at, studio:studios(id, name, owner_id)")
           .eq("id", booking_id)
           .maybeSingle();
 
@@ -3181,6 +3267,28 @@ serve(async (req: Request) => {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
             status: 403,
           });
+        }
+
+        if (new_status === "completed") {
+          studioBalanceSettlement = getStudioBookingBalanceSettlementFields(targetBooking);
+          const canSettleBalance =
+            targetBooking.studio?.owner_id === authUser.id ||
+            (staffAccessLevel !== null && staffAccessLevel <= 2);
+
+          if (studioBalanceSettlement && !canSettleBalance) {
+            return new Response(
+              JSON.stringify({ error: "Only the studio owner can mark the remaining balance as paid." }),
+              {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 403,
+              },
+            );
+          }
+
+          if (studioBalanceSettlement) {
+            studioBalanceSettlementBooking = targetBooking;
+            Object.assign(updateData, studioBalanceSettlement.fields);
+          }
         }
       }
 
@@ -3278,6 +3386,25 @@ serve(async (req: Request) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
           status: 404,
         });
+      }
+
+      if (studioBalanceSettlement) {
+        try {
+          await creditStudioBookingBalanceToOwner(
+            supabaseAdmin,
+            { ...data, studio: studioBalanceSettlementBooking?.studio },
+            studioBalanceSettlement.remainingBalance,
+          );
+        } catch (balanceCreditError) {
+          console.error("Failed to credit completed booking balance:", balanceCreditError);
+          return new Response(
+            JSON.stringify({ error: "Booking completed, but wallet balance credit failed." }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 500,
+            },
+          );
+        }
       }
 
       let ownerCancellationRefundResult: any = null;
@@ -4742,6 +4869,7 @@ serve(async (req: Request) => {
           remaining_balance: 0,
           payment_status: "paid",
           payment_amount: booking.final_price, // Full amount is now paid
+          paid_at: booking.paid_at || new Date().toISOString(),
         })
         .eq("id", booking_id);
 
@@ -4757,45 +4885,10 @@ serve(async (req: Request) => {
       }
 
       // 5. Credit the owner's wallet
-      const { data: wallet, error: walletError } = await supabaseAdmin
-        .from("wallets")
-        .select("id, balance")
-        .eq("user_id", booking.studio?.owner_id || owner_id)
-        .single();
-
-      if (walletError) {
-        console.error("Wallet fetch error:", walletError);
-        // Continue anyway - booking is updated
-      }
-
-      if (wallet) {
-        // Update wallet balance
-        const { error: walletUpdateError } = await supabaseAdmin
-          .from("wallets")
-          .update({ balance: (wallet.balance || 0) + balanceAmount })
-          .eq("id", wallet.id);
-
-        if (walletUpdateError) {
-          console.error("Wallet update error:", walletUpdateError);
-        }
-
-        // Create transaction record
-        const { error: transactionError } = await supabaseAdmin
-          .from("wallet_transactions")
-          .insert({
-            wallet_id: wallet.id,
-            amount: balanceAmount,
-            type: "earning",
-            description: `Remaining balance payment received for booking at ${booking.studio?.name || "Studio"}`,
-            reference_id: booking_id,
-            reference_type: "booking_balance",
-            is_credit: true,
-            status: "completed",
-          });
-
-        if (transactionError) {
-          console.error("Transaction record error:", transactionError);
-        }
+      try {
+        await creditStudioBookingBalanceToOwner(supabaseAdmin, booking, balanceAmount);
+      } catch (walletCreditError) {
+        console.error("Wallet credit error:", walletCreditError);
       }
 
       // 6. Notify the customer that their balance was cleared
