@@ -22,7 +22,9 @@ export function isUuid(value: unknown) {
 }
 
 function normalizeDocumentToken(value: unknown) {
-  return normalizeText(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const rawValue = normalizeText(value);
+  if (!rawValue || /^\[?redacted\]?$/i.test(rawValue)) return "";
+  return rawValue.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 function readPath(source: any, path: string[]) {

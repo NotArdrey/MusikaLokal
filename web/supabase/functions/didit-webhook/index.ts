@@ -638,7 +638,7 @@ serve(async (req) => {
 
         // 1. Session Started / still running - Update status to PENDING
         if (webhookStatusIsRunning) {
-            if (userReference) {
+            if (userReference && isUuid(userReference)) {
                 await supabaseAdmin
                     .from('profiles')
                     .update({
@@ -648,6 +648,15 @@ serve(async (req) => {
                     .eq('id', userReference);
 
                 console.log(`Verification running for user ${userReference}, session ${sessionId}`, {
+                    sourceStatus: status || null,
+                });
+            } else if (userReference && sessionId) {
+                await upsertVerificationSession(supabaseAdmin, sessionId, 'PENDING', {
+                    user_ref: userReference,
+                    source_status: status || null,
+                });
+
+                console.log(`Verification running for temp signup ${userReference}, session ${sessionId}`, {
                     sourceStatus: status || null,
                 });
             }
@@ -765,8 +774,8 @@ serve(async (req) => {
             // 1. Try to get email from Auth User
             let userEmail = authUser?.user?.email;
 
-            // 2. If missing, look up in Profiles table (where we store it during signup)
-            if (!userEmail) {
+            // 2. If missing and this is a real account, look up in Profiles.
+            if (!userEmail && isValidUUID) {
                 console.log('Email not found in Auth User. Checking profiles table...');
                 const { data: profileWithEmail } = await supabaseAdmin
                     .from('profiles')
@@ -779,6 +788,21 @@ serve(async (req) => {
                     console.log('Recovered email from profiles table:', userEmail);
                 } else {
                     console.error('CRITICAL: Email not found in Auth OR Profiles. Verification email cannot be sent.');
+                }
+            } else if (!userEmail && sessionId) {
+                console.log('Email not found in Auth User. Checking verification session for temp signup...');
+                const { data: pendingSession } = await supabaseAdmin
+                    .from('verification_sessions')
+                    .select('verification_data')
+                    .eq('session_ref', sessionId)
+                    .maybeSingle();
+
+                const sessionEmail = String(pendingSession?.verification_data?.email || '').trim().toLowerCase();
+                if (sessionEmail) {
+                    userEmail = sessionEmail;
+                    console.log('Recovered email from verification session:', userEmail);
+                } else {
+                    console.error('CRITICAL: Email not found in Auth, Profiles, or verification_sessions. Verification email cannot be sent.');
                 }
             } else {
                 console.log('Email found in Auth User:', userEmail);
@@ -855,7 +879,7 @@ serve(async (req) => {
             else if (isDiditReviewStatus(faceStatus) || isDiditReviewStatus(idStatus) || isDiditReviewStatus(livenessStatus)) {
                 console.log('Status is IN REVIEW');
                 const reviewDocumentType = idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID';
-                const reviewDocumentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || '';
+                const reviewDocumentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL';
                 const reviewDocumentFingerprint = await buildIdentityDocumentFingerprint(idVerification, {
                     documentType: reviewDocumentType,
                     documentCountry: reviewDocumentCountry,
@@ -1172,7 +1196,7 @@ async function handleApproved(
 
     const documentExpiry = extractDocumentExpiry(idVerification);
     const documentType = idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID';
-    const documentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || '';
+    const documentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL';
     const documentFingerprint = await buildIdentityDocumentFingerprint(idVerification, {
         documentType,
         documentCountry,
@@ -1736,7 +1760,7 @@ async function handleDuplicateDetected(
     console.log('Warnings received:', warnings);
 
     const documentType = idVerification?.document_type || idVerification?.documentType || idVerification?.type || 'Government ID';
-    const documentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || '';
+    const documentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || 'PHL';
     const identityNameBirthDate = prepareIdentityNameBirthDateDuplicateInput(idVerification);
     const documentFingerprint = await buildIdentityDocumentFingerprint(idVerification, {
         documentType,

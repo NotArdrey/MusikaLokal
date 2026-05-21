@@ -5,6 +5,16 @@ import { Calendar } from "react-native-calendars";
 import styles from "../ListingDetailsSheet.styles";
 import { normalizeStudioType } from "./availability";
 
+export type SlotAvailabilityReason = "booked" | "lead_time" | "unavailable";
+
+export type SlotAvailabilityMap = Record<
+  string,
+  {
+    available: boolean;
+    reason?: SlotAvailabilityReason;
+  }
+>;
+
 interface BookingControlsProps {
   colors: any;
   isDark: boolean;
@@ -24,6 +34,7 @@ interface BookingControlsProps {
   setEndTime: (value: any) => void;
   setDate: (value: any) => void;
   availableSlots: string[];
+  slotAvailability: SlotAvailabilityMap;
   selectedSlot: string | null;
   validEndTimes: string[];
   date: Date | null;
@@ -77,6 +88,7 @@ const BookingControls = ({
   setEndTime,
   setDate,
   availableSlots,
+  slotAvailability,
   selectedSlot,
   validEndTimes,
   date,
@@ -95,6 +107,13 @@ const BookingControls = ({
   const normalizedStudioType = normalizeStudioType(group?.studio_type);
   const supportsSessionTypeSelection = normalizedStudioType === "Both";
   const hasSelectedSessionType = Boolean(selectedSessionType);
+  const displaySlots =
+    Object.keys(slotAvailability).length > 0
+      ? Object.keys(slotAvailability).sort()
+      : availableSlots;
+
+  const getUnavailableLabel = (slot: string) =>
+    slotAvailability[slot]?.reason === "lead_time" ? "Too soon" : "Unavailable";
 
   return (
     <View
@@ -400,17 +419,13 @@ const BookingControls = ({
                 return;
               }
 
-              const slots = await fetchAvailableSlots(day.dateString);
-              if (!slots || slots.length === 0) {
-                return;
-              }
-
               setSelectedDate(day.dateString);
               setSelectedSlot(null);
               setValidEndTimes([]);
               setEndTime(null);
               const selectedDateObj = new Date(day.dateString);
               setDate(selectedDateObj);
+              await fetchAvailableSlots(day.dateString);
             }}
             theme={{
               backgroundColor: "transparent",
@@ -530,8 +545,6 @@ const BookingControls = ({
                     const startMinutes = startParts[0] * 60 + startParts[1];
                     const endMinutes = endParts[0] * 60 + endParts[1];
                     const durationHours = (endMinutes - startMinutes) / 60;
-                    const rate = parseInt(displayRate.replace(/,/g, "")) || 0;
-
                     return (
                       <View
                         style={{
@@ -548,13 +561,6 @@ const BookingControls = ({
                         <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
                           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular" }}>Rate</Text>
                           <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>₱{displayRate}/song</Text>
-                        </View>
-                        <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 8 }} />
-                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold" }}>Minimum (1 song)</Text>
-                          <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 16 }}>
-                            ₱{rate.toLocaleString()}
-                          </Text>
                         </View>
                         <Text
                           style={{
@@ -612,7 +618,7 @@ const BookingControls = ({
                   marginBottom: 12,
                 }}
               >
-                Available Slots for{" "}
+                Time Slots for{" "}
                 {new Date(selectedDate).toLocaleDateString(undefined, {
                   weekday: "long",
                   month: "short",
@@ -620,7 +626,7 @@ const BookingControls = ({
                 })}
               </Text>
 
-              {availableSlots.length > 0 ? (
+              {displaySlots.length > 0 ? (
                 <View>
                   {(() => {
                     const grouped = {
@@ -628,7 +634,7 @@ const BookingControls = ({
                       Afternoon: [] as string[],
                       Evening: [] as string[],
                     };
-                    availableSlots.forEach((slot) => {
+                    displaySlots.forEach((slot) => {
                       const hour = parseInt(slot.split(":")[0]);
                       if (hour < 12) grouped.Morning.push(slot);
                       else if (hour < 18) grouped.Afternoon.push(slot);
@@ -647,29 +653,52 @@ const BookingControls = ({
                                 fontSize: 12,
                                 marginBottom: 8,
                                 textTransform: "uppercase",
-                                letterSpacing: 0.5,
+                                letterSpacing: 0,
                               }}
                             >
                               {period}
                             </Text>
                             <View style={styles.slotGrid}>
                               {grouped[period].map((slot) => {
-                                const isSelected = selectedSlot === slot;
+                                const slotStatus = slotAvailability[slot];
+                                const isUnavailable =
+                                  slotStatus ? !slotStatus.available : !availableSlots.includes(slot);
+                                const isSelected = selectedSlot === slot && !isUnavailable;
                                 const slotHour = parseInt(slot.split(":")[0]);
                                 const startHour = selectedSlot
                                   ? parseInt(selectedSlot.split(":")[0])
                                   : -1;
                                 const endHour = endTime ? endTime.getHours() : -1;
                                 const isInRange =
-                                  selectedSlot && endTime && slotHour >= startHour && slotHour < endHour;
+                                  !isUnavailable &&
+                                  selectedSlot &&
+                                  endTime &&
+                                  slotHour >= startHour &&
+                                  slotHour < endHour;
 
                                 return (
-                                  <TouchableOpacity activeOpacity={1}
+                                  <TouchableOpacity
+                                    activeOpacity={isUnavailable ? 1 : 0.78}
                                     key={slot}
+                                    disabled={isUnavailable}
+                                    accessibilityRole="button"
+                                    accessibilityState={{
+                                      disabled: isUnavailable,
+                                      selected: isSelected,
+                                    }}
+                                    accessibilityLabel={`${formatTime12(slot)} ${
+                                      isUnavailable ? getUnavailableLabel(slot) : "available"
+                                    }`}
                                     style={[
                                       styles.slotButton,
                                       {
-                                        backgroundColor: isSelected
+                                        minHeight: 58,
+                                        opacity: isUnavailable ? 0.75 : 1,
+                                        backgroundColor: isUnavailable
+                                          ? isDark
+                                            ? "#1F2937"
+                                            : "#E5E7EB"
+                                          : isSelected
                                           ? isDark
                                             ? "rgba(124, 58, 237, 0.15)"
                                             : "rgba(124, 58, 237, 0.1)"
@@ -680,28 +709,33 @@ const BookingControls = ({
                                             : isDark
                                               ? "#374151"
                                               : "#F3F4F6",
-                                        borderColor: isSelected ? colors.primary : "transparent",
-                                        borderWidth: isSelected ? 2 : 0,
+                                        borderColor: isUnavailable
+                                          ? isDark
+                                            ? "#374151"
+                                            : "#D1D5DB"
+                                          : isSelected
+                                            ? colors.primary
+                                            : "transparent",
+                                        borderWidth: isUnavailable || isSelected ? (isSelected ? 2 : 1) : 0,
                                       },
                                     ]}
                                     onPress={() => {
+                                      if (isUnavailable) return;
                                       setSelectedSlot(slot);
                                       const [hours, minutes] = slot.split(":");
                                       const startDate = new Date(selectedDate);
                                       startDate.setHours(parseInt(hours), parseInt(minutes));
                                       setDate(startDate);
 
-                                      const availableHours = new Set(
-                                        availableSlots.map((s) => parseInt(s.split(":")[0])),
-                                      );
+                                      const availableSlotSet = new Set(availableSlots);
                                       let maxDur = 0;
-                                      let currentH = parseInt(hours);
+                                      const current = new Date(startDate);
 
                                       for (let i = 0; i < 12; i++) {
-                                        if (i > 0 && !availableHours.has(currentH)) break;
+                                        const currentSlot = current.toTimeString().slice(0, 5);
+                                        if (i > 0 && !availableSlotSet.has(currentSlot)) break;
                                         maxDur++;
-                                        currentH++;
-                                        if (currentH >= 24) break;
+                                        current.setHours(current.getHours() + 1);
                                       }
 
                                       const validDurs: string[] = [];
@@ -717,7 +751,13 @@ const BookingControls = ({
                                   >
                                     <Text
                                       style={{
-                                        color: isSelected ? colors.primary : colors.text,
+                                        color: isUnavailable
+                                          ? isDark
+                                            ? "#6B7280"
+                                            : "#9CA3AF"
+                                          : isSelected
+                                            ? colors.primary
+                                            : colors.text,
                                         fontFamily: isSelected
                                           ? "Poppins_600SemiBold"
                                           : "Poppins_500Medium",
@@ -726,6 +766,18 @@ const BookingControls = ({
                                     >
                                       {formatTime12(slot)}
                                     </Text>
+                                    {isUnavailable && (
+                                      <Text
+                                        style={{
+                                          color: isDark ? "#6B7280" : "#9CA3AF",
+                                          fontFamily: "Poppins_500Medium",
+                                          fontSize: 9,
+                                          marginTop: 2,
+                                        }}
+                                      >
+                                        {getUnavailableLabel(slot)}
+                                      </Text>
+                                    )}
                                   </TouchableOpacity>
                                 );
                               })}

@@ -60,7 +60,7 @@ import DocumentUploader from "./DocumentUploader";
 import ReportModal from "./ReportModal";
 import SlidingTabBar from "./SlidingTabBar";
 import VideoUploader from "./VideoUploader";
-import BookingControls from "./listingDetails/BookingControls";
+import BookingControls, { type SlotAvailabilityMap } from "./listingDetails/BookingControls";
 import GigApplyTab from "./listingDetails/GigApplyTab";
 import GigInfoTab from "./listingDetails/GigInfoTab";
 import GroupAboutTab from "./listingDetails/GroupAboutTab";
@@ -124,6 +124,63 @@ const toLocalDateKey = (value: Date) => {
   const month = String(value.getMonth() + 1).padStart(2, "0");
   const day = String(value.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+};
+
+const normalizeTimeLabel = (value: unknown) =>
+  typeof value === "string" && value.length >= 5 ? value.slice(0, 5) : "";
+
+type TimeSlotBlock = { start: string; end: string };
+
+const getBookingBlockedSlots = (booking: any): TimeSlotBlock[] => {
+  const childSlots = Array.isArray(booking?.studio_booking_slots)
+    ? booking.studio_booking_slots
+    : Array.isArray(booking?.timeSlots)
+      ? booking.timeSlots
+      : [];
+  const normalizedChildSlots = childSlots
+    .map((slot: any) => ({
+      start: normalizeTimeLabel(slot?.start_time ?? slot?.start),
+      end: normalizeTimeLabel(slot?.end_time ?? slot?.end),
+    }))
+    .filter((slot: { start: string; end: string }) => slot.start && slot.end);
+
+  if (normalizedChildSlots.length > 0) {
+    return normalizedChildSlots;
+  }
+
+  const start = normalizeTimeLabel(booking?.start_time);
+  const end = normalizeTimeLabel(booking?.end_time);
+  return start && end ? [{ start, end }] : [];
+};
+
+const addBlockedTimeRange = (
+  blockedTimes: Set<string>,
+  dateStr: string,
+  start: string,
+  end: string,
+) => {
+  const slotStart = new Date(`${dateStr}T${start}`);
+  const slotEnd = new Date(`${dateStr}T${end}`);
+
+  if (Number.isNaN(slotStart.getTime()) || Number.isNaN(slotEnd.getTime())) {
+    return;
+  }
+
+  const current = new Date(slotStart);
+  while (current < slotEnd) {
+    blockedTimes.add(current.toTimeString().slice(0, 5));
+    current.setHours(current.getHours() + 1);
+  }
+};
+
+const addBlockedTimesFromBooking = (
+  blockedTimes: Set<string>,
+  booking: any,
+  dateStr: string,
+) => {
+  getBookingBlockedSlots(booking).forEach((slot) => {
+    addBlockedTimeRange(blockedTimes, dateStr, slot.start, slot.end);
+  });
 };
 
 type ScheduleSessionType = "rehearsal" | "recording" | "both";
@@ -584,6 +641,8 @@ const ListingDetailsSheet = forwardRef<
   // New Calendar and Slot State
   const [selectedDate, setSelectedDate] = useState("");
   const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+  const [slotAvailability, setSlotAvailability] = useState<SlotAvailabilityMap>({});
+  const slotAvailabilityRequestRef = useRef(0);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [validEndTimes, setValidEndTimes] = useState<string[]>([]);
   const [markedDates, setMarkedDates] = useState<any>({});
@@ -694,7 +753,38 @@ const ListingDetailsSheet = forwardRef<
       return [];
     }
 
-    return Array.isArray(bookingData) ? bookingData : [];
+    if (!Array.isArray(bookingData) || bookingData.length === 0) {
+      return [];
+    }
+
+    const bookingIds = bookingData.map((booking: any) => booking.id).filter(Boolean);
+    const { data: slotRows, error: slotError } = await supabase
+      .from("studio_booking_slots")
+      .select("booking_id, start_time, end_time")
+      .in("booking_id", bookingIds);
+
+    if (slotError || !Array.isArray(slotRows)) {
+      if (slotError) {
+        console.error("Error fetching studio booking slots:", slotError);
+      }
+      return bookingData;
+    }
+
+    const slotsByBookingId = slotRows.reduce((acc: Record<string, any[]>, slot: any) => {
+      const bookingId = slot?.booking_id;
+      if (!bookingId) return acc;
+      if (!acc[bookingId]) acc[bookingId] = [];
+      acc[bookingId].push({
+        start_time: slot.start_time,
+        end_time: slot.end_time,
+      });
+      return acc;
+    }, {});
+
+    return bookingData.map((booking: any) => ({
+      ...booking,
+      studio_booking_slots: slotsByBookingId[booking.id] || [],
+    }));
   }, []);
 
   const handleSheetChanges = useCallback(
@@ -2611,20 +2701,7 @@ const ListingDetailsSheet = forwardRef<
 
 
         dayDbBookings.forEach((b: any) => {
-
-          const bStart = new Date(`${b.booking_date}T${b.start_time}`);
-          const bEnd = new Date(`${b.booking_date}T${b.end_time}`);
-
-          if (isNaN(bStart.getTime()) || isNaN(bEnd.getTime())) {
-            debugLog("⚠️ Invalid booking times in processAvailability:", b);
-            return;
-          }
-
-          const current = new Date(bStart);
-          while (current < bEnd) {
-            blockedTimes.add(current.toTimeString().slice(0, 5));
-            current.setHours(current.getHours() + 1);
-          }
+          addBlockedTimesFromBooking(blockedTimes, b, dateStr);
         });
 
         // Also block times from cart bookings (same date)
@@ -2640,13 +2717,7 @@ const ListingDetailsSheet = forwardRef<
             // If booking has timeSlots array, use that (multi-slot booking)
             if (b.timeSlots && b.timeSlots.length > 0) {
               b.timeSlots.forEach((slot: any) => {
-                const slotStart = new Date(`${dateStr}T${slot.start}`);
-                const slotEnd = new Date(`${dateStr}T${slot.end}`);
-                const current = new Date(slotStart);
-                while (current < slotEnd) {
-                  blockedTimes.add(current.toTimeString().slice(0, 5));
-                  current.setHours(current.getHours() + 1);
-                }
+                addBlockedTimeRange(blockedTimes, dateStr, slot.start, slot.end);
               });
             } else if (b.startTime && b.endTime) {
               // Single slot booking - use startTime and endTime
@@ -2697,17 +2768,21 @@ const ListingDetailsSheet = forwardRef<
       setEndTime(null as any);
       setDate(null as any);
       setAvailableSlots([]);
+      setSlotAvailability({});
     }
   };
 
   const fetchAvailableSlots = async (dateStr: string): Promise<string[]> => {
+    const requestId = ++slotAvailabilityRequestRef.current;
+    const isLatestSlotRequest = () => requestId === slotAvailabilityRequestRef.current;
     debugLog("🕐 fetchAvailableSlots called for date:", dateStr);
     debugLog("🕐 group.availability:", group?.availability);
     debugLog("🕐 group.dateOverrides:", group?.dateOverrides);
+    setAvailableSlots([]);
+    setSlotAvailability({});
 
     if (!group?.availability) {
       debugLog("⚠️ No availability data in group");
-      setAvailableSlots([]);
       return [];
     }
 
@@ -2742,7 +2817,6 @@ const ListingDetailsSheet = forwardRef<
         if (!daySchedule) {
           // Date is closed
           debugLog("⚠️ Date override marks this date as closed");
-          setAvailableSlots([]);
           return [];
         }
       }
@@ -2765,7 +2839,6 @@ const ListingDetailsSheet = forwardRef<
 
     if (!daySchedule || !daySchedule.slots) {
       debugLog("⚠️ No slots for this day");
-      setAvailableSlots([]);
       return [];
     }
 
@@ -2783,13 +2856,13 @@ const ListingDetailsSheet = forwardRef<
 
     if (sessionAllowedSlots.length === 0) {
       debugLog("⚠️ No slots for selected session type on this day");
-      setAvailableSlots([]);
       return [];
     }
 
     // Generate time slots from the availability
     // Use Set to prevent duplicates
-    const slotsSet = new Set<string>();
+    const slotAvailabilityMap: SlotAvailabilityMap = {};
+    const locallyAvailableSlots: string[] = [];
 
     // Identify blocked times from existing bookings (Confirmed OR Pending)
     // Studio bookings have separate booking_date (DATE), start_time (TIME), end_time (TIME) columns
@@ -2819,21 +2892,7 @@ const ListingDetailsSheet = forwardRef<
 
     // Block times from existing database bookings
     dayBookings.forEach((b: any) => {
-      // start_time and end_time are TIME columns (e.g., "09:00:00" or "09:00")
-      // Combine with booking_date to create proper Date objects
-      const bStart = new Date(`${b.booking_date}T${b.start_time}`);
-      const bEnd = new Date(`${b.booking_date}T${b.end_time}`);
-
-      if (isNaN(bStart.getTime()) || isNaN(bEnd.getTime())) {
-        debugLog("⚠️ Invalid booking times:", b);
-        return;
-      }
-
-      const current = new Date(bStart);
-      while (current < bEnd) {
-        blockedTimes.add(current.toTimeString().slice(0, 5));
-        current.setHours(current.getHours() + 1);
-      }
+      addBlockedTimesFromBooking(blockedTimes, b, dateStr);
     });
 
     // Also block times from bookings already added to cart (same date)
@@ -2848,13 +2907,7 @@ const ListingDetailsSheet = forwardRef<
       // If booking has timeSlots array, use that (multi-slot booking)
       if (b.timeSlots && b.timeSlots.length > 0) {
         b.timeSlots.forEach((slot) => {
-          const slotStart = new Date(`${dateStr}T${slot.start}`);
-          const slotEnd = new Date(`${dateStr}T${slot.end}`);
-          const current = new Date(slotStart);
-          while (current < slotEnd) {
-            blockedTimes.add(current.toTimeString().slice(0, 5));
-            current.setHours(current.getHours() + 1);
-          }
+          addBlockedTimeRange(blockedTimes, dateStr, slot.start, slot.end);
         });
       } else {
         // Single slot booking - use startTime and endTime
@@ -2868,47 +2921,112 @@ const ListingDetailsSheet = forwardRef<
 
     // Also block times from currently selected time slots (for multi-slot selection on same day)
     selectedTimeSlots.forEach((slot) => {
-      const slotStart = new Date(`${dateStr}T${slot.start}`);
-      const slotEnd = new Date(`${dateStr}T${slot.end}`);
-      const current = new Date(slotStart);
-      while (current < slotEnd) {
-        blockedTimes.add(current.toTimeString().slice(0, 5));
-        current.setHours(current.getHours() + 1);
-      }
+      addBlockedTimeRange(blockedTimes, dateStr, slot.start, slot.end);
     });
 
     debugLog("🕐 Blocked times (including cart):", Array.from(blockedTimes));
+
+    const leadTimeHours = group?.settings?.lead_time_hours || 0;
+    const minBookingTime = new Date();
+    minBookingTime.setHours(minBookingTime.getHours() + leadTimeHours);
 
     sessionAllowedSlots.forEach((slot: any) => {
       debugLog("🕐 Processing slot:", slot);
       const start = new Date(`${dateStr}T${slot.start}`);
       const end = new Date(`${dateStr}T${slot.end}`);
 
-      // Get lead time for filtering slots that are too soon
-      const leadTimeHours = group?.settings?.lead_time_hours || 0;
-      const minBookingTime = new Date();
-      minBookingTime.setHours(minBookingTime.getHours() + leadTimeHours);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return;
+      }
 
       // Generate hourly slots or based on duration
       const current = new Date(start);
       while (current < end) {
         const timeStr = current.toTimeString().slice(0, 5); // HH:MM
+        const nextHour = new Date(current);
+        nextHour.setHours(nextHour.getHours() + 1);
 
         // Check if this slot is past the lead time requirement
         const slotDateTime = new Date(`${dateStr}T${timeStr}`);
         const passesLeadTime = slotDateTime >= minBookingTime;
 
-        // Only add if not blocked AND passes lead time check
-        if (!blockedTimes.has(timeStr) && passesLeadTime) {
-          slotsSet.add(timeStr);
+        if (!passesLeadTime) {
+          slotAvailabilityMap[timeStr] = {
+            available: false,
+            reason: "lead_time",
+          };
+        } else if (blockedTimes.has(timeStr)) {
+          slotAvailabilityMap[timeStr] = {
+            available: false,
+            reason: "booked",
+          };
+        } else if (!slotAvailabilityMap[timeStr]) {
+          slotAvailabilityMap[timeStr] = { available: true };
+          locallyAvailableSlots.push(timeStr);
         }
-        current.setHours(current.getHours() + 1); // Assuming 1-hour slots
+
+        current.setTime(nextHour.getTime());
       }
     });
 
-    const uniqueSlots = Array.from(slotsSet).sort();
+    if (locallyAvailableSlots.length > 0 && group?.id) {
+      const serverCheckedSlots = await Promise.all(
+        locallyAvailableSlots.map(async (timeStr) => {
+          const slotStart = new Date(`${dateStr}T${timeStr}`);
+          const slotEnd = new Date(slotStart);
+          slotEnd.setHours(slotEnd.getHours() + 1);
+
+          try {
+            const { data, error } = await supabase.rpc("is_slot_available", {
+              p_studio_id: group.id,
+              p_booking_date: dateStr,
+              p_start_time: timeStr,
+              p_end_time: slotEnd.toTimeString().slice(0, 5),
+              p_user_id: userId,
+            });
+
+            if (error) {
+              debugLog("⚠️ Slot availability check failed:", error);
+              return { timeStr, available: true };
+            }
+
+            return { timeStr, available: data === true };
+          } catch (error) {
+            debugLog("⚠️ Slot availability check threw:", error);
+            return { timeStr, available: true };
+          }
+        }),
+      );
+
+      serverCheckedSlots.forEach(({ timeStr, available }) => {
+        if (!available) {
+          slotAvailabilityMap[timeStr] = {
+            available: false,
+            reason: "unavailable",
+          };
+        }
+      });
+    }
+
+    const uniqueSlots = Object.entries(slotAvailabilityMap)
+      .filter(([, status]) => status.available)
+      .map(([slot]) => slot)
+      .sort();
     debugLog("🕐 Generated slots:", uniqueSlots);
+
+    if (!isLatestSlotRequest()) {
+      return uniqueSlots;
+    }
+
+    setSlotAvailability(slotAvailabilityMap);
     setAvailableSlots(uniqueSlots);
+
+    if (selectedSlot && !slotAvailabilityMap[selectedSlot]?.available) {
+      setSelectedSlot(null);
+      setValidEndTimes([]);
+      setEndTime(null as any);
+    }
+
     return uniqueSlots;
   };
 
@@ -3251,6 +3369,7 @@ const ListingDetailsSheet = forwardRef<
       setEndTime={setEndTime}
       setDate={setDate}
       availableSlots={availableSlots}
+      slotAvailability={slotAvailability}
       selectedSlot={selectedSlot}
       validEndTimes={validEndTimes}
       date={date}
@@ -3299,6 +3418,7 @@ const ListingDetailsSheet = forwardRef<
       sheetRef={ref}
       router={router}
       renderBookingControls={renderBookingControls}
+      refreshAvailableSlots={fetchAvailableSlots}
       isRecordingMode={isRecordingMode}
       isRecordingWholeDayAvailable={isRecordingWholeDayAvailable}
       isCheckingAvailability={isCheckingAvailability}

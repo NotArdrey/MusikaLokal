@@ -33,7 +33,6 @@ import { createBookingCheckout } from "../src/services/paymongo";
 import { formatDashedNumericDate, formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import {
   formatRecordingHours,
-  formatRecordingRuleShort,
   getRecordingRequiredBlocks,
   getRecordingRequiredHours,
   resolveRecordingRule,
@@ -5953,9 +5952,6 @@ export default function BookingsScreen() {
                                   }
                                 : {}),
                             });
-                            const recordingRuleLabel = formatRecordingRuleShort(
-                              recordingRule,
-                            );
                             const parsedRequiredBlocks = Number(
                               item.modifiers_applied?.recording_session
                                 ?.required_blocks ??
@@ -6002,9 +5998,7 @@ export default function BookingsScreen() {
                                 ? parsedSelectedTotalHours
                                 : null;
                             const showRecordingMeta =
-                              Boolean(recordingSongCount) ||
-                              Boolean(requiredTotalHours) ||
-                              Boolean(recordingRuleLabel);
+                              Boolean(requiredTotalHours);
                             const recordingDurationColor =
                               selectedTotalHours &&
                               requiredTotalHours &&
@@ -6058,41 +6052,6 @@ export default function BookingsScreen() {
                                 ) : null}
                                 {showRecordingMeta ? (
                                   <>
-                                    {recordingSongCount ? (
-                                      <View style={styles.cardDetailRow}>
-                                        <Ionicons
-                                          name="musical-notes-outline"
-                                          size={14}
-                                          color={colors.textSecondary}
-                                        />
-                                        <Text
-                                          style={[
-                                            styles.cardDetailText,
-                                            { color: colors.textSecondary },
-                                          ]}
-                                        >
-                                          Recording | {recordingSongCount} song
-                                          {recordingSongCount > 1 ? "s" : ""}
-                                        </Text>
-                                      </View>
-                                    ) : null}
-                                    {recordingRuleLabel ? (
-                                      <View style={styles.cardDetailRow}>
-                                        <Ionicons
-                                          name="layers-outline"
-                                          size={14}
-                                          color={colors.textSecondary}
-                                        />
-                                        <Text
-                                          style={[
-                                            styles.cardDetailText,
-                                            { color: colors.textSecondary },
-                                          ]}
-                                        >
-                                          Rule | {recordingRuleLabel}
-                                        </Text>
-                                      </View>
-                                    ) : null}
                                     {requiredTotalHours ? (
                                       <View style={styles.cardDetailRow}>
                                         <Ionicons

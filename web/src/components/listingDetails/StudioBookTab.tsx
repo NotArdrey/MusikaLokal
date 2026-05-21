@@ -11,7 +11,6 @@ import {
 import styles from "../ListingDetailsSheet.styles";
 import {
   formatRecordingHours,
-  formatRecordingRuleShort,
   getRecordingRequiredBlocks,
   getRecordingRequiredHours,
   resolveRecordingRule,
@@ -219,7 +218,6 @@ const StudioBookTab = ({
   const getRecordingSongCount = (): number | null =>
     parsePositiveInteger(recordingSongCountInput);
   const recordingRule = resolveRecordingRule(group?.settings);
-  const recordingRuleShort = formatRecordingRuleShort(recordingRule);
 
   const getRecordingRequiredTotalHours = (songCount: number): number =>
     getRecordingRequiredHours(songCount, recordingRule);
@@ -1585,13 +1583,7 @@ const StudioBookTab = ({
                 />
               </View>
               <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 6 }}>
-                {(() => {
-                  const enteredSongCount = getRecordingSongCount();
-                  const previewSongCount = enteredSongCount || recordingRule.songsPerBlock;
-                  const requiredHours = getRecordingRequiredTotalHours(previewSongCount);
-                  const requiredBlocks = getRecordingRequiredBlockCount(previewSongCount);
-                  return `Recording sessions are priced per song. Time rule: ${recordingRuleShort}. ${previewSongCount} song${previewSongCount > 1 ? "s" : ""} requires ${formatRecordingHours(requiredHours)} hr${requiredHours === 1 ? "" : "s"} across ${requiredBlocks} block${requiredBlocks > 1 ? "s" : ""}.`;
-                })()}
+                Recording sessions are priced per song. Add enough studio time before submitting.
               </Text>
               {draftRecordingDurationStatus && (
                 <View
@@ -1879,7 +1871,7 @@ const StudioBookTab = ({
                       showAlert(
                         "success",
                         "Recording Session Updated",
-                        `Added time slot for ${formatDashedNumericDate(bookingDate)}. Total selected time: ${formatRecordingHours(totalHours)}h (minimum required: ${formatRecordingHours(requiredTotalHours)}h based on ${recordingRuleShort}).`,
+                        `Added time slot for ${formatDashedNumericDate(bookingDate)}. Total selected time: ${formatRecordingHours(totalHours)}h (minimum required: ${formatRecordingHours(requiredTotalHours)}h).`,
                       );
                     } else {
                       const existingPrice = existingBooking.pricing?.final_price || 0;
@@ -2278,7 +2270,7 @@ const StudioBookTab = ({
                             errors.push({
                               booking,
                               error: {
-                                message: `Recording booking requires at least ${formatRecordingHours(requiredHours)} hour(s) for ${bookingSongCount} song(s) based on ${recordingRuleShort}, but only ${formatRecordingHours(totalSelectedHours)} hour(s) are selected.`,
+                                message: `Recording booking requires at least ${formatRecordingHours(requiredHours)} hour(s) for ${bookingSongCount} song(s), but only ${formatRecordingHours(totalSelectedHours)} hour(s) are selected.`,
                                 serverError: null,
                               },
                             });
@@ -2535,7 +2527,7 @@ const StudioBookTab = ({
                 },
                 hasOnlyRecordingBookings ? "Confirm Recording Booking" : "Confirm Session Booking",
                 hasOnlyRecordingBookings
-                  ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nRecording uses time slots and is priced per song. Time rule: ${recordingRuleShort}. The studio owner will review and approve your booking request.`
+                  ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nRecording uses time slots and is priced per song. The studio owner will review and approve your booking request.`
                   : `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
                 { requireTerms: true, contractUrl: group?.contract_url ?? null, contractName: group?.name },
               );

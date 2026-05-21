@@ -67,14 +67,3 @@ export const getRecordingRequiredHours = (
   return requiredBlocks * Math.max(rule.hoursPerBlock, 0);
 };
 
-export const formatRecordingRuleShort = (rule: RecordingRule): string => {
-  const songLabel = rule.songsPerBlock === 1 ? "song" : "songs";
-  const hourLabel = rule.hoursPerBlock === 1 ? "hr" : "hrs";
-  return `${rule.songsPerBlock} ${songLabel} / ${formatRecordingHours(rule.hoursPerBlock)} ${hourLabel}`;
-};
-
-export const formatRecordingRuleSentence = (rule: RecordingRule): string => {
-  const songLabel = rule.songsPerBlock === 1 ? "song" : "songs";
-  const hourLabel = rule.hoursPerBlock === 1 ? "hour" : "hours";
-  return `Up to ${rule.songsPerBlock} ${songLabel} per ${formatRecordingHours(rule.hoursPerBlock)} ${hourLabel}`;
-};

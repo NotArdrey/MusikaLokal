@@ -29,10 +29,6 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
 import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
-import {
-  formatRecordingRuleSentence,
-  formatRecordingRuleShort,
-} from "../src/utils/recordingRule";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
 const base64ToUint8Array = (base64: string): Uint8Array => {
@@ -843,27 +839,6 @@ export default function EditStudioScreen() {
   const effectiveAppliesTo = allowedPromotionTargets.includes(promotionForm.applies_to)
     ? promotionForm.applies_to
     : allowedPromotionTargets[0];
-  const parsedRecordingSongsPerBlock = parsePositiveInteger(
-    recordingSongsPerBlock,
-  );
-  const parsedRecordingHoursPerBlock = parsePositiveDecimal(
-    recordingHoursPerBlock,
-  );
-  const hasRecordingRule =
-    parsedRecordingSongsPerBlock !== null && parsedRecordingHoursPerBlock !== null;
-  const currentRecordingRule = hasRecordingRule
-    ? {
-        songsPerBlock: parsedRecordingSongsPerBlock,
-        hoursPerBlock: parsedRecordingHoursPerBlock,
-      }
-    : null;
-  const recordingRulePreview = currentRecordingRule
-    ? formatRecordingRuleShort(currentRecordingRule)
-    : null;
-  const recordingRuleSentence = currentRecordingRule
-    ? formatRecordingRuleSentence(currentRecordingRule)
-    : null;
-
   // Predefined instruments with images
   const INSTRUMENT_OPTIONS = [
     {
@@ -4860,9 +4835,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       marginTop: 6,
                     }}
                   >
-                    {recordingRulePreview && recordingRuleSentence
-                      ? `Example: ${recordingRulePreview}. ${recordingRuleSentence}. Musicians can still split the required hours across available dates and time slots.`
-                      : "Set songs and hours per time block to define your recording minimum. Musicians can still split the required hours across available dates and time slots."}
+                    Set songs and hours per time block to define your recording minimum. Musicians can still split the required hours across available dates and time slots.
                   </Text>
                 </View>
               </View>

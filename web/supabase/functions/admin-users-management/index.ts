@@ -189,6 +189,10 @@ function isCopyrightOwnershipReview(review: any) {
   return String(review?.source || "").trim().toUpperCase() === COPYRIGHT_OWNERSHIP_REVIEW_SOURCE;
 }
 
+function hasDiditSession(review: any) {
+  return Boolean(String(review?.didit_session_id || "").trim());
+}
+
 function getCopyrightOwnershipTrackLabel(review: any) {
   const metadata = getReviewMetadataObject(review);
   const title = String(metadata.copyright_title || "released recording").trim();
@@ -1040,7 +1044,7 @@ function normalizeDiditReviewStatus(rawStatus: unknown) {
 
 function isDiditBackedReview(review: any) {
   const source = String(review?.source || "").trim().toUpperCase();
-  return Boolean(String(review?.didit_session_id || "").trim()) && source.startsWith("DIDIT");
+  return hasDiditSession(review) && source !== COPYRIGHT_OWNERSHIP_REVIEW_SOURCE;
 }
 
 function isDiditPendingReview(review: any) {
@@ -1099,6 +1103,73 @@ function firstObject(...values: unknown[]) {
   }
 
   return null;
+}
+
+function normalizeDocumentTypeKey(value: unknown) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/['']/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  if (!normalized) return "";
+  if (normalized === "passport") return "passport";
+  if (["driver_license", "drivers_license", "driving_license", "driver_s_license"].includes(normalized)) return "drivers_license";
+  if (["id_card", "identity_card", "national_id", "national_id_card", "government_id"].includes(normalized)) return "national_id";
+
+  return normalized;
+}
+
+function formatDocumentTypeLabel(rawType: unknown, fallbackType: unknown) {
+  const raw = String(rawType || "").trim();
+  const key = normalizeDocumentTypeKey(raw || fallbackType);
+
+  if (key === "passport") return "Passport";
+  if (key === "drivers_license") return "Driver's license";
+  if (key === "national_id") return "National ID card";
+
+  const label = raw || String(fallbackType || "").trim();
+  if (!label) return "";
+
+  return label
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getDiditDocumentInfoFromVerificationData(verificationData: any) {
+  if (!verificationData || typeof verificationData !== "object") return null;
+
+  const decision = findDiditDecisionPayload(verificationData);
+  const idVerification = firstObject(
+    decision?.id_verifications,
+    decision?.id_verification,
+    decision?.idVerification,
+    verificationData?.raw_data,
+    verificationData,
+  );
+  const rawDocumentType = firstNonEmptyString(
+    verificationData?.document_type,
+    verificationData?.documentType,
+    verificationData?.didit_document_type,
+    idVerification?.document_type,
+    idVerification?.documentType,
+    idVerification?.type,
+    idVerification?.document?.type,
+    idVerification?.document_details?.type,
+  );
+  const documentTypeKey = normalizeDocumentTypeKey(rawDocumentType);
+  const documentType = formatDocumentTypeLabel(rawDocumentType, documentTypeKey);
+
+  if (!rawDocumentType || !documentTypeKey || !documentType) return null;
+
+  return {
+    document_type: documentType,
+    document_type_key: documentTypeKey,
+    didit_document_type: rawDocumentType,
+  };
 }
 
 function findDiditDecisionPayload(source: any) {
@@ -1633,7 +1704,9 @@ serve(async (req: Request) => {
       }
 
       const userIds = Array.from(new Set((reviews || []).map((item: any) => String(item.user_id || "")).filter(Boolean)));
+      const diditSessionIds = Array.from(new Set((reviews || []).map((item: any) => String(item.didit_session_id || "").trim()).filter(Boolean)));
       let profilesById = new Map<string, any>();
+      let verificationSessionsByRef = new Map<string, any>();
 
       if (userIds.length > 0) {
         const { data: linkedProfiles, error: linkedProfilesError } = await client
@@ -1643,6 +1716,17 @@ serve(async (req: Request) => {
 
         if (!linkedProfilesError && linkedProfiles) {
           profilesById = new Map<string, any>(linkedProfiles.map((item: any) => [String(item.id), item]));
+        }
+      }
+
+      if (diditSessionIds.length > 0) {
+        const { data: linkedSessions, error: linkedSessionsError } = await client
+          .from("verification_sessions")
+          .select("session_ref, verification_data")
+          .in("session_ref", diditSessionIds);
+
+        if (!linkedSessionsError && linkedSessions) {
+          verificationSessionsByRef = new Map<string, any>(linkedSessions.map((item: any) => [String(item.session_ref), item]));
         }
       }
 
@@ -1870,10 +1954,27 @@ serve(async (req: Request) => {
             }
           : null;
 
+        const diditSession = verificationSessionsByRef.get(String(review.didit_session_id || ""));
+        const diditDocumentInfo = getDiditDocumentInfoFromVerificationData(diditSession?.verification_data);
+        const displayReview = diditDocumentInfo
+          ? {
+              ...review,
+              document_type: diditDocumentInfo.document_type,
+              document_type_key: diditDocumentInfo.document_type_key || review.document_type_key,
+              metadata: {
+                ...reviewMetadata,
+                selected_document_type: reviewMetadata.selected_document_type || review.document_type || null,
+                selected_document_type_key: reviewMetadata.selected_document_type_key || review.document_type_key || null,
+                didit_document_type: reviewMetadata.didit_document_type || diditDocumentInfo.didit_document_type,
+                didit_document_type_key: reviewMetadata.didit_document_type_key || diditDocumentInfo.document_type_key,
+              },
+            }
+          : review;
+
         const item = {
-          ...review,
+          ...displayReview,
           profile,
-          didit_review: getDiditReviewInfo(review),
+          didit_review: getDiditReviewInfo(displayReview),
           duplicate_verified_identity_warning: duplicateMatches.length > 0
             ? {
                 same_verified_id_fingerprint: true,

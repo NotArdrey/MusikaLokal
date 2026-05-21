@@ -20,7 +20,6 @@ import { useTheme } from "../context/ThemeContext";
 import { formatFriendlyDateTime } from "../utils/friendlyDateTime";
 import {
   formatRecordingHours,
-  formatRecordingRuleShort,
   getRecordingRequiredBlocks,
   getRecordingRequiredHours,
   resolveRecordingRule,
@@ -713,9 +712,6 @@ const BookingDetailsSheet = forwardRef<
   const recordingRule = isRecordingSession
     ? resolveRecordingRule(recordingRuleSource)
     : null;
-  const recordingRuleLabel = recordingRule
-    ? formatRecordingRuleShort(recordingRule)
-    : null;
   const parsedRequiredBlocks = Number(
     booking?.modifiers_applied?.recording_session?.required_blocks ??
       booking?.modifiers_applied?.required_blocks ??
@@ -1389,24 +1385,6 @@ const BookingDetailsSheet = forwardRef<
                       >
                         {effectiveSongCount} song
                         {effectiveSongCount > 1 ? "s" : ""}
-                      </Text>
-                    </View>
-                  )}
-
-                  {isStudio && isRecordingSession && recordingRuleLabel && (
-                    <View style={styles.detailItem}>
-                      <Text
-                        style={[
-                          styles.detailLabel,
-                          { color: colors.textSecondary },
-                        ]}
-                      >
-                        Recording Rule
-                      </Text>
-                      <Text
-                        style={[styles.detailValue, { color: colors.text }]}
-                      >
-                        {recordingRuleLabel}
                       </Text>
                     </View>
                   )}

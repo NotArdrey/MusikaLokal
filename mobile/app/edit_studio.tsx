@@ -31,10 +31,6 @@ import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation"
 import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
 import { clearListingDetailsCache } from "../src/utils/listingDetailsCache";
-import {
-  formatRecordingRuleSentence,
-  formatRecordingRuleShort,
-} from "../src/utils/recordingRule";
 import { sanitizeStorageFileName, uploadStorageObject } from "../src/utils/storageUpload";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
@@ -877,27 +873,6 @@ export default function EditStudioScreen() {
   const effectiveAppliesTo = allowedPromotionTargets.includes(promotionForm.applies_to)
     ? promotionForm.applies_to
     : allowedPromotionTargets[0];
-  const parsedRecordingSongsPerBlock = parsePositiveInteger(
-    recordingSongsPerBlock,
-  );
-  const parsedRecordingHoursPerBlock = parsePositiveDecimal(
-    recordingHoursPerBlock,
-  );
-  const hasRecordingRule =
-    parsedRecordingSongsPerBlock !== null && parsedRecordingHoursPerBlock !== null;
-  const currentRecordingRule = hasRecordingRule
-    ? {
-        songsPerBlock: parsedRecordingSongsPerBlock,
-        hoursPerBlock: parsedRecordingHoursPerBlock,
-      }
-    : null;
-  const recordingRulePreview = currentRecordingRule
-    ? formatRecordingRuleShort(currentRecordingRule)
-    : null;
-  const recordingRuleSentence = currentRecordingRule
-    ? formatRecordingRuleSentence(currentRecordingRule)
-    : null;
-
   // Predefined instruments with images
   const INSTRUMENT_OPTIONS = [
     {
@@ -4659,9 +4634,7 @@ export default function EditStudioScreen() {
                       marginTop: 6,
                     }}
                   >
-                    {recordingRulePreview && recordingRuleSentence
-                      ? `Example: ${recordingRulePreview}. ${recordingRuleSentence}. Musicians can still split the required hours across available dates and time slots.`
-                      : "Set songs and hours per time block to define your recording minimum. Musicians can still split the required hours across available dates and time slots."}
+                    Set songs and hours per time block to define your recording minimum. Musicians can still split the required hours across available dates and time slots.
                   </Text>
                 </View>
               </View>

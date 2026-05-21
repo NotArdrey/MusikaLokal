@@ -29,10 +29,6 @@ import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../src/utils/e2eFix
 import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
 import { clearListingDetailsCache } from "../src/utils/listingDetailsCache";
 import { sanitizeStorageFileName, uploadStorageObject } from "../src/utils/storageUpload";
-import {
-  formatRecordingRuleSentence,
-  formatRecordingRuleShort,
-} from "../src/utils/recordingRule";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
 const base64ToUint8Array = (base64: string): Uint8Array => {
@@ -710,27 +706,6 @@ export default function AddStudioScreen() {
   const effectiveAppliesTo = allowedPromotionTargets.includes(promotionForm.applies_to)
     ? promotionForm.applies_to
     : allowedPromotionTargets[0];
-  const parsedRecordingSongsPerBlock = parsePositiveInteger(
-    recordingSongsPerBlock,
-  );
-  const parsedRecordingHoursPerBlock = parsePositiveDecimal(
-    recordingHoursPerBlock,
-  );
-  const hasRecordingRule =
-    parsedRecordingSongsPerBlock !== null && parsedRecordingHoursPerBlock !== null;
-  const currentRecordingRule = hasRecordingRule
-    ? {
-        songsPerBlock: parsedRecordingSongsPerBlock,
-        hoursPerBlock: parsedRecordingHoursPerBlock,
-      }
-    : null;
-  const recordingRulePreview = currentRecordingRule
-    ? formatRecordingRuleShort(currentRecordingRule)
-    : null;
-  const recordingRuleSentence = currentRecordingRule
-    ? formatRecordingRuleSentence(currentRecordingRule)
-    : null;
-
   // Role-based access control
   useEffect(() => {
     checkAuthorization();
@@ -3090,9 +3065,7 @@ export default function AddStudioScreen() {
                           marginTop: 6,
                         }}
                       >
-                        {recordingRulePreview && recordingRuleSentence
-                          ? `Example: ${recordingRulePreview}. ${recordingRuleSentence}. Musicians can still split the required hours across available dates and time slots.`
-                          : "Set songs and hours per time block to define your recording minimum. Musicians can still split the required hours across available dates and time slots."}
+                        Set songs and hours per time block to define your recording minimum. Musicians can still split the required hours across available dates and time slots.
                       </Text>
                     </View>
                   </View>
@@ -5446,28 +5419,6 @@ export default function AddStudioScreen() {
                         }}
                       >
                         Recording: ₱{recordingRate || "0"}/song
-                      </Text>
-                    </View>
-                  )}
-                  {(studioType === "Recording" || studioType === "Both") && (
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 8,
-                        marginTop: 4,
-                      }}
-                    >
-                      <Ionicons name="time-outline" size={14} color="#EF4444" />
-                      <Text
-                        style={{
-                          color: colors.text,
-                          fontFamily: "Poppins_500Medium",
-                        }}
-                      >
-                        Recording Rule: {recordingRulePreview
-                          ? `${recordingRulePreview} minimum block`
-                          : "Not set"}
                       </Text>
                     </View>
                   )}

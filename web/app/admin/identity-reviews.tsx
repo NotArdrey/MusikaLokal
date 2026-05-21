@@ -255,10 +255,10 @@ const formatDateTime = (value?: string | null) => {
   });
 };
 
-const isDiditBackedReviewSource = (source?: string | null, sessionId?: string | null) => (
-  Boolean(String(sessionId || '').trim()) && String(source || '').trim().toUpperCase().startsWith('DIDIT')
-);
 const COPYRIGHT_OWNERSHIP_REVIEW_SOURCE = 'COPYRIGHT_OWNERSHIP';
+const isDiditBackedReviewSource = (source?: string | null, sessionId?: string | null) => (
+  Boolean(String(sessionId || '').trim()) && String(source || '').trim().toUpperCase() !== COPYRIGHT_OWNERSHIP_REVIEW_SOURCE
+);
 
 const formatDiditStatusLabel = (rawStatus?: string | null) => {
   const value = String(rawStatus || '').trim();

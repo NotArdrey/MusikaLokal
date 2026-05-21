@@ -26,10 +26,6 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
-import {
-  formatRecordingRuleSentence,
-  formatRecordingRuleShort,
-} from "../src/utils/recordingRule";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
 const base64ToUint8Array = (base64: string): Uint8Array => {
@@ -660,27 +656,6 @@ export default function AddStudioScreen() {
   const effectiveAppliesTo = allowedPromotionTargets.includes(promotionForm.applies_to)
     ? promotionForm.applies_to
     : allowedPromotionTargets[0];
-  const parsedRecordingSongsPerBlock = parsePositiveInteger(
-    recordingSongsPerBlock,
-  );
-  const parsedRecordingHoursPerBlock = parsePositiveDecimal(
-    recordingHoursPerBlock,
-  );
-  const hasRecordingRule =
-    parsedRecordingSongsPerBlock !== null && parsedRecordingHoursPerBlock !== null;
-  const currentRecordingRule = hasRecordingRule
-    ? {
-        songsPerBlock: parsedRecordingSongsPerBlock,
-        hoursPerBlock: parsedRecordingHoursPerBlock,
-      }
-    : null;
-  const recordingRulePreview = currentRecordingRule
-    ? formatRecordingRuleShort(currentRecordingRule)
-    : null;
-  const recordingRuleSentence = currentRecordingRule
-    ? formatRecordingRuleSentence(currentRecordingRule)
-    : null;
-
   // Role-based access control
   useEffect(() => {
     checkAuthorization();
@@ -3035,9 +3010,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           marginTop: 6,
                         }}
                       >
-                        {recordingRulePreview && recordingRuleSentence
-                          ? `Example: ${recordingRulePreview}. ${recordingRuleSentence}. Musicians can still split the required hours across available dates and time slots.`
-                          : "Set songs and hours per time block to define your recording minimum. Musicians can still split the required hours across available dates and time slots."}
+                        Set songs and hours per time block to define your recording minimum. Musicians can still split the required hours across available dates and time slots.
                       </Text>
                     </View>
                   </View>
@@ -5387,28 +5360,6 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         }}
                       >
                         Recording: ₱{recordingRate || "0"}/song
-                      </Text>
-                    </View>
-                  )}
-                  {(studioType === "Recording" || studioType === "Both") && (
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 8,
-                        marginTop: 4,
-                      }}
-                    >
-                      <Ionicons name="time-outline" size={14} color="#EF4444" />
-                      <Text
-                        style={{
-                          color: colors.text,
-                          fontFamily: "Poppins_500Medium",
-                        }}
-                      >
-                        Recording Rule: {recordingRulePreview
-                          ? `${recordingRulePreview} minimum block`
-                          : "Not set"}
                       </Text>
                     </View>
                   )}

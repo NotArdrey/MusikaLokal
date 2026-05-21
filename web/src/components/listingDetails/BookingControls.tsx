@@ -470,8 +470,6 @@ const BookingControls = ({
                     const startMinutes = startParts[0] * 60 + startParts[1];
                     const endMinutes = endParts[0] * 60 + endParts[1];
                     const durationHours = (endMinutes - startMinutes) / 60;
-                    const rate = parseInt(displayRate.replace(/,/g, "")) || 0;
-
                     return (
                       <View
                         style={{
@@ -488,13 +486,6 @@ const BookingControls = ({
                         <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
                           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular" }}>Rate</Text>
                           <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>₱{displayRate}/song</Text>
-                        </View>
-                        <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 8 }} />
-                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold" }}>Minimum (1 song)</Text>
-                          <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 16 }}>
-                            ₱{rate.toLocaleString()}
-                          </Text>
                         </View>
                         <Text
                           style={{

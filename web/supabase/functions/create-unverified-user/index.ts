@@ -602,6 +602,88 @@ function getApprovalClaimMatchCount(approvalClaim: any, fallback = 1) {
     return Number.isFinite(count) ? count : fallback
 }
 
+function firstNonEmptyString(...values: unknown[]) {
+    for (const value of values) {
+        const normalized = String(value || '').trim()
+        if (normalized) return normalized
+    }
+
+    return ''
+}
+
+function normalizeDocumentTypeKey(value: unknown) {
+    const normalized = String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/['']/g, '')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+
+    if (!normalized) return ''
+    if (['passport'].includes(normalized)) return 'passport'
+    if (['driver_license', 'drivers_license', 'driving_license', 'driver_s_license'].includes(normalized)) return 'drivers_license'
+    if (['id_card', 'identity_card', 'national_id', 'national_id_card', 'government_id'].includes(normalized)) return 'national_id'
+
+    return normalized
+}
+
+function formatDocumentTypeLabel(rawType: unknown, fallbackType: unknown) {
+    const raw = String(rawType || '').trim()
+    const key = normalizeDocumentTypeKey(raw || fallbackType)
+
+    if (key === 'passport') return 'Passport'
+    if (key === 'drivers_license') return "Driver's license"
+    if (key === 'national_id') return 'National ID card'
+
+    const fallback = String(fallbackType || '').trim()
+    const label = raw || fallback
+    if (!label) return 'Government ID'
+
+    return label
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function resolveDiditDocumentInfo(verificationData: any, selectedDocumentType: unknown, selectedDocumentTypeKey: unknown) {
+    const decision = findDecisionObject(verificationData)
+    const idVerification = decision?.id_verifications?.[0]
+        || verificationData?.id_verification
+        || verificationData?.idVerification
+        || verificationData?.raw_data
+        || verificationData
+
+    const diditDocumentType = firstNonEmptyString(
+        verificationData?.document_type,
+        verificationData?.documentType,
+        verificationData?.document_type_key,
+        verificationData?.documentTypeKey,
+        idVerification?.document_type,
+        idVerification?.documentType,
+        idVerification?.type,
+        idVerification?.document?.type,
+        idVerification?.document_details?.type,
+    )
+    const documentTypeKey = normalizeDocumentTypeKey(diditDocumentType) || normalizeDocumentTypeKey(selectedDocumentTypeKey || selectedDocumentType) || null
+    const documentCountry = firstNonEmptyString(
+        verificationData?.document_country,
+        verificationData?.documentCountry,
+        idVerification?.issuing_country,
+        idVerification?.issuingCountry,
+        idVerification?.country,
+        idVerification?.document?.country,
+        idVerification?.document_details?.country,
+    ) || 'PHL'
+
+    return {
+        documentType: formatDocumentTypeLabel(diditDocumentType, selectedDocumentType),
+        documentTypeKey,
+        documentCountry,
+        diditDocumentType: diditDocumentType || null,
+    }
+}
+
 async function getEmailConfirmationGate(supabaseAdmin: any, user: any) {
     const metadataStatus = normalizeVerificationStatus(user?.user_metadata?.verification_status)
     const { data: profile, error } = await supabaseAdmin
@@ -925,6 +1007,10 @@ serve(async (req) => {
         }
 
         diditVerificationData = sessionData?.verification_data || null
+        const identityDocumentInfo = resolveDiditDocumentInfo(diditVerificationData, selectedDocumentType, selectedDocumentTypeKey)
+        const identityDocumentType = identityDocumentInfo.documentType
+        const identityDocumentTypeKey = identityDocumentInfo.documentTypeKey
+        const identityDocumentCountry = identityDocumentInfo.documentCountry
         const identityNameBirthDate = (approvedByDidit || pendingByDidit)
             ? prepareIdentityNameBirthDateDuplicateInput(diditVerificationData?.raw_data || diditVerificationData, {
                 fullLegalName: diditVerificationData?.verified_full_legal_name || diditVerificationData?.full_legal_name || diditVerificationData?.full_name,
@@ -948,9 +1034,9 @@ serve(async (req) => {
         documentFingerprint = diditVerificationData?.document_fingerprint || await buildIdentityDocumentFingerprint(
             diditVerificationData?.raw_data || diditVerificationData,
             {
-                documentType: selectedDocumentType,
-                documentTypeKey: selectedDocumentTypeKey,
-                documentCountry: diditVerificationData?.document_country,
+                documentType: identityDocumentType,
+                documentTypeKey: identityDocumentTypeKey,
+                documentCountry: identityDocumentCountry,
             },
         )
 
@@ -962,9 +1048,12 @@ serve(async (req) => {
             diditVerificationData = {
                 ...(sessionData?.verification_data && typeof sessionData.verification_data === 'object' ? sessionData.verification_data : {}),
                 ...(diditVerificationData && typeof diditVerificationData === 'object' ? stripPrivateSessionFields(diditVerificationData) : {}),
-                document_country: diditVerificationData?.document_country || 'PHL',
-                document_type: selectedDocumentType,
-                document_type_key: selectedDocumentTypeKey,
+                document_country: identityDocumentCountry,
+                document_type: identityDocumentType,
+                document_type_key: identityDocumentTypeKey,
+                selected_document_type: selectedDocumentType || null,
+                selected_document_type_key: selectedDocumentTypeKey || null,
+                didit_document_type: identityDocumentInfo.diditDocumentType,
                 source_session_status: localDiditStatus || liveFaceRequiredStatus || 'APPROVED',
                 missing_document_fingerprint: !documentFingerprint,
                 missing_name_birthdate_duplicate_key: !identityNameBirthDate.hasNameBirthDate,
@@ -1139,9 +1228,9 @@ serve(async (req) => {
                 userId,
                 email: normalizedEmail,
                 role: normalizedRole,
-                documentType: selectedDocumentType,
-                documentTypeKey: selectedDocumentTypeKey,
-                documentCountry: diditVerificationData?.document_country || 'PHL',
+                documentType: identityDocumentType,
+                documentTypeKey: identityDocumentTypeKey,
+                documentCountry: identityDocumentCountry,
                 source: reviewSource,
                 diditSessionId,
                 documentFingerprint,
@@ -1165,9 +1254,9 @@ serve(async (req) => {
                 userId,
                 role: normalizedRole,
                 documentFingerprint,
-                documentType: selectedDocumentType,
-                documentTypeKey: selectedDocumentTypeKey,
-                documentCountry: diditVerificationData?.document_country || 'PHL',
+                documentType: identityDocumentType,
+                documentTypeKey: identityDocumentTypeKey,
+                documentCountry: identityDocumentCountry,
                 source: reviewSource,
                 status: 'PENDING_REVIEW',
                 diditSessionId,
@@ -1184,9 +1273,9 @@ serve(async (req) => {
                 userId,
                 email: normalizedEmail,
                 role: normalizedRole,
-                documentType: selectedDocumentType,
-                documentTypeKey: selectedDocumentTypeKey,
-                documentCountry: diditVerificationData?.document_country || 'PHL',
+                documentType: identityDocumentType,
+                documentTypeKey: identityDocumentTypeKey,
+                documentCountry: identityDocumentCountry,
                 source: DIDIT_PENDING_SOURCE,
                 diditSessionId,
                 documentFingerprint,
@@ -1201,9 +1290,9 @@ serve(async (req) => {
                 userId,
                 role: normalizedRole,
                 documentFingerprint,
-                documentType: selectedDocumentType,
-                documentTypeKey: selectedDocumentTypeKey,
-                documentCountry: diditVerificationData?.document_country || 'PHL',
+                documentType: identityDocumentType,
+                documentTypeKey: identityDocumentTypeKey,
+                documentCountry: identityDocumentCountry,
                 source: DIDIT_PENDING_SOURCE,
                 status: 'PENDING_REVIEW',
                 diditSessionId,
@@ -1218,9 +1307,9 @@ serve(async (req) => {
                 userId,
                 role: normalizedRole,
                 documentFingerprint,
-                documentType: selectedDocumentType,
-                documentTypeKey: selectedDocumentTypeKey,
-                documentCountry: diditVerificationData?.document_country || 'PHL',
+                documentType: identityDocumentType,
+                documentTypeKey: identityDocumentTypeKey,
+                documentCountry: identityDocumentCountry,
                 source: 'DIDIT',
                 status: 'APPROVED',
                 diditSessionId,
@@ -1241,9 +1330,9 @@ serve(async (req) => {
                     userId,
                     email: normalizedEmail,
                     role: normalizedRole,
-                    documentType: selectedDocumentType,
-                    documentTypeKey: selectedDocumentTypeKey,
-                    documentCountry: diditVerificationData?.document_country || 'PHL',
+                    documentType: identityDocumentType,
+                    documentTypeKey: identityDocumentTypeKey,
+                    documentCountry: identityDocumentCountry,
                     source: DUPLICATE_REVIEW_SOURCE,
                     diditSessionId,
                     documentFingerprint,
@@ -1266,9 +1355,9 @@ serve(async (req) => {
                     userId,
                     role: normalizedRole,
                     documentFingerprint,
-                    documentType: selectedDocumentType,
-                    documentTypeKey: selectedDocumentTypeKey,
-                    documentCountry: diditVerificationData?.document_country || 'PHL',
+                    documentType: identityDocumentType,
+                    documentTypeKey: identityDocumentTypeKey,
+                    documentCountry: identityDocumentCountry,
                     source: DUPLICATE_REVIEW_SOURCE,
                     status: 'PENDING_REVIEW',
                     diditSessionId,
@@ -1334,6 +1423,10 @@ serve(async (req) => {
                             ...existingReviewMetadata,
                             musician_video_review_required: true,
                             musician_video_upload_id: musicianVideoProof.uploadId,
+                            selected_document_type: selectedDocumentType || existingReviewMetadata.selected_document_type || null,
+                            selected_document_type_key: selectedDocumentTypeKey || existingReviewMetadata.selected_document_type_key || null,
+                            didit_document_type: identityDocumentInfo.diditDocumentType || existingReviewMetadata.didit_document_type || null,
+                            didit_document_type_key: identityDocumentTypeKey || existingReviewMetadata.didit_document_type_key || null,
                         },
                         updated_at: new Date().toISOString(),
                     })
@@ -1346,9 +1439,9 @@ serve(async (req) => {
                     userId,
                     email: normalizedEmail,
                     role: normalizedRole,
-                    documentType: selectedDocumentType || 'Musician video proof',
-                    documentTypeKey: selectedDocumentTypeKey,
-                    documentCountry: diditVerificationData?.document_country || 'PHL',
+                    documentType: identityDocumentType || 'Musician video proof',
+                    documentTypeKey: identityDocumentTypeKey,
+                    documentCountry: identityDocumentCountry,
                     source: MUSICIAN_VIDEO_REVIEW_SOURCE,
                     diditSessionId,
                     documentFingerprint,
@@ -1364,6 +1457,10 @@ serve(async (req) => {
                         musician_video_review_required: true,
                         musician_video_upload_id: musicianVideoProof.uploadId,
                         source_session_status: resolvedDiditStatus,
+                        selected_document_type: selectedDocumentType || null,
+                        selected_document_type_key: selectedDocumentTypeKey || null,
+                        didit_document_type: identityDocumentInfo.diditDocumentType,
+                        didit_document_type_key: identityDocumentTypeKey,
                     },
                 })
 

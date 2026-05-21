@@ -1530,21 +1530,6 @@ export default function StudioDetailsScreen() {
                         Lead Time:{" "}
                         {studio.booking_settings.lead_time_hours || 0} hours
                       </Text>
-                      {(isRecordingOnlyStudio || studio?.type === "Both") && (
-                        <Text
-                          style={{
-                            fontFamily: "Poppins_500Medium",
-                            color: colors.textSecondary,
-                          }}
-                        >
-                          Recording Rule:{" "}
-                          {studio.booking_settings.recording_songs_per_block || 1} song(s) per{" "}
-                          {studio.booking_settings.recording_hours_per_block ||
-                            studio.booking_settings.min_booking_duration_hours ||
-                            3}{" "}
-                          hour block
-                        </Text>
-                      )}
                       <Text
                         style={{
                           fontFamily: "Poppins_500Medium",

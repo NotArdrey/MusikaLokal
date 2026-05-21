@@ -45,3 +45,4 @@ app-example
 
 # Database schema (local only)
 supabase_schema.sql
+.vercel

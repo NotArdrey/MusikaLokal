@@ -45,6 +45,15 @@ type DocumentOption = {
     diditDocumentType?: 'passport' | 'id_card' | 'drivers_license';
 };
 
+type DocumentVerificationGroup = {
+    key: 'didit' | 'manual';
+    title: string;
+    subtitle: string;
+    icon: React.ComponentProps<typeof Ionicons>['name'];
+    accent: string;
+    options: DocumentOption[];
+};
+
 type ManualUploadAsset = {
     base64: string;
     uri: string;
@@ -84,16 +93,50 @@ const SIGNUP_ROLE_OPTIONS: SignupRoleOption[] = [
     },
 ];
 
-const PH_DOCUMENT_OPTIONS: DocumentOption[] = [
+const AUTO_DOCUMENT_OPTION: DocumentOption = {
+    key: 'auto_verification',
+    label: 'Auto verification',
+    diditSupported: true,
+};
+
+const DIDIT_DOCUMENT_OPTIONS: DocumentOption[] = [
     { key: 'national_id', label: 'National ID card', diditSupported: true, diditDocumentType: 'id_card' },
     { key: 'passport', label: 'Passport', diditSupported: true, diditDocumentType: 'passport' },
     { key: 'drivers_license', label: 'Driver\'s license', diditSupported: true, diditDocumentType: 'drivers_license' },
+];
+
+const MANUAL_DOCUMENT_OPTIONS: DocumentOption[] = [
     { key: 'health_insurance', label: 'Health Insurance Card', diditSupported: false },
     { key: 'umid', label: 'UMID', diditSupported: false },
     { key: 'postal_id', label: 'Postal ID', diditSupported: false },
     { key: 'voters_id', label: 'Voter\'s ID', diditSupported: false },
     { key: 'prc_id', label: 'PRC ID', diditSupported: false },
     { key: 'other', label: 'Other government ID', diditSupported: false },
+];
+
+const PH_DOCUMENT_OPTIONS: DocumentOption[] = [
+    AUTO_DOCUMENT_OPTION,
+    ...DIDIT_DOCUMENT_OPTIONS,
+    ...MANUAL_DOCUMENT_OPTIONS,
+];
+
+const DOCUMENT_VERIFICATION_GROUPS: DocumentVerificationGroup[] = [
+    {
+        key: 'didit',
+        title: 'Auto verification',
+        subtitle: 'Available IDs: National ID card, Passport, Driver\'s license',
+        icon: 'shield-checkmark-outline',
+        accent: '#16A34A',
+        options: [AUTO_DOCUMENT_OPTION],
+    },
+    {
+        key: 'manual',
+        title: 'Manual review',
+        subtitle: 'Available IDs: Health Insurance Card, UMID, Postal ID, Voter\'s ID, PRC ID, Other government ID',
+        icon: 'document-text-outline',
+        accent: '#D97706',
+        options: MANUAL_DOCUMENT_OPTIONS,
+    },
 ];
 
 const getDocumentOptionByKey = (key: string) => {
@@ -3204,9 +3247,9 @@ export default function SignupScreen() {
                 ) : null}
 
                 <View style={styles.documentSectionContainer}>
-                    <Text style={[styles.documentSectionTitle, themeStyles.text]}>Select your ID type (Philippines)</Text>
+                    <Text style={[styles.documentSectionTitle, themeStyles.text]}>Choose verification method</Text>
                     <Text style={[styles.documentSectionSubtitle, themeStyles.textSecondary]}>
-                        Supported IDs continue with Didit. Unsupported IDs can be uploaded manually for admin review (5-7 business days).
+                        Auto verification supports National ID card, Passport, and Driver's license. Other government IDs go to manual review.
                     </Text>
 
                     <TouchableOpacity
@@ -3216,16 +3259,24 @@ export default function SignupScreen() {
                         style={[styles.documentSelectButton, themeStyles.inputContainer, errors.document ? { borderColor: 'red' } : null]}
                         testID="signup-document-select-button"
                     >
-                        <Ionicons name="id-card-outline" size={20} color={colors.textSecondary} />
+                        <Ionicons
+                            name={selectedDocumentOption.diditSupported ? 'shield-checkmark-outline' : 'document-text-outline'}
+                            size={20}
+                            color={selectedDocumentOption.diditSupported ? '#16A34A' : '#D97706'}
+                        />
                         <View style={styles.documentSelectCopy}>
-                            <Text style={[styles.documentSelectValue, themeStyles.text]}>{selectedDocumentOption.label}</Text>
+                            <Text style={[styles.documentSelectValue, themeStyles.text]}>
+                                {selectedDocumentOption.diditSupported ? 'Auto verification' : 'Manual review'}
+                            </Text>
                             <Text
                                 style={[
                                     styles.documentSelectionMeta,
                                     { color: selectedDocumentOption.diditSupported ? '#16A34A' : '#D97706' },
                                 ]}
                             >
-                                {selectedDocumentOption.diditSupported ? 'Auto verification' : 'Manual review'}
+                                {selectedDocumentOption.key === AUTO_DOCUMENT_OPTION.key
+                                    ? 'National ID card, Passport, Driver\'s license'
+                                    : selectedDocumentOption.label}
                             </Text>
                         </View>
                         <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
@@ -3333,11 +3384,11 @@ export default function SignupScreen() {
                             >
                                 <Ionicons name="close" size={22} color={colors.textSecondary} />
                             </TouchableOpacity>
-                            <Text style={[styles.documentModalTitle, themeStyles.text]}>Select ID type</Text>
+                            <Text style={[styles.documentModalTitle, themeStyles.text]}>Choose verification method</Text>
                             <View style={styles.documentModalHeaderSpacer} />
                         </View>
                         <Text style={[styles.documentModalSubtitle, themeStyles.textSecondary]}>
-                            Choose the government ID you will use for verification.
+                            Pick the method first, then select one of its available IDs.
                         </Text>
 
                         <BottomSheetScrollView
@@ -3346,54 +3397,77 @@ export default function SignupScreen() {
                             showsVerticalScrollIndicator={false}
                             keyboardShouldPersistTaps="always"
                         >
-                            {PH_DOCUMENT_OPTIONS.map((option) => {
-                                const selected = selectedDocumentKey === option.key;
-                                return (
-                                    <TouchableOpacity
-                                        key={option.key}
-                                        activeOpacity={1}
-                                        accessibilityLabel={`signup-document-option-${option.key}`}
-                                        onPress={() => handleDocumentSelect(option.key)}
-                                        testID={`signup-document-option-${option.key}`}
-                                        style={[
-                                            styles.documentModalOption,
-                                            {
-                                                backgroundColor: selected
-                                                    ? (isDark ? 'rgba(99,102,241,0.18)' : 'rgba(99,102,241,0.08)')
-                                                    : (isDark ? '#252D3A' : '#F7F8FA'),
-                                                borderColor: selected ? colors.primary : 'transparent',
-                                            },
-                                        ]}
-                                    >
+                            {DOCUMENT_VERIFICATION_GROUPS.map((group) => (
+                                <View
+                                    key={group.key}
+                                    style={[
+                                        styles.documentModalGroup,
+                                        {
+                                            backgroundColor: isDark ? '#202837' : '#FFFFFF',
+                                            borderColor: isDark ? '#374151' : '#E5E7EB',
+                                        },
+                                    ]}
+                                >
+                                    <View style={styles.documentModalGroupHeader}>
                                         <View
                                             style={[
-                                                styles.documentModalOptionIcon,
-                                                { backgroundColor: option.diditSupported ? 'rgba(22, 163, 74, 0.10)' : 'rgba(217, 119, 6, 0.10)' },
+                                                styles.documentModalGroupIcon,
+                                                { backgroundColor: group.key === 'didit' ? 'rgba(22, 163, 74, 0.10)' : 'rgba(217, 119, 6, 0.10)' },
                                             ]}
                                         >
-                                            <Ionicons
-                                                name={option.diditSupported ? 'shield-checkmark-outline' : 'document-text-outline'}
-                                                size={18}
-                                                color={option.diditSupported ? '#16A34A' : '#D97706'}
-                                            />
+                                            <Ionicons name={group.icon} size={18} color={group.accent} />
                                         </View>
-                                        <View style={styles.documentModalOptionCopy}>
-                                            <Text style={[styles.documentModalOptionTitle, themeStyles.text]}>{option.label}</Text>
-                                            <Text
-                                                style={[
-                                                    styles.documentModalOptionMeta,
-                                                    { color: option.diditSupported ? '#16A34A' : '#D97706' },
-                                                ]}
-                                            >
-                                                {option.diditSupported ? 'Auto verification' : 'Manual review'}
-                                            </Text>
+                                        <View style={styles.documentModalGroupCopy}>
+                                            <Text style={[styles.documentModalGroupTitle, { color: group.accent }]}>{group.title}</Text>
+                                            <Text style={[styles.documentModalGroupSubtitle, themeStyles.textSecondary]}>{group.subtitle}</Text>
                                         </View>
-                                        <View style={styles.documentModalOptionCheck}>
-                                            {selected ? <Ionicons name="checkmark-circle" size={24} color={colors.primary} /> : null}
-                                        </View>
-                                    </TouchableOpacity>
-                                );
-                            })}
+                                    </View>
+                                    <View style={styles.documentModalGroupOptions}>
+                                        {group.options.map((option) => {
+                                            const selected = group.key === 'didit'
+                                                ? selectedDocumentOption.diditSupported
+                                                : selectedDocumentKey === option.key;
+                                            return (
+                                                <TouchableOpacity
+                                                    key={option.key}
+                                                    activeOpacity={1}
+                                                    accessibilityLabel={`signup-document-option-${option.key}`}
+                                                    onPress={() => handleDocumentSelect(option.key)}
+                                                    testID={`signup-document-option-${option.key}`}
+                                                    style={[
+                                                        styles.documentModalOption,
+                                                        {
+                                                            backgroundColor: selected
+                                                                ? (isDark ? 'rgba(99,102,241,0.18)' : 'rgba(99,102,241,0.08)')
+                                                                : (isDark ? '#252D3A' : '#F7F8FA'),
+                                                            borderColor: selected ? colors.primary : 'transparent',
+                                                        },
+                                                    ]}
+                                                >
+                                                    <View
+                                                        style={[
+                                                            styles.documentModalOptionIcon,
+                                                            { backgroundColor: group.key === 'didit' ? 'rgba(22, 163, 74, 0.10)' : 'rgba(217, 119, 6, 0.10)' },
+                                                        ]}
+                                                    >
+                                                        <Ionicons
+                                                            name={option.diditSupported ? 'shield-checkmark-outline' : 'document-text-outline'}
+                                                            size={18}
+                                                            color={group.accent}
+                                                        />
+                                                    </View>
+                                                    <View style={styles.documentModalOptionCopy}>
+                                                        <Text style={[styles.documentModalOptionTitle, themeStyles.text]}>{option.label}</Text>
+                                                    </View>
+                                                    <View style={styles.documentModalOptionCheck}>
+                                                        {selected ? <Ionicons name="checkmark-circle" size={24} color={colors.primary} /> : null}
+                                                    </View>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </View>
+                                </View>
+                            ))}
                         </BottomSheetScrollView>
                     </View>
             </TrackedBottomSheetModal>
@@ -4065,6 +4139,24 @@ const styles = StyleSheet.create({
     documentModalCloseButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: 0 },
     documentModalBody: { flexGrow: 0 },
     documentModalList: { gap: 8, paddingBottom: 4 },
+    documentModalGroup: {
+        borderWidth: 1,
+        borderRadius: 16,
+        padding: 10,
+        gap: 10,
+    },
+    documentModalGroupHeader: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 10,
+        paddingHorizontal: 2,
+        paddingTop: 2,
+    },
+    documentModalGroupIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+    documentModalGroupCopy: { flex: 1, gap: 2 },
+    documentModalGroupTitle: { fontSize: 13, lineHeight: 17, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
+    documentModalGroupSubtitle: { fontSize: 11, lineHeight: 16, fontFamily: 'Poppins_400Regular' },
+    documentModalGroupOptions: { gap: 8 },
     documentModalOption: {
         flexDirection: 'row',
         alignItems: 'center',
