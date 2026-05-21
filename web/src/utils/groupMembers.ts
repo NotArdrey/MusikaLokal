@@ -32,6 +32,14 @@ export const isGroupLeaderMember = (
 ): boolean => {
   if (!member || typeof member === "string") return false;
   const role = String(member.role || "").toLowerCase();
-  if (ownerId && member.user_id === ownerId) return true;
+  const normalizedOwnerId =
+    typeof ownerId === "string" ? ownerId.trim() : "";
+  const memberUserId =
+    typeof member.user_id === "string" ? member.user_id.trim() : "";
+
+  if (normalizedOwnerId) {
+    return memberUserId === normalizedOwnerId;
+  }
+
   return role === "leader" || role === "owner";
 };

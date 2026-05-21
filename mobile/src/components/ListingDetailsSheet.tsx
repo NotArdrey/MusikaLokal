@@ -2441,7 +2441,7 @@ const ListingDetailsSheet = forwardRef<
                 name: row.profiles?.full_name || "Member",
                 avatar_url: row.profiles?.avatar_url || null,
                 instrument: legacy?.instrument || row.role || "Member",
-                role: row.role === "owner" || row.user_id === data.owner_id ? "Leader" : "Member",
+                role: row.user_id === data.owner_id ? "Leader" : "Member",
               };
             });
             // Sort: owner/leader first

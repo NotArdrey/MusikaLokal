@@ -515,9 +515,11 @@ export default function EditGroupScreen() {
           name: matchedMember?.name || row.profiles?.full_name || "Unknown",
           instrument: matchedMember?.instrument || "",
           role:
-            row.user_id === data.owner_id || row.role === "owner"
+            row.user_id === data.owner_id
               ? "Leader"
-              : matchedMember?.role,
+              : row.role === "admin"
+                ? "Admin"
+                : "Member",
           user_id: row.user_id,
           avatar_url: matchedMember?.avatar_url || row.profiles?.avatar_url,
         });
@@ -538,7 +540,9 @@ export default function EditGroupScreen() {
             role:
               member.user_id && member.user_id === data.owner_id
                 ? "Leader"
-                : member.role,
+                : member.user_id
+                  ? "Member"
+                  : member.role,
           }));
 
       setMembers(combinedMembers);

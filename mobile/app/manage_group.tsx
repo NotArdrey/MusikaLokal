@@ -475,9 +475,11 @@ export default function GroupDetailsScreen() {
                 (member: any) => member?.user_id && member.user_id === row.user_id,
               )?.instrument || "",
             role:
-              row.role === "owner" || row.user_id === groupData?.owner_id
+              row.user_id === groupData?.owner_id
                 ? "Leader"
-                : "Member",
+                : row.role === "admin"
+                  ? "Admin"
+                  : "Member",
             membershipState: "active",
             source: "group_members",
           }));
@@ -942,7 +944,9 @@ export default function GroupDetailsScreen() {
           ...member,
           name: syncedMember?.name || member?.name || member?.full_name,
           avatar_url: syncedMember?.avatar_url || member?.avatar_url,
-          role: member?.role || syncedMember?.role,
+          role: syncedMember
+            ? syncedMember.role
+            : member?.role,
           membershipState: syncedMember
             ? "active"
             : member?.membershipState || "roster",

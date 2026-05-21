@@ -272,7 +272,7 @@ const GroupAboutTab = ({
           </Text>
           <View style={{ gap: 12 }}>
             {group.members.map((member: any, index: number) => {
-              const isLeader = isGroupLeaderMember(member, group.owner_id) || member?.role === "Leader";
+              const isLeader = isGroupLeaderMember(member, group.owner_id);
               const memberName =
                 typeof member === "string" ? member : member.name;
               const memberInstrument =

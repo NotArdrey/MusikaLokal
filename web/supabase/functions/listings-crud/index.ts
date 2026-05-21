@@ -946,11 +946,11 @@ serve(async (req: Request) => {
                         .map((m: any) => ({
                             group_id: groupId,
                             user_id: m.user_id,
-                            role: m.role === 'Leader' ? 'owner' : 'member'
+                            role: m.user_id === data?.owner_id ? 'owner' : 'member'
                         }));
 
                     const toRemove = (currentMembers || [])
-                        .filter((m: any) => !newUserIds.has(m.user_id) && m.role !== 'owner')
+                        .filter((m: any) => !newUserIds.has(m.user_id) && m.user_id !== data?.owner_id)
                         .map((m: any) => m.user_id);
 
                     if (toAdd.length > 0) {

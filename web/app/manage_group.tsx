@@ -426,9 +426,11 @@ export default function GroupDetailsScreen() {
                 (member: any) => member?.user_id && member.user_id === row.user_id,
               )?.instrument || "",
             role:
-              row.role === "owner" || row.user_id === groupData?.owner_id
+              row.user_id === groupData?.owner_id
                 ? "Leader"
-                : "Member",
+                : row.role === "admin"
+                  ? "Admin"
+                  : "Member",
             membershipState: "active",
             source: "group_members",
           }));

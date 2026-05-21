@@ -436,7 +436,7 @@ export default function GroupDetailsScreen() {
         const legacyMember = Array.isArray(group?.members)
           ? group.members.find((member: any) => member?.user_id === row?.user_id)
           : null;
-        const isLeader = row?.role === 'owner' || row?.user_id === group?.owner_id;
+        const isLeader = row?.user_id === group?.owner_id;
 
         return {
           user_id: row?.user_id,
