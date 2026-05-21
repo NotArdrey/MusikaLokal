@@ -1006,8 +1006,8 @@ export default function SignupScreen() {
      * Logic to handle account checking and creation (Step 2 -> 3)
      */
 
-    // Helper to generate a fresh session URL
-    const startNewVerificationSession = async ({ forceNew = true }: { forceNew?: boolean } = {}) => {
+    // Helper to start or reuse a verification session URL. Explicit retry links pass forceNew.
+    const startNewVerificationSession = async ({ forceNew = false }: { forceNew?: boolean } = {}) => {
         if (creatingDiditSessionRef.current) {
             return verificationUrl;
         }
@@ -1015,6 +1015,8 @@ export default function SignupScreen() {
         creatingDiditSessionRef.current = true;
         const existingSessionId = forceNew ? '' : sessionId;
         const existingSessionNonce = forceNew ? '' : sessionNonce;
+        const storageSessionId = existingSessionId || sessionId;
+        const storageSessionNonce = existingSessionNonce || sessionNonce;
         const tempRef = forceNew || !tempSessionRef
             ? `TEMP_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`
             : tempSessionRef;
@@ -1030,8 +1032,9 @@ export default function SignupScreen() {
                 verificationMode,
                 selectedDocumentKey,
                 musicianVideoProof,
-                sSessionId: existingSessionId || undefined,
-                sSessionNonce: existingSessionNonce || undefined,
+                sSessionId: storageSessionId || undefined,
+                sSessionNonce: storageSessionNonce || undefined,
+                sVerificationUrl: verificationUrl || undefined,
             }));
         } catch (e) {
             console.error('Failed to save session state', e);
@@ -1098,6 +1101,18 @@ export default function SignupScreen() {
             return data.verificationUrl;
         } catch (e: any) {
             console.error('Failed to create Didit session:', e);
+            const errorMessage = String(e?.message || '').trim();
+            const isRateLimited = e?.status === 429 || /too many/i.test(errorMessage);
+            if (isRateLimited) {
+                if (!verificationUrl) {
+                    Alert.alert(
+                        'Verification Limit Reached',
+                        'Too many verification sessions were started for this email. Please wait before trying again, or finish the verification link you already opened.'
+                    );
+                    setStep('details');
+                }
+                return verificationUrl;
+            }
             Alert.alert('Error', 'Could not start verification session. Please try again.');
             return '';
         } finally {
@@ -1569,7 +1584,6 @@ export default function SignupScreen() {
             }
 
             if (selectedDocumentOption.diditSupported) {
-                await clearDiditSignupSession();
                 setVerificationMode('didit');
                 setManualFrontImage(null);
                 setManualBackImage(null);

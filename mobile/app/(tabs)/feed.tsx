@@ -234,6 +234,10 @@ type PostComposerMedia = {
   thumbnailChoices: PostComposerThumbnail[];
   selectedThumbnailIndex: number;
   safetyMetadata: Record<string, any>;
+  existing?: boolean;
+  storage_path?: string | null;
+  thumbnail_path?: string | null;
+  safety_checked_at?: string | null;
 };
 
 const feedScreenCache = createFeedCache(getGroqModelInfo().modelLabel);
@@ -722,6 +726,132 @@ const resolveFeedMediaUrl = (value: unknown) => {
   return normalized;
 };
 
+const extractPostMediaStoragePath = (value: unknown) => {
+  if (typeof value !== "string") return "";
+  const candidate = value.trim();
+  if (!candidate) return "";
+
+  const publicMatch = candidate.match(/\/storage\/v1\/object\/(?:public|sign)\/post-media\/([^?#]+)/i);
+  if (publicMatch?.[1]) {
+    try {
+      return decodeURIComponent(publicMatch[1]).replace(/^\/+/, "");
+    } catch {
+      return publicMatch[1].replace(/^\/+/, "");
+    }
+  }
+
+  const normalized = candidate.replace(/^\/+/, "");
+  if (normalized.startsWith(`${POST_MEDIA_BUCKET}/`)) {
+    return normalized.slice(POST_MEDIA_BUCKET.length + 1);
+  }
+
+  if (/^https?:\/\//i.test(normalized)) return "";
+  return normalized;
+};
+
+const inferPostMediaExtension = (...values: unknown[]) => {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const path = value.split("?")[0].split("#")[0];
+    const ext = sanitizePostMediaExtension(path.includes(".") ? path.split(".").pop() : "");
+    if (ext && (POST_IMAGE_EXTENSIONS.has(ext) || POST_VIDEO_EXTENSIONS.has(ext))) {
+      return ext;
+    }
+  }
+  return "";
+};
+
+const normalizeExistingPostMediaType = (item: any, mimeType: string, ext: string): "image" | "video" => {
+  const rawType = typeof item?.media_type === "string" ? item.media_type.trim().toLowerCase() : "";
+  if (rawType === "video" || rawType === "teaser_clip") return "video";
+  if (rawType === "image" || rawType === "cover_art") return "image";
+  if (mimeType.startsWith("video/") || POST_VIDEO_EXTENSIONS.has(ext)) return "video";
+  return "image";
+};
+
+const normalizeExistingPostMediaMimeType = (item: any, mediaType: "image" | "video", ext: string) => {
+  const rawMime = typeof item?.mime_type === "string" ? item.mime_type.trim().toLowerCase() : "";
+  const normalizedMime = rawMime === "image/jpg" ? "image/jpeg" : rawMime;
+  if (
+    normalizedMime &&
+    normalizedMime !== "application/octet-stream" &&
+    normalizedMime.startsWith(mediaType === "video" ? "video/" : "image/")
+  ) {
+    return normalizedMime;
+  }
+  return POST_MIME_BY_EXTENSION[ext] || (mediaType === "video" ? "video/mp4" : "image/jpeg");
+};
+
+const hasPostMediaPayload = (post: any) =>
+  Array.isArray(post?.media) || Array.isArray(post?.post_media);
+
+const normalizeExistingPostMediaForComposer = (post: any): PostComposerMedia[] => {
+  const rawMedia = Array.isArray(post?.media)
+    ? post.media
+    : Array.isArray(post?.post_media)
+      ? post.post_media
+      : [];
+  const orderedRawMedia = [...rawMedia].sort((a: any, b: any) => {
+    const aOrder = Number.isFinite(Number(a?.display_order)) ? Number(a.display_order) : Number.MAX_SAFE_INTEGER;
+    const bOrder = Number.isFinite(Number(b?.display_order)) ? Number(b.display_order) : Number.MAX_SAFE_INTEGER;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return String(a?.created_at || "").localeCompare(String(b?.created_at || ""));
+  });
+
+  const media: PostComposerMedia[] = orderedRawMedia
+    .map((item: any, index: number): PostComposerMedia | null => {
+      const storagePath = extractPostMediaStoragePath(item?.storage_path || item?.url || item?.public_url);
+      if (!storagePath) return null;
+
+      const mediaUrl = resolveFeedMediaUrl(item?.url || item?.storage_path || item?.public_url);
+      if (!mediaUrl) return null;
+
+      const thumbnailPath = extractPostMediaStoragePath(item?.thumbnail_path || item?.thumbnail_url);
+      const thumbnailUrl = resolveFeedMediaUrl(
+        item?.thumbnail_url ||
+          item?.thumbnail_path ||
+          item?.url ||
+          item?.storage_path ||
+          item?.public_url,
+      );
+      const ext = inferPostMediaExtension(storagePath, mediaUrl, item?.mime_type) || "jpg";
+      const mediaType = normalizeExistingPostMediaType(item, String(item?.mime_type || "").toLowerCase(), ext);
+      const mimeType = normalizeExistingPostMediaMimeType(item, mediaType, ext);
+      const width = Number.isFinite(Number(item?.width)) ? Number(item.width) : null;
+      const height = Number.isFinite(Number(item?.height)) ? Number(item.height) : null;
+      const durationSeconds = Number.isFinite(Number(item?.duration_seconds)) ? Number(item.duration_seconds) : null;
+      const id = typeof item?.id === "string" && item.id.trim().length > 0
+        ? `existing:${item.id}`
+        : `existing:${storagePath}:${index}`;
+
+      return {
+        id,
+        uri: mediaUrl,
+        name: storagePath.split("/").pop() || `post-media.${ext}`,
+        media_type: mediaType,
+        mime_type: mimeType,
+        ext,
+        size: 0,
+        width,
+        height,
+        duration_seconds: durationSeconds,
+        is_cover: Boolean(item?.is_cover),
+        thumbnailChoices: mediaType === "video" && thumbnailUrl ? [{ uri: thumbnailUrl, dataUrl: "" }] : [],
+        selectedThumbnailIndex: 0,
+        safetyMetadata: item?.safety_metadata && typeof item.safety_metadata === "object" ? item.safety_metadata : {},
+        existing: true,
+        storage_path: storagePath,
+        thumbnail_path: thumbnailPath || null,
+        safety_checked_at: typeof item?.safety_checked_at === "string" ? item.safety_checked_at : null,
+      };
+    })
+    .filter((item: PostComposerMedia | null): item is PostComposerMedia => Boolean(item))
+    .slice(0, MAX_POST_MEDIA_ITEMS);
+
+  const hasCover = media.some((item) => item.is_cover);
+  return media.map((item, index) => ({ ...item, is_cover: hasCover ? item.is_cover : index === 0 }));
+};
+
 const normalizeFeedPost = (post: any) => {
   const author = post?.author || {};
   const visibility = post?.visibility === "followers_only" ? "followers" : post?.visibility;
@@ -967,6 +1097,11 @@ const formatCompactPostType = (value: unknown) => {
     .join(" ");
 };
 
+const shouldHideFeedPostTypeLabel = (value: unknown) => {
+  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return raw === "playlist_share" || raw === "text";
+};
+
 const formatFeedPrice = (amount: number, unit = "", label = "") => {
   const formatted = `${PESO_SIGN}${amount.toLocaleString()}`;
   return `${formatted}${unit}${label ? ` ${label}` : ""}`;
@@ -1200,6 +1335,7 @@ const isOwnFeedAiRecommendationCard = (item: any, userId?: string | null) => {
 
 const getFeedHeaderBadge = (item: any) => {
   if (item?.__feedKind !== "ai_card") {
+    if (shouldHideFeedPostTypeLabel(item?.post_type)) return "";
     return formatCompactPostType(item?.post_type);
   }
 
@@ -1507,6 +1643,7 @@ const getFeedOptionViewLabel = (item: any) => {
 
 const getFeedMetaLabel = (item: any) => {
   if (item?.__feedKind !== "ai_card") {
+    if (shouldHideFeedPostTypeLabel(item?.post_type)) return "";
     return formatCompactPostType(item?.post_type);
   }
 
@@ -2580,6 +2717,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   );
   const displayName = getFeedDisplayName(item);
   const metaLabel = getFeedMetaLabel(item);
+  const hasMetaLabel = metaLabel.length > 0;
   const caption = getFeedCaption(item);
   const timestamp = getFeedTimestampLabel(item, timeAgo);
   const showHeaderFollow = Boolean(followTarget && (showAuthorFollow || isSuggestion));
@@ -2765,10 +2903,14 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
             ) : null}
           </View>
           <View style={styles.socialMetaRow}>
-            <Text style={[styles.socialMetaText, { color: colors.textSecondary }]} numberOfLines={1}>
-              {metaLabel}
-            </Text>
-            <Text style={[styles.socialMetaDot, { color: colors.textSecondary }]}>{"\u2022"}</Text>
+            {hasMetaLabel ? (
+              <Text style={[styles.socialMetaText, { color: colors.textSecondary }]} numberOfLines={1}>
+                {metaLabel}
+              </Text>
+            ) : null}
+            {hasMetaLabel ? (
+              <Text style={[styles.socialMetaDot, { color: colors.textSecondary }]}>{"\u2022"}</Text>
+            ) : null}
             <Text style={[styles.socialMetaText, { color: colors.textSecondary }]} numberOfLines={1}>
               {timestamp}
             </Text>
@@ -3016,6 +3158,7 @@ export default function FeedScreen() {
   const [postVisibility, setPostVisibility] = useState<"public" | "followers">("public");
   const [postMedia, setPostMedia] = useState<PostComposerMedia[]>([]);
   const [editingPost, setEditingPost] = useState<any | null>(null);
+  const [composerMediaDirty, setComposerMediaDirty] = useState(false);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [mediaStatus, setMediaStatus] = useState("");
   const [creating, setCreating] = useState(false);
@@ -5016,6 +5159,7 @@ export default function FeedScreen() {
     setPostBody("");
     setPostVisibility("public");
     setPostMedia([]);
+    setComposerMediaDirty(false);
     setMediaStatus("");
   }, []);
 
@@ -5071,11 +5215,39 @@ export default function FeedScreen() {
   }, [handleComposerClose]);
 
   const uploadComposerMedia = useCallback(async () => {
-    if (!userId || postMedia.length === 0) return [];
+    if (!userId) throw new Error("Your session expired. Please log in again before uploading media.");
+    if (postMedia.length === 0) return [];
 
     const uploadedMedia: any[] = [];
     for (let index = 0; index < postMedia.length; index += 1) {
       const item = postMedia[index];
+
+      if (item.existing) {
+        const storagePath = extractPostMediaStoragePath(item.storage_path);
+        if (!storagePath) {
+          throw new Error("Existing post media is missing its storage path.");
+        }
+
+        uploadedMedia.push({
+          media_type: item.media_type,
+          storage_path: storagePath,
+          thumbnail_path: item.thumbnail_path ? extractPostMediaStoragePath(item.thumbnail_path) || null : null,
+          is_cover: item.is_cover,
+          mime_type: item.mime_type,
+          width: item.width || null,
+          height: item.height || null,
+          duration_seconds: item.duration_seconds || null,
+          safety_status: "passed",
+          safety_context: "social_post_media",
+          safety_checked_at: item.safety_checked_at || new Date().toISOString(),
+          safety_metadata: {
+            ...item.safetyMetadata,
+            preserved_existing_media: true,
+          },
+        });
+        continue;
+      }
+
       const stamp = `${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`;
       const storagePath = `${userId}/posts/${stamp}.${item.ext}`;
       const bytes = item.media_type === "image"
@@ -5161,6 +5333,7 @@ export default function FeedScreen() {
           const hasCover = merged.some((item) => item.is_cover);
           return merged.map((item, index) => ({ ...item, is_cover: hasCover ? item.is_cover : index === 0 }));
         });
+        setComposerMediaDirty(true);
       }
 
       if (blockedReasons.length > 0) {
@@ -5192,16 +5365,19 @@ export default function FeedScreen() {
       const hasCover = next.some((item) => item.is_cover);
       return next.map((item, index) => ({ ...item, is_cover: hasCover ? item.is_cover : index === 0 }));
     });
+    setComposerMediaDirty(true);
   }, []);
 
   const setComposerCover = useCallback((mediaId: string) => {
     setPostMedia((current) => current.map((item) => ({ ...item, is_cover: item.id === mediaId })));
+    setComposerMediaDirty(true);
   }, []);
 
   const setComposerThumbnail = useCallback((mediaId: string, selectedThumbnailIndex: number) => {
     setPostMedia((current) =>
       current.map((item) => (item.id === mediaId ? { ...item, selectedThumbnailIndex } : item)),
     );
+    setComposerMediaDirty(true);
   }, []);
 
   const handleCreatePost = async () => {
@@ -5216,7 +5392,8 @@ export default function FeedScreen() {
     }
     setCreating(true);
     try {
-      const uploadedMedia = postMedia.length > 0 ? await uploadComposerMedia() : undefined;
+      const shouldSendMedia = editingPost ? composerMediaDirty : postMedia.length > 0;
+      const uploadedMedia = shouldSendMedia ? await uploadComposerMedia() : undefined;
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
         body: editingPost
           ? {
@@ -5224,7 +5401,7 @@ export default function FeedScreen() {
               post_id: editingPost.id,
               content,
               visibility: postVisibility,
-              ...(uploadedMedia ? { media: uploadedMedia } : {}),
+              ...(uploadedMedia !== undefined ? { media: uploadedMedia } : {}),
             }
           : {
               action: "create_post",
@@ -5505,12 +5682,34 @@ export default function FeedScreen() {
     invalidateFeedCache("following");
   }, [invalidateFeedCache]);
 
-  const handleEditPost = useCallback((post: any) => {
+  const handleEditPost = useCallback(async (post: any) => {
     if (!post?.id || post.author_id !== userId) return;
-    setEditingPost(post);
-    setPostBody(post.body || post.content || "");
-    setPostVisibility(post.visibility === "followers" ? "followers" : "public");
-    setPostMedia([]);
+
+    const seedPost = normalizeFeedPost(post);
+    const seedMedia = normalizeExistingPostMediaForComposer(seedPost);
+    let editablePost = seedPost;
+
+    try {
+      const details = await prefetchPostDetails(post.id, seedPost);
+      if (details?.post) {
+        editablePost = normalizeFeedPost(details.post);
+      }
+    } catch (error: any) {
+      if (!hasPostMediaPayload(post) && seedMedia.length === 0) {
+        emitToast({
+          type: "error",
+          title: "Edit unavailable",
+          message: error?.message || "Could not load this post's media. Please try again.",
+        });
+        return;
+      }
+    }
+
+    setEditingPost(editablePost);
+    setPostBody(editablePost.body || editablePost.content || "");
+    setPostVisibility(editablePost.visibility === "followers" ? "followers" : "public");
+    setPostMedia(normalizeExistingPostMediaForComposer(editablePost));
+    setComposerMediaDirty(false);
     setMediaStatus("");
     presentComposerSheet();
   }, [presentComposerSheet, userId]);

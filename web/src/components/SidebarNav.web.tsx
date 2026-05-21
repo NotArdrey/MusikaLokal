@@ -116,6 +116,9 @@ const normalizeNotificationsPayload = (payload: unknown): TopbarNotification[] =
 
 export default function SidebarNav() {
     const { colors, isDark } = useTheme();
+    const logoSource = isDark
+        ? require('../../assets/images/musika-lokal-logo-modern-wordmark-dark.png')
+        : require('../../assets/images/musika-lokal-logo-modern-wordmark.png');
     const { isAdmin, isGuest, roleResolved, session, setGuestMode, userRole } = useAuth();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
@@ -682,7 +685,7 @@ export default function SidebarNav() {
                     <View style={[styles.logoSection, styles.sidebarLogoSection]}>
                         <View style={[styles.logoFrame, styles.sidebarLogoFrame]}>
                             <Image
-                                source={require('../../assets/images/musika-lokal-logo-modern-wordmark.png')}
+                                source={logoSource}
                                 style={[styles.logoImage, styles.sidebarLogoImage]}
                                 resizeMode="contain"
                             />
@@ -727,7 +730,7 @@ export default function SidebarNav() {
                         <View style={[styles.logoSection, styles.logoSectionTop]}>
                             <View style={styles.logoFrame}>
                                 <Image
-                                    source={require('../../assets/images/musika-lokal-logo-modern-wordmark.png')}
+                                    source={logoSource}
                                     style={styles.logoImage}
                                     resizeMode="contain"
                                 />
@@ -990,7 +993,7 @@ export default function SidebarNav() {
                 <View style={[styles.logoSection, styles.sidebarLogoSection]}>
                     <View style={[styles.logoFrame, styles.sidebarLogoFrame]}>
                         <Image
-                            source={require('../../assets/images/musika-lokal-logo-modern-wordmark.png')}
+                            source={logoSource}
                             style={[styles.logoImage, styles.sidebarLogoImage]}
                             resizeMode="contain"
                         />

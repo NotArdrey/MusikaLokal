@@ -293,6 +293,17 @@ export default function PostDetailsScreen() {
     }
   };
 
+  const handleOpenAuthorProfile = useCallback(() => {
+    const authorId = post?.author_id;
+    if (!authorId) return;
+
+    Keyboard.dismiss();
+    router.push({
+      pathname: "/profile",
+      params: { userId: authorId },
+    });
+  }, [post?.author_id]);
+
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -339,16 +350,27 @@ export default function PostDetailsScreen() {
       >
         {/* Author */}
         <View style={styles.authorRow}>
-          <CachedImage
-            uri={post.author_avatar || "https://via.placeholder.com/40" }
-            style={styles.authorAvatar}
-          />
-          <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={[styles.authorName, { color: colors.text }]}>{post.author_name || "User"}</Text>
-            <Text style={[styles.postTime, { color: colors.textSecondary }]}>
-              {formatFriendlyDateTime(post.created_at)} | {post.visibility === "followers" ? "Followers" : "Public"}
-            </Text>
-          </View>
+          <TouchableOpacity
+            activeOpacity={0.78}
+            disabled={!post.author_id}
+            onPress={handleOpenAuthorProfile}
+            style={styles.authorProfileButton}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${post.author_name || "user"} profile`}
+          >
+            <CachedImage
+              uri={post.author_avatar || "https://via.placeholder.com/40" }
+              style={styles.authorAvatar}
+            />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={[styles.authorName, { color: colors.text }]} numberOfLines={1}>
+                {post.author_name || "User"}
+              </Text>
+              <Text style={[styles.postTime, { color: colors.textSecondary }]}>
+                {formatFriendlyDateTime(post.created_at)} | {post.visibility === "followers" ? "Followers" : "Public"}
+              </Text>
+            </View>
+          </TouchableOpacity>
           {isOwner ? (
             <TouchableOpacity activeOpacity={1} onPress={handleDeletePost}>
               <Ionicons name="trash-outline" size={20} color="#ef4444" />
@@ -489,6 +511,7 @@ const styles = StyleSheet.create({
   content: { flex: 1, paddingHorizontal: 16 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
   authorRow: { flexDirection: "row", alignItems: "center", marginTop: 16, marginBottom: 12 },
+  authorProfileButton: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center" },
   authorAvatar: { width: 44, height: 44, borderRadius: 22 },
   authorName: { fontSize: moderateScale(15), fontWeight: "700" },
   postTime: { fontSize: moderateScale(12), marginTop: 2 },

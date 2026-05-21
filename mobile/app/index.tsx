@@ -531,8 +531,8 @@ export default function LoginScreen() {
   };
 
   const logoSource = isDark
-    ? require('../assets/images/musika-lokal-logo-modern-wordmark.png')
-    : require('../assets/images/musika-lokal-logo-modern-wordmark-light.png');
+    ? require('../assets/images/musika-lokal-logo-modern-wordmark-dark.png')
+    : require('../assets/images/musika-lokal-logo-modern-wordmark.png');
 
   // Derived styles based on theme
   const themeStyles = {

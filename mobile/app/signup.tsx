@@ -1324,6 +1324,62 @@ export default function SignupScreen() {
                 selectedRole,
                 selectedDocumentKey,
             });
+            const startOrRestoreVerificationSession = async () => {
+                try {
+                    const savedState = await AsyncStorage.getItem('signup_current_session');
+                    if (savedState) {
+                        const {
+                            email: savedEmail,
+                            selectedRole: savedRole,
+                            verificationMode: savedVerificationMode,
+                            selectedDocumentKey: savedDocumentKey,
+                            tempRef: savedTempRef,
+                            sSessionId,
+                            sSessionNonce,
+                            sVerificationUrl,
+                        } = JSON.parse(savedState);
+                        const savedUrl = String(sVerificationUrl || '').trim();
+                        const emailMatches = String(savedEmail || '').trim().toLowerCase() === email.trim().toLowerCase();
+                        const roleMatches = !savedRole || savedRole === selectedRole;
+                        const modeMatches = !savedVerificationMode || savedVerificationMode === 'didit';
+                        const documentMatches = !savedDocumentKey || savedDocumentKey === selectedDocumentKey;
+
+                        if (savedUrl && emailMatches && roleMatches && modeMatches && documentMatches) {
+                            logSignupFlow('mobileAutoStart.restoredStoredSession', {
+                                email: maskEmailForLog(savedEmail),
+                                selectedRole: savedRole ?? null,
+                                selectedDocumentKey: savedDocumentKey ?? null,
+                                sessionId: summarizeSessionRefForLog(sSessionId),
+                                tempRef: summarizeSessionRefForLog(savedTempRef),
+                                hasSessionNonce: Boolean(sSessionNonce),
+                            });
+                            if (savedTempRef) setTempSessionRef(String(savedTempRef));
+                            if (sSessionId) setSessionId(String(sSessionId));
+                            if (sSessionNonce) setSessionNonce(String(sSessionNonce));
+                            setVerificationUrl(savedUrl);
+                            return;
+                        }
+
+                        if (savedUrl) {
+                            logSignupFlow('mobileAutoStart.storedSessionSkipped', {
+                                reason: 'signup_state_mismatch',
+                                savedEmail: maskEmailForLog(savedEmail),
+                                currentEmail: maskEmailForLog(email),
+                                savedRole: savedRole ?? null,
+                                selectedRole,
+                                savedDocumentKey: savedDocumentKey ?? null,
+                                selectedDocumentKey,
+                            });
+                        }
+                    }
+                } catch (storageError) {
+                    logSignupFlowError('mobileAutoStart.restoreStoredSessionError', storageError, {
+                        storageKey: 'signup_current_session',
+                    });
+                }
+
+                await startNewVerificationSession({ forceNew: false });
+            };
             // Check permissions first
             if (!permission?.granted) {
                 logSignupFlow('mobileAutoStart.requestCameraPermission', {
@@ -1337,7 +1393,7 @@ export default function SignupScreen() {
                         // Permissions granted, start session
                         const timer = setTimeout(() => {
                             if (mounted) {
-                                startNewVerificationSession().catch(e => undefined);
+                                startOrRestoreVerificationSession().catch(e => undefined);
                             }
                         }, 100);
                     } else if (mounted) {
@@ -1354,7 +1410,7 @@ export default function SignupScreen() {
                 // Already granted
                 const timer = setTimeout(() => {
                     if (mounted) {
-                        startNewVerificationSession().catch(e => undefined);
+                        startOrRestoreVerificationSession().catch(e => undefined);
                     }
                 }, 100);
                 return () => { clearTimeout(timer); mounted = false; };
@@ -1492,8 +1548,8 @@ export default function SignupScreen() {
      * Logic to handle account checking and creation (Step 2 -> 3)
      */
 
-    // Helper to generate a fresh session URL
-    const startNewVerificationSession = async ({ forceNew = true }: { forceNew?: boolean } = {}) => {
+    // Helper to start or reuse a verification session URL. Explicit retry links pass forceNew.
+    const startNewVerificationSession = async ({ forceNew = false }: { forceNew?: boolean } = {}) => {
         if (creatingDiditSessionRef.current) {
             logSignupFlow('diditSession.startBlocked.inFlight', {
                 email: maskEmailForLog(email),
@@ -1509,6 +1565,8 @@ export default function SignupScreen() {
         creatingDiditSessionRef.current = true;
         const existingSessionId = forceNew ? '' : sessionId;
         const existingSessionNonce = forceNew ? '' : sessionNonce;
+        const storageSessionId = existingSessionId || sessionId;
+        const storageSessionNonce = existingSessionNonce || sessionNonce;
         const tempRef = forceNew || !tempSessionRef
             ? `TEMP_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`
             : tempSessionRef;
@@ -1536,8 +1594,9 @@ export default function SignupScreen() {
                 verificationMode,
                 selectedDocumentKey,
                 musicianVideoProof,
-                sSessionId: existingSessionId || undefined,
-                sSessionNonce: existingSessionNonce || undefined,
+                sSessionId: storageSessionId || undefined,
+                sSessionNonce: storageSessionNonce || undefined,
+                sVerificationUrl: verificationUrl || undefined,
             }));
             logSignupFlow('diditSession.statePersisted.preCreate', {
                 email: maskEmailForLog(email),
@@ -1676,10 +1735,17 @@ export default function SignupScreen() {
             const errorMessage = String(e?.message || '').trim();
             const isRateLimited = e?.status === 429 || /too many/i.test(errorMessage);
             if (isRateLimited) {
-                logSignupFlow('diditSession.rateLimitAlertSuppressed', {
+                logSignupFlow('diditSession.rateLimitHandled', {
                     tempRef: summarizeSessionRefForLog(tempRef),
                     hasVerificationUrl: Boolean(verificationUrl),
                 });
+                if (!verificationUrl) {
+                    Alert.alert(
+                        'Verification Limit Reached',
+                        'Too many verification sessions were started for this email. Please wait before trying again, or finish the verification link you already opened.'
+                    );
+                    setStep('details');
+                }
                 return verificationUrl;
             }
 
@@ -2380,8 +2446,10 @@ export default function SignupScreen() {
                     selectedDocumentKey,
                     selectedDocumentLabel: selectedDocumentOption.label,
                     diditDocumentType: selectedDocumentOption.diditDocumentType,
+                    hasReusableVerificationUrl: Boolean(verificationUrl),
+                    existingSessionId: summarizeSessionRefForLog(sessionId),
+                    tempSessionRef: summarizeSessionRefForLog(tempSessionRef),
                 });
-                await clearDiditSignupSession('enter_didit_verification');
                 setVerificationMode('didit');
                 setManualFrontImage(null);
                 setManualBackImage(null);

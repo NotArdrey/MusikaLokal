@@ -543,51 +543,11 @@ serve(async (req: Request) => {
         return jsonResponse({ error: "Music video proof is only available for musician signup." }, 400);
       }
 
-      let registrationAttemptId: string | null = null;
-      let emailHash: string | null = null;
-      try {
-        const registrationAttempt = await enforceRegistrationRateLimit(supabaseAdmin, req, {
-          action: "musician_video_upload",
-          email,
-          metadata: {
-            role,
-            original_name: originalName,
-            mime_type: mimeType,
-            size_bytes: sizeBytes,
-          },
-          limits: {
-            hourlyEmail: 8,
-            dailyEmail: 16,
-            hourlyIp: 30,
-            dailyIp: 80,
-            hourlyDevice: 16,
-            dailyDevice: 40,
-          },
-        });
-        registrationAttemptId = registrationAttempt?.attemptId || null;
-        emailHash = registrationAttempt?.emailHash || null;
-      } catch (rateLimitError) {
-        const status = getRegistrationRateLimitStatus(rateLimitError);
-        if (status) {
-          return jsonResponse({ error: rateLimitError.message }, status);
-        }
-        throw rateLimitError;
-      }
-
       const upload = await createMusicianVideoUploadSlot(supabaseAdmin, {
-        emailHash,
+        emailHash: null,
         originalName,
         mimeType,
         sizeBytes,
-      });
-
-      await markRegistrationAttempt(supabaseAdmin, registrationAttemptId, {
-        success: true,
-        metadata: {
-          role,
-          musician_video_upload_id: upload.uploadId,
-          musician_video_path: upload.path,
-        },
       });
 
       return jsonResponse({

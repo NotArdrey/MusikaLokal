@@ -168,11 +168,13 @@ export default function ForgetPasswordScreen() {
                        <Ionicons name="arrow-back" size={24} color={colors.text} />
                        <Text style={{ marginLeft: 8, fontSize: 16, fontFamily: 'Poppins_500Medium', color: colors.text }}>Back</Text>
                      </TouchableOpacity>
-                     <Image
-                       source={require("../assets/images/musika-lokal-logo-modern-wordmark.png")}
+                      <Image
+                       source={isDark
+                         ? require("../assets/images/musika-lokal-logo-modern-wordmark-dark.png")
+                         : require("../assets/images/musika-lokal-logo-modern-wordmark.png")}
                        style={styles.webFormLogo}
                        resizeMode="contain"
-                     />
+                      />
                      <Text style={{ textAlign: 'left', fontSize: 36, marginBottom: 8, color: colors.text, fontFamily: 'Poppins_700Bold' }}>Forgot Password</Text>
                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 18, color: colors.textSecondary }}>Reset your password below.</Text>
                    </View>

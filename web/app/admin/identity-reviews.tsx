@@ -1175,7 +1175,7 @@ export default function AdminIdentityReviewsPage() {
         : declinedAccountDeleted
           ? ' The declined account was deleted.'
           : declinedAccountDeleteAttempted && cleanDeclinedAccountDeleteIssue
-            ? ` The email was handled, but account deletion failed: ${cleanDeclinedAccountDeleteIssue}`
+            ? ` Account deletion failed: ${cleanDeclinedAccountDeleteIssue}`
             : ` The account was not deleted.${cleanDeclinedAccountDeleteIssue ? ` ${cleanDeclinedAccountDeleteIssue}` : ''}`;
       const emailMessage = emailSent
         ? `The decision was saved and the email notification was sent automatically.${diditMessage}${declinedAccountDeletionMessage}`

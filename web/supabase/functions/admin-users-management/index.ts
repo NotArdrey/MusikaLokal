@@ -686,6 +686,13 @@ async function nullProfileReference(client: any, table: string, column: string, 
   if (error) throw error;
 }
 
+function isAuthUserNotFoundError(error: any) {
+  if (!error) return false;
+  const status = Number(error?.status || error?.code || 0);
+  const message = String(error?.message || error?.error_description || error || "").toLowerCase();
+  return message.includes("user not found") || (status === 404 && message.includes("not found"));
+}
+
 async function deleteIdentityClaimsForRemovedUser(client: any, userId: string) {
   const { error: userIdError } = await client
     .from("identity_document_claims")
@@ -755,6 +762,10 @@ async function deleteReviewedIdentityAccount(client: any, userId: string) {
     .eq("id", normalizedUserId)
     .maybeSingle();
 
+  if (existingAuthError && !isAuthUserNotFoundError(existingAuthError)) {
+    throw existingAuthError;
+  }
+
   if (existingProfileError) throw existingProfileError;
 
   if ((existingAuthError || !existingAuth?.user) && !existingProfile) {
@@ -784,7 +795,7 @@ async function deleteReviewedIdentityAccount(client: any, userId: string) {
   let authDeleted = false;
   if (existingAuth?.user) {
     const { error: authDeleteError } = await client.auth.admin.deleteUser(normalizedUserId);
-    if (authDeleteError) throw authDeleteError;
+    if (authDeleteError && !isAuthUserNotFoundError(authDeleteError)) throw authDeleteError;
     authDeleted = true;
   }
 
@@ -2602,17 +2613,7 @@ serve(async (req: Request) => {
       }
 
       if (decision === "DECLINED") {
-        const emailWasHandled = Boolean(decisionEmail.sent || decisionEmail.queued);
-
-        if (!emailWasHandled) {
-          declinedAccountDeletion.skipped_reason = "Decision email was not sent or queued.";
-          console.error("manual_identity_review_declined_account_delete_skipped", {
-            reviewId,
-            userId: review.user_id,
-            reason: declinedAccountDeletion.skipped_reason,
-            emailError: decisionEmail.error || null,
-          });
-        } else if (String(review.user_id) === actorId) {
+        if (String(review.user_id) === actorId) {
           declinedAccountDeletion.skipped_reason = "Refused to delete the signed-in admin account.";
           console.error("manual_identity_review_declined_account_delete_skipped", {
             reviewId,
@@ -2637,6 +2638,7 @@ serve(async (req: Request) => {
               alreadyRemoved: declinedAccountDeletion.already_removed,
               emailSent: decisionEmail.sent,
               emailQueued: decisionEmail.queued,
+              emailError: decisionEmail.error || null,
             });
           } catch (deleteError: any) {
             declinedAccountDeletion.error = deleteError?.message || "Unable to delete declined account.";
@@ -2644,6 +2646,9 @@ serve(async (req: Request) => {
               reviewId,
               userId: review.user_id,
               message: declinedAccountDeletion.error,
+              emailSent: decisionEmail.sent,
+              emailQueued: decisionEmail.queued,
+              emailError: decisionEmail.error || null,
             });
           }
         }

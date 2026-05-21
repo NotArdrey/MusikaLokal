@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -328,6 +329,20 @@ export default function PostDetailsModal({
     Keyboard.dismiss();
     onClose();
   }, [onClose]);
+
+  const handleOpenAuthorProfile = useCallback(() => {
+    const authorId = post?.author_id;
+    if (!authorId) return;
+
+    Keyboard.dismiss();
+    onClose();
+    setTimeout(() => {
+      router.push({
+        pathname: "/profile",
+        params: { userId: authorId },
+      });
+    }, 150);
+  }, [onClose, post?.author_id]);
 
   const cardBg = isDark ? "#1E293B" : "#FFFFFF";
   const borderCol = isDark ? "#334155" : "#E2E8F0";
@@ -760,28 +775,37 @@ export default function PostDetailsModal({
     return (
       <>
         <View style={styles.authorRow}>
-          <ProfileAvatar
-            uri={post.author_avatar}
-            style={styles.avatar}
-            backgroundColor={isDark ? "#374151" : "#E5E7EB"}
-            iconColor={colors.textSecondary}
-          />
-          <View style={styles.authorText}>
-            <Text style={[styles.authorName, { color: colors.text }]} numberOfLines={1}>
-              {post.author_name}
-            </Text>
-            <View style={styles.authorMetaRow}>
-              <Text style={[styles.authorMetaText, { color: colors.textSecondary }]}>
-                {formatTimestamp(post.created_at)}
+          <TouchableOpacity
+            activeOpacity={0.78}
+            disabled={!post.author_id}
+            onPress={handleOpenAuthorProfile}
+            style={styles.authorProfileButton}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${post.author_name || "user"} profile`}
+          >
+            <ProfileAvatar
+              uri={post.author_avatar}
+              style={styles.avatar}
+              backgroundColor={isDark ? "#374151" : "#E5E7EB"}
+              iconColor={colors.textSecondary}
+            />
+            <View style={styles.authorText}>
+              <Text style={[styles.authorName, { color: colors.text }]} numberOfLines={1}>
+                {post.author_name}
               </Text>
-              <Text style={[styles.dot, { color: colors.textSecondary }]}>|</Text>
-              <Ionicons
-                name={post.visibility === "followers" ? "people" : "earth"}
-                size={12}
-                color={colors.textSecondary}
-              />
+              <View style={styles.authorMetaRow}>
+                <Text style={[styles.authorMetaText, { color: colors.textSecondary }]}>
+                  {formatTimestamp(post.created_at)}
+                </Text>
+                <Text style={[styles.dot, { color: colors.textSecondary }]}>|</Text>
+                <Ionicons
+                  name={post.visibility === "followers" ? "people" : "earth"}
+                  size={12}
+                  color={colors.textSecondary}
+                />
+              </View>
             </View>
-          </View>
+          </TouchableOpacity>
           <TouchableOpacity
             activeOpacity={0.78}
             onPress={handleMoreOptions}
@@ -877,6 +901,7 @@ export default function PostDetailsModal({
     handleMoreOptions,
     handleReaction,
     handleSharePost,
+    handleOpenAuthorProfile,
     isDark,
     mediaWidth,
     post,
@@ -1131,6 +1156,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingTop: 14,
     paddingBottom: 8,
+  },
+  authorProfileButton: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
   },
   avatar: { width: 40, height: 40, borderRadius: 20 },
   avatarFallback: {
