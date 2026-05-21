@@ -46,6 +46,7 @@ const hiddenUserManagementVerificationStatuses = [
   "DECLINED",
   "PENDING_REVIEW",
 ];
+const COPYRIGHT_OWNERSHIP_REVIEW_SOURCE = "COPYRIGHT_OWNERSHIP";
 
 function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -182,6 +183,17 @@ function normalizeIdentityMatchType(matchType: unknown, fallback = "DOCUMENT_FIN
 
 function getReviewMetadataObject(review: any) {
   return review?.metadata && typeof review.metadata === "object" ? review.metadata : {};
+}
+
+function isCopyrightOwnershipReview(review: any) {
+  return String(review?.source || "").trim().toUpperCase() === COPYRIGHT_OWNERSHIP_REVIEW_SOURCE;
+}
+
+function getCopyrightOwnershipTrackLabel(review: any) {
+  const metadata = getReviewMetadataObject(review);
+  const title = String(metadata.copyright_title || "released recording").trim();
+  const artistLabel = String(metadata.copyright_artist_label || "").trim();
+  return artistLabel ? `${title} by ${artistLabel}` : title;
 }
 
 function metadataMatchSources(metadata: any) {
@@ -2123,6 +2135,65 @@ serve(async (req: Request) => {
 
       if (String(review.status || "").toUpperCase() !== "PENDING_REVIEW") {
         return jsonResponse({ error: "This review is already finalized" }, 400);
+      }
+
+      if (isCopyrightOwnershipReview(review)) {
+        const nowIso = new Date().toISOString();
+        const existingReviewMetadata = getReviewMetadataObject(review);
+        const nextReviewMetadata = {
+          ...existingReviewMetadata,
+          copyright_ownership_decision: decision,
+          copyright_ownership_reviewed_by: actorId,
+          copyright_ownership_reviewed_at: nowIso,
+        };
+        const trackLabel = getCopyrightOwnershipTrackLabel(review);
+
+        const { data: updatedReview, error: updateReviewError } = await client
+          .from("manual_identity_reviews")
+          .update({
+            status: decision,
+            review_notes: reviewNotes,
+            reviewed_by: actorId,
+            reviewed_at: nowIso,
+            metadata: nextReviewMetadata,
+            updated_at: nowIso,
+          })
+          .eq("id", reviewId)
+          .select("*")
+          .maybeSingle();
+
+        if (updateReviewError) {
+          return jsonResponse({ error: updateReviewError.message }, 400);
+        }
+
+        await client.from("notifications").insert({
+          user_id: review.user_id,
+          type: decision === "APPROVED" ? "success" : "warning",
+          title: decision === "APPROVED" ? "Track Ownership Approved" : "Track Ownership Declined",
+          message: decision === "APPROVED"
+            ? `Your ownership review for ${trackLabel} was approved. You can try uploading the track again.`
+            : `Your ownership review for ${trackLabel} was declined.`,
+          meta: {
+            manual_identity_review_id: reviewId,
+            source: COPYRIGHT_OWNERSHIP_REVIEW_SOURCE,
+            decision,
+            review_notes: reviewNotes,
+            copyright_track_key: existingReviewMetadata.copyright_track_key || null,
+          },
+        });
+
+        return jsonResponse({
+          item: {
+            ...(updatedReview || review),
+            copyright_ownership_review: true,
+            decision_email_sent: false,
+            decision_email_queued: false,
+            decision_email_provider: "none",
+            decision_email_error: null,
+            declined_account_delete_attempted: false,
+            declined_account_deleted: false,
+          },
+        });
       }
 
       const { data: preDecisionProfile } = await client

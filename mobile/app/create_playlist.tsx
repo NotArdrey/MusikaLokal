@@ -35,9 +35,14 @@ import {
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const PLAYLIST_COVER_BUCKET = "post-media";
 const PLAYLIST_COVER_FOLDER = "playlist-covers";
+const PLAYLIST_TRACK_IMAGE_FOLDER = "playlist-track-images";
 const COPYRIGHT_MATCH_PATTERN = /this (?:audio|track) appears to match|appears to be copyrighted|permission to share/i;
 const EXPECTED_UPLOAD_FEEDBACK_PATTERN =
   /(blocked by safety screening|safety check|copyright check|appears to match|appears to be copyrighted|permission to share|please upload music you own|licensed to share|playlist tracks must be|tracks must be|only mp3)/i;
+const PLAYLIST_COPYRIGHT_TERMS_BODY =
+  "Under the Intellectual Property Code (RA 8293), protection is automatic from the moment of creation, securing creators' economic and moral rights. Unauthorized public performance, reproduction, or streaming without a license constitutes copyright infringement.";
+const PLAYLIST_COPYRIGHT_ACKNOWLEDGEMENT =
+  "I understand and confirm I own this music or have the required license to upload and stream it.";
 const moderateScale = (size: number, factor = 0.3) => {
   const scaled = Math.max((SCREEN_WIDTH / 375) * size, size * 0.85);
   return size + (scaled - size) * factor;
@@ -47,6 +52,7 @@ type PlaylistDraftTrack = {
   id: string;
   title: string;
   artist_name: string;
+  cover_image_url: string | null;
   audio_file: PlaylistAudioFile | null;
 };
 
@@ -54,6 +60,7 @@ const createTrackDraft = (): PlaylistDraftTrack => ({
   id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   title: "",
   artist_name: "",
+  cover_image_url: null,
   audio_file: null,
 });
 
@@ -61,6 +68,7 @@ type DraftTrackPayload = {
   id: string;
   title: string;
   artist_name: string | null;
+  cover_image_url: string | null;
   duration_seconds: number | null;
   audio_file: PlaylistAudioFile | null;
 };
@@ -176,6 +184,9 @@ export default function CreatePlaylistScreen() {
   const [alert, setAlert] = useState<PlaylistAlert | null>(null);
   const [uploadingTrackAudioId, setUploadingTrackAudioId] = useState<string | null>(null);
   const [audioUploadMessage, setAudioUploadMessage] = useState<string | null>(null);
+  const [copyrightTermsAccepted, setCopyrightTermsAccepted] = useState(false);
+  const [copyrightTermsVisible, setCopyrightTermsVisible] = useState(false);
+  const [copyrightTermsDraftAccepted, setCopyrightTermsDraftAccepted] = useState(false);
 
   useEffect(() => {
     if (!isE2EFixtureMode() || isEditing) return;
@@ -184,6 +195,7 @@ export default function CreatePlaylistScreen() {
       id: "e2e-track-fixture",
       title: "E2E Track Fixture",
       artist_name: "E2E Artist",
+      cover_image_url: null,
       audio_file: createE2EPlaylistAudioFixture(),
     }]);
   }, [isEditing]);
@@ -261,6 +273,25 @@ export default function CreatePlaylistScreen() {
     })();
   }, [editId, isEditing, logPlaylistInvokeError]);
 
+  const openCopyrightTermsModal = useCallback(() => {
+    setCopyrightTermsDraftAccepted(copyrightTermsAccepted);
+    setCopyrightTermsVisible(true);
+  }, [copyrightTermsAccepted]);
+
+  const confirmCopyrightTerms = useCallback(() => {
+    setCopyrightTermsAccepted(true);
+    setCopyrightTermsVisible(false);
+  }, []);
+
+  const toggleCopyrightTerms = useCallback(() => {
+    if (copyrightTermsAccepted) {
+      setCopyrightTermsAccepted(false);
+      return;
+    }
+
+    openCopyrightTermsModal();
+  }, [copyrightTermsAccepted, openCopyrightTermsModal]);
+
   const addTrackDraft = useCallback(() => {
     setTrackDrafts((current) => [...current, createTrackDraft()]);
   }, []);
@@ -282,6 +313,17 @@ export default function CreatePlaylistScreen() {
         ? {
             ...track,
             audio_file: audioFile,
+          }
+        : track
+    )));
+  }, []);
+
+  const setTrackCoverImage = useCallback((trackId: string, coverImageUrl: string | null) => {
+    setTrackDrafts((current) => current.map((track) => (
+      track.id === trackId
+        ? {
+            ...track,
+            cover_image_url: coverImageUrl,
           }
         : track
     )));
@@ -375,9 +417,10 @@ export default function CreatePlaylistScreen() {
         id: track.id,
         title: track.title.trim(),
         artist_name: track.artist_name.trim() || null,
+        cover_image_url: track.cover_image_url,
         audio_file: track.audio_file,
       }))
-      .filter((track) => track.title || track.artist_name || track.audio_file);
+      .filter((track) => track.title || track.artist_name || track.cover_image_url || track.audio_file);
 
     if (items.some((track) => !track.title)) {
       throw new Error("Each added music needs a title before you save the playlist.");
@@ -388,6 +431,7 @@ export default function CreatePlaylistScreen() {
         id: track.id,
         title: track.title,
         artist_name: track.artist_name,
+        cover_image_url: track.cover_image_url,
         duration_seconds: track.audio_file?.durationSeconds || null,
         audio_file: track.audio_file,
       };
@@ -429,6 +473,11 @@ export default function CreatePlaylistScreen() {
 
     if (authLoading) {
       setAlert({ type: "info", title: "Please Wait", message: "Your session is still loading. Try again in a moment." });
+      return;
+    }
+
+    if (!isEditing && !copyrightTermsAccepted) {
+      openCopyrightTermsModal();
       return;
     }
 
@@ -506,6 +555,7 @@ export default function CreatePlaylistScreen() {
                 playlist_id: playlistId,
                 title: track.title,
                 artist_name: track.artist_name,
+                cover_image_url: track.cover_image_url,
                 audio_url: sourceUrl,
                 duration_seconds: track.duration_seconds,
               };
@@ -598,6 +648,7 @@ export default function CreatePlaylistScreen() {
     const hasAnyDraftValue =
       track.title.trim().length > 0 ||
       track.artist_name.trim().length > 0 ||
+      Boolean(track.cover_image_url) ||
       Boolean(track.audio_file);
     return !hasAnyDraftValue || track.title.trim().length > 0;
   });
@@ -779,6 +830,19 @@ export default function CreatePlaylistScreen() {
                     autoCapitalize={isE2EFixtureMode() ? "none" : "sentences"}
                     autoCorrect={!isE2EFixtureMode()}
                   />
+                  {userId ? (
+                    <>
+                      <Text style={[styles.trackImageLabel, { color: colors.textSecondary }]}>Music Image (Optional)</Text>
+                      <ImageUploader
+                        images={track.cover_image_url ? [track.cover_image_url] : []}
+                        onImagesChange={(images) => setTrackCoverImage(track.id, images[0] || null)}
+                        maxImages={1}
+                        bucketName={PLAYLIST_COVER_BUCKET}
+                        userId={userId}
+                        folder={PLAYLIST_TRACK_IMAGE_FOLDER}
+                      />
+                    </>
+                  ) : null}
                   <TouchableOpacity
                     testID={`mobile-playlist-track-audio-${index}`}
                     accessibilityLabel={`mobile-playlist-track-audio-${index}`}
@@ -828,6 +892,30 @@ export default function CreatePlaylistScreen() {
           </View>
         )}
 
+        {!isEditing ? (
+          <View style={[styles.termsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <TouchableOpacity
+              testID="mobile-playlist-copyright-terms-checkbox"
+              accessibilityLabel="mobile-playlist-copyright-terms-checkbox"
+              activeOpacity={0.78}
+              onPress={toggleCopyrightTerms}
+              style={styles.termsCheckboxButton}
+            >
+              <Ionicons
+                name={copyrightTermsAccepted ? "checkbox" : "square-outline"}
+                size={22}
+                color={copyrightTermsAccepted ? colors.primary : colors.textSecondary}
+              />
+            </TouchableOpacity>
+            <Text style={[styles.termsText, { color: colors.textSecondary }]}>
+              I acknowledge the playlist copyright terms under RA 8293.{" "}
+              <Text style={[styles.termsLink, { color: colors.primary }]} onPress={openCopyrightTermsModal}>
+                View terms
+              </Text>
+            </Text>
+          </View>
+        ) : null}
+
         <TouchableOpacity
           testID="mobile-playlist-save-button"
           accessibilityLabel="mobile-playlist-save-button"
@@ -871,6 +959,55 @@ export default function CreatePlaylistScreen() {
         </View>
       </Modal>
 
+      <Modal visible={copyrightTermsVisible} transparent animationType="fade" statusBarTranslucent>
+        <View style={styles.termsOverlay}>
+          <View style={[styles.termsModalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.termsModalTitle, { color: colors.text }]}>Copyright Terms</Text>
+            <Text style={[styles.termsModalBody, { color: colors.textSecondary }]}>
+              {PLAYLIST_COPYRIGHT_TERMS_BODY}
+            </Text>
+            <TouchableOpacity
+              activeOpacity={0.78}
+              onPress={() => setCopyrightTermsDraftAccepted((accepted) => !accepted)}
+              style={[styles.termsModalCheckRow, { borderColor: colors.border, backgroundColor: colors.background }]}
+            >
+              <Ionicons
+                name={copyrightTermsDraftAccepted ? "checkbox" : "square-outline"}
+                size={22}
+                color={copyrightTermsDraftAccepted ? colors.primary : colors.textSecondary}
+              />
+              <Text style={[styles.termsModalCheckText, { color: colors.text }]}>
+                {PLAYLIST_COPYRIGHT_ACKNOWLEDGEMENT}
+              </Text>
+            </TouchableOpacity>
+            <View style={styles.termsModalActions}>
+              <TouchableOpacity
+                activeOpacity={0.78}
+                onPress={() => setCopyrightTermsVisible(false)}
+                style={[styles.termsModalButton, { borderColor: colors.border }]}
+              >
+                <Text style={[styles.termsModalButtonText, { color: colors.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={copyrightTermsDraftAccepted ? 0.78 : 1}
+                disabled={!copyrightTermsDraftAccepted}
+                onPress={confirmCopyrightTerms}
+                style={[
+                  styles.termsModalButton,
+                  styles.termsModalPrimaryButton,
+                  {
+                    backgroundColor: copyrightTermsDraftAccepted ? colors.primary : colors.border,
+                    opacity: copyrightTermsDraftAccepted ? 1 : 0.65,
+                  },
+                ]}
+              >
+                <Text style={styles.termsModalPrimaryText}>Agree</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Navbar />
     </View>
   );
@@ -898,6 +1035,7 @@ const styles = StyleSheet.create({
   trackCardTitle: { fontSize: moderateScale(13), fontWeight: "700" },
   trackRemoveBtn: { padding: 4 },
   trackInput: { marginTop: 10 },
+  trackImageLabel: { fontSize: moderateScale(12), fontWeight: "700", marginTop: 12 },
   audioPickerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderRadius: 10, paddingVertical: 10, marginTop: 10 },
   audioPickerBtnText: { fontSize: moderateScale(13), fontWeight: "700" },
   audioHelperText: { fontSize: moderateScale(11), lineHeight: 16, marginTop: 8 },
@@ -905,10 +1043,25 @@ const styles = StyleSheet.create({
   audioFileChipText: { flex: 1, fontSize: moderateScale(12), fontWeight: "500" },
   editHintCard: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 18 },
   editHintText: { flex: 1, fontSize: moderateScale(12), lineHeight: 18 },
+  termsCard: { flexDirection: "row", gap: 10, borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 18 },
+  termsCheckboxButton: { paddingTop: 1 },
+  termsText: { flex: 1, fontSize: moderateScale(12), lineHeight: 18 },
+  termsLink: { fontWeight: "700" },
   loadingOverlay: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.35)", padding: 24 },
   loadingCard: { width: "100%", maxWidth: 320, borderWidth: 1, borderRadius: 16, padding: 22, alignItems: "center" },
   loadingTitle: { fontSize: moderateScale(16), fontWeight: "800", marginTop: 14, textAlign: "center" },
   loadingSubtitle: { fontSize: moderateScale(12), lineHeight: 18, marginTop: 6, textAlign: "center" },
+  termsOverlay: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.42)", padding: 24 },
+  termsModalCard: { width: "100%", maxWidth: 360, borderWidth: 1, borderRadius: 18, padding: 20 },
+  termsModalTitle: { fontSize: moderateScale(17), fontWeight: "800" },
+  termsModalBody: { fontSize: moderateScale(13), lineHeight: 20, marginTop: 10 },
+  termsModalCheckRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, borderWidth: 1, borderRadius: 14, padding: 12, marginTop: 16 },
+  termsModalCheckText: { flex: 1, fontSize: moderateScale(12), lineHeight: 18 },
+  termsModalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 18 },
+  termsModalButton: { minWidth: 96, borderWidth: 1, borderRadius: 12, alignItems: "center", justifyContent: "center", paddingHorizontal: 14, paddingVertical: 10 },
+  termsModalPrimaryButton: { borderWidth: 0 },
+  termsModalButtonText: { fontSize: moderateScale(13), fontWeight: "700" },
+  termsModalPrimaryText: { color: "#FFFFFF", fontSize: moderateScale(13), fontWeight: "800" },
   saveBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 16, borderRadius: 12, marginTop: 32 },
   saveBtnText: { color: "#fff", fontSize: moderateScale(16), fontWeight: "700" },
 });

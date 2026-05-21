@@ -1,9 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { ResizeMode, Video } from "expo-av";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Image,
   Modal,
   Pressable,
   StyleSheet,
@@ -95,6 +93,16 @@ const WebFrame = ({
     title: "Media preview",
   });
 
+const centeredMediaElementStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  maxWidth: "100%",
+  maxHeight: "100%",
+  objectFit: "contain",
+  objectPosition: "center center",
+  display: "block",
+};
+
 const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProps) => {
   const [loading, setLoading] = useState(false);
   const mediaType = useMemo(() => getInAppMediaType(uri), [uri]);
@@ -129,21 +137,30 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
           )}
 
           {uri && mediaType === "video" ? (
-            <Video
-              source={{ uri }}
-              style={styles.media}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay
-            />
+            <View style={styles.mediaSurface}>
+              {React.createElement("video", {
+                src: uri,
+                controls: true,
+                autoPlay: true,
+                playsInline: true,
+                preload: "auto",
+                style: centeredMediaElementStyle,
+                "aria-label": title || "Video preview",
+                onLoadedData: () => setLoading(false),
+                onCanPlay: () => setLoading(false),
+                onError: () => setLoading(false),
+              })}
+            </View>
           ) : uri && mediaType === "image" ? (
-            <Image
-              source={{ uri }}
-              style={styles.media}
-              resizeMode="contain"
-              onLoadEnd={() => setLoading(false)}
-              onError={() => setLoading(false)}
-            />
+            <View style={styles.mediaSurface}>
+              {React.createElement("img", {
+                src: uri,
+                alt: title || "Image preview",
+                style: centeredMediaElementStyle,
+                onLoad: () => setLoading(false),
+                onError: () => setLoading(false),
+              })}
+            </View>
           ) : previewUri && mediaType === "document" && canPreviewDocument ? (
             <WebFrame uri={previewUri} onLoad={() => setLoading(false)} />
           ) : uri && mediaType === "document" ? (
@@ -199,9 +216,13 @@ const styles = StyleSheet.create({
     paddingTop: 70,
     paddingBottom: 24,
   },
-  media: {
+  mediaSurface: {
     width: "100%",
     height: "100%",
+    maxWidth: 1180,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
   },
   webFrame: {
     width: "100%",

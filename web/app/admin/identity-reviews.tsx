@@ -258,6 +258,7 @@ const formatDateTime = (value?: string | null) => {
 const isDiditBackedReviewSource = (source?: string | null, sessionId?: string | null) => (
   Boolean(String(sessionId || '').trim()) && String(source || '').trim().toUpperCase().startsWith('DIDIT')
 );
+const COPYRIGHT_OWNERSHIP_REVIEW_SOURCE = 'COPYRIGHT_OWNERSHIP';
 
 const formatDiditStatusLabel = (rawStatus?: string | null) => {
   const value = String(rawStatus || '').trim();
@@ -327,7 +328,33 @@ const getIdentityMatchAccountAssetUrl = (account: Partial<IdentityMatchAccount>,
   return String(account.selfie_image_url || '').trim();
 };
 
+const isCopyrightOwnershipReview = (review?: ManualIdentityReviewEntry | null) => (
+  String(review?.source || '').trim().toUpperCase() === COPYRIGHT_OWNERSHIP_REVIEW_SOURCE
+);
+
+const getCopyrightOwnershipInfo = (review?: ManualIdentityReviewEntry | null) => {
+  const metadata = review?.metadata || {};
+  const rawArtists = metadata['copyright_artists'];
+  const artistLabel = Array.isArray(rawArtists)
+    ? rawArtists.map((artist) => String(artist || '').trim()).filter(Boolean).join(', ')
+    : String(metadata['copyright_artist_label'] || '').trim();
+  const title = String(metadata['copyright_title'] || 'Released recording').trim();
+
+  return {
+    title,
+    artistLabel,
+    trackLabel: artistLabel ? `${title} by ${artistLabel}` : title,
+    isrc: String(metadata['copyright_isrc'] || '').trim(),
+    upc: String(metadata['copyright_upc'] || '').trim(),
+    score: metadata['copyright_score'],
+    rightsOwner: String(metadata['copyright_rights_owner'] || '').trim(),
+    fileName: String(metadata['uploaded_file_name'] || '').trim(),
+    trackKey: String(metadata['copyright_track_key'] || '').trim(),
+  };
+};
+
 const isMusicianReview = (review?: ManualIdentityReviewEntry | null) => {
+  if (isCopyrightOwnershipReview(review)) return false;
   const role = String(review?.submitted_role || review?.profile?.role || '').trim().toLowerCase();
   const source = String(review?.source || '').trim().toUpperCase();
   return role === 'musician' || source === 'MUSICIAN_VIDEO' || Boolean(review?.music_video_path || review?.music_video_url);
@@ -363,6 +390,9 @@ const formatIdentityReviewReason = (value?: string | null, staleNameBirthdateOnl
   }
   if (normalized === 'SAME_ROLE_DUPLICATE_DOCUMENT') {
     return 'Same-role duplicate ID document';
+  }
+  if (normalized === 'COPYRIGHT_OWNERSHIP_REVIEW') {
+    return 'Released track ownership needs admin approval';
   }
   return String(value || '').trim() || 'Pending manual identity review';
 };
@@ -452,6 +482,7 @@ const isE2EManualIdentityReview = (review?: ManualIdentityReviewEntry | null) =>
 
 const needsIdentityVerificationRetry = (review?: ManualIdentityReviewEntry | null) => (
   Boolean(review) &&
+  !isCopyrightOwnershipReview(review) &&
   String(review?.source || '').trim().toUpperCase() !== 'MUSICIAN_VIDEO' &&
   !String(review?.document_fingerprint || '').trim()
 );
@@ -1061,13 +1092,14 @@ export default function AdminIdentityReviewsPage() {
     const requiresDuplicateOverride = manualReviewDecision === 'APPROVED' && requiresIdentityDuplicateOverride(manualReviewTarget);
     const requiresIdentityRetry = manualReviewDecision === 'APPROVED' && needsIdentityVerificationRetry(manualReviewTarget);
     const isRetryRequest = manualReviewDecision === 'DECLINED' && needsIdentityVerificationRetry(manualReviewTarget);
+    const isOwnershipReview = isCopyrightOwnershipReview(manualReviewTarget);
 
     if (requiresIdentityRetry) {
       showAlert('warning', 'Verification retry required', 'Didit did not return the document data needed for approval. Require the user to repeat identity verification instead.');
       return;
     }
 
-    if (manualReviewDecision === 'APPROVED' && isMusicianReview(manualReviewTarget) && !manualReviewTarget.music_video_path && !manualReviewTarget.music_video_url) {
+    if (manualReviewDecision === 'APPROVED' && !isOwnershipReview && isMusicianReview(manualReviewTarget) && !manualReviewTarget.music_video_path && !manualReviewTarget.music_video_url) {
       showAlert('warning', 'Music video required', 'Musician signup cannot be approved without a music video proof upload.');
       return;
     }
@@ -1098,6 +1130,7 @@ export default function AdminIdentityReviewsPage() {
       const declinedAccountDeleteError = String(reviewedItem.declined_account_delete_error || '').trim();
       const declinedAccountDeleteSkippedReason = String(reviewedItem.declined_account_delete_skipped_reason || '').trim();
       const diditSync = reviewedItem.didit_status_sync as { synced?: boolean; status?: string | null } | null | undefined;
+      const isOwnershipDecision = isOwnershipReview || Boolean(reviewedItem.copyright_ownership_review);
       console.log('manual identity review email result', {
         reviewId: manualReviewTarget.id,
         decision: manualReviewDecision,
@@ -1110,6 +1143,26 @@ export default function AdminIdentityReviewsPage() {
         declinedAccountDeleteSkippedReason: declinedAccountDeleteSkippedReason || null,
         diditStatus: diditSync?.status || null,
       });
+
+      if (isOwnershipDecision) {
+        const ownershipInfo = getCopyrightOwnershipInfo(manualReviewTarget);
+        showAlert(
+          manualReviewDecision === 'APPROVED' ? 'success' : 'warning',
+          manualReviewDecision === 'APPROVED' ? 'Track ownership approved' : 'Track ownership declined',
+          `The decision for ${ownershipInfo.trackLabel} was saved. The user was notified in app.`,
+        );
+
+        setManualReviewModalVisible(false);
+        setManualReviewTarget(null);
+        setManualReviewNotes('');
+        setDuplicateOverrideConfirmed(false);
+        setManualReviewDecision('APPROVED');
+
+        invalidateAdminPageCache();
+        await fetchManualReviews();
+        return;
+      }
+
       const cleanEmailError = cleanManualReviewEmailError(emailError);
       const cleanDeclinedAccountDeleteIssue = cleanManualReviewEmailError(
         declinedAccountDeleteError || declinedAccountDeleteSkippedReason,
@@ -1170,6 +1223,7 @@ export default function AdminIdentityReviewsPage() {
     if (!q) return manualReviews;
 
     return manualReviews.filter((review) => {
+      const ownershipInfo = isCopyrightOwnershipReview(review) ? getCopyrightOwnershipInfo(review) : null;
       const searchableText = [
         review.profile?.full_name,
         review.profile?.email,
@@ -1178,6 +1232,8 @@ export default function AdminIdentityReviewsPage() {
         review.document_country,
         review.source,
         review.didit_session_id,
+        ownershipInfo?.trackLabel,
+        ownershipInfo?.isrc,
         getDiditReviewInfo(review)?.status,
       ]
         .filter(Boolean)
@@ -1202,6 +1258,8 @@ export default function AdminIdentityReviewsPage() {
   }
 
   const manualReviewDiditInfo = getDiditReviewInfo(manualReviewTarget);
+  const manualReviewIsOwnership = isCopyrightOwnershipReview(manualReviewTarget);
+  const manualReviewOwnershipInfo = getCopyrightOwnershipInfo(manualReviewTarget);
   const manualReviewMatchWarning = getIdentityMatchWarning(manualReviewTarget);
   const manualReviewHasStaleNameMatchOnly = hasStaleOnlyNameBirthdateWarning(manualReviewMatchWarning);
   const manualReviewRequiresDuplicateOverride = requiresIdentityDuplicateOverride(manualReviewTarget);
@@ -1271,7 +1329,7 @@ export default function AdminIdentityReviewsPage() {
                 <View style={styles.queueHeaderCopy}>
                   <Text style={[styles.queueHeaderTitle, { color: colors.text }]}>Identity Reviews</Text>
                   <Text style={[styles.queueHeaderSubtitle, { color: colors.textSecondary }]}>
-                    Review manual uploads and Didit pending checks from signup.
+                    Review identity uploads, Didit pending checks, and released-track ownership requests.
                   </Text>
                 </View>
               </View>
@@ -1351,6 +1409,8 @@ export default function AdminIdentityReviewsPage() {
                   .filter(Boolean)
                   .map((matchType) => formatIdentityMatchType(String(matchType)));
                 const requiresVerificationRetry = needsIdentityVerificationRetry(review);
+                const isOwnershipReview = isCopyrightOwnershipReview(review);
+                const ownershipInfo = getCopyrightOwnershipInfo(review);
 
                 return (
                   <View
@@ -1362,8 +1422,25 @@ export default function AdminIdentityReviewsPage() {
                     <Text style={[styles.cardTitle, { color: colors.text }]}>{profileName}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>{profileEmail}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Role: {review.profile?.role || review.submitted_role || '-'}</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Document: {review.document_type} ({review.document_country || 'PHL'})</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>ID expires: {review.profile?.id_document_expiry || '-'}</Text>
+                    {isOwnershipReview ? (
+                      <>
+                        <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Track: {ownershipInfo.trackLabel}</Text>
+                        {ownershipInfo.isrc ? (
+                          <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>ISRC: {ownershipInfo.isrc}</Text>
+                        ) : null}
+                        {ownershipInfo.score ? (
+                          <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Match score: {String(ownershipInfo.score)}</Text>
+                        ) : null}
+                        {ownershipInfo.fileName ? (
+                          <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Uploaded file: {ownershipInfo.fileName}</Text>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Document: {review.document_type} ({review.document_country || 'PHL'})</Text>
+                        <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>ID expires: {review.profile?.id_document_expiry || '-'}</Text>
+                      </>
+                    )}
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Source: {String(review.source || 'MANUAL_UPLOAD').replace(/_/g, ' ')}</Text>
                     {reviewReason ? (
                       <Text style={[styles.cardMeta, { color: isDark ? '#FBBF24' : '#D97706' }]}>
@@ -1422,53 +1499,57 @@ export default function AdminIdentityReviewsPage() {
                     ) : null}
 
                     <View style={styles.cardActionsRow}>
-                      <TouchableOpacity
-                        testID={`admin-identity-review-front-${review.id}`}
-                        accessibilityLabel={`admin-identity-review-front-${review.id}`}
-                        activeOpacity={1}
-                        disabled={Boolean(loadingAsset)}
-                        onPress={() => void openManualReviewAsset(review, 'front')}
-                        style={[styles.smallActionButton, { borderColor: colors.border, opacity: loadingAsset ? 0.65 : 1 }]}
-                      >
-                        {loadingAsset === 'front' ? (
-                          <ActivityIndicator size="small" color={colors.text} />
-                        ) : (
-                          <Ionicons name="image-outline" size={14} color={colors.text} />
-                        )}
-                        <Text style={[styles.smallActionText, { color: colors.text }]}>Front</Text>
-                      </TouchableOpacity>
+                      {!isOwnershipReview ? (
+                        <>
+                          <TouchableOpacity
+                            testID={`admin-identity-review-front-${review.id}`}
+                            accessibilityLabel={`admin-identity-review-front-${review.id}`}
+                            activeOpacity={1}
+                            disabled={Boolean(loadingAsset)}
+                            onPress={() => void openManualReviewAsset(review, 'front')}
+                            style={[styles.smallActionButton, { borderColor: colors.border, opacity: loadingAsset ? 0.65 : 1 }]}
+                          >
+                            {loadingAsset === 'front' ? (
+                              <ActivityIndicator size="small" color={colors.text} />
+                            ) : (
+                              <Ionicons name="image-outline" size={14} color={colors.text} />
+                            )}
+                            <Text style={[styles.smallActionText, { color: colors.text }]}>Front</Text>
+                          </TouchableOpacity>
 
-                      <TouchableOpacity
-                        testID={`admin-identity-review-back-${review.id}`}
-                        accessibilityLabel={`admin-identity-review-back-${review.id}`}
-                        activeOpacity={1}
-                        disabled={Boolean(loadingAsset)}
-                        onPress={() => void openManualReviewAsset(review, 'back')}
-                        style={[styles.smallActionButton, { borderColor: colors.border, opacity: loadingAsset ? 0.65 : 1 }]}
-                      >
-                        {loadingAsset === 'back' ? (
-                          <ActivityIndicator size="small" color={colors.text} />
-                        ) : (
-                          <Ionicons name="images-outline" size={14} color={colors.text} />
-                        )}
-                        <Text style={[styles.smallActionText, { color: colors.text }]}>Back</Text>
-                      </TouchableOpacity>
+                          <TouchableOpacity
+                            testID={`admin-identity-review-back-${review.id}`}
+                            accessibilityLabel={`admin-identity-review-back-${review.id}`}
+                            activeOpacity={1}
+                            disabled={Boolean(loadingAsset)}
+                            onPress={() => void openManualReviewAsset(review, 'back')}
+                            style={[styles.smallActionButton, { borderColor: colors.border, opacity: loadingAsset ? 0.65 : 1 }]}
+                          >
+                            {loadingAsset === 'back' ? (
+                              <ActivityIndicator size="small" color={colors.text} />
+                            ) : (
+                              <Ionicons name="images-outline" size={14} color={colors.text} />
+                            )}
+                            <Text style={[styles.smallActionText, { color: colors.text }]}>Back</Text>
+                          </TouchableOpacity>
 
-                      <TouchableOpacity
-                        testID={`admin-identity-review-selfie-${review.id}`}
-                        accessibilityLabel={`admin-identity-review-selfie-${review.id}`}
-                        activeOpacity={1}
-                        disabled={Boolean(loadingAsset)}
-                        onPress={() => void openManualReviewAsset(review, 'selfie')}
-                        style={[styles.smallActionButton, { borderColor: colors.border, opacity: loadingAsset ? 0.65 : 1 }]}
-                      >
-                        {loadingAsset === 'selfie' ? (
-                          <ActivityIndicator size="small" color={colors.text} />
-                        ) : (
-                          <Ionicons name="person-circle-outline" size={14} color={colors.text} />
-                        )}
-                        <Text style={[styles.smallActionText, { color: colors.text }]}>Selfie</Text>
-                      </TouchableOpacity>
+                          <TouchableOpacity
+                            testID={`admin-identity-review-selfie-${review.id}`}
+                            accessibilityLabel={`admin-identity-review-selfie-${review.id}`}
+                            activeOpacity={1}
+                            disabled={Boolean(loadingAsset)}
+                            onPress={() => void openManualReviewAsset(review, 'selfie')}
+                            style={[styles.smallActionButton, { borderColor: colors.border, opacity: loadingAsset ? 0.65 : 1 }]}
+                          >
+                            {loadingAsset === 'selfie' ? (
+                              <ActivityIndicator size="small" color={colors.text} />
+                            ) : (
+                              <Ionicons name="person-circle-outline" size={14} color={colors.text} />
+                            )}
+                            <Text style={[styles.smallActionText, { color: colors.text }]}>Selfie</Text>
+                          </TouchableOpacity>
+                        </>
+                      ) : null}
 
                       {isMusicianReview(review) ? (
                         <TouchableOpacity
@@ -1561,7 +1642,9 @@ export default function AdminIdentityReviewsPage() {
             accessibilityLabel="admin-identity-review-decision-modal"
             style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}
           >
-            <Text style={[styles.modalTitle, { color: colors.text }]}>Review Identity Submission</Text>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              {manualReviewIsOwnership ? 'Review Track Ownership' : 'Review Identity Submission'}
+            </Text>
 
             <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
               Decision: {manualReviewDecision === 'APPROVED' ? 'Approve' : 'Decline'}
@@ -1572,12 +1655,37 @@ export default function AdminIdentityReviewsPage() {
             <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
               Role: {manualReviewTarget?.profile?.role || manualReviewTarget?.submitted_role || '-'}
             </Text>
-            <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
-              ID expires: {manualReviewTarget?.profile?.id_document_expiry || '-'}
-            </Text>
-            <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
-              Document: {manualReviewTarget?.document_type || '-'}
-            </Text>
+            {manualReviewIsOwnership ? (
+              <>
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                  Track: {manualReviewOwnershipInfo.trackLabel}
+                </Text>
+                {manualReviewOwnershipInfo.isrc ? (
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                    ISRC: {manualReviewOwnershipInfo.isrc}
+                  </Text>
+                ) : null}
+                {manualReviewOwnershipInfo.rightsOwner ? (
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                    Rights owner: {manualReviewOwnershipInfo.rightsOwner}
+                  </Text>
+                ) : null}
+                {manualReviewOwnershipInfo.fileName ? (
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                    Uploaded file: {manualReviewOwnershipInfo.fileName}
+                  </Text>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                  ID expires: {manualReviewTarget?.profile?.id_document_expiry || '-'}
+                </Text>
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                  Document: {manualReviewTarget?.document_type || '-'}
+                </Text>
+              </>
+            )}
             {isMusicianReview(manualReviewTarget) ? (
               <Text style={[styles.cardMeta, { color: manualReviewTarget?.music_video_path || manualReviewTarget?.music_video_url ? colors.textSecondary : '#D97706' }]}>
                 Music video: {manualReviewTarget?.music_video_original_name || (manualReviewTarget?.music_video_path || manualReviewTarget?.music_video_url ? 'Uploaded' : 'Missing')}

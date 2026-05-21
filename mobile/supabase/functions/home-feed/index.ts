@@ -17,12 +17,12 @@ const corsHeaders = {
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const ENV_GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")?.trim() || "";
 const GROQ_MODEL_CANDIDATES = [
-    "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
 ];
-const GROQ_RETRYABLE_STATUS_CODES = new Set([403, 404, 408, 409, 429, 498, 500, 502, 503, 504]);
+const GROQ_RETRYABLE_STATUS_CODES = new Set([400, 403, 404, 408, 409, 422, 429, 498, 500, 502, 503, 504]);
 const isEnabledEnvFlag = (value?: string) =>
     ["1", "true", "yes", "on"].includes((value || "").trim().toLowerCase());
 const LOCAL_ONLY_MODE = isEnabledEnvFlag(
@@ -90,9 +90,11 @@ interface UserProfile {
     genres: string[];
 }
 
+type RecommendationItemType = "Group" | "Duo" | "Studio" | "Venue" | "Gig" | "Artist" | "Production";
+
 interface RecommendationItem {
     id: string;
-    type: "Group" | "Studio" | "Gig";
+    type: RecommendationItemType;
     name: string;
     image: string | null;
     images: string[];
@@ -107,6 +109,14 @@ interface RecommendationItem {
     updated_at: string | null;
     owner_id: string | null;
     organizer_id: string | null;
+    description?: string | null;
+    avatar_url?: string | null;
+    logo_url?: string | null;
+    group_type?: string | null;
+    studio_type?: string | null;
+    genres?: string[];
+    skills?: string[];
+    open_production_applications?: boolean;
     similarity: number;
     aiReason: string;
     aiScore: number;
@@ -115,6 +125,17 @@ interface RecommendationItem {
 interface CandidateItem extends Omit<RecommendationItem, "similarity" | "aiReason" | "aiScore"> {
     searchableText: string;
     extractedGenres: string[];
+}
+
+interface UserActivitySignals {
+    positiveTerms: string[];
+    negativeTerms: string[];
+    searchTerms: string[];
+    positiveTargetIds: Set<string>;
+    negativeTargetIds: Set<string>;
+    positiveOwnerIds: Set<string>;
+    eventCount: number;
+    summary: string;
 }
 
 const clamp = (value: number, min = 0, max = 1) => Math.max(min, Math.min(max, value));
@@ -154,6 +175,59 @@ const splitGenres = (raw: string | null | undefined): string[] => {
     );
 };
 
+const HOME_FEED_CANDIDATE_SOURCE_LIMIT = 48;
+const HOME_FEED_GROQ_CANDIDATE_LIMIT = 18;
+const HOME_FEED_GROQ_RETURN_LIMIT = 12;
+const HOME_FEED_GROQ_TOTAL_TIMEOUT_MS = 4500;
+const HOME_FEED_GROQ_REQUEST_TIMEOUT_MS = 3500;
+const HOME_FEED_ACTIVITY_LOOKBACK_DAYS = 45;
+const HOME_FEED_ACTIVITY_EVENT_LIMIT = 80;
+const HOME_FEED_ACTIVITY_TERM_LIMIT = 18;
+
+const HOME_FEED_ACTIVITY_EVENT_WEIGHTS: Record<string, number> = {
+    follow: 5,
+    reaction_added: 3,
+    comment_added: 4,
+    post_shared: 4,
+    feed_post_opened: 2,
+    feed_card_opened: 3,
+    feed_card_favorited: 5,
+    feed_card_unfavorited: -2,
+    feed_card_shared: 4,
+    feed_card_skipped: -1,
+    feed_search_submitted: 2,
+    reaction_removed: -1,
+};
+
+const ACTIVITY_STOPWORDS = new Set([
+    "about",
+    "after",
+    "artist",
+    "before",
+    "card",
+    "check",
+    "created",
+    "details",
+    "feed",
+    "from",
+    "group",
+    "here",
+    "into",
+    "lokal",
+    "more",
+    "musika",
+    "music",
+    "post",
+    "profile",
+    "recommended",
+    "studio",
+    "team",
+    "that",
+    "this",
+    "with",
+    "your",
+]);
+
 const freshnessScore = (createdAt: string | null) => {
     if (!createdAt) return 0.35;
     const created = new Date(createdAt).getTime();
@@ -164,6 +238,235 @@ const freshnessScore = (createdAt: string | null) => {
     if (ageDays <= 30) return 0.8;
     if (ageDays <= 90) return 0.55;
     return 0.35;
+};
+
+const createEmptyActivitySignals = (): UserActivitySignals => ({
+    positiveTerms: [],
+    negativeTerms: [],
+    searchTerms: [],
+    positiveTargetIds: new Set<string>(),
+    negativeTargetIds: new Set<string>(),
+    positiveOwnerIds: new Set<string>(),
+    eventCount: 0,
+    summary: "",
+});
+
+const asActivityMetadata = (metadata: unknown): Record<string, unknown> => {
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+        return {};
+    }
+    return metadata as Record<string, unknown>;
+};
+
+const getMetadataString = (metadata: Record<string, unknown>, key: string) => {
+    const value = metadata[key];
+    return typeof value === "string" ? value.trim() : "";
+};
+
+const addIdSignal = (target: Set<string>, value: unknown) => {
+    if (typeof value === "string" && value.trim().length > 0) {
+        target.add(value.trim());
+    }
+};
+
+const extractActivityTerms = (value: unknown, limit = HOME_FEED_ACTIVITY_TERM_LIMIT): string[] => {
+    if (typeof value !== "string" || value.trim().length === 0) {
+        return [];
+    }
+
+    const seen = new Set<string>();
+    const terms: string[] = [];
+    for (const term of normalizeText(value).split(" ")) {
+        if (term.length < 3 || term.length > 32) continue;
+        if (ACTIVITY_STOPWORDS.has(term)) continue;
+        if (seen.has(term)) continue;
+        seen.add(term);
+        terms.push(term);
+        if (terms.length >= limit) break;
+    }
+
+    return terms;
+};
+
+const addWeightedTerms = (scores: Map<string, number>, value: unknown, weight: number) => {
+    for (const term of extractActivityTerms(value)) {
+        scores.set(term, (scores.get(term) || 0) + weight);
+    }
+};
+
+const getTopTerms = (scores: Map<string, number>, limit: number) =>
+    [...scores.entries()]
+        .filter(([, score]) => score > 0)
+        .sort((a, b) => b[1] - a[1])
+        .map(([term]) => term)
+        .slice(0, limit);
+
+const fetchActivitySignals = async (supabaseClient: any, userId: string): Promise<UserActivitySignals> => {
+    const emptySignals = createEmptyActivitySignals();
+    const since = new Date(Date.now() - HOME_FEED_ACTIVITY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: rows, error } = await supabaseClient
+        .from("social_activity_events")
+        .select("event_type, target_user_id, post_id, metadata, created_at")
+        .eq("actor_id", userId)
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(HOME_FEED_ACTIVITY_EVENT_LIMIT);
+
+    if (error) {
+        console.error("home-feed activity signal lookup error:", error);
+        return emptySignals;
+    }
+
+    const activityRows = Array.isArray(rows) ? rows : [];
+    if (activityRows.length === 0) {
+        return emptySignals;
+    }
+
+    const postIds = uniqueStrings(activityRows.map((row: any) => row?.post_id));
+    const postsById = new Map<string, { content?: string | null; post_type?: string | null; author_id?: string | null }>();
+
+    if (postIds.length > 0) {
+        const { data: postRows, error: postError } = await supabaseClient
+            .from("feed_posts")
+            .select("id, content, post_type, author_id")
+            .in("id", postIds);
+
+        if (postError) {
+            console.error("home-feed activity post lookup error:", postError);
+        } else {
+            for (const post of postRows || []) {
+                if (typeof post?.id === "string") {
+                    postsById.set(post.id, post);
+                }
+            }
+        }
+    }
+
+    const positiveTermScores = new Map<string, number>();
+    const negativeTermScores = new Map<string, number>();
+    const searchTermScores = new Map<string, number>();
+    const positiveTargetIds = new Set<string>();
+    const negativeTargetIds = new Set<string>();
+    const positiveOwnerIds = new Set<string>();
+
+    for (const row of activityRows) {
+        const eventType = typeof row?.event_type === "string" ? row.event_type : "";
+        const weight = HOME_FEED_ACTIVITY_EVENT_WEIGHTS[eventType] || 0;
+        const metadata = asActivityMetadata(row?.metadata);
+        const isPositive = weight > 0;
+        const isNegative = weight < 0;
+        const termScores = isNegative ? negativeTermScores : positiveTermScores;
+        const termWeight = Math.max(1, Math.abs(weight));
+
+        if (isPositive) {
+            addIdSignal(positiveTargetIds, getMetadataString(metadata, "target_id"));
+            addIdSignal(positiveOwnerIds, row?.target_user_id);
+            addIdSignal(positiveOwnerIds, getMetadataString(metadata, "owner_id"));
+            addIdSignal(positiveOwnerIds, getMetadataString(metadata, "organizer_id"));
+            addIdSignal(positiveOwnerIds, getMetadataString(metadata, "uploader_id"));
+        } else if (isNegative) {
+            addIdSignal(negativeTargetIds, getMetadataString(metadata, "target_id"));
+        }
+
+        for (const key of ["name", "genre", "location", "description", "card_type", "target_type", "favorite_target_type"]) {
+            addWeightedTerms(termScores, getMetadataString(metadata, key), termWeight);
+        }
+
+        if (eventType === "feed_search_submitted") {
+            const query = getMetadataString(metadata, "query").slice(0, 120);
+            addWeightedTerms(searchTermScores, query, termWeight);
+            addWeightedTerms(positiveTermScores, query, termWeight);
+        }
+
+        const post = typeof row?.post_id === "string" ? postsById.get(row.post_id) : null;
+        if (post) {
+            if (isPositive) {
+                addIdSignal(positiveOwnerIds, post.author_id);
+            }
+            addWeightedTerms(termScores, post.content, termWeight);
+            addWeightedTerms(termScores, post.post_type, termWeight);
+        }
+    }
+
+    const positiveTerms = getTopTerms(positiveTermScores, HOME_FEED_ACTIVITY_TERM_LIMIT);
+    const negativeTerms = getTopTerms(negativeTermScores, 10);
+    const searchTerms = getTopTerms(searchTermScores, 8);
+    const summaryParts = [
+        positiveTerms.length > 0 ? `Positive: ${positiveTerms.slice(0, 10).join(", ")}` : "",
+        searchTerms.length > 0 ? `Searches: ${searchTerms.slice(0, 6).join(", ")}` : "",
+        negativeTerms.length > 0 ? `Weak skips: ${negativeTerms.slice(0, 6).join(", ")}` : "",
+    ].filter(Boolean);
+
+    return {
+        positiveTerms,
+        negativeTerms,
+        searchTerms,
+        positiveTargetIds,
+        negativeTargetIds,
+        positiveOwnerIds,
+        eventCount: activityRows.length,
+        summary: summaryParts.join(" | "),
+    };
+};
+
+const scoreActivityCandidate = (
+    candidate: CandidateItem,
+    normalizedText: string,
+    activity?: UserActivitySignals,
+): { score: number; reason: string } => {
+    if (!activity || activity.eventCount === 0) {
+        return { score: 0, reason: "" };
+    }
+
+    const candidateIds = [
+        candidate.id,
+        candidate.owner_id,
+        candidate.organizer_id,
+    ].filter((value): value is string => typeof value === "string" && value.length > 0);
+
+    let score = 0;
+    const matchedTerms: string[] = [];
+
+    if (activity.positiveTargetIds.has(candidate.id)) {
+        score += 0.7;
+    }
+    if (activity.negativeTargetIds.has(candidate.id)) {
+        score -= 0.2;
+    }
+    if (candidateIds.some((id) => activity.positiveOwnerIds.has(id))) {
+        score += 0.55;
+    }
+
+    for (const term of activity.positiveTerms.slice(0, 12)) {
+        if (normalizedText.includes(term)) {
+            score += 0.12;
+            if (matchedTerms.length < 2) matchedTerms.push(term);
+        }
+    }
+
+    for (const term of activity.searchTerms.slice(0, 6)) {
+        if (normalizedText.includes(term)) {
+            score += 0.1;
+            if (matchedTerms.length < 2) matchedTerms.push(term);
+        }
+    }
+
+    for (const term of activity.negativeTerms.slice(0, 8)) {
+        if (normalizedText.includes(term)) {
+            score -= 0.04;
+        }
+    }
+
+    const uniqueMatchedTerms = uniqueStrings(matchedTerms);
+    return {
+        score: clamp(score, -0.25, 1),
+        reason: uniqueMatchedTerms.length > 0
+            ? `Because of your recent ${uniqueMatchedTerms.slice(0, 2).join(" and ")} activity.`
+            : score >= 0.55
+                ? "Similar to creators or cards you recently opened."
+                : "",
+    };
 };
 
 const buildFallbackReason = (skillMatches: string[], genreMatches: string[], itemType: string): string => {
@@ -186,6 +489,7 @@ const scoreCandidate = (
     candidate: CandidateItem,
     profile: UserProfile,
     mode: RecommendationMode,
+    activity?: UserActivitySignals,
 ): { score: number; reason: string } => {
     const normalizedText = normalizeText(candidate.searchableText);
     const normalizedSkills = profile.skills.map((skill) => normalizeText(skill)).filter(Boolean);
@@ -215,9 +519,12 @@ const scoreCandidate = (
         score = (skillScore * 0.35 + genreScore * 0.35 + popularityScore * 0.2 + recentScore * 0.1) * 100;
     }
 
+    const activityMatch = scoreActivityCandidate(candidate, normalizedText, activity);
+    score += activityMatch.score * (mode === "for-you" ? 18 : 14);
+
     return {
         score: Math.round(clamp(score / 100) * 100),
-        reason: buildFallbackReason(matchedSkills, matchedGenres, candidate.type),
+        reason: activityMatch.reason || buildFallbackReason(matchedSkills, matchedGenres, candidate.type),
     };
 };
 
@@ -242,39 +549,55 @@ const rankWithGroq = async (
     mode: RecommendationMode,
     candidates: Array<{ item: CandidateItem; score: number; reason: string }>,
     limit: number,
+    activity?: UserActivitySignals,
 ) => {
     if (!groqApiKey) {
         return null;
     }
 
-    const compactCandidates = candidates.slice(0, 30).map((entry) => ({
+    const groqReturnLimit = Math.min(limit, HOME_FEED_GROQ_RETURN_LIMIT);
+    const compactCandidates = candidates.slice(0, HOME_FEED_GROQ_CANDIDATE_LIMIT).map((entry) => ({
         id: entry.item.id,
         type: entry.item.type,
         name: entry.item.name,
         genre: entry.item.genre,
         location: entry.item.location,
         rating: entry.item.rating,
+        summary: entry.item.searchableText.slice(0, 120),
         heuristicScore: entry.score,
         heuristicReason: entry.reason,
     }));
 
     const systemPrompt = "You are MusikaLokal recommendation ranking AI. Return JSON only.";
     const userPrompt = [
-        `Goal: Rank candidates for a ${mode === "for-you" ? "TikTok-style For You" : "skill-focused"} feed.`,
+        `Goal: Rank candidates for a personalized MusikaLokal recommendation feed.`,
+        `Priority: ${mode === "for-you" ? "genre, location, quality, and creator fit" : "skill fit first, then genre, location, and quality"}.`,
         `User skills: ${profile.skills.join(", ") || "none"}`,
         `User genres: ${profile.genres.join(", ") || "none"}`,
+        `Recent activity: ${activity?.summary || "none"}`,
+        `Positive activity terms: ${activity?.positiveTerms.slice(0, 12).join(", ") || "none"}`,
+        `Weak negative/skipped terms: ${activity?.negativeTerms.slice(0, 8).join(", ") || "none"}`,
         "Return JSON shape:",
         '{"recommendations":[{"id":"candidate-id","score":0-100,"reason":"short reason"}]}.',
         `Rules:`,
         `- Use only candidate ids provided.`,
+        `- Treat skipped terms as weak hints, not hard blocks.`,
         `- Keep reason under 90 characters.`,
-        `- Return up to ${limit} items sorted best to worst.`,
+        `- Return up to ${groqReturnLimit} items sorted best to worst.`,
         `Candidates: ${JSON.stringify(compactCandidates)}`,
     ].join("\n");
 
     try {
+        const deadline = Date.now() + HOME_FEED_GROQ_TOTAL_TIMEOUT_MS;
+
         for (const model of GROQ_MODEL_CANDIDATES) {
             for (const useJsonMode of [true, false]) {
+                const remainingBudgetMs = deadline - Date.now();
+                if (remainingBudgetMs <= 0) {
+                    console.warn("home-feed groq budget exhausted before request", { mode });
+                    return null;
+                }
+
                 const requestPayload: Record<string, unknown> = {
                     model,
                     messages: [
@@ -282,21 +605,37 @@ const rankWithGroq = async (
                         { role: "user", content: userPrompt },
                     ],
                     temperature: 0.4,
-                    max_completion_tokens: 1200,
+                    max_completion_tokens: 900,
                 };
 
                 if (useJsonMode) {
                     requestPayload.response_format = { type: "json_object" };
                 }
 
-                const response = await fetch(GROQ_API_URL, {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${groqApiKey}`,
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify(requestPayload),
-                });
+                const controller = new AbortController();
+                const timeoutMs = Math.min(HOME_FEED_GROQ_REQUEST_TIMEOUT_MS, remainingBudgetMs);
+                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+                let response: Response;
+
+                try {
+                    response = await fetch(GROQ_API_URL, {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${groqApiKey}`,
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify(requestPayload),
+                        signal: controller.signal,
+                    });
+                } catch (error: any) {
+                    if (error?.name === "AbortError") {
+                        console.warn("home-feed groq request timed out", { model, useJsonMode, timeoutMs });
+                        return null;
+                    }
+                    throw error;
+                } finally {
+                    clearTimeout(timeoutId);
+                }
 
                 if (!response.ok) {
                     const errorBody = await response.text();
@@ -320,13 +659,15 @@ const rankWithGroq = async (
                 }
 
                 const byId = new Map(candidates.map((entry) => [entry.item.id, entry]));
+                const byName = new Map(candidates.map((entry) => [normalizeText(entry.item.name), entry]));
                 const ranked: Array<{ item: CandidateItem; score: number; reason: string }> = [];
 
                 for (const rec of recommendations) {
                     const id = typeof rec?.id === "string" ? rec.id : "";
-                    if (!id || !byId.has(id)) continue;
+                    const recName = typeof rec?.name === "string" ? normalizeText(rec.name) : "";
+                    const base = byId.get(id) || byName.get(normalizeText(id)) || (recName ? byName.get(recName) : undefined);
+                    if (!base) continue;
 
-                    const base = byId.get(id)!;
                     const parsedScore = Number(rec?.score);
                     const aiScore = Number.isFinite(parsedScore) ? Math.round(clamp(parsedScore / 100) * 100) : base.score;
                     const reason = typeof rec?.reason === "string" && rec.reason.trim().length > 0
@@ -424,30 +765,101 @@ const fetchProfile = async (supabaseClient: any, userId: string): Promise<UserPr
 };
 
 const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> => {
-    const [{ data: groups }, { data: studios }, { data: gigs }] = await Promise.all([
+    const [
+        groupsResult,
+        studiosResult,
+        gigsResult,
+        artistsResult,
+        productionTeamsResult,
+    ] = await Promise.all([
         supabaseClient
             .from("groups_with_stats")
-            .select("id, name, images, location, genre, rating, review_count, owner_id, created_at")
-            .limit(60),
+            .select("id, name, description, images, location, genre, group_type, rate, rating, review_count, owner_id, created_at")
+            .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
         supabaseClient
             .from("studios_with_stats")
-            .select("id, name, images, address, type, hourly_rate, rehearsal_rate, recording_rate, rating, review_count, owner_id, created_at")
+            .select("id, name, description, amenities, images, address, location, type, types, hourly_rate, rehearsal_rate, recording_rate, rating, review_count, owner_id, created_at, permit_status")
             .eq("permit_status", "approved")
-            .limit(60),
+            .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
         supabaseClient
             .from("gigs_with_stats")
-            .select("id, name, images, location, budget, rate, requirements, rating, review_count, organizer_id, created_at, status")
+            .select("id, name, description, images, location, budget, rate, requirements, rating, review_count, organizer_id, created_at, status, permit_status")
             .neq("status", "cancelled")
             .eq("permit_status", "approved")
-            .limit(60),
+            .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
+        supabaseClient
+            .from("profiles")
+            .select("id, full_name, avatar_url, address, location, role, bio, created_at")
+            .eq("role", "musician")
+            .eq("is_verified", true)
+            .eq("verification_status", "APPROVED")
+            .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
+        supabaseClient
+            .from("production_teams")
+            .select("id, owner_id, name, description, logo_url, created_at, updated_at, open_production_applications")
+            .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
     ]);
 
-    const groupItems: CandidateItem[] = (groups || []).map((item: any) => {
+    const queryErrors = [
+        groupsResult.error,
+        studiosResult.error,
+        gigsResult.error,
+        artistsResult.error,
+        productionTeamsResult.error,
+    ].filter(Boolean);
+    if (queryErrors.length > 0) {
+        console.error("home-feed candidate query errors:", queryErrors);
+    }
+
+    const artists = Array.isArray(artistsResult.data) ? artistsResult.data : [];
+    const artistIds = artists
+        .map((row: any) => row?.id)
+        .filter((value: any): value is string => typeof value === "string" && value.length > 0);
+    let artistGenresById = new Map<string, string[]>();
+    let artistSkillsById = new Map<string, string[]>();
+
+    if (artistIds.length > 0) {
+        const [genresResult, skillsResult] = await Promise.all([
+            supabaseClient
+                .from("profile_genres")
+                .select("profile_id, genre")
+                .in("profile_id", artistIds),
+            supabaseClient
+                .from("profile_skills")
+                .select("profile_id, skill")
+                .in("profile_id", artistIds),
+        ]);
+
+        if (genresResult.error) {
+            console.error("home-feed artist genres query error:", genresResult.error);
+        }
+        if (skillsResult.error) {
+            console.error("home-feed artist skills query error:", skillsResult.error);
+        }
+
+        for (const row of genresResult.data || []) {
+            if (typeof row?.profile_id !== "string" || typeof row?.genre !== "string") continue;
+            const next = artistGenresById.get(row.profile_id) || [];
+            next.push(row.genre);
+            artistGenresById.set(row.profile_id, next);
+        }
+
+        for (const row of skillsResult.data || []) {
+            if (typeof row?.profile_id !== "string" || !isVisibleProfileSkill(row?.skill)) continue;
+            const next = artistSkillsById.get(row.profile_id) || [];
+            next.push(row.skill.trim());
+            artistSkillsById.set(row.profile_id, next);
+        }
+    }
+
+    const groupItems: CandidateItem[] = (groupsResult.data || []).map((item: any) => {
         const genres = splitGenres(item.genre);
+        const groupType = String(item.group_type || "").toLowerCase();
+        const type: RecommendationItemType = groupType.includes("duo") ? "Duo" : "Group";
         return {
             id: item.id,
-            type: "Group",
-            name: item.name || "Unnamed Group",
+            type,
+            name: item.name || `Unnamed ${type}`,
             image: Array.isArray(item.images) ? item.images[0] || null : null,
             images: Array.isArray(item.images) ? item.images : [],
             rating: Number(item.rating || 0),
@@ -457,37 +869,48 @@ const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> =>
             budget: null,
             location: item.location || "",
             genre: item.genre || "",
+            description: item.description || null,
+            group_type: item.group_type || null,
             created_at: item.created_at || null,
             updated_at: item.updated_at || null,
             owner_id: item.owner_id || null,
             organizer_id: null,
-            searchableText: `${item.name || ""} ${item.genre || ""} ${item.location || ""}`,
+            searchableText: `${item.name || ""} ${item.description || ""} ${item.genre || ""} ${item.location || ""} ${item.group_type || ""}`,
             extractedGenres: genres,
         };
     });
 
-    const studioItems: CandidateItem[] = (studios || []).map((item: any) => ({
-        id: item.id,
-        type: "Studio",
-        name: item.name || "Unnamed Studio",
-        image: Array.isArray(item.images) ? item.images[0] || null : null,
-        images: Array.isArray(item.images) ? item.images : [],
-        rating: Number(item.rating || 0),
-        review_count: Number(item.review_count || 0),
-        rate: null,
-        hourly_rate: Number.isFinite(Number(item.hourly_rate)) ? Number(item.hourly_rate) : null,
-        budget: null,
-        location: item.address || "",
-        genre: item.type || "Studio",
-        created_at: item.created_at || null,
-        updated_at: item.updated_at || null,
-        owner_id: item.owner_id || null,
-        organizer_id: null,
-        searchableText: `${item.name || ""} ${item.type || ""} ${item.address || ""}`,
-        extractedGenres: splitGenres(item.type || ""),
-    }));
+    const studioItems: CandidateItem[] = (studiosResult.data || []).map((item: any) => {
+        const studioType = String(item.type || item.studio_type || "").trim();
+        const isVenue = studioType.toLowerCase().includes("venue") ||
+            (Array.isArray(item.amenities) && item.amenities.some((amenity: unknown) => String(amenity || "").toLowerCase().includes("stage")));
+        const type: RecommendationItemType = isVenue ? "Venue" : "Studio";
 
-    const gigItems: CandidateItem[] = (gigs || []).map((item: any) => {
+        return {
+            id: item.id,
+            type,
+            name: item.name || `Unnamed ${type}`,
+            image: Array.isArray(item.images) ? item.images[0] || null : null,
+            images: Array.isArray(item.images) ? item.images : [],
+            rating: Number(item.rating || 0),
+            review_count: Number(item.review_count || 0),
+            rate: Number.isFinite(Number(item.rate)) ? Number(item.rate) : null,
+            hourly_rate: Number.isFinite(Number(item.hourly_rate)) ? Number(item.hourly_rate) : null,
+            budget: null,
+            location: item.address || item.location || "",
+            genre: isVenue ? "Gig" : studioType || "Studio",
+            description: item.description || null,
+            studio_type: studioType || null,
+            created_at: item.created_at || null,
+            updated_at: item.updated_at || null,
+            owner_id: item.owner_id || null,
+            organizer_id: null,
+            searchableText: `${item.name || ""} ${item.description || ""} ${studioType} ${item.address || ""} ${item.location || ""}`,
+            extractedGenres: splitGenres(studioType || ""),
+        };
+    });
+
+    const gigItems: CandidateItem[] = (gigsResult.data || []).map((item: any) => {
         const requirementGenres = Array.isArray(item.requirements?.genres)
             ? item.requirements.genres
             : [];
@@ -507,16 +930,71 @@ const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> =>
             budget: Number.isFinite(Number(item.budget)) ? Number(item.budget) : null,
             location: item.location || "",
             genre: genres.join(", "),
+            description: item.description || null,
             created_at: item.created_at || null,
             updated_at: item.updated_at || null,
             owner_id: null,
             organizer_id: item.organizer_id || null,
-            searchableText: `${item.name || ""} ${item.location || ""} ${JSON.stringify(item.requirements || {})}`,
+            searchableText: `${item.name || ""} ${item.description || ""} ${item.location || ""} ${JSON.stringify(item.requirements || {})}`,
             extractedGenres: genres,
         };
     });
 
-    return [...groupItems, ...studioItems, ...gigItems];
+    const artistItems: CandidateItem[] = artists.map((item: any) => {
+        const genres = uniqueStrings(artistGenresById.get(item.id) || []);
+        const skills = uniqueStrings(artistSkillsById.get(item.id) || []);
+
+        return {
+            id: item.id,
+            type: "Artist",
+            name: item.full_name || "Artist",
+            image: item.avatar_url || null,
+            images: item.avatar_url ? [item.avatar_url] : [],
+            rating: 0,
+            review_count: 0,
+            rate: null,
+            hourly_rate: null,
+            budget: null,
+            location: item.address || item.location || "",
+            genre: genres.join(", "),
+            genres,
+            skills,
+            description: item.bio || null,
+            avatar_url: item.avatar_url || null,
+            created_at: item.created_at || null,
+            updated_at: item.updated_at || null,
+            owner_id: item.id,
+            organizer_id: null,
+            searchableText: `${item.full_name || ""} ${item.bio || ""} ${item.address || ""} ${item.location || ""} ${genres.join(" ")} ${skills.join(" ")}`,
+            extractedGenres: genres,
+        };
+    });
+
+    const productionItems: CandidateItem[] = (productionTeamsResult.data || []).map((item: any) => ({
+        id: item.id,
+        type: "Production",
+        name: item.name || "Production Team",
+        image: item.logo_url || null,
+        images: item.logo_url ? [item.logo_url] : [],
+        rating: 0,
+        review_count: 0,
+        rate: null,
+        hourly_rate: null,
+        budget: null,
+        location: item.description || "Production Team",
+        genre: "",
+        description: item.description || null,
+        logo_url: item.logo_url || null,
+        created_at: item.created_at || null,
+        updated_at: item.updated_at || null,
+        owner_id: item.owner_id || null,
+        organizer_id: null,
+        open_production_applications: item.open_production_applications === true,
+        searchableText: `${item.name || ""} ${item.description || ""} production team ${item.open_production_applications ? "open applications" : ""}`,
+        extractedGenres: [],
+    }));
+
+    return [...groupItems, ...studioItems, ...gigItems, ...artistItems, ...productionItems];
 };
 
 const getRecommendations = async (
@@ -526,7 +1004,11 @@ const getRecommendations = async (
     groqApiKey: string,
     limit: number,
 ) => {
-    const profile = await fetchProfile(supabaseClient, userId);
+    const [profile, activity] = await Promise.all([
+        fetchProfile(supabaseClient, userId),
+        fetchActivitySignals(supabaseClient, userId),
+    ]);
+
     if (!profile) {
         return {
             recommendations: [],
@@ -548,7 +1030,7 @@ const getRecommendations = async (
 
     const deterministicRank = candidates
         .map((item) => {
-            const scored = scoreCandidate(item, profile, mode);
+            const scored = scoreCandidate(item, profile, mode, activity);
             return {
                 item,
                 score: scored.score,
@@ -568,7 +1050,7 @@ const getRecommendations = async (
         };
     }
 
-    const aiRank = await rankWithGroq(groqApiKey, profile, mode, deterministicRank, limit);
+    const aiRank = await rankWithGroq(groqApiKey, profile, mode, deterministicRank, limit, activity);
 
     if (aiRank && aiRank.ranked.length > 0) {
         return {

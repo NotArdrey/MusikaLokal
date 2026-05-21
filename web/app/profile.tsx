@@ -181,9 +181,14 @@ const PROFILE_PLAYLISTS_CACHE_TTL_MS = 30000;
 const PLAYLIST_GENRES = ["Pop", "Rock", "Hip-Hop", "R&B", "Jazz", "Classical", "Electronic", "OPM", "Indie", "Other"];
 const PLAYLIST_COVER_BUCKET = "post-media";
 const PLAYLIST_COVER_FOLDER = "playlist-covers";
+const PLAYLIST_TRACK_IMAGE_FOLDER = "playlist-track-images";
 const PLAYLIST_COPYRIGHT_MATCH_PATTERN = /this (?:audio|track) appears to match|appears to be copyrighted|permission to share/i;
 const PLAYLIST_EXPECTED_UPLOAD_FEEDBACK_PATTERN =
   /(blocked by safety screening|safety check|copyright check|appears to match|appears to be copyrighted|permission to share|please upload music you own|licensed to share|playlist tracks must be|tracks must be|only mp3)/i;
+const PLAYLIST_COPYRIGHT_TERMS_BODY =
+  "Under the Intellectual Property Code (RA 8293), protection is automatic from the moment of creation, securing creators' economic and moral rights. Unauthorized public performance, reproduction, or streaming without a license constitutes copyright infringement.";
+const PLAYLIST_COPYRIGHT_ACKNOWLEDGEMENT =
+  "I understand and confirm I own this music or have the required license to upload and stream it.";
 const profilePostsCache = new Map<string, { posts: any[]; fetchedAt: number }>();
 const profilePlaylistsCache = new Map<string, { playlists: any[]; fetchedAt: number }>();
 
@@ -191,6 +196,7 @@ type PlaylistDraftTrack = {
   id: string;
   title: string;
   artist_name: string;
+  cover_image_url: string | null;
   audio_file: PlaylistAudioFile | null;
 };
 
@@ -198,6 +204,7 @@ type PlaylistDraftTrackPayload = {
   id: string;
   title: string;
   artist_name: string | null;
+  cover_image_url: string | null;
   duration_seconds: number | null;
   audio_file: PlaylistAudioFile | null;
 };
@@ -206,6 +213,7 @@ const createPlaylistTrackDraft = (): PlaylistDraftTrack => ({
   id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   title: "",
   artist_name: "",
+  cover_image_url: null,
   audio_file: null,
 });
 
@@ -1125,6 +1133,9 @@ export default function ProfileScreen() {
   const [creatingPlaylist, setCreatingPlaylist] = useState(false);
   const [uploadingPlaylistTrackId, setUploadingPlaylistTrackId] = useState<string | null>(null);
   const [playlistAudioUploadMessage, setPlaylistAudioUploadMessage] = useState<string | null>(null);
+  const [playlistCopyrightTermsAccepted, setPlaylistCopyrightTermsAccepted] = useState(false);
+  const [playlistCopyrightTermsVisible, setPlaylistCopyrightTermsVisible] = useState(false);
+  const [playlistCopyrightTermsDraftAccepted, setPlaylistCopyrightTermsDraftAccepted] = useState(false);
   const profilePostsFetchInFlightRef = useRef<string | null>(null);
   const profilePlaylistsFetchInFlightRef = useRef<string | null>(null);
 
@@ -1982,6 +1993,25 @@ export default function ProfileScreen() {
     return refreshed.session;
   }, [isGuest]);
 
+  const openPlaylistCopyrightTermsModal = useCallback(() => {
+    setPlaylistCopyrightTermsDraftAccepted(playlistCopyrightTermsAccepted);
+    setPlaylistCopyrightTermsVisible(true);
+  }, [playlistCopyrightTermsAccepted]);
+
+  const confirmPlaylistCopyrightTerms = useCallback(() => {
+    setPlaylistCopyrightTermsAccepted(true);
+    setPlaylistCopyrightTermsVisible(false);
+  }, []);
+
+  const togglePlaylistCopyrightTerms = useCallback(() => {
+    if (playlistCopyrightTermsAccepted) {
+      setPlaylistCopyrightTermsAccepted(false);
+      return;
+    }
+
+    openPlaylistCopyrightTermsModal();
+  }, [openPlaylistCopyrightTermsModal, playlistCopyrightTermsAccepted]);
+
   const addPlaylistTrackDraft = useCallback(() => {
     setPlaylistTrackDrafts((current) => [...current, createPlaylistTrackDraft()]);
   }, []);
@@ -1995,6 +2025,12 @@ export default function ProfileScreen() {
   const setPlaylistTrackAudioFile = useCallback((trackId: string, audioFile: PlaylistAudioFile | null) => {
     setPlaylistTrackDrafts((current) => current.map((track) => (
       track.id === trackId ? { ...track, audio_file: audioFile } : track
+    )));
+  }, []);
+
+  const setPlaylistTrackCoverImage = useCallback((trackId: string, coverImageUrl: string | null) => {
+    setPlaylistTrackDrafts((current) => current.map((track) => (
+      track.id === trackId ? { ...track, cover_image_url: coverImageUrl } : track
     )));
   }, []);
 
@@ -2042,9 +2078,10 @@ export default function ProfileScreen() {
         id: track.id,
         title: track.title.trim(),
         artist_name: track.artist_name.trim() || null,
+        cover_image_url: track.cover_image_url,
         audio_file: track.audio_file,
       }))
-      .filter((track) => track.title || track.artist_name || track.audio_file);
+      .filter((track) => track.title || track.artist_name || track.cover_image_url || track.audio_file);
 
     if (items.some((track) => !track.title)) {
       throw new Error("Each added music needs a title before you save the playlist.");
@@ -2054,6 +2091,7 @@ export default function ProfileScreen() {
       id: track.id,
       title: track.title,
       artist_name: track.artist_name,
+      cover_image_url: track.cover_image_url,
       duration_seconds: track.audio_file?.durationSeconds || null,
       audio_file: track.audio_file,
     })));
@@ -2068,6 +2106,9 @@ export default function ProfileScreen() {
     setPlaylistVisibility("public");
     setUploadingPlaylistTrackId(null);
     setPlaylistAudioUploadMessage(null);
+    setPlaylistCopyrightTermsAccepted(false);
+    setPlaylistCopyrightTermsDraftAccepted(false);
+    setPlaylistCopyrightTermsVisible(false);
     setCreatePlaylistModalVisible(true);
   }, []);
 
@@ -2085,6 +2126,11 @@ export default function ProfileScreen() {
 
     if (authLoading) {
       showAlert("info", "Please Wait", "Your session is still loading. Try again in a moment.");
+      return;
+    }
+
+    if (!playlistCopyrightTermsAccepted) {
+      openPlaylistCopyrightTermsModal();
       return;
     }
 
@@ -2129,6 +2175,7 @@ export default function ProfileScreen() {
               playlist_id: playlistId,
               title: track.title,
               artist_name: track.artist_name,
+              cover_image_url: track.cover_image_url,
               audio_url: sourceUrl,
               duration_seconds: track.duration_seconds,
             };
@@ -2191,9 +2238,11 @@ export default function ProfileScreen() {
     playlistCoverImages,
     playlistDescription,
     playlistGenre,
+    playlistCopyrightTermsAccepted,
     playlistTitle,
     playlistTrackDrafts,
     playlistVisibility,
+    openPlaylistCopyrightTermsModal,
     preparePlaylistTrackPayloads,
     viewedProfileId,
   ]);
@@ -2848,6 +2897,7 @@ export default function ProfileScreen() {
     const hasAnyDraftValue =
       track.title.trim().length > 0 ||
       track.artist_name.trim().length > 0 ||
+      Boolean(track.cover_image_url) ||
       Boolean(track.audio_file);
     return !hasAnyDraftValue || track.title.trim().length > 0;
   });
@@ -3862,6 +3912,26 @@ export default function ProfileScreen() {
                     })}
                   </View>
 
+                  <View style={[styles.playlistTermsCard, { backgroundColor: surfaceBackground, borderColor: borderSoft }]}>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={togglePlaylistCopyrightTerms}
+                      style={styles.playlistTermsCheckboxButton}
+                    >
+                      <Ionicons
+                        name={playlistCopyrightTermsAccepted ? "checkbox" : "square-outline"}
+                        size={22}
+                        color={playlistCopyrightTermsAccepted ? colors.primary : colors.textSecondary}
+                      />
+                    </TouchableOpacity>
+                    <Text style={[styles.playlistTermsText, { color: colors.textSecondary }]}>
+                      I acknowledge the playlist copyright terms under RA 8293.{" "}
+                      <Text style={[styles.playlistTermsLink, { color: colors.primary }]} onPress={openPlaylistCopyrightTermsModal}>
+                        View terms
+                      </Text>
+                    </Text>
+                  </View>
+
                   <View style={styles.playlistMusicHeader}>
                     <View>
                       <Text style={[styles.playlistModalLabel, styles.playlistMusicLabel, { color: colors.text }]}>Musics</Text>
@@ -3918,6 +3988,19 @@ export default function ProfileScreen() {
                           maxLength={120}
                           style={[styles.playlistModalInput, styles.playlistTrackInput, { color: colors.text, backgroundColor: pageCardBackground, borderColor: borderSoft }]}
                         />
+                        {currentUserId ? (
+                          <>
+                            <Text style={[styles.playlistTrackImageLabel, { color: colors.textSecondary }]}>Music Image (Optional)</Text>
+                            <ImageUploader
+                              images={track.cover_image_url ? [track.cover_image_url] : []}
+                              onImagesChange={(images) => setPlaylistTrackCoverImage(track.id, images[0] || null)}
+                              maxImages={1}
+                              bucketName={PLAYLIST_COVER_BUCKET}
+                              userId={currentUserId}
+                              folder={PLAYLIST_TRACK_IMAGE_FOLDER}
+                            />
+                          </>
+                        ) : null}
                         <TouchableOpacity
                           activeOpacity={uploadingPlaylistTrackId === track.id || creatingPlaylist ? 1 : 0.85}
                           onPress={() => void handlePickPlaylistTrackAudio(track.id)}
@@ -3988,6 +4071,59 @@ export default function ProfileScreen() {
                         Create Playlist
                       </Text>
                     )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+          <Modal
+            visible={playlistCopyrightTermsVisible}
+            transparent
+            animationType="fade"
+            statusBarTranslucent
+          >
+            <View style={styles.playlistTermsOverlay}>
+              <View style={[styles.playlistTermsModalCard, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}>
+                <Text style={[styles.playlistTermsModalTitle, { color: colors.text }]}>Copyright Terms</Text>
+                <Text style={[styles.playlistTermsModalBody, { color: colors.textSecondary }]}>
+                  {PLAYLIST_COPYRIGHT_TERMS_BODY}
+                </Text>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => setPlaylistCopyrightTermsDraftAccepted((accepted) => !accepted)}
+                  style={[styles.playlistTermsModalCheckRow, { backgroundColor: surfaceBackground, borderColor: borderSoft }]}
+                >
+                  <Ionicons
+                    name={playlistCopyrightTermsDraftAccepted ? "checkbox" : "square-outline"}
+                    size={22}
+                    color={playlistCopyrightTermsDraftAccepted ? colors.primary : colors.textSecondary}
+                  />
+                  <Text style={[styles.playlistTermsModalCheckText, { color: colors.text }]}>
+                    {PLAYLIST_COPYRIGHT_ACKNOWLEDGEMENT}
+                  </Text>
+                </TouchableOpacity>
+                <View style={styles.playlistTermsModalActions}>
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => setPlaylistCopyrightTermsVisible(false)}
+                    style={[styles.playlistTermsModalButton, { borderColor: borderSoft }]}
+                  >
+                    <Text style={[styles.playlistTermsModalButtonText, { color: colors.textSecondary }]}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    activeOpacity={playlistCopyrightTermsDraftAccepted ? 0.85 : 1}
+                    disabled={!playlistCopyrightTermsDraftAccepted}
+                    onPress={confirmPlaylistCopyrightTerms}
+                    style={[
+                      styles.playlistTermsModalButton,
+                      styles.playlistTermsModalPrimaryButton,
+                      {
+                        backgroundColor: playlistCopyrightTermsDraftAccepted ? colors.primary : surfaceBackground,
+                        opacity: playlistCopyrightTermsDraftAccepted ? 1 : 0.65,
+                      },
+                    ]}
+                  >
+                    <Text style={styles.playlistTermsModalPrimaryText}>Agree</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -4541,6 +4677,26 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_700Bold",
     fontSize: 12,
   },
+  playlistTermsCard: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    flexDirection: "row",
+    gap: 10,
+  },
+  playlistTermsCheckboxButton: {
+    paddingTop: 1,
+  },
+  playlistTermsText: {
+    flex: 1,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  playlistTermsLink: {
+    fontFamily: "Poppins_700Bold",
+  },
   playlistMusicHeader: {
     marginTop: 18,
     marginBottom: 10,
@@ -4612,6 +4768,11 @@ const styles = StyleSheet.create({
   playlistTrackInput: {
     marginTop: 10,
   },
+  playlistTrackImageLabel: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 12,
+    marginTop: 12,
+  },
   playlistAudioPickerBtn: {
     marginTop: 10,
     minHeight: 40,
@@ -4670,6 +4831,72 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   playlistModalSubmitText: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 13,
+  },
+  playlistTermsOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.42)",
+    padding: 24,
+  },
+  playlistTermsModalCard: {
+    width: "100%",
+    maxWidth: 380,
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 20,
+  },
+  playlistTermsModalTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 17,
+  },
+  playlistTermsModalBody: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 10,
+  },
+  playlistTermsModalCheckRow: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  playlistTermsModalCheckText: {
+    flex: 1,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  playlistTermsModalActions: {
+    marginTop: 18,
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+  },
+  playlistTermsModalButton: {
+    minWidth: 96,
+    borderWidth: 1,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  playlistTermsModalPrimaryButton: {
+    borderWidth: 0,
+  },
+  playlistTermsModalButtonText: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 13,
+  },
+  playlistTermsModalPrimaryText: {
+    color: "#FFFFFF",
     fontFamily: "Poppins_700Bold",
     fontSize: 13,
   },

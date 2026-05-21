@@ -241,51 +241,95 @@ function moderationTargetLabel(target: TextModerationTarget) {
 
 type RuleNormalizedText = {
   normalizedText: string;
+  squashedNormalizedText: string;
   compactText: string;
   compactSquashedText: string;
   tokens: Set<string>;
+  squashedTokens: Set<string>;
 };
 
 const FILIPINO_STRONG_PROFANITY_TERMS = [
   "putangina",
   "putang ina",
+  "putang ina mo",
+  "putanginamo",
+  "putangina mo",
+  "putragis",
+  "putragis mo",
+  "potangina",
+  "potang ina",
   "tangina",
   "tang ina",
+  "tang ina mo",
+  "tanginamo",
+  "tangina mo",
+  "taena",
+  "tae na",
+  "tangna",
+  "tang na",
   "pukinangina",
+  "pukinang ina",
   "kingina",
   "kinangina",
+  "kingsina",
+  "kngina",
+  "puta",
+  "pota",
+  "pucha",
+  "putcha",
   "pakyu",
   "pak yu",
   "pakyo",
+  "pak u",
   "pakshet",
   "pakshit",
+  "pak shet",
   "punyeta",
   "punyemas",
   "hinayupak",
+  "hayup",
+  "gunggong",
+  "walanghiya",
   "tarantado",
+  "tarantada",
 ];
 
 const FILIPINO_ABUSIVE_TERMS = [
   "gago",
+  "gagong",
   "bobo",
+  "bobong",
   "tanga",
+  "tangang",
   "ulol",
   "kupal",
   "leche",
+  "letse",
   "bwisit",
+  "buwisit",
   "lintik",
   "inutil",
+  "engot",
+  "unggoy",
   "buang",
   "boang",
   "yawa",
   "piste",
+  "pisti",
   "pokpok",
+  "malandi",
+  "burikat",
+  "bayot",
+  "ogag",
+  "siraulo",
+  "sira ulo",
 ];
 
 const FILIPINO_TARGETED_ABUSE_PATTERNS = [
-  /\b(hayop|animal)\s+(ka|mo|kayo|nyo|niyo|sila|siya)\b/i,
-  /\b(ikaw|ka|mo|kayo|nyo|niyo|sila|siya)\s+(?:ay\s+)?(gago|bobo|tanga|ulol|kupal|tarantado|inutil|buang|boang|pokpok)\b/i,
-  /\b(gago|bobo|tanga|ulol|kupal|tarantado|inutil|buang|boang|pokpok)\s+(ka|mo|kayo|nyo|niyo|sila|siya)\b/i,
+  /\b(?:anak\s+ka\s+ng\s+)?(?:puta|pota|putangina|tangina)\s+(?:ka|mo|kayo|nyo|niyo|n\u2019yo|sila|siya|sya)\b/i,
+  /\b(?:hayop|hayup|animal|walanghiya|gunggong)\s+(?:ka|mo|kayo|nyo|niyo|sila|siya|sya|yan|yun)\b/i,
+  /\b(?:ikaw|ka|mo|kayo|nyo|niyo|sila|siya|sya|yan|yun)\s+(?:ay\s+)?(?:ang\s+)?(?:gagong?|bobong?|tangang?|ulol|kupal|tarantado|tarantada|inutil|buang|boang|pokpok|ogag|siraulo|sira\s+ulo)\b/i,
+  /\b(?:gagong?|bobong?|tangang?|ulol|kupal|tarantado|tarantada|inutil|buang|boang|pokpok|ogag|siraulo|sira\s+ulo)\s+(?:ka|mo|kayo|nyo|niyo|sila|siya|sya|yan|yun)\b/i,
 ];
 
 const LEETISH_CHAR_MAP: Record<string, string> = {
@@ -302,6 +346,10 @@ const LEETISH_CHAR_MAP: Record<string, string> = {
   "+": "t",
   "8": "b",
 };
+
+function squashRepeatedLetters(text: string) {
+  return text.replace(/([a-z])\1+/g, "$1");
+}
 
 function normalizeTextForRules(content: string): RuleNormalizedText {
   const withoutMarks = content
@@ -321,15 +369,35 @@ function normalizeTextForRules(content: string): RuleNormalizedText {
   }
 
   const normalizedText = ` ${normalized.replace(/\s+/g, " ").trim()} `;
+  const squashedNormalizedText = squashRepeatedLetters(normalizedText);
   const compactText = normalizedText.replace(/\s+/g, "");
-  const compactSquashedText = compactText.replace(/([a-z])\1+/g, "$1");
+  const compactSquashedText = squashRepeatedLetters(compactText);
   const tokens = new Set(normalizedText.trim().split(/\s+/).filter(Boolean));
+  const squashedTokens = new Set(
+    Array.from(tokens)
+      .map((token) => squashRepeatedLetters(token))
+      .filter(Boolean),
+  );
 
-  return { normalizedText, compactText, compactSquashedText, tokens };
+  return { normalizedText, squashedNormalizedText, compactText, compactSquashedText, tokens, squashedTokens };
 }
 
 function compactRuleTerm(term: string) {
   return term.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function matchesFlexibleRuleTerm(ruleText: RuleNormalizedText, compactTerm: string) {
+  if (compactTerm.length < 4) return false;
+  const flexibleTerm = compactTerm
+    .split("")
+    .map((char) => `${escapeRegExp(char)}+`)
+    .join("\\s*");
+  const pattern = new RegExp(`\\b${flexibleTerm}\\b`, "i");
+  return pattern.test(ruleText.normalizedText) || pattern.test(ruleText.squashedNormalizedText);
 }
 
 function findRuleTerm(ruleText: RuleNormalizedText, terms: string[], compactMinimumLength = 6) {
@@ -337,7 +405,7 @@ function findRuleTerm(ruleText: RuleNormalizedText, terms: string[], compactMini
     const compactTerm = compactRuleTerm(term);
     if (!compactTerm) continue;
 
-    if (ruleText.tokens.has(compactTerm)) {
+    if (ruleText.tokens.has(compactTerm) || ruleText.squashedTokens.has(compactTerm)) {
       return term;
     }
 
@@ -347,13 +415,19 @@ function findRuleTerm(ruleText: RuleNormalizedText, terms: string[], compactMini
     ) {
       return term;
     }
+
+    if (matchesFlexibleRuleTerm(ruleText, compactTerm)) {
+      return term;
+    }
   }
 
   return null;
 }
 
-function hasFilipinoTargetedAbuse(normalizedText: string) {
-  return FILIPINO_TARGETED_ABUSE_PATTERNS.some((pattern) => pattern.test(normalizedText));
+function hasFilipinoTargetedAbuse(ruleText: RuleNormalizedText) {
+  return FILIPINO_TARGETED_ABUSE_PATTERNS.some(
+    (pattern) => pattern.test(ruleText.normalizedText) || pattern.test(ruleText.squashedNormalizedText),
+  );
 }
 
 function filipinoProfanityModeration(
@@ -374,7 +448,7 @@ function filipinoProfanityModeration(
   }
 
   const abusiveTerm = findRuleTerm(ruleText, FILIPINO_ABUSIVE_TERMS, 99);
-  const targetedAbuse = hasFilipinoTargetedAbuse(ruleText.normalizedText);
+  const targetedAbuse = hasFilipinoTargetedAbuse(ruleText);
   if ((abusiveTerm && target === "comment") || targetedAbuse) {
     return {
       status: "blocked",

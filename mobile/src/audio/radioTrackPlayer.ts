@@ -220,9 +220,6 @@ const getTrackArtworkUrl = (stationData: any, slot: any, playlist: any, item: an
   const candidates: unknown[] = [
     item?.cover_image_url,
     playlist?.cover_image_url,
-    stationData?.cover_image_url,
-    stationData?.creator?.avatar_url,
-    slot?.image_url,
   ];
 
   for (const value of candidates) {

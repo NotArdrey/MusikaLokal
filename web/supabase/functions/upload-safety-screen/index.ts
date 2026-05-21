@@ -125,6 +125,8 @@ const SAFE_AUDIO_MIMES = new Set([
   "audio/mp3",
 ]);
 const SAFE_AUDIO_EXTENSIONS = new Set(["mp3"]);
+const COPYRIGHT_OWNERSHIP_REVIEW_SOURCE = "COPYRIGHT_OWNERSHIP";
+const COPYRIGHT_OWNERSHIP_REVIEW_REASON = "COPYRIGHT_OWNERSHIP_REVIEW";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -142,6 +144,15 @@ type ScreeningResult = {
   id: string;
   allowed: boolean;
   reason?: string;
+};
+
+type CopyrightScreeningContext = {
+  supabaseAdmin?: any | null;
+  user?: {
+    id?: string | null;
+    email?: string | null;
+  } | null;
+  context?: string;
 };
 
 // ─── Rule-based pre-screen ────────────────────────────────────────────────────
@@ -395,6 +406,223 @@ function maskSecretPreview(value: string): string {
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
 }
 
+function hashText(value: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function normalizeTrackKeyText(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function getAcrArtistNames(match: any): string[] {
+  return Array.isArray(match?.artists)
+    ? match.artists.map((artist: any) => artist?.name).filter(Boolean)
+    : [];
+}
+
+function getAcrRightsOwner(match: any): string {
+  return Array.isArray(match?.rights_claim)
+    ? match.rights_claim
+        .flatMap((claim: any) => Array.isArray(claim?.rights_owners) ? claim.rights_owners : [])
+        .map((owner: any) => owner?.name)
+        .filter(Boolean)[0] || ""
+    : "";
+}
+
+function buildCopyrightTrackKey(match: any): string {
+  const isrc = String(match?.external_ids?.isrc || "").trim().toUpperCase();
+  if (isrc) return `isrc:${isrc}`;
+
+  const acrid = String(match?.acrid || "").trim();
+  if (acrid) return `acrid:${acrid}`;
+
+  const title = normalizeTrackKeyText(match?.title || "unknown-track");
+  const artists = getAcrArtistNames(match).map(normalizeTrackKeyText).filter(Boolean).join("-");
+  return `track:${hashText(`${title}|${artists}`)}`;
+}
+
+function buildCopyrightMatchMetadata(match: any) {
+  const artistNames = getAcrArtistNames(match);
+  const title = typeof match?.title === "string" && match.title.trim()
+    ? match.title.trim()
+    : "Released recording";
+  const score = Number(match?.score || 0);
+  const isrc = String(match?.external_ids?.isrc || "").trim();
+  const upc = String(match?.external_ids?.upc || "").trim();
+  const acrid = String(match?.acrid || "").trim();
+  const rightsOwner = getAcrRightsOwner(match);
+
+  return {
+    copyright_track_key: buildCopyrightTrackKey(match),
+    copyright_title: title,
+    copyright_artists: artistNames,
+    copyright_artist_label: artistNames.join(", "),
+    copyright_score: Number.isFinite(score) ? score : null,
+    copyright_isrc: isrc || null,
+    copyright_upc: upc || null,
+    copyright_acrid: acrid || null,
+    copyright_label: String(match?.label || "").trim() || null,
+    copyright_album: String(match?.album?.name || match?.album || "").trim() || null,
+    copyright_release_date: String(match?.release_date || "").trim() || null,
+    copyright_rights_owner: rightsOwner || null,
+  };
+}
+
+function buildCopyrightMatchDetails(match: any): string {
+  const metadata = buildCopyrightMatchMetadata(match);
+  const details = [
+    metadata.copyright_artist_label
+      ? `${metadata.copyright_title} by ${metadata.copyright_artist_label}`
+      : metadata.copyright_title,
+    Number.isFinite(metadata.copyright_score) && Number(metadata.copyright_score) > 0
+      ? `match score ${metadata.copyright_score}`
+      : "",
+    metadata.copyright_rights_owner ? `rights owner: ${metadata.copyright_rights_owner}` : "",
+    metadata.copyright_isrc ? `ISRC: ${metadata.copyright_isrc}` : "",
+  ].filter(Boolean).join("; ");
+
+  return details || "a released recording";
+}
+
+async function findCopyrightOwnershipReview(
+  supabaseAdmin: any,
+  userId: string,
+  trackKey: string,
+  statuses: string[],
+) {
+  const { data, error } = await supabaseAdmin
+    .from("manual_identity_reviews")
+    .select("id, status, metadata")
+    .eq("user_id", userId)
+    .eq("source", COPYRIGHT_OWNERSHIP_REVIEW_SOURCE)
+    .in("status", statuses)
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (error) {
+    console.error("[upload-safety-screen] copyright_ownership_review_lookup_failed", {
+      userId,
+      trackKey,
+      message: error.message,
+    });
+    return null;
+  }
+
+  return (data || []).find((review: any) => (
+    String(review?.metadata?.copyright_track_key || "").trim() === trackKey
+  )) || null;
+}
+
+async function queueCopyrightOwnershipReview(
+  supabaseAdmin: any,
+  user: { id?: string | null; email?: string | null } | null,
+  file: FileCandidate,
+  match: any,
+  context?: string,
+) {
+  const userId = String(user?.id || "").trim();
+  if (!supabaseAdmin || !userId) {
+    return { approved: false, queued: false, reviewId: null, trackKey: buildCopyrightTrackKey(match) };
+  }
+
+  const matchMetadata = buildCopyrightMatchMetadata(match);
+  const trackKey = matchMetadata.copyright_track_key;
+  const existingReview = await findCopyrightOwnershipReview(
+    supabaseAdmin,
+    userId,
+    trackKey,
+    ["APPROVED", "PENDING_REVIEW"],
+  );
+
+  if (existingReview?.status === "APPROVED") {
+    return { approved: true, queued: false, reviewId: existingReview.id, trackKey };
+  }
+
+  if (existingReview?.status === "PENDING_REVIEW") {
+    return { approved: false, queued: false, reviewId: existingReview.id, trackKey };
+  }
+
+  const { data: profile } = await supabaseAdmin
+    .from("profiles")
+    .select("email, role, full_name")
+    .eq("id", userId)
+    .maybeSingle();
+
+  const submittedEmail = String(user.email || profile?.email || "unknown@musikalokal.local").trim().toLowerCase();
+  const submittedRole = String(profile?.role || "musician").trim().toLowerCase() || "musician";
+  const nowIso = new Date().toISOString();
+  const metadata = {
+    ...matchMetadata,
+    review_reason: COPYRIGHT_OWNERSHIP_REVIEW_REASON,
+    requested_from: "upload-safety-screen",
+    requested_context: context || "playlist_audio_upload",
+    uploaded_file_name: file.fileName || null,
+    uploaded_mime_type: file.mimeType || null,
+    uploaded_file_size: typeof file.fileSize === "number" ? file.fileSize : null,
+    requested_at: nowIso,
+  };
+
+  const { data: insertedReview, error: insertError } = await supabaseAdmin
+    .from("manual_identity_reviews")
+    .insert({
+      user_id: userId,
+      submitted_by_email: submittedEmail,
+      submitted_role: submittedRole,
+      document_type: "Released track ownership",
+      document_type_key: "COPYRIGHT_OWNERSHIP",
+      document_country: "PHL",
+      source: COPYRIGHT_OWNERSHIP_REVIEW_SOURCE,
+      status: "PENDING_REVIEW",
+      review_reason: COPYRIGHT_OWNERSHIP_REVIEW_REASON,
+      matched_on: "COPYRIGHT_TRACK",
+      review_notes: "Matched released recording requires admin ownership approval before upload.",
+      metadata,
+      expected_decision_by: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (insertError) {
+    console.error("[upload-safety-screen] copyright_ownership_review_queue_failed", {
+      userId,
+      trackKey,
+      message: insertError.message,
+    });
+    return { approved: false, queued: false, reviewId: null, trackKey };
+  }
+
+  await supabaseAdmin.from("notifications").insert({
+    user_id: userId,
+    type: "warning",
+    title: "Track Ownership Review Required",
+    message: "Your upload matched a released recording. Identity Review admin approval is required before you can upload this track.",
+    meta: {
+      manual_identity_review_id: insertedReview?.id || null,
+      source: COPYRIGHT_OWNERSHIP_REVIEW_SOURCE,
+      copyright_track_key: trackKey,
+      copyright_title: matchMetadata.copyright_title,
+      copyright_artists: matchMetadata.copyright_artists,
+    },
+  });
+
+  console.log("[upload-safety-screen] copyright_ownership_review_queued", {
+    userId,
+    reviewId: insertedReview?.id || null,
+    trackKey,
+  });
+
+  return { approved: false, queued: true, reviewId: insertedReview?.id || null, trackKey };
+}
+
 function getBestAcrMusicMatch(response: any): any | null {
   const matches = Array.isArray(response?.metadata?.music) ? response.metadata.music : [];
   if (matches.length === 0) {
@@ -409,33 +637,12 @@ function getBestAcrMusicMatch(response: any): any | null {
 }
 
 function summarizeAcrMusicMatch(match: any): string {
-  const title = typeof match?.title === "string" && match.title.trim()
-    ? match.title.trim()
-    : "a copyrighted track";
-  const artistNames = Array.isArray(match?.artists)
-    ? match.artists.map((artist: any) => artist?.name).filter(Boolean).join(", ")
-    : "";
-  const score = Number(match?.score || 0);
-  const isrc = typeof match?.external_ids?.isrc === "string" ? match.external_ids.isrc : "";
-  const rightsOwner = Array.isArray(match?.rights_claim)
-    ? match.rights_claim
-        .flatMap((claim: any) => Array.isArray(claim?.rights_owners) ? claim.rights_owners : [])
-        .map((owner: any) => owner?.name)
-        .filter(Boolean)[0]
-    : "";
-
-  const details = [
-    artistNames ? `${title} by ${artistNames}` : title,
-    Number.isFinite(score) && score > 0 ? `match score ${score}` : "",
-    rightsOwner ? `rights owner: ${rightsOwner}` : "",
-    isrc ? `ISRC: ${isrc}` : "",
-  ].filter(Boolean).join("; ");
-
-  return `This audio appears to match ${details}. Please upload music you own or are licensed to share.`;
+  return `This audio appears to match ${buildCopyrightMatchDetails(match)}. If this is your song, an ownership request has been sent to Identity Review for admin approval.`;
 }
 
 async function screenAudioCopyright(
   file: FileCandidate,
+  screeningContext: CopyrightScreeningContext = {},
 ): Promise<{ allowed: boolean; reason?: string }> {
   console.log("[upload-safety-screen] acrcloud_copyright_check_start", {
     fileName: file.fileName || "(unknown)",
@@ -491,7 +698,11 @@ async function screenAudioCopyright(
   const signature = await createAcrCloudSignature(ACRCLOUD_ACCESS_SECRET, stringToSign);
 
   const formData = new FormData();
-  formData.append("sample", new Blob([parsedAudio.bytes], { type: parsedAudio.mimeType }), file.fileName || "track.mp3");
+  const sampleBytes = parsedAudio.bytes.buffer.slice(
+    parsedAudio.bytes.byteOffset,
+    parsedAudio.bytes.byteOffset + parsedAudio.bytes.byteLength,
+  ) as ArrayBuffer;
+  formData.append("sample", new Blob([sampleBytes], { type: parsedAudio.mimeType }), file.fileName || "track.mp3");
   formData.append("access_key", ACRCLOUD_ACCESS_KEY);
   formData.append("sample_bytes", String(parsedAudio.bytes.byteLength));
   formData.append("timestamp", timestamp);
@@ -570,12 +781,32 @@ async function screenAudioCopyright(
   });
 
   if (bestMatch && Number(bestMatch?.score || 0) >= minScore) {
+    const ownershipReview = await queueCopyrightOwnershipReview(
+      screeningContext.supabaseAdmin,
+      screeningContext.user || null,
+      file,
+      bestMatch,
+      screeningContext.context,
+    );
+
+    if (ownershipReview.approved) {
+      console.log("[upload-safety-screen] acrcloud_copyright_check_allowed", {
+        fileName: file.fileName || "(unknown)",
+        reason: "approved_ownership_review",
+        reviewId: ownershipReview.reviewId,
+        trackKey: ownershipReview.trackKey,
+      });
+      return { allowed: true };
+    }
+
     console.warn("[upload-safety-screen] acrcloud_copyright_check_blocked", {
       fileName: file.fileName || "(unknown)",
       title: bestMatch?.title || null,
       score: bestMatch?.score || null,
       minScore,
       acrid: bestMatch?.acrid || null,
+      ownershipReviewId: ownershipReview.reviewId,
+      ownershipReviewQueued: ownershipReview.queued,
     });
     return {
       allowed: false,
@@ -1173,7 +1404,11 @@ serve(async (req: Request) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     const supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+    const supabaseAdmin = supabaseServiceRoleKey
+      ? createClient(supabaseUrl, supabaseServiceRoleKey)
+      : null;
 
     // Authenticate the user
     const authHeader = req.headers.get("Authorization");
@@ -1267,7 +1502,11 @@ serve(async (req: Request) => {
 
         try {
           const decision = file.kind === "audio"
-            ? await screenAudioCopyright(file)
+            ? await screenAudioCopyright(file, {
+                supabaseAdmin,
+                user: { id: user.id, email: user.email || null },
+                context,
+              })
             : await screenVisualContent(context, file);
           results.push({
             id: fileId,

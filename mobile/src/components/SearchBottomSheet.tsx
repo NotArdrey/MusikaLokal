@@ -10,6 +10,7 @@ import React, {
     useCallback,
     useEffect,
   useMemo,
+    useRef,
     useState,
 } from "react";
 import {
@@ -141,11 +142,12 @@ interface SearchBottomSheetProps {
   onProductionTeamPress?: (teamId: string) => void;
   onChat?: (item: any) => void;
   onFollowChanged?: () => void;
+  onSearchCommitted?: (query: string) => void;
 }
 
 const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
   function SearchBottomSheet(
-    { onClose, onItemPress, onProductionTeamPress, onChat, onFollowChanged },
+    { onClose, onItemPress, onProductionTeamPress, onChat, onFollowChanged, onSearchCommitted },
     ref,
   ) {
     const { colors, isDark } = useTheme();
@@ -179,6 +181,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     const [isSheetOpen, setIsSheetOpen] = useState(false);
     const [followingKeys, setFollowingKeys] = useState<Set<string>>(new Set());
     const [followBusyByKey, setFollowBusyByKey] = useState<Record<string, boolean>>({});
+    const lastCommittedSearchRef = useRef("");
 
     // Advanced Filter State
     const [showFilters, setShowFilters] = useState(false);
@@ -272,12 +275,16 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
     const handleClose = useCallback(() => {
       setIsSheetOpen(false);
+      lastCommittedSearchRef.current = "";
       Keyboard.dismiss();
       onClose?.();
     }, [onClose]);
 
     const handleSheetChange = useCallback((index: number) => {
       const nextOpen = index >= 0;
+      if (!nextOpen) {
+        lastCommittedSearchRef.current = "";
+      }
       setIsSheetOpen(nextOpen);
     }, []);
 
@@ -307,6 +314,16 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
       return () => clearTimeout(timeout);
     }, [isSheetOpen, searchQuery]);
+
+    useEffect(() => {
+      const query = debouncedSearchQuery.trim();
+      if (!isSheetOpen || query.length < 2 || query === lastCommittedSearchRef.current) {
+        return;
+      }
+
+      lastCommittedSearchRef.current = query;
+      onSearchCommitted?.(query);
+    }, [debouncedSearchQuery, isSheetOpen, onSearchCommitted]);
 
     // Search invalidation is handled by the shared RootLayout query channel.
 

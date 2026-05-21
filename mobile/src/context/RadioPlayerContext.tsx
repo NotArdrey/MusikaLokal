@@ -27,6 +27,7 @@ import {
   NAVBAR_MAX_WIDTH,
   NAVBAR_WIDTH,
 } from "../components/navbar";
+import CachedImage from "../components/CachedImage";
 import { useBottomOverlay } from "./BottomOverlayContext";
 import { useTheme } from "./ThemeContext";
 import { getStationLiveTimelineState } from "../utils/radioTimeline";
@@ -2340,6 +2341,9 @@ export function GlobalRadioMiniPlayer() {
   const activeTrackTitle = currentTrack?.title
     || activeLiveSlots[currentSlotIndex]?.playlist?.title
     || `Track ${currentSlotIndex + 1}`;
+  const activeArtworkUrl = currentTrack?.artwork
+    || activeLiveSlots[currentSlotIndex]?.playlist?.cover_image_url
+    || "";
 
   const radioPlayerNode = (
     <View
@@ -2354,6 +2358,18 @@ export function GlobalRadioMiniPlayer() {
         isBottomOverlayActive ? styles.radioPlayerOverlayActive : null,
       ]}
     >
+      <TouchableOpacity
+        activeOpacity={1}
+        style={[styles.radioPlayerArtworkFrame, { backgroundColor: colors.primary + "18" }]}
+        onPress={() => router.push({ pathname: "/station_details" as any, params: { station_id: activeStation.id } })}
+      >
+        {activeArtworkUrl ? (
+          <CachedImage uri={activeArtworkUrl} style={styles.radioPlayerArtwork} />
+        ) : (
+          <Ionicons name="radio" size={18} color={colors.primary} />
+        )}
+      </TouchableOpacity>
+
       <TouchableOpacity
         activeOpacity={1}
         style={{ flex: 1, marginRight: 10 }}
@@ -2402,6 +2418,20 @@ const styles = StyleSheet.create({
   },
   radioPlayerOverlayActive: {
     opacity: 0.98,
+  },
+  radioPlayerArtworkFrame: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+    overflow: "hidden",
+  },
+  radioPlayerArtwork: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 12,
   },
   radioPlayerBtn: {
     padding: 6,

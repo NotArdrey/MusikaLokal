@@ -320,6 +320,7 @@ export default function PostDetailsModal({
   const [postOptionsVisible, setPostOptionsVisible] = useState(false);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const [deleteCommentTargetId, setDeleteCommentTargetId] = useState<string | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [keyboardAvoidingResetKey, setKeyboardAvoidingResetKey] = useState(0);
 
@@ -602,6 +603,10 @@ export default function PostDetailsModal({
     }
   }, [comments, onCommentChanged, post, visibleCommentCount]);
 
+  const promptDeleteComment = useCallback((commentId: string) => {
+    setDeleteCommentTargetId(commentId);
+  }, []);
+
   const handleDeletePost = async () => {
     if (!post) return;
     try {
@@ -727,11 +732,11 @@ export default function PostDetailsModal({
         colors={colors}
         comment={item}
         isDark={isDark}
-        onDeleteComment={handleDeleteComment}
+        onDeleteComment={promptDeleteComment}
         userId={userId}
       />
     ),
-    [bubbleBg, colors, handleDeleteComment, isDark, userId],
+    [bubbleBg, colors, isDark, promptDeleteComment, userId],
   );
 
   const listEmptyComponent = useMemo(
@@ -1051,6 +1056,27 @@ export default function PostDetailsModal({
             { text: "Delete", style: "destructive", onPress: handleDeletePost },
           ]}
           onClose={() => setDeleteConfirmVisible(false)}
+        />
+      )}
+
+      {deleteCommentTargetId && (
+        <CustomAlert
+          visible
+          forceModal
+          type="warning"
+          title="Delete comment"
+          message="This comment will be removed from the post."
+          buttons={[
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Delete",
+              style: "destructive",
+              onPress: () => {
+                void handleDeleteComment(deleteCommentTargetId);
+              },
+            },
+          ]}
+          onClose={() => setDeleteCommentTargetId(null)}
         />
       )}
 

@@ -39,6 +39,10 @@ const GROUP_TABS = ["About", "Applications", "Review"];
 const PLAYLIST_COVER_BUCKET = "post-media";
 const PLAYLIST_COVER_FOLDER = "playlist-covers";
 const PLAYLIST_GENRES = ["Pop", "Rock", "Hip-Hop", "R&B", "Jazz", "Classical", "Electronic", "OPM", "Indie", "Other"];
+const PLAYLIST_COPYRIGHT_TERMS_BODY =
+  "Under the Intellectual Property Code (RA 8293), protection is automatic from the moment of creation, securing creators' economic and moral rights. Unauthorized public performance, reproduction, or streaming without a license constitutes copyright infringement.";
+const PLAYLIST_COPYRIGHT_ACKNOWLEDGEMENT =
+  "I understand and confirm I own this music or have the required license to upload and stream it.";
 
 export default function GroupDetailsScreen() {
   const { colors, isDark } = useTheme();
@@ -91,6 +95,9 @@ export default function GroupDetailsScreen() {
   const [playlistVisibility, setPlaylistVisibility] = useState<"public" | "private" | "unlisted">("public");
   const [playlistCoverImages, setPlaylistCoverImages] = useState<string[]>([]);
   const [creatingGroupPlaylist, setCreatingGroupPlaylist] = useState(false);
+  const [playlistCopyrightTermsAccepted, setPlaylistCopyrightTermsAccepted] = useState(false);
+  const [playlistCopyrightTermsVisible, setPlaylistCopyrightTermsVisible] = useState(false);
+  const [playlistCopyrightTermsDraftAccepted, setPlaylistCopyrightTermsDraftAccepted] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -118,6 +125,25 @@ export default function GroupDetailsScreen() {
   ) => {
     setAlertConfig({ type, title, message, buttons });
     setAlertVisible(true);
+  };
+
+  const openPlaylistCopyrightTermsModal = () => {
+    setPlaylistCopyrightTermsDraftAccepted(playlistCopyrightTermsAccepted);
+    setPlaylistCopyrightTermsVisible(true);
+  };
+
+  const confirmPlaylistCopyrightTerms = () => {
+    setPlaylistCopyrightTermsAccepted(true);
+    setPlaylistCopyrightTermsVisible(false);
+  };
+
+  const togglePlaylistCopyrightTerms = () => {
+    if (playlistCopyrightTermsAccepted) {
+      setPlaylistCopyrightTermsAccepted(false);
+      return;
+    }
+
+    openPlaylistCopyrightTermsModal();
   };
 
   const handleNavigateToGroup = async () => {
@@ -149,6 +175,9 @@ export default function GroupDetailsScreen() {
     setPlaylistGenre("");
     setPlaylistVisibility("public");
     setPlaylistCoverImages([]);
+    setPlaylistCopyrightTermsAccepted(false);
+    setPlaylistCopyrightTermsDraftAccepted(false);
+    setPlaylistCopyrightTermsVisible(false);
     setGroupPlaylistModalVisible(true);
   };
 
@@ -166,6 +195,11 @@ export default function GroupDetailsScreen() {
 
     if (!playlistTitle.trim()) {
       showAlert("warning", "Missing Title", "Enter a playlist title before creating it.");
+      return;
+    }
+
+    if (!playlistCopyrightTermsAccepted) {
+      openPlaylistCopyrightTermsModal();
       return;
     }
 
@@ -1473,6 +1507,26 @@ export default function GroupDetailsScreen() {
                 })}
               </View>
 
+              <View style={[styles.playlistTermsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={togglePlaylistCopyrightTerms}
+                  style={styles.playlistTermsCheckboxButton}
+                >
+                  <Ionicons
+                    name={playlistCopyrightTermsAccepted ? "checkbox" : "square-outline"}
+                    size={22}
+                    color={playlistCopyrightTermsAccepted ? colors.primary : colors.textSecondary}
+                  />
+                </TouchableOpacity>
+                <Text style={[styles.playlistTermsText, { color: colors.textSecondary }]}>
+                  I acknowledge the playlist copyright terms under RA 8293.{" "}
+                  <Text style={[styles.playlistTermsLink, { color: colors.primary }]} onPress={openPlaylistCopyrightTermsModal}>
+                    View terms
+                  </Text>
+                </Text>
+              </View>
+
               <TouchableOpacity
                 activeOpacity={creatingGroupPlaylist || !playlistTitle.trim() ? 1 : 0.78}
                 disabled={creatingGroupPlaylist || !playlistTitle.trim()}
@@ -1492,6 +1546,59 @@ export default function GroupDetailsScreen() {
                 )}
               </TouchableOpacity>
             </ScrollView>
+          </View>
+        </View>
+      </RNModal>
+      <RNModal
+        visible={playlistCopyrightTermsVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPlaylistCopyrightTermsVisible(false)}
+      >
+        <View style={styles.playlistTermsOverlay}>
+          <View style={[styles.playlistTermsModalCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
+            <Text style={[styles.playlistTermsModalTitle, { color: colors.text }]}>Copyright Terms</Text>
+            <Text style={[styles.playlistTermsModalBody, { color: colors.textSecondary }]}>
+              {PLAYLIST_COPYRIGHT_TERMS_BODY}
+            </Text>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setPlaylistCopyrightTermsDraftAccepted((accepted) => !accepted)}
+              style={[styles.playlistTermsModalCheckRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <Ionicons
+                name={playlistCopyrightTermsDraftAccepted ? "checkbox" : "square-outline"}
+                size={22}
+                color={playlistCopyrightTermsDraftAccepted ? colors.primary : colors.textSecondary}
+              />
+              <Text style={[styles.playlistTermsModalCheckText, { color: colors.text }]}>
+                {PLAYLIST_COPYRIGHT_ACKNOWLEDGEMENT}
+              </Text>
+            </TouchableOpacity>
+            <View style={styles.playlistTermsModalActions}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setPlaylistCopyrightTermsVisible(false)}
+                style={[styles.playlistTermsModalButton, { borderColor: colors.border }]}
+              >
+                <Text style={[styles.playlistTermsModalButtonText, { color: colors.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={playlistCopyrightTermsDraftAccepted ? 0.85 : 1}
+                disabled={!playlistCopyrightTermsDraftAccepted}
+                onPress={confirmPlaylistCopyrightTerms}
+                style={[
+                  styles.playlistTermsModalButton,
+                  styles.playlistTermsModalPrimaryButton,
+                  {
+                    backgroundColor: playlistCopyrightTermsDraftAccepted ? colors.primary : colors.border,
+                    opacity: playlistCopyrightTermsDraftAccepted ? 1 : 0.65,
+                  },
+                ]}
+              >
+                <Text style={styles.playlistTermsModalPrimaryText}>Agree</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </RNModal>
@@ -2092,6 +2199,92 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 10,
     borderWidth: 1,
+  },
+  playlistTermsCard: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    flexDirection: "row",
+    gap: 10,
+  },
+  playlistTermsCheckboxButton: {
+    paddingTop: 1,
+  },
+  playlistTermsText: {
+    flex: 1,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  playlistTermsLink: {
+    fontFamily: "Poppins_700Bold",
+  },
+  playlistTermsOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+    backgroundColor: "rgba(2,6,23,0.72)",
+  },
+  playlistTermsModalCard: {
+    width: "100%",
+    maxWidth: 380,
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 20,
+  },
+  playlistTermsModalTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 17,
+  },
+  playlistTermsModalBody: {
+    marginTop: 10,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  playlistTermsModalCheckRow: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  playlistTermsModalCheckText: {
+    flex: 1,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  playlistTermsModalActions: {
+    marginTop: 18,
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+  },
+  playlistTermsModalButton: {
+    minWidth: 96,
+    borderWidth: 1,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  playlistTermsModalPrimaryButton: {
+    borderWidth: 0,
+  },
+  playlistTermsModalButtonText: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 13,
+  },
+  playlistTermsModalPrimaryText: {
+    color: "#FFFFFF",
+    fontFamily: "Poppins_700Bold",
+    fontSize: 13,
   },
   playlistSubmitButton: {
     marginTop: 24,

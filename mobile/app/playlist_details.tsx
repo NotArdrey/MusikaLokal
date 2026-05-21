@@ -19,6 +19,7 @@ import { supabase } from "../lib/supabase";
 import BottomModal from "../src/components/BottomModal";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
+import ImageUploader from "../src/components/ImageUploader";
 import Navbar from "../src/components/navbar";
 import ReportModal from "../src/components/ReportModal";
 import Skeleton from "../src/components/Skeleton";
@@ -42,6 +43,8 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 const PLAYLIST_ASSET_BUCKET = "playlist-assets";
 const PLAYLIST_ASSET_SIGNED_URL_TTL_SECONDS = 24 * 60 * 60;
+const PLAYLIST_TRACK_IMAGE_BUCKET = "post-media";
+const PLAYLIST_TRACK_IMAGE_FOLDER = "playlist-track-images";
 
 type PlaylistAlert = {
   type: AlertType;
@@ -187,12 +190,14 @@ export default function PlaylistDetailsScreen() {
   const [playlist, setPlaylist] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState<PlaylistAlert | null>(null);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
 
   // Add track modal state
   const [addTrackVisible, setAddTrackVisible] = useState(false);
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
   const [newTrackTitle, setNewTrackTitle] = useState("");
   const [newTrackArtist, setNewTrackArtist] = useState("");
+  const [newTrackCoverImages, setNewTrackCoverImages] = useState<string[]>([]);
   const [newTrackAudioUrl, setNewTrackAudioUrl] = useState("");
   const [newTrackDurationSeconds, setNewTrackDurationSeconds] = useState("");
   const [newTrackAudioFile, setNewTrackAudioFile] = useState<PlaylistAudioFile | null>(null);
@@ -388,6 +393,7 @@ export default function PlaylistDetailsScreen() {
     setEditingTrackId(null);
     setNewTrackTitle("");
     setNewTrackArtist("");
+    setNewTrackCoverImages([]);
     setNewTrackAudioUrl("");
     setNewTrackDurationSeconds("");
     setNewTrackAudioFile(null);
@@ -568,10 +574,15 @@ export default function PlaylistDetailsScreen() {
     }
   };
 
+  const promptDeletePlaylist = () => {
+    setDeleteConfirmVisible(true);
+  };
+
   const openEditTrackModal = useCallback((item: any) => {
     setEditingTrackId(item.id);
     setNewTrackTitle(item.title || "");
     setNewTrackArtist(item.artist_name || "");
+    setNewTrackCoverImages(item.cover_image_url ? [item.cover_image_url] : []);
     setNewTrackAudioUrl(item.audio_url || "");
     setNewTrackDurationSeconds(
       typeof item.duration_seconds === "number" && Number.isFinite(item.duration_seconds)
@@ -628,6 +639,7 @@ export default function PlaylistDetailsScreen() {
         ...(editingTrackId ? { item_id: editingTrackId } : { playlist_id: playlist.id }),
         title: newTrackTitle.trim(),
         artist_name: newTrackArtist.trim() || null,
+        cover_image_url: newTrackCoverImages[0] || null,
         audio_url: sourceUrl,
         duration_seconds: durationSeconds,
       };
@@ -943,6 +955,9 @@ export default function PlaylistDetailsScreen() {
             items.map((item: any, idx: number) => (
               <View key={item.id} style={[styles.trackRow, { borderColor: colors.border }]}>
                 <Text style={[styles.trackNum, { color: colors.textSecondary }]}>{idx + 1}</Text>
+                {item.cover_image_url ? (
+                  <CachedImage uri={resolveRadioMediaUrl(item.cover_image_url)} style={styles.trackCoverThumb} />
+                ) : null}
                 <View style={{ flex: 1, marginLeft: 12 }}>
                   <Text style={[styles.trackTitle, { color: colors.text }]} numberOfLines={1}>{item.title || "Untitled"}</Text>
                   <Text style={[styles.trackArtist, { color: colors.textSecondary }]}>{item.artist_name || ""}</Text>
@@ -1038,7 +1053,7 @@ export default function PlaylistDetailsScreen() {
               </TouchableOpacity>
               <TouchableOpacity activeOpacity={1}
                 style={[styles.actionBtn, { backgroundColor: "#ef4444" }]}
-                onPress={handleDelete}
+                onPress={promptDeletePlaylist}
               >
                 <Ionicons name="trash" size={16} color="#fff" />
                 <Text style={styles.actionBtnText}>Delete</Text>
@@ -1057,6 +1072,27 @@ export default function PlaylistDetailsScreen() {
         title="Report Music"
         reportType="music"
       />
+
+      {deleteConfirmVisible && playlist && (
+        <CustomAlert
+          visible
+          forceModal
+          type="warning"
+          title="Delete playlist"
+          message={`Delete "${playlist?.title || "this playlist"}"? This cannot be undone.`}
+          buttons={[
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Delete",
+              style: "destructive",
+              onPress: () => {
+                void handleDelete();
+              },
+            },
+          ]}
+          onClose={() => setDeleteConfirmVisible(false)}
+        />
+      )}
 
       {alert && (
         <CustomAlert
@@ -1091,6 +1127,20 @@ export default function PlaylistDetailsScreen() {
               value={newTrackArtist}
               onChangeText={setNewTrackArtist}
             />
+
+            {userId ? (
+              <>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Music Image (Optional)</Text>
+                <ImageUploader
+                  images={newTrackCoverImages}
+                  onImagesChange={(images) => setNewTrackCoverImages(images.slice(0, 1))}
+                  maxImages={1}
+                  bucketName={PLAYLIST_TRACK_IMAGE_BUCKET}
+                  userId={userId}
+                  folder={PLAYLIST_TRACK_IMAGE_FOLDER}
+                />
+              </>
+            ) : null}
 
             <TouchableOpacity
               activeOpacity={audioUploadMessage || addingTrack ? 1 : 0.78}
@@ -1185,6 +1235,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: moderateScale(16), fontWeight: "700", marginBottom: 12 },
   trackRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, borderBottomWidth: 0.5 },
   trackNum: { fontSize: moderateScale(13), width: 24, textAlign: "center" },
+  trackCoverThumb: { width: 40, height: 40, borderRadius: 8, marginLeft: 8 },
   trackTitle: { fontSize: moderateScale(14), fontWeight: "600" },
   trackArtist: { fontSize: moderateScale(12), marginTop: 2 },
   trackDuration: { fontSize: moderateScale(12) },

@@ -618,6 +618,43 @@ test('requested gig, production, booking, and wallet guardrails hold on live bac
   expect(Number(clearedBooking.remaining_balance)).toBe(0);
   expect(clearedBooking.payment_status).toBe('paid');
 
+  const partialBookingToComplete = await seedE2EStudioBooking({
+    userId: customer.id,
+    studioId: studio.id,
+    bookingDate: futureDate(21),
+    status: 'confirmed',
+    paymentStatus: 'partial',
+    paymentType: 'downpayment',
+    paymentAmount: 400,
+    remainingBalance: 600,
+  });
+  const completePartial = await invokeFunction(studioOwnerClient, 'manage-bookings', {
+    action: 'update_status',
+    booking_id: partialBookingToComplete.id,
+    new_status: 'completed',
+    type_id: 'studio_booking',
+  });
+  expect(completePartial.response.ok).toBeTruthy();
+  const { data: completedPartial, error: completedPartialError } = await admin
+    .from('studio_bookings')
+    .select('status, remaining_balance, payment_status, payment_amount')
+    .eq('id', partialBookingToComplete.id)
+    .single();
+  if (completedPartialError) throw completedPartialError;
+  expect(completedPartial.status).toBe('completed');
+  expect(Number(completedPartial.remaining_balance)).toBe(0);
+  expect(completedPartial.payment_status).toBe('paid');
+  expect(Number(completedPartial.payment_amount)).toBe(1000);
+  const { data: balanceCredit, error: balanceCreditError } = await admin
+    .from('wallet_transactions')
+    .select('id, amount')
+    .eq('reference_id', partialBookingToComplete.id)
+    .eq('reference_type', 'booking_balance')
+    .eq('type', 'earning')
+    .maybeSingle();
+  if (balanceCreditError) throw balanceCreditError;
+  expect(Number(balanceCredit?.amount || 0)).toBe(600);
+
   const ownerAvailabilityDate = futureDate(24);
   const ownerUpdateStudio = await studioOwnerClient
     .from('studios')

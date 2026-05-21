@@ -46,6 +46,7 @@ export default function PlaylistDetailsScreen() {
   const [externalLinks, setExternalLinks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
 
   const bg = isWebDesktop ? (isDark ? "#0F172A" : "#F1F5F9") : colors.background;
@@ -72,8 +73,24 @@ export default function PlaylistDetailsScreen() {
   useEffect(() => { fetchPlaylist(); }, [fetchPlaylist]);
 
   const handleDelete = async () => {
-    const { data } = await supabase.functions.invoke("manage-playlists", { body: { action: "delete_playlist", playlist_id: playlist.id } });
-    if (data?.success) { emitToast({ type: "info", title: "Deleted", message: "Playlist deleted." }); router.back(); }
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-playlists", {
+        body: { action: "delete_playlist", playlist_id: playlist.id },
+      });
+      if (error) throw error;
+      if (data?.success) {
+        emitToast({ type: "info", title: "Deleted", message: "Playlist deleted." });
+        router.back();
+      } else {
+        setAlert({ type: "error", title: "Delete Failed", message: data?.error || "Failed to delete playlist." });
+      }
+    } catch (e: any) {
+      setAlert({ type: "error", title: "Delete Failed", message: e?.message || "Please try again." });
+    }
+  };
+
+  const promptDeletePlaylist = () => {
+    setDeleteConfirmVisible(true);
   };
 
   const handleRemoveItem = async (itemId: string) => {
@@ -172,7 +189,7 @@ export default function PlaylistDetailsScreen() {
               <TouchableOpacity activeOpacity={1} style={[styles.ownerBtn, { backgroundColor: colors.primary }]} onPress={() => router.push({ pathname: "/create_playlist", params: { edit_id: playlist.id } })}>
                 <Ionicons name="pencil" size={16} color="#fff" /><Text style={styles.ownerBtnText}>Edit</Text>
               </TouchableOpacity>
-              <TouchableOpacity activeOpacity={1} style={[styles.ownerBtn, { backgroundColor: "#ef4444" }]} onPress={handleDelete}>
+              <TouchableOpacity activeOpacity={1} style={[styles.ownerBtn, { backgroundColor: "#ef4444" }]} onPress={promptDeletePlaylist}>
                 <Ionicons name="trash" size={16} color="#fff" /><Text style={styles.ownerBtnText}>Delete</Text>
               </TouchableOpacity>
             </View>
@@ -211,7 +228,9 @@ export default function PlaylistDetailsScreen() {
           {items.length > 0 ? items.map((item: any, idx: number) => (
             <View key={item.id} style={[styles.trackRow, { borderBottomColor: borderCol }]}>
               <Text style={{ color: colors.textSecondary, fontSize: 14, width: 28 }}>{idx + 1}</Text>
-              {item.thumbnail_url && <CachedImage uri={item.thumbnail_url } style={styles.trackThumb} />}
+              {(item.cover_image_url || item.thumbnail_url) && (
+                <CachedImage uri={item.cover_image_url || item.thumbnail_url} style={styles.trackThumb} />
+              )}
               <View style={{ flex: 1, marginLeft: 10 }}>
                 <Text style={{ color: colors.text, fontSize: 14, fontWeight: "600" }} numberOfLines={1}>{item.title || "Untitled"}</Text>
                 {item.artist_name && <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{item.artist_name}</Text>}
@@ -232,6 +251,26 @@ export default function PlaylistDetailsScreen() {
         reportType="music"
       />
 
+      {deleteConfirmVisible && playlist && (
+        <CustomAlert
+          visible
+          forceModal
+          type="warning"
+          title="Delete playlist"
+          message={`Delete "${playlist?.title || "this playlist"}"? This cannot be undone.`}
+          buttons={[
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Delete",
+              style: "destructive",
+              onPress: () => {
+                void handleDelete();
+              },
+            },
+          ]}
+          onClose={() => setDeleteConfirmVisible(false)}
+        />
+      )}
       {alert && <CustomAlert visible type={alert.type} title={alert.title} message={alert.message} onClose={() => setAlert(null)} />}
       <Navbar />
     </View>
