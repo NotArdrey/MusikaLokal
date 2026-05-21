@@ -530,6 +530,10 @@ export default function LoginScreen() {
     // Silent
   };
 
+  const logoSource = isDark
+    ? require('../assets/images/musika-lokal-logo-modern-wordmark.png')
+    : require('../assets/images/musika-lokal-logo-modern-wordmark-light.png');
+
   // Derived styles based on theme
   const themeStyles = {
     container: { backgroundColor: colors.background },
@@ -554,7 +558,7 @@ export default function LoginScreen() {
           <View style={styles.logoSection}>
             <View style={styles.logoWrapper}>
               <Image
-                source={require('../assets/images/musika-lokal-logo-modern-wordmark.png')}
+                source={logoSource}
                 style={styles.logoImage}
                 resizeMode="contain"
               />

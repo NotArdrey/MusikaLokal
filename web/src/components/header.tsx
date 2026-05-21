@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 import { fetchActiveStaffAssignment, isStaffRole, normalizeStaffAccessLevel } from '../utils/staffAccess';
+import ThemeModeToggle from './ThemeModeToggle';
 
 interface HeaderProps {
     title: string;
@@ -255,6 +256,8 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
                 <View style={styles.rightContainer}>
                     {rightComponent ? (
                         rightComponent
+                    ) : isAdminPath ? (
+                        <ThemeModeToggle compact showLabel={false} variant="button" />
                     ) : isGuest ? (
                         <TouchableOpacity
                             activeOpacity={1}

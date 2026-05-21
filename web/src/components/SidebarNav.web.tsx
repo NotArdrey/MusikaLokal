@@ -10,6 +10,7 @@ import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 import { formatDashedNumericDate } from '../utils/friendlyDateTime';
 import { resolveNotificationNavigationTarget } from '../utils/notificationNavigation';
+import ThemeModeToggle from './ThemeModeToggle';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -1316,6 +1317,14 @@ export default function SidebarNav() {
                 </ScrollView>
 
                 <View style={[styles.footer, { borderTopColor: colors.border }]}>
+                    <View style={styles.themeToggleSection}>
+                        <View style={styles.themeToggleHeader}>
+                            <Ionicons name={isDark ? 'moon-outline' : 'sunny-outline'} size={16} color={colors.textSecondary} />
+                            <Text style={[styles.themeToggleLabel, { color: colors.textSecondary }]}>Appearance</Text>
+                        </View>
+                        <ThemeModeToggle />
+                    </View>
+
                     <TouchableOpacity activeOpacity={1} style={styles.logoutButton} onPress={handleLogout}>
                         <Ionicons name="log-out-outline" size={22} color={colors.textSecondary} style={{ width: 30 }} />
                         <Text style={[styles.navLabel, { color: colors.textSecondary }]}>
@@ -1716,9 +1725,24 @@ const styles = StyleSheet.create({
     footer: {
         padding: 24,
         borderTopWidth: 1,
+        gap: 18,
     },
     logoutButton: {
         flexDirection: 'row',
         alignItems: 'center',
+    },
+    themeToggleSection: {
+        gap: 8,
+    },
+    themeToggleHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingHorizontal: 2,
+    },
+    themeToggleLabel: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+        textTransform: 'uppercase',
     }
 });

@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { Appearance, Platform, type ColorSchemeName } from 'react-native';
 
 type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -60,26 +61,67 @@ const darkColors: ThemeColors = {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
+const normalizeColorScheme = (colorScheme: ColorSchemeName): 'light' | 'dark' => (
+  colorScheme === 'dark' ? 'dark' : 'light'
+);
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>('light');
+  const [systemColorScheme, setSystemColorScheme] = useState<'light' | 'dark'>(() =>
+    normalizeColorScheme(Appearance.getColorScheme()),
+  );
 
   useEffect(() => {
-    // Load saved theme preference
+    let mounted = true;
+
     AsyncStorage.getItem('theme').then((savedTheme: string | null) => {
+      if (!mounted) return;
+
       if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
         setThemeState(savedTheme);
       }
+    }).catch((error) => {
+      if (__DEV__) {
+        console.warn('[theme] Failed to load saved theme preference', error);
+      }
     });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const setTheme = async (newTheme: ThemeMode) => {
+  useEffect(() => {
+    const subscription = Appearance.addChangeListener(({ colorScheme }) => {
+      setSystemColorScheme(normalizeColorScheme(colorScheme));
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  const setTheme = (newTheme: ThemeMode) => {
     setThemeState(newTheme);
-    await AsyncStorage.setItem('theme', newTheme);
+    AsyncStorage.setItem('theme', newTheme).catch((error) => {
+      if (__DEV__) {
+        console.warn('[theme] Failed to save theme preference', error);
+      }
+    });
   };
 
-  const isDark = theme !== 'light';
+  const resolvedTheme = theme === 'system' ? systemColorScheme : theme;
+  const isDark = resolvedTheme === 'dark';
 
   const colors = isDark ? darkColors : lightColors;
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+
+    document.documentElement.style.colorScheme = resolvedTheme;
+    document.documentElement.style.backgroundColor = colors.background;
+    document.body.style.backgroundColor = colors.background;
+  }, [colors.background, resolvedTheme]);
 
   return (
     <ThemeContext.Provider value={{ theme, isDark, colors, setTheme }}>

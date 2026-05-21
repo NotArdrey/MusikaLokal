@@ -1675,12 +1675,15 @@ export default function SignupScreen() {
             });
             const errorMessage = String(e?.message || '').trim();
             const isRateLimited = e?.status === 429 || /too many/i.test(errorMessage);
-            Alert.alert(
-                isRateLimited ? 'Verification Paused' : 'Error',
-                isRateLimited
-                    ? errorMessage || 'Too many verification attempts. Please wait before trying again.'
-                    : 'Could not start verification session. Please try again.',
-            );
+            if (isRateLimited) {
+                logSignupFlow('diditSession.rateLimitAlertSuppressed', {
+                    tempRef: summarizeSessionRefForLog(tempRef),
+                    hasVerificationUrl: Boolean(verificationUrl),
+                });
+                return verificationUrl;
+            }
+
+            Alert.alert('Error', 'Could not start verification session. Please try again.');
             return '';
         } finally {
             creatingDiditSessionRef.current = false;
