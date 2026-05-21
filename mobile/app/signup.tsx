@@ -642,6 +642,7 @@ export default function SignupScreen() {
     const lastVerificationEmailRef = useRef('');
     const diditStatusPollInFlightRef = useRef(false);
     const diditStatusPollFinalizedRef = useRef(false);
+    const diditVerificationReturnHandledRef = useRef(false);
     const pendingReviewSignupRef = useRef(false);
     const finishAccountCreationRef = useRef(false);
     const documentSheetSnapPoints = useMemo(() => ['88%'], []);
@@ -1019,6 +1020,16 @@ export default function SignupScreen() {
             selectedRole &&
             (verified === 'true' || check_verification === 'true')
         ) {
+            if (diditVerificationReturnHandledRef.current) {
+                logSignupFlow('returnCheck.skippedAlreadyHandled', {
+                    verified,
+                    checkVerification: check_verification,
+                    sessionId: summarizeSessionRefForLog(sessionId),
+                    tempSessionRef: summarizeSessionRefForLog(tempSessionRef),
+                });
+                return;
+            }
+
             logSignupFlow('returnCheck.started', {
                 email: maskEmailForLog(email),
                 selectedRole,
@@ -1039,7 +1050,37 @@ export default function SignupScreen() {
                         hasEmail: Boolean(email),
                         selectedRole,
                     });
-                    if (mounted) finishAccountCreation(); // Fallback
+
+                    if (diditVerificationReturnHandledRef.current) {
+                        logSignupFlow('returnCheck.missingSessionRefIgnored', {
+                            reason: 'return_already_handled',
+                            retries,
+                        });
+                        setLoading(false);
+                        return;
+                    }
+
+                    if (retries < 5) {
+                        const retryDelayMs = 250;
+                        logSignupFlow('returnCheck.missingSessionRefRetryScheduled', {
+                            nextAttempt: retries + 2,
+                            retryDelayMs,
+                        });
+                        setTimeout(() => {
+                            if (mounted) checkAndFinish(retries + 1);
+                        }, retryDelayMs);
+                        return;
+                    }
+
+                    diditVerificationReturnHandledRef.current = true;
+                    setLoading(false);
+                    router.setParams({ verified: '', check_verification: '' });
+                    setStep('details');
+                    Alert.alert(
+                        'Verification Session Expired',
+                        'Please start identity verification again so we can confirm the latest result.',
+                        [{ text: 'OK' }]
+                    );
                     return;
                 }
 
@@ -1074,6 +1115,7 @@ export default function SignupScreen() {
                             attempt: retries + 1,
                             sessionId: summarizeSessionRefForLog(refToCheck),
                         });
+                        diditVerificationReturnHandledRef.current = true;
                         if (mounted) finishAccountCreation();
                         return;
                     }
@@ -1087,6 +1129,7 @@ export default function SignupScreen() {
                             faceStatus: faceMatchCheck.faceStatus || null,
                             hasFaceMatch: faceMatchCheck.hasFaceMatch,
                         });
+                        diditVerificationReturnHandledRef.current = true;
                         if (mounted) {
                             await finishAccountCreationPendingReview(refToCheck);
                         }
@@ -1100,6 +1143,7 @@ export default function SignupScreen() {
                             sessionId: summarizeSessionRefForLog(refToCheck),
                             status,
                         });
+                        diditVerificationReturnHandledRef.current = true;
                         setLoading(false);
 
                         // Clear all verification state
@@ -1204,6 +1248,7 @@ export default function SignupScreen() {
                             errorStatus,
                             errorMessage,
                         });
+                        diditVerificationReturnHandledRef.current = true;
                         await finishAccountCreationPendingReview(refToCheck);
                         return;
                     }
@@ -1215,6 +1260,7 @@ export default function SignupScreen() {
                             errorStatus,
                             errorMessage,
                         });
+                        diditVerificationReturnHandledRef.current = true;
                         setLoading(false);
                         setVerificationUrl('');
                         setSessionId('');
@@ -1246,6 +1292,7 @@ export default function SignupScreen() {
                             hasSessionNonce: Boolean(sessionNonce),
                             errorMessage,
                         });
+                        diditVerificationReturnHandledRef.current = true;
                         setLoading(false);
                         setVerificationUrl('');
                         setSessionId('');
@@ -1506,6 +1553,7 @@ export default function SignupScreen() {
     }, []);
 
     const resetDiditVerificationReturnState = useCallback(async (reason: string) => {
+        diditVerificationReturnHandledRef.current = true;
         await clearDiditSignupSession(reason);
         router.setParams({ verified: '', check_verification: '' });
     }, [clearDiditSignupSession, router]);
@@ -1562,6 +1610,7 @@ export default function SignupScreen() {
             return verificationUrl;
         }
 
+        diditVerificationReturnHandledRef.current = false;
         creatingDiditSessionRef.current = true;
         const existingSessionId = forceNew ? '' : sessionId;
         const existingSessionNonce = forceNew ? '' : sessionNonce;
@@ -3412,6 +3461,7 @@ export default function SignupScreen() {
                         faceStatus: faceMatchCheck.faceStatus || null,
                         hasFaceMatch: faceMatchCheck.hasFaceMatch,
                     });
+                    diditVerificationReturnHandledRef.current = true;
                     await finishAccountCreationPendingReview(refToCheck);
                     return;
                 } else if (isFailedDiditFlowStatus(status) || isSupersededVerificationStatus(status)) {
@@ -3419,6 +3469,7 @@ export default function SignupScreen() {
                         sessionId: summarizeSessionRefForLog(refToCheck),
                         status,
                     });
+                    diditVerificationReturnHandledRef.current = true;
                     // Failed - show alert and go back to form
                     setLoading(false);
                     setVerificationUrl('');
@@ -3457,6 +3508,7 @@ export default function SignupScreen() {
                 setLoading(false);
                 const errorMessage = String(e?.message || '').trim();
                 if (/verification session could not be validated|start verification again|session_validation_failed/i.test(errorMessage)) {
+                    diditVerificationReturnHandledRef.current = true;
                     setVerificationUrl('');
                     setSessionId('');
                     setSessionNonce('');

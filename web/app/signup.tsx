@@ -437,6 +437,7 @@ export default function SignupScreen() {
     const isWebDesktop = Platform.OS === 'web' && width >= 768;
     const creatingDiditSessionRef = useRef(false);
     const lastVerificationEmailRef = useRef('');
+    const diditVerificationReturnHandledRef = useRef(false);
 
     // State
     // State
@@ -744,12 +745,37 @@ export default function SignupScreen() {
             selectedRole &&
             (verified === 'true' || check_verification === 'true')
         ) {
+            if (diditVerificationReturnHandledRef.current) {
+                console.log('Verification return already handled; skipping duplicate status check.');
+                return;
+            }
+
             console.log('Returning from verification. Checking status...');
 
             const checkAndFinish = async (retries = 0) => {
                 const refToCheck = sessionId || tempSessionRef;
                 if (!refToCheck) {
-                    if (mounted) finishAccountCreation(); // Fallback
+                    if (diditVerificationReturnHandledRef.current) {
+                        setLoading(false);
+                        return;
+                    }
+
+                    if (retries < 5) {
+                        setTimeout(() => {
+                            if (mounted) checkAndFinish(retries + 1);
+                        }, 250);
+                        return;
+                    }
+
+                    diditVerificationReturnHandledRef.current = true;
+                    setLoading(false);
+                    router.setParams({ verified: '', check_verification: '' });
+                    setStep('details');
+                    Alert.alert(
+                        'Verification Session Expired',
+                        'Please start identity verification again so we can confirm the latest result.',
+                        [{ text: 'OK' }]
+                    );
                     return;
                 }
 
@@ -768,11 +794,13 @@ export default function SignupScreen() {
 
                     // 1. SUCCESS
                     if (status === 'Approved' || status === 'APPROVED') {
+                        diditVerificationReturnHandledRef.current = true;
                         if (mounted) finishAccountCreation();
                         return;
                     }
 
                     if (status === 'In Review' || status === 'PENDING_REVIEW') {
+                        diditVerificationReturnHandledRef.current = true;
                         if (mounted) {
                             await finishAccountCreationPendingReview(refToCheck);
                         }
@@ -781,6 +809,7 @@ export default function SignupScreen() {
 
                     // 2. FAILURE (Final) - Show alert and go back to signup form
                     if (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(status)) {
+                        diditVerificationReturnHandledRef.current = true;
                         setLoading(false);
 
                         // Clear all verification state
@@ -819,6 +848,7 @@ export default function SignupScreen() {
                         }, 1000); // Wait 1 second between checks
                     } else {
                         // TIMEOUT - Go back to signup form with alert
+                        diditVerificationReturnHandledRef.current = true;
                         setLoading(false);
                         setVerificationUrl('');
                         setSessionId('');
@@ -871,11 +901,13 @@ export default function SignupScreen() {
 
                     // If we got a status from error, handle it
                     if (errorStatus && ['In Review', 'PENDING_REVIEW'].includes(errorStatus)) {
+                        diditVerificationReturnHandledRef.current = true;
                         await finishAccountCreationPendingReview(refToCheck);
                         return;
                     }
 
                     if (errorStatus && ['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(errorStatus)) {
+                        diditVerificationReturnHandledRef.current = true;
                         setLoading(false);
                         setVerificationUrl('');
                         setSessionId('');
@@ -1012,6 +1044,7 @@ export default function SignupScreen() {
             return verificationUrl;
         }
 
+        diditVerificationReturnHandledRef.current = false;
         creatingDiditSessionRef.current = true;
         const existingSessionId = forceNew ? '' : sessionId;
         const existingSessionNonce = forceNew ? '' : sessionNonce;
@@ -2547,11 +2580,14 @@ export default function SignupScreen() {
                 console.log('Manual status check result:', status);
 
                 if (status === 'Approved' || status === 'APPROVED') {
+                    diditVerificationReturnHandledRef.current = true;
                     finishAccountCreation();
                 } else if (status === 'In Review' || status === 'PENDING_REVIEW') {
+                    diditVerificationReturnHandledRef.current = true;
                     await finishAccountCreationPendingReview(refToCheck);
                     return;
                 } else if (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned'].includes(status)) {
+                    diditVerificationReturnHandledRef.current = true;
                     // Failed - show alert and go back to form
                     setLoading(false);
                     setVerificationUrl('');
