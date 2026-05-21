@@ -19,6 +19,7 @@ import { Calendar } from "react-native-calendars";
 import ConflictResolutionModal, {
     ConflictingBooking,
     ConflictResolution,
+    RelocationSlot,
 } from "../src/components/ConflictResolutionModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
@@ -2247,6 +2248,10 @@ export default function EditStudioScreen() {
           start_time,
           end_time,
           status,
+          relocation_proposed_date,
+          relocation_proposed_start_time,
+          relocation_proposed_end_time,
+          relocation_expires_at,
           user_id,
           profiles:user_id (
             full_name,
@@ -2268,6 +2273,33 @@ export default function EditStudioScreen() {
 
     if (existingBookings && existingBookings.length > 0) {
       for (const booking of existingBookings) {
+        if (booking.status === "pending_relocation") {
+          const proposedDate = booking.relocation_proposed_date;
+          const proposedStart =
+            booking.relocation_proposed_start_time?.substring(0, 5);
+          const proposedEnd =
+            booking.relocation_proposed_end_time?.substring(0, 5);
+          const relocationStillActive =
+            !booking.relocation_expires_at ||
+            new Date(booking.relocation_expires_at).getTime() > Date.now();
+
+          if (
+            proposedDate &&
+            proposedStart &&
+            proposedEnd &&
+            relocationStillActive
+          ) {
+            const proposedSlots = getEditedAvailableSlotsForDate(
+              proposedDate,
+              protectedDateOverrides,
+            );
+
+            if (bookingFitsInSlots(proposedStart, proposedEnd, proposedSlots)) {
+              continue;
+            }
+          }
+        }
+
         const bookingDate = booking.booking_date;
         const bookingStart = booking.start_time.substring(0, 5);
         const bookingEnd = booking.end_time.substring(0, 5);
@@ -2298,14 +2330,17 @@ export default function EditStudioScreen() {
             newAvailableSlot: null,
           };
 
-          const nextSlot = await findNextAvailableSlot(
+          const relocationSlots = await findAvailableRelocationSlots(
             studioId,
             bookingDate,
             bookingStart,
             bookingEnd,
             protectedDateOverrides,
+            booking.id,
+            booking.user_id,
           );
-          conflict.newAvailableSlot = nextSlot;
+          conflict.newAvailableSlot = relocationSlots[0] || null;
+          conflict.availableRelocationSlots = relocationSlots;
           conflicts.push(conflict);
         }
       }
@@ -2541,125 +2576,145 @@ export default function EditStudioScreen() {
     }
   };
 
-  // Find next available slot for a booking
-  const findNextAvailableSlot = async (
+  // Find available relocation slots for a booking
+  const findAvailableRelocationSlots = async (
     studioId: string,
     currentDate: string,
     bookingStart: string,
     bookingEnd: string,
     protectedDateOverrides: ProtectedDateOverrideMap =
       nearTermProtectedDateOverridesRef.current,
-  ): Promise<{ date: string; start_time: string; end_time: string } | null> => {
+    currentBookingId?: string,
+    currentBookingUserId?: string,
+    limit = 24,
+  ): Promise<RelocationSlot[]> => {
     const bookingDuration = (() => {
       const [sH, sM] = bookingStart.split(":").map(Number);
       const [eH, eM] = bookingEnd.split(":").map(Number);
       return eH * 60 + eM - (sH * 60 + sM);
     })();
 
-    // Helper function to convert 12-hour to 24-hour format
-    const convertTo24Hour = (time12: string): string => {
-      const [time, modifier] = time12.split(" ");
-      if (!modifier) return time;
-      let [hours, minutes] = time.split(":");
-      if (hours === "12") hours = "00";
-      if (modifier === "PM") hours = String(parseInt(hours, 10) + 12);
-      return `${hours.padStart(2, "0")}:${minutes}`;
+    if (bookingDuration <= 0) return [];
+
+    const relocationSlots: RelocationSlot[] = [];
+    const nowIso = new Date().toISOString();
+    const nowMs = Date.now();
+
+    const toMinutes = (time: string) => {
+      const [hours, minutes] = time.substring(0, 5).split(":").map(Number);
+      return hours * 60 + minutes;
     };
 
-    const getDayOfWeek = (dateStr: string): string => {
-      const date = parseLocalDateKey(dateStr);
-      const days = [
-        "Sunday",
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-      ];
-      return days[date.getDay()];
+    const toTimeString = (minutes: number) =>
+      `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+
+    const addBookedWindow = (
+      windows: { start: string; end: string }[],
+      start?: string | null,
+      end?: string | null,
+    ) => {
+      if (!start || !end) return;
+      windows.push({
+        start: start.substring(0, 5),
+        end: end.substring(0, 5),
+      });
     };
 
-    // Search for next 30 days
-    const startDate = parseLocalDateKey(currentDate);
-    startDate.setDate(startDate.getDate() + 1); // Start from next day
+    const today = getLocalDateKey();
+    const startDate = parseLocalDateKey(currentDate >= today ? currentDate : today);
 
     for (let i = 0; i < 30; i++) {
       const checkDate = new Date(startDate);
       checkDate.setDate(checkDate.getDate() + i);
       const dateStr = getLocalDateKey(checkDate);
-
-      // Get available slots for this date
-      let availableSlots: { start: string; end: string }[] = [];
-
-      // Check date overrides first
-      if (protectedDateOverrides[dateStr]) {
-        availableSlots = protectedDateOverrides[dateStr].slots;
-      } else if (
-        selectedDates[dateStr]?.selected &&
-        selectedDates[dateStr]?.slots.length > 0
-      ) {
-        availableSlots = selectedDates[dateStr].slots.map((slot) => ({
-          start: convertTo24Hour(slot.start),
-          end: convertTo24Hour(slot.end),
-        }));
-      } else {
-        // Check weekly schedule
-        if (isWeeklyScheduleDateAllowed(dateStr)) {
-          const dayName = getDayOfWeek(dateStr);
-          const daySchedule = availability.find((a) => a.day === dayName);
-          if (daySchedule && daySchedule.slots.length > 0) {
-            availableSlots = daySchedule.slots.map((slot) => ({
-              start: convertTo24Hour(slot.start),
-              end: convertTo24Hour(slot.end),
-            }));
-          }
-        }
-      }
+      const availableSlots = getEditedAvailableSlotsForDate(
+        dateStr,
+        protectedDateOverrides,
+      );
 
       if (availableSlots.length === 0) continue;
 
-      // Check existing bookings on this date
-      const { data: existingOnDate } = await supabase
+      let bookingsQuery = supabase
         .from("studio_bookings")
-        .select("start_time, end_time")
+        .select(
+          "id, booking_date, start_time, end_time, status, relocation_proposed_date, relocation_proposed_start_time, relocation_proposed_end_time, relocation_expires_at",
+        )
+        .eq("studio_id", studioId)
+        .in("status", ["pending", "confirmed", "pending_relocation"])
+        .or(`booking_date.eq.${dateStr},relocation_proposed_date.eq.${dateStr}`);
+
+      if (currentBookingId) {
+        bookingsQuery = bookingsQuery.neq("id", currentBookingId);
+      }
+
+      const { data: existingOnDate, error: bookingsError } = await bookingsQuery;
+
+      if (bookingsError) {
+        throw new Error(
+          `Failed to find relocation slots: ${bookingsError.message}`,
+        );
+      }
+
+      const { data: activeHolds, error: holdsError } = await supabase
+        .from("booking_holds")
+        .select("id, user_id, start_time, end_time")
         .eq("studio_id", studioId)
         .eq("booking_date", dateStr)
-        .in("status", ["pending", "confirmed", "pending_relocation"]);
+        .gt("expires_at", nowIso);
 
-      // Find a slot that can fit the booking
+      if (holdsError) {
+        throw new Error(
+          `Failed to check relocation checkout holds: ${holdsError.message}`,
+        );
+      }
+
+      const bookedTimes: { start: string; end: string }[] = [];
+
+      (existingOnDate || []).forEach((booking: any) => {
+        if (booking.booking_date === dateStr) {
+          addBookedWindow(bookedTimes, booking.start_time, booking.end_time);
+        }
+
+        const activeRelocationProposal =
+          booking.status === "pending_relocation" &&
+          booking.relocation_proposed_date === dateStr &&
+          booking.relocation_proposed_start_time &&
+          booking.relocation_proposed_end_time &&
+          (!booking.relocation_expires_at ||
+            new Date(booking.relocation_expires_at).getTime() > nowMs);
+
+        if (activeRelocationProposal) {
+          addBookedWindow(
+            bookedTimes,
+            booking.relocation_proposed_start_time,
+            booking.relocation_proposed_end_time,
+          );
+        }
+      });
+
+      (activeHolds || []).forEach((hold: any) => {
+        if (currentBookingUserId && hold.user_id === currentBookingUserId) {
+          return;
+        }
+        addBookedWindow(bookedTimes, hold.start_time, hold.end_time);
+      });
+
       for (const slot of availableSlots) {
-        const slotStart = slot.start;
-        const slotEnd = slot.end;
-
-        // Calculate slot duration in minutes
-        const [ssH, ssM] = slotStart.split(":").map(Number);
-        const [seH, seM] = slotEnd.split(":").map(Number);
-        const slotDuration = seH * 60 + seM - (ssH * 60 + ssM);
+        const slotStartMinutes = toMinutes(slot.start);
+        const slotEndMinutes = toMinutes(slot.end);
+        const slotDuration = slotEndMinutes - slotStartMinutes;
 
         if (slotDuration < bookingDuration) continue;
 
-        // Check if there's room considering existing bookings
-        const bookedTimes = (existingOnDate || []).map((b: any) => ({
-          start: b.start_time.substring(0, 5),
-          end: b.end_time.substring(0, 5),
-        }));
-
-        // Try to find a free window within the slot
-        let currentTime = ssH * 60 + ssM;
-        const slotEndMinutes = seH * 60 + seM;
+        let currentTime = slotStartMinutes;
 
         while (currentTime + bookingDuration <= slotEndMinutes) {
-          const proposedStart = `${String(Math.floor(currentTime / 60)).padStart(2, "0")}:${String(currentTime % 60).padStart(2, "0")}`;
-          const proposedEnd = `${String(Math.floor((currentTime + bookingDuration) / 60)).padStart(2, "0")}:${String((currentTime + bookingDuration) % 60).padStart(2, "0")}`;
+          const proposedStart = toTimeString(currentTime);
+          const proposedEnd = toTimeString(currentTime + bookingDuration);
 
-          // Check if this time conflicts with existing bookings
           const hasConflict = bookedTimes.some((bt: any) => {
-            const btStart = bt.start.split(":").map(Number);
-            const btEnd = bt.end.split(":").map(Number);
-            const btStartMin = btStart[0] * 60 + btStart[1];
-            const btEndMin = btEnd[0] * 60 + btEnd[1];
-            // Check overlap
+            const btStartMin = toMinutes(bt.start);
+            const btEndMin = toMinutes(bt.end);
             return !(
               currentTime + bookingDuration <= btStartMin ||
               currentTime >= btEndMin
@@ -2667,20 +2722,23 @@ export default function EditStudioScreen() {
           });
 
           if (!hasConflict) {
-            return {
+            relocationSlots.push({
               date: dateStr,
               start_time: proposedStart,
               end_time: proposedEnd,
-            };
+            });
+
+            if (relocationSlots.length >= limit) {
+              return relocationSlots;
+            }
           }
 
-          // Move to next slot increment (30 minutes)
           currentTime += 30;
         }
       }
     }
 
-    return null; // No available slot found
+    return relocationSlots;
   };
 
   // Handle conflict resolution
@@ -2716,6 +2774,17 @@ export default function EditStudioScreen() {
             throw error;
           }
 
+          const { error: refundPendingError } = await supabase
+            .from("studio_bookings")
+            .update({ payment_status: "refund_pending" })
+            .eq("id", resolution.bookingId)
+            .in("payment_status", ["paid", "partial"]);
+
+          if (refundPendingError) {
+            console.error("Error marking refund pending:", refundPendingError);
+            throw refundPendingError;
+          }
+
           // Create notification for the user
           const conflict = conflictingBookings.find(
             (c) => c.id === resolution.bookingId,
@@ -2725,7 +2794,7 @@ export default function EditStudioScreen() {
               user_id: conflict.user_id,
               type: "warning",
               title: "Booking Cancelled",
-              message: `Your booking at ${studioName} on ${formatDashedNumericDate(conflict.booking_date)} has been cancelled due to schedule changes. You will receive a refund.`,
+              message: `Your booking at ${studioName} on ${formatDashedNumericDate(conflict.booking_date)} has been cancelled due to schedule changes. If payment was already made, refund processing has started.`,
               meta: buildNotificationRouteMeta("/bookings", undefined, {
                 bookingId: resolution.bookingId,
                 studioId,
@@ -2759,10 +2828,14 @@ export default function EditStudioScreen() {
           const { data: overlappingBookings, error: overlapBookingsError } =
             await supabase
               .from("studio_bookings")
-              .select("id, start_time, end_time")
+              .select(
+                "id, booking_date, start_time, end_time, status, relocation_proposed_date, relocation_proposed_start_time, relocation_proposed_end_time, relocation_expires_at",
+              )
               .eq("studio_id", studioId)
-              .eq("booking_date", resolution.newSlot.date)
               .in("status", ["pending", "confirmed", "pending_relocation"])
+              .or(
+                `booking_date.eq.${resolution.newSlot.date},relocation_proposed_date.eq.${resolution.newSlot.date}`,
+              )
               .neq("id", resolution.bookingId);
 
           if (overlapBookingsError) {
@@ -2779,16 +2852,68 @@ export default function EditStudioScreen() {
           const moveStartMinutes = toMinutes(resolution.newSlot.start_time);
           const moveEndMinutes = toMinutes(resolution.newSlot.end_time);
 
-          const hasBookingOverlap = (overlappingBookings || []).some(
-            (booking: any) => {
-              const existingStart = toMinutes(booking.start_time);
-              const existingEnd = toMinutes(booking.end_time);
-              return !(
-                moveEndMinutes <= existingStart ||
-                moveStartMinutes >= existingEnd
+          const hasBatchOverlap = resolutions.some((otherResolution) => {
+            if (
+              otherResolution.bookingId === resolution.bookingId ||
+              otherResolution.action !== "move" ||
+              !otherResolution.newSlot ||
+              otherResolution.newSlot.date !== resolution.newSlot?.date
+            ) {
+              return false;
+            }
+
+            const otherStart = toMinutes(otherResolution.newSlot.start_time);
+            const otherEnd = toMinutes(otherResolution.newSlot.end_time);
+            return !(moveEndMinutes <= otherStart || moveStartMinutes >= otherEnd);
+          });
+
+          if (hasBatchOverlap) {
+            throw new Error(
+              "Selected move slots overlap. Please pick different relocation slots.",
+            );
+          }
+
+          const bookedWindows: { start: string; end: string }[] = [];
+          const addBookedWindow = (
+            start?: string | null,
+            end?: string | null,
+          ) => {
+            if (!start || !end) return;
+            bookedWindows.push({
+              start: start.substring(0, 5),
+              end: end.substring(0, 5),
+            });
+          };
+
+          (overlappingBookings || []).forEach((booking: any) => {
+            if (booking.booking_date === resolution.newSlot?.date) {
+              addBookedWindow(booking.start_time, booking.end_time);
+            }
+
+            const activeRelocationProposal =
+              booking.status === "pending_relocation" &&
+              booking.relocation_proposed_date === resolution.newSlot?.date &&
+              booking.relocation_proposed_start_time &&
+              booking.relocation_proposed_end_time &&
+              (!booking.relocation_expires_at ||
+                new Date(booking.relocation_expires_at).getTime() > Date.now());
+
+            if (activeRelocationProposal) {
+              addBookedWindow(
+                booking.relocation_proposed_start_time,
+                booking.relocation_proposed_end_time,
               );
-            },
-          );
+            }
+          });
+
+          const hasBookingOverlap = bookedWindows.some((booking) => {
+            const existingStart = toMinutes(booking.start);
+            const existingEnd = toMinutes(booking.end);
+            return !(
+              moveEndMinutes <= existingStart ||
+              moveStartMinutes >= existingEnd
+            );
+          });
 
           if (hasBookingOverlap) {
             throw new Error(
@@ -2862,7 +2987,7 @@ export default function EditStudioScreen() {
               user_id: conflict.user_id,
               type: "warning",
               title: "Booking Relocation Request",
-              message: `Your booking at ${studioName} needs relocation to ${formatDashedNumericDate(resolution.newSlot.date)} at ${resolution.newSlot.start_time}. Please accept within 24 hours or your booking will be cancelled and refunded.`,
+              message: `Your booking at ${studioName} needs relocation to ${formatDashedNumericDate(resolution.newSlot.date)} at ${resolution.newSlot.start_time}. Your existing payment stays attached to this booking. Please accept within 24 hours or your booking will be cancelled; if payment was already made, refund processing will start.`,
               meta: buildNotificationRouteMeta("/bookings", undefined, {
                 bookingId: resolution.bookingId,
                 studioId,

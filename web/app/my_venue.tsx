@@ -411,7 +411,7 @@ export default function MyVenueScreen() {
                     showAlert(
                         'warning',
                         'Delete Blocked',
-                        `This gig still has ${result.accepted_application_count || 0} accepted application(s)${(result.pending_application_count || 0) > 0 ? ` and ${result.pending_application_count} pending application(s)` : ''}. Resolve accepted applicants first before deleting.`
+                        `This gig still has ${result.accepted_application_count || 0} accepted/approved application(s)${(result.pending_application_count || 0) > 0 ? ` and ${result.pending_application_count} pending application(s)` : ''}. Resolve accepted or approved applicants first before deleting.`
                     );
                     closeDeleteModal();
                     return;

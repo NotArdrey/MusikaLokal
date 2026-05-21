@@ -1,13 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Audio, type AVPlaybackStatus } from "expo-av";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Dimensions,
   Linking,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,6 +19,7 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import BottomModal from "../src/components/BottomModal";
+import AudioPreviewPlayer from "../src/components/AudioPreviewPlayer";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
@@ -47,6 +50,7 @@ const PLAYLIST_ASSET_BUCKET = "playlist-assets";
 const PLAYLIST_ASSET_SIGNED_URL_TTL_SECONDS = 24 * 60 * 60;
 const PLAYLIST_TRACK_IMAGE_BUCKET = "post-media";
 const PLAYLIST_TRACK_IMAGE_FOLDER = "playlist-track-images";
+const PLAYLIST_DETAILS_LIVE_REFRESH_MS = 10_000;
 
 type PlaylistAlert = {
   type: AlertType;
@@ -67,6 +71,25 @@ const formatUploadFeedbackMessage = (message: string) =>
 
 const formatCopyrightPendingMessage = (reason?: string) =>
   reason || "This MP3 appears to be copyrighted and was sent to admin review. You can still save it; this track will stay unavailable publicly until admin approves it.";
+
+const PUBLIC_PLAYLIST_ITEM_COPYRIGHT_STATUSES = new Set(["not_required", "approved"]);
+
+const normalizePlaylistItemCopyrightStatus = (value: unknown) => {
+  const normalized = String(value || "not_required").trim().toLowerCase();
+  return normalized || "not_required";
+};
+
+const isPlaylistItemPubliclyAvailable = (item: any) =>
+  PUBLIC_PLAYLIST_ITEM_COPYRIGHT_STATUSES.has(
+    normalizePlaylistItemCopyrightStatus(item?.copyright_status),
+  );
+
+const formatTrackReviewStatus = (status: unknown) => {
+  const normalized = normalizePlaylistItemCopyrightStatus(status);
+  if (normalized === "pending_review") return "Pending admin review";
+  if (normalized === "declined") return "Declined by admin";
+  return "Approved";
+};
 
 const getCopyrightPayload = (source?: Partial<PlaylistAudioFile> | null) => ({
   copyright_status: source?.copyrightStatus || "not_required",
@@ -204,6 +227,7 @@ export default function PlaylistDetailsScreen() {
 
   const [playlist, setPlaylist] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [alert, setAlert] = useState<PlaylistAlert | null>(null);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
 
@@ -215,6 +239,7 @@ export default function PlaylistDetailsScreen() {
   const [newTrackCoverImages, setNewTrackCoverImages] = useState<string[]>([]);
   const [newTrackAudioUrl, setNewTrackAudioUrl] = useState("");
   const [newTrackDurationSeconds, setNewTrackDurationSeconds] = useState("");
+  const [editingTrackCopyrightStatus, setEditingTrackCopyrightStatus] = useState("not_required");
   const [newTrackAudioFile, setNewTrackAudioFile] = useState<PlaylistAudioFile | null>(null);
   const [addingTrack, setAddingTrack] = useState(false);
   const [audioUploadMessage, setAudioUploadMessage] = useState<string | null>(null);
@@ -224,6 +249,7 @@ export default function PlaylistDetailsScreen() {
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewPlaying, setPreviewPlaying] = useState(false);
+  const hasLoadedPlaylistRef = useRef(false);
 
   const isOwner = (playlist?.creator_id || playlist?.owner_id) === userId;
 
@@ -375,10 +401,18 @@ export default function PlaylistDetailsScreen() {
     }
   }, [logPlaylistInvokeError]);
 
-  const fetchPlaylist = useCallback(async () => {
-    if (!playlist_id) return;
+  const fetchPlaylist = useCallback(async (options: { silent?: boolean } = {}) => {
+    const playlistId = Array.isArray(playlist_id)
+      ? String(playlist_id[0] || "").trim()
+      : String(playlist_id || "").trim();
+
+    if (!playlistId) {
+      setLoading(false);
+      return;
+    }
+
     try {
-      const body = { action: "get_playlist_details", playlist_id };
+      const body = { action: "get_playlist_details", playlist_id: playlistId };
       const { data, error } = await supabase.functions.invoke("manage-playlists", {
         body,
       });
@@ -393,15 +427,79 @@ export default function PlaylistDetailsScreen() {
       } else {
         setPlaylist(null);
       }
+      hasLoadedPlaylistRef.current = true;
     } catch (e: any) {
       console.warn("PlaylistDetails fetch failed", e);
-      setAlert({ type: "error", title: "Playlist Unavailable", message: e?.message || "Failed to load this playlist." });
+      if (!options.silent) {
+        setAlert({ type: "error", title: "Playlist Unavailable", message: e?.message || "Failed to load this playlist." });
+      }
     } finally {
       setLoading(false);
     }
   }, [logPlaylistInvokeError, playlist_id]);
 
-  useEffect(() => { fetchPlaylist(); }, [fetchPlaylist]);
+  useFocusEffect(
+    useCallback(() => {
+      const shouldFetchSilently = hasLoadedPlaylistRef.current;
+      void fetchPlaylist({ silent: shouldFetchSilently });
+
+      const refreshInterval = setInterval(() => {
+        void fetchPlaylist({ silent: true });
+      }, PLAYLIST_DETAILS_LIVE_REFRESH_MS);
+
+      return () => {
+        clearInterval(refreshInterval);
+      };
+    }, [fetchPlaylist]),
+  );
+
+  useEffect(() => {
+    const appStateSub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        void fetchPlaylist({ silent: true });
+      }
+    });
+
+    return () => {
+      appStateSub.remove();
+    };
+  }, [fetchPlaylist]);
+
+  useEffect(() => {
+    const playlistId = Array.isArray(playlist_id)
+      ? String(playlist_id[0] || "").trim()
+      : String(playlist_id || "").trim();
+
+    if (!playlistId) return undefined;
+
+    const channel = supabase
+      .channel(`playlist-details:${playlistId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "playlists", filter: `id=eq.${playlistId}` },
+        () => {
+          void fetchPlaylist({ silent: true });
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "playlist_items", filter: `playlist_id=eq.${playlistId}` },
+        () => {
+          void fetchPlaylist({ silent: true });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [fetchPlaylist, playlist_id]);
+
+  const refreshPlaylist = useCallback(async () => {
+    setRefreshing(true);
+    await fetchPlaylist();
+    setRefreshing(false);
+  }, [fetchPlaylist]);
 
   const resetAddTrackForm = useCallback(() => {
     setAddTrackVisible(false);
@@ -411,6 +509,7 @@ export default function PlaylistDetailsScreen() {
     setNewTrackCoverImages([]);
     setNewTrackAudioUrl("");
     setNewTrackDurationSeconds("");
+    setEditingTrackCopyrightStatus("not_required");
     setNewTrackAudioFile(null);
   }, []);
 
@@ -419,16 +518,25 @@ export default function PlaylistDetailsScreen() {
 
     const playlistItems = Array.isArray(playlist.items) ? playlist.items : [];
     const playlistTeaserAssets = Array.isArray(playlist.teaser_assets) ? playlist.teaser_assets : [];
-    const fallbackAsset = playlistTeaserAssets.find((asset: any) => (
+    const playableItems = playlistItems.filter(isPlaylistItemPubliclyAvailable);
+    const playableTeaserAssets = playlistTeaserAssets.filter((asset: any) => {
+      const linkedItem = playlistItems.find((item: any) => item?.teaser?.id === asset?.id);
+      return !linkedItem || isPlaylistItemPubliclyAvailable(linkedItem);
+    });
+    const playableAudioAssets = playableTeaserAssets.filter((asset: any) => (
       asset?.asset_type === "teaser_clip" || asset?.asset_type === "track_preview"
-    )) || playlistTeaserAssets[0] || null;
-    const selectedAsset = preferredAsset || fallbackAsset;
+    ));
+    const isPreferredAssetPlayable = preferredAsset
+      ? playableAudioAssets.some((asset: any) => asset?.id === preferredAsset?.id)
+      : false;
+    const fallbackAsset = playableAudioAssets[0] || null;
+    const selectedAsset = isPreferredAssetPlayable ? preferredAsset : fallbackAsset;
 
     const linkedAssetItem = selectedAsset
-      ? playlistItems.find((item: any) => item?.teaser?.id === selectedAsset.id) || null
+      ? playableItems.find((item: any) => item?.teaser?.id === selectedAsset.id) || null
       : null;
 
-    const fallbackItem = linkedAssetItem || playlistItems.find((item: any) => {
+    const fallbackItem = linkedAssetItem || playableItems.find((item: any) => {
       return typeof item?.audio_url === "string" && item.audio_url.trim().length > 0;
     }) || null;
 
@@ -447,7 +555,7 @@ export default function PlaylistDetailsScreen() {
         setAlert({
           type: "warning",
           title: "Teaser Unavailable",
-          message: "Add a teaser clip or track audio before playing a preview.",
+          message: "No approved audio is available to play yet.",
         });
         return;
       }
@@ -604,6 +712,7 @@ export default function PlaylistDetailsScreen() {
         ? String(item.duration_seconds)
         : "",
     );
+    setEditingTrackCopyrightStatus(normalizePlaylistItemCopyrightStatus(item.copyright_status));
     setNewTrackAudioFile(null);
     setAddTrackVisible(true);
   }, []);
@@ -798,7 +907,6 @@ export default function PlaylistDetailsScreen() {
       const copyrightScreening = await screenPlaylistAudioForCopyright(audioFile);
       const reviewedAudioFile = applyPlaylistAudioCopyrightDecision(audioFile, copyrightScreening.decision);
       setNewTrackAudioFile(reviewedAudioFile);
-      setNewTrackAudioUrl("");
       setNewTrackDurationSeconds(String(audioFile.durationSeconds));
 
       if (copyrightScreening.decision.requiresAdminReview) {
@@ -916,11 +1024,37 @@ export default function PlaylistDetailsScreen() {
     );
   }
 
-  const items = playlist.items || [];
-  const teaserAssets = playlist.teaser_assets || [];
-  const externalLinks = playlist.external_links || [];
+  const allItems = Array.isArray(playlist.items) ? playlist.items : [];
+  const items = allItems.filter(isPlaylistItemPubliclyAvailable);
+  const restrictedItems = isOwner ? allItems.filter((item: any) => !isPlaylistItemPubliclyAvailable(item)) : [];
+  const teaserAssets = (Array.isArray(playlist.teaser_assets) ? playlist.teaser_assets : []).filter((asset: any) => {
+    const linkedItem = allItems.find((item: any) => item?.teaser?.id === asset?.id);
+    return !linkedItem || isPlaylistItemPubliclyAvailable(linkedItem);
+  });
+  const playableItemIds = new Set(items.map((item: any) => item?.id).filter(Boolean));
+  const externalLinks = (Array.isArray(playlist.external_links) ? playlist.external_links : []).filter((link: any) => (
+    !link?.linked_item_id || playableItemIds.has(link.linked_item_id)
+  ));
   const isEditingTrack = editingTrackId !== null;
   const isTrackFormReady = newTrackTitle.trim().length > 0;
+  const isSelectedAudioPubliclyAvailable = newTrackAudioFile
+    ? isPlaylistItemPubliclyAvailable({ copyright_status: newTrackAudioFile.copyrightStatus })
+    : isPlaylistItemPubliclyAvailable({ copyright_status: editingTrackCopyrightStatus });
+  const audioPreviewSource = isSelectedAudioPubliclyAvailable
+    ? newTrackAudioFile?.uri || newTrackAudioUrl.trim()
+    : "";
+  const audioPreviewDuration = newTrackAudioFile?.durationSeconds || Number(newTrackDurationSeconds) || null;
+  const audioPreviewTitle = newTrackAudioFile?.name || (isEditingTrack ? "Current MP3" : "Track MP3");
+  const audioPreviewSubtitle = newTrackAudioFile
+    ? "Selected replacement"
+    : isEditingTrack && newTrackAudioUrl.trim()
+      ? "Saved track audio"
+      : undefined;
+  const audioPreviewEmptyMessage = isSelectedAudioPubliclyAvailable
+    ? isEditingTrack ? "This track has no MP3 attached yet." : "Upload an MP3 to preview it here."
+    : newTrackAudioFile
+      ? "This MP3 is waiting for admin approval and cannot be previewed yet."
+      : "This saved MP3 is not approved for playback.";
   const canReportPlaylist = !isOwner && !!userId && !isGuest;
   const reportHeaderAction = canReportPlaylist ? (
     <TouchableOpacity
@@ -938,11 +1072,69 @@ export default function PlaylistDetailsScreen() {
     </TouchableOpacity>
   ) : null;
 
+  const renderTrackRow = (item: any, idx: number, options: { restricted?: boolean } = {}) => {
+    const restricted = Boolean(options.restricted);
+
+    return (
+      <View key={item.id} style={[styles.trackRow, { borderColor: colors.border }]}>
+        <Text style={[styles.trackNum, { color: colors.textSecondary }]}>{idx + 1}</Text>
+        {item.cover_image_url ? (
+          <CachedImage uri={resolveRadioMediaUrl(item.cover_image_url)} style={styles.trackCoverThumb} />
+        ) : null}
+        <View style={{ flex: 1, marginLeft: 12 }}>
+          <Text style={[styles.trackTitle, { color: colors.text }]} numberOfLines={1}>{item.title || "Untitled"}</Text>
+          <Text style={[styles.trackArtist, { color: colors.textSecondary }]}>{item.artist_name || ""}</Text>
+          {restricted ? (
+            <View style={[styles.reviewStatusPill, { backgroundColor: colors.primary + "12" }]}>
+              <Text style={[styles.reviewStatusText, { color: colors.textSecondary }]}>
+                {formatTrackReviewStatus(item.copyright_status)}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+        {!restricted && item.audio_url ? (
+          <Ionicons name="musical-note" size={14} color={colors.primary} style={{ marginRight: 6 }} />
+        ) : null}
+        {!restricted && item.external_link?.url ? (
+          <TouchableOpacity
+            activeOpacity={1}
+            hitSlop={8}
+            onPress={() => void handleOpenExternalLink(item.external_link, item.id)}
+            style={{ marginLeft: 10 }}
+          >
+            <Ionicons name="open-outline" size={18} color={colors.primary} />
+          </TouchableOpacity>
+        ) : null}
+        {isOwner && (
+          <View style={{ flexDirection: "row", alignItems: "center", marginLeft: 10, gap: 10 }}>
+            <TouchableOpacity activeOpacity={1} hitSlop={8} onPress={() => openEditTrackModal(item)}>
+              <Ionicons name="create-outline" size={18} color={colors.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity activeOpacity={1} hitSlop={8} onPress={() => handleRemoveItem(item.id)}>
+              <Ionicons name="remove-circle-outline" size={20} color="#ef4444" />
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    );
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header title={playlist.title} onBackPress={() => router.back()} rightComponent={reportHeaderAction} />
 
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: contentBottomPadding }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refreshPlaylist}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+      >
         {/* Cover */}
         {resolvedCoverUrl ? (
           <CachedImage uri={resolvedCoverUrl } style={styles.cover} />
@@ -956,7 +1148,7 @@ export default function PlaylistDetailsScreen() {
         <View style={styles.metaSection}>
           <Text style={[styles.title, { color: colors.text }]}>{playlist.title}</Text>
           <Text style={[styles.creator, { color: colors.textSecondary }]}>
-            by {playlist.creator_name || "Unknown"} - {items.length} tracks
+            by {playlist.creator_name || "Unknown"} - {items.length} {items.length === 1 ? "track" : "tracks"}
           </Text>
           {playlist.description && (
             <Text style={[styles.description, { color: colors.textSecondary }]}>{playlist.description}</Text>
@@ -1000,45 +1192,21 @@ export default function PlaylistDetailsScreen() {
             )}
           </View>
           {items.length > 0 ? (
-            items.map((item: any, idx: number) => (
-              <View key={item.id} style={[styles.trackRow, { borderColor: colors.border }]}>
-                <Text style={[styles.trackNum, { color: colors.textSecondary }]}>{idx + 1}</Text>
-                {item.cover_image_url ? (
-                  <CachedImage uri={resolveRadioMediaUrl(item.cover_image_url)} style={styles.trackCoverThumb} />
-                ) : null}
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={[styles.trackTitle, { color: colors.text }]} numberOfLines={1}>{item.title || "Untitled"}</Text>
-                  <Text style={[styles.trackArtist, { color: colors.textSecondary }]}>{item.artist_name || ""}</Text>
-                </View>
-                {item.audio_url ? (
-                  <Ionicons name="musical-note" size={14} color={colors.primary} style={{ marginRight: 6 }} />
-                ) : null}
-                {item.external_link?.url ? (
-                  <TouchableOpacity
-                    activeOpacity={1}
-                    hitSlop={8}
-                    onPress={() => void handleOpenExternalLink(item.external_link, item.id)}
-                    style={{ marginLeft: 10 }}
-                  >
-                    <Ionicons name="open-outline" size={18} color={colors.primary} />
-                  </TouchableOpacity>
-                ) : null}
-                {isOwner && (
-                  <View style={{ flexDirection: "row", alignItems: "center", marginLeft: 10, gap: 10 }}>
-                    <TouchableOpacity activeOpacity={1} hitSlop={8} onPress={() => openEditTrackModal(item)}>
-                      <Ionicons name="create-outline" size={18} color={colors.primary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity activeOpacity={1} hitSlop={8} onPress={() => handleRemoveItem(item.id)}>
-                      <Ionicons name="remove-circle-outline" size={20} color="#ef4444" />
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-            ))
+            items.map((item: any, idx: number) => renderTrackRow(item, idx))
           ) : (
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No tracks added yet</Text>
           )}
         </View>
+
+        {restrictedItems.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Hidden Until Approved</Text>
+            <Text style={[styles.restrictedNote, { color: colors.textSecondary }]}>
+              These tracks are visible only to you for editing or removal. They cannot be played until admin approval.
+            </Text>
+            {restrictedItems.map((item: any, idx: number) => renderTrackRow(item, idx, { restricted: true }))}
+          </View>
+        ) : null}
 
         {/* Teaser assets */}
         {teaserAssets.length > 0 && (
@@ -1226,6 +1394,14 @@ export default function PlaylistDetailsScreen() {
               </View>
             ) : null}
 
+            <AudioPreviewPlayer
+              sourceUrl={audioPreviewSource}
+              title={audioPreviewTitle}
+              subtitle={audioPreviewSubtitle}
+              durationSeconds={audioPreviewDuration}
+              emptyMessage={audioPreviewEmptyMessage}
+            />
+
             <View style={{ flexDirection: "row", gap: 10 }}>
               <TouchableOpacity
                 activeOpacity={1}
@@ -1287,6 +1463,9 @@ const styles = StyleSheet.create({
   trackTitle: { fontSize: moderateScale(14), fontWeight: "600" },
   trackArtist: { fontSize: moderateScale(12), marginTop: 2 },
   trackDuration: { fontSize: moderateScale(12) },
+  reviewStatusPill: { alignSelf: "flex-start", borderRadius: 6, marginTop: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  reviewStatusText: { fontSize: moderateScale(10), fontWeight: "700" },
+  restrictedNote: { fontSize: moderateScale(12), lineHeight: 18, marginBottom: 8 },
   assetCard: { borderWidth: 1, borderRadius: 10, marginRight: 10, overflow: "hidden", width: 120 },
   assetImage: { width: 120, height: 90, borderRadius: 0 },
   assetLabel: { fontSize: moderateScale(11), padding: 6, textAlign: "center" },

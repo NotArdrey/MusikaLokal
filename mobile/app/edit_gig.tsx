@@ -74,6 +74,64 @@ type EventSchedule = {
   end_time: string;
 };
 
+const DATE_ONLY_PREFIX = /^(\d{4}-\d{2}-\d{2})/;
+const DISPLAY_TIME_PATTERN = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i;
+const DATABASE_TIME_PATTERN = /^(\d{1,2}):(\d{2})(?::\d{2})?$/;
+
+const toCalendarDateString = (value: unknown): string => {
+  if (!value) return "";
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return "";
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const raw = String(value).trim();
+  const dateOnlyMatch = raw.match(DATE_ONLY_PREFIX);
+  if (dateOnlyMatch) return dateOnlyMatch[1];
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const toDisplayTimeString = (value: unknown): string => {
+  if (!value) return "";
+
+  const raw = String(value).trim();
+  const displayMatch = raw.match(DISPLAY_TIME_PATTERN);
+  if (displayMatch) {
+    return `${displayMatch[1].padStart(2, "0")}:${displayMatch[2]} ${displayMatch[3].toUpperCase()}`;
+  }
+
+  const databaseMatch = raw.match(DATABASE_TIME_PATTERN);
+  if (!databaseMatch) return raw;
+
+  const hour24 = Number(databaseMatch[1]);
+  const minute = databaseMatch[2];
+  if (!Number.isFinite(hour24) || hour24 < 0 || hour24 > 23) return raw;
+
+  const period = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 || 12;
+  return `${String(hour12).padStart(2, "0")}:${minute} ${period}`;
+};
+
+const normalizeEventSchedules = (items: any[]): EventSchedule[] =>
+  items
+    .map((item: any) => ({
+      date: toCalendarDateString(item?.date ?? item?.slot_date),
+      start_time: toDisplayTimeString(item?.start_time ?? item?.start),
+      end_time: toDisplayTimeString(item?.end_time ?? item?.end),
+    }))
+    .filter((item) => item.date && item.start_time && item.end_time);
+
 export default function EditGigScreen() {
   const { colors, isDark } = useTheme();
   const { id, reapply } = useLocalSearchParams<{
@@ -432,6 +490,7 @@ export default function EditGigScreen() {
       const [
         { data: requirementRows, error: requirementsError },
         { data: mediaRows, error: mediaError },
+        { data: availabilityRows, error: availabilityError },
       ] = await Promise.all([
         supabase
           .from('gig_requirements')
@@ -443,12 +502,19 @@ export default function EditGigScreen() {
           .eq('gig_id', gigId)
           .order('sort_order', { ascending: true })
           .order('created_at', { ascending: true }),
+        supabase
+          .from('gig_availability_slots')
+          .select('slot_date, start_time, end_time, is_available, created_at')
+          .eq('gig_id', gigId)
+          .order('slot_date', { ascending: true })
+          .order('start_time', { ascending: true }),
       ]);
 
 
       if (baseError) throw baseError;
       if (requirementsError) throw requirementsError;
       if (mediaError) throw mediaError;
+      if (availabilityError) throw availabilityError;
 
       if (!baseData) {
         showAlert(
@@ -508,39 +574,59 @@ export default function EditGigScreen() {
       setLatitude(data.latitude === null || data.latitude === undefined ? null : Number(data.latitude));
       setLongitude(data.longitude === null || data.longitude === undefined ? null : Number(data.longitude));
       setCost(data.budget?.toString() || "");
-      const schedulesFromRequirements = Array.isArray(data.requirements?.event_schedules)
-        ? data.requirements.event_schedules
-          .filter((item: any) => item?.date && item?.start_time && item?.end_time)
-          .map((item: any) => ({
-            date: item.date,
-            start_time: item.start_time,
-            end_time: item.end_time,
-          }))
-        : [];
 
-      if (schedulesFromRequirements.length > 0) {
-        setEventSchedules(schedulesFromRequirements);
-        setEventDate(schedulesFromRequirements[0].date);
-        setEventStartTime(schedulesFromRequirements[0].start_time);
-        setEventEndTime(schedulesFromRequirements[0].end_time);
+      const schedulesFromRequirements = normalizeEventSchedules(
+        Array.isArray(data.requirements?.event_schedules)
+          ? data.requirements.event_schedules
+          : [],
+      );
+      const schedulesFromAvailability = normalizeEventSchedules(
+        (availabilityRows || []).filter((item: any) => item?.is_available !== false),
+      );
+      const fallbackDate = toCalendarDateString(data.event_date);
+      const fallbackStart =
+        toDisplayTimeString(data.requirements?.event_start_time) || "06:00 PM";
+      const fallbackEnd =
+        toDisplayTimeString(data.requirements?.event_end_time) || "11:00 PM";
+      let resolvedSchedules =
+        schedulesFromRequirements.length > 0
+          ? schedulesFromRequirements
+          : schedulesFromAvailability;
+
+      if (fallbackDate) {
+        if (resolvedSchedules.length === 0) {
+          resolvedSchedules = [
+            {
+              date: fallbackDate,
+              start_time: fallbackStart,
+              end_time: fallbackEnd,
+            },
+          ];
+        } else if (resolvedSchedules[0].date !== fallbackDate) {
+          resolvedSchedules = [
+            {
+              ...resolvedSchedules[0],
+              date: fallbackDate,
+              start_time: resolvedSchedules[0].start_time || fallbackStart,
+              end_time: resolvedSchedules[0].end_time || fallbackEnd,
+            },
+            ...resolvedSchedules
+              .slice(1)
+              .filter((schedule) => schedule.date !== fallbackDate),
+          ];
+        }
+      }
+
+      if (resolvedSchedules.length > 0) {
+        setEventSchedules(resolvedSchedules);
+        setEventDate(resolvedSchedules[0].date);
+        setEventStartTime(resolvedSchedules[0].start_time);
+        setEventEndTime(resolvedSchedules[0].end_time);
       } else {
-        const fallbackDate = data.event_date || "";
-        const fallbackStart = data.requirements?.event_start_time || "06:00 PM";
-        const fallbackEnd = data.requirements?.event_end_time || "11:00 PM";
-        setEventDate(fallbackDate);
+        setEventDate("");
         setEventStartTime(fallbackStart);
         setEventEndTime(fallbackEnd);
-        setEventSchedules(
-          fallbackDate
-            ? [
-              {
-                date: fallbackDate,
-                start_time: fallbackStart,
-                end_time: fallbackEnd,
-              },
-            ]
-            : [],
-        );
+        setEventSchedules([]);
       }
       setMusicianType(data.requirements?.musician_type || "both");
       setRequiredGenres(
@@ -849,7 +935,7 @@ export default function EditGigScreen() {
       }
 
       if (softClosed) {
-        updateNotes.push('Gig was soft-closed because accepted applicants now fill all available slots.');
+        updateNotes.push('Gig was soft-closed because accepted/approved applicants now fill all available slots.');
         if (softClosedRejected > 0) {
           updateNotes.push(`${softClosedRejected} pending applicant(s) were notified that slots are full.`);
         }

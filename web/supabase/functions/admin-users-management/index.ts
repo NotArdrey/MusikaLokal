@@ -47,6 +47,7 @@ const hiddenUserManagementVerificationStatuses = [
   "PENDING_REVIEW",
 ];
 const COPYRIGHT_OWNERSHIP_REVIEW_SOURCE = "COPYRIGHT_OWNERSHIP";
+const KNOWN_PLAYLIST_AUDIO_BUCKETS = new Set(["documents", "playlist-assets"]);
 
 function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -183,6 +184,94 @@ function normalizeIdentityMatchType(matchType: unknown, fallback = "DOCUMENT_FIN
 
 function getReviewMetadataObject(review: any) {
   return review?.metadata && typeof review.metadata === "object" ? review.metadata : {};
+}
+
+function decodeStoragePath(value: string) {
+  return value
+    .split("/")
+    .map((part) => {
+      try {
+        return decodeURIComponent(part);
+      } catch {
+        return part;
+      }
+    })
+    .join("/");
+}
+
+function parsePlaylistAudioStorageRef(value: unknown): { bucket: string; path: string } | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed) return null;
+
+  const storageUrlMatch = trimmed.match(
+    /(?:^|\/)storage\/v1\/object\/(?:public|sign|authenticated)\/([^/?#]+)\/([^?#]+)/i,
+  );
+
+  if (storageUrlMatch) {
+    const bucket = decodeURIComponent(storageUrlMatch[1]);
+    if (!KNOWN_PLAYLIST_AUDIO_BUCKETS.has(bucket)) return null;
+
+    return {
+      bucket,
+      path: decodeStoragePath(storageUrlMatch[2]),
+    };
+  }
+
+  const normalized = trimmed.replace(/^\/+/, "").split(/[?#]/)[0];
+  const parts = normalized.split("/");
+  const bucket = parts[0];
+
+  if (parts.length > 1 && KNOWN_PLAYLIST_AUDIO_BUCKETS.has(bucket)) {
+    return {
+      bucket,
+      path: parts.slice(1).join("/"),
+    };
+  }
+
+  return null;
+}
+
+function uniquePlaylistAudioStorageRefs(items: any[]) {
+  const seen = new Set<string>();
+  const refs: Array<{ bucket: string; path: string }> = [];
+
+  for (const item of items || []) {
+    const ref = parsePlaylistAudioStorageRef(item?.audio_url);
+    if (!ref?.bucket || !ref.path) continue;
+
+    const key = `${ref.bucket}/${ref.path}`;
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    refs.push(ref);
+  }
+
+  return refs;
+}
+
+async function removePlaylistAudioStorageRefs(client: any, refs: Array<{ bucket: string; path: string }>) {
+  const refsByBucket = new Map<string, string[]>();
+  for (const ref of refs) {
+    const current = refsByBucket.get(ref.bucket) || [];
+    current.push(ref.path);
+    refsByBucket.set(ref.bucket, current);
+  }
+
+  const removed: Array<{ bucket: string; path: string }> = [];
+  for (const [bucket, paths] of refsByBucket.entries()) {
+    const uniquePaths = Array.from(new Set(paths.filter(Boolean)));
+    for (let index = 0; index < uniquePaths.length; index += 100) {
+      const chunk = uniquePaths.slice(index, index + 100);
+      const { error } = await client.storage.from(bucket).remove(chunk);
+      if (error) {
+        throw new Error(error.message || `Unable to delete MP3 from ${bucket}`);
+      }
+
+      removed.push(...chunk.map((path) => ({ bucket, path })));
+    }
+  }
+
+  return removed;
 }
 
 function isCopyrightOwnershipReview(review: any) {
@@ -830,10 +919,12 @@ function buildMusikaLokalEmail({
   title,
   subtitle,
   bodyHtml,
+  eyebrow = "Identity Verification",
 }: {
   title: string;
   subtitle: string;
   bodyHtml: string;
+  eyebrow?: string;
 }) {
   return `
 <!DOCTYPE html>
@@ -849,7 +940,7 @@ function buildMusikaLokalEmail({
   </div>
 
   <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: #ffffff; padding: 30px; border-radius: 16px; text-align: center; margin-bottom: 30px;">
-    <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.85; margin-bottom: 10px;">Identity Verification</div>
+    <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.85; margin-bottom: 10px;">${escapeHtml(eyebrow)}</div>
     <h2 style="margin: 0 0 10px 0; font-size: 24px; line-height: 1.3;">${escapeHtml(title)}</h2>
     <p style="margin: 0; opacity: 0.9;">${escapeHtml(subtitle)}</p>
   </div>
@@ -1022,6 +1113,103 @@ async function sendDecisionEmail(
     queued: true,
     provider: "email_notifications",
     error: fallbackReason ? `${fallbackReason}; queued in email_notifications` : null,
+  };
+}
+
+async function sendCopyrightOwnershipDeclinedEmail(
+  client: any,
+  {
+    userEmail,
+    recipientName,
+    trackLabel,
+    reviewNotes,
+  }: {
+    userEmail: string;
+    recipientName?: string | null;
+    trackLabel: string;
+    reviewNotes?: string | null;
+  },
+) {
+  const normalizedEmail = String(userEmail || "").trim().toLowerCase();
+  if (!normalizedEmail) {
+    return { sent: false, queued: false, provider: "none", error: "Missing recipient email" };
+  }
+
+  const safeTrackLabel = trackLabel || "your uploaded track";
+  const subject = "Track Ownership Declined - MusikaLokal";
+  const notesHtml = reviewNotes
+    ? `<div style="background: #fef2f2; padding: 16px 18px; border-radius: 8px; border-left: 4px solid #dc2626; margin: 20px 0;"><p style="margin: 0; color: #7f1d1d;"><strong>Admin notes:</strong> ${escapeHtml(reviewNotes)}</p></div>`
+    : "";
+  const html = buildMusikaLokalEmail({
+    eyebrow: "Music Review",
+    title: "Track Ownership Declined",
+    subtitle: "The MP3 was removed from your playlist",
+    bodyHtml: `
+  <p style="margin: 0 0 12px;">We reviewed your ownership request for <strong>${escapeHtml(safeTrackLabel)}</strong>, but we could not approve it.</p>
+  <p style="margin: 0 0 12px;">The uploaded MP3 has been removed from your playlist and cannot be played on MusikaLokal.</p>
+  <ul style="background: #f8fafc; padding: 20px 20px 20px 40px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 24px 0;">
+    <li>Upload only music you own or have permission to share</li>
+    <li>Use a different MP3 if this was the wrong file</li>
+    <li>Add clear ownership details when submitting copyrighted music for review</li>
+  </ul>
+  ${notesHtml}
+  <p style="margin: 16px 0 0;">Thank you,<br>MusikaLokal Team</p>`,
+  });
+
+  const gmailDelivery = await sendEmailWithGmail({
+    to: normalizedEmail,
+    subject,
+    html,
+    recipientName: recipientName || "User",
+    source: "admin-users-management",
+  });
+
+  if (gmailDelivery.sent) {
+    console.log("copyright_ownership_declined_email_sent", {
+      provider: gmailDelivery.provider,
+      recipient: maskEmailForLog(normalizedEmail),
+    });
+    return { sent: true, queued: false, provider: gmailDelivery.provider, error: null };
+  }
+
+  const fallbackReason = gmailDelivery.error || "Gmail sender is not configured";
+  console.error("copyright_ownership_declined_email_gmail_failed", {
+    provider: gmailDelivery.provider,
+    message: fallbackReason,
+  });
+
+  const { error } = await client.from("email_notifications").insert({
+    recipient_email: normalizedEmail,
+    recipient_name: recipientName || "User",
+    subject,
+    html_content: html,
+    template_type: "copyright_ownership_declined",
+    status: "pending",
+    error_message: fallbackReason,
+    created_at: new Date().toISOString(),
+  });
+
+  if (error) {
+    console.error("copyright_ownership_declined_email_queue_failed", { message: error.message });
+    return {
+      sent: false,
+      queued: false,
+      provider: "email_notifications",
+      error: `${fallbackReason}; ${error.message}`,
+    };
+  }
+
+  console.log("copyright_ownership_declined_email_queued", {
+    provider: "email_notifications",
+    recipient: maskEmailForLog(normalizedEmail),
+    reason: fallbackReason,
+  });
+
+  return {
+    sent: false,
+    queued: true,
+    provider: "email_notifications",
+    error: `${fallbackReason}; queued in email_notifications`,
   };
 }
 
@@ -1707,6 +1895,7 @@ serve(async (req: Request) => {
       const diditSessionIds = Array.from(new Set((reviews || []).map((item: any) => String(item.didit_session_id || "").trim()).filter(Boolean)));
       let profilesById = new Map<string, any>();
       let verificationSessionsByRef = new Map<string, any>();
+      let playlistItemsByReviewId = new Map<string, any[]>();
 
       if (userIds.length > 0) {
         const { data: linkedProfiles, error: linkedProfilesError } = await client
@@ -1727,6 +1916,64 @@ serve(async (req: Request) => {
 
         if (!linkedSessionsError && linkedSessions) {
           verificationSessionsByRef = new Map<string, any>(linkedSessions.map((item: any) => [String(item.session_ref), item]));
+        }
+      }
+
+      const copyrightReviewIds = Array.from(new Set(
+        (reviews || [])
+          .filter((item: any) => isCopyrightOwnershipReview(item))
+          .map((item: any) => String(item.id || "").trim())
+          .filter(Boolean),
+      ));
+
+      if (copyrightReviewIds.length > 0) {
+        const { data: linkedPlaylistItems, error: linkedPlaylistItemsError } = await client
+          .from("playlist_items")
+          .select("id, playlist_id, title, artist_name, audio_url, cover_image_url, duration_seconds, copyright_status, copyright_review_id, created_at")
+          .in("copyright_review_id", copyrightReviewIds)
+          .order("created_at", { ascending: false });
+
+        if (linkedPlaylistItemsError) {
+          console.warn("[admin-users-management] copyright_playlist_items_lookup_failed", {
+            message: linkedPlaylistItemsError.message,
+          });
+        } else {
+          const linkedPlaylistIds = Array.from(new Set(
+            (linkedPlaylistItems || [])
+              .map((item: any) => String(item?.playlist_id || "").trim())
+              .filter(Boolean),
+          ));
+          let playlistsById = new Map<string, any>();
+
+          if (linkedPlaylistIds.length > 0) {
+            const { data: linkedPlaylists, error: linkedPlaylistsError } = await client
+              .from("playlists")
+              .select("id, title")
+              .in("id", linkedPlaylistIds);
+
+            if (linkedPlaylistsError) {
+              console.warn("[admin-users-management] copyright_playlists_lookup_failed", {
+                message: linkedPlaylistsError.message,
+              });
+            } else {
+              playlistsById = new Map<string, any>(
+                (linkedPlaylists || []).map((playlist: any) => [String(playlist.id), playlist]),
+              );
+            }
+          }
+
+          playlistItemsByReviewId = new Map<string, any[]>();
+          for (const playlistItem of linkedPlaylistItems || []) {
+            const reviewId = String(playlistItem?.copyright_review_id || "").trim();
+            if (!reviewId) continue;
+
+            const existing = playlistItemsByReviewId.get(reviewId) || [];
+            existing.push({
+              ...playlistItem,
+              playlist: playlistsById.get(String(playlistItem?.playlist_id || "")) || null,
+            });
+            playlistItemsByReviewId.set(reviewId, existing);
+          }
         }
       }
 
@@ -1970,11 +2217,32 @@ serve(async (req: Request) => {
               },
             }
           : review;
+        const copyrightPlaylistItems = (playlistItemsByReviewId.get(String(displayReview.id || "")) || [])
+          .map((playlistItem: any) => {
+            const playlist = Array.isArray(playlistItem?.playlist)
+              ? playlistItem.playlist[0] || null
+              : playlistItem?.playlist || null;
+
+            return {
+              id: playlistItem.id || null,
+              playlist_id: playlistItem.playlist_id || null,
+              playlist_title: playlist?.title || null,
+              title: playlistItem.title || null,
+              artist_name: playlistItem.artist_name || null,
+              audio_url: playlistItem.audio_url || null,
+              cover_image_url: playlistItem.cover_image_url || null,
+              duration_seconds: playlistItem.duration_seconds || null,
+              copyright_status: playlistItem.copyright_status || null,
+              created_at: playlistItem.created_at || null,
+            };
+          });
 
         const item = {
           ...displayReview,
           profile,
           didit_review: getDiditReviewInfo(displayReview),
+          copyright_playlist_item: copyrightPlaylistItems[0] || null,
+          copyright_playlist_items: copyrightPlaylistItems,
           duplicate_verified_identity_warning: duplicateMatches.length > 0
             ? {
                 same_verified_id_fingerprint: true,
@@ -2252,13 +2520,44 @@ serve(async (req: Request) => {
       if (isCopyrightOwnershipReview(review)) {
         const nowIso = new Date().toISOString();
         const existingReviewMetadata = getReviewMetadataObject(review);
+        const trackLabel = getCopyrightOwnershipTrackLabel(review);
+        const { data: linkedPlaylistItems, error: linkedPlaylistItemsError } = await client
+          .from("playlist_items")
+          .select("id, playlist_id, title, artist_name, audio_url, duration_seconds, copyright_status, copyright_review_id, created_at")
+          .eq("copyright_review_id", reviewId);
+
+        if (linkedPlaylistItemsError) {
+          return jsonResponse({ error: linkedPlaylistItemsError.message }, 400);
+        }
+
+        const linkedItems = linkedPlaylistItems || [];
+        let deletedAudioRefs: Array<{ bucket: string; path: string }> = [];
+
+        if (decision === "DECLINED") {
+          const audioRefs = uniquePlaylistAudioStorageRefs(linkedItems);
+          try {
+            deletedAudioRefs = await removePlaylistAudioStorageRefs(client, audioRefs);
+          } catch (deleteError: any) {
+            return jsonResponse({
+              error: deleteError?.message || "Unable to delete the declined MP3. The review was not finalized.",
+            }, 500);
+          }
+        }
+
         const nextReviewMetadata = {
           ...existingReviewMetadata,
           copyright_ownership_decision: decision,
           copyright_ownership_reviewed_by: actorId,
           copyright_ownership_reviewed_at: nowIso,
+          ...(decision === "DECLINED"
+            ? {
+                declined_mp3_deleted_at: nowIso,
+                declined_mp3_storage_deleted: deletedAudioRefs.length > 0,
+                declined_mp3_storage_ref_count: deletedAudioRefs.length,
+                declined_playlist_item_count: linkedItems.length,
+              }
+            : {}),
         };
-        const trackLabel = getCopyrightOwnershipTrackLabel(review);
 
         const { data: updatedReview, error: updateReviewError } = await client
           .from("manual_identity_reviews")
@@ -2279,44 +2578,96 @@ serve(async (req: Request) => {
         }
 
         const nextPlaylistItemCopyrightStatus = decision === "APPROVED" ? "approved" : "declined";
+        const playlistItemPatch: Record<string, unknown> = {
+          copyright_status: nextPlaylistItemCopyrightStatus,
+        };
+
+        if (decision === "DECLINED") {
+          playlistItemPatch.audio_url = null;
+          playlistItemPatch.duration_seconds = null;
+        }
+
         const { error: updatePlaylistItemsError } = await client
           .from("playlist_items")
-          .update({
-            copyright_status: nextPlaylistItemCopyrightStatus,
-          })
+          .update(playlistItemPatch)
           .eq("copyright_review_id", reviewId);
 
         if (updatePlaylistItemsError) {
           return jsonResponse({ error: updatePlaylistItemsError.message }, 400);
         }
 
-        await client.from("notifications").insert({
+        const notificationPayload = {
           user_id: review.user_id,
           type: decision === "APPROVED" ? "success" : "warning",
           title: decision === "APPROVED" ? "Track Ownership Approved" : "Track Ownership Declined",
           message: decision === "APPROVED"
             ? `Your ownership review for ${trackLabel} was approved. The track is now available in your playlist.`
-            : `Your ownership review for ${trackLabel} was declined.`,
+            : `Your ownership review for ${trackLabel} was declined. The uploaded MP3 was removed from your playlist.`,
           meta: {
             manual_identity_review_id: reviewId,
             source: COPYRIGHT_OWNERSHIP_REVIEW_SOURCE,
             decision,
             review_notes: reviewNotes,
             copyright_track_key: existingReviewMetadata.copyright_track_key || null,
+            declined_mp3_deleted: decision === "DECLINED",
+            declined_mp3_storage_deleted: deletedAudioRefs.length > 0,
           },
-        });
+        };
+
+        const { error: notificationError } = await client.from("notifications").insert(notificationPayload);
+        if (notificationError) {
+          console.error("copyright_ownership_decision_notification_failed", {
+            reviewId,
+            decision,
+            message: notificationError.message,
+          });
+        }
+
+        const { data: notificationProfile } = await client
+          .from("profiles")
+          .select("email, full_name")
+          .eq("id", review.user_id)
+          .maybeSingle();
+
+        let decisionEmail = {
+          sent: false,
+          queued: false,
+          provider: "none",
+          error: null as string | null,
+        };
+
+        if (decision === "DECLINED") {
+          decisionEmail = await sendCopyrightOwnershipDeclinedEmail(client, {
+            userEmail: String(notificationProfile?.email || review.submitted_by_email || "").trim().toLowerCase(),
+            recipientName: String(notificationProfile?.full_name || "").trim() || null,
+            trackLabel,
+            reviewNotes,
+          });
+
+          if (decisionEmail.sent) {
+            await client
+              .from("manual_identity_reviews")
+              .update({ decision_email_sent_at: nowIso, updated_at: nowIso })
+              .eq("id", reviewId);
+          }
+        }
 
         return jsonResponse({
           item: {
             ...(updatedReview || review),
             copyright_ownership_review: true,
-            decision_email_sent: false,
-            decision_email_queued: false,
-            decision_email_provider: "none",
-            decision_email_error: null,
+            decision_email_sent: decisionEmail.sent,
+            decision_email_queued: decisionEmail.queued,
+            decision_email_provider: decisionEmail.provider,
+            decision_email_error: decisionEmail.error || null,
             declined_account_delete_attempted: false,
             declined_account_deleted: false,
             playlist_item_copyright_status: nextPlaylistItemCopyrightStatus,
+            declined_mp3_deleted: decision === "DECLINED",
+            declined_mp3_storage_deleted: deletedAudioRefs.length > 0,
+            declined_mp3_storage_ref_count: deletedAudioRefs.length,
+            declined_playlist_item_count: linkedItems.length,
+            notification_created: !notificationError,
           },
         });
       }

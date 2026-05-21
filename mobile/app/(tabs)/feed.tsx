@@ -304,7 +304,7 @@ const getFeedImageIdentityKey = (value?: string | null) => {
 const getDistinctFeedFallbackImage = (
   type: string,
   id: string | null | undefined,
-  blockedImages: Array<string | null | undefined>,
+  blockedImages: (string | null | undefined)[],
 ) => {
   const images = FEED_FALLBACK_IMAGES[type] || FEED_FALLBACK_IMAGES.Group;
   const blockedKeys = new Set(
@@ -327,8 +327,8 @@ const getDistinctFeedFallbackImage = (
 const getDistinctFeedCardImages = (
   type: string,
   id: string | null | undefined,
-  preferredImages: Array<string | null | undefined>,
-  blockedImages: Array<string | null | undefined>,
+  preferredImages: (string | null | undefined)[],
+  blockedImages: (string | null | undefined)[],
 ) => {
   const blockedKeys = new Set(
     blockedImages
@@ -6685,7 +6685,7 @@ export default function FeedScreen() {
           ...sortFanRecommendationCards(filterFanVisibleFeedItems(rankedCards)),
         ]);
       }
-      return dedupeFeedItems([...rankedCards, ...socialPosts]);
+      return dedupeFeedItems([...socialPosts, ...rankedCards]);
     }
     if (tab === "talent") {
       return dedupeFeedItems(aiCards);

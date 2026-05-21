@@ -500,6 +500,7 @@ export default function SignupScreen() {
     const [manualFullName, setManualFullName] = useState('');
     const [manualIdNumber, setManualIdNumber] = useState('');
     const [manualIdExpiration, setManualIdExpiration] = useState('');
+    const [manualIdHasNoExpiration, setManualIdHasNoExpiration] = useState(false);
     const [manualExpirationCalendarVisible, setManualExpirationCalendarVisible] = useState(false);
     const [musicianVideoProof, setMusicianVideoProof] = useState<MusicianVideoProofUpload | null>(null);
     const [musicianVideoUploading, setMusicianVideoUploading] = useState(false);
@@ -591,12 +592,16 @@ export default function SignupScreen() {
 
     const selectedDocumentOption = useMemo(() => getDocumentOptionByKey(selectedDocumentKey), [selectedDocumentKey]);
     const todayDateString = useMemo(() => getLocalDateInputValue(), []);
-    const manualExpirationDateLabel = manualIdExpiration ? formatSelectedDate(manualIdExpiration) : 'Choose date';
+    const manualExpirationDateLabel = manualIdHasNoExpiration
+        ? 'No expiration'
+        : manualIdExpiration
+            ? formatSelectedDate(manualIdExpiration)
+            : 'Choose date';
     const manualExpirationCalendarCurrent = manualIdExpiration && manualIdExpiration >= todayDateString
         ? manualIdExpiration
         : todayDateString;
     const manualExpirationMarkedDates = useMemo(() => {
-        if (!manualIdExpiration) return {};
+        if (!manualIdExpiration || manualIdHasNoExpiration) return {};
 
         return {
             [manualIdExpiration]: {
@@ -605,7 +610,7 @@ export default function SignupScreen() {
                 selectedTextColor: '#FFFFFF',
             },
         };
-    }, [colors.primary, manualIdExpiration]);
+    }, [colors.primary, manualIdExpiration, manualIdHasNoExpiration]);
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const passwordRequirementState = useMemo(() => getPasswordRequirementState(password), [password]);
     const passwordStrengthScore = passwordRequirementState.filter((requirement) => requirement.met).length;
@@ -637,7 +642,7 @@ export default function SignupScreen() {
         Boolean(manualSelfieImage) &&
         Boolean(manualFullName.trim()) &&
         Boolean(manualIdNumber.trim()) &&
-        Boolean(manualIdExpiration.trim()) &&
+        (manualIdHasNoExpiration || Boolean(manualIdExpiration.trim())) &&
         (!isMusicianSignup || Boolean(musicianVideoProof?.uploadId));
 
     // Reset verification state only after the user edits away from a known email.
@@ -1059,6 +1064,8 @@ export default function SignupScreen() {
     const handleDocumentSelect = (documentKey: string) => {
         if (documentKey !== selectedDocumentKey) {
             void clearDiditSignupSession();
+            setManualIdExpiration('');
+            setManualIdHasNoExpiration(false);
         }
         setSelectedDocumentKey(documentKey);
         setDocumentModalVisible(false);
@@ -1074,7 +1081,17 @@ export default function SignupScreen() {
         }
 
         setManualIdExpiration(day.dateString);
+        setManualIdHasNoExpiration(false);
         setManualExpirationCalendarVisible(false);
+    };
+
+    const handleManualNoExpirationToggle = () => {
+        const nextValue = !manualIdHasNoExpiration;
+        setManualIdHasNoExpiration(nextValue);
+        if (nextValue) {
+            setManualIdExpiration('');
+            setManualExpirationCalendarVisible(false);
+        }
     };
 
     /**
@@ -1482,8 +1499,8 @@ export default function SignupScreen() {
 
         const enteredFullName = manualFullName.trim();
         const enteredIdNumber = manualIdNumber.trim();
-        const enteredIdExpiration = manualIdExpiration.trim();
-        const expirationDate = new Date(`${enteredIdExpiration}T00:00:00Z`);
+        const enteredIdExpiration = manualIdHasNoExpiration ? '' : manualIdExpiration.trim();
+        const expirationDate = enteredIdExpiration ? new Date(`${enteredIdExpiration}T00:00:00Z`) : null;
 
         if (!enteredFullName) {
             Alert.alert('Name Required', 'Please enter the full name shown on your ID.');
@@ -1495,12 +1512,12 @@ export default function SignupScreen() {
             return;
         }
 
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(enteredIdExpiration) || Number.isNaN(expirationDate.getTime()) || expirationDate.toISOString().slice(0, 10) !== enteredIdExpiration) {
+        if (!manualIdHasNoExpiration && (!/^\d{4}-\d{2}-\d{2}$/.test(enteredIdExpiration) || !expirationDate || Number.isNaN(expirationDate.getTime()) || expirationDate.toISOString().slice(0, 10) !== enteredIdExpiration)) {
             Alert.alert('Invalid Expiration Date', 'Please enter the ID expiration date in YYYY-MM-DD format.');
             return;
         }
 
-        if (enteredIdExpiration < getLocalDateInputValue()) {
+        if (!manualIdHasNoExpiration && enteredIdExpiration < getLocalDateInputValue()) {
             Alert.alert('Expired ID', 'Please choose an ID expiration date that is today or later.');
             return;
         }
@@ -1528,7 +1545,8 @@ export default function SignupScreen() {
                     role: selectedRole,
                     fullName: enteredFullName,
                     identityDocumentNumber: enteredIdNumber,
-                    idDocumentExpiry: enteredIdExpiration,
+                    idDocumentExpiry: manualIdHasNoExpiration ? null : enteredIdExpiration,
+                    idDocumentNoExpiration: manualIdHasNoExpiration,
                     documentType: selectedDocumentOption.label,
                     documentTypeKey: selectedDocumentOption.key,
                     documentCountry: 'PHL',
@@ -2800,15 +2818,20 @@ export default function SignupScreen() {
                                     <Ionicons name="calendar-outline" size={18} color={colors.textSecondary} style={styles.manualInfoIcon} />
                                     <TouchableOpacity
                                         activeOpacity={1}
-                                        onPress={() => setManualExpirationCalendarVisible(true)}
+                                        onPress={() => {
+                                            if (!manualIdHasNoExpiration) {
+                                                setManualExpirationCalendarVisible(true);
+                                            }
+                                        }}
                                         style={styles.manualInfoDateButton}
                                         accessibilityRole="button"
+                                        disabled={manualIdHasNoExpiration}
                                     >
                                         <Text
                                             numberOfLines={1}
                                             style={[
                                                 styles.manualInfoDateText,
-                                                { color: manualIdExpiration ? colors.text : colors.textSecondary },
+                                                { color: manualIdHasNoExpiration || manualIdExpiration ? colors.text : colors.textSecondary },
                                             ]}
                                         >
                                             {manualExpirationDateLabel}
@@ -2816,6 +2839,30 @@ export default function SignupScreen() {
                                     </TouchableOpacity>
                                     <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
                                 </View>
+                                <TouchableOpacity
+                                    activeOpacity={0.78}
+                                    onPress={handleManualNoExpirationToggle}
+                                    style={[
+                                        styles.manualNoExpirationToggle,
+                                        {
+                                            backgroundColor: manualIdHasNoExpiration
+                                                ? (isDark ? 'rgba(99,102,241,0.16)' : 'rgba(99,102,241,0.08)')
+                                                : 'transparent',
+                                            borderColor: manualIdHasNoExpiration ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
+                                        },
+                                    ]}
+                                    accessibilityRole="checkbox"
+                                    accessibilityState={{ checked: manualIdHasNoExpiration }}
+                                >
+                                    <Ionicons
+                                        name={manualIdHasNoExpiration ? 'checkbox-outline' : 'square-outline'}
+                                        size={20}
+                                        color={manualIdHasNoExpiration ? colors.primary : colors.textSecondary}
+                                    />
+                                    <Text style={[styles.manualNoExpirationText, { color: manualIdHasNoExpiration ? colors.primary : colors.textSecondary }]}>
+                                        This ID has no expiration date
+                                    </Text>
+                                </TouchableOpacity>
                             </View>
                         </View>
 
@@ -3373,6 +3420,22 @@ const styles = StyleSheet.create({
     manualInfoDateText: {
         fontSize: 14,
         lineHeight: 18,
+        fontFamily: 'Poppins_500Medium',
+    },
+    manualNoExpirationToggle: {
+        minHeight: 42,
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 9,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    manualNoExpirationText: {
+        flex: 1,
+        fontSize: 12,
+        lineHeight: 16,
         fontFamily: 'Poppins_500Medium',
     },
     manualCalendarSheet: {

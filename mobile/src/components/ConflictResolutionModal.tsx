@@ -13,6 +13,12 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import { formatFriendlyDateTime } from '../utils/friendlyDateTime';
 
+export interface RelocationSlot {
+  date: string;
+  start_time: string;
+  end_time: string;
+}
+
 export interface ConflictingBooking {
   id: string;
   booking_date: string;
@@ -23,11 +29,8 @@ export interface ConflictingBooking {
   user_name?: string;
   user_email?: string;
   conflictType: 'time_overlap' | 'date_removed' | 'date_override';
-  newAvailableSlot?: {
-    date: string;
-    start_time: string;
-    end_time: string;
-  } | null;
+  newAvailableSlot?: RelocationSlot | null;
+  availableRelocationSlots?: RelocationSlot[];
 }
 
 interface ConflictResolutionModalProps {
@@ -43,11 +46,7 @@ export type ResolutionAction = 'move' | 'cancel' | 'skip';
 export interface ConflictResolution {
   bookingId: string;
   action: ResolutionAction;
-  newSlot?: {
-    date: string;
-    start_time: string;
-    end_time: string;
-  };
+  newSlot?: RelocationSlot;
 }
 
 // useNativeDriver is not supported on web
@@ -62,6 +61,7 @@ export default function ConflictResolutionModal({
 }: ConflictResolutionModalProps) {
   const { colors, isDark } = useTheme();
   const [resolutions, setResolutions] = useState<{ [bookingId: string]: ResolutionAction }>({});
+  const [selectedSlots, setSelectedSlots] = useState<{ [bookingId: string]: RelocationSlot }>({});
   const [isResolving, setIsResolving] = useState(false);
 
   const formatDate = (dateStr: string) => {
@@ -87,11 +87,62 @@ export default function ConflictResolutionModal({
     }));
   };
 
+  const slotKey = (slot: RelocationSlot) =>
+    `${slot.date}|${slot.start_time.substring(0, 5)}|${slot.end_time.substring(0, 5)}`;
+
+  const toMinutes = (time: string) => {
+    const [hours, minutes] = time.substring(0, 5).split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+
+  const slotsOverlap = (first: RelocationSlot, second: RelocationSlot) => {
+    if (first.date !== second.date) return false;
+    return !(
+      toMinutes(first.end_time) <= toMinutes(second.start_time) ||
+      toMinutes(first.start_time) >= toMinutes(second.end_time)
+    );
+  };
+
+  const getCandidateSlots = (conflict: ConflictingBooking): RelocationSlot[] => {
+    const rawSlots =
+      conflict.availableRelocationSlots && conflict.availableRelocationSlots.length > 0
+        ? conflict.availableRelocationSlots
+        : conflict.newAvailableSlot
+          ? [conflict.newAvailableSlot]
+          : [];
+    const seen = new Set<string>();
+    return rawSlots.filter((slot) => {
+      const key = slotKey(slot);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
+  const getSelectedSlot = (conflict: ConflictingBooking): RelocationSlot | null =>
+    selectedSlots[conflict.id] || conflict.newAvailableSlot || getCandidateSlots(conflict)[0] || null;
+
+  const isSlotUsedByAnotherMove = (bookingId: string, slot: RelocationSlot) =>
+    conflicts.some((conflict) => {
+      if (conflict.id === bookingId || resolutions[conflict.id] !== 'move') return false;
+      const selected = getSelectedSlot(conflict);
+      return selected ? slotsOverlap(selected, slot) : false;
+    });
+
+  const selectMoveSlot = (bookingId: string, slot: RelocationSlot) => {
+    setSelectedSlots((prev) => ({
+      ...prev,
+      [bookingId]: slot,
+    }));
+    setResolutionAction(bookingId, 'move');
+  };
+
   const handleResolveAll = async () => {
     // Check if all conflicts have been addressed
-    const unresolvedConflicts = conflicts.filter(
-      (c) => !resolutions[c.id]
-    );
+    const unresolvedConflicts = conflicts.filter((c) => {
+      if (!resolutions[c.id]) return true;
+      return resolutions[c.id] === 'move' && !getSelectedSlot(c);
+    });
 
     if (unresolvedConflicts.length > 0) {
       // Show message that all conflicts must be resolved
@@ -103,7 +154,7 @@ export default function ConflictResolutionModal({
       const resolutionActions: ConflictResolution[] = conflicts.map((conflict) => ({
         bookingId: conflict.id,
         action: resolutions[conflict.id],
-        newSlot: resolutions[conflict.id] === 'move' ? conflict.newAvailableSlot || undefined : undefined,
+        newSlot: resolutions[conflict.id] === 'move' ? getSelectedSlot(conflict) || undefined : undefined,
       }));
 
       await onResolve(resolutionActions);
@@ -116,11 +167,23 @@ export default function ConflictResolutionModal({
 
   const handleMoveAll = () => {
     const newResolutions: { [key: string]: ResolutionAction } = {};
+    const newSelectedSlots: { [key: string]: RelocationSlot } = {};
     conflicts.forEach((conflict) => {
-      // Only allow move if there's an available slot
-      newResolutions[conflict.id] = conflict.newAvailableSlot ? 'move' : 'cancel';
+      const slot = getCandidateSlots(conflict).find(
+        (candidate) =>
+          !Object.values(newSelectedSlots).some((selected) =>
+            slotsOverlap(selected, candidate),
+          ),
+      );
+      if (slot) {
+        newResolutions[conflict.id] = 'move';
+        newSelectedSlots[conflict.id] = slot;
+      } else {
+        newResolutions[conflict.id] = 'cancel';
+      }
     });
     setResolutions(newResolutions);
+    setSelectedSlots(newSelectedSlots);
   };
 
   const handleCancelAll = () => {
@@ -129,10 +192,27 @@ export default function ConflictResolutionModal({
       newResolutions[conflict.id] = 'cancel';
     });
     setResolutions(newResolutions);
+    setSelectedSlots({});
   };
 
-  const allResolved = conflicts.every((c) => resolutions[c.id]);
-  const moveableCount = conflicts.filter((c) => c.newAvailableSlot).length;
+  const selectedMoveSlots = conflicts
+    .filter((c) => resolutions[c.id] === 'move')
+    .map((c) => ({ id: c.id, slot: getSelectedSlot(c) }));
+  const hasSelectedMoveOverlap = selectedMoveSlots.some((entry, index) =>
+    selectedMoveSlots.some(
+      (other, otherIndex) =>
+        otherIndex > index &&
+        Boolean(entry.slot) &&
+        Boolean(other.slot) &&
+        slotsOverlap(entry.slot as RelocationSlot, other.slot as RelocationSlot),
+    ),
+  );
+  const allResolved =
+    !hasSelectedMoveOverlap &&
+    conflicts.every(
+      (c) => resolutions[c.id] && (resolutions[c.id] !== 'move' || getSelectedSlot(c)),
+    );
+  const moveableCount = conflicts.filter((c) => getCandidateSlots(c).length > 0).length;
 
   if (!visible) return null;
 
@@ -207,7 +287,10 @@ export default function ConflictResolutionModal({
             contentContainerStyle={styles.conflictListContent}
             showsVerticalScrollIndicator={false}
             drawDistance={360}
-            renderItem={({ item: conflict }) => (
+            renderItem={({ item: conflict }) => {
+              const candidateSlots = getCandidateSlots(conflict);
+              const selectedSlot = getSelectedSlot(conflict);
+              return (
               <View
                 key={conflict.id}
                 style={[
@@ -260,7 +343,7 @@ export default function ConflictResolutionModal({
 
                 {/* Action Options */}
                 <View style={styles.actionOptions}>
-                  {conflict.newAvailableSlot && (
+                  {selectedSlot && (
                     <TouchableOpacity activeOpacity={1}
                       style={[
                         styles.actionOption,
@@ -277,7 +360,7 @@ export default function ConflictResolutionModal({
                               : colors.border,
                         },
                       ]}
-                      onPress={() => setResolutionAction(conflict.id, 'move')}
+                      onPress={() => selectMoveSlot(conflict.id, selectedSlot)}
                     >
                       <Ionicons
                         name="swap-horizontal"
@@ -294,7 +377,7 @@ export default function ConflictResolutionModal({
                             },
                           ]}
                         >
-                          Move to Next Available
+                          Move Booking
                         </Text>
                         <Text
                           style={[
@@ -307,15 +390,83 @@ export default function ConflictResolutionModal({
                             },
                           ]}
                         >
-                          {formatDate(conflict.newAvailableSlot.date)} at{' '}
-                          {formatTime(conflict.newAvailableSlot.start_time)} -{' '}
-                          {formatTime(conflict.newAvailableSlot.end_time)}
+                          {formatDate(selectedSlot.date)} at{' '}
+                          {formatTime(selectedSlot.start_time)} -{' '}
+                          {formatTime(selectedSlot.end_time)}
                         </Text>
                       </View>
                       {resolutions[conflict.id] === 'move' && (
                         <Ionicons name="checkmark-circle" size={20} color="#fff" />
                       )}
                     </TouchableOpacity>
+                  )}
+
+                  {resolutions[conflict.id] === 'move' && candidateSlots.length > 1 && (
+                    <View
+                      style={[
+                        styles.slotPicker,
+                        {
+                          backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#fff',
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+                      <View style={styles.slotPickerHeader}>
+                        <Ionicons name="calendar" size={15} color={colors.primary} />
+                        <Text style={[styles.slotPickerTitle, { color: colors.text }]}>
+                          Pick New Slot
+                        </Text>
+                      </View>
+                      <View style={styles.slotOptions}>
+                        {candidateSlots.map((slot) => {
+                          const isSelected = selectedSlot ? slotKey(selectedSlot) === slotKey(slot) : false;
+                          const isUsed = !isSelected && isSlotUsedByAnotherMove(conflict.id, slot);
+                          return (
+                            <TouchableOpacity
+                              key={slotKey(slot)}
+                              activeOpacity={isUsed ? 1 : 0.78}
+                              disabled={isUsed}
+                              style={[
+                                styles.slotOption,
+                                {
+                                  backgroundColor: isSelected
+                                    ? colors.primary
+                                    : isDark
+                                      ? 'rgba(255,255,255,0.08)'
+                                      : 'rgba(0,0,0,0.04)',
+                                  borderColor: isSelected ? colors.primary : colors.border,
+                                  opacity: isUsed ? 0.42 : 1,
+                                },
+                              ]}
+                              onPress={() => selectMoveSlot(conflict.id, slot)}
+                            >
+                              <Text
+                                style={[
+                                  styles.slotOptionDate,
+                                  { color: isSelected ? '#fff' : colors.text },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {formatDate(slot.date)}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.slotOptionTime,
+                                  {
+                                    color: isSelected
+                                      ? 'rgba(255,255,255,0.82)'
+                                      : colors.textSecondary,
+                                  },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {formatTime(slot.start_time)} - {formatTime(slot.end_time)}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </View>
                   )}
 
                   <TouchableOpacity activeOpacity={1}
@@ -371,7 +522,8 @@ export default function ConflictResolutionModal({
                   </TouchableOpacity>
                 </View>
               </View>
-            )}
+              );
+            }}
           />
 
           {/* Footer Actions */}
@@ -550,6 +702,42 @@ const styles = StyleSheet.create({
   },
   actionOptionSubtitle: {
     fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+  },
+  slotPicker: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    gap: 8,
+  },
+  slotPickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  slotPickerTitle: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  slotOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  slotOption: {
+    minWidth: 132,
+    flexGrow: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  slotOptionDate: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  slotOptionTime: {
+    fontSize: 11,
     fontFamily: 'Poppins_400Regular',
   },
   footer: {

@@ -137,6 +137,13 @@ function normalizeDateInput(raw: unknown, label: string, required = false) {
   return value;
 }
 
+function normalizeBooleanInput(raw: unknown) {
+  if (typeof raw === "boolean") return raw;
+
+  const value = String(raw || "").trim().toLowerCase();
+  return ["1", "true", "yes", "y", "on"].includes(value);
+}
+
 function buildMusikaLokalEmail({
   title,
   subtitle,
@@ -332,6 +339,7 @@ async function ensurePendingReviewAuthUser(
     verificationMode: string;
     diditSessionId: string | null;
     idDocumentExpiry: string | null;
+    idDocumentNoExpiration: boolean;
   },
 ) {
   const role = String(payload.role || "musician").trim().toLowerCase();
@@ -386,6 +394,8 @@ async function ensurePendingReviewAuthUser(
         selected_document_type_key: payload.documentTypeKey,
         verification_mode: payload.verificationMode,
         didit_session_id: payload.diditSessionId,
+        id_document_expiry: payload.idDocumentExpiry,
+        id_document_no_expiration: payload.idDocumentNoExpiration,
       },
     };
 
@@ -420,6 +430,7 @@ async function ensurePendingReviewAuthUser(
       verification_mode: payload.verificationMode,
       didit_session_id: payload.diditSessionId,
       id_document_expiry: payload.idDocumentExpiry,
+      id_document_no_expiration: payload.idDocumentNoExpiration,
     },
   });
 
@@ -568,11 +579,19 @@ serve(async (req: Request) => {
     const role = String(body?.role || "musician").trim().toLowerCase();
     const fullName = String(body?.fullName || body?.displayName || "").trim();
     const source = String(body?.source || "MANUAL_UPLOAD").trim().toUpperCase();
-    const idDocumentExpiry = normalizeDateInput(
-      body?.idDocumentExpiry || body?.id_document_expiry,
-      "ID expiration date",
-      source === "MANUAL_UPLOAD",
+    const idDocumentNoExpiration = normalizeBooleanInput(
+      body?.idDocumentNoExpiration ??
+        body?.id_document_no_expiration ??
+        body?.documentHasNoExpiration ??
+        body?.document_has_no_expiration,
     );
+    const idDocumentExpiry = idDocumentNoExpiration
+      ? null
+      : normalizeDateInput(
+          body?.idDocumentExpiry || body?.id_document_expiry,
+          "ID expiration date",
+          source === "MANUAL_UPLOAD",
+        );
     const identityDocumentNumber = String(
       body?.identityDocumentNumber || body?.idDocumentNumber || body?.documentNumber || "",
     ).trim();
@@ -616,6 +635,8 @@ serve(async (req: Request) => {
           role,
           source,
           verification_mode: verificationMode,
+          id_document_expiry: idDocumentExpiry,
+          id_document_no_expiration: idDocumentNoExpiration,
         },
       });
       registrationAttemptId = registrationAttempt?.attemptId || null;
@@ -660,6 +681,7 @@ serve(async (req: Request) => {
       verificationMode,
       diditSessionId,
       idDocumentExpiry,
+      idDocumentNoExpiration,
     });
 
     userId = String(authUser.id || "").trim();
@@ -697,7 +719,7 @@ serve(async (req: Request) => {
 
     const { data: existingPending } = await supabaseAdmin
       .from("manual_identity_reviews")
-      .select("id")
+      .select("id, metadata")
       .eq("user_id", userId)
       .eq("status", "PENDING_REVIEW")
       .eq("source", source)
@@ -707,6 +729,15 @@ serve(async (req: Request) => {
 
     let reviewId = String(existingPending?.id || "").trim();
     const nowIso = new Date().toISOString();
+    const existingReviewMetadata =
+      existingPending?.metadata && typeof existingPending.metadata === "object"
+        ? existingPending.metadata
+        : {};
+    const reviewMetadata = {
+      ...existingReviewMetadata,
+      id_document_expiry: idDocumentExpiry,
+      id_document_no_expiration: idDocumentNoExpiration,
+    };
 
     if (reviewId) {
       const { error: updateReviewError } = await supabaseAdmin
@@ -734,6 +765,7 @@ serve(async (req: Request) => {
           reviewed_at: null,
           decision_email_sent_at: null,
           expected_decision_by: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          metadata: reviewMetadata,
           updated_at: nowIso,
         })
         .eq("id", reviewId);
@@ -765,6 +797,7 @@ serve(async (req: Request) => {
           front_image_path: frontPath,
           back_image_path: backPath,
           selfie_image_path: selfiePath,
+          metadata: reviewMetadata,
           expected_decision_by: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         })
         .select("id")
@@ -824,6 +857,10 @@ serve(async (req: Request) => {
       birthDate: identityNameBirthDate.birthDate,
       reviewReason: duplicateReason,
       matchedOn: duplicateReason ? "DOCUMENT_FINGERPRINT" : null,
+      metadata: {
+        id_document_expiry: idDocumentExpiry,
+        id_document_no_expiration: idDocumentNoExpiration,
+      },
     });
 
     await supabaseAdmin.from("notifications").insert({
@@ -853,6 +890,8 @@ serve(async (req: Request) => {
         musician_video_review_required: requiresMusicVideoProof,
         musician_video_upload_id: musicianVideoProof?.uploadId || null,
         manual_identity_review_id: reviewId,
+        id_document_expiry: idDocumentExpiry,
+        id_document_no_expiration: idDocumentNoExpiration,
       },
     });
 

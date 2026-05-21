@@ -13,6 +13,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import AudioPreviewPlayer from '../../src/components/AudioPreviewPlayer';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
 import InAppMediaViewer from '../../src/components/InAppMediaViewer';
@@ -153,6 +154,19 @@ interface IdentityMatchAccount {
   music_video_url?: string | null;
 }
 
+interface CopyrightPlaylistItem {
+  id?: string | null;
+  playlist_id?: string | null;
+  playlist_title?: string | null;
+  title?: string | null;
+  artist_name?: string | null;
+  audio_url?: string | null;
+  cover_image_url?: string | null;
+  duration_seconds?: number | string | null;
+  copyright_status?: string | null;
+  created_at?: string | null;
+}
+
 interface ManualIdentityReviewEntry {
   id: string;
   user_id: string;
@@ -211,6 +225,8 @@ interface ManualIdentityReviewEntry {
   music_video_size_bytes?: number | null;
   music_video_uploaded_at?: string | null;
   music_video_url?: string | null;
+  copyright_playlist_item?: CopyrightPlaylistItem | null;
+  copyright_playlist_items?: CopyrightPlaylistItem[];
   profile?: {
     id?: string;
     full_name?: string | null;
@@ -253,6 +269,20 @@ const formatDateTime = (value?: string | null) => {
     hour: '2-digit',
     minute: '2-digit',
   });
+};
+
+const isTruthyMetadataFlag = (value: unknown) => (
+  value === true || String(value || '').trim().toLowerCase() === 'true'
+);
+
+const formatIdentityExpiryForReview = (review?: ManualIdentityReviewEntry | null) => {
+  const profileExpiry = String(review?.profile?.id_document_expiry || '').trim();
+  if (profileExpiry) return profileExpiry;
+
+  const metadataExpiry = String(review?.metadata?.['id_document_expiry'] || '').trim();
+  if (metadataExpiry) return metadataExpiry;
+
+  return isTruthyMetadataFlag(review?.metadata?.['id_document_no_expiration']) ? 'No expiration' : '-';
 };
 
 const COPYRIGHT_OWNERSHIP_REVIEW_SOURCE = 'COPYRIGHT_OWNERSHIP';
@@ -334,11 +364,13 @@ const isCopyrightOwnershipReview = (review?: ManualIdentityReviewEntry | null) =
 
 const getCopyrightOwnershipInfo = (review?: ManualIdentityReviewEntry | null) => {
   const metadata = review?.metadata || {};
+  const playlistItem = review?.copyright_playlist_item || null;
   const rawArtists = metadata['copyright_artists'];
   const artistLabel = Array.isArray(rawArtists)
     ? rawArtists.map((artist) => String(artist || '').trim()).filter(Boolean).join(', ')
-    : String(metadata['copyright_artist_label'] || '').trim();
-  const title = String(metadata['copyright_title'] || 'Released recording').trim();
+    : String(playlistItem?.artist_name || metadata['copyright_artist_label'] || '').trim();
+  const title = String(playlistItem?.title || metadata['copyright_title'] || 'Released recording').trim();
+  const durationSeconds = Number(playlistItem?.duration_seconds || metadata['uploaded_duration_seconds'] || 0);
 
   return {
     title,
@@ -350,6 +382,11 @@ const getCopyrightOwnershipInfo = (review?: ManualIdentityReviewEntry | null) =>
     rightsOwner: String(metadata['copyright_rights_owner'] || '').trim(),
     fileName: String(metadata['uploaded_file_name'] || '').trim(),
     trackKey: String(metadata['copyright_track_key'] || '').trim(),
+    audioUrl: String(playlistItem?.audio_url || metadata['uploaded_audio_url'] || metadata['audio_url'] || '').trim(),
+    durationSeconds: Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : null,
+    playlistTitle: String(playlistItem?.playlist_title || '').trim(),
+    playlistItemId: String(playlistItem?.id || '').trim(),
+    copyrightStatus: String(playlistItem?.copyright_status || '').trim(),
   };
 };
 
@@ -667,6 +704,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     fontFamily: 'Poppins_500Medium',
+  },
+  ownershipPlayerWrap: {
+    marginTop: 8,
   },
   queueBadge: {
     borderRadius: 999,
@@ -1146,10 +1186,24 @@ export default function AdminIdentityReviewsPage() {
 
       if (isOwnershipDecision) {
         const ownershipInfo = getCopyrightOwnershipInfo(manualReviewTarget);
+        const mp3Message = manualReviewDecision === 'DECLINED'
+          ? Boolean(reviewedItem.declined_mp3_deleted)
+            ? ' The MP3 was removed from the playlist and deleted from storage when available.'
+            : ' The MP3 was removed from playable tracks.'
+          : '';
+        const emailMessage = manualReviewDecision === 'DECLINED'
+          ? emailSent
+            ? ' The user was emailed.'
+            : emailQueued
+              ? ' The user email is queued for delivery.'
+              : emailError
+                ? ` Email could not be sent: ${cleanManualReviewEmailError(emailError)}`
+                : ' Email was not sent.'
+          : '';
         showAlert(
           manualReviewDecision === 'APPROVED' ? 'success' : 'warning',
           manualReviewDecision === 'APPROVED' ? 'Track ownership approved' : 'Track ownership declined',
-          `The decision for ${ownershipInfo.trackLabel} was saved. The user was notified in app.`,
+          `The decision for ${ownershipInfo.trackLabel} was saved. The user was notified in app.${mp3Message}${emailMessage}`,
         );
 
         setManualReviewModalVisible(false);
@@ -1434,11 +1488,23 @@ export default function AdminIdentityReviewsPage() {
                         {ownershipInfo.fileName ? (
                           <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Uploaded file: {ownershipInfo.fileName}</Text>
                         ) : null}
+                        {ownershipInfo.playlistTitle ? (
+                          <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Playlist: {ownershipInfo.playlistTitle}</Text>
+                        ) : null}
+                        <View style={styles.ownershipPlayerWrap}>
+                          <AudioPreviewPlayer
+                            sourceUrl={ownershipInfo.audioUrl}
+                            title={ownershipInfo.title}
+                            subtitle={ownershipInfo.artistLabel || ownershipInfo.playlistTitle || 'Submitted MP3'}
+                            durationSeconds={ownershipInfo.durationSeconds}
+                            emptyMessage="The playlist item MP3 is not linked to this review yet."
+                          />
+                        </View>
                       </>
                     ) : (
                       <>
                         <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Document: {review.document_type} ({review.document_country || 'PHL'})</Text>
-                        <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>ID expires: {review.profile?.id_document_expiry || '-'}</Text>
+                        <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>ID expires: {formatIdentityExpiryForReview(review)}</Text>
                       </>
                     )}
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Source: {String(review.source || 'MANUAL_UPLOAD').replace(/_/g, ' ')}</Text>
@@ -1675,11 +1741,23 @@ export default function AdminIdentityReviewsPage() {
                     Uploaded file: {manualReviewOwnershipInfo.fileName}
                   </Text>
                 ) : null}
+                {manualReviewOwnershipInfo.playlistTitle ? (
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
+                    Playlist: {manualReviewOwnershipInfo.playlistTitle}
+                  </Text>
+                ) : null}
+                <AudioPreviewPlayer
+                  sourceUrl={manualReviewOwnershipInfo.audioUrl}
+                  title={manualReviewOwnershipInfo.title}
+                  subtitle={manualReviewOwnershipInfo.artistLabel || manualReviewOwnershipInfo.playlistTitle || 'Submitted MP3'}
+                  durationSeconds={manualReviewOwnershipInfo.durationSeconds}
+                  emptyMessage="The playlist item MP3 is not linked to this review yet."
+                />
               </>
             ) : (
               <>
                 <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
-                  ID expires: {manualReviewTarget?.profile?.id_document_expiry || '-'}
+                  ID expires: {formatIdentityExpiryForReview(manualReviewTarget)}
                 </Text>
                 <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
                   Document: {manualReviewTarget?.document_type || '-'}

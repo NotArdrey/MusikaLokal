@@ -890,6 +890,15 @@ const isAcceptedGigApplicationItem = (item: any) =>
     normalizeGigApplicationStatusValue(item?.raw_status || item?.status),
   );
 
+const isGigReconfirmationItem = (item: any) =>
+  item?.type_id === "gig_application" &&
+  normalizeGigApplicationStatusValue(item?.raw_status || item?.status) === "pending" &&
+  (
+    item?.requires_reconfirmation === true ||
+    item?.system_status_reason === "system_reconfirm_required_terms_changed" ||
+    Boolean(item?.reconfirmation_due_at)
+  );
+
 const isUpcomingAcceptedGigApplicationItem = (item: any) => {
   if (!isAcceptedGigApplicationItem(item)) return false;
   const eventStart = new Date(String(item?.raw_date || item?.date || ""));
@@ -1915,6 +1924,10 @@ export default function BookingsScreen() {
 
     (productionApps || []).forEach((app: any) => {
       const normalizedStatus = String(app.status || "").toLowerCase();
+      const requiresReconfirmation =
+        normalizedStatus === "pending" &&
+        app.system_status_reason === "system_reconfirm_required_terms_changed" &&
+        !!app.reconfirmation_due_at;
       const gig = app.gig;
       const dateStr = gig?.event_date || app.created_at?.split("T")[0] || "TBA";
       const performerSnapshot =
@@ -1956,8 +1969,14 @@ export default function BookingsScreen() {
           app.production_team?.logo_url ||
           gig?.organizer?.avatar_url ||
           "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop",
-        status: getGigApplicationStatusLabel(normalizedStatus, app.status),
+        status: requiresReconfirmation
+          ? "Reconfirmation Required"
+          : getGigApplicationStatusLabel(normalizedStatus, app.status),
         raw_status: app.status,
+        reconfirmation_required_at: app.reconfirmation_required_at || null,
+        reconfirmation_due_at: app.reconfirmation_due_at || null,
+        system_status_reason: app.system_status_reason || null,
+        requires_reconfirmation: requiresReconfirmation,
         type:
           app.group?.group_type === "duo"
             ? "Production Duo Application"
@@ -1965,7 +1984,12 @@ export default function BookingsScreen() {
               ? "Production Group Application"
               : "Production Musician Application",
         isCancelled: ["cancelled", "rejected", "fired"].includes(normalizedStatus),
-        action: normalizedStatus === "accepted" || normalizedStatus === "approved" ? "View Details" : "Details",
+        action:
+          normalizedStatus === "accepted" || normalizedStatus === "approved"
+            ? "View Details"
+            : requiresReconfirmation
+              ? "Reconfirm"
+              : "Details",
         location: gig?.location,
         pitch_message: app.pitch_message,
         video_url: app.video_url,
@@ -2059,6 +2083,10 @@ export default function BookingsScreen() {
     (venueApps || []).forEach((app: any) => {
       const gig = gigById.get(app.gig_id);
       const normalizedStatus = String(app.status || "").toLowerCase();
+      const requiresReconfirmation =
+        normalizedStatus === "pending" &&
+        app.system_status_reason === "system_reconfirm_required_terms_changed" &&
+        !!app.reconfirmation_due_at;
       const dateStr = gig?.event_date || "TBA";
       const performerSnapshot =
         app.performer_snapshot && typeof app.performer_snapshot === "object"
@@ -2102,12 +2130,18 @@ export default function BookingsScreen() {
           app.applicant?.avatar_url ||
           "https://picsum.photos/400/300",
         status:
-          normalizedStatus === "pending"
-            ? "Action Required"
-            : normalizedStatus === "accepted" || normalizedStatus === "approved"
+          requiresReconfirmation
+            ? "Needs Reconfirmation"
+            : normalizedStatus === "pending"
+              ? "Action Required"
+              : normalizedStatus === "accepted" || normalizedStatus === "approved"
               ? "Confirmed"
               : getGigApplicationStatusLabel(normalizedStatus, app.status),
         raw_status: app.status,
+        reconfirmation_required_at: app.reconfirmation_required_at || null,
+        reconfirmation_due_at: app.reconfirmation_due_at || null,
+        system_status_reason: app.system_status_reason || null,
+        requires_reconfirmation: requiresReconfirmation,
         type: app.production_team?.name
           ? app.group?.group_type === "duo"
             ? "Production Duo Application"
@@ -2877,7 +2911,8 @@ export default function BookingsScreen() {
         const appliedApps = allGigApps.filter(
           (app: any) => {
             const status = normalizeStatus(app.status);
-            return status === "applied" || status === "pending";
+            const rawStatus = normalizeGigApplicationStatusValue(app.raw_status);
+            return status === "applied" || status === "pending" || rawStatus === "pending" || isGigReconfirmationItem(app);
           },
         );
         const acceptedApps = allGigApps.filter(
@@ -3067,6 +3102,99 @@ export default function BookingsScreen() {
     } finally {
       clearActionLoading(bookingId);
     }
+  }
+
+  async function runGigReconfirmationDecision(item: any, accepted: boolean) {
+    if (!userId || !item?.id) {
+      showAlert("info", "Sign in required", "Please sign in to manage this gig.");
+      return;
+    }
+
+    try {
+      startActionLoading(item.id, accepted ? "Reconfirming gig" : "Declining update");
+      setLoading(true);
+
+      const { data, error } = await supabase.functions.invoke("manage-bookings", {
+        body: {
+          action: "reconfirm_gig_terms",
+          application_id: item.id,
+          decision: accepted ? "accepted" : "declined",
+          userId,
+        },
+      });
+
+      if (error) {
+        const errorContext = (error as any)?.context;
+        let contextBody: any = null;
+
+        try {
+          contextBody = errorContext?.json ? await errorContext.json() : null;
+        } catch {
+          contextBody = null;
+        }
+
+        const contextMessage =
+          (contextBody && typeof contextBody === "object" && (contextBody.error || contextBody.message)) ||
+          null;
+
+        if (contextMessage && typeof contextMessage === "string") {
+          throw new Error(contextMessage);
+        }
+
+        throw error;
+      }
+
+      if (data?.error) throw new Error(data.error);
+
+      bookingsScreenCache.delete(userId);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.bookings.summary(userId) });
+      await fetchBookings(userId, { showLoading: false });
+      setViewMode("applications");
+      setActiveAppTab(accepted ? "Accepted" : "Completed");
+      setModalVisible(false);
+      setCancellationReason("");
+
+      showAlert(
+        accepted ? "success" : "info",
+        accepted ? "Gig Reconfirmed" : "Update Declined",
+        accepted
+          ? "You accepted the updated gig details."
+          : "You declined the updated gig details.",
+      );
+    } catch (error: any) {
+      showAlert(
+        "error",
+        "Action Failed",
+        error?.message || "Could not process this gig update.",
+      );
+    } finally {
+      clearActionLoading(item.id);
+      setLoading(false);
+    }
+  }
+
+  function handleGigReconfirmationDecision(item: any, accepted: boolean) {
+    if (isReadOnlyBookingItem(item)) {
+      showReadOnlyBookingAlert();
+      return;
+    }
+
+    Alert.alert(
+      accepted ? "Reconfirm Gig" : "Decline Updated Gig",
+      accepted
+        ? "This will accept the venue's updated gig date and time."
+        : "This will decline the updated gig terms and remove you from this gig.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: accepted ? "Reconfirm" : "Decline Update",
+          style: accepted ? "default" : "destructive",
+          onPress: () => {
+            void runGigReconfirmationDecision(item, accepted);
+          },
+        },
+      ],
+    );
   }
 
   async function handleReportAccessIssue(
@@ -3907,6 +4035,10 @@ export default function BookingsScreen() {
         return;
       }
 
+      const isPaidRelocation =
+        latestBooking.payment_status === "paid" ||
+        latestBooking.payment_status === "partial";
+
       if (accepted) {
         const { error: acceptError } = await supabase
           .from("studio_bookings")
@@ -3952,7 +4084,9 @@ export default function BookingsScreen() {
           .from("studio_bookings")
           .update({
             status: "cancelled",
-            payment_status: latestBooking.payment_status,
+            payment_status: isPaidRelocation
+              ? "refund_pending"
+              : latestBooking.payment_status,
             cancellation_reason:
               "Musician declined the owner relocation request.",
             relocation_requested_at: null,
@@ -3971,7 +4105,9 @@ export default function BookingsScreen() {
             user_id: item.studio_owner_id,
             type: "warning",
             title: "Relocation Declined",
-            message: `The musician declined your relocation request for ${item.name}. Booking was cancelled.`,
+            message: isPaidRelocation
+              ? `The musician declined your relocation request for ${item.name}. Booking was cancelled and refund processing has started.`
+              : `The musician declined your relocation request for ${item.name}. Booking was cancelled.`,
             meta: buildNotificationRouteMeta("/bookings", undefined, {
               bookingId: item.id,
               studioId: item.studio_id,
@@ -3982,7 +4118,9 @@ export default function BookingsScreen() {
 
         Alert.alert(
           "Info",
-          "You declined the move request. Booking has been cancelled.",
+          isPaidRelocation
+            ? "You declined the move request. Booking has been cancelled and refund processing has started."
+            : "You declined the move request. Booking has been cancelled.",
         );
       }
 
@@ -6044,18 +6182,35 @@ export default function BookingsScreen() {
                                 </TouchableOpacity>
                               </View>
                             )
-                          ) : renderActiveTab === "Pending" && isMusicianView && item.type_id === "gig_application" && !isLeaderConfirmation ? (
+                          ) : (renderActiveTab === "Pending" || (viewMode === "applications" && activeAppTab === "Applied")) && isMusicianView && item.type_id === "gig_application" && !isLeaderConfirmation ? (
                             <View
                               style={{ flexDirection: "row", gap: 8, flex: 1 }}
                             >
                               <TouchableOpacity activeOpacity={1}
-                                testID={bookingActionTestId(item, "view")}
-                                accessibilityLabel={bookingActionTestId(item, "view")}
-                                onPress={() => handleDetailsPress(item)}
+                                testID={bookingActionTestId(
+                                  item,
+                                  isGigReconfirmationItem(item) ? "decline-update" : "view",
+                                )}
+                                accessibilityLabel={bookingActionTestId(
+                                  item,
+                                  isGigReconfirmationItem(item) ? "decline-update" : "view",
+                                )}
+                                onPress={() => {
+                                  if (isGigReconfirmationItem(item)) {
+                                    handleGigReconfirmationDecision(item, false);
+                                  } else {
+                                    handleDetailsPress(item);
+                                  }
+                                }}
                                 style={{
                                   flex: 1,
-                                  borderColor: colors.border,
+                                  borderColor: isGigReconfirmationItem(item) ? "#EF4444" : colors.border,
                                   borderWidth: 1,
+                                  backgroundColor: isGigReconfirmationItem(item)
+                                    ? isDark
+                                      ? "rgba(239, 68, 68, 0.2)"
+                                      : "#FEF2F2"
+                                    : "transparent",
                                   padding: 10,
                                   borderRadius: 100,
                                   alignItems: "center",
@@ -6066,26 +6221,40 @@ export default function BookingsScreen() {
                               >
                                 <Text
                                   style={{
-                                    color: colors.textSecondary,
-                                    fontFamily: "Poppins_500Medium",
+                                    color: isGigReconfirmationItem(item) ? "#EF4444" : colors.textSecondary,
+                                    fontFamily: isGigReconfirmationItem(item)
+                                      ? "Poppins_600SemiBold"
+                                      : "Poppins_500Medium",
                                     fontSize: 12,
                                   }}
                                 >
-                                  View Details
+                                  {isGigReconfirmationItem(item) ? "Decline" : "View Details"}
                                 </Text>
                               </TouchableOpacity>
                               <TouchableOpacity activeOpacity={1}
-                                testID={bookingActionTestId(item, "withdraw")}
-                                accessibilityLabel={bookingActionTestId(item, "withdraw")}
+                                testID={bookingActionTestId(
+                                  item,
+                                  isGigReconfirmationItem(item) ? "reconfirm" : "withdraw",
+                                )}
+                                accessibilityLabel={bookingActionTestId(
+                                  item,
+                                  isGigReconfirmationItem(item) ? "reconfirm" : "withdraw",
+                                )}
                                 onPress={() => {
-                                  setSelectedItem(item);
-                                  handleCancelBooking(item.id);
+                                  if (isGigReconfirmationItem(item)) {
+                                    handleGigReconfirmationDecision(item, true);
+                                  } else {
+                                    setSelectedItem(item);
+                                    handleCancelBooking(item.id);
+                                  }
                                 }}
                                 style={{
                                   flex: 1,
-                                  backgroundColor: isDark
-                                    ? "rgba(239, 68, 68, 0.2)"
-                                    : "#FEF2F2",
+                                  backgroundColor: isGigReconfirmationItem(item)
+                                    ? "#10B981"
+                                    : isDark
+                                      ? "rgba(239, 68, 68, 0.2)"
+                                      : "#FEF2F2",
                                   padding: 10,
                                   borderRadius: 100,
                                   alignItems: "center",
@@ -6093,12 +6262,12 @@ export default function BookingsScreen() {
                               >
                                 <Text
                                   style={{
-                                    color: "#EF4444",
+                                    color: isGigReconfirmationItem(item) ? "white" : "#EF4444",
                                     fontFamily: "Poppins_600SemiBold",
                                     fontSize: 12,
                                   }}
                                 >
-                                  Withdraw
+                                  {isGigReconfirmationItem(item) ? "Reconfirm" : "Withdraw"}
                                 </Text>
                               </TouchableOpacity>
                             </View>

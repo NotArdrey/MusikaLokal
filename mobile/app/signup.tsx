@@ -4,6 +4,7 @@ import {
     BottomSheetBackdrop,
     BottomSheetModal,
     BottomSheetScrollView,
+    BottomSheetView,
     useBottomSheetSpringConfigs,
 } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -689,7 +690,6 @@ export default function SignupScreen() {
     const pendingReviewSignupRef = useRef(false);
     const finishAccountCreationRef = useRef(false);
     const documentSheetSnapPoints = useMemo(() => ['88%'], []);
-    const manualCalendarSnapPoints = useMemo(() => ['70%'], []);
     const bottomSheetAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
 
     // State
@@ -710,6 +710,7 @@ export default function SignupScreen() {
     const [manualFullName, setManualFullName] = useState('');
     const [manualIdNumber, setManualIdNumber] = useState('');
     const [manualIdExpiration, setManualIdExpiration] = useState('');
+    const [manualIdHasNoExpiration, setManualIdHasNoExpiration] = useState(false);
     const [manualExpirationCalendarVisible, setManualExpirationCalendarVisible] = useState(false);
     const [musicianVideoProof, setMusicianVideoProof] = useState<MusicianVideoProofUpload | null>(null);
     const [musicianVideoUploading, setMusicianVideoUploading] = useState(false);
@@ -1527,12 +1528,16 @@ export default function SignupScreen() {
         }
     };
     const todayDateString = useMemo(() => getLocalDateInputValue(), []);
-    const manualExpirationDateLabel = manualIdExpiration ? formatSelectedDate(manualIdExpiration) : 'Choose date';
+    const manualExpirationDateLabel = manualIdHasNoExpiration
+        ? 'No expiration'
+        : manualIdExpiration
+            ? formatSelectedDate(manualIdExpiration)
+            : 'Choose date';
     const manualExpirationCalendarCurrent = manualIdExpiration && manualIdExpiration >= todayDateString
         ? manualIdExpiration
         : todayDateString;
     const manualExpirationMarkedDates = useMemo(() => {
-        if (!manualIdExpiration) return {};
+        if (!manualIdExpiration || manualIdHasNoExpiration) return {};
 
         return {
             [manualIdExpiration]: {
@@ -1541,7 +1546,7 @@ export default function SignupScreen() {
                 selectedTextColor: '#FFFFFF',
             },
         };
-    }, [colors.primary, manualIdExpiration]);
+    }, [colors.primary, manualIdExpiration, manualIdHasNoExpiration]);
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const passwordRequirementState = useMemo(() => getPasswordRequirementState(password), [password]);
     const passwordStrengthScore = passwordRequirementState.filter((requirement) => requirement.met).length;
@@ -1573,7 +1578,7 @@ export default function SignupScreen() {
         Boolean(manualSelfieImage) &&
         Boolean(manualFullName.trim()) &&
         Boolean(manualIdNumber.trim()) &&
-        Boolean(manualIdExpiration.trim()) &&
+        (manualIdHasNoExpiration || Boolean(manualIdExpiration.trim())) &&
         (!isMusicianSignup || Boolean(musicianVideoProof?.uploadId));
 
     const clearDiditSignupSession = useCallback(async (reason: string) => {
@@ -1604,6 +1609,8 @@ export default function SignupScreen() {
     const handleDocumentSelect = (documentKey: string) => {
         if (documentKey !== selectedDocumentKey) {
             void clearDiditSignupSession('document_changed');
+            setManualIdExpiration('');
+            setManualIdHasNoExpiration(false);
         }
         setSelectedDocumentKey(documentKey);
         setDocumentModalVisible(false);
@@ -1632,7 +1639,17 @@ export default function SignupScreen() {
         }
 
         setManualIdExpiration(day.dateString);
+        setManualIdHasNoExpiration(false);
         setManualExpirationCalendarVisible(false);
+    };
+
+    const handleManualNoExpirationToggle = () => {
+        const nextValue = !manualIdHasNoExpiration;
+        setManualIdHasNoExpiration(nextValue);
+        if (nextValue) {
+            setManualIdExpiration('');
+            setManualExpirationCalendarVisible(false);
+        }
     };
 
     /**
@@ -2231,6 +2248,7 @@ export default function SignupScreen() {
             hasManualFullName: Boolean(manualFullName.trim()),
             hasManualIdNumber: Boolean(manualIdNumber.trim()),
             hasManualIdExpiration: Boolean(manualIdExpiration.trim()),
+            hasManualIdNoExpiration: manualIdHasNoExpiration,
         });
         if (selectedDocumentOption.diditSupported) {
             logSignupFlow('manualSignup.blocked', {
@@ -2261,8 +2279,8 @@ export default function SignupScreen() {
 
         const enteredFullName = manualFullName.trim();
         const enteredIdNumber = manualIdNumber.trim();
-        const enteredIdExpiration = manualIdExpiration.trim();
-        const expirationDate = new Date(`${enteredIdExpiration}T00:00:00Z`);
+        const enteredIdExpiration = manualIdHasNoExpiration ? '' : manualIdExpiration.trim();
+        const expirationDate = enteredIdExpiration ? new Date(`${enteredIdExpiration}T00:00:00Z`) : null;
 
         if (!enteredFullName) {
             logSignupFlow('manualSignup.blocked', { reason: 'missing_full_name' });
@@ -2276,7 +2294,7 @@ export default function SignupScreen() {
             return;
         }
 
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(enteredIdExpiration) || Number.isNaN(expirationDate.getTime()) || expirationDate.toISOString().slice(0, 10) !== enteredIdExpiration) {
+        if (!manualIdHasNoExpiration && (!/^\d{4}-\d{2}-\d{2}$/.test(enteredIdExpiration) || !expirationDate || Number.isNaN(expirationDate.getTime()) || expirationDate.toISOString().slice(0, 10) !== enteredIdExpiration)) {
             logSignupFlow('manualSignup.blocked', {
                 reason: 'invalid_expiration_date',
                 enteredIdExpiration,
@@ -2285,7 +2303,7 @@ export default function SignupScreen() {
             return;
         }
 
-        if (enteredIdExpiration < getLocalDateInputValue()) {
+        if (!manualIdHasNoExpiration && enteredIdExpiration < getLocalDateInputValue()) {
             logSignupFlow('manualSignup.blocked', {
                 reason: 'expired_id',
                 enteredIdExpiration,
@@ -2322,7 +2340,8 @@ export default function SignupScreen() {
                 selectedRole,
                 selectedDocumentKey,
                 selectedDocumentLabel: selectedDocumentOption.label,
-                idExpiration: enteredIdExpiration,
+                idExpiration: manualIdHasNoExpiration ? null : enteredIdExpiration,
+                idHasNoExpiration: manualIdHasNoExpiration,
                 imageSummary: {
                     front: manualFrontImage ? { mimeType: manualFrontImage.mimeType, extension: manualFrontImage.extension } : null,
                     back: manualBackImage ? { mimeType: manualBackImage.mimeType, extension: manualBackImage.extension } : null,
@@ -2337,7 +2356,8 @@ export default function SignupScreen() {
                     role: selectedRole,
                     fullName: enteredFullName,
                     identityDocumentNumber: enteredIdNumber,
-                    idDocumentExpiry: enteredIdExpiration,
+                    idDocumentExpiry: manualIdHasNoExpiration ? null : enteredIdExpiration,
+                    idDocumentNoExpiration: manualIdHasNoExpiration,
                     documentType: selectedDocumentOption.label,
                     documentTypeKey: selectedDocumentOption.key,
                     documentCountry: 'PHL',
@@ -3722,15 +3742,20 @@ export default function SignupScreen() {
                                     <Ionicons name="calendar-outline" size={18} color={colors.textSecondary} style={styles.manualInfoIcon} />
                                     <TouchableOpacity
                                         activeOpacity={1}
-                                        onPress={() => setManualExpirationCalendarVisible(true)}
+                                        onPress={() => {
+                                            if (!manualIdHasNoExpiration) {
+                                                setManualExpirationCalendarVisible(true);
+                                            }
+                                        }}
                                         style={styles.manualInfoDateButton}
                                         accessibilityRole="button"
+                                        disabled={manualIdHasNoExpiration}
                                     >
                                         <Text
                                             numberOfLines={1}
                                             style={[
                                                 styles.manualInfoDateText,
-                                                { color: manualIdExpiration ? colors.text : colors.textSecondary },
+                                                { color: manualIdHasNoExpiration || manualIdExpiration ? colors.text : colors.textSecondary },
                                             ]}
                                         >
                                             {manualExpirationDateLabel}
@@ -3738,6 +3763,30 @@ export default function SignupScreen() {
                                     </TouchableOpacity>
                                     <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
                                 </View>
+                                <TouchableOpacity
+                                    activeOpacity={0.78}
+                                    onPress={handleManualNoExpirationToggle}
+                                    style={[
+                                        styles.manualNoExpirationToggle,
+                                        {
+                                            backgroundColor: manualIdHasNoExpiration
+                                                ? (isDark ? 'rgba(99,102,241,0.16)' : 'rgba(99,102,241,0.08)')
+                                                : 'transparent',
+                                            borderColor: manualIdHasNoExpiration ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
+                                        },
+                                    ]}
+                                    accessibilityRole="checkbox"
+                                    accessibilityState={{ checked: manualIdHasNoExpiration }}
+                                >
+                                    <Ionicons
+                                        name={manualIdHasNoExpiration ? 'checkbox-outline' : 'square-outline'}
+                                        size={20}
+                                        color={manualIdHasNoExpiration ? colors.primary : colors.textSecondary}
+                                    />
+                                    <Text style={[styles.manualNoExpirationText, { color: manualIdHasNoExpiration ? colors.primary : colors.textSecondary }]}>
+                                        This ID has no expiration date
+                                    </Text>
+                                </TouchableOpacity>
                             </View>
                         </View>
 
@@ -3773,10 +3822,9 @@ export default function SignupScreen() {
                         ref={manualExpirationSheetRef}
                         overlayLabel="SignupManualExpirationCalendarModal"
                         index={0}
-                        snapPoints={manualCalendarSnapPoints}
                         animationConfigs={bottomSheetAnimationConfigs}
                         animateOnMount
-                        enableDynamicSizing={false}
+                        enableDynamicSizing
                         enablePanDownToClose
                         backdropComponent={renderSignupSheetBackdrop}
                         backgroundStyle={{
@@ -3787,7 +3835,7 @@ export default function SignupScreen() {
                         handleComponent={null}
                         onDismiss={handleManualExpirationSheetDismiss}
                     >
-                        <View style={[styles.documentModalSheet, styles.manualCalendarSheet, safeModalPadding, { backgroundColor: bottomSheetSurfaceColor }]}>
+                        <BottomSheetView style={[styles.documentModalSheet, styles.manualCalendarSheet, safeModalPadding, { backgroundColor: bottomSheetSurfaceColor }]}>
                             <View style={styles.documentModalHeader}>
                                 <TouchableOpacity
                                     activeOpacity={1}
@@ -3825,7 +3873,7 @@ export default function SignupScreen() {
                                     }}
                                 />
                             </View>
-                        </View>
+                        </BottomSheetView>
                     </TrackedBottomSheetModal>
                 </View>
             );
@@ -4226,8 +4274,24 @@ const styles = StyleSheet.create({
         lineHeight: 18,
         fontFamily: 'Poppins_500Medium',
     },
+    manualNoExpirationToggle: {
+        minHeight: 42,
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 9,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    manualNoExpirationText: {
+        flex: 1,
+        fontSize: 12,
+        lineHeight: 16,
+        fontFamily: 'Poppins_500Medium',
+    },
     manualCalendarSheet: {
-        maxHeight: '78%',
+        flex: 0,
     },
     manualCalendarContainer: {
         paddingHorizontal: 12,

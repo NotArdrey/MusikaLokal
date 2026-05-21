@@ -1643,6 +1643,10 @@ serve(async (req: Request) => {
         // @ts-ignore
         gigApps.forEach((g: any) => {
           const normalizedStatus = (g.status || "").toLowerCase();
+          const requiresReconfirmation =
+            normalizedStatus === "pending" &&
+            g.system_status_reason === "system_reconfirm_required_terms_changed" &&
+            !!g.reconfirmation_due_at;
           const gig = g.gig;
           const viewer: GigApplicationAudienceMember = g.__viewer || {
             user_id: userId,
@@ -1672,6 +1676,10 @@ serve(async (req: Request) => {
             production_roster_id: g.production_roster_id,
             production_team_name: g.production_team?.name || null,
             raw_status: g.status,
+            reconfirmation_required_at: g.reconfirmation_required_at || null,
+            reconfirmation_due_at: g.reconfirmation_due_at || null,
+            system_status_reason: g.system_status_reason || null,
+            requires_reconfirmation: requiresReconfirmation,
             viewer_access: viewer.viewer_access,
             viewer_can_act: viewer.viewer_can_act,
             viewer_read_only_reason: viewer.viewer_read_only_reason || null,
@@ -1690,7 +1698,9 @@ serve(async (req: Request) => {
                 ?.media_url ||
               gig?.organizer?.avatar_url ||
               "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop",
-            status: getGigApplicationStatusLabel(normalizedStatus, g.status, g.completion_rate_penalty === true),
+            status: requiresReconfirmation
+              ? "Reconfirmation Required"
+              : getGigApplicationStatusLabel(normalizedStatus, g.status, g.completion_rate_penalty === true),
             type: getProductionApplicationType(g),
             isCancelled:
               normalizedStatus === "cancelled" ||
@@ -1699,7 +1709,9 @@ serve(async (req: Request) => {
             action:
               viewer.viewer_can_act === false || normalizedStatus === "accepted" || normalizedStatus === "approved"
                 ? "View Details"
-                : "Details",
+                : requiresReconfirmation
+                  ? "Reconfirm"
+                  : "Details",
             location: gig?.location,
             pitch_message: g.pitch_message,
             video_url: g.video_url,
@@ -1859,6 +1871,10 @@ serve(async (req: Request) => {
 
           productionApps?.forEach((app: any) => {
             const normalizedStatus = (app.status || "").toLowerCase();
+            const requiresReconfirmation =
+              normalizedStatus === "pending" &&
+              app.system_status_reason === "system_reconfirm_required_terms_changed" &&
+              !!app.reconfirmation_due_at;
             const gig = app.gig;
             const teamRole = teamRoleById.get(app.production_team_id) || "member";
             const canManageApplication =
@@ -1892,6 +1908,10 @@ serve(async (req: Request) => {
               production_roster_id: app.production_roster_id,
               production_team_name: app.production_team?.name || null,
               raw_status: app.status,
+              reconfirmation_required_at: app.reconfirmation_required_at || null,
+              reconfirmation_due_at: app.reconfirmation_due_at || null,
+              system_status_reason: app.system_status_reason || null,
+              requires_reconfirmation: requiresReconfirmation,
               viewer_access: canManageApplication ? "production_manager" : "group_member",
               viewer_can_act: canManageApplication,
               viewer_read_only_reason: canManageApplication
@@ -1908,7 +1928,9 @@ serve(async (req: Request) => {
                 app.production_team?.logo_url ||
                 gig?.organizer?.avatar_url ||
                 "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop",
-              status: getGigApplicationStatusLabel(normalizedStatus, app.status),
+              status: requiresReconfirmation
+                ? "Reconfirmation Required"
+                : getGigApplicationStatusLabel(normalizedStatus, app.status),
               type: getProductionApplicationType(app),
               isCancelled:
                 normalizedStatus === "cancelled" ||
@@ -1917,7 +1939,9 @@ serve(async (req: Request) => {
             action:
               !canManageApplication || normalizedStatus === "accepted" || normalizedStatus === "approved"
                 ? "View Details"
-                : "Details",
+                : requiresReconfirmation
+                  ? "Reconfirm"
+                  : "Details",
               location: gig?.location,
               pitch_message: app.pitch_message,
               video_url: app.video_url,
@@ -2013,6 +2037,11 @@ serve(async (req: Request) => {
 
           // Process accepted applications
           acceptedApps?.forEach((app: any) => {
+            const normalizedStatus = String(app.status || "").toLowerCase();
+            const requiresReconfirmation =
+              normalizedStatus === "pending" &&
+              app.system_status_reason === "system_reconfirm_required_terms_changed" &&
+              !!app.reconfirmation_due_at;
             const gig = gigs?.find((g: any) => g.id === app.gig_id);
             const dateStr = gig?.event_date || "TBA";
             const performerName =
@@ -2041,6 +2070,10 @@ serve(async (req: Request) => {
               production_roster_id: app.production_roster_id,
               production_team_name: app.production_team?.name || null,
               raw_status: app.status,
+              reconfirmation_required_at: app.reconfirmation_required_at || null,
+              reconfirmation_due_at: app.reconfirmation_due_at || null,
+              system_status_reason: app.system_status_reason || null,
+              requires_reconfirmation: requiresReconfirmation,
               viewer_access: staffContext ? "staff" : "organizer",
               viewer_can_act: staffCanAct,
               viewer_read_only_reason: staffCanAct ? null : "This staff account has view-only access.",
@@ -2055,9 +2088,11 @@ serve(async (req: Request) => {
                 app.applicant?.avatar_url ||
                 "https://picsum.photos/400/300",
               status:
-                app.status === "pending"
-                  ? "Action Required"
-                  : app.status === "accepted" || app.status === "approved"
+                requiresReconfirmation
+                  ? "Needs Reconfirmation"
+                  : app.status === "pending"
+                    ? "Action Required"
+                    : app.status === "accepted" || app.status === "approved"
                     ? "Confirmed"
                     : getGigApplicationStatusLabel(app.status, app.status, app.completion_rate_penalty === true),
               type: getProductionApplicationType(app),
@@ -3195,6 +3230,203 @@ serve(async (req: Request) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 201,
       });
+    }
+
+    if (action === "reconfirm_gig_terms") {
+      const { application_id, decision } = params;
+      const normalizedDecision = String(decision || "").trim().toLowerCase();
+
+      if (!application_id || !["accepted", "declined"].includes(normalizedDecision)) {
+        return new Response(
+          JSON.stringify({ error: "Invalid gig reconfirmation request" }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
+      const { data: targetApplication, error: targetError } = await supabaseAdmin
+        .from("gig_applications")
+        .select(
+          `
+            id,
+            applicant_id,
+            submitted_by_user_id,
+            group_id,
+            gig_id,
+            production_team_id,
+            production_roster_id,
+            status,
+            reconfirmation_required_at,
+            reconfirmation_due_at,
+            system_status_reason,
+            gig:gig_id(id, name, organizer_id, event_date),
+            group:group_id(id, name),
+            production_team:production_team_id(id, name),
+            production_roster:production_roster_id(
+              id,
+              entity_kind,
+              profile_id,
+              group_id,
+              roster_profile:profile_id(id, full_name),
+              roster_group:group_id(id, name)
+            )
+          `,
+        )
+        .eq("id", application_id)
+        .maybeSingle();
+
+      if (targetError) throw targetError;
+
+      if (!targetApplication) {
+        return new Response(JSON.stringify({ error: "Application not found" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 404,
+        });
+      }
+
+      const { audience } = await resolveGigApplicationAudience(
+        supabaseAdmin,
+        targetApplication,
+        { includeOrganizer: true },
+      );
+      const actorMember = audience.find((member) => member.user_id === authUser.id);
+      const canReconfirm =
+        targetApplication.applicant_id === authUser.id ||
+        targetApplication.submitted_by_user_id === authUser.id ||
+        (
+          actorMember?.viewer_can_act === true &&
+          ["applicant", "production_manager"].includes(actorMember.viewer_access)
+        );
+
+      if (!canReconfirm) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+
+      const requiresReconfirmation =
+        String(targetApplication.status || "").toLowerCase() === "pending" &&
+        targetApplication.system_status_reason === "system_reconfirm_required_terms_changed" &&
+        !!targetApplication.reconfirmation_due_at;
+
+      if (!requiresReconfirmation) {
+        return new Response(
+          JSON.stringify({ error: "This gig update no longer needs reconfirmation." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      const dueAt = new Date(targetApplication.reconfirmation_due_at);
+      const now = new Date();
+
+      if (!Number.isNaN(dueAt.getTime()) && dueAt <= now) {
+        await supabaseAdmin
+          .from("gig_applications")
+          .update({
+            status: "rejected",
+            reconfirmation_required_at: null,
+            reconfirmation_due_at: null,
+            system_status_reason: "system_reconfirm_timeout",
+            cancellation_reason: "Reconfirmation window expired.",
+            completion_rate_penalty: false,
+            updated_at: now.toISOString(),
+          })
+          .eq("id", targetApplication.id);
+
+        return new Response(
+          JSON.stringify({ error: "The reconfirmation window has expired." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      const accepted = normalizedDecision === "accepted";
+      const updatePayload = accepted
+        ? {
+            status: "accepted",
+            reconfirmation_required_at: null,
+            reconfirmation_due_at: null,
+            system_status_reason: null,
+            cancellation_reason: null,
+            completion_rate_penalty: false,
+            updated_at: now.toISOString(),
+          }
+        : {
+            status: "cancelled",
+            reconfirmation_required_at: null,
+            reconfirmation_due_at: null,
+            system_status_reason: "musician_declined_updated_terms",
+            cancellation_reason: "Musician declined updated gig terms.",
+            completion_rate_penalty: false,
+            updated_at: now.toISOString(),
+          };
+
+      const { data: updatedApplication, error: updateError } = await supabaseAdmin
+        .from("gig_applications")
+        .update(updatePayload)
+        .eq("id", targetApplication.id)
+        .select()
+        .maybeSingle();
+
+      if (updateError) throw updateError;
+
+      const organizerId = targetApplication.gig?.organizer_id;
+
+      if (organizerId && organizerId !== authUser.id) {
+        const organizerAudienceMember =
+          audience.find((member) => member.user_id === organizerId) || {
+            user_id: organizerId,
+            viewer_access: "organizer" as const,
+            viewer_can_act: true,
+            viewer_read_only_reason: null,
+          };
+        const performerName =
+          targetApplication.group?.name ||
+          targetApplication.production_roster?.roster_profile?.full_name ||
+          targetApplication.production_roster?.roster_group?.name ||
+          targetApplication.production_team?.name ||
+          "A musician";
+        const gigName = targetApplication.gig?.name || "your gig";
+
+        await insertNotificationIfMissing(supabaseAdmin, {
+          user_id: organizerId,
+          type: accepted ? "success" : "warning",
+          title: accepted ? "Gig Update Reconfirmed" : "Gig Update Declined",
+          message: accepted
+            ? `${performerName} reconfirmed the updated terms for ${gigName}.`
+            : `${performerName} declined the updated terms for ${gigName}.`,
+          image: null,
+          meta: buildNotificationRouteMeta(
+            "/bookings",
+            { tab: "Applicants" },
+            buildGigApplicationAudienceMeta(targetApplication, organizerAudienceMember, {
+              booking_id: targetApplication.id,
+              source_table: "gig_applications",
+              status: updatedApplication?.status || updatePayload.status,
+              event_type: accepted ? "gig_terms_reconfirmed" : "gig_terms_declined",
+            }),
+          ),
+        });
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          status: updatedApplication?.status || updatePayload.status,
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
     }
 
     // 3. UPDATE STATUS (Cancel/Confirm)
