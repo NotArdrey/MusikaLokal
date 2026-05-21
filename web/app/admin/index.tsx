@@ -1775,7 +1775,7 @@ export default function AdminDashboardPage() {
     showAlert(
       'info',
       'Withdrawal Details',
-      `${owner}\n${destination} ${account}\nStatus: ${formatWithdrawalStatus(withdrawal.status)}\nNet: ${formatCurrency(withdrawal.net_amount)}\nRef: ${reference}${withdrawal.source_type === 'platform' ? '\nManual record only; no external transfer was sent.' : ''}`,
+      `${owner}\n${destination} ${account}\nStatus: ${formatWithdrawalStatus(withdrawal.status)}\nWithdrawal amount: ${formatCurrency(withdrawal.amount)}\nNet: ${formatCurrency(withdrawal.net_amount)}\nRef: ${reference}${withdrawal.source_type === 'platform' ? '\nManual record only; no external transfer was sent.' : ''}`,
     );
   }, [showAlert]);
 
@@ -2318,7 +2318,7 @@ export default function AdminDashboardPage() {
               <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.3 }]}>Owner</Text>
               <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.5 }]}>Destination</Text>
               <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary }]}>Status</Text>
-              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right' }]}>Net Amount</Text>
+              <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right' }]}>Withdrawal Amount</Text>
               <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right', flex: 1.15 }]}>Actions</Text>
             </View>
 
@@ -2365,11 +2365,16 @@ export default function AdminDashboardPage() {
                       </View>
                     </View>
                     <View style={[styles.tableCell, { justifyContent: 'center' }]}>
-                      <Text style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_600SemiBold', textAlign: 'right' }}>
-                        {formatCurrency(withdrawal.net_amount)}
+                      <Text
+                        testID={`admin-withdrawal-amount-${withdrawal.id}`}
+                        accessibilityLabel={`admin-withdrawal-amount-${withdrawal.id}`}
+                        numberOfLines={1}
+                        style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_600SemiBold', textAlign: 'right' }}
+                      >
+                        {formatCurrency(withdrawal.amount)}
                       </Text>
-                      <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', textAlign: 'right' }}>
-                        {formatDateTime(withdrawal.processed_at)}
+                      <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', textAlign: 'right' }}>
+                        Net {formatCurrency(withdrawal.net_amount)} - {formatDateTime(withdrawal.processed_at)}
                       </Text>
                     </View>
                     <View style={[styles.tableCell, styles.withdrawalActionsCell]}>

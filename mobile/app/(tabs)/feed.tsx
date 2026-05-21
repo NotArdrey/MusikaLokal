@@ -6679,13 +6679,29 @@ export default function FeedScreen() {
     if (tab === "for_you") {
       const rankedCards = aiCards.filter((item) => item?.__feedKind === "ai_card");
       const socialPosts = sortFeedItemsNewestFirst(posts.filter((item) => item?.__feedKind !== "ai_card"));
+      const visibleRecommendationCards = isFan
+        ? sortFanRecommendationCards(filterFanVisibleFeedItems(rankedCards))
+        : rankedCards;
+      const featuredRecommendationCards = visibleRecommendationCards.slice(0, 2);
+      const remainingRecommendationCards = visibleRecommendationCards.slice(2);
+      const leadPostCount = socialPosts.length > 0 ? 1 : 0;
+      const leadPosts = socialPosts.slice(0, leadPostCount);
+      const remainingPosts = socialPosts.slice(leadPostCount);
+
       if (isFan) {
         return dedupeFeedItems([
-          ...socialPosts,
-          ...sortFanRecommendationCards(filterFanVisibleFeedItems(rankedCards)),
+          ...leadPosts,
+          ...featuredRecommendationCards,
+          ...remainingPosts,
+          ...remainingRecommendationCards,
         ]);
       }
-      return dedupeFeedItems([...socialPosts, ...rankedCards]);
+      return dedupeFeedItems([
+        ...leadPosts,
+        ...featuredRecommendationCards,
+        ...remainingPosts,
+        ...remainingRecommendationCards,
+      ]);
     }
     if (tab === "talent") {
       return dedupeFeedItems(aiCards);

@@ -19,7 +19,6 @@ import {
     TouchableOpacity,
     View
 } from "react-native";
-import BottomModal from "../src/components/BottomModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import GroupInviteSection from "../src/components/GroupInviteSection";
 import PlaylistSelectionSection from "../src/components/PlaylistSelectionSection";
@@ -307,13 +306,6 @@ export default function EditGroupScreen() {
     groupTypeSheetRef.current?.dismiss();
   }, [groupTypeModalVisible]);
 
-  // Leadership Transfer State
-  const [transferModalVisible, setTransferModalVisible] = useState(false);
-  const [groupMembers, setGroupMembers] = useState<any[]>([]);
-  const [pendingTransfer, setPendingTransfer] = useState<any>(null);
-  const [selectedNewLeader, setSelectedNewLeader] = useState<any>(null);
-  const [transferMessage, setTransferMessage] = useState("");
-  const [isTransferring, setIsTransferring] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [groupOwnerId, setGroupOwnerId] = useState<string | null>(null);
   const [initialGroupType, setInitialGroupType] = useState<string>(mapDbGroupTypeToUiGroupType("band"));
@@ -896,7 +888,7 @@ export default function EditGroupScreen() {
       };
 
       // Direct update to groups table
-      const { data: updatedGroup, error } = await supabase
+      const { data: updatedGroups, error } = await supabase
         .from('groups')
         .update({
           name: payload.name,
@@ -909,15 +901,18 @@ export default function EditGroupScreen() {
         })
         .eq('id', groupId)
         .eq('owner_id', user.id)
-        .select('id')
-        .single();
+        .select('id');
+      const updatedGroup = Array.isArray(updatedGroups) ? updatedGroups[0] : null;
 
       if (error || !updatedGroup) {
         logActionError("edit_group.update_base_failed", error, {
           groupId,
           userId: user.id,
         });
-        throw new Error(`Failed to update group: ${formatSupabaseError(error)}`);
+        const updateMessage = error
+          ? formatSupabaseError(error)
+          : "No group was updated. Make sure you are still the group owner.";
+        throw new Error(`Failed to update group: ${updateMessage}`);
       }
 
       const { error: deleteRosterError } = await supabase
@@ -1410,158 +1405,6 @@ export default function EditGroupScreen() {
       ],
     );
   };
-
-  // ============================================================
-  // Leadership Transfer Functions
-  // ============================================================
-
-  // Fetch actual group members from group_members table
-  const fetchGroupMembers = async () => {
-    if (!id) return;
-
-    try {
-      const groupId = Array.isArray(id) ? id[0] : id;
-      const { data, error } = await supabase
-        .from("group_members")
-        .select("user_id, role, profiles:user_id(id, full_name, avatar_url)")
-        .eq("group_id", groupId);
-
-      if (error) {
-        return;
-      }
-
-      // Only include members who aren't the current user (can't transfer to yourself)
-      const filteredMembers = (data || [])
-        .filter((m: any) => m.user_id !== currentUserId)
-        .map((m: any) => ({
-          user_id: m.user_id,
-          role: m.role,
-          full_name: m.profiles?.full_name || "Unknown",
-          avatar_url: m.profiles?.avatar_url,
-        }));
-
-      setGroupMembers(filteredMembers);
-    } catch (e) {
-      console.error("Error fetching group members:", e);
-    }
-  };
-
-  // Fetch pending transfer request for this group
-  const fetchPendingTransfer = async () => {
-    if (!id) return;
-
-    try {
-      const groupId = Array.isArray(id) ? id[0] : id;
-      const { data, error } = await supabase
-        .from("leadership_transfer_requests")
-        .select("*, to_user:to_user_id(full_name, avatar_url)")
-        .eq("group_id", groupId)
-        .eq("status", "pending")
-        .maybeSingle();
-
-      if (error) {
-        return;
-      }
-
-      setPendingTransfer(data);
-    } catch (e) {
-      console.error("Error fetching pending transfer:", e);
-    }
-  };
-
-  // Initiate leadership transfer
-  const initiateTransfer = async () => {
-    if (!selectedNewLeader || !id || !currentUserId) return;
-
-    setIsTransferring(true);
-    try {
-      const groupId = Array.isArray(id) ? id[0] : id;
-
-      const { error } = await supabase
-        .rpc("initiate_leadership_transfer", {
-          p_group_id: groupId,
-          p_to_user_id: selectedNewLeader.user_id,
-          p_message: transferMessage || null,
-        });
-
-      if (error) {
-        logActionError("edit_group.create_transfer_failed", error, {
-          groupId,
-          toUserId: selectedNewLeader.user_id,
-        });
-        throw new Error(`Failed to send transfer request: ${formatSupabaseError(error)}`);
-      }
-
-      showAlert(
-        "success",
-        "Request Sent",
-        `Leadership transfer request sent to ${selectedNewLeader.full_name}. They must accept to complete the transfer.`,
-      );
-
-      // Reset and refresh
-      setTransferModalVisible(false);
-      setSelectedNewLeader(null);
-      setTransferMessage("");
-      fetchPendingTransfer();
-    } catch (e) {
-      logActionError("edit_group.initiate_transfer_failed", e);
-      showAlert(
-        "warning",
-        "Transfer Failed",
-        `Failed to send transfer request: ${formatSupabaseError(e)}`,
-      );
-    } finally {
-      setIsTransferring(false);
-    }
-  };
-
-  // Cancel pending transfer
-  const cancelTransfer = async () => {
-    if (!pendingTransfer) return;
-
-    showAlert(
-      "warning",
-      "Cancel Transfer",
-      "Are you sure you want to cancel this leadership transfer request?",
-      [
-        { text: "No", style: "cancel" },
-        {
-          text: "Yes, Cancel",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const { error } = await supabase.rpc(
-                "cancel_leadership_transfer",
-                {
-                  request_id: pendingTransfer.id,
-                },
-              );
-
-              if (error) throw error;
-
-              showAlert(
-                "success",
-                "Cancelled",
-                "Transfer request has been cancelled.",
-              );
-              setPendingTransfer(null);
-            } catch (e) {
-              console.error("Error cancelling transfer:", e);
-              showAlert("warning", "Couldn't Cancel Transfer", "Failed to cancel transfer request.");
-            }
-          },
-        },
-      ],
-    );
-  };
-
-  // Fetch group members and pending transfer when group loads
-  useEffect(() => {
-    if (authorized && id && currentUserId) {
-      fetchGroupMembers();
-      fetchPendingTransfer();
-    }
-  }, [authorized, id, currentUserId]);
 
   const renderSectionHeader = (
     title: string,
@@ -2339,85 +2182,6 @@ export default function EditGroupScreen() {
             disabled={saving}
           />
 
-          {/* Leadership Transfer Section */}
-          {renderSectionHeader("Leadership", "shield-checkmark")}
-
-          {/* Pending Transfer Warning */}
-          {pendingTransfer && (
-            <View
-              style={[
-                styles.warningBox,
-                { backgroundColor: "#F59E0B20", borderColor: "#F59E0B" },
-              ]}
-            >
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 8,
-                  flex: 1,
-                minWidth: 150 }}
-              >
-                <Ionicons name="time-outline" size={20} color="#F59E0B" />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.warningTitle, { color: colors.text }]}>
-                    Transfer Pending
-                  </Text>
-                  <Text
-                    style={[
-                      styles.warningText,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    Waiting for {pendingTransfer.to_user?.full_name || "member"}{" "}
-                    to accept
-                  </Text>
-                </View>
-              </View>
-              <TouchableOpacity activeOpacity={1}
-                onPress={cancelTransfer}
-                style={styles.cancelTransferButton}
-              >
-                <Text
-                  style={{
-                    color: "#EF4444",
-                    fontFamily: "Poppins_600SemiBold",
-                    fontSize: 12,
-                  }}
-                >
-                  Cancel
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Transfer Leadership Button */}
-          {!pendingTransfer && (
-            <TouchableOpacity activeOpacity={1}
-              style={[styles.transferButton, { borderColor: "#F59E0B" }]}
-              onPress={() => {
-                if (groupMembers.length === 0) {
-                  showAlert(
-                    "info",
-                    "No Eligible Members",
-                    "There are no other members in the group_members table to transfer leadership to. Add members to the group first.",
-                  );
-                  return;
-                }
-                setTransferModalVisible(true);
-              }}
-            >
-              <Ionicons name="swap-horizontal" size={20} color="#F59E0B" />
-              <Text style={[styles.transferButtonText, { color: "#F59E0B" }]}>
-                Transfer Leadership
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          <Text style={[styles.transferHint, { color: colors.textSecondary }]}>
-            Transfer ownership requires the new leader to accept the request.
-          </Text>
-
           <View style={styles.footerActions}>
             {(remainingMemberCount > 0 || disableSaveForMissingInstruments) && (
               <Text
@@ -2511,170 +2275,6 @@ export default function EditGroupScreen() {
           latitude && longitude ? { lat: latitude, lng: longitude } : undefined
         }
       />
-
-      {/* Leadership Transfer Modal */}
-      <BottomModal
-        visible={transferModalVisible}
-        overlayLabel="EditGroupTransferLeadershipModal"
-        onClose={() => setTransferModalVisible(false)}
-      >
-          <View
-            style={[
-              styles.transferModalContent,
-              {
-                backgroundColor: colors.background,
-                borderTopLeftRadius: 24,
-                borderTopRightRadius: 24,
-              },
-            ]}
-          >
-            <Text style={[styles.transferModalTitle, { color: colors.text }]}>
-              Transfer Leadership
-            </Text>
-            <Text
-              style={[
-                styles.transferModalSubtitle,
-                { color: colors.textSecondary },
-              ]}
-            >
-              Select a group member to become the new leader
-            </Text>
-
-            {/* Member List */}
-            <ScrollView
-              style={{ maxHeight: 300 }}
-              showsVerticalScrollIndicator={false}
-            >
-              {groupMembers.length === 0 ? (
-                <Text
-                  style={{
-                    color: colors.textSecondary,
-                    textAlign: "center",
-                    paddingVertical: 24,
-                  }}
-                >
-                  No other members available. Add members to the group first.
-                </Text>
-              ) : (
-                groupMembers.map((member) => (
-                  <TouchableOpacity activeOpacity={1}
-                    key={member.user_id}
-                    style={[
-                      styles.memberSelectItem,
-                      {
-                        backgroundColor:
-                          selectedNewLeader?.user_id === member.user_id
-                            ? colors.primary + "20"
-                            : colors.surface,
-                        borderColor:
-                          selectedNewLeader?.user_id === member.user_id
-                            ? colors.primary
-                            : "transparent",
-                      },
-                    ]}
-                    onPress={() => setSelectedNewLeader(member)}
-                  >
-                    <ProfileAvatar
-                      uri={member.avatar_url}
-                      style={[
-                        styles.memberAvatar,
-                        { backgroundColor: colors.border },
-                      ]}
-                      backgroundColor={isDark ? "#374151" : "#E5E7EB"}
-                      iconColor={colors.textSecondary}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.memberName, { color: colors.text }]}>
-                        {member.full_name}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.memberRole,
-                          { color: colors.textSecondary },
-                        ]}
-                      >
-                        {member.role === "admin" ? "Admin" : "Member"}
-                      </Text>
-                    </View>
-                    {selectedNewLeader?.user_id === member.user_id && (
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={24}
-                        color={colors.primary}
-                      />
-                    )}
-                  </TouchableOpacity>
-                ))
-              )}
-            </ScrollView>
-
-            {/* Optional Message */}
-            {selectedNewLeader && (
-              <TextInput
-                placeholder="Add a message (optional)"
-                placeholderTextColor={colors.textSecondary}
-                value={transferMessage}
-                onChangeText={setTransferMessage}
-                multiline
-                style={[
-                  styles.transferMessageInput,
-                  {
-                    borderColor: colors.border,
-                    color: colors.text,
-                    backgroundColor: colors.inputBackground,
-                  },
-                ]}
-              />
-            )}
-
-            {/* Actions */}
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 16 }}>
-              <TouchableOpacity activeOpacity={1}
-                style={[
-                  styles.cancelButton,
-                  { flex: 1, borderColor: colors.border },
-                ]}
-                onPress={() => {
-                  setTransferModalVisible(false);
-                  setSelectedNewLeader(null);
-                  setTransferMessage("");
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily: "Poppins_600SemiBold",
-                    color: colors.text,
-                  }}
-                >
-                  Cancel
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.transferConfirmButton,
-                  {
-                    flex: 1,
-                    backgroundColor: selectedNewLeader
-                      ? "#F59E0B"
-                      : colors.border,
-                  },
-                ]}
-                onPress={initiateTransfer}
-                disabled={!selectedNewLeader || isTransferring}
-                activeOpacity={!selectedNewLeader || isTransferring ? 1 : 0.78}
-              >
-                {isTransferring ? (
-                  <ActivityIndicator color="white" size="small" />
-                ) : (
-                  <Text style={styles.transferConfirmButtonText}>
-                    Send Request
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-      </BottomModal>
 
       <TrackedBottomSheetModal
         ref={groupTypeSheetRef}
@@ -2977,104 +2577,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 16,
     borderWidth: 1,
-  },
-  // Leadership Transfer Styles
-  warningBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 16,
-  },
-  warningTitle: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 14,
-  },
-  warningText: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 12,
-  },
-  cancelTransferButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  transferButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    marginBottom: 8,
-  },
-  transferButtonText: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 14,
-  },
-  transferHint: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 12,
-    textAlign: "center",
-    marginBottom: 16,
-  },
-  transferModalContent: {
-    padding: 24,
-  },
-  transferModalTitle: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 18,
-    marginBottom: 8,
-  },
-  transferModalSubtitle: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 14,
-    marginBottom: 24,
-  },
-  memberSelectItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 8,
-    borderWidth: 2,
-  },
-  memberAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    marginRight: 12,
-  },
-  memberName: {
-    fontFamily: "Poppins_500Medium",
-    fontSize: 14,
-  },
-  memberRole: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 12,
-  },
-  transferMessageInput: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 16,
-    minHeight: 80,
-    textAlignVertical: "center",
-    fontFamily: "Poppins_400Regular",
-  },
-  transferConfirmButton: {
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 16,
-  },
-  transferConfirmButtonText: {
-    color: "white",
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 14,
   },
   typeButton: {
     paddingVertical: 16,

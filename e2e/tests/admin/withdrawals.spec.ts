@@ -104,6 +104,7 @@ test.describe('admin platform withdrawals CRUD', () => {
     if (error) throw error;
 
     await expect(page.getByTestId(`admin-withdrawal-row-${latestWithdrawal.id}`)).toBeVisible({ timeout: 45_000 });
+    await expect(page.getByTestId(`admin-withdrawal-amount-${latestWithdrawal.id}`)).toContainText('350.00');
     await page.getByTestId(`admin-withdrawal-details-${latestWithdrawal.id}`).click();
     await expect(page.getByText('Withdrawal Details')).toBeVisible();
   });
