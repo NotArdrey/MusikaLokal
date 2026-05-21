@@ -148,6 +148,7 @@ export default function AdminStationsPage() {
   const [stationGenre, setStationGenre] = useState('');
   const [stationIsLive, setStationIsLive] = useState(true);
   const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<string[]>([]);
+  const [playlistSearch, setPlaylistSearch] = useState('');
   const [deleteTargetStation, setDeleteTargetStation] = useState<{ id: string; name: string } | null>(null);
 
   const invokePlaylistAction = useCallback(async (body: Record<string, unknown>) => {
@@ -283,6 +284,20 @@ export default function AdminStationsPage() {
     });
   }, [editingSource, stationPlaylistOptions]);
 
+  const filteredEditorPlaylistOptions = useMemo(() => {
+    const query = playlistSearch.trim().toLowerCase();
+    if (!query) return editorPlaylistOptions;
+
+    return editorPlaylistOptions.filter((playlist: any) => (
+      [
+        playlist?.title,
+        playlist?.source_name,
+        playlist?.genre,
+        playlist?.visibility,
+      ].some((value) => String(value || '').toLowerCase().includes(query))
+    ));
+  }, [editorPlaylistOptions, playlistSearch]);
+
   const hasStations = stations.length > 0;
   const hasEligibleStationSources = manualStationSources.length > 0;
   const isStationEditorReady = selectedPlaylistIds.length > 0;
@@ -299,6 +314,7 @@ export default function AdminStationsPage() {
     setStationGenre(source?.station?.genre || source?.genre || '');
     setStationIsLive(source?.station?.is_active !== false);
     setSelectedPlaylistIds(getDefaultSelectedPlaylistIds(source));
+    setPlaylistSearch('');
   }, []);
 
   const openAddStation = useCallback(() => {
@@ -324,6 +340,7 @@ export default function AdminStationsPage() {
   const closeEditor = useCallback(() => {
     setEditingSource(null);
     setSelectedPlaylistIds([]);
+    setPlaylistSearch('');
   }, []);
 
   const togglePlaylist = useCallback((playlistId: string) => {
@@ -970,30 +987,73 @@ export default function AdminStationsPage() {
             <Text style={{ color: colors.textSecondary, fontSize: 12, lineHeight: 18, marginBottom: 10 }}>
               Pick one or more playlists from any owner. They play as one continuous queue and loop after the final track.
             </Text>
+            <View style={[styles.modalSearchBox, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
+              <Ionicons name="search-outline" size={18} color={colors.textSecondary} />
+              <TextInput
+                testID="admin-station-playlist-search-input"
+                accessibilityLabel="admin-station-playlist-search-input"
+                value={playlistSearch}
+                onChangeText={setPlaylistSearch}
+                placeholder="Search playlists or owners"
+                placeholderTextColor={colors.textSecondary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={[styles.modalSearchInput, { color: colors.text }]}
+              />
+              {playlistSearch.trim().length > 0 ? (
+                <TouchableOpacity
+                  testID="admin-station-playlist-search-clear-button"
+                  accessibilityLabel="admin-station-playlist-search-clear-button"
+                  activeOpacity={1}
+                  onPress={() => setPlaylistSearch('')}
+                  style={styles.searchClearButton}
+                >
+                  <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
             <ScrollView style={styles.playlistPicker}>
-              {editorPlaylistOptions.map((playlist: any) => {
-                const selected = selectedPlaylistIds.includes(playlist.id);
-                return (
-                  <TouchableOpacity
-                    testID={`admin-station-playlist-${playlist.id}`}
-                    accessibilityLabel={`admin-station-playlist-${playlist.id}`}
-                    key={playlist.id}
-                    activeOpacity={1}
-                    onPress={() => togglePlaylist(playlist.id)}
-                    style={[styles.playlistOption, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '14' : 'transparent' }]}
-                  >
-                    <Ionicons name={selected ? 'checkbox' : 'square-outline'} size={20} color={selected ? colors.primary : colors.textSecondary} />
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }} numberOfLines={1}>
-                        {playlist.title || 'Untitled playlist'}
-                      </Text>
-                      <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
-                        {playlist.source_name || 'Unknown source'} - {playlist.track_count || 0} track{playlist.track_count === 1 ? '' : 's'}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+              {filteredEditorPlaylistOptions.length > 0 ? (
+                filteredEditorPlaylistOptions.map((playlist: any) => {
+                  const selected = selectedPlaylistIds.includes(playlist.id);
+                  return (
+                    <TouchableOpacity
+                      testID={`admin-station-playlist-${playlist.id}`}
+                      accessibilityLabel={`admin-station-playlist-${playlist.id}`}
+                      key={playlist.id}
+                      activeOpacity={1}
+                      onPress={() => togglePlaylist(playlist.id)}
+                      style={[styles.playlistOption, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '14' : 'transparent' }]}
+                    >
+                      <Ionicons name={selected ? 'checkbox' : 'square-outline'} size={20} color={selected ? colors.primary : colors.textSecondary} />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }} numberOfLines={1}>
+                          {playlist.title || 'Untitled playlist'}
+                        </Text>
+                        <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
+                          {playlist.source_name || 'Unknown source'} - {playlist.track_count || 0} track{playlist.track_count === 1 ? '' : 's'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
+                <View
+                  testID="admin-station-playlist-search-empty"
+                  accessibilityLabel="admin-station-playlist-search-empty"
+                  style={[styles.sourceEmpty, { borderColor: colors.border, backgroundColor: colors.primary + '10' }]}
+                >
+                  <Ionicons name="search-outline" size={28} color={colors.primary} />
+                  <Text style={{ color: colors.text, fontSize: 15, fontWeight: '800', marginTop: 8 }}>
+                    {editorPlaylistOptions.length > 0 ? 'No matching playlists' : 'No playlists available'}
+                  </Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginTop: 5, lineHeight: 19 }}>
+                    {editorPlaylistOptions.length > 0
+                      ? 'Try a playlist title, owner name, genre, or visibility.'
+                      : 'Create a public playlist first, then add it to the station.'}
+                  </Text>
+                </View>
+              )}
             </ScrollView>
 
             <View style={styles.modalActions}>

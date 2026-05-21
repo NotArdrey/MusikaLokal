@@ -38,9 +38,10 @@ interface RemoteUploadSafetyResult {
   reason?: string;
 }
 
-const SAFETY_CACHE_PREFIX = "upload_safety_screen:v7:";
+const SAFETY_CACHE_PREFIX = "upload_safety_screen:v8:";
 const SAFETY_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SAFETY_UNAVAILABLE_CACHE_TTL_MS = 5 * 60 * 1000;
+const SAFETY_OWNERSHIP_REVIEW_CACHE_TTL_MS = 30 * 1000;
 const SCREENING_FUNCTION_NAME = "upload-safety-screen";
 const MAX_CANDIDATES_PER_REQUEST = 10;
 const SCREENING_UNAVAILABLE_BLOCK_MESSAGE =
@@ -52,13 +53,15 @@ const SAFETY_TIMEOUT_MESSAGE =
 const SAFETY_GENERIC_BLOCK_MESSAGE =
   "This media did not pass safety screening. Please choose another file.";
 const AUDIO_COPYRIGHT_FALLBACK_MESSAGE =
-  "This track appears to be copyrighted. Please upload original music or a track you have permission to share.";
+  "This track appears to match a released recording. If this is your song, an ownership request has been sent to Identity Review for admin approval.";
 const PROVIDER_ERROR_PATTERN =
   /\b(groq|openai|gemini|api error|visual review error|image safety screening failed|rate_limit|rate limit|429|tokens per minute|tpm|organization|service tier|billing|console\.groq\.com|internal server error)\b/i;
 const TEMPORARY_BLOCK_REASON_PATTERN =
   /\b(temporarily unavailable|unavailable|busy|too long|timed out|timeout|try again|could not verify|failed|not configured|incomplete|did not return)\b/i;
+const OWNERSHIP_REVIEW_REASON_PATTERN =
+  /\b(ownership request|ownership review|identity review|admin approval)\b/i;
 const AUDIO_COPYRIGHT_REASON_PATTERN =
-  /this audio appears to match\s+(.+?)(?:;\s*(?:match score|rights owner|ISRC)|\. Please upload|$)/i;
+  /this audio appears to match\s+(.+?)(?:;\s*(?:match score|rights owner|ISRC)|\. (?:Please upload|If this is your song)|$)/i;
 
 const memoryDecisionCache = new Map<string, CachedUploadSafetyDecision>();
 const inFlightDecisionCache = new Map<string, Promise<CachedUploadSafetyDecision>>();
@@ -167,6 +170,10 @@ const getDecisionCacheTtlMs = (allowed: boolean, reason?: string): number => {
     return SAFETY_CACHE_TTL_MS;
   }
 
+  if (OWNERSHIP_REVIEW_REASON_PATTERN.test(reason || "")) {
+    return SAFETY_OWNERSHIP_REVIEW_CACHE_TTL_MS;
+  }
+
   return TEMPORARY_BLOCK_REASON_PATTERN.test(reason || "")
     ? SAFETY_UNAVAILABLE_CACHE_TTL_MS
     : SAFETY_CACHE_TTL_MS;
@@ -197,7 +204,7 @@ const formatAudioCopyrightReason = (reason: string): string => {
     return AUDIO_COPYRIGHT_FALLBACK_MESSAGE;
   }
 
-  return `This track appears to match ${matchDescription}. Please upload original music or a track you have permission to share.`;
+  return `This track appears to match ${matchDescription}. If this is your song, an ownership request has been sent to Identity Review for admin approval.`;
 };
 
 const sanitizeUploadSafetyReason = (rawReason?: string): string => {

@@ -32,6 +32,9 @@ type AuditContext = {
   source: string;
 };
 
+const BOOKING_REQUEST_SELECT =
+  "id, created_at, sender_id, receiver_id, group_id, message, status, event_details, attachment_url, studio_id";
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -555,7 +558,7 @@ async function fetchRelatedActivity(client: any, resourceType: ResourceType, res
       fetchAllStudioBookingsForStudio(client, rowId),
       client
         .from("booking_requests")
-        .select("id, created_at, sender_id, receiver_id, group_id, message, status, event_details, attachment_url, studio_id")
+        .select(BOOKING_REQUEST_SELECT)
         .eq("studio_id", rowId)
         .order("created_at", { ascending: false })
         .limit(50),
@@ -576,13 +579,13 @@ async function fetchRelatedActivity(client: any, resourceType: ResourceType, res
         .limit(75),
       client
         .from("booking_requests")
-        .select("id, created_at, sender_id, receiver_id, group_id, message, status, event_details, attachment_url, studio_id")
+        .select(BOOKING_REQUEST_SELECT)
         .contains("event_details", { listing_id: rowId })
         .order("created_at", { ascending: false })
         .limit(50),
       client
         .from("booking_requests")
-        .select("id, created_at, sender_id, receiver_id, group_id, message, status, event_details, attachment_url, studio_id")
+        .select(BOOKING_REQUEST_SELECT)
         .contains("event_details", { sender_entity_id: rowId })
         .order("created_at", { ascending: false })
         .limit(50),
@@ -598,7 +601,13 @@ async function fetchRelatedActivity(client: any, resourceType: ResourceType, res
     }
     bookingRequests = Array.from(requestsById.values());
   } else {
-    const [applicationsResult, requestsResult] = await Promise.all([
+    const productionRequestMatchers = [
+      { production_team_id: rowId },
+      { sender_entity_id: rowId },
+      { receiver_entity_id: rowId },
+      { listing_id: rowId },
+    ];
+    const [applicationsResult, ...requestResults] = await Promise.all([
       client
         .from("gig_applications")
         .select(
@@ -607,18 +616,26 @@ async function fetchRelatedActivity(client: any, resourceType: ResourceType, res
         .eq("production_team_id", rowId)
         .order("created_at", { ascending: false })
         .limit(75),
-      client
-        .from("booking_requests")
-        .select("id, created_at, sender_id, receiver_id, group_id, message, status, event_details, attachment_url, studio_id")
-        .contains("event_details", { production_team_id: rowId })
-        .order("created_at", { ascending: false })
-        .limit(75),
+      ...productionRequestMatchers.map((matcher) =>
+        client
+          .from("booking_requests")
+          .select(BOOKING_REQUEST_SELECT)
+          .contains("event_details", matcher)
+          .order("created_at", { ascending: false })
+          .limit(75),
+      ),
     ]);
 
     if (applicationsResult.error) throw applicationsResult.error;
-    if (requestsResult.error) throw requestsResult.error;
     gigApplications = applicationsResult.data || [];
-    bookingRequests = requestsResult.data || [];
+    const requestsById = new Map<string, any>();
+    for (const result of requestResults) {
+      if (result.error) throw result.error;
+      for (const row of result.data || []) {
+        if (row?.id) requestsById.set(row.id, row);
+      }
+    }
+    bookingRequests = Array.from(requestsById.values());
   }
 
   const profileIds = [

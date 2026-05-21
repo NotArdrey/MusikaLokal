@@ -178,6 +178,8 @@ const splitGenres = (raw: string | null | undefined): string[] => {
 const HOME_FEED_CANDIDATE_SOURCE_LIMIT = 48;
 const HOME_FEED_GROQ_CANDIDATE_LIMIT = 18;
 const HOME_FEED_GROQ_RETURN_LIMIT = 12;
+const HOME_FEED_GROQ_TOTAL_TIMEOUT_MS = 4500;
+const HOME_FEED_GROQ_REQUEST_TIMEOUT_MS = 3500;
 const HOME_FEED_ACTIVITY_LOOKBACK_DAYS = 45;
 const HOME_FEED_ACTIVITY_EVENT_LIMIT = 80;
 const HOME_FEED_ACTIVITY_TERM_LIMIT = 18;
@@ -586,8 +588,16 @@ const rankWithGroq = async (
     ].join("\n");
 
     try {
+        const deadline = Date.now() + HOME_FEED_GROQ_TOTAL_TIMEOUT_MS;
+
         for (const model of GROQ_MODEL_CANDIDATES) {
             for (const useJsonMode of [true, false]) {
+                const remainingBudgetMs = deadline - Date.now();
+                if (remainingBudgetMs <= 0) {
+                    console.warn("home-feed groq budget exhausted before request", { mode });
+                    return null;
+                }
+
                 const requestPayload: Record<string, unknown> = {
                     model,
                     messages: [
@@ -602,14 +612,30 @@ const rankWithGroq = async (
                     requestPayload.response_format = { type: "json_object" };
                 }
 
-                const response = await fetch(GROQ_API_URL, {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${groqApiKey}`,
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify(requestPayload),
-                });
+                const controller = new AbortController();
+                const timeoutMs = Math.min(HOME_FEED_GROQ_REQUEST_TIMEOUT_MS, remainingBudgetMs);
+                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+                let response: Response;
+
+                try {
+                    response = await fetch(GROQ_API_URL, {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${groqApiKey}`,
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify(requestPayload),
+                        signal: controller.signal,
+                    });
+                } catch (error: any) {
+                    if (error?.name === "AbortError") {
+                        console.warn("home-feed groq request timed out", { model, useJsonMode, timeoutMs });
+                        return null;
+                    }
+                    throw error;
+                } finally {
+                    clearTimeout(timeoutId);
+                }
 
                 if (!response.ok) {
                     const errorBody = await response.text();

@@ -299,10 +299,7 @@ const buildStationQueue = async (stationData: any): Promise<RadioQueueTrack[]> =
       : stationData?.creator?.full_name || stationData?.name || "MusikaLokal";
     const artwork = resolveRadioMediaUrl(
       entry.item?.cover_image_url ||
-      entry.playlist?.cover_image_url ||
-      stationData?.cover_image_url ||
-      stationData?.creator?.avatar_url ||
-      entry.slot?.image_url,
+      entry.playlist?.cover_image_url,
     );
 
     return {

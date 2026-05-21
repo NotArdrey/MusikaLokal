@@ -228,7 +228,9 @@ export default function PlaylistDetailsScreen() {
           {items.length > 0 ? items.map((item: any, idx: number) => (
             <View key={item.id} style={[styles.trackRow, { borderBottomColor: borderCol }]}>
               <Text style={{ color: colors.textSecondary, fontSize: 14, width: 28 }}>{idx + 1}</Text>
-              {item.thumbnail_url && <CachedImage uri={item.thumbnail_url } style={styles.trackThumb} />}
+              {(item.cover_image_url || item.thumbnail_url) && (
+                <CachedImage uri={item.cover_image_url || item.thumbnail_url} style={styles.trackThumb} />
+              )}
               <View style={{ flex: 1, marginLeft: 10 }}>
                 <Text style={{ color: colors.text, fontSize: 14, fontWeight: "600" }} numberOfLines={1}>{item.title || "Untitled"}</Text>
                 {item.artist_name && <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{item.artist_name}</Text>}

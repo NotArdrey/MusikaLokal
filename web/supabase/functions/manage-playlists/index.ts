@@ -98,6 +98,11 @@ function normalizeOptionalAudioUrl(value: unknown): string | null {
   return trimmed;
 }
 
+function normalizeOptionalImageUrl(value: unknown): string | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed || null;
+}
+
 function normalizePositiveInteger(
   value: unknown,
   fallback: number,
@@ -2061,6 +2066,7 @@ Deno.serve(async (req: Request) => {
             title: String(item?.title || "").trim(),
             artist_name: item?.artist_name ? String(item.artist_name).trim() : null,
             audio_url: normalizeOptionalAudioUrl(item?.audio_url),
+            cover_image_url: normalizeOptionalImageUrl(item?.cover_image_url),
             duration_seconds: normalizeOptionalDurationSeconds(item?.duration_seconds),
             teaser_asset_id: item?.teaser_asset_id || null,
             position: i,
@@ -2143,11 +2149,12 @@ Deno.serve(async (req: Request) => {
 
       const { data: playlistItemsForCleanup } = await supabaseAdmin
         .from("playlist_items")
-        .select("audio_url, teaser:playlist_teaser_assets!teaser_asset_id(storage_path)")
+        .select("audio_url, cover_image_url, teaser:playlist_teaser_assets!teaser_asset_id(storage_path)")
         .eq("playlist_id", playlist_id);
 
       for (const item of playlistItemsForCleanup || []) {
         addParsedStorageRef(storageRefs, item?.audio_url);
+        addParsedStorageRef(storageRefs, item?.cover_image_url);
         const teaser = Array.isArray(item?.teaser) ? item.teaser[0] : item?.teaser;
         addStorageRef(storageRefs, PLAYLIST_ASSET_BUCKET, teaser?.storage_path);
       }
@@ -2313,7 +2320,7 @@ Deno.serve(async (req: Request) => {
 
     // ── add_playlist_item ───────────────────────────────────────────
     if (action === "add_playlist_item") {
-      const { playlist_id, title, artist_name, duration_seconds, teaser_asset_id, external_link_id, audio_url } = params;
+      const { playlist_id, title, artist_name, duration_seconds, teaser_asset_id, external_link_id, audio_url, cover_image_url } = params;
       if (!playlist_id || !title) return jsonResponse({ error: "playlist_id and title are required" }, 400);
 
       const { data: pl } = await supabaseAdmin.from("playlists").select("creator_id, owner_group_id").eq("id", playlist_id).single();
@@ -2332,9 +2339,11 @@ Deno.serve(async (req: Request) => {
 
       let normalizedDuration: number | null;
       let normalizedAudioUrl: string | null;
+      let normalizedCoverImageUrl: string | null;
       try {
         normalizedDuration = normalizeOptionalDurationSeconds(duration_seconds);
         normalizedAudioUrl = normalizeOptionalAudioUrl(audio_url);
+        normalizedCoverImageUrl = normalizeOptionalImageUrl(cover_image_url);
       } catch (validationError: any) {
         return jsonResponse({ error: validationError.message || "Invalid track data" }, 400);
       }
@@ -2346,6 +2355,7 @@ Deno.serve(async (req: Request) => {
           title,
           artist_name: artist_name || null,
           duration_seconds: normalizedDuration,
+          cover_image_url: normalizedCoverImageUrl,
           position: nextPos,
           teaser_asset_id: teaser_asset_id || null,
           external_link_id: external_link_id || null,
@@ -2360,7 +2370,7 @@ Deno.serve(async (req: Request) => {
 
     // ── update_playlist_item ───────────────────────────────────────
     if (action === "update_playlist_item") {
-      const { item_id, title, artist_name, duration_seconds, teaser_asset_id, external_link_id, audio_url } = params;
+      const { item_id, title, artist_name, duration_seconds, teaser_asset_id, external_link_id, audio_url, cover_image_url } = params;
       if (!item_id || !title) return jsonResponse({ error: "item_id and title are required" }, 400);
 
       const { data: item } = await supabaseAdmin
@@ -2381,9 +2391,11 @@ Deno.serve(async (req: Request) => {
 
       let normalizedDuration: number | null;
       let normalizedAudioUrl: string | null;
+      let normalizedCoverImageUrl: string | null;
       try {
         normalizedDuration = normalizeOptionalDurationSeconds(duration_seconds);
         normalizedAudioUrl = normalizeOptionalAudioUrl(audio_url);
+        normalizedCoverImageUrl = normalizeOptionalImageUrl(cover_image_url);
       } catch (validationError: any) {
         return jsonResponse({ error: validationError.message || "Invalid track data" }, 400);
       }
@@ -2394,6 +2406,7 @@ Deno.serve(async (req: Request) => {
           title,
           artist_name: artist_name || null,
           duration_seconds: normalizedDuration,
+          cover_image_url: normalizedCoverImageUrl,
           teaser_asset_id: teaser_asset_id || null,
           external_link_id: external_link_id || null,
           audio_url: normalizedAudioUrl,

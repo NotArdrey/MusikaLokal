@@ -1665,6 +1665,33 @@ const getStationNowPlayingTitle = (station: any, slotIndex: number | null = null
   );
 };
 
+const getStationNowPlayingArtworkUrl = (
+  station: any,
+  options: {
+    currentTrack?: any | null;
+    liveTimelineState?: any | null;
+    slotIndex?: number | null;
+  } = {},
+) => {
+  const slotIndex = typeof options.slotIndex === "number" ? options.slotIndex : null;
+  const slot = options.liveTimelineState?.slot || getStationLiveCurrentSlot(station, slotIndex);
+  const currentItem = options.liveTimelineState?.item || getStationLiveCurrentItem(station, slotIndex);
+  const candidates = [
+    options.currentTrack?.artwork,
+    currentItem?.cover_image_url,
+    slot?.playlist?.cover_image_url,
+  ];
+
+  for (const candidate of candidates) {
+    const resolved = resolveRadioMediaUrl(candidate);
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  return "";
+};
+
 const FEED_RADIO_CACHE_TTL_MS = 30_000;
 const FEED_RADIO_DEFER_MS = 80;
 const FEED_RADIO_STATION_ROTATION_MS = 30_000;
@@ -2238,7 +2265,11 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
         .filter(Boolean),
     ),
   ).join(" | ");
-  const stationArtworkUrl = displayStation?.cover_image_url || displayStation?.creator?.avatar_url || null;
+  const stationArtworkUrl = getStationNowPlayingArtworkUrl(displayStation, {
+    currentTrack: isCurrentStation ? currentTrack : null,
+    liveTimelineState,
+    slotIndex: isCurrentStation ? currentSlotIndex : null,
+  }) || null;
   const tapHintLabel = isTuneInLoading
     ? "Starting radio..."
     : isCurrentStation
@@ -2431,7 +2462,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
         ) : (
           <Ionicons
             name={isCurrentStation ? (isMuted ? "volume-mute" : "volume-high") : "radio"}
-            size={20}
+            size={26}
             color={primaryColor}
           />
         )}
@@ -2873,6 +2904,10 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
                       styles.socialQuickInfoItem,
                       index === 0 && styles.socialQuickInfoItemStart,
                       index === quickInfoItems.length - 1 && styles.socialQuickInfoItemEnd,
+                      {
+                        backgroundColor: isDark ? "rgba(124,58,237,0.16)" : "#FFFFFF",
+                        borderColor: isDark ? "rgba(167,139,250,0.24)" : "rgba(124,58,237,0.14)",
+                      },
                     ]}
                   >
                     <View style={styles.socialQuickInfoIconBox}>
@@ -3273,7 +3308,7 @@ export default function FeedScreen() {
   ), []);
 
   const isEmptyForYouSnapshot = useCallback((snapshot: FeedCacheEntry) => (
-    !hasVisibleForYouPost(snapshot.posts) && snapshot.aiCards.length === 0
+    !hasVisibleForYouPost(snapshot.posts)
   ), [hasVisibleForYouPost]);
 
   const isEmptyBlockingFeedSnapshot = useCallback((feedTab: FeedTab, snapshot: FeedCacheEntry) => (
@@ -3375,7 +3410,7 @@ export default function FeedScreen() {
 
     feedCacheRef.current[snapshotTab] = {
       posts: snapshotTab === "talent" ? [] : posts,
-      aiCards: snapshotTab === "talent" || snapshotTab === "for_you" ? aiCards : [],
+      aiCards: snapshotTab === "talent" ? aiCards : [],
       aiFeedMessage,
       aiFeedProvider,
       hasMore,
@@ -4471,13 +4506,7 @@ export default function FeedScreen() {
         }
 
         feedPublicFallbackCursorRef.current = null;
-        if (activeTabRef.current === feedTab) {
-          setIsAiCardsLoading(true);
-        }
-        const [queryResult, forYouAiResult] = await Promise.all([
-          forYouFeedQueryRef.current.refetch(),
-          fetchAiRecommendationCards("for_you"),
-        ]);
+        const queryResult = await forYouFeedQueryRef.current.refetch();
 
         if (requestId !== feedRequestIdRef.current[feedTab]) {
           return;
@@ -4499,9 +4528,9 @@ export default function FeedScreen() {
 
         const nextSnapshot: FeedCacheEntry = {
           posts: postSnapshot?.posts || [],
-          aiCards: applyFollowingStateToRecommendationCards(forYouAiResult.cards),
-          aiFeedMessage: normalizeAiFeedMessage(forYouAiResult.message || ""),
-          aiFeedProvider: normalizeAiFeedProvider(forYouAiResult.provider || groqModelLabel),
+          aiCards: [],
+          aiFeedMessage: "",
+          aiFeedProvider: groqModelLabel,
           hasMore: postSnapshot?.hasMore || false,
           loaded: true,
         };
@@ -4651,7 +4680,6 @@ export default function FeedScreen() {
     applyFeedSnapshot,
     authLoading,
     buildFeedSnapshotFromPages,
-    fetchAiRecommendationCards,
     fetchTalentCards,
     groqModelLabel,
     isGuest,
@@ -6154,7 +6182,7 @@ export default function FeedScreen() {
     tab === "talent"
       ? aiCards.length > 0
       : tab === "for_you"
-        ? hasVisibleForYouPost(posts) || aiCards.length > 0
+        ? hasVisibleForYouPost(posts)
         : posts.length > 0 || followingEntities.length > 0;
   const activeTabIsFetching =
     fetchingByTab[tab] ||
@@ -6256,7 +6284,7 @@ export default function FeedScreen() {
     if (loading) return [];
     if (tab === "for_you") {
       const socialPosts = sortFeedItemsNewestFirst(posts.filter((item) => item?.__feedKind !== "ai_card"));
-      return dedupeFeedItems([...aiCards, ...socialPosts]);
+      return dedupeFeedItems(socialPosts);
     }
     if (tab === "talent") {
       return dedupeFeedItems(aiCards);
@@ -6267,28 +6295,18 @@ export default function FeedScreen() {
     return sortFeedItemsNewestFirst(dedupeFeedItems(posts));
   }, [aiCards, followingEntities, loading, posts, tab]);
 
-  const isShowingAiCards = (tab === "talent" || tab === "for_you") && aiCards.length > 0;
+  const isShowingAiCards = tab === "talent" && aiCards.length > 0;
   const showRecommendationLoadingState =
-    (
-      tab === "talent" &&
-      aiCards.length === 0 &&
-      (isAiCardsLoading || fetchingByTab.talent)
-    ) ||
-    (
-      tab === "for_you" &&
-      aiCards.length === 0 &&
-      !hasVisibleForYouPost(posts) &&
-      (isAiCardsLoading || fetchingByTab.for_you)
-    );
+    tab === "talent" &&
+    aiCards.length === 0 &&
+    (isAiCardsLoading || fetchingByTab.talent);
   const showFeedEmptyLoadingState =
     shouldHoldFeedEmptyState ||
     showRecommendationLoadingState ||
     (
       tab === "for_you" &&
-      aiCards.length === 0 &&
       !hasVisibleForYouPost(posts) &&
       (
-        isAiCardsLoading ||
         fetchingByTab.for_you ||
         forYouFeedQuery.isFetching
       )
@@ -6861,33 +6879,33 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
   },
   liveRadioCard: {
-    minHeight: 88,
+    minHeight: 104,
     marginHorizontal: 14,
     marginTop: 10,
     marginBottom: 14,
     borderRadius: 14,
     borderWidth: 1,
-    padding: 10,
+    padding: 12,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 12,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 5 },
     shadowRadius: 12,
     elevation: 2,
   },
   liveRadioIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
+    width: 68,
+    height: 68,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
   },
   liveRadioArtwork: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
+    width: 68,
+    height: 68,
+    borderRadius: 14,
   },
   liveRadioEyebrowRow: {
     flexDirection: "row",
@@ -7273,58 +7291,63 @@ const styles = StyleSheet.create({
   socialEntityModule: {
     marginHorizontal: 16,
     marginTop: 10,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    gap: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    gap: 8,
   },
   socialEntityChipRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 6,
+    alignItems: "center",
+    gap: 7,
   },
   socialQuickInfoRow: {
-    minHeight: 30,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
+    flexWrap: "wrap",
     gap: 8,
   },
   socialQuickInfoItem: {
-    flex: 1,
     minWidth: 0,
-    height: 20,
+    maxWidth: "100%",
+    minHeight: 32,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
+    justifyContent: "flex-start",
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
   },
   socialQuickInfoItemStart: {
     justifyContent: "flex-start",
   },
   socialQuickInfoItemEnd: {
-    justifyContent: "flex-end",
+    justifyContent: "flex-start",
   },
   socialQuickInfoIconBox: {
-    width: 20,
-    height: 20,
+    width: 18,
+    height: 18,
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
   socialQuickInfoIcon: {
-    width: 20,
-    height: 20,
-    lineHeight: 20,
+    width: 18,
+    height: 18,
+    lineHeight: 18,
     includeFontPadding: false,
     textAlign: "center",
     textAlignVertical: "center",
   },
   socialQuickInfoText: {
     flexShrink: 1,
-    fontSize: moderateScale(10.5),
-    height: 20,
-    lineHeight: 20,
+    fontSize: moderateScale(11),
+    lineHeight: 15,
     fontFamily: "Poppins_700Bold",
     includeFontPadding: false,
     textAlignVertical: "center",

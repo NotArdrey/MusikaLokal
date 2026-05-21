@@ -171,19 +171,27 @@ const getStationNowPlayingTitle = (station: any, slotIndex: number | null = null
   return currentItem?.title || slot?.playlist?.title || slot?.label || "Local artist spotlight";
 };
 
-const getStationArtworkUrl = (station: any) => {
+const getStationArtworkUrl = (
+  station: any,
+  options: {
+    currentTrack?: any | null;
+    liveTimelineState?: any | null;
+    slotIndex?: number | null;
+  } = {},
+) => {
+  const slotIndex = typeof options.slotIndex === "number" ? options.slotIndex : null;
+  const slot = options.liveTimelineState?.slot || getStationLiveCurrentSlot(station, slotIndex);
+  const currentItem = options.liveTimelineState?.item || getStationLiveCurrentItem(station, slotIndex);
   const candidates = [
-    station?.artwork_url,
-    station?.cover_url,
-    station?.image_url,
-    station?.image,
-    station?.thumbnail_url,
-    station?.creator?.avatar_url,
+    options.currentTrack?.artwork,
+    currentItem?.cover_image_url,
+    slot?.playlist?.cover_image_url,
   ];
 
   for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim().length > 0) {
-      return candidate.trim();
+    const resolved = resolveFeedMediaUrl(candidate);
+    if (resolved) {
+      return resolved;
     }
   }
 
@@ -351,7 +359,11 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
         ? isMuted ? "Unmute" : "Mute"
         : "Listen";
   const badgeLabel = loadingStation ? "..." : canTuneIn ? "LIVE" : "OFF";
-  const stationArtworkUrl = getStationArtworkUrl(displayStation);
+  const stationArtworkUrl = getStationArtworkUrl(displayStation, {
+    currentTrack: isCurrentStation ? currentTrack : null,
+    liveTimelineState,
+    slotIndex: isCurrentStation ? currentSlotIndex : null,
+  });
   const stationCreator =
     typeof displayStation?.creator?.full_name === "string" && displayStation.creator.full_name.trim()
       ? displayStation.creator.full_name.trim()
@@ -431,9 +443,9 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     >
       <View style={[styles.liveRadioArtworkFrame, { backgroundColor: primaryColor + "1F" }]}>
         {stationArtworkUrl ? (
-          <CachedImage uri={stationArtworkUrl} style={styles.liveRadioArtwork} width={70} height={70} />
+          <CachedImage uri={stationArtworkUrl} style={styles.liveRadioArtwork} width={72} height={72} />
         ) : (
-          <Ionicons name="radio" size={26} color={primaryColor} />
+          <Ionicons name="radio" size={30} color={primaryColor} />
         )}
       </View>
 
@@ -1569,6 +1581,10 @@ const SocialPostCard = React.memo(function SocialPostCard({
                     styles.socialQuickInfoItem,
                     index === 0 && styles.socialQuickInfoItemStart,
                     index === suggestionQuickInfo.length - 1 && styles.socialQuickInfoItemEnd,
+                    {
+                      backgroundColor: isDark ? "rgba(124,58,237,0.16)" : "#FFFFFF",
+                      borderColor: isDark ? "rgba(167,139,250,0.24)" : "rgba(124,58,237,0.14)",
+                    },
                   ]}
                 >
                   <Ionicons
@@ -2048,18 +2064,15 @@ export default function FeedScreen() {
             return;
           }
 
-          const [feedResult, aiCards] = await Promise.all([
-            supabase.functions.invoke("manage-social-feed", {
-              body: {
-                action: "get_feed",
-                feed_type: "for_you",
-                include_entities: false,
-                limit: FEED_PAGE_SIZE,
-                offset: 0,
-              },
-            }),
-            fetchAiRecommendationCards("for_you"),
-          ]);
+          const feedResult = await supabase.functions.invoke("manage-social-feed", {
+            body: {
+              action: "get_feed",
+              feed_type: "for_you",
+              include_entities: false,
+              limit: FEED_PAGE_SIZE,
+              offset: 0,
+            },
+          });
 
           if (feedResult.error) {
             logFeedInvokeError("manage-social-feed:get_feed", feedResult.error, {
@@ -2075,7 +2088,7 @@ export default function FeedScreen() {
             ? feedResult.data.data.map(normalizeFeedPost)
             : [];
           setPosts(page);
-          setListingCards(aiCards);
+          setListingCards([]);
           setHasMore(page.length === FEED_PAGE_SIZE);
           return;
         }
@@ -2116,7 +2129,7 @@ export default function FeedScreen() {
         setLoadingMore(false);
       }
     },
-    [fetchAiRecommendationCards, fetchTalentCards, isGuest, posts.length, session],
+    [fetchTalentCards, isGuest, posts.length, session],
   );
 
   const presentListingDetailsWithRetry = useCallback(() => {
@@ -2787,7 +2800,7 @@ export default function FeedScreen() {
         return sortFeedItemsNewestFirst(dedupeFeedItems(posts));
       }
       const socialPosts = sortFeedItemsNewestFirst(posts.filter((item) => item?.__feedKind !== "ai_card"));
-      return dedupeFeedItems([...listingCards, ...socialPosts]);
+      return dedupeFeedItems(socialPosts);
     },
     [listingCards, posts, tab],
   );
@@ -3256,17 +3269,17 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
   },
   liveRadioArtworkFrame: {
-    width: 46,
-    height: 46,
-    borderRadius: 10,
+    width: 72,
+    height: 72,
+    borderRadius: 14,
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
   },
   liveRadioArtwork: {
-    width: 46,
-    height: 46,
-    borderRadius: 10,
+    width: 72,
+    height: 72,
+    borderRadius: 14,
   },
   liveRadioContent: {
     flex: 1,
@@ -3673,42 +3686,48 @@ const styles = StyleSheet.create({
   },
   socialEntityModule: {
     marginTop: 10,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    gap: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    gap: 8,
   },
   socialEntityChipRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 6,
+    alignItems: "center",
+    gap: 7,
   },
   socialQuickInfoRow: {
-    minHeight: 30,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
+    flexWrap: "wrap",
     gap: 8,
   },
   socialQuickInfoItem: {
-    flex: 1,
     minWidth: 0,
+    maxWidth: "100%",
+    minHeight: 32,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "flex-start",
     gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
   },
   socialQuickInfoItemStart: {
     justifyContent: "flex-start",
   },
   socialQuickInfoItemEnd: {
-    justifyContent: "flex-end",
+    justifyContent: "flex-start",
   },
   socialQuickInfoText: {
     flexShrink: 1,
     fontSize: 12,
-    lineHeight: 16,
+    lineHeight: 17,
     fontFamily: "Poppins_700Bold",
   },
   socialBadgeChip: {

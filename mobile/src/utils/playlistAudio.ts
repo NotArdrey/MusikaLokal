@@ -14,7 +14,7 @@ const ALLOWED_AUDIO_MIME_TYPES = new Set([
   "audio/mp3",
 ]);
 const EXPECTED_UPLOAD_FEEDBACK_PATTERN =
-  /(blocked by safety screening|safety check|copyright check|appears to match|appears to be copyrighted|permission to share|please upload music you own|licensed to share|playlist tracks must be|tracks must be|only mp3)/i;
+  /(blocked by safety screening|safety check|copyright check|appears to match|appears to be copyrighted|ownership request|identity review|admin approval|permission to share|please upload music you own|licensed to share|playlist tracks must be|tracks must be|only mp3)/i;
 
 export type PlaylistAudioFile = {
   name: string;
