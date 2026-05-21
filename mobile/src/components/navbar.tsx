@@ -53,6 +53,22 @@ type NavbarProps = {
 
 type GlobalNavbarProps = Pick<NavbarProps, 'forceVisible'> & Partial<BottomTabBarProps>;
 
+const TAB_BAR_HOSTED_PATHS = new Set([
+    '/feed',
+    '/home',
+    '/ai_suggestions',
+    '/bookings',
+    '/marketplace',
+    '/manage',
+    '/profile',
+    '/chat',
+    '/notifications',
+    '/my_group',
+    '/my_production',
+    '/my_studio',
+    '/my_venue',
+]);
+
 type NavIconProps = {
     active: boolean;
     color: string;
@@ -157,7 +173,13 @@ function NavTab({ active, colors, compact = false, iconOnly = false, isDark, ite
 }
 
 export function Navbar(_props: NavbarProps) {
-    return null;
+    const pathname = usePathname();
+
+    if (TAB_BAR_HOSTED_PATHS.has(pathname)) {
+        return null;
+    }
+
+    return <GlobalNavbar forceVisible />;
 }
 
 const getTabIdFromRouteName = (routeName: string | undefined) => {
@@ -234,7 +256,8 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
     const hideForE2EForm = isE2EFixtureMode() && E2E_NAVBAR_HIDDEN_ROUTES.has(pathname);
     const hasTabNavigator = Boolean(state && navigation);
     const focusedRoute = state?.routes[state.index];
-    const shouldRenderGlobalNavbar = !isBottomOverlayActive && (forceVisible || (hasTabNavigator && !hideForE2EForm));
+    const shouldRenderGlobalNavbar =
+        !isBottomOverlayActive && !hideForE2EForm && (forceVisible || hasTabNavigator);
 
     useEffect(() => {
         if (isGuest || isFan || !session?.user?.id) {
@@ -283,11 +306,13 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
 
     const handleNavPress = useCallback((item: NavItem) => {
         if (!navigation || !state) {
+            router.replace(item.route as any);
             return;
         }
 
         const targetRoute = state.routes.find((route) => route.name === item.routeName);
         if (!targetRoute) {
+            router.replace(item.route as any);
             return;
         }
 

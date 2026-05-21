@@ -729,7 +729,14 @@ export default function EditProfileScreen() {
       };
 
       showAlert("success", "Success", "Profile updated!", [
-        { text: "OK", onPress: () => router.replace("/profile") },
+        {
+          text: "OK",
+          onPress: () =>
+            router.replace({
+              pathname: "/profile",
+              params: { refresh: String(Date.now()) },
+            } as any),
+        },
       ]);
     } catch (error: any) {
       showAlert("warning", "Couldn't Save", error?.message || "Failed to save changes.");

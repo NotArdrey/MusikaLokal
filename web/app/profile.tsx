@@ -1108,6 +1108,21 @@ export default function ProfileScreen() {
   const [loadingProfilePosts, setLoadingProfilePosts] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
   const isProfileFan = isFanUserRole(profile?.role) || (isOwner && isFanUserRole(userRole));
+  const profileSkillTags = useMemo<string[]>(() => {
+    const values = Array.isArray(profile?.skills) ? profile.skills : [];
+    const normalized = values
+      .map((skill: unknown): string => String(skill || "").trim())
+      .filter((skill: string) => skill.length > 0 && skill.toLowerCase() !== "producer");
+    return Array.from(new Set<string>(normalized));
+  }, [profile?.skills]);
+  const profileGenreTags = useMemo<string[]>(() => {
+    const values = Array.isArray(profile?.genres) ? profile.genres : [];
+    const normalized = values
+      .map((genre: unknown): string => String(genre || "").trim())
+      .filter((genre: string) => genre.length > 0);
+    return Array.from(new Set<string>(normalized));
+  }, [profile?.genres]);
+  const profileSkillLabel = isProfileFan ? "Interests" : "Roles & Instruments";
   const [, setGigStats] = useState({ active: 0, upcoming: 0, done: 0 });
   const [gigTimeline, setGigTimeline] = useState<{
     active: any[];
@@ -1924,16 +1939,21 @@ export default function ProfileScreen() {
 
   const formatProfileRoleHeadline = (profileData?: any) => {
     const role = profileData?.role;
-    if (role === "musician") {
-      const specialties = Array.isArray(profileData?.skills)
-        ? profileData.skills
-          .map((skill: unknown) => String(skill || "").trim())
-          .filter((skill: string) => skill.length > 0 && skill.toLowerCase() !== "producer")
-        : [];
+    const specialties = Array.isArray(profileData?.skills)
+      ? profileData.skills
+        .map((skill: unknown) => String(skill || "").trim())
+        .filter((skill: string) => skill.length > 0 && skill.toLowerCase() !== "producer")
+      : [];
 
+    if (role === "musician") {
       return specialties.length > 0
         ? `Musician (${specialties.join(", ")})`
         : "Musician";
+    }
+    if (role === "fan") {
+      return specialties.length > 0
+        ? `Fan (${specialties.join(", ")})`
+        : "Fan";
     }
     if (role === "studio-owner") return "Studio Owner";
     if (role === "venue-owner") return "Gig Owner";
@@ -3037,23 +3057,55 @@ export default function ProfileScreen() {
               • {profile?.location || "Unknown"}
             </Text>
 
-            <View style={styles.genreRow}>
-              {(profile?.genres || ["Rock", "Indie"]).map((genre: string) => (
-                <View
-                  key={genre}
-                  style={[
-                    styles.genreTag,
-                    { backgroundColor: isDark ? "#1E293B" : "#F3F4F6" },
-                  ]}
-                >
-                  <Text
-                    style={[styles.genreText, { color: colors.textSecondary }]}
-                  >
-                    {genre}
-                  </Text>
-                </View>
-              ))}
-            </View>
+            {(profileSkillTags.length > 0 || profileGenreTags.length > 0) && (
+              <View style={styles.profileTagsSection}>
+                {profileSkillTags.length > 0 ? (
+                  <View style={styles.profileTagGroup}>
+                    <Text style={[styles.profileTagLabel, { color: colors.textSecondary }]}>
+                      {profileSkillLabel}
+                    </Text>
+                    <View style={styles.profileTagRow}>
+                      {profileSkillTags.map((skill) => (
+                        <View
+                          key={skill}
+                          style={[
+                            styles.genreTag,
+                            { backgroundColor: isDark ? "#1E293B" : "#F3F4F6" },
+                          ]}
+                        >
+                          <Text style={[styles.genreText, { color: colors.textSecondary }]}>
+                            {skill}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+
+                {profileGenreTags.length > 0 ? (
+                  <View style={styles.profileTagGroup}>
+                    <Text style={[styles.profileTagLabel, { color: colors.textSecondary }]}>
+                      Genres
+                    </Text>
+                    <View style={styles.profileTagRow}>
+                      {profileGenreTags.map((genre) => (
+                        <View
+                          key={genre}
+                          style={[
+                            styles.genreTag,
+                            { backgroundColor: isDark ? "#1E293B" : "#F3F4F6" },
+                          ]}
+                        >
+                          <Text style={[styles.genreText, { color: colors.textSecondary }]}>
+                            {genre}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+            )}
 
             {canFollowProfile ? (
               <TouchableOpacity
@@ -5047,6 +5099,28 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     justifyContent: "center",
     marginBottom: 20,
+  },
+  profileTagsSection: {
+    width: "100%",
+    alignItems: "center",
+    gap: 14,
+    marginBottom: 20,
+  },
+  profileTagGroup: {
+    width: "100%",
+    alignItems: "center",
+    gap: 8,
+  },
+  profileTagLabel: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 11,
+    textTransform: "uppercase",
+  },
+  profileTagRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+    justifyContent: "center",
   },
   genreTag: {
     paddingHorizontal: 16,

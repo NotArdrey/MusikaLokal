@@ -1130,12 +1130,16 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
     userId?: string;
+    refresh?: string;
     returnToHome?: string;
     returnListingId?: string;
   }>();
   const normalizedParamUserId = useMemo(() => {
     return Array.isArray(params.userId) ? params.userId[0] : params.userId;
   }, [params.userId]);
+  const normalizedRefresh = useMemo(() => {
+    return Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
+  }, [params.refresh]);
 
   const [profile, setProfile] = useState<any>(null);
   const isFan = isFanUserRole(userRole || profile?.role);
@@ -1146,6 +1150,21 @@ export default function ProfileScreen() {
   const [isOwner, setIsOwner] = useState(false);
   const isProfileFan = isFanUserRole(profile?.role) || (isOwner && isFanUserRole(userRole));
   const shouldHideProfessionalProfileStats = isFan || isProfileFan;
+  const profileSkillTags = useMemo<string[]>(() => {
+    const values = Array.isArray(profile?.skills) ? profile.skills : [];
+    const normalized = values
+      .map((skill: unknown): string => String(skill || "").trim())
+      .filter((skill: string) => skill.length > 0 && skill.toLowerCase() !== "producer");
+    return Array.from(new Set<string>(normalized));
+  }, [profile?.skills]);
+  const profileGenreTags = useMemo<string[]>(() => {
+    const values = Array.isArray(profile?.genres) ? profile.genres : [];
+    const normalized = values
+      .map((genre: unknown): string => String(genre || "").trim())
+      .filter((genre: string) => genre.length > 0);
+    return Array.from(new Set<string>(normalized));
+  }, [profile?.genres]);
+  const profileSkillLabel = isProfileFan ? "Interests" : "Roles & Instruments";
   const [, setGigStats] = useState({ active: 0, upcoming: 0, done: 0 });
   const [gigTimeline, setGigTimeline] = useState<{
     active: any[];
@@ -1187,6 +1206,7 @@ export default function ProfileScreen() {
   const followListAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
   const profileFetchInFlightRef = useRef<string | null>(null);
   const profileFetchRequestIdRef = useRef(0);
+  const lastHandledProfileRefreshRef = useRef<string | null>(null);
   const profilePostsFetchInFlightRef = useRef<string | null>(null);
   const profilePlaylistsFetchInFlightRef = useRef<string | null>(null);
   const profileStationFetchInFlightRef = useRef<string | null>(null);
@@ -1773,7 +1793,7 @@ export default function ProfileScreen() {
 
   // Refresh profile data every time the screen comes into focus
   const fetchProfile = useCallback(async (
-    options: { showLoading?: boolean } = {},
+    options: { showLoading?: boolean; force?: boolean } = {},
   ) => {
     let targetIdForRequest: string | null = null;
     let requestId = 0;
@@ -1843,7 +1863,7 @@ export default function ProfileScreen() {
       }
 
       targetIdForRequest = targetId;
-      if (profileFetchInFlightRef.current === targetId) {
+      if (!options.force && profileFetchInFlightRef.current === targetId) {
         skippedDuplicateFetch = true;
         return;
       }
@@ -2199,8 +2219,25 @@ export default function ProfileScreen() {
     useCallback(() => {
       if (!authLoading) {
         const cacheTargetId = normalizedParamUserId || currentUserId;
-        const cached = cacheTargetId ? profileScreenCache.get(cacheTargetId) : null;
+        const refreshToken =
+          typeof normalizedRefresh === "string" && normalizedRefresh.trim().length > 0
+            ? normalizedRefresh.trim()
+            : null;
+        const shouldForceRefresh = Boolean(
+          refreshToken && lastHandledProfileRefreshRef.current !== refreshToken,
+        );
+
+        if (shouldForceRefresh) {
+          if (cacheTargetId) {
+            profileScreenCache.delete(cacheTargetId);
+          }
+          lastHandledProfileRefreshRef.current = refreshToken;
+        }
+
+        const cached =
+          !shouldForceRefresh && cacheTargetId ? profileScreenCache.get(cacheTargetId) : null;
         const cacheIsFresh =
+          !shouldForceRefresh &&
           cached &&
           Date.now() - cached.fetchedAt < PROFILE_FOCUS_REFRESH_COOLDOWN_MS;
 
@@ -2225,7 +2262,7 @@ export default function ProfileScreen() {
           const startProfileRefresh = () => {
             if (!isActive || refreshStarted) return;
             refreshStarted = true;
-            void fetchProfile({ showLoading: !cached });
+            void fetchProfile({ showLoading: !cached, force: shouldForceRefresh });
           };
 
           if (!cached) {
@@ -2247,7 +2284,7 @@ export default function ProfileScreen() {
           };
         }
       }
-    }, [authLoading, currentUserId, fetchProfile, normalizedParamUserId]),
+    }, [authLoading, currentUserId, fetchProfile, normalizedParamUserId, normalizedRefresh]),
   );
 
   const MENU_ITEMS = [
@@ -2942,16 +2979,21 @@ export default function ProfileScreen() {
 
   const formatProfileRoleHeadline = (profileData?: any) => {
     const role = profileData?.role;
-    if (role === "musician") {
-      const specialties = Array.isArray(profileData?.skills)
-        ? profileData.skills
-          .map((skill: unknown) => String(skill || "").trim())
-          .filter((skill: string) => skill.length > 0 && skill.toLowerCase() !== "producer")
-        : [];
+    const specialties = Array.isArray(profileData?.skills)
+      ? profileData.skills
+        .map((skill: unknown) => String(skill || "").trim())
+        .filter((skill: string) => skill.length > 0 && skill.toLowerCase() !== "producer")
+      : [];
 
+    if (role === "musician") {
       return specialties.length > 0
         ? `Musician (${specialties.join(", ")})`
         : "Musician";
+    }
+    if (role === "fan") {
+      return specialties.length > 0
+        ? `Fan (${specialties.join(", ")})`
+        : "Fan";
     }
     if (role === "studio-owner") return "Studio Owner";
     if (role === "venue-owner") return "Gig Owner";
@@ -3659,23 +3701,55 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             ) : null}
 
-            <View style={styles.genreRow}>
-              {(profile?.genres || ["Rock", "Indie"]).map((genre: string) => (
-                <View
-                  key={genre}
-                  style={[
-                    styles.genreTag,
-                    { backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" },
-                  ]}
-                >
-                  <Text
-                    style={[styles.genreText, { color: colors.text }]}
-                  >
-                    {genre}
-                  </Text>
-                </View>
-              ))}
-            </View>
+            {(profileSkillTags.length > 0 || profileGenreTags.length > 0) && (
+              <View style={styles.profileTagsSection}>
+                {profileSkillTags.length > 0 ? (
+                  <View style={styles.profileTagGroup}>
+                    <Text style={[styles.profileTagLabel, { color: colors.textSecondary }]}>
+                      {profileSkillLabel}
+                    </Text>
+                    <View style={styles.profileTagRow}>
+                      {profileSkillTags.map((skill) => (
+                        <View
+                          key={skill}
+                          style={[
+                            styles.genreTag,
+                            { backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" },
+                          ]}
+                        >
+                          <Text style={[styles.genreText, { color: colors.text }]}>
+                            {skill}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+
+                {profileGenreTags.length > 0 ? (
+                  <View style={styles.profileTagGroup}>
+                    <Text style={[styles.profileTagLabel, { color: colors.textSecondary }]}>
+                      Genres
+                    </Text>
+                    <View style={styles.profileTagRow}>
+                      {profileGenreTags.map((genre) => (
+                        <View
+                          key={genre}
+                          style={[
+                            styles.genreTag,
+                            { backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" },
+                          ]}
+                        >
+                          <Text style={[styles.genreText, { color: colors.text }]}>
+                            {genre}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+            )}
 
             {isOwner && profile?.role === "musician" && supportsGigVisibilityPreference && (
               <View
@@ -4949,6 +5023,28 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     justifyContent: "center",
     marginBottom: 28,
+  },
+  profileTagsSection: {
+    width: "100%",
+    alignItems: "center",
+    gap: 14,
+    marginBottom: 24,
+  },
+  profileTagGroup: {
+    width: "100%",
+    alignItems: "center",
+    gap: 8,
+  },
+  profileTagLabel: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 11,
+    textTransform: "uppercase",
+  },
+  profileTagRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+    justifyContent: "center",
   },
   genreTag: {
     paddingHorizontal: 16,

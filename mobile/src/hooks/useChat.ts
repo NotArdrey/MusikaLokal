@@ -1,5 +1,5 @@
-﻿import { RealtimeChannel } from '@supabase/supabase-js';
-import { useCallback, useEffect, useState } from 'react';
+import { RealtimeChannel } from '@supabase/supabase-js';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { emitToast } from '../events/toastBus';
 import { getScreenCacheKey, readScreenCache, writeScreenCache } from '../utils/screenCache';
@@ -472,6 +472,16 @@ export function useConversations(currentUserId: string | null) {
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const conversationsRef = useRef<Conversation[]>([]);
+
+    const replaceConversations = useCallback((nextConversations: Conversation[]) => {
+        conversationsRef.current = nextConversations;
+        setConversations(nextConversations);
+    }, []);
+
+    useEffect(() => {
+        conversationsRef.current = conversations;
+    }, [conversations]);
 
     const fetchConversations = useCallback(async (options?: { silent?: boolean }) => {
         if (!currentUserId) {
@@ -497,7 +507,7 @@ export function useConversations(currentUserId: string | null) {
 
             const conversationIds = participations?.map((p) => p.conversation_id) || [];
             if (conversationIds.length === 0) {
-                setConversations([]);
+                replaceConversations([]);
                 await writeScreenCache(cacheKey, []);
                 return;
             }
@@ -691,7 +701,7 @@ export function useConversations(currentUserId: string | null) {
                 new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
             );
 
-            setConversations(allConversations);
+            replaceConversations(allConversations);
             await writeScreenCache(cacheKey, allConversations);
         } catch (err: any) {
             console.error('Error fetching conversations:', err);
@@ -701,11 +711,11 @@ export function useConversations(currentUserId: string | null) {
                 setLoading(false);
             }
         }
-    }, [currentUserId]);
+    }, [currentUserId, replaceConversations]);
 
     useEffect(() => {
         if (!currentUserId) {
-            setConversations([]);
+            replaceConversations([]);
             setLoading(false);
             return;
         }
@@ -724,7 +734,7 @@ export function useConversations(currentUserId: string | null) {
             }
 
             if (cachedConversations) {
-                setConversations(cachedConversations);
+                replaceConversations(cachedConversations);
                 setLoading(false);
             }
 
@@ -734,7 +744,7 @@ export function useConversations(currentUserId: string | null) {
         return () => {
             cancelled = true;
         };
-    }, [currentUserId, fetchConversations]);
+    }, [currentUserId, fetchConversations, replaceConversations]);
 
     // REALTIME SUBSCRIPTION FOR CONVERSATION LIST
     useEffect(() => {
@@ -752,57 +762,45 @@ export function useConversations(currentUserId: string | null) {
                 },
                 async (payload) => {
                     const newMessage = payload.new as Message;
+                    const prevConversations = conversationsRef.current;
+                    const conversationIndex = prevConversations.findIndex(c => c.id === newMessage.conversation_id);
+                    const cacheKey = currentUserId
+                        ? buildConversationListCacheKey(currentUserId)
+                        : null;
 
-                    // Check if this message belongs to any of our conversations
-                    setConversations(prevConversations => {
-                        const conversationIndex = prevConversations.findIndex(c => c.id === newMessage.conversation_id);
-                        const cacheKey = currentUserId
-                            ? buildConversationListCacheKey(currentUserId)
-                            : null;
+                    // New conversation? Or one we didn't have loaded?
+                    // Determining participant membership requires a fresh fetch.
+                    if (conversationIndex < 0) {
+                        void fetchConversations();
+                        return;
+                    }
 
-                        // If conversation exists in our list
-                        if (conversationIndex >= 0) {
-                            const updatedConversations = [...prevConversations];
-                            const conversation = { ...updatedConversations[conversationIndex] };
+                    const updatedConversations = [...prevConversations];
+                    const conversation = { ...updatedConversations[conversationIndex] };
+                    const sender = senderProfileCache.get(newMessage.sender_id);
+                    const messageWithSender = {
+                        ...newMessage,
+                        sender,
+                    };
 
-                            // Check if message is relevant (not blocked, etc. - simplistic check for now)
+                    conversation.last_message = messageWithSender;
+                    conversation.updated_at = newMessage.created_at;
 
-                            // Fetch sender profile if needed for group chat preview
-                            // For now, we'll optimistically update without full profile and let UI handle graceful fallback
-                            // or fetch asynchronously. 
+                    if (newMessage.sender_id !== currentUserId) {
+                        conversation.unread_count = (conversation.unread_count || 0) + 1;
+                    }
 
-                            const sender = senderProfileCache.get(newMessage.sender_id);
-                            const messageWithSender = {
-                                ...newMessage,
-                                sender,
-                            };
-                            conversation.last_message = messageWithSender;
-                            conversation.updated_at = newMessage.created_at;
+                    updatedConversations.splice(conversationIndex, 1);
+                    updatedConversations.unshift(conversation);
+                    replaceConversations(updatedConversations);
 
-                            if (newMessage.sender_id !== currentUserId) {
-                                conversation.unread_count = (conversation.unread_count || 0) + 1;
-                                emitIncomingMessageToast(conversation, messageWithSender, currentUserId);
-                            }
+                    if (cacheKey) {
+                        void writeScreenCache(cacheKey, updatedConversations);
+                    }
 
-                            // Remove from old position and add to top
-                            updatedConversations.splice(conversationIndex, 1);
-                            updatedConversations.unshift(conversation);
-
-                            if (cacheKey) {
-                                void writeScreenCache(cacheKey, updatedConversations);
-                            }
-
-                            return updatedConversations;
-                        } else {
-                            // New conversation? Or one we didn't have loaded?
-                            // Safest to refetch or fetch just this conversation
-                            // Determining if I'm a participant in this new message's conversation is hard without fetching.
-                            // So we'll trigger a refetch of the list to be safe and accurate.
-                            // Debounce this? For now, direct call.
-                            fetchConversations();
-                            return prevConversations;
-                        }
-                    });
+                    if (newMessage.sender_id !== currentUserId) {
+                        emitIncomingMessageToast(conversation, messageWithSender, currentUserId);
+                    }
                 }
             )
             .on(
@@ -814,40 +812,38 @@ export function useConversations(currentUserId: string | null) {
                 },
                 async (payload) => {
                     const updatedMessage = payload.new as Message;
+                    const prevConversations = conversationsRef.current;
+                    const conversationIndex = prevConversations.findIndex(
+                        (conversation) => conversation.id === updatedMessage.conversation_id
+                    );
+                    const cacheKey = currentUserId
+                        ? buildConversationListCacheKey(currentUserId)
+                        : null;
 
-                    setConversations(prevConversations => {
-                        const conversationIndex = prevConversations.findIndex(
-                            (conversation) => conversation.id === updatedMessage.conversation_id
-                        );
-                        const cacheKey = currentUserId
-                            ? buildConversationListCacheKey(currentUserId)
-                            : null;
+                    if (conversationIndex < 0) {
+                        return;
+                    }
 
-                        if (conversationIndex < 0) {
-                            return prevConversations;
-                        }
+                    const updatedConversations = [...prevConversations];
+                    const conversation = { ...updatedConversations[conversationIndex] };
 
-                        const updatedConversations = [...prevConversations];
-                        const conversation = { ...updatedConversations[conversationIndex] };
+                    if (conversation.last_message?.id === updatedMessage.id) {
+                        conversation.last_message = {
+                            ...conversation.last_message,
+                            ...updatedMessage,
+                        };
+                    }
 
-                        if (conversation.last_message?.id === updatedMessage.id) {
-                            conversation.last_message = {
-                                ...conversation.last_message,
-                                ...updatedMessage,
-                            };
-                        }
+                    if (updatedMessage.sender_id !== currentUserId && updatedMessage.read_at) {
+                        conversation.unread_count = Math.max(0, (conversation.unread_count || 0) - 1);
+                    }
 
-                        if (updatedMessage.sender_id !== currentUserId && updatedMessage.read_at) {
-                            conversation.unread_count = Math.max(0, (conversation.unread_count || 0) - 1);
-                        }
+                    updatedConversations[conversationIndex] = conversation;
+                    replaceConversations(updatedConversations);
 
-                        updatedConversations[conversationIndex] = conversation;
-
-                        if (cacheKey) {
-                            void writeScreenCache(cacheKey, updatedConversations);
-                        }
-                        return updatedConversations;
-                    });
+                    if (cacheKey) {
+                        void writeScreenCache(cacheKey, updatedConversations);
+                    }
                 }
             )
             .subscribe();
@@ -855,7 +851,7 @@ export function useConversations(currentUserId: string | null) {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [currentUserId, fetchConversations]);
+    }, [currentUserId, fetchConversations, replaceConversations]);
 
     const toggleConversationMute = useCallback(async (
         conversationId: string,
@@ -864,35 +860,33 @@ export function useConversations(currentUserId: string | null) {
     ) => {
         const muteState = await setConversationMute(conversationId, muted, mutedUntil);
 
-        setConversations((prevConversations) => {
-            const updatedConversations = prevConversations.map((conversation) => {
-                if (conversation.id !== conversationId) {
-                    return conversation;
-                }
-
-                return {
-                    ...conversation,
-                    is_muted: isConversationMuted(muteState),
-                    muted_until: muteState.muted_until,
-                    current_participant: conversation.current_participant
-                        ? {
-                            ...conversation.current_participant,
-                            is_muted: muteState.is_muted,
-                            muted_until: muteState.muted_until,
-                        }
-                        : conversation.current_participant,
-                };
-            });
-
-            if (currentUserId) {
-                void writeScreenCache(buildConversationListCacheKey(currentUserId), updatedConversations);
+        const updatedConversations = conversationsRef.current.map((conversation) => {
+            if (conversation.id !== conversationId) {
+                return conversation;
             }
 
-            return updatedConversations;
+            return {
+                ...conversation,
+                is_muted: isConversationMuted(muteState),
+                muted_until: muteState.muted_until,
+                current_participant: conversation.current_participant
+                    ? {
+                        ...conversation.current_participant,
+                        is_muted: muteState.is_muted,
+                        muted_until: muteState.muted_until,
+                    }
+                    : conversation.current_participant,
+            };
         });
 
+        replaceConversations(updatedConversations);
+
+        if (currentUserId) {
+            void writeScreenCache(buildConversationListCacheKey(currentUserId), updatedConversations);
+        }
+
         return muteState;
-    }, [currentUserId]);
+    }, [currentUserId, replaceConversations]);
 
     return { conversations, loading, error, refetch: fetchConversations, toggleConversationMute };
 }

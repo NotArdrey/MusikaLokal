@@ -238,6 +238,17 @@ const reportTargetAccountActionLabels: Record<ReportTargetAccountAction, string>
   lift_ban: 'Lift Ban',
 };
 
+const reportBanAccountActions = new Set<ReportTargetAccountAction>([
+  'ban_1_day',
+  'ban_7_days',
+  'ban_30_days',
+  'ban_permanent',
+]);
+
+const reportHasBanAccountAction = (report: Pick<ReportEntry, 'target_account_action'>) => {
+  return reportBanAccountActions.has(report.target_account_action);
+};
+
 const reportTargetLabels: Record<string, string> = {
   feed_post: 'Feed post',
   gig: 'Gig',
@@ -1120,6 +1131,47 @@ export default function AdminReportsPage() {
     [fetchReports, showAlert],
   );
 
+  const liftReportedAccountBan = useCallback(
+    async (targetReport: ReportEntry) => {
+      if (!reportHasBanAccountAction(targetReport)) {
+        showAlert('info', 'No ban to lift', 'This report does not have a recorded account ban.');
+        return;
+      }
+
+      setReportActionLoadingId(targetReport.id);
+      try {
+        const moderationAction =
+          targetReport.moderation_action === 'manual_review' && targetReport.status !== 'pending'
+            ? 'none'
+            : targetReport.moderation_action || 'none';
+
+        const { data, error } = await supabase.functions.invoke<any>('admin-reports-management', {
+          body: {
+            action: 'update_report_status',
+            reportId: targetReport.id,
+            nextStatus: targetReport.status,
+            moderationAction,
+            targetAccountAction: 'lift_ban',
+            moderationNotes: targetReport.moderation_notes || null,
+          },
+        });
+
+        if (error) throw error;
+        if (data?.error) throw new Error(String(data.error));
+
+        invalidateAdminPageCache();
+        showAlert('success', 'Account unbanned', 'The reported account ban has been lifted.');
+        await fetchReports();
+      } catch (error) {
+        const message = await getErrorMessage(error, 'Unable to unban the reported account.');
+        showAlert('error', 'Failed to unban account', message);
+      } finally {
+        setReportActionLoadingId(null);
+      }
+    },
+    [fetchReports, showAlert],
+  );
+
   const openReportModerationModal = useCallback(
     (
       targetReport: ReportEntry,
@@ -1656,6 +1708,8 @@ export default function AdminReportsPage() {
       ) : (
         <View style={styles.sectionGap}>
           {filteredReports.map((report) => {
+            const hasReportBanAction = reportHasBanAccountAction(report);
+
             return (
               <View
                 key={report.id}
@@ -1712,6 +1766,26 @@ export default function AdminReportsPage() {
                       </>
                     )}
                   </TouchableOpacity>
+
+                  {hasReportBanAction ? (
+                    <TouchableOpacity
+                      testID={`admin-report-unban-${report.id}`}
+                      accessibilityLabel={`admin-report-unban-${report.id}`}
+                      activeOpacity={1}
+                      disabled={reportActionLoadingId === report.id}
+                      onPress={() => void liftReportedAccountBan(report)}
+                      style={[styles.smallActionButtonFilled, { backgroundColor: '#16A34A', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
+                    >
+                      {reportActionLoadingId === report.id ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <>
+                          <Ionicons name="lock-open-outline" size={14} color="#FFFFFF" />
+                          <Text style={styles.smallActionTextFilled}>Unban</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  ) : null}
 
                   {report.status === 'pending' ? (
                     <>

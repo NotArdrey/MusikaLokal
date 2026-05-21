@@ -648,7 +648,14 @@ export default function EditProfileScreen() {
       };
 
       showAlert("success", "Success", "Profile updated!", [
-        { text: "OK", onPress: () => router.replace("/profile") },
+        {
+          text: "OK",
+          onPress: () =>
+            router.replace({
+              pathname: "/profile",
+              params: { refresh: String(Date.now()) },
+            } as any),
+        },
       ]);
     } catch (error: any) {
       showAlert("error", "Error", error?.message || "Failed to save");

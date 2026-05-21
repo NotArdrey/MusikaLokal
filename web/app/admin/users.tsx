@@ -134,6 +134,14 @@ interface UserEntry {
   is_verified: boolean;
   verification_status?: string | null;
   created_at: string;
+  is_banned?: boolean | null;
+  banned_until?: string | null;
+  ban_reason?: string | null;
+  ban_action?: string | null;
+  banned_at?: string | null;
+  banned_by?: string | null;
+  ban_lifted_at?: string | null;
+  ban_lifted_by?: string | null;
   staff_assignment?: StaffAssignment | null;
   staff_assignment_label?: string | null;
   staff_access_level_label?: string | null;
@@ -226,6 +234,52 @@ const formatDateTime = (value?: string | null) => {
     hour: '2-digit',
     minute: '2-digit',
   });
+};
+
+const getActiveUserBan = (user?: Pick<UserEntry, 'is_banned' | 'banned_until' | 'ban_reason' | 'ban_action'> | null) => {
+  const isBanned = user?.is_banned === true || String(user?.is_banned || '').toLowerCase() === 'true';
+  if (!isBanned) return null;
+
+  const bannedUntil = typeof user?.banned_until === 'string' ? user.banned_until : null;
+  if (!bannedUntil) {
+    return {
+      permanent: true,
+      bannedUntil: null,
+      reason: user?.ban_reason || user?.ban_action || null,
+    };
+  }
+
+  const expiry = new Date(bannedUntil);
+  if (Number.isNaN(expiry.getTime())) {
+    return {
+      permanent: true,
+      bannedUntil: null,
+      reason: user?.ban_reason || user?.ban_action || null,
+    };
+  }
+
+  if (expiry <= new Date()) return null;
+
+  return {
+    permanent: false,
+    bannedUntil,
+    reason: user?.ban_reason || user?.ban_action || null,
+  };
+};
+
+const formatBanTimeRemaining = (bannedUntil?: string | null, permanent?: boolean) => {
+  if (permanent || !bannedUntil) return 'permanent';
+
+  const expiry = new Date(bannedUntil);
+  if (Number.isNaN(expiry.getTime())) return 'permanent';
+
+  const remainingHours = Math.max(1, Math.ceil((expiry.getTime() - Date.now()) / (60 * 60 * 1000)));
+  if (remainingHours >= 48) {
+    const days = Math.ceil(remainingHours / 24);
+    return `${days} day${days === 1 ? '' : 's'}`;
+  }
+  if (remainingHours >= 24) return '1 day';
+  return `${remainingHours} hour${remainingHours === 1 ? '' : 's'}`;
 };
 
 const getErrorMessage = async (error: unknown, fallback: string) => {
@@ -397,6 +451,14 @@ const normalizeUserEntryFromDetails = (
     is_verified: getBooleanField(record, 'is_verified', Boolean(fallback.is_verified)),
     verification_status: getOptionalStringField(record, 'verification_status', fallback.verification_status),
     created_at: getOptionalStringField(record, 'created_at', fallback.created_at) || fallback.created_at,
+    is_banned: getBooleanField(record, 'is_banned', Boolean(fallback.is_banned)),
+    banned_until: getOptionalStringField(record, 'banned_until', fallback.banned_until),
+    ban_reason: getOptionalStringField(record, 'ban_reason', fallback.ban_reason),
+    ban_action: getOptionalStringField(record, 'ban_action', fallback.ban_action),
+    banned_at: getOptionalStringField(record, 'banned_at', fallback.banned_at),
+    banned_by: getOptionalStringField(record, 'banned_by', fallback.banned_by),
+    ban_lifted_at: getOptionalStringField(record, 'ban_lifted_at', fallback.ban_lifted_at),
+    ban_lifted_by: getOptionalStringField(record, 'ban_lifted_by', fallback.ban_lifted_by),
     staff_assignment: staffAssignment,
     staff_assignment_label: getOptionalStringField(record, 'staff_assignment_label', fallback.staff_assignment_label),
     staff_access_level_label: getOptionalStringField(record, 'staff_access_level_label', fallback.staff_access_level_label),
@@ -1432,6 +1494,74 @@ export default function AdminUsersPage() {
     [session?.user.id, showAlert, fetchUsers, invokeAdminUsersManagement],
   );
 
+  const unbanUser = useCallback(
+    (targetUser: UserEntry) => {
+      const activeBan = getActiveUserBan(targetUser);
+      if (!activeBan && !targetUser.is_banned) {
+        showAlert('info', 'No active ban', 'This user does not have an active ban.');
+        return;
+      }
+
+      const message = activeBan
+        ? `Lift the active ban for ${targetUser.full_name || targetUser.email}? They will be able to sign in again immediately.`
+        : `Clear the expired ban record for ${targetUser.full_name || targetUser.email}?`;
+      const performUnban = async () => {
+        setUserActionLoadingId(targetUser.id);
+        try {
+          await invokeAdminUsersManagement({
+            action: 'unban_user',
+            userId: targetUser.id,
+          });
+
+          invalidateAdminPageCache();
+          showAlert('success', 'User unbanned', 'The account ban has been lifted.');
+          await fetchUsers();
+        } catch (error) {
+          const message = await getErrorMessage(error, 'Unable to unban this user.');
+          showAlert('error', 'Failed to unban user', message);
+        } finally {
+          setUserActionLoadingId(null);
+        }
+      };
+
+      if (Platform.OS === 'web') {
+        setAlertState({
+          visible: true,
+          type: 'warning',
+          title: 'Unban user',
+          message,
+          buttons: [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Unban',
+              style: 'default',
+              onPress: () => {
+                void performUnban();
+              },
+            },
+          ],
+        });
+        return;
+      }
+
+      Alert.alert(
+        'Unban user',
+        message,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Unban',
+            style: 'default',
+            onPress: () => {
+              void performUnban();
+            },
+          },
+        ],
+      );
+    },
+    [showAlert, fetchUsers, invokeAdminUsersManagement],
+  );
+
   const filteredUsers = useMemo(() => {
     const roleFiltered = users.filter((item) => {
       if (!isVisibleInUserManagement(item)) return false;
@@ -1453,7 +1583,9 @@ export default function AdminUsersPage() {
       return (
         String(item.full_name || '').toLowerCase().includes(q) ||
         String(item.email || '').toLowerCase().includes(q) ||
-        String(item.role || '').toLowerCase().includes(q)
+        String(item.role || '').toLowerCase().includes(q) ||
+        String(item.ban_reason || '').toLowerCase().includes(q) ||
+        String(item.ban_action || '').toLowerCase().includes(q)
       );
     });
   }, [users, userSearch, userFilter]);
@@ -1669,6 +1801,12 @@ export default function AdminUsersPage() {
               {filteredUsers.map((user) => {
                 const userViewLoadingKey = `user-card-${user.id}`;
                 const userEditLoading = userEditLoadingId === user.id;
+                const activeBan = getActiveUserBan(user);
+                const banLabel = activeBan
+                  ? `Banned: ${formatBanTimeRemaining(activeBan.bannedUntil, activeBan.permanent)}`
+                  : user.is_banned
+                    ? 'Ban expired'
+                    : 'Active';
 
                 return (
                   <View
@@ -1685,6 +1823,13 @@ export default function AdminUsersPage() {
                     ) : null}
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Verified: {user.is_verified ? 'Yes' : 'No'}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Verification Status: {String(user.verification_status || 'PENDING').replace(/_/g, ' ')}</Text>
+                    <Text style={[styles.cardMeta, { color: activeBan ? '#DC2626' : colors.textSecondary }]}>
+                      Account Status: {banLabel}
+                      {activeBan?.bannedUntil ? ` until ${formatDateTime(activeBan.bannedUntil)}` : ''}
+                    </Text>
+                    {activeBan?.reason ? (
+                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Ban Reason: {activeBan.reason}</Text>
+                    ) : null}
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Joined: {formatDateTime(user.created_at)}</Text>
 
                     <View style={styles.cardActionsRow}>
@@ -1723,6 +1868,29 @@ export default function AdminUsersPage() {
                           </>
                         )}
                       </TouchableOpacity>
+
+                      {activeBan || user.is_banned ? (
+                        <TouchableOpacity
+                          testID={`admin-user-unban-${user.id}`}
+                          accessibilityLabel={`admin-user-unban-${user.id}`}
+                          activeOpacity={1}
+                          disabled={userActionLoadingId === user.id}
+                          onPress={() => unbanUser(user)}
+                          style={[
+                            styles.smallActionButtonFilled,
+                            {
+                              backgroundColor: '#16A34A',
+                              opacity: userActionLoadingId === user.id ? 0.6 : 1,
+                            },
+                          ]}
+                        >
+                          {userActionLoadingId === user.id ? (
+                            <ActivityIndicator size="small" color="#FFFFFF" />
+                          ) : (
+                            <Text style={styles.smallActionTextFilled}>Unban</Text>
+                          )}
+                        </TouchableOpacity>
+                      ) : null}
 
                       <TouchableOpacity
                         testID={`admin-user-delete-${user.id}`}

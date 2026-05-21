@@ -48,6 +48,10 @@ const hiddenUserManagementVerificationStatuses = [
 ];
 const COPYRIGHT_OWNERSHIP_REVIEW_SOURCE = "COPYRIGHT_OWNERSHIP";
 const KNOWN_PLAYLIST_AUDIO_BUCKETS = new Set(["documents", "playlist-assets"]);
+const userListProfileSelect =
+  "id, full_name, email, role, is_verified, verification_status, created_at, contact_number, address, location, bio, is_banned, banned_until, ban_reason, ban_action, banned_at, banned_by, ban_lifted_at, ban_lifted_by";
+const userListProfileSelectLegacy =
+  "id, full_name, email, role, is_verified, verification_status, created_at, contact_number, address, location, bio";
 
 function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -133,6 +137,34 @@ function parseBoolean(raw: unknown): boolean | null {
     if (value === "false") return false;
   }
   return null;
+}
+
+function isMissingColumnError(error: any) {
+  const code = String(error?.code || "").toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+
+  return (
+    code === "42703" ||
+    code === "PGRST204" ||
+    message.includes("column") ||
+    message.includes("schema cache")
+  );
+}
+
+async function ensureProfileBanFieldsAvailable(client: any, userId: string) {
+  const { error } = await client
+    .from("profiles")
+    .select("is_banned")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!error) return { error: null as string | null };
+
+  if (isMissingColumnError(error)) {
+    return { error: "Account ban profile fields are missing. Apply the latest profile ban migration first.", status: 503 };
+  }
+
+  return { error: error.message || "Unable to verify account ban fields.", status: 400 };
 }
 
 function normalizeTextField(raw: unknown): string | null {
@@ -1849,15 +1881,23 @@ serve(async (req: Request) => {
     if (action === "fetch_users") {
       const limit = Math.max(1, Math.min(300, Number(body?.limit || 200)));
 
-      const { data, error } = await client
+      let fetchResult = await client
         .from("profiles")
-        .select(
-          "id, full_name, email, role, is_verified, verification_status, created_at, contact_number, address, location, bio",
-        )
+        .select(userListProfileSelect)
         .or(`verification_status.is.null,verification_status.not.in.(${hiddenUserManagementVerificationStatuses.join(",")})`)
         .order("created_at", { ascending: false })
         .limit(limit);
 
+      if (fetchResult.error && isMissingColumnError(fetchResult.error)) {
+        fetchResult = await client
+          .from("profiles")
+          .select(userListProfileSelectLegacy)
+          .or(`verification_status.is.null,verification_status.not.in.(${hiddenUserManagementVerificationStatuses.join(",")})`)
+          .order("created_at", { ascending: false })
+          .limit(limit);
+      }
+
+      const { data, error } = fetchResult;
       if (error) throw error;
 
       const items = await attachProfileLists(client, data || []);
@@ -3257,7 +3297,7 @@ serve(async (req: Request) => {
       const { data: profile, error: profileError } = await client
         .from("profiles")
         .upsert(profilePayload, { onConflict: "id" })
-        .select("id, full_name, email, role, is_verified, verification_status, created_at, contact_number, address, location, bio")
+        .select(userListProfileSelectLegacy)
         .maybeSingle();
 
       if (profileError) {
@@ -3535,9 +3575,7 @@ serve(async (req: Request) => {
           .from("profiles")
           .update(profileUpdates)
           .eq("id", userId)
-          .select(
-            "id, full_name, email, role, is_verified, verification_status, created_at, contact_number, address, location, bio",
-          )
+          .select(userListProfileSelectLegacy)
           .maybeSingle();
 
         if (profileUpdateError) {
@@ -3548,7 +3586,7 @@ serve(async (req: Request) => {
       } else {
         const { data, error: profileFetchError } = await client
           .from("profiles")
-          .select("id, full_name, email, role, is_verified, verification_status, created_at, contact_number, address, location, bio")
+          .select(userListProfileSelectLegacy)
           .eq("id", userId)
           .maybeSingle();
 
@@ -3586,6 +3624,85 @@ serve(async (req: Request) => {
       const [item] = await attachProfileLists(client, [updatedProfile]);
 
       return jsonResponse({ item: item || updatedProfile, role_change_review_id: roleChangeReviewId }, 200);
+    }
+
+    if (action === "unban_user") {
+      const userId = String(body?.userId || "").trim();
+
+      if (!userId) {
+        return jsonResponse({ error: "Missing userId" }, 400);
+      }
+
+      const { data: existingAuth, error: existingAuthError } = await client.auth.admin.getUserById(userId);
+      const { data: existingProfile, error: existingProfileError } = await client
+        .from("profiles")
+        .select("id")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (existingProfileError) {
+        return jsonResponse({ error: existingProfileError.message }, 400);
+      }
+
+      if ((existingAuthError || !existingAuth?.user) && !existingProfile) {
+        return jsonResponse({ error: "User not found" }, 404);
+      }
+
+      const banFieldsResult = await ensureProfileBanFieldsAvailable(client, userId);
+      if (banFieldsResult.error) {
+        return jsonResponse({ error: banFieldsResult.error }, banFieldsResult.status || 400);
+      }
+
+      const nowIso = new Date().toISOString();
+
+      if (existingAuth?.user) {
+        const existingMetadata = (existingAuth.user.user_metadata || {}) as Record<string, unknown>;
+        const existingModeration = existingMetadata.moderation;
+        const nextModeration = {
+          ...(existingModeration && typeof existingModeration === "object" ? existingModeration : {}),
+          banned: false,
+          last_lifted_at: nowIso,
+          last_lifted_by: actorId,
+          last_lifted_source: "admin_users_management",
+        };
+
+        const { error: authUpdateError } = await client.auth.admin.updateUserById(userId, {
+          ban_duration: "none",
+          user_metadata: {
+            ...existingMetadata,
+            moderation: nextModeration,
+          },
+        });
+
+        if (authUpdateError) {
+          return jsonResponse({ error: authUpdateError.message }, 400);
+        }
+      }
+
+      const { data: profile, error: profileUpdateError } = await client
+        .from("profiles")
+        .update({
+          is_banned: false,
+          banned_until: null,
+          ban_reason: null,
+          ban_action: "manual_unban",
+          ban_lifted_at: nowIso,
+          ban_lifted_by: actorId,
+        })
+        .eq("id", userId)
+        .select(userListProfileSelect)
+        .maybeSingle();
+
+      if (profileUpdateError) {
+        if (isMissingColumnError(profileUpdateError)) {
+          return jsonResponse({ error: "Account ban profile fields are missing. Apply the latest profile ban migration first." }, 503);
+        }
+        return jsonResponse({ error: profileUpdateError.message }, 400);
+      }
+
+      const [item] = await attachProfileLists(client, profile ? [profile] : []);
+
+      return jsonResponse({ item: item || profile || { id: userId, is_banned: false }, success: true }, 200);
     }
 
     if (action === "delete_user") {

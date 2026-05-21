@@ -3999,28 +3999,69 @@ export default function BookingsScreen() {
     return `${formatRelocationDateTime(slot.date, slot.start_time)} - ${formatRelocationClockTime(slot.end_time)}`;
   };
 
+  const getRelocationLocalDateKey = (value: Date = new Date()) =>
+    `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+
+  const addRelocationDays = (value: Date, days: number) => {
+    const next = new Date(value);
+    next.setDate(next.getDate() + days);
+    return next;
+  };
+
+  const getRelocationDateRange = (startDate: string, endDate: string) => {
+    const dates: string[] = [];
+    const start = new Date(`${startDate}T00:00:00`);
+    const end = new Date(`${endDate}T00:00:00`);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+      return dates;
+    }
+
+    for (const cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
+      dates.push(getRelocationLocalDateKey(cursor));
+    }
+
+    return dates;
+  };
+
   const getRelocationSlotDates = (slots: RelocationSlotOption[]) =>
     Array.from(new Set(slots.map((slot) => slot.date).filter(Boolean))).sort();
 
   const buildRelocationCalendarMarks = (
     slots: RelocationSlotOption[],
     activeDate: string,
+    minDate: string,
+    maxDate: string,
   ) => {
     const marks: Record<string, any> = {};
-    getRelocationSlotDates(slots).forEach((date) => {
+    const availableDates = new Set(getRelocationSlotDates(slots));
+
+    getRelocationDateRange(minDate, maxDate).forEach((date) => {
+      if (!availableDates.has(date)) {
+        marks[date] = {
+          disabled: true,
+          disableTouchEvent: true,
+        };
+      }
+    });
+
+    availableDates.forEach((date) => {
       marks[date] = {
+        ...(marks[date] || {}),
+        disabled: false,
+        disableTouchEvent: false,
         marked: true,
         dotColor: colors.primary,
       };
     });
 
-    if (activeDate) {
+    if (activeDate && availableDates.has(activeDate)) {
       marks[activeDate] = {
         ...(marks[activeDate] || {}),
         selected: true,
         selectedColor: colors.primary,
         selectedTextColor: "#FFFFFF",
-        marked: Boolean(marks[activeDate]?.marked),
+        marked: true,
         dotColor: "#FFFFFF",
       };
     }
@@ -4036,15 +4077,6 @@ export default function BookingsScreen() {
 
   const toRelocationTimeString = (minutes: number) =>
     `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-
-  const getRelocationLocalDateKey = (value: Date = new Date()) =>
-    `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
-
-  const addRelocationDays = (value: Date, days: number) => {
-    const next = new Date(value);
-    next.setDate(next.getDate() + days);
-    return next;
-  };
 
   const getRelocationDurationMinutes = (item: any) => {
     const start = toRelocationMinutes(item?.start_time);
@@ -4613,7 +4645,28 @@ export default function BookingsScreen() {
     }
   };
 
+  const promptConfirmRelocationSlot = (
+    item: any,
+    selectedSlot: RelocationSlotOption | null,
+  ) => {
+    if (!item || !selectedSlot) return;
 
+    showAlert(
+      "warning",
+      "Confirm Time",
+      `Confirm ${formatRelocationSlotLabel(selectedSlot)}? The original price and payment details will stay the same.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Confirm",
+          onPress: () => {
+            setRelocationSlotPickerVisible(false);
+            handleRelocationDecision(item, true, selectedSlot);
+          },
+        },
+      ],
+    );
+  };
 
   // Leave Review handler with proper params
   const handleLeaveReview = (item: any) => {
@@ -7679,101 +7732,56 @@ export default function BookingsScreen() {
                               </Text>
                             </TouchableOpacity>
 
-                            <View
-                              style={{ flexDirection: "row", gap: scale(8) }}
+                            <TouchableOpacity
+                              activeOpacity={0.78}
+                              disabled={isActionLoadingFor(item)}
+                              onPress={() => {
+                                showAlert(
+                                  "warning",
+                                  "Cancel Move Request",
+                                  "Cancel this owner-requested move? Your booking will be cancelled, refund processing will start if needed, and your completion rate will not be affected.",
+                                  [
+                                    { text: "Keep Booking", style: "cancel" },
+                                    {
+                                      text: "Cancel Booking",
+                                      style: "destructive",
+                                      onPress: () =>
+                                        handleRelocationDecision(item, false),
+                                    },
+                                  ],
+                                );
+                              }}
+                              style={[
+                                styles.cancelButton,
+                                {
+                                  backgroundColor: isDark
+                                    ? "rgba(127, 29, 29, 0.2)"
+                                    : "#FEF2F2",
+                                  width: "100%",
+                                  alignItems: "center",
+                                  borderRadius: 100,
+                                  opacity: isActionLoadingFor(item) ? 0.65 : 1,
+                                },
+                              ]}
                             >
-                              <TouchableOpacity activeOpacity={0.78}
-                                disabled={isActionLoadingFor(item) || !getSelectedRelocationSlot(item)}
-                                onPress={() => {
-                                  const selectedRelocationSlot = getSelectedRelocationSlot(item);
-                                  showAlert(
-                                    "warning",
-                                    "Confirm Time",
-                                    `Confirm ${formatRelocationSlotLabel(selectedRelocationSlot)}? The original price and payment details will stay the same.`,
-                                    [
-                                      { text: "Cancel", style: "cancel" },
-                                      {
-                                        text: "Confirm",
-                                        onPress: () =>
-                                          handleRelocationDecision(
-                                            item,
-                                            true,
-                                            selectedRelocationSlot,
-                                          ),
-                                      },
-                                    ],
-                                  );
-                                }}
-                                style={[
-                                  styles.actionButton,
-                                  {
-                                    backgroundColor: "#16A34A",
-                                    flex: 1,
-                                    alignItems: "center",
-                                    borderRadius: 100,
-                                    opacity:
-                                      isActionLoadingFor(item) || !getSelectedRelocationSlot(item)
-                                        ? 0.65
-                                        : 1,
-                                  },
-                                ]}
-                              >
-                                {isActionLoadingFor(item) ? (
-                                  <ActivityIndicator size="small" color="white" />
-                                ) : (
-                                  <Text style={[styles.actionButtonText, { color: "white" }]}>Confirm Time</Text>
-                                )}
-                              </TouchableOpacity>
+                              {isActionLoadingFor(item) ? (
+                                <ActivityIndicator size="small" color={isDark ? "#F87171" : "#DC2626"} />
+                              ) : (
+                                <Text
+                                  style={[
+                                    styles.cancelButtonText,
+                                    isDark
+                                      ? { color: "#F87171" }
+                                      : { color: "#DC2626" },
+                                  ]}
+                                >
+                                  Cancel Request
+                                </Text>
+                              )}
+                            </TouchableOpacity>
 
-                              <TouchableOpacity activeOpacity={0.78}
-                                disabled={isActionLoadingFor(item)}
-                                onPress={() => {
-                                  showAlert(
-                                    "warning",
-                                    "Cancel Move Request",
-                                    "Cancel this owner-requested move? Your booking will be cancelled, refund processing will start if needed, and your completion rate will not be affected.",
-                                    [
-                                      { text: "Keep Booking", style: "cancel" },
-                                      {
-                                        text: "Cancel Booking",
-                                        style: "destructive",
-                                        onPress: () =>
-                                          handleRelocationDecision(item, false),
-                                      },
-                                    ],
-                                  );
-                                }}
-                                style={[
-                                  styles.cancelButton,
-                                  {
-                                    backgroundColor: isDark
-                                      ? "rgba(127, 29, 29, 0.2)"
-                                      : "#FEF2F2",
-                                    flex: 1,
-                                    alignItems: "center",
-                                    borderRadius: 100,
-                                    opacity: isActionLoadingFor(item) ? 0.65 : 1,
-                                  },
-                                ]}
-                              >
-                                {isActionLoadingFor(item) ? (
-                                  <ActivityIndicator size="small" color={isDark ? "#F87171" : "#DC2626"} />
-                                ) : (
-                                  <Text
-                                    style={[
-                                      styles.cancelButtonText,
-                                      isDark
-                                        ? { color: "#F87171" }
-                                        : { color: "#DC2626" },
-                                    ]}
-                                  >
-                                    Cancel Request
-                                  </Text>
-                                )}
-                              </TouchableOpacity>
-                            </View>
-
-                            <TouchableOpacity activeOpacity={1}
+                            <TouchableOpacity
+                              activeOpacity={1}
                               onPress={() => handleDetailsPress(item)}
                               style={[
                                 styles.outlineButton,
@@ -8697,6 +8705,12 @@ export default function BookingsScreen() {
                   (slot) => slot.date === activeDate,
                 );
                 const selectedSlot = getSelectedRelocationSlot(relocationSlotPickerItem);
+                const selectedSlotForActiveDate =
+                  selectedSlot?.date === activeDate ? selectedSlot : null;
+                const availableDateSet = new Set(slotDates);
+                const minRelocationDate = getRelocationLocalDateKey();
+                const maxRelocationDate = slotDates[slotDates.length - 1] || minRelocationDate;
+                const isConfirmingRelocationSlot = isActionLoadingFor(relocationSlotPickerItem);
 
                 return (
                   <>
@@ -8712,16 +8726,21 @@ export default function BookingsScreen() {
                       ]}
                     >
                       <Calendar
+                        style={styles.relocationCalendar}
                         current={activeDate || slotDates[0]}
-                        minDate={getRelocationLocalDateKey()}
-                        maxDate={slotDates[slotDates.length - 1]}
+                        minDate={minRelocationDate}
+                        maxDate={maxRelocationDate}
                         markedDates={buildRelocationCalendarMarks(
                           relocationSlotOptions,
                           activeDate,
+                          minRelocationDate,
+                          maxRelocationDate,
                         )}
                         onDayPress={(day) => {
+                          if (!availableDateSet.has(day.dateString)) return;
                           setRelocationSlotCalendarDate(day.dateString);
                         }}
+                        disableAllTouchEventsForDisabledDays
                         theme={{
                           backgroundColor: "transparent",
                           calendarBackground: "transparent",
@@ -8739,9 +8758,14 @@ export default function BookingsScreen() {
                           textDayFontFamily: "Poppins_500Medium",
                           textMonthFontFamily: "Poppins_600SemiBold",
                           textDayHeaderFontFamily: "Poppins_500Medium",
-                          textDayFontSize: 13,
-                          textMonthFontSize: 15,
-                          textDayHeaderFontSize: 11,
+                          textDayFontSize: 12,
+                          textMonthFontSize: 14,
+                          textDayHeaderFontSize: 10,
+                          weekVerticalMargin: 1,
+                          arrowStyle: { padding: moderateScale(6) },
+                          arrowHeight: moderateScale(14),
+                          arrowWidth: moderateScale(14),
+                          textDayStyle: { marginTop: moderateScale(4) },
                         }}
                         enableSwipeMonths
                       />
@@ -8765,7 +8789,8 @@ export default function BookingsScreen() {
                       >
                         {slotsForDate.map((slot) => {
                           const isSelected =
-                            selectedSlot && relocationSlotKey(selectedSlot) === relocationSlotKey(slot);
+                            selectedSlotForActiveDate &&
+                            relocationSlotKey(selectedSlotForActiveDate) === relocationSlotKey(slot);
 
                           return (
                             <TouchableOpacity
@@ -8777,7 +8802,7 @@ export default function BookingsScreen() {
                                   ...prev,
                                   [relocationSlotPickerItem.id]: slot,
                                 }));
-                                setRelocationSlotPickerVisible(false);
+                                setRelocationSlotCalendarDate(slot.date);
                               }}
                               style={[
                                 styles.relocationSlotOption,
@@ -8809,6 +8834,34 @@ export default function BookingsScreen() {
                         })}
                       </ScrollView>
                     )}
+                    <View
+                      style={[
+                        styles.relocationModalActions,
+                        { borderTopColor: colors.border },
+                      ]}
+                    >
+                      <TouchableOpacity
+                        activeOpacity={0.78}
+                        disabled={!selectedSlotForActiveDate || isConfirmingRelocationSlot}
+                        onPress={() => promptConfirmRelocationSlot(relocationSlotPickerItem, selectedSlotForActiveDate)}
+                        style={[
+                          styles.relocationConfirmButton,
+                          {
+                            backgroundColor: colors.primary,
+                            opacity: !selectedSlotForActiveDate || isConfirmingRelocationSlot ? 0.55 : 1,
+                          },
+                        ]}
+                      >
+                        {isConfirmingRelocationSlot ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <>
+                            <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />
+                            <Text style={styles.relocationConfirmButtonText}>Confirm Time</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </View>
                   </>
                 );
               })()}
@@ -9459,9 +9512,9 @@ const styles = StyleSheet.create({
   relocationPickerContainer: {
     width: "100%",
     maxWidth: 520,
-    maxHeight: "82%",
+    maxHeight: "86%",
     borderRadius: moderateScale(18),
-    padding: moderateScale(18),
+    padding: moderateScale(16),
     position: "relative",
   },
   relocationPickerTitle: {
@@ -9491,32 +9544,35 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   relocationCalendarContainer: {
-    marginTop: moderateScale(14),
+    marginTop: moderateScale(12),
     borderWidth: 1,
     borderRadius: moderateScale(12),
     overflow: "hidden",
-    paddingVertical: moderateScale(4),
+    paddingVertical: moderateScale(1),
+  },
+  relocationCalendar: {
+    paddingBottom: moderateScale(1),
   },
   relocationDateHint: {
-    marginTop: moderateScale(8),
+    marginTop: moderateScale(6),
     fontSize: moderateScale(11),
     lineHeight: moderateScale(15),
     fontFamily: "Poppins_400Regular",
   },
   relocationSlotList: {
-    marginTop: moderateScale(10),
-    maxHeight: verticalScale(220),
+    marginTop: moderateScale(8),
+    maxHeight: verticalScale(260),
   },
   relocationSlotListContent: {
     gap: moderateScale(8),
-    paddingBottom: moderateScale(4),
+    paddingBottom: moderateScale(2),
   },
   relocationSlotOption: {
-    minHeight: moderateScale(58),
+    minHeight: moderateScale(56),
     borderRadius: moderateScale(12),
     borderWidth: 1.5,
     paddingHorizontal: scale(12),
-    paddingVertical: moderateScale(10),
+    paddingVertical: moderateScale(9),
     flexDirection: "row",
     alignItems: "center",
     gap: scale(10),
@@ -9531,6 +9587,25 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(11),
     lineHeight: moderateScale(15),
     fontFamily: "Poppins_400Regular",
+  },
+  relocationModalActions: {
+    marginTop: moderateScale(10),
+    paddingTop: moderateScale(10),
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  relocationConfirmButton: {
+    minHeight: moderateScale(46),
+    borderRadius: moderateScale(999),
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: scale(8),
+  },
+  relocationConfirmButtonText: {
+    color: "#FFFFFF",
+    fontSize: moderateScale(13),
+    lineHeight: moderateScale(18),
+    fontFamily: "Poppins_600SemiBold",
   },
   qrContainer: {
     width: "100%",

@@ -30,10 +30,94 @@ const createEmailConfirmationRedirectUrl = () => {
   return `${redirectPageUrl}?app_url=${encodeURIComponent(appUrl)}`;
 };
 
+type LoginBanStatus = {
+  permanent: boolean;
+  bannedUntil: string | null;
+  reason: string | null;
+};
+
+const getStringParam = (value: unknown): string => {
+  if (Array.isArray(value)) return String(value[0] || '');
+  return String(value || '');
+};
+
+const isMissingBanColumnError = (errorLike: unknown) => {
+  const error = errorLike as { code?: string; message?: string; details?: string; hint?: string } | null;
+  const text = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+  return error?.code === 'PGRST204' || error?.code === '42703' || text.includes('is_banned') || text.includes('schema cache');
+};
+
+const getActiveLoginBan = (profile: any): LoginBanStatus | null => {
+  const isBanned = profile?.is_banned === true || String(profile?.is_banned || '').toLowerCase() === 'true';
+  if (!isBanned) return null;
+
+  const bannedUntil = typeof profile?.banned_until === 'string' ? profile.banned_until : null;
+  const reason = typeof profile?.ban_reason === 'string' && profile.ban_reason.trim()
+    ? profile.ban_reason.trim()
+    : typeof profile?.ban_action === 'string' && profile.ban_action.trim()
+      ? profile.ban_action.trim().replace(/_/g, ' ')
+      : null;
+
+  if (!bannedUntil) {
+    return { permanent: true, bannedUntil: null, reason };
+  }
+
+  const expiry = new Date(bannedUntil);
+  if (Number.isNaN(expiry.getTime())) {
+    return { permanent: true, bannedUntil: null, reason };
+  }
+
+  if (expiry <= new Date()) return null;
+  return { permanent: false, bannedUntil, reason };
+};
+
+const formatBanDuration = (ban: LoginBanStatus) => {
+  if (ban.permanent || !ban.bannedUntil) return 'permanently';
+
+  const expiry = new Date(ban.bannedUntil);
+  if (Number.isNaN(expiry.getTime())) return 'permanently';
+
+  const remainingHours = Math.max(1, Math.ceil((expiry.getTime() - Date.now()) / (60 * 60 * 1000)));
+  if (remainingHours >= 48) {
+    const days = Math.ceil(remainingHours / 24);
+    return `${days} day${days === 1 ? '' : 's'}`;
+  }
+  if (remainingHours >= 24) return '1 day';
+  return `${remainingHours} hour${remainingHours === 1 ? '' : 's'}`;
+};
+
+const buildBanMessage = (ban: LoginBanStatus) => {
+  const reasonText = ban.reason ? `\n\nReason: ${ban.reason}` : '';
+  if (ban.permanent || !ban.bannedUntil) {
+    return `Your account has been banned permanently.${reasonText}`;
+  }
+
+  return `Your account is currently banned. Please try again in about ${formatBanDuration(ban)}.\n\nBan ends: ${new Date(ban.bannedUntil).toLocaleString('en-PH', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })}.${reasonText}`;
+};
+
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
   const { session, loading: authLoading, roleResolved, userRole } = useAuth();
-  const { verified, accountCreated, email: createdEmail, verification_error, verificationPendingReview, diditPendingReview, diditVerified } = useLocalSearchParams();
+  const {
+    verified,
+    accountCreated,
+    email: createdEmail,
+    verification_error,
+    verificationPendingReview,
+    diditPendingReview,
+    diditVerified,
+    banned,
+    banned_until,
+    ban_reason,
+    ban_permanent,
+  } = useLocalSearchParams();
+  const shownRouteBanRef = useRef(false);
 
   const resolvePostLoginRoute = () => '/feed';
 
@@ -207,6 +291,59 @@ export default function LoginScreen() {
     showAlert('error', title, message, [{ text: 'OK', style: 'default' }], true);
   };
 
+  const showBannedAccountError = (ban: LoginBanStatus) => {
+    const message = buildBanMessage(ban);
+    setLoginMessage({ type: 'error', text: message });
+    showAlert('error', 'Account Banned', message, [{ text: 'OK', style: 'default' }], true);
+  };
+
+  const fetchActiveBanForEmail = async (loginEmail: string): Promise<LoginBanStatus | null> => {
+    const normalizedEmail = String(loginEmail || '').trim().toLowerCase();
+    if (!normalizedEmail) return null;
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('is_banned, banned_until, ban_reason, ban_action')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingBanColumnError(error)) return null;
+      return null;
+    }
+
+    return getActiveLoginBan(data);
+  };
+
+  const fetchLoginProfile = async (userId: string) => {
+    const withBan = await supabase
+      .from('profiles')
+      .select('is_verified, id_document_expiry, role, is_banned, banned_until, ban_reason, ban_action')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (!withBan.error || !isMissingBanColumnError(withBan.error)) {
+      return withBan;
+    }
+
+    return await supabase
+      .from('profiles')
+      .select('is_verified, id_document_expiry, role')
+      .eq('id', userId)
+      .maybeSingle();
+  };
+
+  useEffect(() => {
+    if (shownRouteBanRef.current || getStringParam(banned) !== 'true') return;
+
+    shownRouteBanRef.current = true;
+    showBannedAccountError({
+      permanent: getStringParam(ban_permanent) === 'true',
+      bannedUntil: getStringParam(banned_until) || null,
+      reason: getStringParam(ban_reason) || null,
+    });
+  }, [banned, banned_until, ban_reason, ban_permanent]);
+
   // Check for Account Created success (New User)
   useEffect(() => {
     if (accountCreated === 'true') {
@@ -259,36 +396,49 @@ export default function LoginScreen() {
       // Clear any stale session first to prevent refresh token errors
       await supabase.auth.signOut({ scope: 'local' });
 
+      const activeBanBeforeLogin = await fetchActiveBanForEmail(loginEmail);
+      if (activeBanBeforeLogin) {
+        showBannedAccountError(activeBanBeforeLogin);
+        return;
+      }
+
       const { error } = await supabase.auth.signInWithPassword({
         email: loginEmail,
         password: loginPassword,
       });
 
       if (error) {
-        // Handle specific error cases
-        if (error.message.includes('Invalid login credentials')) {
-          showLoginError('Invalid Login', 'Invalid email or password.');
-        } else if (error.message.includes('Email not confirmed')) {
-          setCanResendConfirmation(true);
-          setLoginMessage({ type: 'error', text: 'Email not confirmed. Check your inbox or resend the confirmation email.' });
-          showAlert(
-            'warning',
-            'Email Not Confirmed',
-            'Email not confirmed. Check your inbox or resend the confirmation email.',
-            [
-              { text: 'Resend Email', onPress: () => void handleResendConfirmationEmail(), style: 'default' },
-              { text: 'OK', style: 'cancel' },
-            ],
-            true,
-          );
-        } else if (error.message.includes('rate') || error.status === 429) {
-          showLoginError('Too Many Attempts', 'Too many attempts. Please wait before trying again.');
-        } else if (error.message.includes('refresh') || error.message.includes('token')) {
-          // Clear storage and retry once
-          await supabase.auth.signOut({ scope: 'local' });
-          showLoginError('Session Expired', 'Session expired. Please try again.');
+        const activeBanAfterError = await fetchActiveBanForEmail(loginEmail);
+        if (activeBanAfterError) {
+          showBannedAccountError(activeBanAfterError);
+        } else if (/bann?ed/i.test(error.message || '')) {
+          showBannedAccountError({ permanent: true, bannedUntil: null, reason: null });
         } else {
-          showLoginError('Sign In Failed', error.message);
+          // Handle specific error cases
+          if (error.message.includes('Invalid login credentials')) {
+            showLoginError('Invalid Login', 'Invalid email or password.');
+          } else if (error.message.includes('Email not confirmed')) {
+            setCanResendConfirmation(true);
+            setLoginMessage({ type: 'error', text: 'Email not confirmed. Check your inbox or resend the confirmation email.' });
+            showAlert(
+              'warning',
+              'Email Not Confirmed',
+              'Email not confirmed. Check your inbox or resend the confirmation email.',
+              [
+                { text: 'Resend Email', onPress: () => void handleResendConfirmationEmail(), style: 'default' },
+                { text: 'OK', style: 'cancel' },
+              ],
+              true,
+            );
+          } else if (error.message.includes('rate') || error.status === 429) {
+            showLoginError('Too Many Attempts', 'Too many attempts. Please wait before trying again.');
+          } else if (error.message.includes('refresh') || error.message.includes('token')) {
+            // Clear storage and retry once
+            await supabase.auth.signOut({ scope: 'local' });
+            showLoginError('Session Expired', 'Session expired. Please try again.');
+          } else {
+            showLoginError('Sign In Failed', error.message);
+          }
         }
       } else {
         // Login succeeded - VALIDATE VERIFICATION STATUS
@@ -333,15 +483,18 @@ export default function LoginScreen() {
           }
 
           // 2. Check Profile (Source of Truth)
-          let { data: profile, error: profileError } = await supabase
-            .from('profiles')
-            .select('is_verified, id_document_expiry, role')
-            .eq('id', user.id)
-            .maybeSingle();
+          let { data: profile, error: profileError } = await fetchLoginProfile(user.id);
 
 
           if (isAdminRole(profile?.role)) {
             await blockAdminAccess();
+            return;
+          }
+
+          const activeBanAfterLogin = getActiveLoginBan(profile);
+          if (activeBanAfterLogin) {
+            await supabase.auth.signOut({ scope: 'local' });
+            showBannedAccountError(activeBanAfterLogin);
             return;
           }
 
@@ -367,17 +520,20 @@ export default function LoginScreen() {
             if (upsertError) {
               console.error('Failed to repair profile:', upsertError);
             } else {
-              const { data: newProfile } = await supabase
-                .from('profiles')
-                .select('is_verified, id_document_expiry, role')
-                .eq('id', user.id)
-                .maybeSingle();
+              const { data: newProfile } = await fetchLoginProfile(user.id);
               profile = newProfile;
             }
           }
 
           if (isAdminRole(profile?.role)) {
             await blockAdminAccess();
+            return;
+          }
+
+          const activeBanAfterRepair = getActiveLoginBan(profile);
+          if (activeBanAfterRepair) {
+            await supabase.auth.signOut({ scope: 'local' });
+            showBannedAccountError(activeBanAfterRepair);
             return;
           }
 

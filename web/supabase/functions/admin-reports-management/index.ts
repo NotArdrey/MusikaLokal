@@ -174,6 +174,56 @@ function getTargetAccountActionExpiresAt(action: ReportTargetAccountAction, now:
   return new Date(now.getTime() + config.expiresAfterDays * 24 * 60 * 60 * 1000).toISOString();
 }
 
+async function updateProfileBanState(
+  client: any,
+  userId: string,
+  action: ReportTargetAccountAction,
+  input: {
+    adminUserId: string;
+    nowIso: string;
+    banExpiresAt: string | null;
+  },
+) {
+  if (action === "none" || action === "mark_unverified") {
+    return { error: null as string | null };
+  }
+
+  const config = reportTargetAccountActionConfigs[action];
+  const profileUpdate =
+    action === "lift_ban"
+      ? {
+          is_banned: false,
+          banned_until: null,
+          ban_reason: null,
+          ban_action: "lift_ban",
+          ban_lifted_at: input.nowIso,
+          ban_lifted_by: input.adminUserId,
+        }
+      : {
+          is_banned: true,
+          banned_until: input.banExpiresAt,
+          ban_reason: config?.label || "Account ban",
+          ban_action: action,
+          banned_at: input.nowIso,
+          banned_by: input.adminUserId,
+          ban_lifted_at: null,
+          ban_lifted_by: null,
+        };
+
+  const { error } = await client
+    .from("profiles")
+    .update(profileUpdate)
+    .eq("id", userId);
+
+  if (!error) return { error: null };
+
+  if (isMissingColumnError(error)) {
+    return { error: "Account ban profile fields are missing. Apply the latest profile ban migration first." };
+  }
+
+  return { error: error.message || "Unable to update account ban state." };
+}
+
 function normalizeText(rawValue: unknown, maxLength: number): string | null {
   if (typeof rawValue !== "string") return null;
   const value = rawValue.trim();
@@ -184,13 +234,18 @@ function normalizeText(rawValue: unknown, maxLength: number): string | null {
 function isMissingColumnError(error: any) {
   const code = String(error?.code || "").toUpperCase();
   const message = String(error?.message || "").toLowerCase();
+  const details = String(error?.details || "").toLowerCase();
+  const hint = String(error?.hint || "").toLowerCase();
+  const text = `${message} ${details} ${hint}`;
 
   return (
     code === "42P01" ||
     code === "42703" ||
-    message.includes("does not exist") ||
-    message.includes("relation") ||
-    message.includes("unknown column")
+    code === "PGRST204" ||
+    text.includes("does not exist") ||
+    text.includes("relation") ||
+    text.includes("schema cache") ||
+    text.includes("unknown column")
   );
 }
 
@@ -202,6 +257,22 @@ function isMissingTableError(error: any, tableName: string) {
     message.includes(`relation "${tableName}" does not exist`) ||
     message.includes(`table "${tableName}" does not exist`)
   );
+}
+
+async function ensureProfileBanFieldsAvailable(client: any, userId: string) {
+  const { error } = await client
+    .from("profiles")
+    .select("is_banned")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!error) return { error: null as string | null };
+
+  if (isMissingColumnError(error)) {
+    return { error: "Account ban profile fields are missing. Apply the latest profile ban migration first." };
+  }
+
+  return { error: error.message || "Unable to verify account ban fields." };
 }
 
 async function fetchProfileById(client: any, profileId: string) {
@@ -444,6 +515,21 @@ async function fetchReportTargetDetails(client: any, rawTargetType: unknown, raw
   };
 }
 
+async function resolveReportTargetOwnerId(client: any, report: any) {
+  const normalizedTargetType = String(report?.target_type || "").trim().toLowerCase();
+  const targetId = String(report?.target_id || "").trim();
+
+  if (!targetId) return "";
+  if (normalizedTargetType === "profile" || normalizedTargetType === "user") return targetId;
+
+  try {
+    const targetDetails = await fetchReportTargetDetails(client, report?.target_type, report?.target_id);
+    return String(targetDetails?.owner_profile?.id || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 async function markTargetAccountUnverified(client: any, userId: string) {
   const normalizedUserId = String(userId || "").trim();
   if (!normalizedUserId) {
@@ -520,6 +606,11 @@ async function applyTargetAccountAction(
     return { error: "Reported auth account was not found." };
   }
 
+  const profileBanFieldsResult = await ensureProfileBanFieldsAvailable(client, normalizedUserId);
+  if (profileBanFieldsResult.error) {
+    return { error: profileBanFieldsResult.error };
+  }
+
   const existingMetadata = (existingAuth.user.user_metadata || {}) as Record<string, unknown>;
   const existingModeration = existingMetadata.moderation || {};
   const nextModeration =
@@ -553,6 +644,15 @@ async function applyTargetAccountAction(
 
   if (authUpdateError) {
     return { error: authUpdateError.message };
+  }
+
+  const profileBanResult = await updateProfileBanState(client, normalizedUserId, action, {
+    adminUserId: input.adminUserId,
+    nowIso: input.nowIso,
+    banExpiresAt: input.banExpiresAt,
+  });
+  if (profileBanResult.error) {
+    return { error: profileBanResult.error };
   }
 
   return { error: null };
@@ -794,6 +894,126 @@ serve(async (req: Request) => {
       });
     }
 
+    if (action === "lift_report_target_ban") {
+      const reportId = String(params.reportId || "").trim();
+
+      if (!reportId) {
+        return jsonResponse({ error: "Missing reportId" }, 400);
+      }
+
+      let supportsTargetAccountActionColumns = true;
+      let existingReport: any = null;
+
+      {
+        const { data, error } = await client
+          .from("reports")
+          .select("id, status, reporter_id, target_type, target_id, target_account_action, target_account_action_expires_at")
+          .eq("id", reportId)
+          .maybeSingle();
+
+        if (!error) {
+          existingReport = data;
+        } else if (isMissingColumnError(error)) {
+          supportsTargetAccountActionColumns = false;
+
+          const fallback = await client
+            .from("reports")
+            .select("id, status, reporter_id, target_type, target_id")
+            .eq("id", reportId)
+            .maybeSingle();
+
+          if (fallback.error) throw fallback.error;
+          existingReport = fallback.data;
+        } else {
+          throw error;
+        }
+      }
+
+      if (!existingReport) {
+        return jsonResponse({ error: "Report not found" }, 404);
+      }
+
+      const targetOwnerId = await resolveReportTargetOwnerId(client, existingReport);
+      if (!targetOwnerId) {
+        return jsonResponse({ error: "Reported account is unavailable." }, 400);
+      }
+
+      const nowIso = new Date().toISOString();
+      const accountActionResult = await applyTargetAccountAction(client, targetOwnerId, "lift_ban", {
+        reportId,
+        adminUserId: userId,
+        nowIso,
+        banExpiresAt: null,
+      });
+
+      if (accountActionResult.error) {
+        return jsonResponse({ error: accountActionResult.error }, 400);
+      }
+
+      let updatedReport: any = {
+        ...existingReport,
+        reviewed_by: userId,
+        reviewed_at: nowIso,
+        target_account_action: "lift_ban",
+        target_account_action_expires_at: null,
+      };
+
+      if (supportsTargetAccountActionColumns) {
+        const { data, error } = await client
+          .from("reports")
+          .update({
+            reviewed_by: userId,
+            reviewed_at: nowIso,
+            target_account_action: "lift_ban",
+            target_account_action_expires_at: null,
+          })
+          .eq("id", reportId)
+          .select("id, status, target_type, target_id, reviewed_by, reviewed_at, target_account_action, target_account_action_expires_at")
+          .maybeSingle();
+
+        if (error) {
+          if (isMissingColumnError(error)) {
+            supportsTargetAccountActionColumns = false;
+          } else {
+            throw error;
+          }
+        } else if (data) {
+          updatedReport = data;
+        }
+      }
+
+      const accountActionConfig = reportTargetAccountActionConfigs.lift_ban;
+      try {
+        await insertNotificationIfMissing(client, {
+          user_id: targetOwnerId,
+          type: accountActionConfig.notificationType,
+          title: accountActionConfig.notificationTitle,
+          message: accountActionConfig.notificationMessage,
+          image: null,
+          meta: {
+            report_id: reportId,
+            target_type: existingReport.target_type,
+            target_id: existingReport.target_id,
+            target_account_action: "lift_ban",
+            target_account_action_label: accountActionConfig.label,
+            event_type: "report_target_account_lift_ban",
+          },
+        });
+      } catch {
+        // Do not block unban if notification insert fails.
+      }
+
+      return jsonResponse({
+        item: {
+          ...updatedReport,
+          target_account_action: "lift_ban",
+          target_account_action_expires_at: null,
+        },
+        usedTargetAccountActionLegacy: !supportsTargetAccountActionColumns,
+        success: true,
+      });
+    }
+
     if (action === "update_report_status") {
       const reportId = String(params.reportId || "").trim();
       const nextStatus = parseReportStatus(params.nextStatus);
@@ -831,24 +1051,7 @@ serve(async (req: Request) => {
       }
 
       const reporterId = String(existingReport.reporter_id || "").trim();
-      let targetOwnerId = "";
-
-      try {
-        const targetDetails = await fetchReportTargetDetails(
-          client,
-          existingReport.target_type,
-          existingReport.target_id,
-        );
-
-        const normalizedTargetType = String(existingReport.target_type || "").trim().toLowerCase();
-        if (normalizedTargetType === "profile" || normalizedTargetType === "user") {
-          targetOwnerId = String(existingReport.target_id || "").trim();
-        } else {
-          targetOwnerId = String(targetDetails?.owner_profile?.id || "").trim();
-        }
-      } catch {
-        targetOwnerId = "";
-      }
+      const targetOwnerId = await resolveReportTargetOwnerId(client, existingReport);
 
       const now = new Date();
       const nowIso = now.toISOString();

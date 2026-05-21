@@ -35,7 +35,6 @@ import {
     getGroupTypeLabel,
     isGroupLeaderMember,
 } from "../src/utils/groupMembers";
-import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
 
 import { useLocalSearchParams } from "expo-router";
 import { supabase } from "../lib/supabase";
@@ -1193,18 +1192,12 @@ export default function EditGroupScreen() {
     try {
       const groupId = Array.isArray(id) ? id[0] : id;
 
-      // Create transfer request
-      const { data, error } = await supabase
-        .from("leadership_transfer_requests")
-        .insert({
-          group_id: groupId,
-          from_user_id: currentUserId,
-          to_user_id: selectedNewLeader.user_id,
-          message: transferMessage || null,
-          status: "pending",
-        })
-        .select()
-        .single();
+      const { error } = await supabase
+        .rpc("initiate_leadership_transfer", {
+          p_group_id: groupId,
+          p_to_user_id: selectedNewLeader.user_id,
+          p_message: transferMessage || null,
+        });
 
       if (error) {
         console.error("Error creating transfer request:", error);
@@ -1215,21 +1208,6 @@ export default function EditGroupScreen() {
         );
         return;
       }
-
-      // Direct insert to notifications table
-      await supabase.from('notifications').insert({
-        user_id: selectedNewLeader.user_id,
-        type: "info",
-        title: "Leadership Transfer Request",
-        message: `You have been invited to become the leader of "${groupName}". Open to accept or decline.`,
-        meta: buildNotificationRouteMeta('/notifications', undefined, {
-          type: "leadership_transfer",
-          request_id: data.id,
-          group_id: groupId,
-          group_name: groupName,
-        }),
-        read: false,
-      });
 
       showAlert(
         "success",

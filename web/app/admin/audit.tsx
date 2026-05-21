@@ -252,6 +252,18 @@ const auditSourceLabels: Record<string, string> = {
   system: 'System',
 };
 
+const rawUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const genericAuditEntityTitles: Record<string, string> = {
+  booking_requests: 'Booking request',
+  conversations: 'Conversation',
+  conversation_participants: 'Conversation participant',
+  messages: 'Message',
+  message_reactions: 'Message reaction',
+  post_comments: 'Post comment',
+  post_reactions: 'Post reaction',
+};
+
 const formatDateTime = (value?: string | null) => {
   if (!value) return '-';
   const date = new Date(value);
@@ -299,6 +311,46 @@ const formatAuditEntityType = (value?: string | null) => {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) return '-';
   return auditEntityLabels[normalized] || formatTitleWords(normalized);
+};
+
+const getGenericAuditEntityTitle = (entityType?: string | null) => {
+  const normalized = String(entityType || '').trim().toLowerCase();
+  if (!normalized) return 'Unknown item';
+  return genericAuditEntityTitles[normalized] || formatAuditEntityType(normalized);
+};
+
+const isRawAuditReference = (
+  entityName?: string | null,
+  reference?: string | null,
+  entityType?: string | null,
+) => {
+  const normalizedName = String(entityName || '').trim();
+  const normalizedReference = String(reference || '').trim();
+  const normalizedEntityType = String(entityType || '').trim().toLowerCase();
+
+  if (!normalizedName) return true;
+  if (rawUuidPattern.test(normalizedName)) return true;
+  if (!normalizedReference) return false;
+
+  const lowerName = normalizedName.toLowerCase();
+  const lowerReference = normalizedReference.toLowerCase();
+
+  return (
+    lowerName === lowerReference ||
+    lowerName === `${normalizedEntityType}:${lowerReference}`
+  );
+};
+
+const getAuditEntityTitle = (entry: AuditEntry) => {
+  const entityType = String(entry.entity_type || '').trim().toLowerCase();
+  const rawEntityName = String(entry.entity_name || '').trim();
+  const rawReference = String(entry.reference || entry.booking_id || '').trim();
+  const genericTitle = getGenericAuditEntityTitle(entityType);
+
+  if (genericAuditEntityTitles[entityType]) return genericTitle;
+  if (isRawAuditReference(rawEntityName, rawReference, entityType)) return genericTitle;
+
+  return rawEntityName;
 };
 
 const formatAuditSource = (value?: string | null) => {
@@ -690,6 +742,7 @@ export default function AdminAuditPage() {
       const friendlyEntityType = formatAuditEntityType(entry.entity_type).toLowerCase();
       const friendlySource = formatAuditSource(entry.source).toLowerCase();
       const friendlyNotes = formatAuditNotes(entry.admin_notes).toLowerCase();
+      const friendlyEntityTitle = getAuditEntityTitle(entry).toLowerCase();
 
       if (auditActionFilter !== 'all' && action !== auditActionFilter) {
         return false;
@@ -702,6 +755,7 @@ export default function AdminAuditPage() {
       if (!query) return true;
 
       return (
+        friendlyEntityTitle.includes(query) ||
         String(entry.entity_name || '').toLowerCase().includes(query) ||
         String(entry.action || '').toLowerCase().includes(query) ||
         String(entry.entity_type || '').toLowerCase().includes(query) ||
@@ -870,6 +924,7 @@ export default function AdminAuditPage() {
               {filteredAuditEntries.map((entry) => {
                 const changedCount = Number(entry.changed_fields_count || 0);
                 const notes = formatAuditNotes(entry.admin_notes);
+                const entityTitle = getAuditEntityTitle(entry);
 
                 return (
                   <View
@@ -878,7 +933,7 @@ export default function AdminAuditPage() {
                     accessibilityLabel={`admin-audit-card-${entry.id}`}
                     style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
                   >
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>{entry.entity_name || 'Unknown item'}</Text>
+                    <Text style={[styles.cardTitle, { color: colors.text }]}>{entityTitle}</Text>
                     <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
                       What happened: {formatAuditAction(entry.action)}
                     </Text>

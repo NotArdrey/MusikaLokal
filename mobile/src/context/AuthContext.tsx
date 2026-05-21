@@ -19,6 +19,44 @@ type UnpaidBooking = {
   booking_date: string;
 };
 
+type AccountBanRecord = {
+  is_banned?: boolean | null;
+  banned_until?: string | null;
+  ban_reason?: string | null;
+  ban_action?: string | null;
+};
+
+const isBanColumnError = (errorLike: unknown) => {
+  const error = errorLike as { code?: string; message?: string; details?: string; hint?: string } | null;
+  const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+  return error?.code === "PGRST204" || error?.code === "42703" || text.includes("is_banned") || text.includes("schema cache");
+};
+
+const getActiveAccountBan = (record?: AccountBanRecord | null) => {
+  const isBanned = record?.is_banned === true || String(record?.is_banned || "").toLowerCase() === "true";
+  if (!isBanned) return null;
+
+  const bannedUntil = typeof record?.banned_until === "string" ? record.banned_until : null;
+  const reason =
+    typeof record?.ban_reason === "string" && record.ban_reason.trim()
+      ? record.ban_reason.trim()
+      : typeof record?.ban_action === "string" && record.ban_action.trim()
+        ? record.ban_action.trim().replace(/_/g, " ")
+        : null;
+
+  if (!bannedUntil) {
+    return { permanent: true, bannedUntil: null as string | null, reason };
+  }
+
+  const expiry = new Date(bannedUntil);
+  if (Number.isNaN(expiry.getTime())) {
+    return { permanent: true, bannedUntil: null as string | null, reason };
+  }
+
+  if (expiry <= new Date()) return null;
+  return { permanent: false, bannedUntil, reason };
+};
+
 type AuthContextType = {
   session: Session | null;
   loading: boolean;
@@ -119,6 +157,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     userId: null,
     fetchedAt: 0,
   });
+  const banLogoutUserIdRef = useRef<string | null>(null);
 
   const ROLE_FETCH_COOLDOWN_MS = 5000;
   const AUTH_DEBUG_LOGS = false;
@@ -238,6 +277,79 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     onBeforeNavigate?.();
   }, []);
 
+  const clearAuthenticatedStateForBan = useCallback(() => {
+    setSession(null);
+    roleUserIdRef.current = null;
+    setIsAdmin(false);
+    setUserRole(null);
+    setRoleResolved(true);
+    setIsSystemLocked(false);
+    setUnpaidBalance(0);
+    setUnpaidBookings([]);
+    setIdentityStatus(null);
+    setIdentityRequired(false);
+    setIdentityChecked(true);
+    setIdentityExpiresAt(null);
+    roleFetchInFlightRef.current = null;
+    lastRoleFetchRef.current = { userId: null, fetchedAt: 0 };
+    setLoading(false);
+  }, []);
+
+  const handleActiveAccountBan = useCallback(async (record?: AccountBanRecord | null) => {
+    const activeBan = getActiveAccountBan(record);
+    const activeUserId = session?.user?.id || null;
+    if (!activeBan || !activeUserId) return false;
+
+    if (banLogoutUserIdRef.current === activeUserId) return true;
+    banLogoutUserIdRef.current = activeUserId;
+
+    try {
+      await supabase.auth.signOut({ scope: "local" });
+    } catch {
+      // Local storage clear below is the fallback that actually removes app access.
+    }
+
+    try {
+      await clearSupabaseAuthStorage();
+    } catch {
+      // Ignore storage-clear errors.
+    }
+
+    clearAuthenticatedStateForBan();
+    router.replace({
+      pathname: "/",
+      params: {
+        banned: "true",
+        banned_until: activeBan.bannedUntil || "",
+        ban_reason: activeBan.reason || "",
+        ban_permanent: activeBan.permanent ? "true" : "false",
+      },
+    } as any);
+    return true;
+  }, [clearAuthenticatedStateForBan, session?.user?.id]);
+
+  const checkAccountBanStatus = useCallback(async () => {
+    const activeUserId = session?.user?.id;
+    if (!activeUserId) return false;
+
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("is_banned, banned_until, ban_reason, ban_action")
+        .eq("id", activeUserId)
+        .maybeSingle();
+
+      if (error) {
+        if (isBanColumnError(error)) return false;
+        return false;
+      }
+
+      return await handleActiveAccountBan(data);
+    } catch {
+      return false;
+    }
+  }, [handleActiveAccountBan, session?.user?.id]);
+
   useEffect(() => {
     AsyncStorage.removeItem("auth_guest_mode")
       .then(() => {
@@ -295,6 +407,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setIdentityRequired(false);
       setIdentityChecked(true);
       setIdentityExpiresAt(null);
+      banLogoutUserIdRef.current = null;
       setLoading(false);
     };
 
@@ -369,6 +482,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setIdentityExpiresAt(null);
         roleFetchInFlightRef.current = null;
         lastRoleFetchRef.current = { userId: null, fetchedAt: 0 };
+        banLogoutUserIdRef.current = null;
         setLoading(false);
         return;
       }
@@ -463,8 +577,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     if (session?.user?.id) {
       checkSystemLock();
+      void checkAccountBanStatus();
     }
-  }, [session?.user?.id, checkSystemLock]);
+  }, [session?.user?.id, checkSystemLock, checkAccountBanStatus]);
 
   // Check identity verification and expiry when session changes
   useEffect(() => {
@@ -501,7 +616,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           table: "profiles",
           filter: `id=eq.${activeUserId}`,
         },
-        async () => {
+        async (payload) => {
+          if (await handleActiveAccountBan(payload.new as AccountBanRecord)) {
+            return;
+          }
           await Promise.all([checkIdentityStatus(), checkSystemLock()]);
         },
       )
@@ -515,7 +633,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         profileRealtimeChannelRef.current = null;
       }
     };
-  }, [session?.user?.id, checkIdentityStatus, checkSystemLock]);
+  }, [session?.user?.id, checkIdentityStatus, checkSystemLock, handleActiveAccountBan]);
 
   // Re-check on app foreground to catch expiry transitions after backgrounding.
   useEffect(() => {
@@ -523,14 +641,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const appStateSub = AppState.addEventListener("change", (nextState: AppStateStatus) => {
       if (nextState === "active") {
-        void Promise.all([checkIdentityStatus(), checkSystemLock()]);
+        void Promise.all([checkIdentityStatus(), checkSystemLock(), checkAccountBanStatus()]);
       }
     });
 
     return () => {
       appStateSub.remove();
     };
-  }, [session?.user?.id, checkIdentityStatus, checkSystemLock]);
+  }, [session?.user?.id, checkIdentityStatus, checkSystemLock, checkAccountBanStatus]);
 
   // Trigger re-check exactly when identity document expiry timestamp is reached.
   useEffect(() => {

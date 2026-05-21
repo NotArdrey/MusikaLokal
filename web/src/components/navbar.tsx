@@ -2,14 +2,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { router, usePathname } from 'expo-router';
 import { memo, useEffect, useMemo, useState } from 'react';
-import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Platform, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 
-export const NAVBAR_BOTTOM_OFFSET = Platform.OS === 'web' ? 0 : 24;
-export const NAVBAR_HEIGHT = Platform.OS === 'web' ? 0 : 84;
+export const NAVBAR_BOTTOM_OFFSET = 24;
+export const NAVBAR_HEIGHT = 84;
 export const NAVBAR_CLEARANCE = NAVBAR_BOTTOM_OFFSET + NAVBAR_HEIGHT + 16;
 
 function Navbar() {
@@ -17,8 +17,10 @@ function Navbar() {
     const { isAdmin, isGuest, roleResolved, session, userRole } = useAuth();
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
+    const { width } = useWindowDimensions();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
     const isFan = isFanUserRole(userRole);
+    const isWebDesktop = Platform.OS === 'web' && width >= 768;
 
     useEffect(() => {
         if (isGuest || isFan || !session?.user?.id) {
@@ -79,7 +81,7 @@ function Navbar() {
     );
     const useCompactFanNavbar = isFan && !isGuest;
 
-    if (isGuest || Platform.OS === 'web') {
+    if (isGuest || isWebDesktop) {
         return null;
     }
 

@@ -49,7 +49,6 @@ import {
   fetchUserOwnedPlaylists,
   syncGroupLinkedPlaylists,
 } from "../src/utils/groupPlaylists";
-import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
 import {
   GroupInviteTarget,
   sendGroupMemberInvites,
@@ -1478,18 +1477,12 @@ export default function EditGroupScreen() {
     try {
       const groupId = Array.isArray(id) ? id[0] : id;
 
-      // Create transfer request
-      const { data, error } = await supabase
-        .from("leadership_transfer_requests")
-        .insert({
-          group_id: groupId,
-          from_user_id: currentUserId,
-          to_user_id: selectedNewLeader.user_id,
-          message: transferMessage || null,
-          status: "pending",
-        })
-        .select()
-        .single();
+      const { error } = await supabase
+        .rpc("initiate_leadership_transfer", {
+          p_group_id: groupId,
+          p_to_user_id: selectedNewLeader.user_id,
+          p_message: transferMessage || null,
+        });
 
       if (error) {
         logActionError("edit_group.create_transfer_failed", error, {
@@ -1497,29 +1490,6 @@ export default function EditGroupScreen() {
           toUserId: selectedNewLeader.user_id,
         });
         throw new Error(`Failed to send transfer request: ${formatSupabaseError(error)}`);
-      }
-
-      // Direct insert to notifications table
-      const { error: notificationError } = await supabase.from('notifications').insert({
-        user_id: selectedNewLeader.user_id,
-        type: "info",
-        title: "Leadership Transfer Request",
-        message: `You have been invited to become the leader of "${groupName}". Open to accept or decline.`,
-        meta: buildNotificationRouteMeta('/notifications', undefined, {
-          type: "leadership_transfer",
-          request_id: data.id,
-          group_id: groupId,
-          group_name: groupName,
-        }),
-        read: false,
-      });
-      if (notificationError) {
-        logActionError("edit_group.create_transfer_notification_failed", notificationError, {
-          groupId,
-          requestId: data.id,
-          toUserId: selectedNewLeader.user_id,
-        });
-        throw new Error(`Failed to notify new leader: ${formatSupabaseError(notificationError)}`);
       }
 
       showAlert(
