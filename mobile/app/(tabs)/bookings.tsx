@@ -5,6 +5,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ExpoLinking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Calendar } from "react-native-calendars";
 import {
     ActivityIndicator,
     AppState,
@@ -1335,6 +1336,7 @@ export default function BookingsScreen() {
   const [relocationSlotOptions, setRelocationSlotOptions] = useState<RelocationSlotOption[]>([]);
   const [relocationSlotLoading, setRelocationSlotLoading] = useState(false);
   const [relocationSlotError, setRelocationSlotError] = useState<string | null>(null);
+  const [relocationSlotCalendarDate, setRelocationSlotCalendarDate] = useState("");
   useBottomOverlayVisibility(
     showPaymentOptionModal || showScanModal || relocationSlotPickerVisible,
     "BookingsPaymentOrScanModal",
@@ -3951,19 +3953,24 @@ export default function BookingsScreen() {
     }
   };
 
+  const normalizeRelocationTime = (value: unknown) =>
+    String(value || "").trim().substring(0, 5);
+
+  const formatRelocationClockTime = (value: unknown) =>
+    formatBookingClockTime(normalizeRelocationTime(value)) || "TBA";
+
   const formatRelocationDateTime = (
     dateValue?: string | null,
     timeValue?: string | null,
   ) => {
     if (!dateValue || !timeValue) return "TBA";
-    const timePart = timeValue.substring(0, 5);
+    const timePart = normalizeRelocationTime(timeValue);
     const parsed = new Date(`${dateValue}T${timePart}`);
-    if (isNaN(parsed.getTime())) return `${dateValue} ${timePart}`;
+    if (isNaN(parsed.getTime())) {
+      return `${dateValue} ${formatRelocationClockTime(timePart)}`;
+    }
     return formatFriendlyDateTime(parsed.toISOString());
   };
-
-  const normalizeRelocationTime = (value: unknown) =>
-    String(value || "").trim().substring(0, 5);
 
   const relocationSlotKey = (slot: RelocationSlotOption) =>
     `${slot.date}|${normalizeRelocationTime(slot.start_time)}|${normalizeRelocationTime(slot.end_time)}`;
@@ -3989,7 +3996,36 @@ export default function BookingsScreen() {
 
   const formatRelocationSlotLabel = (slot: RelocationSlotOption | null) => {
     if (!slot) return "Choose a time";
-    return `${formatRelocationDateTime(slot.date, slot.start_time)} - ${normalizeRelocationTime(slot.end_time)}`;
+    return `${formatRelocationDateTime(slot.date, slot.start_time)} - ${formatRelocationClockTime(slot.end_time)}`;
+  };
+
+  const getRelocationSlotDates = (slots: RelocationSlotOption[]) =>
+    Array.from(new Set(slots.map((slot) => slot.date).filter(Boolean))).sort();
+
+  const buildRelocationCalendarMarks = (
+    slots: RelocationSlotOption[],
+    activeDate: string,
+  ) => {
+    const marks: Record<string, any> = {};
+    getRelocationSlotDates(slots).forEach((date) => {
+      marks[date] = {
+        marked: true,
+        dotColor: colors.primary,
+      };
+    });
+
+    if (activeDate) {
+      marks[activeDate] = {
+        ...(marks[activeDate] || {}),
+        selected: true,
+        selectedColor: colors.primary,
+        selectedTextColor: "#FFFFFF",
+        marked: Boolean(marks[activeDate]?.marked),
+        dotColor: "#FFFFFF",
+      };
+    }
+
+    return marks;
   };
 
   const toRelocationMinutes = (time: unknown) => {
@@ -4032,7 +4068,7 @@ export default function BookingsScreen() {
 
   const fetchRelocationSlotOptions = async (
     item: any,
-    limit = 24,
+    limit = 72,
   ): Promise<RelocationSlotOption[]> => {
     if (!item?.studio_id) return [];
 
@@ -4192,11 +4228,21 @@ export default function BookingsScreen() {
     setRelocationSlotPickerVisible(true);
     setRelocationSlotOptions([]);
     setRelocationSlotError(null);
+    setRelocationSlotCalendarDate(getSelectedRelocationSlot(item)?.date || "");
     setRelocationSlotLoading(true);
 
     try {
       const options = await fetchRelocationSlotOptions(item);
       setRelocationSlotOptions(options);
+      const selectedSlot = getSelectedRelocationSlot(item);
+      const availableDates = Array.from(new Set(options.map((slot) => slot.date))).sort();
+      setRelocationSlotCalendarDate((prev) =>
+        prev && availableDates.includes(prev)
+          ? prev
+          : selectedSlot?.date && availableDates.includes(selectedSlot.date)
+            ? selectedSlot.date
+            : availableDates[0] || "",
+      );
 
       if (!preferredRelocationSlots[item.id] && options[0]) {
         setPreferredRelocationSlots((prev) => ({
@@ -7629,7 +7675,7 @@ export default function BookingsScreen() {
                             >
                               <Ionicons name="calendar-outline" size={16} color={colors.primary} />
                               <Text style={[styles.outlineButtonText, { color: colors.primary }]}>
-                                Choose Time
+                                Choose Date & Time
                               </Text>
                             </TouchableOpacity>
 
@@ -8599,7 +8645,7 @@ export default function BookingsScreen() {
               </TouchableOpacity>
 
               <Text style={[styles.relocationPickerTitle, { color: colors.text }]}>
-                Choose Time
+                Choose Date & Time
               </Text>
               <Text style={[styles.relocationPickerSubtitle, { color: colors.textSecondary }]}>
                 Pick an available slot for this booking. The original price and payment details stay the same.
@@ -8640,59 +8686,132 @@ export default function BookingsScreen() {
                     No matching available slots were found. You can cancel this owner-requested move without affecting your completion rate.
                   </Text>
                 </View>
-              ) : (
-                <ScrollView
-                  style={styles.relocationSlotList}
-                  contentContainerStyle={styles.relocationSlotListContent}
-                  showsVerticalScrollIndicator={false}
-                >
-                  {relocationSlotOptions.map((slot) => {
-                    const selectedSlot = getSelectedRelocationSlot(relocationSlotPickerItem);
-                    const isSelected =
-                      selectedSlot && relocationSlotKey(selectedSlot) === relocationSlotKey(slot);
+              ) : (() => {
+                const slotDates = getRelocationSlotDates(relocationSlotOptions);
+                const activeDate =
+                  relocationSlotCalendarDate ||
+                  getSelectedRelocationSlot(relocationSlotPickerItem)?.date ||
+                  slotDates[0] ||
+                  "";
+                const slotsForDate = relocationSlotOptions.filter(
+                  (slot) => slot.date === activeDate,
+                );
+                const selectedSlot = getSelectedRelocationSlot(relocationSlotPickerItem);
 
-                    return (
-                      <TouchableOpacity
-                        key={relocationSlotKey(slot)}
-                        activeOpacity={0.78}
-                        onPress={() => {
-                          if (!relocationSlotPickerItem?.id) return;
-                          setPreferredRelocationSlots((prev) => ({
-                            ...prev,
-                            [relocationSlotPickerItem.id]: slot,
-                          }));
-                          setRelocationSlotPickerVisible(false);
-                        }}
-                        style={[
-                          styles.relocationSlotOption,
-                          {
-                            borderColor: isSelected ? colors.primary : colors.border,
-                            backgroundColor: isSelected
-                              ? colors.primary + "18"
-                              : isDark
-                                ? "rgba(255,255,255,0.06)"
-                                : "#F8FAFC",
-                          },
-                        ]}
-                      >
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.relocationSlotDate, { color: colors.text }]}>
-                            {formatRelocationDateTime(slot.date, slot.start_time)}
-                          </Text>
-                          <Text style={[styles.relocationSlotTime, { color: colors.textSecondary }]}>
-                            Until {normalizeRelocationTime(slot.end_time)}
-                          </Text>
-                        </View>
-                        {isSelected ? (
-                          <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-                        ) : (
-                          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                return (
+                  <>
+                    <View
+                      style={[
+                        styles.relocationCalendarContainer,
+                        {
+                          borderColor: colors.border,
+                          backgroundColor: isDark
+                            ? "rgba(255,255,255,0.04)"
+                            : "#FFFFFF",
+                        },
+                      ]}
+                    >
+                      <Calendar
+                        current={activeDate || slotDates[0]}
+                        minDate={getRelocationLocalDateKey()}
+                        maxDate={slotDates[slotDates.length - 1]}
+                        markedDates={buildRelocationCalendarMarks(
+                          relocationSlotOptions,
+                          activeDate,
                         )}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              )}
+                        onDayPress={(day) => {
+                          setRelocationSlotCalendarDate(day.dateString);
+                        }}
+                        theme={{
+                          backgroundColor: "transparent",
+                          calendarBackground: "transparent",
+                          textSectionTitleColor: colors.textSecondary,
+                          selectedDayBackgroundColor: colors.primary,
+                          selectedDayTextColor: "#FFFFFF",
+                          todayTextColor: colors.primary,
+                          dayTextColor: colors.text,
+                          textDisabledColor: isDark ? "#4B5563" : "#D1D5DB",
+                          dotColor: colors.primary,
+                          selectedDotColor: "#FFFFFF",
+                          arrowColor: colors.primary,
+                          monthTextColor: colors.text,
+                          indicatorColor: colors.primary,
+                          textDayFontFamily: "Poppins_500Medium",
+                          textMonthFontFamily: "Poppins_600SemiBold",
+                          textDayHeaderFontFamily: "Poppins_500Medium",
+                          textDayFontSize: 13,
+                          textMonthFontSize: 15,
+                          textDayHeaderFontSize: 11,
+                        }}
+                        enableSwipeMonths
+                      />
+                    </View>
+
+                    <Text style={[styles.relocationDateHint, { color: colors.textSecondary }]}>
+                      Dates with available times are marked.
+                    </Text>
+
+                    {slotsForDate.length === 0 ? (
+                      <View style={styles.relocationPickerState}>
+                        <Text style={[styles.relocationPickerStateText, { color: colors.textSecondary }]}>
+                          No available times were found for this date.
+                        </Text>
+                      </View>
+                    ) : (
+                      <ScrollView
+                        style={styles.relocationSlotList}
+                        contentContainerStyle={styles.relocationSlotListContent}
+                        showsVerticalScrollIndicator={false}
+                      >
+                        {slotsForDate.map((slot) => {
+                          const isSelected =
+                            selectedSlot && relocationSlotKey(selectedSlot) === relocationSlotKey(slot);
+
+                          return (
+                            <TouchableOpacity
+                              key={relocationSlotKey(slot)}
+                              activeOpacity={0.78}
+                              onPress={() => {
+                                if (!relocationSlotPickerItem?.id) return;
+                                setPreferredRelocationSlots((prev) => ({
+                                  ...prev,
+                                  [relocationSlotPickerItem.id]: slot,
+                                }));
+                                setRelocationSlotPickerVisible(false);
+                              }}
+                              style={[
+                                styles.relocationSlotOption,
+                                {
+                                  borderColor: isSelected ? colors.primary : colors.border,
+                                  backgroundColor: isSelected
+                                    ? colors.primary + "18"
+                                    : isDark
+                                      ? "rgba(255,255,255,0.06)"
+                                      : "#F8FAFC",
+                                },
+                              ]}
+                            >
+                              <View style={{ flex: 1 }}>
+                                <Text style={[styles.relocationSlotDate, { color: colors.text }]}>
+                                  {formatRelocationDateTime(slot.date, slot.start_time)}
+                                </Text>
+                                <Text style={[styles.relocationSlotTime, { color: colors.textSecondary }]}>
+                                  Until {formatRelocationClockTime(slot.end_time)}
+                                </Text>
+                              </View>
+                              {isSelected ? (
+                                <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
+                              ) : (
+                                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                              )}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
+                    )}
+                  </>
+                );
+              })()}
             </View>
           </View>
         </RNModal>
@@ -9371,8 +9490,22 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_500Medium",
     textAlign: "center",
   },
-  relocationSlotList: {
+  relocationCalendarContainer: {
     marginTop: moderateScale(14),
+    borderWidth: 1,
+    borderRadius: moderateScale(12),
+    overflow: "hidden",
+    paddingVertical: moderateScale(4),
+  },
+  relocationDateHint: {
+    marginTop: moderateScale(8),
+    fontSize: moderateScale(11),
+    lineHeight: moderateScale(15),
+    fontFamily: "Poppins_400Regular",
+  },
+  relocationSlotList: {
+    marginTop: moderateScale(10),
+    maxHeight: verticalScale(220),
   },
   relocationSlotListContent: {
     gap: moderateScale(8),

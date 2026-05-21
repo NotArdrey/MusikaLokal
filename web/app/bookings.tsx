@@ -3345,13 +3345,18 @@ export default function BookingsScreen() {
     if (!dateValue || !timeValue) return "TBA";
     const timePart = timeValue.substring(0, 5);
     const parsed = new Date(`${dateValue}T${timePart}`);
-    if (isNaN(parsed.getTime())) return `${dateValue} ${timePart}`;
+    if (isNaN(parsed.getTime())) {
+      return `${dateValue} ${formatBookingClockTime(timePart) || timePart}`;
+    }
     return `${formatDashedNumericDate(parsed)} | ${parsed.toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
     })}`;
   };
+
+  const formatRelocationClockTime = (value?: string | null) =>
+    formatBookingClockTime(value) || "TBA";
 
   const handleRelocationDecision = async (item: any, accepted: boolean) => {
     if (!userId || !item?.id) return;
@@ -6509,7 +6514,7 @@ export default function BookingsScreen() {
                                   item.relocation_proposed_start_time,
                                 )}
                                 {item.relocation_proposed_end_time
-                                  ? ` - ${item.relocation_proposed_end_time.substring(0, 5)}`
+                                  ? ` - ${formatRelocationClockTime(item.relocation_proposed_end_time)}`
                                   : ""}
                               </Text>
                               {item.relocation_expires_at ? (
