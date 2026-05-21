@@ -103,8 +103,6 @@ type ReportFilter = 'all' | ReportStatus;
 
 type ReportEscalationStatus = 'none' | 'manual_review';
 
-type ReportEscalationFilter = 'all' | ReportEscalationStatus;
-
 type ReportModerationAction = 'none' | 'warn_reporter' | 'warn_target_owner' | 'warn_both' | 'manual_review';
 
 type ReportTargetAccountAction =
@@ -218,9 +216,7 @@ interface UserDetailsRequestTarget {
 
 const reportStatuses: ReportFilter[] = ['all', 'pending', 'resolved', 'dismissed'];
 
-const reportEscalationFilters: ReportEscalationFilter[] = ['all', 'none', 'manual_review'];
-
-const reportModerationActions: ReportModerationAction[] = ['none', 'warn_reporter', 'warn_target_owner', 'warn_both', 'manual_review'];
+const reportModerationActions: ReportModerationAction[] = ['none', 'warn_reporter', 'warn_target_owner', 'warn_both'];
 
 const reportTargetAccountActions: ReportTargetAccountAction[] = [
   'none',
@@ -722,6 +718,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
+    flexDirection: 'row',
+    gap: 5,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 40,
@@ -781,7 +779,6 @@ export default function AdminReportsPage() {
   const [initializingReports, setInitializingReports] = useState(false);
   const [reportSearch, setReportSearch] = useState('');
   const [reportFilter, setReportFilter] = useState<ReportFilter>('all');
-  const [reportEscalationFilter, setReportEscalationFilter] = useState<(typeof reportEscalationFilters)[number]>('all');
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reports, setReports] = useState<ReportEntry[]>([]);
   const [incidentsLoading, setIncidentsLoading] = useState(false);
@@ -800,7 +797,6 @@ export default function AdminReportsPage() {
   const [reportModerationAction, setReportModerationAction] = useState<ReportModerationAction>('none');
   const [reportTargetAccountAction, setReportTargetAccountAction] = useState<ReportTargetAccountAction>('none');
   const [reportModerationNotes, setReportModerationNotes] = useState('');
-  const [reportEscalationReason, setReportEscalationReason] = useState('');
   const [reportModerationSubmitting, setReportModerationSubmitting] = useState(false);
   const [incidentResolutionTarget, setIncidentResolutionTarget] = useState<BookingIncidentEntry | null>(null);
   const [incidentResolutionChoice, setIncidentResolutionChoice] = useState<BookingIncidentResolution>('resolved_no_refund');
@@ -831,9 +827,8 @@ export default function AdminReportsPage() {
   const reportsCacheKey = useMemo(
     () => getAdminPageCacheKey('reports', {
       reportFilter,
-      reportEscalationFilter,
     }),
-    [reportFilter, reportEscalationFilter],
+    [reportFilter],
   );
 
   const incidentsCacheKey = useMemo(
@@ -843,10 +838,6 @@ export default function AdminReportsPage() {
 
   const updateReportFilter = useCallback((nextFilter: ReportFilter) => {
     setReportFilter(nextFilter);
-  }, []);
-
-  const updateReportEscalationFilter = useCallback((nextFilter: (typeof reportEscalationFilters)[number]) => {
-    setReportEscalationFilter(nextFilter);
   }, []);
 
   const handleTabChange = useCallback((nextTab: Tab) => {
@@ -912,7 +903,6 @@ export default function AdminReportsPage() {
         body: {
           action: 'fetch_reports',
           statusFilter: reportFilter,
-          escalationFilter: reportEscalationFilter,
           limit: REPORTS_PAGE_SIZE,
         },
       });
@@ -961,7 +951,7 @@ export default function AdminReportsPage() {
         setReportsLoading(false);
       }
     }
-  }, [reportFilter, reportEscalationFilter, reportsCacheKey, showAlert]);
+  }, [reportFilter, reportsCacheKey, showAlert]);
 
   const fetchIncidents = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
@@ -1086,14 +1076,12 @@ export default function AdminReportsPage() {
       moderationAction = 'none',
       targetAccountAction = 'none',
       moderationNotes = '',
-      escalationReason = '',
     }: {
       reportId: string;
       nextStatus: ReportStatus;
       moderationAction?: ReportModerationAction;
       targetAccountAction?: ReportTargetAccountAction;
       moderationNotes?: string;
-      escalationReason?: string;
     }) => {
       setReportActionLoadingId(reportId);
       try {
@@ -1105,7 +1093,6 @@ export default function AdminReportsPage() {
             moderationAction,
             targetAccountAction,
             moderationNotes: moderationNotes.trim() || null,
-            escalationReason: escalationReason.trim() || null,
           },
         });
 
@@ -1145,7 +1132,6 @@ export default function AdminReportsPage() {
       setReportModerationAction(presetAction || 'none');
       setReportTargetAccountAction('none');
       setReportModerationNotes('');
-      setReportEscalationReason('');
     },
     [],
   );
@@ -1157,14 +1143,13 @@ export default function AdminReportsPage() {
     setReportModerationAction('none');
     setReportTargetAccountAction('none');
     setReportModerationNotes('');
-    setReportEscalationReason('');
   }, [reportModerationSubmitting]);
 
   const submitReportModeration = useCallback(async () => {
     if (!reportModerationTarget) return;
 
     if (reportModerationAction === 'manual_review' && reportModerationStatus !== 'pending') {
-      showAlert('warning', 'Invalid moderation state', 'Manual review escalation requires pending status.');
+      showAlert('warning', 'Invalid moderation state', 'Manual review requires pending status.');
       return;
     }
 
@@ -1176,7 +1161,6 @@ export default function AdminReportsPage() {
         moderationAction: reportModerationAction,
         targetAccountAction: reportTargetAccountAction,
         moderationNotes: reportModerationNotes,
-        escalationReason: reportEscalationReason,
       });
 
       if (updated) {
@@ -1185,7 +1169,6 @@ export default function AdminReportsPage() {
         setReportModerationAction('none');
         setReportTargetAccountAction('none');
         setReportModerationNotes('');
-        setReportEscalationReason('');
       }
     } finally {
       setReportModerationSubmitting(false);
@@ -1196,7 +1179,6 @@ export default function AdminReportsPage() {
     reportModerationStatus,
     reportModerationTarget,
     reportTargetAccountAction,
-    reportEscalationReason,
     moderateReport,
     showAlert,
   ]);
@@ -1521,8 +1503,6 @@ export default function AdminReportsPage() {
         String(item.moderation_action || '').toLowerCase().includes(q) ||
         String(item.target_account_action || '').toLowerCase().includes(q) ||
         String(item.moderation_notes || '').toLowerCase().includes(q) ||
-        String(item.escalation_status || '').toLowerCase().includes(q) ||
-        String(item.escalation_reason || '').toLowerCase().includes(q) ||
         formatReportTargetType(item.target_type).toLowerCase().includes(q) ||
         String(item.target_type || '').toLowerCase().includes(q) ||
         String(item.target_id || '').toLowerCase().includes(q) ||
@@ -1667,33 +1647,6 @@ export default function AdminReportsPage() {
         </View>
       </View>
 
-      <View style={styles.filterGroup}>
-        <Text style={[styles.filterLabel, { color: colors.textSecondary }]}>Escalation</Text>
-        <View style={[styles.filterRow, styles.filterRowWrap]}>
-          {reportEscalationFilters.map((escalation) => {
-            const active = reportEscalationFilter === escalation;
-            return (
-              <TouchableOpacity
-                key={escalation}
-                activeOpacity={1}
-                onPress={() => updateReportEscalationFilter(escalation)}
-                style={[
-                  styles.filterChip,
-                  {
-                    backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                    borderColor: active ? colors.primary : colors.border,
-                  },
-                ]}
-              >
-                <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                  {escalation.replace(/_/g, ' ')}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      </View>
-
       {reportsLoading ? (
         <View style={styles.inlineLoader}>
           <ActivityIndicator size="small" color={colors.primary} />
@@ -1715,7 +1668,6 @@ export default function AdminReportsPage() {
                   <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>{report.details}</Text>
                 ) : null}
                 <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Status: {report.status}</Text>
-                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Escalation: {String(report.escalation_status || 'none').replace(/_/g, ' ')}</Text>
                 <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reporter: {report.reporter_name || 'Unknown'} ({report.reporter_email || 'no email'})</Text>
                 <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reported item: {formatReportTargetType(report.target_type)}</Text>
                 <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Created: {formatDateTime(report.created_at)}</Text>
@@ -1734,9 +1686,6 @@ export default function AdminReportsPage() {
                 {report.moderation_notes ? (
                   <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Notes: {report.moderation_notes}</Text>
                 ) : null}
-                {report.escalation_reason ? (
-                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Escalation reason: {report.escalation_reason}</Text>
-                ) : null}
 
                 <View style={styles.cardActionsRow}>
                   <TouchableOpacity
@@ -1745,7 +1694,14 @@ export default function AdminReportsPage() {
                     activeOpacity={1}
                     disabled={reportViewLoadingId === report.id}
                     onPress={() => void openReportDetailsModal(report.id)}
-                    style={[styles.smallActionButton, { borderColor: colors.border }]}
+                    style={[
+                      styles.smallActionButton,
+                      {
+                        borderColor: colors.border,
+                        backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
+                        opacity: reportViewLoadingId === report.id ? 0.6 : 1,
+                      },
+                    ]}
                   >
                     {reportViewLoadingId === report.id ? (
                       <ActivityIndicator size="small" color={colors.primary} />
@@ -1756,9 +1712,7 @@ export default function AdminReportsPage() {
                       </>
                     )}
                   </TouchableOpacity>
-                </View>
 
-                <View style={styles.cardActionsRow}>
                   {report.status === 'pending' ? (
                     <>
                       <TouchableOpacity
@@ -1769,6 +1723,7 @@ export default function AdminReportsPage() {
                         onPress={() => openReportModerationModal(report, 'resolved')}
                         style={[styles.smallActionButtonFilled, { backgroundColor: '#16A34A', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
                       >
+                        <Ionicons name="checkmark-circle-outline" size={14} color="#FFFFFF" />
                         <Text style={styles.smallActionTextFilled}>Resolve</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
@@ -1779,18 +1734,8 @@ export default function AdminReportsPage() {
                         onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'dismissed' })}
                         style={[styles.smallActionButtonFilled, { backgroundColor: '#64748B', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
                       >
+                        <Ionicons name="close-circle-outline" size={14} color="#FFFFFF" />
                         <Text style={styles.smallActionTextFilled}>Dismiss</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        testID={`admin-report-escalate-${report.id}`}
-                        accessibilityLabel={`admin-report-escalate-${report.id}`}
-                        activeOpacity={1}
-                        disabled={reportActionLoadingId === report.id}
-                        onPress={() => openReportModerationModal(report, 'pending', 'manual_review')}
-                        style={[styles.smallActionButtonFilled, { backgroundColor: '#DC2626', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
-                      >
-                        <Text style={styles.smallActionTextFilled}>Escalate</Text>
                       </TouchableOpacity>
                     </>
                   ) : (
@@ -1802,6 +1747,7 @@ export default function AdminReportsPage() {
                       onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'pending' })}
                       style={[styles.smallActionButtonFilled, { backgroundColor: '#0EA5E9', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
                     >
+                      <Ionicons name="refresh-outline" size={14} color="#FFFFFF" />
                       <Text style={styles.smallActionTextFilled}>Reopen</Text>
                     </TouchableOpacity>
                   )}
@@ -2303,12 +2249,7 @@ export default function AdminReportsPage() {
                     accessibilityLabel={`admin-report-moderation-action-${action}`}
                     key={action}
                     activeOpacity={1}
-                    onPress={() => {
-                      setReportModerationAction(action);
-                      if (action === 'manual_review') {
-                        setReportModerationStatus('pending');
-                      }
-                    }}
+                    onPress={() => setReportModerationAction(action)}
                     style={[
                       styles.filterChip,
                       {
@@ -2369,26 +2310,6 @@ export default function AdminReportsPage() {
                 },
               ]}
             />
-
-            {reportModerationAction === 'manual_review' && (
-              <TextInput
-                testID="admin-report-escalation-reason-input"
-                accessibilityLabel="admin-report-escalation-reason-input"
-                value={reportEscalationReason}
-                onChangeText={setReportEscalationReason}
-                placeholder="Escalation reason (recommended)"
-                placeholderTextColor={colors.textSecondary}
-                multiline
-                style={[
-                  styles.modalInput,
-                  {
-                    color: colors.text,
-                    backgroundColor: colors.inputBackground,
-                    borderColor: colors.inputBorder,
-                  },
-                ]}
-              />
-            )}
 
             <View style={styles.modalActionsRow}>
               <TouchableOpacity

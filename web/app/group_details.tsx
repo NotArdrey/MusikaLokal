@@ -31,6 +31,105 @@ import {
 
 const { width, height } = Dimensions.get('window');
 const IMG_HEIGHT = height * 0.5;
+
+const getOwnerDisplayName = (group: any): string => {
+  const candidates = [
+    group?.owner_name,
+    group?.owner_profile?.full_name,
+    group?.owner?.full_name,
+  ];
+
+  const displayName = candidates.find(
+    (name) => typeof name === 'string' && name.trim().length > 0,
+  );
+
+  return displayName ? displayName.trim() : 'Unknown User';
+};
+
+const getOwnerAvatarUri = (group: any): string | null => {
+  const candidates = [
+    group?.owner_avatar,
+    group?.owner_profile?.avatar_url,
+    group?.owner?.avatar_url,
+  ];
+
+  return (
+    candidates.find((uri) => typeof uri === 'string' && uri.trim().length > 0)?.trim() ||
+    null
+  );
+};
+
+const getReviews = (group: any): any[] => (Array.isArray(group?.reviews) ? group.reviews : []);
+
+const getNumberCandidate = (...candidates: unknown[]): number | null => {
+  for (const candidate of candidates) {
+    if (candidate === null || candidate === undefined || candidate === '') continue;
+
+    const parsed = Number(candidate);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+
+  return null;
+};
+
+const getRatingValue = (group: any): number => {
+  const reviews = getReviews(group);
+  const rating = getNumberCandidate(group?.rating, group?.computed_rating);
+
+  if (rating !== null && (rating > 0 || reviews.length === 0)) {
+    return rating;
+  }
+
+  const reviewRatings = reviews
+    .map((review) => Number(review?.rating))
+    .filter((value) => Number.isFinite(value));
+
+  if (reviewRatings.length === 0) return rating || 0;
+
+  const total = reviewRatings.reduce((sum, value) => sum + value, 0);
+  return total / reviewRatings.length;
+};
+
+const getReviewCount = (group: any): number => {
+  const reviews = getReviews(group);
+  const reviewCount = getNumberCandidate(group?.review_count, group?.computed_review_count);
+
+  return Math.max(0, Math.trunc(Math.max(reviewCount ?? 0, reviews.length)));
+};
+
+const getReviewLabel = (count: number): string => `${count} ${count === 1 ? 'review' : 'reviews'}`;
+
+const getReviewContent = (review: any): string => {
+  const candidates = [
+    review?.content,
+    review?.comment,
+    review?.feedback,
+    review?.body,
+    review?.review_text,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+
+  return 'No written review.';
+};
+
+const formatReviewDate = (rawDate: unknown): string => {
+  if (typeof rawDate !== 'string' || rawDate.trim().length === 0) return '';
+
+  const parsed = new Date(rawDate);
+  if (Number.isNaN(parsed.getTime())) return '';
+
+  return parsed.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+};
+
 export default function GroupDetailsScreen() {
   const { id } = useLocalSearchParams();
   const { colors, isDark } = useTheme();
@@ -232,6 +331,10 @@ export default function GroupDetailsScreen() {
   }
 
   const isOwner = !!userId && group?.owner_id === userId;
+  const reviews = getReviews(group);
+  const ratingValue = getRatingValue(group);
+  const reviewCount = getReviewCount(group);
+  const reviewLabel = getReviewLabel(reviewCount);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -295,7 +398,7 @@ export default function GroupDetailsScreen() {
             <View style={styles.ratingLocationRow}>
               <Ionicons name="star" size={16} color={colors.text} />
               <Text style={[styles.ratingText, { color: colors.text }]}>
-                {group.rating?.toFixed(2) || '4.95'} · <Text style={{ textDecorationLine: 'underline' }}>{group.review_count || 12} reviews</Text>
+                {ratingValue.toFixed(2)} - <Text style={{ textDecorationLine: 'underline' }}>{reviewLabel}</Text>
               </Text>
             </View>
             <Text style={[styles.locationText, { color: colors.textSecondary }]}>
@@ -320,11 +423,11 @@ export default function GroupDetailsScreen() {
           {/* Host Section */}
           <View style={styles.hostSection}>
             <View style={styles.hostInfo}>
-              <Text style={[styles.hostedBy, { color: colors.text }]}>Hosted by {group.owner_name || 'Martin'}</Text>
-              <Text style={[styles.hostSub, { color: colors.textSecondary }]}>Joined in 2021</Text>
+              <Text style={[styles.hostSub, { color: colors.textSecondary }]}>Managed by</Text>
+              <Text style={[styles.hostedBy, { color: colors.text }]}>{getOwnerDisplayName(group)}</Text>
             </View>
             <ProfileAvatar
-              uri={group.owner_avatar}
+              uri={getOwnerAvatarUri(group)}
               style={[styles.hostAvatar, { backgroundColor: colors.border }]}
               backgroundColor={isDark ? '#374151' : '#E5E7EB'}
               iconColor={colors.textSecondary}
@@ -402,12 +505,45 @@ export default function GroupDetailsScreen() {
             <View style={styles.reviewHeader}>
               <Ionicons name="star" size={20} color={colors.text} />
               <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
-                {group.rating?.toFixed(2) || '0.0'} · {group.review_count || 0} reviews
+                {ratingValue.toFixed(2)} - {reviewLabel}
               </Text>
             </View>
-            <Text style={{ color: colors.textSecondary, fontStyle: 'italic' }}>
-              Reviews are not available in this preview.
-            </Text>
+            <View style={styles.reviewsScroll}>
+              {reviews.length > 0 ? (
+                reviews.map((review: any) => {
+                  const reviewDate = formatReviewDate(review.created_at);
+
+                  return (
+                    <View
+                      key={review.id || `${review.created_at}-${review.author_id || 'review'}`}
+                      style={[styles.reviewCard, { borderColor: colors.border, width: '100%' }]}
+                    >
+                      <View style={styles.reviewUser}>
+                        <ProfileAvatar
+                          uri={review.author?.avatar_url || null}
+                          style={styles.reviewAvatar}
+                          backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+                          iconColor={colors.textSecondary}
+                        />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.reviewName, { color: colors.text }]}>
+                            {review.author?.full_name || 'Anonymous'}
+                          </Text>
+                          {reviewDate ? (
+                            <Text style={[styles.reviewDate, { color: colors.textSecondary }]}>
+                              {reviewDate}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </View>
+                      <Text style={[styles.reviewBody, { color: colors.text }]}>{getReviewContent(review)}</Text>
+                    </View>
+                  );
+                })
+              ) : (
+                <Text style={{ color: colors.textSecondary, fontStyle: 'italic' }}>No reviews yet.</Text>
+              )}
+            </View>
           </View>
 
           {/* Sticky Bottom Bar */}
@@ -601,11 +737,11 @@ const styles = StyleSheet.create({
   hostedBy: {
     fontSize: 16,
     fontFamily: 'Poppins_600SemiBold',
-    marginBottom: 4,
   },
   hostSub: {
     fontSize: 14,
     fontFamily: 'Poppins_400Regular',
+    marginBottom: 4,
   },
   hostAvatar: {
     width: 56,

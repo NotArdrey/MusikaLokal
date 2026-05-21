@@ -25,6 +25,7 @@ import Navbar from "../src/components/navbar";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useTheme } from "../src/context/ThemeContext";
 import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
+import { isFanUserRole, normalizeUserRole } from "../src/utils/roleRouting";
 
 
 const DISALLOWED_PROFILE_SKILLS = new Set(["producer"]);
@@ -148,6 +149,7 @@ export default function EditProfileScreen() {
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [roleSearch, setRoleSearch] = useState("");
   const [genreSearch, setGenreSearch] = useState("");
+  const [profileRole, setProfileRole] = useState<string | null>(null);
   const [pendingAvatar, setPendingAvatar] = useState<{
     base64: string;
     ext: string;
@@ -173,6 +175,10 @@ export default function EditProfileScreen() {
     setAlertConfig({ type, title, message, buttons });
     setAlertVisible(true);
   };
+
+  const isFanProfile = isFanUserRole(profileRole);
+  const roleFieldLabel = isFanProfile ? "INTERESTS" : "ROLES & INSTRUMENTS";
+  const roleSearchPlaceholder = isFanProfile ? "Search interests..." : "Search roles & instruments...";
 
   const initialSnapshotRef = useRef<{
     contactNumber: string;
@@ -268,6 +274,11 @@ export default function EditProfileScreen() {
       if (profileError) {
         console.error("Load profile error:", profileError);
       }
+
+      setProfileRole(
+        normalizeUserRole(profileData?.role) ??
+          normalizeUserRole(user.user_metadata?.role),
+      );
 
       let resolvedProfile = null;
 
@@ -492,7 +503,13 @@ export default function EditProfileScreen() {
     );
 
     if (cleanedRoles.length === 0) {
-      showAlert("warning", "Required", "Please select at least one role or instrument.");
+      showAlert(
+        "warning",
+        "Required",
+        isFanProfile
+          ? "Please select at least one interest."
+          : "Please select at least one role or instrument.",
+      );
       return;
     }
     if (cleanedGenres.length === 0) {
@@ -780,7 +797,7 @@ export default function EditProfileScreen() {
               ]}
             >
           <Text style={[styles.label, { color: colors.textSecondary }]}>
-            ROLES & INSTRUMENTS <Text style={{ color: "#ef4444" }}>*</Text>
+            {roleFieldLabel} <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
           {/* Selected roles */}
           {selectedRoles.length > 0 && (
@@ -829,7 +846,7 @@ export default function EditProfileScreen() {
             ]}
             value={roleSearch}
             onChangeText={setRoleSearch}
-            placeholder="Search roles & instruments..."
+            placeholder={roleSearchPlaceholder}
             placeholderTextColor={colors.textSecondary}
           />
           {/* Filtered chips */}

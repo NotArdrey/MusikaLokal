@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
+import * as NavigationBar from "expo-navigation-bar";
 import {
+  Dimensions,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -8,7 +10,9 @@ import {
   StyleSheet,
   View,
   ViewStyle,
+  useWindowDimensions,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   interpolate,
   runOnJS,
@@ -24,32 +28,39 @@ type BottomModalProps = {
   onClose: () => void;
   children: React.ReactNode;
   backdropColor?: string;
+  bottomInsetBackgroundColor?: string;
   closeOnBackdropPress?: boolean;
   contentContainerStyle?: StyleProp<ViewStyle>;
   keyboardAvoiding?: boolean;
   keyboardAvoidingResetKey?: React.Key;
   keyboardVerticalOffset?: number;
   navigationBarTranslucent?: boolean;
+  navigationBarStyleWhileVisible?: "auto" | "inverted" | "light" | "dark";
   overlayLabel?: string;
   statusBarTranslucent?: boolean;
 };
 
 const CLOSED_TRANSLATE_Y = 54;
+const ANDROID_NAVIGATION_AREA_FALLBACK = 180;
 
 export default function BottomModal({
   visible,
   onClose,
   children,
   backdropColor = "rgba(0,0,0,0.5)",
+  bottomInsetBackgroundColor,
   closeOnBackdropPress = false,
   contentContainerStyle,
   keyboardAvoiding = false,
   keyboardAvoidingResetKey,
   keyboardVerticalOffset = 0,
   navigationBarTranslucent = true,
+  navigationBarStyleWhileVisible,
   overlayLabel = "BottomModal",
   statusBarTranslucent = true,
 }: BottomModalProps) {
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const [rendered, setRendered] = useState(visible);
   const progress = useSharedValue(visible ? 1 : 0);
   const dismissFallbackRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -73,6 +84,18 @@ export default function BottomModal({
       registerOverlay();
     }
   }, [clearDismissFallback, registerOverlay, visible]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || !visible || !navigationBarStyleWhileVisible) {
+      return undefined;
+    }
+
+    NavigationBar.setStyle(navigationBarStyleWhileVisible);
+
+    return () => {
+      NavigationBar.setStyle("auto");
+    };
+  }, [navigationBarStyleWhileVisible, visible]);
 
   useEffect(() => {
     return clearDismissFallback;
@@ -144,16 +167,54 @@ export default function BottomModal({
     return null;
   }
 
+  const screenHeight = Dimensions.get("screen").height;
+  const androidSystemBarDelta =
+    Platform.OS === "android" && navigationBarTranslucent
+      ? Math.max(0, screenHeight - windowHeight)
+      : 0;
+  const bottomInsetFillHeight = bottomInsetBackgroundColor
+    ? Math.ceil(Math.max(
+        insets.bottom,
+        Math.min(androidSystemBarDelta, 240),
+        Platform.OS === "android" ? ANDROID_NAVIGATION_AREA_FALLBACK : 0,
+      ))
+    : 0;
+
   const content = (
     <View pointerEvents="box-none" style={styles.contentHost}>
+      {bottomInsetFillHeight > 0 ? (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.bottomInsetUnderlay,
+            {
+              backgroundColor: bottomInsetBackgroundColor,
+              height: bottomInsetFillHeight,
+            },
+          ]}
+        />
+      ) : null}
       <Animated.View
         style={[
           styles.sheetHost,
+          bottomInsetFillHeight > 0 ? { marginBottom: -bottomInsetFillHeight } : null,
           contentContainerStyle,
           sheetAnimatedStyle,
         ]}
       >
         {children}
+        {bottomInsetFillHeight > 0 ? (
+          <View
+            pointerEvents="none"
+            style={[
+              styles.bottomInsetFill,
+              {
+                backgroundColor: bottomInsetBackgroundColor,
+                height: bottomInsetFillHeight,
+              },
+            ]}
+          />
+        ) : null}
       </Animated.View>
     </View>
   );
@@ -212,7 +273,16 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "flex-end",
   },
+  bottomInsetUnderlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
   sheetHost: {
+    width: "100%",
+  },
+  bottomInsetFill: {
     width: "100%",
   },
 });

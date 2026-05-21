@@ -28,8 +28,6 @@ import LocationPicker from "../src/components/LocationPicker";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
-import { buildNotificationRouteMeta } from "../src/utils/notificationNavigation";
-import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
 import { clearListingDetailsCache } from "../src/utils/listingDetailsCache";
 import {
@@ -2283,12 +2281,11 @@ export default function EditStudioScreen() {
             !booking.relocation_expires_at ||
             new Date(booking.relocation_expires_at).getTime() > Date.now();
 
-          if (
-            proposedDate &&
-            proposedStart &&
-            proposedEnd &&
-            relocationStillActive
-          ) {
+          if (relocationStillActive && (!proposedDate || !proposedStart || !proposedEnd)) {
+            continue;
+          }
+
+          if (proposedDate && proposedStart && proposedEnd && relocationStillActive) {
             const proposedSlots = getEditedAvailableSlotsForDate(
               proposedDate,
               protectedDateOverrides,
@@ -2756,6 +2753,9 @@ export default function EditStudioScreen() {
       }
 
       const studioId = Array.isArray(id) ? id[0] : id;
+      if (!studioId) {
+        throw new Error("Invalid studio ID. Please try again.");
+      }
 
       for (const resolution of resolutions) {
         if (resolution.action === "cancel") {
@@ -2781,6 +2781,56 @@ export default function EditStudioScreen() {
             });
             throw new Error(
               `Failed to cancel and refund booking: ${formatSupabaseError(errorPayload)}`,
+            );
+          }
+        } else if (resolution.action === "choose") {
+          const conflict = conflictingBookings.find(
+            (c) => c.id === resolution.bookingId,
+          );
+
+          if (!conflict) {
+            throw new Error("Could not find the booking that needs relocation.");
+          }
+
+          const availableSlots = await findAvailableRelocationSlots(
+            studioId,
+            conflict.booking_date,
+            conflict.start_time.substring(0, 5),
+            conflict.end_time.substring(0, 5),
+            nearTermProtectedDateOverridesRef.current,
+            conflict.id,
+            conflict.user_id,
+            1,
+          );
+
+          if (availableSlots.length === 0) {
+            throw new Error(
+              "No available relocation slots were found for one booking. Please cancel it or add availability first.",
+            );
+          }
+
+          const { data: relocationData, error: relocationError } = await supabase.rpc(
+            "request_studio_booking_relocation",
+            {
+              p_booking_id: resolution.bookingId,
+              p_proposed_date: null,
+              p_proposed_start_time: null,
+              p_proposed_end_time: null,
+              p_musician_can_choose_slot: true,
+              p_reason:
+                "Pending relocation requested by studio owner. Musician will choose an available slot.",
+            },
+          );
+
+          if (relocationError || relocationData?.success === false) {
+            const errorPayload = relocationError || relocationData?.error;
+            logActionError("edit_studio.musician_choice_relocation_failed", errorPayload, {
+              bookingId: resolution.bookingId,
+              studioId,
+              userId: conflict.user_id,
+            });
+            throw new Error(
+              `Failed to ask musician to choose a new time: ${formatSupabaseError(errorPayload)}`,
             );
           }
         } else if (resolution.action === "move" && resolution.newSlot) {
@@ -2929,109 +2979,28 @@ export default function EditStudioScreen() {
             );
           }
 
-          const relocationExpiresAt = new Date(
-            Date.now() + 24 * 60 * 60 * 1000,
-          ).toISOString();
-
-          // Convert move into musician approval flow (pending relocation).
-          const { error } = await supabase
-            .from("studio_bookings")
-            .update({
-              status: "pending_relocation",
-              relocation_requested_at: new Date().toISOString(),
-              relocation_proposed_date: resolution.newSlot.date,
-              relocation_proposed_start_time: resolution.newSlot.start_time,
-              relocation_proposed_end_time: resolution.newSlot.end_time,
-              relocation_expires_at: relocationExpiresAt,
-              notes: `Pending relocation requested by studio owner. Proposed slot: ${resolution.newSlot.date} ${resolution.newSlot.start_time}-${resolution.newSlot.end_time}. Expires: ${relocationExpiresAt}`,
-            })
-            .eq("id", resolution.bookingId);
-
-          if (error) {
-            console.error("Error moving booking:", error);
-            throw error;
-          }
-
-          if (movedBookingUserId) {
-            const holdPayload = {
-              user_id: movedBookingUserId,
-              studio_id: studioId,
-              booking_date: resolution.newSlot.date,
-              start_time: resolution.newSlot.start_time,
-              end_time: resolution.newSlot.end_time,
-              expires_at: relocationExpiresAt,
-            };
-
-            const { error: clearExistingHoldError } = await supabase
-              .from("booking_holds")
-              .delete()
-              .eq("studio_id", studioId)
-              .eq("user_id", movedBookingUserId)
-              .eq("booking_date", resolution.newSlot.date)
-              .eq("start_time", resolution.newSlot.start_time)
-              .eq("end_time", resolution.newSlot.end_time);
-
-            if (clearExistingHoldError) {
-              logActionError(
-                "edit_studio.clear_relocation_hold_failed",
-                clearExistingHoldError,
-                {
-                  bookingId: resolution.bookingId,
-                  studioId,
-                  userId: movedBookingUserId,
-                },
-              );
-              throw new Error(
-                `Failed to reserve relocation slot: ${formatSupabaseError(clearExistingHoldError)}`,
-              );
-            }
-
-            const { error: holdError } = await supabase
-              .from("booking_holds")
-              .insert(holdPayload);
-
-            if (holdError) {
-              logActionError("edit_studio.relocation_hold_failed", holdError, {
-                bookingId: resolution.bookingId,
-                studioId,
-                userId: movedBookingUserId,
-              });
-              throw new Error(
-                `Failed to reserve relocation slot: ${formatSupabaseError(holdError)}`,
-              );
-            }
-          }
-
-          // Create notification for the user
-          const conflict = conflictingBookings.find(
-            (c) => c.id === resolution.bookingId,
+          const { data: relocationData, error: relocationError } = await supabase.rpc(
+            "request_studio_booking_relocation",
+            {
+              p_booking_id: resolution.bookingId,
+              p_proposed_date: resolution.newSlot.date,
+              p_proposed_start_time: resolution.newSlot.start_time,
+              p_proposed_end_time: resolution.newSlot.end_time,
+              p_musician_can_choose_slot: true,
+              p_reason: `Pending relocation requested by studio owner. Proposed slot: ${resolution.newSlot.date} ${resolution.newSlot.start_time}-${resolution.newSlot.end_time}. Musician can choose another available slot.`,
+            },
           );
-          if (conflict) {
-            const { error: notificationError } = await supabase.from("notifications").insert({
-              user_id: conflict.user_id,
-              type: "warning",
-              title: "Booking Relocation Request",
-              message: `Your booking at ${studioName} needs relocation. A suggested slot is ${formatDashedNumericDate(resolution.newSlot.date)} at ${resolution.newSlot.start_time}, but you can choose another available time in Bookings. Your existing price and payment stay attached to this booking.`,
-              meta: buildNotificationRouteMeta("/bookings", undefined, {
-                bookingId: resolution.bookingId,
-                studioId,
-                relocation: {
-                  status: "pending_relocation",
-                  proposed_date: resolution.newSlot.date,
-                  proposed_start_time: resolution.newSlot.start_time,
-                  proposed_end_time: resolution.newSlot.end_time,
-                  expires_at: relocationExpiresAt,
-                },
-              }),
+
+          if (relocationError || relocationData?.success === false) {
+            const errorPayload = relocationError || relocationData?.error;
+            logActionError("edit_studio.request_relocation_failed", errorPayload, {
+              bookingId: resolution.bookingId,
+              studioId,
+              userId: movedBookingUserId,
             });
-            if (notificationError) {
-              logActionError("edit_studio.relocation_notification_failed", notificationError, {
-                bookingId: resolution.bookingId,
-                studioId,
-                userId: conflict.user_id,
-              });
-              throw new Error(`Failed to notify booking customer: ${formatSupabaseError(notificationError)}`);
-            }
+            throw new Error(
+              `Failed to request booking relocation: ${formatSupabaseError(errorPayload)}`,
+            );
           }
         }
       }

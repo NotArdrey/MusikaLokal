@@ -4,6 +4,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { InteractionManager, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import CachedImage from '../../src/components/CachedImage';
+import ConflictResolutionModal, {
+    ConflictingBooking,
+    ConflictResolution,
+} from '../../src/components/ConflictResolutionModal';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
 import InlineErrorBanner from '../../src/components/InlineErrorBanner';
@@ -45,6 +49,8 @@ export default function MyStudioScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [deleteConflictModalVisible, setDeleteConflictModalVisible] = useState(false);
+    const [deleteConflictingBookings, setDeleteConflictingBookings] = useState<ConflictingBooking[]>([]);
     const [loadError, setLoadError] = useState<string | null>(null);
     const [alertVisible, setAlertVisible] = useState(false);
     const [alertConfig, setAlertConfig] = useState<{
@@ -236,7 +242,163 @@ export default function MyStudioScreen() {
         normalizeConfirmationInput(deleteConfirmationText) ===
         normalizeConfirmationInput(selectedName);
 
-    const handleDelete = async () => {
+    const mapDeleteConflictBooking = useCallback((booking: any): ConflictingBooking => {
+        const profileSource = booking.profile ?? booking.profiles;
+        const profile = Array.isArray(profileSource)
+            ? profileSource[0]
+            : profileSource;
+        const canAskMusicianToChoose = booking.status !== 'checked_in';
+        const currentSlot = canAskMusicianToChoose
+            ? {
+                date: booking.booking_date,
+                start_time: String(booking.start_time || '').substring(0, 5),
+                end_time: String(booking.end_time || '').substring(0, 5),
+            }
+            : null;
+
+        return {
+            id: booking.id,
+            booking_date: booking.booking_date,
+            start_time: booking.start_time,
+            end_time: booking.end_time,
+            status: booking.status,
+            user_id: booking.user_id,
+            user_name: profile?.full_name || booking.user_name || 'Unknown',
+            user_email: profile?.email || booking.user_email || '',
+            conflictType: 'date_removed',
+            newAvailableSlot: currentSlot,
+            availableRelocationSlots: currentSlot ? [currentSlot] : [],
+        };
+    }, []);
+
+    const fetchDeleteConflicts = useCallback(async (studioId: string): Promise<ConflictingBooking[]> => {
+        const { data, error } = await supabase
+            .from('studio_bookings')
+            .select(`
+                id,
+                booking_date,
+                start_time,
+                end_time,
+                status,
+                user_id,
+                profile:profiles!studio_bookings_user_id_fkey (
+                    full_name,
+                    email
+                )
+            `)
+            .eq('studio_id', studioId)
+            .in('status', ['pending', 'confirmed', 'checked_in', 'pending_relocation'])
+            .order('booking_date', { ascending: true })
+            .order('start_time', { ascending: true });
+
+        if (error) throw error;
+
+        return (data || []).map(mapDeleteConflictBooking);
+    }, [mapDeleteConflictBooking]);
+
+    const performStudioDelete = useCallback(async (studioId: string, reason: string) => {
+        let result: any = null;
+        let invokeError: any = null;
+
+        if (isE2EFixtureMode()) {
+            const { error } = await supabase
+                .from('studios')
+                .delete()
+                .eq('id', studioId)
+                .eq('owner_id', userId);
+            if (error) throw error;
+            return { success: true };
+        }
+
+        const {
+            data: { session },
+        } = await supabase.auth.getSession();
+        const accessToken = session?.access_token;
+
+        if (accessToken) {
+            try {
+                const { data, error } = await supabase.functions.invoke('delete-studio-with-storage', {
+                    body: {
+                        studioId,
+                        reason,
+                    },
+                    headers: {
+                        Authorization: `Bearer ${accessToken}`,
+                    },
+                });
+
+                result = data;
+                invokeError = error;
+            } catch (e) {
+                invokeError = e;
+            }
+        } else {
+            invokeError = new Error('No active session token for edge invoke.');
+        }
+
+        if (invokeError) {
+            logActionError('MyStudio', 'delete-studio-with-storage invoke', invokeError, { studioId });
+            const { data: rpcData, error: rpcError } = await supabase.rpc('delete_studio_safely', {
+                p_studio_id: studioId,
+                p_reason: `${reason} (RPC fallback)`,
+            });
+            if (rpcError) throw rpcError;
+            result = rpcData;
+        }
+
+        return result;
+    }, [userId]);
+
+    const handleDeleteSuccess = useCallback((studioId: string) => {
+        setStudios(prev => prev.filter(s => s.id !== studioId));
+        clearListingDetailsCache(studioId);
+        invalidateListingCaches(userId, ['bookings', 'details', 'home', 'search', 'wallet']);
+        closeDeleteModal();
+        setDeleteConflictModalVisible(false);
+        setDeleteConflictingBookings([]);
+        showAlert('success', 'Studio Deleted', 'Studio deleted successfully.');
+    }, [showAlert, userId]);
+
+    const handleDeleteResult = useCallback(async (studioId: string, result: any) => {
+        if (!result?.success) {
+            if (result?.code === 'ACTIVE_BOOKINGS_EXIST') {
+                const returnedBookings = Array.isArray(result?.active_bookings)
+                    ? result.active_bookings
+                    : [];
+                const conflicts = returnedBookings.length > 0
+                    ? returnedBookings.map(mapDeleteConflictBooking)
+                    : await fetchDeleteConflicts(studioId);
+                if (conflicts.length > 0) {
+                    setDeleteConflictingBookings(conflicts);
+                    setDeleteConflictModalVisible(true);
+                    setModalVisible(false);
+                    return;
+                }
+
+                showAlert(
+                    'error',
+                    'Booking Conflicts Unavailable',
+                    'Delete found active bookings, but their conflict details could not be loaded. Please refresh and try again.'
+                );
+                closeDeleteModal();
+                return;
+            }
+
+            if (result?.code === 'STUDIO_NOT_FOUND') {
+                showAlert('warning', 'Not Found', 'Studio was not found. It may have already been removed.');
+                clearListingDetailsCache(studioId);
+                setStudios(prev => prev.filter(s => s.id !== studioId));
+                closeDeleteModal();
+                return;
+            }
+
+            throw new Error(getResultErrorMessage(result, 'Delete failed'));
+        }
+
+        handleDeleteSuccess(studioId);
+    }, [fetchDeleteConflicts, handleDeleteSuccess, mapDeleteConflictBooking, showAlert]);
+
+    const handleDelete = async (skipConflictCheck = false) => {
         if (!selectedId || !userId || deleting) return;
         if (userRole === 'staff') {
             showAlert('warning', 'Action blocked', 'Staff accounts cannot delete studios.');
@@ -248,84 +410,123 @@ export default function MyStudioScreen() {
         }
         setDeleting(true);
         try {
-            let result: any = null;
-            let invokeError: any = null;
-            if (isE2EFixtureMode()) {
-                const { error } = await supabase
-                    .from('studios')
-                    .delete()
-                    .eq('id', selectedId)
-                    .eq('owner_id', userId);
-                if (error) throw error;
-                result = { success: true };
-            } else {
-            const {
-                data: { session },
-            } = await supabase.auth.getSession();
-            const accessToken = session?.access_token;
-
-            if (accessToken) {
+            if (!skipConflictCheck) {
                 try {
-                    const { data, error } = await supabase.functions.invoke('delete-studio-with-storage', {
-                        body: {
-                            studioId: selectedId,
-                            reason: 'Deleted from My Studio screen by owner',
-                        },
-                        headers: {
-                            Authorization: `Bearer ${accessToken}`,
-                        },
-                    });
-
-                    result = data;
-                    invokeError = error;
-                } catch (e) {
-                    invokeError = e;
+                    const conflicts = await fetchDeleteConflicts(selectedId);
+                    if (conflicts.length > 0) {
+                        setDeleteConflictingBookings(conflicts);
+                        setDeleteConflictModalVisible(true);
+                        setModalVisible(false);
+                        return;
+                    }
+                } catch (conflictError) {
+                    logActionError('MyStudio', 'preload delete conflicts', conflictError, { studioId: selectedId });
                 }
-            } else {
-                invokeError = new Error('No active session token for edge invoke.');
             }
 
-            if (invokeError) {
-                logActionError('MyStudio', 'delete-studio-with-storage invoke', invokeError, { studioId: selectedId });
-                const { data: rpcData, error: rpcError } = await supabase.rpc('delete_studio_safely', {
-                    p_studio_id: selectedId,
-                    p_reason: 'Deleted from My Studio screen by owner (RPC fallback)',
-                });
-                if (rpcError) throw rpcError;
-                result = rpcData;
-            }
-            }
+            const result = await performStudioDelete(
+                selectedId,
+                'Deleted from My Studio screen by owner',
+            );
 
-            if (!result?.success) {
-                if (result?.code === 'ACTIVE_BOOKINGS_EXIST') {
-                    showAlert(
-                        'warning',
-                        'Delete Blocked',
-                        `This studio still has ${result.active_booking_count || 0} active booking(s)${(result.pending_relocation_count || 0) > 0 ? `, including ${result.pending_relocation_count} pending relocation request(s)` : ''}. Resolve booking cancellations/relocations first so musician notifications and refunds are handled correctly.`
-                    );
-                    closeDeleteModal();
-                    return;
-                }
-
-                if (result?.code === 'STUDIO_NOT_FOUND') {
-                    showAlert('warning', 'Not Found', 'Studio was not found. It may have already been removed.');
-                    clearListingDetailsCache(selectedId);
-                    setStudios(prev => prev.filter(s => s.id !== selectedId));
-                    closeDeleteModal();
-                    return;
-                }
-
-                throw new Error(getResultErrorMessage(result, 'Delete failed'));
-            }
-
-            setStudios(prev => prev.filter(s => s.id !== selectedId));
-            clearListingDetailsCache(selectedId);
-            invalidateListingCaches(userId, ['bookings', 'details', 'home', 'search', 'wallet']);
-            closeDeleteModal();
-            showAlert('success', 'Studio Deleted', 'Studio deleted successfully.');
+            await handleDeleteResult(selectedId, result);
         } catch (e) {
             const message = getActionErrorMessage(e, 'Failed to delete studio.');
             logActionError('MyStudio', 'delete studio', e, { studioId: selectedId, userId });
+            showAlert('error', 'Delete Failed', message);
+        } finally {
+            setDeleting(false);
+        }
+    };
+
+    const handleDeleteConflictResolution = async (resolutions: ConflictResolution[]) => {
+        if (!selectedId || !userId || deleting) return;
+        setDeleting(true);
+        try {
+            const unsupportedResolution = resolutions.find(
+                (resolution) => resolution.action !== 'cancel' && resolution.action !== 'choose',
+            );
+            if (unsupportedResolution) {
+                throw new Error('Studio deletion can only continue after active bookings are cancelled or sent back to the musician.');
+            }
+
+            let pausedForMusicianChoice = false;
+
+            for (const resolution of resolutions) {
+                if (resolution.action === 'choose') {
+                    const conflict = deleteConflictingBookings.find((booking) => booking.id === resolution.bookingId);
+                    if (!conflict) {
+                        throw new Error('Could not find the booking that needs relocation.');
+                    }
+
+                    const { data: relocationData, error: relocationError } = await supabase.rpc(
+                        'request_studio_booking_relocation',
+                        {
+                            p_booking_id: resolution.bookingId,
+                            p_proposed_date: null,
+                            p_proposed_start_time: null,
+                            p_proposed_end_time: null,
+                            p_musician_can_choose_slot: true,
+                            p_reason:
+                                'Pending relocation requested before studio deletion. Musician will choose an available slot.',
+                        },
+                    );
+
+                    if (relocationError || relocationData?.success === false) {
+                        throw relocationError || new Error(relocationData?.error || 'Failed to ask musician to choose a new time.');
+                    }
+
+                    pausedForMusicianChoice = true;
+                    continue;
+                }
+
+                const cancellationReason =
+                    'Studio was deleted by owner. Booking was cancelled and refunded with no musician completion-rate penalty.';
+                const { data: cancelData, error: cancelError } =
+                    await supabase.functions.invoke('manage-bookings', {
+                        body: {
+                            action: 'update_status',
+                            booking_id: resolution.bookingId,
+                            new_status: 'cancelled',
+                            type_id: 'studio_booking',
+                            cancellation_reason: cancellationReason,
+                            userId,
+                        },
+                    });
+
+                if (cancelError || cancelData?.error) {
+                    const errorPayload = cancelData?.error || cancelData?.message || cancelError;
+                    logActionError('MyStudio', 'cancel booking before delete', errorPayload, {
+                        bookingId: resolution.bookingId,
+                        studioId: selectedId,
+                    });
+                    throw new Error(getActionErrorMessage(errorPayload, 'Failed to cancel and refund booking.'));
+                }
+            }
+
+            setDeleteConflictModalVisible(false);
+            setDeleteConflictingBookings([]);
+
+            if (pausedForMusicianChoice) {
+                closeDeleteModal();
+                showAlert(
+                    'info',
+                    'Booking Resolution Started',
+                    'Delete is paused until the musician responds or the remaining active bookings are cancelled.',
+                );
+                void fetchStudios({ showAlertOnError: true });
+                return;
+            }
+
+            const result = await performStudioDelete(
+                selectedId,
+                'Deleted from My Studio screen by owner after resolving active bookings',
+            );
+
+            await handleDeleteResult(selectedId, result);
+        } catch (e) {
+            const message = getActionErrorMessage(e, 'Failed to resolve bookings before delete.');
+            logActionError('MyStudio', 'resolve delete conflicts', e, { studioId: selectedId, userId });
             showAlert('error', 'Delete Failed', message);
         } finally {
             setDeleting(false);
@@ -549,6 +750,21 @@ export default function MyStudioScreen() {
                 confirmDisabled={!isDeleteConfirmed || deleting}
                 loading={deleting}
                 loadingMessage="Deleting studio..."
+            />
+            <ConflictResolutionModal
+                visible={deleteConflictModalVisible}
+                conflicts={deleteConflictingBookings}
+                studioName={selectedName || 'this studio'}
+                subtitle={`${deleteConflictingBookings.length} active booking${deleteConflictingBookings.length === 1 ? '' : 's'} must be resolved before deleting ${selectedName || 'this studio'}.`}
+                resolveLabel="Resolve Bookings"
+                allowMusicianChoose
+                allowMove={false}
+                onClose={() => {
+                    setDeleteConflictModalVisible(false);
+                    setDeleteConflictingBookings([]);
+                    closeDeleteModal();
+                }}
+                onResolve={handleDeleteConflictResolution}
             />
             <CustomAlert
                 visible={alertVisible}

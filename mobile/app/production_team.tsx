@@ -889,6 +889,7 @@ export default function ProductionTeamScreen() {
             <View style={styles.modalContent}>
               <ProductionInviteSection
                 currentUserId={userId}
+                productionTeamId={selectedTeam.id}
                 selectedTargets={selectedInviteTargets}
                 onSelectedTargetsChange={setSelectedInviteTargets}
                 inviteMessage={inviteMessage}

@@ -390,6 +390,8 @@ const ListingDetailsSheet = forwardRef<
     "solo" | "duo" | "band" | null
   >(null);
   const [loadingGroups, setLoadingGroups] = useState(false);
+  const [currentGroupMembershipStatus, setCurrentGroupMembershipStatus] =
+    useState<"unknown" | "member" | "not-member">("unknown");
 
   // Group Deduplication State (prevent same group applying twice)
   const [groupAlreadyApplied, setGroupAlreadyApplied] = useState(false);
@@ -1675,6 +1677,7 @@ const ListingDetailsSheet = forwardRef<
       setHasExistingStudioBooking(false);
       setExistingStudioBookingStatus(null);
       // Reset group selection state
+      setCurrentGroupMembershipStatus("unknown");
       setSelectedGroupId(null);
       setSelectedSlotType(null);
       setUserGroups([]);
@@ -1713,6 +1716,74 @@ const ListingDetailsSheet = forwardRef<
       }
     }
   }, [group, userId, userRole]);
+
+  const membershipCheckGroupId = group?.type === "Group" ? group.id : null;
+  const membershipCheckOwnerId = group?.type === "Group" ? group.owner_id : null;
+  const membershipCheckLoadedMembers = group?.type === "Group" ? group.members : null;
+
+  useEffect(() => {
+    let active = true;
+
+    if (!membershipCheckGroupId || !userId) {
+      setCurrentGroupMembershipStatus("not-member");
+      return () => {
+        active = false;
+      };
+    }
+
+    if (membershipCheckOwnerId === userId) {
+      setCurrentGroupMembershipStatus("member");
+      return () => {
+        active = false;
+      };
+    }
+
+    const loadedMembers = Array.isArray(membershipCheckLoadedMembers)
+      ? membershipCheckLoadedMembers
+      : [];
+    const hasLoadedMembership = loadedMembers.some(
+      (member: any) => member?.user_id === userId,
+    );
+
+    setCurrentGroupMembershipStatus(hasLoadedMembership ? "member" : "unknown");
+
+    void (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("group_members")
+          .select("id")
+          .eq("group_id", membershipCheckGroupId)
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (error) {
+          console.error("Error checking current group membership:", error);
+          if (active && !hasLoadedMembership) {
+            setCurrentGroupMembershipStatus("not-member");
+          }
+          return;
+        }
+
+        if (active) {
+          setCurrentGroupMembershipStatus(data ? "member" : "not-member");
+        }
+      } catch (err) {
+        console.error("Error checking current group membership:", err);
+        if (active && !hasLoadedMembership) {
+          setCurrentGroupMembershipStatus("not-member");
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    membershipCheckGroupId,
+    membershipCheckLoadedMembers,
+    membershipCheckOwnerId,
+    userId,
+  ]);
 
   useEffect(() => {
     const resolvedUserRole = userRole || currentUserRole;
@@ -2877,7 +2948,8 @@ const ListingDetailsSheet = forwardRef<
     group?.open_group_applications === true &&
     !!userId &&
     effectiveUserRole === "musician" &&
-    group?.owner_id !== userId;
+    group?.owner_id !== userId &&
+    currentGroupMembershipStatus === "not-member";
 
   useEffect(() => {
     if (!isGuest && activeTab === "Connect" && effectiveUserRole === "producer" && activeUserId) {

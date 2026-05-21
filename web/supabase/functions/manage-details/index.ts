@@ -119,6 +119,17 @@ const mapReviewRow = (row: any) => ({
     likes_count: Number(row?.likes_count ?? row?.computed_likes_count ?? 0),
 })
 
+const getNumericValue = (...candidates: unknown[]): number => {
+    for (const candidate of candidates) {
+        if (candidate === null || candidate === undefined || candidate === '') continue
+
+        const parsed = Number(candidate)
+        if (Number.isFinite(parsed)) return parsed
+    }
+
+    return 0
+}
+
 const normalizeRequiredText = (rawValue: unknown, maxLength: number): string => {
     const value = typeof rawValue === 'string' ? rawValue.trim() : ''
     if (!value) return ''
@@ -266,7 +277,7 @@ serve(async (req: Request) => {
 
             const { data: reviews, error: reviewsError } = await supabaseClient
                 .from('reviews')
-                .select('*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url, updated_at)')
+                .select('*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url, created_at)')
                 .eq(reviewTargetColumn, id)
                 .order('created_at', { ascending: false })
                 .limit(5)
@@ -369,8 +380,8 @@ serve(async (req: Request) => {
 
             return new Response(JSON.stringify({
                 ...entity,
-                rating: entity.computed_rating || 0,
-                review_count: entity.computed_review_count || 0,
+                rating: getNumericValue(entity.rating, entity.computed_rating),
+                review_count: getNumericValue(entity.review_count, entity.computed_review_count),
                 is_owner: isOwner,
                 is_favorited: isFavorited,
                 favorites_count: favoritesCount,

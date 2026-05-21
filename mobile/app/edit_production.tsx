@@ -307,6 +307,7 @@ export default function EditProductionScreen() {
 
               <ProductionInviteSection
                 currentUserId={userId || session?.user?.id || null}
+                productionTeamId={team?.id || null}
                 selectedTargets={selectedInviteTargets}
                 onSelectedTargetsChange={setSelectedInviteTargets}
                 inviteMessage={inviteMessage}

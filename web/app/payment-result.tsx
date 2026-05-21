@@ -147,15 +147,17 @@ export default function PaymentResultScreen() {
               <Text style={styles.primaryButtonText}>View Activity</Text>
             </TouchableOpacity>
           ) : null}
-          <TouchableOpacity
-            activeOpacity={1}
-            style={[styles.secondaryButton, { borderColor: colors.border }]}
-            onPress={() => router.replace(isDeposit ? "/wallet" : "/feed")}
-          >
-            <Text style={[styles.secondaryButtonText, { color: colors.text }]}>
-              {isDeposit ? "View Wallet" : "Go Home"}
-            </Text>
-          </TouchableOpacity>
+          {isDeposit ? (
+            <TouchableOpacity
+              activeOpacity={1}
+              style={[styles.secondaryButton, { borderColor: colors.border }]}
+              onPress={() => router.replace("/wallet")}
+            >
+              <Text style={[styles.secondaryButtonText, { color: colors.text }]}>
+                View Wallet
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
     </View>

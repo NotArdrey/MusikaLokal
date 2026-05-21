@@ -914,6 +914,8 @@ export default function MarketplaceScreen() {
       {/* Add Product Modal */}
       <BottomModal
         visible={showAddProduct}
+        bottomInsetBackgroundColor={colors.surface}
+        navigationBarStyleWhileVisible={isDark ? "dark" : "light"}
         overlayLabel="MarketplaceAddProductModal"
         onClose={() => {
           setShowAddProduct(false);

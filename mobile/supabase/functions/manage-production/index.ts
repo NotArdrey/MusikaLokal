@@ -651,6 +651,106 @@ function normalizeConnectionEntityType(value: unknown) {
   return String(value || "").trim().toLowerCase();
 }
 
+function isGroupMemberInviteEvent(eventDetails: any) {
+  return (
+    normalizeConnectionEntityType(eventDetails?.sender_entity_type) === "group" &&
+    normalizeConnectionEntityType(eventDetails?.receiver_entity_type) === "musician" &&
+    getListingRequestKind(eventDetails) === "invite" &&
+    normalizeConnectionEntityType(readEventString(eventDetails, "application_scope")) === "group_member"
+  );
+}
+
+async function validateGroupMemberInviteAvailability(
+  supabaseAdmin: any,
+  params: {
+    eventDetails: any;
+    groupId: string | null;
+    receiverUserId: string;
+    actorUserId: string;
+  },
+) {
+  const { eventDetails, groupId, receiverUserId, actorUserId } = params;
+
+  if (!isGroupMemberInviteEvent(eventDetails)) {
+    return null;
+  }
+
+  const inviteGroupId =
+    groupId ||
+    readEventString(eventDetails, "group_id") ||
+    readEventString(eventDetails, "sender_entity_id");
+  const targetUserId = readEventString(eventDetails, "receiver_entity_id") || receiverUserId;
+
+  if (!inviteGroupId) {
+    return { error: "Group invite is missing a group reference", status: 400 };
+  }
+
+  if (!targetUserId) {
+    return { error: "Group invite is missing a musician reference", status: 400 };
+  }
+
+  const group = await getGroupOwnerContext(supabaseAdmin, inviteGroupId);
+  if (!group) {
+    return { error: "Group not found", status: 404 };
+  }
+
+  if (group.owner_id !== actorUserId) {
+    const { data: actorMembership, error: actorMembershipError } = await supabaseAdmin
+      .from("group_members")
+      .select("id, role")
+      .eq("group_id", inviteGroupId)
+      .eq("user_id", actorUserId)
+      .maybeSingle();
+
+    if (actorMembershipError) {
+      throw actorMembershipError;
+    }
+
+    if (!actorMembership || !["owner", "admin"].includes(actorMembership.role)) {
+      return { error: "Only group owners or admins can send group invites", status: 403 };
+    }
+  }
+
+  const { data: existingMember, error: existingMemberError } = await supabaseAdmin
+    .from("group_members")
+    .select("id")
+    .eq("group_id", inviteGroupId)
+    .eq("user_id", targetUserId)
+    .maybeSingle();
+
+  if (existingMemberError) {
+    throw existingMemberError;
+  }
+
+  if (existingMember) {
+    return { error: "This musician is already in this group.", status: 409 };
+  }
+
+  const { data: existingInvite, error: existingInviteError } = await supabaseAdmin
+    .from("booking_requests")
+    .select("id")
+    .eq("group_id", inviteGroupId)
+    .eq("receiver_id", targetUserId)
+    .eq("status", "pending")
+    .contains("event_details", {
+      sender_entity_type: "group",
+      request_kind: "invite",
+      application_scope: "group_member",
+    })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingInviteError) {
+    throw existingInviteError;
+  }
+
+  if (existingInvite) {
+    return { error: "This musician already has a pending invite to this group.", status: 409 };
+  }
+
+  return null;
+}
+
 function isVenueGigInviteEvent(eventDetails: any) {
   const senderEntityType = normalizeConnectionEntityType(eventDetails?.sender_entity_type);
   const listingType = normalizeConnectionEntityType(readEventString(eventDetails, "listing_type"));
@@ -1238,6 +1338,23 @@ serve(async (req: Request) => {
       const eventDetails = buildListingRequestEventDetails(params);
 
       try {
+        const groupMemberInviteValidation = await validateGroupMemberInviteAvailability(
+          supabaseAdmin,
+          {
+            eventDetails,
+            groupId,
+            receiverUserId,
+            actorUserId: authUser.id,
+          },
+        );
+
+        if (groupMemberInviteValidation?.error) {
+          return jsonResponse(
+            { error: groupMemberInviteValidation.error },
+            groupMemberInviteValidation.status || 400,
+          );
+        }
+
         const validationResult = await validateProductionTeamInviteAvailability(supabaseAdmin, {
           eventDetails,
           groupId,

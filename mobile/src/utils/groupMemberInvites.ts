@@ -32,6 +32,39 @@ const normalizeText = (value: unknown) => String(value ?? "").trim();
 const buildTargetSubtitle = (parts: (string | null | undefined)[]) =>
   parts.map((part) => normalizeText(part)).filter(Boolean).join(" | ");
 
+const fetchExistingGroupMemberIds = async (
+  groupId: string,
+  inviteTargets: GroupInviteTarget[],
+) => {
+  const receiverUserIds = Array.from(
+    new Set(
+      inviteTargets
+        .map((target) => normalizeText(target.receiverUserId))
+        .filter(Boolean),
+    ),
+  );
+
+  if (receiverUserIds.length === 0) {
+    return new Set<string>();
+  }
+
+  const { data, error } = await supabase
+    .from("group_members")
+    .select("user_id")
+    .eq("group_id", groupId)
+    .in("user_id", receiverUserIds);
+
+  if (error) {
+    throw error;
+  }
+
+  return new Set(
+    (data || [])
+      .map((member: any) => normalizeText(member?.user_id))
+      .filter(Boolean),
+  );
+};
+
 export async function searchGroupInviteTargets({
   currentUserId,
   groupId,
@@ -107,7 +140,17 @@ export async function sendGroupMemberInvites({
   const failures: { target: GroupInviteTarget; error: string }[] = [];
   let sentCount = 0;
 
+  const existingMemberIds = await fetchExistingGroupMemberIds(groupId, inviteTargets);
+
   for (const target of inviteTargets) {
+    if (existingMemberIds.has(normalizeText(target.receiverUserId))) {
+      failures.push({
+        target,
+        error: `${target.displayName} is already in this group.`,
+      });
+      continue;
+    }
+
     try {
       await submitListingRequest({
         currentUserId,

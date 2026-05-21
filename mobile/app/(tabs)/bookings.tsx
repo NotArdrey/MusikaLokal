@@ -176,6 +176,40 @@ const formatBookingCardDateTime = (value: unknown) => {
   return formatFriendlyDateTime(raw, { fallback: raw });
 };
 
+const formatBookingClockTime = (value: unknown) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+
+  const parsed = raw.includes("T") ? new Date(raw) : null;
+  if (parsed && !Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+
+  const timeMatch = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?/);
+  if (!timeMatch) return raw;
+
+  const hour = Number(timeMatch[1]);
+  if (!Number.isFinite(hour)) return raw;
+
+  const period = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 || 12;
+  return `${hour12}:${timeMatch[2]} ${period}`;
+};
+
+const formatBookingTimeRange = (startTime: unknown, endTime: unknown) => {
+  const startLabel = formatBookingClockTime(startTime);
+  if (!startLabel) return "";
+
+  const endLabel = formatBookingClockTime(endTime);
+  if (!endLabel || endLabel === startLabel) return startLabel;
+
+  return `${startLabel} - ${endLabel}`;
+};
+
 const getLocalEventDayEndTimestamp = (value: unknown) => {
   const raw = String(value ?? "").trim();
   if (!raw || raw.toLowerCase() === "tba") return null;
@@ -429,10 +463,25 @@ const getBookingPaidAmountLabel = (item: any) => {
   return formatPesoAmount(paidAmount);
 };
 
-const isStudioOwnerCancellation = (item: any, currentUserId?: string | null) =>
-  item?.type_id === "studio_booking" &&
-  !!currentUserId &&
-  item?.studio_owner_id === currentUserId;
+const isStudioOwnerCancellation = (
+  item: any,
+  currentUserId?: string | null,
+  currentUserRole?: string | null,
+) => {
+  const viewerAccess = String(item?.viewer_access || "").trim().toLowerCase();
+  const isDirectOwnerRole =
+    String(currentUserRole || "").trim().toLowerCase() === "studio-owner" &&
+    viewerAccess !== "staff";
+
+  return (
+    item?.type_id === "studio_booking" &&
+    (
+      isDirectOwnerRole ||
+      viewerAccess === "studio_owner" ||
+      (!!currentUserId && item?.studio_owner_id === currentUserId)
+    )
+  );
+};
 
 const isDownpaymentBalanceItem = (item: any) =>
   item?.payment_type === "downpayment" && getBookingRemainingBalance(item) > 0;
@@ -5627,12 +5676,14 @@ export default function BookingsScreen() {
                       : renderActiveTab === "Active Musicians"
                         ? "No active musicians"
                         : renderActiveTab === "Review"
-                          ? "No history yet"
+                          ? "No reviews pending"
                           : "No items"
                       : userRole === "studio-owner" && renderActiveTab === "Pending" && pendingPermitStudios.length > 0
                         ? "No pending items below"
                         : renderActiveTab === "Pending"
                           ? "No pending items"
+                          : renderActiveTab === "Review"
+                            ? "No reviews pending"
                           : renderActiveTab === "History"
                             ? "No history yet"
                             : isProducerActivityRole(userRole)
@@ -6788,24 +6839,19 @@ export default function BookingsScreen() {
                               testID={bookingActionTestId(item, "leave-review")}
                               accessibilityLabel={bookingActionTestId(item, "leave-review")}
                               onPress={() => handleLeaveReview(item)}
-                              style={{
-                                flex: 1,
-                                borderColor: colors.primary,
-                                borderWidth: 1,
-                                padding: 10,
-                                borderRadius: 100,
-                                alignItems: "center",
-                                flexDirection: "row",
-                                justifyContent: "center",
-                                gap: 6,
-                              }}
+                              style={[
+                                styles.outlineButton,
+                                styles.reviewActionButton,
+                                { borderColor: colors.primary },
+                              ]}
                             >
+                              <Ionicons
+                                name="star-outline"
+                                size={16}
+                                color={colors.primary}
+                              />
                               <Text
-                                style={{
-                                  color: colors.primary,
-                                  fontFamily: "Poppins_500Medium",
-                                  fontSize: 12,
-                                }}
+                                style={[styles.outlineButtonText, { color: colors.primary }]}
                               >
                                 Leave Review
                               </Text>
@@ -7124,27 +7170,10 @@ export default function BookingsScreen() {
                               ? formatFriendlyDateTime(item.raw_date, { forceDateOnly: true })
                               : formatFriendlyDateTime(item.start_time, { forceDateOnly: true });
 
-                            let timeStr = "";
-                            if (item.start_time) {
-                              if (item.start_time.includes("T")) {
-                                timeStr = new Date(
-                                  item.start_time,
-                                ).toLocaleTimeString([], {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                  hour12: true,
-                                });
-                              } else if (item.start_time.includes(":")) {
-                                const [hours, minutes] =
-                                  item.start_time.split(":");
-                                const h = parseInt(hours);
-                                if (!isNaN(h)) {
-                                  const period = h >= 12 ? "PM" : "AM";
-                                  const h12 = h % 12 || 12;
-                                  timeStr = `${h12}:${minutes} ${period}`;
-                                }
-                              }
-                            }
+                            const timeStr = formatBookingTimeRange(
+                              item.start_time,
+                              item.end_time,
+                            );
 
                             const parsedSongCount = Number(
                               item.song_count ??
@@ -7992,12 +8021,9 @@ export default function BookingsScreen() {
                               }}
                               style={[
                                 styles.actionButton,
+                                styles.reviewActionButton,
                                 {
                                   backgroundColor: "#10B981",
-                                  width: "100%",
-                                  alignItems: "center",
-                                  flexDirection: "row",
-                                  justifyContent: "center",
                                   borderRadius: 100,
                                   opacity: isActionLoadingFor(item) ? 0.65 : 1,
                                 },
@@ -8006,16 +8032,23 @@ export default function BookingsScreen() {
                               {isActionLoadingFor(item) ? (
                                 <ActivityIndicator size="small" color="white" />
                               ) : (
-                                <Text
-                                  style={[
-                                    styles.actionButtonText,
-                                    { color: "white" },
-                                  ]}
-                                >
-                                  {getBookingRemainingBalance(item) > 0 && !isBookingPaymentSettled(item)
-                                    ? "Complete & Mark Paid"
-                                    : "Complete"}
-                                </Text>
+                                <>
+                                  <Ionicons
+                                    name="checkmark-circle-outline"
+                                    size={18}
+                                    color="white"
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.actionButtonText,
+                                      { color: "white" },
+                                    ]}
+                                  >
+                                    {getBookingRemainingBalance(item) > 0 && !isBookingPaymentSettled(item)
+                                      ? "Complete & Mark Paid"
+                                      : "Complete"}
+                                  </Text>
+                                </>
                               )}
                             </TouchableOpacity>
                           ) : (
@@ -8025,9 +8058,15 @@ export default function BookingsScreen() {
                               onPress={() => handleLeaveReview(item)}
                               style={[
                                 styles.outlineButton,
+                                styles.reviewActionButton,
                                 { borderColor: colors.primary },
                               ]}
                             >
+                              <Ionicons
+                                name="star-outline"
+                                size={16}
+                                color={colors.primary}
+                              />
                               <Text
                                 style={[
                                   styles.outlineButtonText,
@@ -8074,53 +8113,6 @@ export default function BookingsScreen() {
                                   >
                                     Report Late
                                   </Text>
-                                </TouchableOpacity>
-                              )}
-
-                            {renderActiveTab === "Ongoing" &&
-                              item.type_id === "studio_booking" &&
-                              (userRole === "studio-owner" || userRole === "venue-owner") &&
-                              item.raw_status !== "completed" &&
-                              !isReadOnlyBookingItem(item) && (
-                                <TouchableOpacity activeOpacity={1}
-                                  disabled={isActionLoadingFor(item)}
-                                  testID={bookingActionTestId(item, "complete")}
-                                  accessibilityLabel={bookingActionTestId(item, "complete")}
-                                  onPress={() => {
-                                    setSelectedItem(item);
-                                    setModalMode("complete");
-                                    setModalVisible(true);
-                                  }}
-                                  style={[
-                                    styles.actionButton,
-                                    {
-                                      backgroundColor: "#10B981",
-                                      width: "100%",
-                                      alignItems: "center",
-                                      flexDirection: "row",
-                                      justifyContent: "center",
-                                      borderRadius: 100,
-                                      opacity: isActionLoadingFor(item) ? 0.65 : 1,
-                                    },
-                                  ]}
-                                >
-                                  {isActionLoadingFor(item) ? (
-                                    <ActivityIndicator size="small" color="white" />
-                                  ) : (
-                                    <Text
-                                      style={[
-                                        styles.actionButtonText,
-                                        {
-                                          color: "white",
-                                          fontSize: moderateScale(14),
-                                        },
-                                      ]}
-                                    >
-                                      {getBookingRemainingBalance(item) > 0 && !isBookingPaymentSettled(item)
-                                        ? "Complete & Mark Paid"
-                                        : "Complete"}
-                                    </Text>
-                                  )}
                                 </TouchableOpacity>
                               )}
 
@@ -8372,7 +8364,7 @@ export default function BookingsScreen() {
                             return "Are you sure you want to withdraw this application? The gig owner will be notified.";
                           } else {
                             // For studio bookings, owner cancellations refund the musician.
-                            const ownerCancellation = isStudioOwnerCancellation(selectedItem, userId);
+                            const ownerCancellation = isStudioOwnerCancellation(selectedItem, userId, userRole);
                             const paidAmount = getBookingPaidAmount(selectedItem);
 
                             if (ownerCancellation) {
@@ -9311,6 +9303,13 @@ const styles = StyleSheet.create({
     gap: scale(8),
     marginTop: 0,
     width: "100%",
+  },
+  reviewActionButton: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: scale(6),
   },
   actionLoadingRow: {
     flexDirection: "row",

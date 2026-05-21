@@ -3,7 +3,6 @@ import React, { useState } from 'react';
 import {
     ActivityIndicator,
     Modal,
-    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -38,9 +37,13 @@ interface ConflictResolutionModalProps {
   onClose: () => void;
   onResolve: (actions: ConflictResolution[]) => Promise<void>;
   studioName: string;
+  subtitle?: string;
+  resolveLabel?: string;
+  allowMusicianChoose?: boolean;
+  allowMove?: boolean;
 }
 
-export type ResolutionAction = 'move' | 'cancel' | 'skip';
+export type ResolutionAction = 'move' | 'cancel' | 'choose' | 'skip';
 
 export interface ConflictResolution {
   bookingId: string;
@@ -48,15 +51,16 @@ export interface ConflictResolution {
   newSlot?: RelocationSlot;
 }
 
-// useNativeDriver is not supported on web
-const useNativeDriver = Platform.OS !== 'web';
-
 export default function ConflictResolutionModal({
   visible,
   conflicts,
   onClose,
   onResolve,
   studioName,
+  subtitle,
+  resolveLabel = 'Resolve & Save',
+  allowMusicianChoose = true,
+  allowMove = true,
 }: ConflictResolutionModalProps) {
   const { colors, isDark } = useTheme();
   const [resolutions, setResolutions] = useState<{ [bookingId: string]: ResolutionAction }>({});
@@ -197,6 +201,16 @@ export default function ConflictResolutionModal({
     setSelectedSlots({});
   };
 
+  const handleChooseAll = () => {
+    const newResolutions: { [key: string]: ResolutionAction } = {};
+    conflicts.forEach((conflict) => {
+      newResolutions[conflict.id] =
+        getCandidateSlots(conflict).length > 0 ? 'choose' : 'cancel';
+    });
+    setResolutions(newResolutions);
+    setSelectedSlots({});
+  };
+
   const selectedMoveSlots = conflicts
     .filter((c) => resolutions[c.id] === 'move')
     .map((c) => ({ id: c.id, slot: getSelectedSlot(c) }));
@@ -215,6 +229,7 @@ export default function ConflictResolutionModal({
       (c) => resolutions[c.id] && (resolutions[c.id] !== 'move' || getSelectedSlot(c)),
     );
   const moveableCount = conflicts.filter((c) => getCandidateSlots(c).length > 0).length;
+  const musicianChooseCount = allowMusicianChoose ? moveableCount : 0;
 
   return (
     <Modal
@@ -246,7 +261,8 @@ export default function ConflictResolutionModal({
               Booking Conflicts Detected
             </Text>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              {conflicts.length} booking{conflicts.length > 1 ? 's' : ''} conflict with your schedule changes for {studioName}
+              {subtitle ||
+                `${conflicts.length} booking${conflicts.length > 1 ? 's' : ''} conflict with your schedule changes for ${studioName}`}
             </Text>
           </View>
 
@@ -256,7 +272,7 @@ export default function ConflictResolutionModal({
               Quick Actions:
             </Text>
             <View style={styles.quickActionsButtons}>
-              {moveableCount > 0 && (
+              {allowMove && moveableCount > 0 && (
                 <TouchableOpacity activeOpacity={1}
                   style={[styles.quickActionBtn, { backgroundColor: colors.primary + '20' }]}
                   onPress={handleMoveAll}
@@ -264,6 +280,17 @@ export default function ConflictResolutionModal({
                   <Ionicons name="swap-horizontal" size={16} color={colors.primary} />
                   <Text style={[styles.quickActionText, { color: colors.primary }]}>
                     Move All ({moveableCount})
+                  </Text>
+                </TouchableOpacity>
+              )}
+              {musicianChooseCount > 0 && (
+                <TouchableOpacity activeOpacity={1}
+                  style={[styles.quickActionBtn, { backgroundColor: 'rgba(14, 165, 233, 0.12)' }]}
+                  onPress={handleChooseAll}
+                >
+                  <Ionicons name="person-circle" size={16} color="#0EA5E9" />
+                  <Text style={[styles.quickActionText, { color: '#0EA5E9' }]}>
+                    Ask All ({musicianChooseCount})
                   </Text>
                 </TouchableOpacity>
               )}
@@ -284,6 +311,7 @@ export default function ConflictResolutionModal({
             {conflicts.map((conflict) => {
               const candidateSlots = getCandidateSlots(conflict);
               const selectedSlot = getSelectedSlot(conflict);
+              const canLetMusicianChoose = allowMusicianChoose && candidateSlots.length > 0;
               return (
               <View
                 key={conflict.id}
@@ -337,7 +365,7 @@ export default function ConflictResolutionModal({
 
                 {/* Action Options */}
                 <View style={styles.actionOptions}>
-                  {selectedSlot && (
+                  {allowMove && selectedSlot && (
                     <TouchableOpacity activeOpacity={1}
                       style={[
                         styles.actionOption,
@@ -463,6 +491,60 @@ export default function ConflictResolutionModal({
                     </View>
                   )}
 
+                  {canLetMusicianChoose && (
+                    <TouchableOpacity activeOpacity={1}
+                      style={[
+                        styles.actionOption,
+                        {
+                          backgroundColor:
+                            resolutions[conflict.id] === 'choose'
+                              ? '#0EA5E9'
+                              : isDark
+                              ? 'rgba(255,255,255,0.1)'
+                              : 'rgba(0,0,0,0.05)',
+                          borderColor:
+                            resolutions[conflict.id] === 'choose' ? '#0EA5E9' : colors.border,
+                        },
+                      ]}
+                      onPress={() => setResolutionAction(conflict.id, 'choose')}
+                    >
+                      <Ionicons
+                        name="person-circle"
+                        size={18}
+                        color={resolutions[conflict.id] === 'choose' ? '#fff' : '#0EA5E9'}
+                      />
+                      <View style={styles.actionOptionContent}>
+                        <Text
+                          style={[
+                            styles.actionOptionTitle,
+                            {
+                              color:
+                                resolutions[conflict.id] === 'choose' ? '#fff' : colors.text,
+                            },
+                          ]}
+                        >
+                          Let Musician Choose
+                        </Text>
+                        <Text
+                          style={[
+                            styles.actionOptionSubtitle,
+                            {
+                              color:
+                                resolutions[conflict.id] === 'choose'
+                                  ? 'rgba(255,255,255,0.8)'
+                                  : colors.textSecondary,
+                            },
+                          ]}
+                        >
+                          They can pick an available slot in Bookings
+                        </Text>
+                      </View>
+                      {resolutions[conflict.id] === 'choose' && (
+                        <Ionicons name="checkmark-circle" size={20} color="#fff" />
+                      )}
+                    </TouchableOpacity>
+                  )}
+
                   <TouchableOpacity activeOpacity={1}
                     style={[
                       styles.actionOption,
@@ -549,7 +631,7 @@ export default function ConflictResolutionModal({
                 <>
                   <Ionicons name="checkmark" size={20} color="#fff" />
                   <Text style={styles.resolveBtnText}>
-                    Resolve & Save
+                    {resolveLabel}
                   </Text>
                 </>
               )}
@@ -617,6 +699,7 @@ const styles = StyleSheet.create({
   },
   quickActionsButtons: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
   quickActionBtn: {

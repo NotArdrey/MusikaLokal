@@ -421,6 +421,7 @@ async function fetchReportTargetDetails(client: any, rawTargetType: unknown, raw
     record?.organizer_id ||
     record?.seller_id ||
     record?.creator_id ||
+    record?.author_id ||
     record?.user_id ||
     "",
   ).trim();

@@ -166,7 +166,48 @@ serve(async (req: Request) => {
 
     const result: any = deleteResult;
     if (!result?.success) {
-      return new Response(JSON.stringify(result), {
+      let blockedResult = result;
+
+      if (result?.code === "ACTIVE_BOOKINGS_EXIST") {
+        const { data: activeBookings, error: activeBookingsError } =
+          await serviceClient
+            .from("studio_bookings")
+            .select(
+              `
+                id,
+                booking_date,
+                start_time,
+                end_time,
+                status,
+                user_id,
+                profile:profiles!studio_bookings_user_id_fkey (
+                  full_name,
+                  email
+                )
+              `,
+            )
+            .eq("studio_id", studioId)
+            .in("status", [
+              "pending",
+              "confirmed",
+              "checked_in",
+              "pending_relocation",
+            ])
+            .order("booking_date", { ascending: true })
+            .order("start_time", { ascending: true });
+
+        const rpcActiveBookings = Array.isArray(result?.active_bookings)
+          ? result.active_bookings
+          : [];
+
+        blockedResult = {
+          ...result,
+          active_bookings: activeBookingsError ? rpcActiveBookings : activeBookings || rpcActiveBookings,
+          active_bookings_error: activeBookingsError?.message || null,
+        };
+      }
+
+      return new Response(JSON.stringify(blockedResult), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
       });

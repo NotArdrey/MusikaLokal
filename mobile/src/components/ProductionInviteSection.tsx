@@ -18,6 +18,7 @@ import {
 
 type ProductionInviteSectionProps = {
   currentUserId?: string | null;
+  productionTeamId?: string | null;
   selectedTargets: ProductionInviteTarget[];
   onSelectedTargetsChange: (targets: ProductionInviteTarget[]) => void;
   inviteMessage: string;
@@ -38,6 +39,7 @@ const FILTER_OPTIONS: { value: ProductionInviteFilter; label: string }[] = [
 
 export default function ProductionInviteSection({
   currentUserId,
+  productionTeamId,
   selectedTargets,
   onSelectedTargetsChange,
   inviteMessage,
@@ -81,6 +83,7 @@ export default function ProductionInviteSection({
         setSearchError(null);
         const results = await searchProductionInviteTargets({
           currentUserId,
+          productionTeamId,
           searchQuery: normalizedQuery,
           filter: activeFilter,
         });
@@ -104,7 +107,7 @@ export default function ProductionInviteSection({
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [activeFilter, currentUserId, searchQuery]);
+  }, [activeFilter, currentUserId, productionTeamId, searchQuery]);
 
   const addTarget = (target: ProductionInviteTarget) => {
     if (selectedKeys.has(target.key)) {

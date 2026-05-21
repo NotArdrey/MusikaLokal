@@ -19,6 +19,7 @@ export type ProductionInviteTarget = {
 
 type SearchInviteTargetsParams = {
   currentUserId?: string | null;
+  productionTeamId?: string | null;
   searchQuery: string;
   filter: ProductionInviteFilter;
 };
@@ -39,8 +40,81 @@ const normalizeText = (value: unknown) => String(value ?? "").trim();
 const buildTargetSubtitle = (parts: (string | null | undefined)[]) =>
   parts.map((part) => normalizeText(part)).filter(Boolean).join(" • ");
 
+type ProductionInviteMembershipSnapshot = {
+  memberUserIds: Set<string>;
+  rosterProfileIds: Set<string>;
+  rosterGroupIds: Set<string>;
+};
+
+const emptyProductionInviteMembershipSnapshot = (): ProductionInviteMembershipSnapshot => ({
+  memberUserIds: new Set<string>(),
+  rosterProfileIds: new Set<string>(),
+  rosterGroupIds: new Set<string>(),
+});
+
+const fetchProductionInviteMembershipSnapshot = async (
+  productionTeamId?: string | null,
+): Promise<ProductionInviteMembershipSnapshot> => {
+  const normalizedTeamId = normalizeText(productionTeamId);
+  if (!normalizedTeamId) {
+    return emptyProductionInviteMembershipSnapshot();
+  }
+
+  const [memberResponse, rosterResponse] = await Promise.all([
+    supabase
+      .from("production_team_members")
+      .select("user_id")
+      .eq("team_id", normalizedTeamId),
+    supabase
+      .from("production_team_roster")
+      .select("profile_id, group_id")
+      .eq("team_id", normalizedTeamId),
+  ]);
+
+  if (memberResponse.error) {
+    throw memberResponse.error;
+  }
+
+  if (rosterResponse.error) {
+    throw rosterResponse.error;
+  }
+
+  return {
+    memberUserIds: new Set(
+      (memberResponse.data || [])
+        .map((member: any) => normalizeText(member?.user_id))
+        .filter(Boolean),
+    ),
+    rosterProfileIds: new Set(
+      (rosterResponse.data || [])
+        .map((entry: any) => normalizeText(entry?.profile_id))
+        .filter(Boolean),
+    ),
+    rosterGroupIds: new Set(
+      (rosterResponse.data || [])
+        .map((entry: any) => normalizeText(entry?.group_id))
+        .filter(Boolean),
+    ),
+  };
+};
+
+const isTargetAlreadyOnProductionTeam = (
+  target: ProductionInviteTarget,
+  snapshot: ProductionInviteMembershipSnapshot,
+) => {
+  if (target.kind === "musician") {
+    return (
+      snapshot.memberUserIds.has(normalizeText(target.receiverUserId)) ||
+      snapshot.rosterProfileIds.has(normalizeText(target.receiverEntityId))
+    );
+  }
+
+  return Boolean(target.groupId && snapshot.rosterGroupIds.has(target.groupId));
+};
+
 export async function searchProductionInviteTargets({
   currentUserId,
+  productionTeamId,
   searchQuery,
   filter,
 }: SearchInviteTargetsParams): Promise<ProductionInviteTarget[]> {
@@ -91,7 +165,13 @@ export async function searchProductionInviteTargets({
       })()
     : Promise.resolve({ data: [], error: null } as any);
 
-  const [profileResponse, groupResponse] = await Promise.all([profilePromise, groupPromise]);
+  const membershipPromise = fetchProductionInviteMembershipSnapshot(productionTeamId);
+
+  const [profileResponse, groupResponse, membershipSnapshot] = await Promise.all([
+    profilePromise,
+    groupPromise,
+    membershipPromise,
+  ]);
 
   if (profileResponse.error) {
     throw profileResponse.error;
@@ -134,7 +214,9 @@ export async function searchProductionInviteTargets({
     };
   });
 
-  return [...profileTargets, ...groupTargets];
+  return [...profileTargets, ...groupTargets].filter(
+    (target) => !isTargetAlreadyOnProductionTeam(target, membershipSnapshot),
+  );
 }
 
 export async function sendProductionTeamInvites({
@@ -153,7 +235,17 @@ export async function sendProductionTeamInvites({
   const failures: { target: ProductionInviteTarget; error: string }[] = [];
   let sentCount = 0;
 
+  const membershipSnapshot = await fetchProductionInviteMembershipSnapshot(teamId);
+
   for (const target of inviteTargets) {
+    if (isTargetAlreadyOnProductionTeam(target, membershipSnapshot)) {
+      failures.push({
+        target,
+        error: `${target.displayName} is already on this production team.`,
+      });
+      continue;
+    }
+
     try {
       await submitListingRequest({
         currentUserId,

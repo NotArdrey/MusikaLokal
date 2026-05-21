@@ -1588,6 +1588,7 @@ serve(async (req: Request) => {
               remaining_balance: b.remaining_balance || 0,
               refund_amount: toMoneyNumber(b.refund_amount),
               refunded_at: b.refunded_at || null,
+              studio_owner_id: b.studio?.owner_id || null,
               relocation_requested_at: b.relocation_requested_at,
               relocation_expires_at: b.relocation_expires_at,
               relocation_proposed_date: b.relocation_proposed_date,
