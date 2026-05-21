@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Image,
@@ -16,7 +16,7 @@ import { supabase } from '../../lib/supabase';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import GuestSignInGate from '../../src/components/GuestSignInGate';
 import Header from '../../src/components/header';
-import Navbar from '../../src/components/navbar';
+import BottomNavbar from '../../src/components/navbar';
 import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -28,7 +28,6 @@ import {
     resolveNotificationNavigationTarget,
 } from '../../src/utils/notificationNavigation';
 
-const DEFAULT_NOTIFICATION_IMAGE = 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop';
 const KNOWN_IMAGE_BUCKETS = ['listings', 'avatars', 'profile-images', 'group-images', 'studio-images', 'gig-images', 'documents', 'portfolio', 'images', 'public-assets'];
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}:?\d{2})?$/i;
@@ -62,6 +61,12 @@ type NotificationImageLookup = {
     productionTeams: Map<string, string[]>;
     studios: Map<string, string[]>;
     gigs: Map<string, string[]>;
+};
+
+type NotificationFallbackVisual = {
+    backgroundColor: string;
+    color: string;
+    icon: React.ComponentProps<typeof Ionicons>['name'];
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -289,7 +294,7 @@ const collectNotificationImageCandidates = (raw: unknown, candidates: string[] =
         try {
             collectNotificationImageCandidates(JSON.parse(trimmed), candidates);
             return candidates;
-        } catch (_) {
+        } catch {
             // Fall through and treat it as a plain URL/path candidate.
         }
     }
@@ -300,6 +305,131 @@ const collectNotificationImageCandidates = (raw: unknown, candidates: string[] =
     }
 
     return candidates;
+};
+
+const readLowerText = (...values: unknown[]) => {
+    for (const value of values) {
+        const normalized = readStringId(value)?.toLowerCase();
+        if (normalized) return normalized;
+    }
+
+    return '';
+};
+
+const getNotificationFallbackVisual = (item: any): NotificationFallbackVisual => {
+    const meta = isRecord(item?.meta) ? item.meta : {};
+    const source = normalizeEntityType(meta.source);
+    const eventType = normalizeEntityType(
+        meta.event_type ||
+        meta.eventType ||
+        meta.notification_type ||
+        meta.notificationType ||
+        meta.type ||
+        item?.event_type ||
+        item?.eventType ||
+        item?.notification_type ||
+        item?.notificationType,
+    );
+    const title = readLowerText(item?.title, meta.title);
+    const message = readLowerText(item?.message, meta.message);
+    const combined = `${source} ${eventType} ${title} ${message}`;
+
+    if (
+        source === 'copyright_ownership' ||
+        eventType === 'copyright_ownership_review' ||
+        combined.includes('track ownership') ||
+        combined.includes('copyright')
+    ) {
+        const decision = readLowerText(meta.decision, meta.status, item?.status);
+        if (decision === 'declined' || combined.includes('declined')) {
+            return { icon: 'close-circle-outline', color: '#DC2626', backgroundColor: '#FEE2E2' };
+        }
+        if (decision === 'approved' || combined.includes('approved')) {
+            return { icon: 'checkmark-circle-outline', color: '#059669', backgroundColor: '#D1FAE5' };
+        }
+        return { icon: 'musical-notes-outline', color: '#7C3AED', backgroundColor: '#F3E8FF' };
+    }
+
+    if (combined.includes('identity') || readStringId(meta.manual_identity_review_id, meta.manualIdentityReviewId)) {
+        return { icon: 'shield-checkmark-outline', color: '#2563EB', backgroundColor: '#DBEAFE' };
+    }
+
+    if (combined.includes('leadership') || combined.includes('transfer')) {
+        return { icon: 'people-outline', color: '#0F766E', backgroundColor: '#CCFBF1' };
+    }
+
+    if (combined.includes('booking') || combined.includes('schedule') || combined.includes('application')) {
+        return { icon: 'calendar-outline', color: '#0E7490', backgroundColor: '#CFFAFE' };
+    }
+
+    if (combined.includes('wallet') || combined.includes('withdrawal') || combined.includes('refund')) {
+        return { icon: 'wallet-outline', color: '#15803D', backgroundColor: '#DCFCE7' };
+    }
+
+    if (combined.includes('playlist') || readStringId(meta.playlist_id, meta.playlistId, item?.playlist_id, item?.playlistId)) {
+        return { icon: 'radio-outline', color: '#4F46E5', backgroundColor: '#E0E7FF' };
+    }
+
+    if (combined.includes('order') || combined.includes('product')) {
+        return { icon: 'cart-outline', color: '#B45309', backgroundColor: '#FEF3C7' };
+    }
+
+    if (combined.includes('production') || readStringId(meta.production_team_id, meta.productionTeamId, meta.team_id, meta.teamId)) {
+        return { icon: 'briefcase-outline', color: '#4338CA', backgroundColor: '#E0E7FF' };
+    }
+
+    if (combined.includes('follow') || readStringId(meta.profile_id, meta.profileId, item?.profile_id, item?.profileId)) {
+        return { icon: 'person-circle-outline', color: '#0369A1', backgroundColor: '#E0F2FE' };
+    }
+
+    const severity = normalizeEntityType(item?.type);
+    if (severity === 'success') {
+        return { icon: 'checkmark-circle-outline', color: '#059669', backgroundColor: '#D1FAE5' };
+    }
+    if (severity === 'warning') {
+        return { icon: 'alert-circle-outline', color: '#D97706', backgroundColor: '#FEF3C7' };
+    }
+    if (severity === 'error') {
+        return { icon: 'close-circle-outline', color: '#DC2626', backgroundColor: '#FEE2E2' };
+    }
+
+    return { icon: 'notifications-outline', color: '#4F46E5', backgroundColor: '#E0E7FF' };
+};
+
+const resolveNotificationImagesForItem = (
+    item: any,
+    notificationImageOverrides: Record<string, string[]>,
+) => {
+    const rawCandidates = [
+        item?.image,
+        item?.image_url,
+        item?.avatar_url,
+        item?.logo_url,
+        item?.cover_image_url,
+        item?.primary_image,
+        item?.meta?.image,
+        item?.meta?.images,
+        item?.meta?.image_url,
+        item?.meta?.avatar_url,
+        item?.meta?.logo_url,
+        item?.meta?.cover_image_url,
+        item?.meta?.primary_image,
+        item?.meta?.sender_image,
+        item?.meta?.sender_avatar_url,
+        item?.meta?.actor_avatar_url,
+        item?.meta?.team_logo_url,
+        item?.meta?.production_team_logo_url,
+        item?.meta?.studio_image,
+        item?.meta?.studio_images,
+        item?.meta?.gig_image,
+        item?.meta?.gig_images,
+        item?.meta?.group_image,
+        item?.meta?.group_images,
+        notificationImageOverrides[item?.id],
+    ];
+
+    const candidates = rawCandidates.flatMap((raw) => collectNotificationImageCandidates(raw, []));
+    return candidates.filter((candidate, index, all) => all.indexOf(candidate) === index);
 };
 
 
@@ -498,39 +628,6 @@ export default function NotificationsScreen() {
         };
     }, [queriedNotifications, userId]);
 
-    const resolveNotificationImages = useCallback((item: any) => {
-        const rawCandidates = [
-            item?.image,
-            item?.image_url,
-            item?.avatar_url,
-            item?.logo_url,
-            item?.cover_image_url,
-            item?.primary_image,
-            item?.meta?.image,
-            item?.meta?.images,
-            item?.meta?.image_url,
-            item?.meta?.avatar_url,
-            item?.meta?.logo_url,
-            item?.meta?.cover_image_url,
-            item?.meta?.primary_image,
-            item?.meta?.sender_image,
-            item?.meta?.sender_avatar_url,
-            item?.meta?.actor_avatar_url,
-            item?.meta?.team_logo_url,
-            item?.meta?.production_team_logo_url,
-            item?.meta?.studio_image,
-            item?.meta?.studio_images,
-            item?.meta?.gig_image,
-            item?.meta?.gig_images,
-            item?.meta?.group_image,
-            item?.meta?.group_images,
-            notificationImageOverrides[item?.id],
-        ];
-
-        const candidates = rawCandidates.flatMap((raw) => collectNotificationImageCandidates(raw, []));
-        return [...candidates, DEFAULT_NOTIFICATION_IMAGE].filter((candidate, index, all) => all.indexOf(candidate) === index);
-    }, [notificationImageOverrides]);
-
     const onRefresh = React.useCallback(async () => {
         setRefreshing(true);
         await notificationsQuery.refetch();
@@ -550,7 +647,7 @@ export default function NotificationsScreen() {
                 body: { action: 'mark_read', userId, notificationId: id }
             });
             void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.list(userId) });
-        } catch (e) {
+        } catch {
         }
     };
 
@@ -565,7 +662,7 @@ export default function NotificationsScreen() {
                 body: { action: 'mark_read', userId, all: true }
             });
             void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.list(userId) });
-        } catch (e) {
+        } catch {
         }
     };
 
@@ -869,14 +966,16 @@ export default function NotificationsScreen() {
     const NotificationItem = ({ item }: { item: any }) => {
         const isTransfer = isLeadershipTransfer(item);
         const isRead = item.read;
-        const imageCandidates = useMemo(() => resolveNotificationImages(item), [item, resolveNotificationImages]);
+        const imageCandidates = resolveNotificationImagesForItem(item, notificationImageOverrides);
+        const imageCandidatesKey = imageCandidates.join('\n');
+        const fallbackVisual = getNotificationFallbackVisual(item);
         const [imageCandidateIndex, setImageCandidateIndex] = useState(0);
 
         useEffect(() => {
             setImageCandidateIndex(0);
-        }, [imageCandidates]);
+        }, [imageCandidatesKey, item?.id]);
 
-        const resolvedImage = imageCandidates[imageCandidateIndex] || DEFAULT_NOTIFICATION_IMAGE;
+        const resolvedImage = imageCandidates[imageCandidateIndex] || null;
 
         return (
             <TouchableOpacity activeOpacity={1}
@@ -898,18 +997,29 @@ export default function NotificationsScreen() {
             >
                 <View style={styles.notificationContent}>
                     <View style={styles.leftContent}>
-                        <View style={[styles.avatarContainer, { borderColor: colors.border }]}>
-                            <Image
-                                source={{ uri: resolvedImage }}
-                                style={styles.avatarImage}
-                                resizeMode="cover"
-                                onError={() => {
-                                    setImageCandidateIndex((currentIndex) => {
-                                        const nextIndex = currentIndex + 1;
-                                        return nextIndex < imageCandidates.length ? nextIndex : currentIndex;
-                                    });
-                                }}
-                            />
+                        <View
+                            style={[
+                                styles.avatarContainer,
+                                {
+                                    backgroundColor: fallbackVisual.backgroundColor,
+                                    borderColor: colors.border,
+                                },
+                            ]}
+                        >
+                            {resolvedImage ? (
+                                <Image
+                                    source={{ uri: resolvedImage }}
+                                    style={styles.avatarImage}
+                                    resizeMode="cover"
+                                    onError={() => {
+                                        setImageCandidateIndex((currentIndex) => currentIndex + 1);
+                                    }}
+                                />
+                            ) : (
+                                <View style={styles.avatarIconFallback}>
+                                    <Ionicons name={fallbackVisual.icon} size={22} color={fallbackVisual.color} />
+                                </View>
+                            )}
                         </View>
                     </View>
 
@@ -974,7 +1084,7 @@ export default function NotificationsScreen() {
                 <Header title="Notifications" />
                 <GuestSignInGate message="Sign in to view your notifications." />
                 <View style={styles.navbarContainer}>
-                    <Navbar />
+                    <BottomNavbar />
                 </View>
             </View>
         );
@@ -1035,7 +1145,7 @@ export default function NotificationsScreen() {
             />
 
             <View style={styles.navbarContainer}>
-                <Navbar />
+                <BottomNavbar />
             </View>
 
             <CustomAlert
@@ -1113,6 +1223,11 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
         borderRadius: 22,
+    },
+    avatarIconFallback: {
+        alignItems: 'center',
+        flex: 1,
+        justifyContent: 'center',
     },
     headerRow: {
         flexDirection: 'row',

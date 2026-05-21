@@ -442,6 +442,10 @@ async function refundStudioOwnerCancelledBookingToWallet(
   supabaseAdmin: any,
   bookingId: string,
   cancelledByUserId: string,
+  options: {
+    allowCustomerRelocationRefund?: boolean;
+    description?: string;
+  } = {},
 ) {
   const { data: booking, error: bookingError } = await supabaseAdmin
     .from("studio_bookings")
@@ -450,14 +454,24 @@ async function refundStudioOwnerCancelledBookingToWallet(
     .maybeSingle();
 
   if (bookingError) throw bookingError;
-  if (!booking || booking.studio?.owner_id !== cancelledByUserId) {
+  if (!booking) {
+    return null;
+  }
+
+  const ownerCancelled = booking.studio?.owner_id === cancelledByUserId;
+  const customerRelocationCancelled = Boolean(
+    options.allowCustomerRelocationRefund && booking.user_id === cancelledByUserId,
+  );
+
+  if (!ownerCancelled && !customerRelocationCancelled) {
     return null;
   }
 
   const paymentStatus = String(booking.payment_status || "").toLowerCase();
-  if (!["paid", "partial"].includes(paymentStatus)) {
+  if (!["paid", "partial", "refund_pending"].includes(paymentStatus)) {
     return {
-      owner_cancelled: true,
+      owner_cancelled: ownerCancelled,
+      owner_requested_relocation: customerRelocationCancelled,
       refund_amount: 0,
       skipped: "not_paid",
     };
@@ -468,7 +482,8 @@ async function refundStudioOwnerCancelledBookingToWallet(
 
   if (paidAmount <= 0) {
     return {
-      owner_cancelled: true,
+      owner_cancelled: ownerCancelled,
+      owner_requested_relocation: customerRelocationCancelled,
       refund_amount: 0,
       skipped: "no_paid_amount",
     };
@@ -515,7 +530,8 @@ async function refundStudioOwnerCancelledBookingToWallet(
       .eq("id", booking.id);
 
     return {
-      owner_cancelled: true,
+      owner_cancelled: ownerCancelled,
+      owner_requested_relocation: customerRelocationCancelled,
       already_refunded: true,
       refund_amount: toMoneyNumber(existingRefund[0].amount) || paidAmount,
     };
@@ -535,7 +551,8 @@ async function refundStudioOwnerCancelledBookingToWallet(
       wallet_id: wallet.id,
       amount: paidAmount,
       type: "refund",
-      description: `Studio owner cancelled booking at ${booking.studio?.name || "Studio"}`,
+      description: options.description ||
+        `Studio owner cancelled booking at ${booking.studio?.name || "Studio"}`,
       reference_id: booking.id,
       reference_type: "refund",
       is_credit: true,
@@ -556,7 +573,8 @@ async function refundStudioOwnerCancelledBookingToWallet(
   if (bookingUpdateError) throw bookingUpdateError;
 
   return {
-    owner_cancelled: true,
+    owner_cancelled: ownerCancelled,
+    owner_requested_relocation: customerRelocationCancelled,
     already_refunded: false,
     refund_amount: paidAmount,
   };
@@ -3510,11 +3528,12 @@ serve(async (req: Request) => {
       const updateData: any = { status: new_status };
       let studioBalanceSettlement: any = null;
       let studioBalanceSettlementBooking: any = null;
+      let ownerRequestedRelocationCancellation = false;
 
       if (table === "studio_bookings") {
         const { data: targetBooking, error: targetBookingError } = await supabaseAdmin
           .from("studio_bookings")
-          .select("id, user_id, studio_id, payment_status, payment_amount, final_price, remaining_balance, paid_at, studio:studios(id, name, owner_id)")
+          .select("id, user_id, studio_id, status, payment_status, payment_amount, final_price, remaining_balance, paid_at, relocation_requested_at, relocation_expires_at, relocation_proposed_date, relocation_proposed_start_time, relocation_proposed_end_time, studio:studios(id, name, owner_id)")
           .eq("id", booking_id)
           .maybeSingle();
 
@@ -3537,6 +3556,24 @@ serve(async (req: Request) => {
           return new Response(JSON.stringify({ error: "Forbidden" }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
             status: 403,
+          });
+        }
+
+        ownerRequestedRelocationCancellation =
+          new_status === "cancelled" &&
+          targetBooking.status === "pending_relocation" &&
+          targetBooking.user_id === authUser.id;
+
+        if (ownerRequestedRelocationCancellation) {
+          Object.assign(updateData, {
+            cancellation_reason:
+              cancellation_reason ||
+              "Musician cancelled after an owner-requested schedule move. No musician completion-rate penalty.",
+            relocation_requested_at: null,
+            relocation_expires_at: null,
+            relocation_proposed_date: null,
+            relocation_proposed_start_time: null,
+            relocation_proposed_end_time: null,
           });
         }
 
@@ -3699,12 +3736,44 @@ serve(async (req: Request) => {
         }
       }
 
+      let relocationCancellationRefundResult: any = null;
+      if (
+        table === "studio_bookings" &&
+        new_status === "cancelled" &&
+        ownerRequestedRelocationCancellation
+      ) {
+        try {
+          relocationCancellationRefundResult = await refundStudioOwnerCancelledBookingToWallet(
+            supabaseAdmin,
+            booking_id,
+            authUser.id,
+            {
+              allowCustomerRelocationRefund: true,
+              description: "Owner-requested studio booking relocation cancelled by musician",
+            },
+          );
+        } catch (refundError) {
+          console.error("Failed to refund owner-requested relocation cancellation:", refundError);
+          return new Response(
+            JSON.stringify({ error: "Booking was cancelled, but wallet refund failed. Please contact support." }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 500,
+            },
+          );
+        }
+      }
+
+      const studioCancellationRefundResult =
+        ownerCancellationRefundResult || relocationCancellationRefundResult;
+
       // CANCELLATION PENALTY LOGIC for studio bookings
       if (
         table === "studio_bookings" &&
         new_status === "cancelled" &&
         data.cancellation_policy_id &&
-        !ownerCancellationRefundResult?.owner_cancelled
+        !studioCancellationRefundResult?.owner_cancelled &&
+        !studioCancellationRefundResult?.owner_requested_relocation
       ) {
         try {
           const { data: penaltyResult, error: penaltyCalcErr } = await supabaseAdmin.rpc(
@@ -3783,7 +3852,7 @@ serve(async (req: Request) => {
                   cancellationActorRole = "musician";
                 } else {
                   targetUserId = bookingInfoWithLegacy.user_id;
-                  const refundAmount = toMoneyNumber(ownerCancellationRefundResult?.refund_amount);
+                  const refundAmount = toMoneyNumber(studioCancellationRefundResult?.refund_amount);
                   if (refundAmount > 0) {
                     notificationTitle = "Booking Refunded";
                     notificationMessage = `Your booking at ${bookingInfoWithLegacy.studio.name} has been refunded. A full refund of ₱${refundAmount.toLocaleString()} has been credited to your wallet.${reasonSuffix}`;
@@ -3923,8 +3992,9 @@ serve(async (req: Request) => {
                 status: new_status,
                 event_type: notificationEventType,
                 cancellation_reason: cancellation_reason || null,
-                refund_amount: toMoneyNumber(ownerCancellationRefundResult?.refund_amount),
-                payment_status: ownerCancellationRefundResult?.owner_cancelled
+                refund_amount: toMoneyNumber(studioCancellationRefundResult?.refund_amount),
+                payment_status: studioCancellationRefundResult?.owner_cancelled ||
+                  studioCancellationRefundResult?.owner_requested_relocation
                   ? "refunded"
                   : null,
                 cancelled_by_user_id: new_status === "cancelled" || new_status === "resigned" || new_status === "fired" ? authUser.id : null,
@@ -3937,7 +4007,17 @@ serve(async (req: Request) => {
         }
       }
 
-      return new Response(JSON.stringify(data), {
+      const refundAmountForResponse = toMoneyNumber(studioCancellationRefundResult?.refund_amount);
+      const responseData = studioCancellationRefundResult
+        ? {
+            ...data,
+            payment_status: refundAmountForResponse > 0 ? "refunded" : data?.payment_status,
+            refund_amount: refundAmountForResponse,
+            refund_result: studioCancellationRefundResult,
+          }
+        : data;
+
+      return new Response(JSON.stringify(responseData), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
       });

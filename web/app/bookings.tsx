@@ -424,6 +424,11 @@ const getBookingPaidAmountLabel = (item: any) => {
   return formatPesoAmount(paidAmount);
 };
 
+const isStudioOwnerCancellation = (item: any, currentUserId?: string | null) =>
+  item?.type_id === "studio_booking" &&
+  !!currentUserId &&
+  item?.studio_owner_id === currentUserId;
+
 const isDownpaymentBalanceItem = (item: any) =>
   item?.payment_type === "downpayment" && getBookingRemainingBalance(item) > 0;
 
@@ -741,7 +746,7 @@ export default function BookingsScreen() {
       : "#D8E3F2"
     : colors.border;
   const [modalMode, setModalMode] = useState<
-    "confirm" | "cancel" | "decline" | "fire" | "complete" | "clear_balance" | "late" | "late_confirm" | "report_access"
+    "confirm" | "cancel" | "decline" | "fire" | "complete" | "clear_balance" | "late" | "late_confirm"
   >("confirm");
 
   // Payment Option State
@@ -792,7 +797,6 @@ export default function BookingsScreen() {
   const [staffBookingContext, setStaffBookingContext] = useState<any>(null);
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
   const [locallyReportedLateBookings, setLocallyReportedLateBookings] = useState<Record<string, boolean>>({});
-  const [locallyReportedAccessIssueBookings, setLocallyReportedAccessIssueBookings] = useState<Record<string, boolean>>({});
   const [requestActionId, setRequestActionId] = useState<string | null>(null);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
@@ -856,7 +860,6 @@ export default function BookingsScreen() {
 
   useEffect(() => {
     setLocallyReportedLateBookings({});
-    setLocallyReportedAccessIssueBookings({});
   }, [userId]);
 
   // Track if user went to payment page (to auto-refresh on return)
@@ -2670,83 +2673,6 @@ export default function BookingsScreen() {
     );
   }
 
-  async function handleReportAccessIssue(
-    item: any,
-    reason: string,
-  ): Promise<boolean> {
-    if (!item?.id) {
-      showAlert("error", "Error", "Booking not found.");
-      return false;
-    }
-
-    try {
-      const { data, error } = await supabase.functions.invoke("manage-bookings", {
-        body: {
-          action: "create_incident",
-          booking_id: item.id,
-          issue_type: "cannot_access_studio",
-          notes: reason,
-          userId,
-        },
-      });
-
-      if (error) {
-        const errorContext = (error as any)?.context;
-        let contextBody: any = null;
-
-        try {
-          contextBody = errorContext?.json ? await errorContext.json() : null;
-        } catch {
-          contextBody = null;
-        }
-
-        const contextMessage =
-          (contextBody &&
-            typeof contextBody === "object" &&
-            (contextBody.error || contextBody.message)) ||
-          null;
-
-        if (contextMessage && typeof contextMessage === "string") {
-          throw new Error(contextMessage);
-        }
-
-        throw error;
-      }
-
-      if (data?.incident?.booking_id) {
-        setLocallyReportedAccessIssueBookings((prev) => ({
-          ...prev,
-          [data.incident.booking_id]: true,
-        }));
-      } else {
-        setLocallyReportedAccessIssueBookings((prev) => ({
-          ...prev,
-          [item.id]: true,
-        }));
-      }
-
-      if (userId) fetchBookings(userId);
-      setModalVisible(false);
-      setCancellationReason("");
-
-      showAlert(
-        "success",
-        "Report submitted",
-        "Your report was sent. The studio owner has been notified and the booking issue is now under review.",
-      );
-      return true;
-    } catch (e) {
-      debugLog("Error reporting access issue:", e);
-      const errorMessage =
-        (e as any)?.message ||
-        (typeof e === "string"
-          ? e
-          : "We could not submit your report. Please try again.");
-      showAlert("error", "Unable to submit report", errorMessage);
-      return false;
-    }
-  }
-
   const handleDetailsPress = (item: any) => {
     if (item?.type_id === "booking_request") {
       const detailButtons = [
@@ -3166,25 +3092,6 @@ export default function BookingsScreen() {
     return isWithinLateReportWindow(item);
   };
 
-  const hasAccessIssueAlready = (item: any) => {
-    if (item?.type_id !== "studio_booking") return false;
-
-    return (
-      Boolean(item?.has_open_incident) ||
-      Boolean(locallyReportedAccessIssueBookings[item?.id])
-    );
-  };
-
-  const shouldShowAccessIssueReportButton = (item: any) => {
-    if (activeTab !== "Ongoing") return false;
-    if (item?.type_id !== "studio_booking") return false;
-    if (userRole !== "musician") return false;
-    if (item?.isCancelled) return false;
-    if (hasAccessIssueAlready(item)) return false;
-
-    return true;
-  };
-
   const shouldShowMessageForItem = (item: any) => {
     if (item.type_id === "booking_request") {
       return !!item.counterparty_id;
@@ -3485,47 +3392,54 @@ export default function BookingsScreen() {
           "You accepted the moved schedule.",
         );
       } else {
-        const { error: declineError } = await supabase
-          .from("studio_bookings")
-          .update({
-            status: "cancelled",
-            payment_status: isPaidRelocation
-              ? "refund_pending"
-              : latestBooking.payment_status,
-            cancellation_reason:
-              "Musician declined the owner relocation request.",
-            relocation_requested_at: null,
-            relocation_expires_at: null,
-            relocation_proposed_date: null,
-            relocation_proposed_start_time: null,
-            relocation_proposed_end_time: null,
-          })
-          .eq("id", item.id)
-          .eq("user_id", userId);
-
-        if (declineError) throw declineError;
-
-        if (item.studio_owner_id) {
-          await supabase.from("notifications").insert({
-            user_id: item.studio_owner_id,
-            type: "warning",
-            title: "Relocation Declined",
-            message: isPaidRelocation
-              ? `The musician declined your relocation request for ${item.name}. Booking was cancelled and refund processing has started.`
-              : `The musician declined your relocation request for ${item.name}. Booking was cancelled.`,
-            meta: {
-              bookingId: item.id,
-              studioId: item.studio_id,
-              event_type: "relocation_declined",
+        const { data: cancelData, error: cancelError } =
+          await supabase.functions.invoke("manage-bookings", {
+            body: {
+              action: "update_status",
+              booking_id: item.id,
+              new_status: "cancelled",
+              type_id: "studio_booking",
+              cancellation_reason:
+                "Musician cancelled after an owner-requested schedule move. No musician completion-rate penalty.",
+              userId,
             },
           });
+
+        if (cancelError || cancelData?.error) {
+          throw cancelError || new Error(cancelData?.error || "Could not cancel relocation request.");
         }
+
+        if (
+          latestBooking.relocation_proposed_date &&
+          latestBooking.relocation_proposed_start_time &&
+          latestBooking.relocation_proposed_end_time
+        ) {
+          await supabase
+            .from("booking_holds")
+            .delete()
+            .eq("studio_id", item.studio_id)
+            .eq("user_id", userId)
+            .eq("booking_date", latestBooking.relocation_proposed_date)
+            .eq("start_time", latestBooking.relocation_proposed_start_time)
+            .eq("end_time", latestBooking.relocation_proposed_end_time);
+        }
+
+        const relocationRefundAmount = Number(
+          cancelData?.refund_amount || cancelData?.refund_result?.refund_amount || 0,
+        );
+        const relocationWasRefunded =
+          relocationRefundAmount > 0 ||
+          String(cancelData?.payment_status || "").toLowerCase() === "refunded";
 
         showAlert(
           "info",
           "Relocation Declined",
-          isPaidRelocation
-            ? "You declined the move request. Booking has been cancelled and refund processing has started."
+          relocationWasRefunded
+            ? relocationRefundAmount > 0
+              ? `You declined the move request. ${formatPesoAmount(relocationRefundAmount)} was credited to your wallet and this will not affect your completion rate.`
+              : "You declined the move request. Your paid amount was credited to your wallet and this will not affect your completion rate."
+          : isPaidRelocation
+            ? "You declined the move request. Refund processing has started and this will not affect your completion rate."
             : "You declined the move request. Booking has been cancelled.",
         );
       }
@@ -6959,38 +6873,6 @@ export default function BookingsScreen() {
                                 </TouchableOpacity>
                               )}
 
-                            {shouldShowAccessIssueReportButton(item) && (
-                              <TouchableOpacity activeOpacity={1}
-                                onPress={() => {
-                                  setSelectedItem(item);
-                                  setModalMode("report_access");
-                                  setCancellationReason("");
-                                  setModalVisible(true);
-                                }}
-                                style={[
-                                  styles.outlineButton,
-                                  {
-                                    borderColor: "#EF4444",
-                                    backgroundColor: isDark
-                                      ? "rgba(239, 68, 68, 0.12)"
-                                      : "#FEF2F2",
-                                    width: "100%",
-                                    alignItems: "center",
-                                    borderRadius: 100,
-                                  },
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.outlineButtonText,
-                                    { color: "#DC2626" },
-                                  ]}
-                                >
-                                  Report Access Issue
-                                </Text>
-                              </TouchableOpacity>
-                            )}
-
                             {activeTab === "Ongoing" &&
                               item.type_id === "studio_booking" &&
                               (userRole === "studio-owner" || userRole === "venue-owner") &&
@@ -7235,9 +7117,7 @@ export default function BookingsScreen() {
                       ? "Confirm Late Report"
                       : modalMode === "late"
                         ? "Report Late"
-                        : modalMode === "report_access"
-                          ? "Report Access Issue"
-                          : selectedItem?.type_id === "gig_application"
+                        : selectedItem?.type_id === "gig_application"
                             ? "Withdraw from Gig"
                             : "Cancel Booking"
         }
@@ -7268,9 +7148,7 @@ export default function BookingsScreen() {
                         ? `Send this late-arrival reason to the studio owner?\n\n${normalizeVisibleInput(cancellationReason)}`
                       : modalMode === "late"
                         ? "Please provide your reason for being late."
-                        : modalMode === "report_access"
-                          ? "Describe the access issue. Your report will be sent to the studio owner and the booking will be flagged for review."
-                          : (() => {
+                        : (() => {
                           // Cancel mode
                           if (selectedItem?.type_id === "gig_application") {
                             // For gig applications
@@ -7284,8 +7162,17 @@ export default function BookingsScreen() {
 
                             return "Are you sure you want to withdraw this application? The gig owner will be notified.";
                           } else {
-                            // For studio bookings - strictly no-refund policy
+                            // For studio bookings, owner cancellations refund the musician.
+                            const ownerCancellation = isStudioOwnerCancellation(selectedItem, userId);
                             const paidAmount = getBookingPaidAmount(selectedItem);
+
+                            if (ownerCancellation) {
+                              if (paidAmount > 0) {
+                                return `Cancelling as the studio owner will refund ${formatPesoAmount(paidAmount)} to the musician's wallet. The musician will be notified.`;
+                              }
+
+                              return "Cancelling as the studio owner will notify the musician. No paid amount has been recorded for this booking yet.";
+                            }
 
                             if (paidAmount > 0) {
                               const paidLabel =
@@ -7330,9 +7217,7 @@ export default function BookingsScreen() {
                           ? "Send Report"
                         : modalMode === "late"
                           ? "Submit"
-                          : modalMode === "report_access"
-                            ? "Submit Report"
-                            : selectedItem?.type_id === "gig_application"
+                          : selectedItem?.type_id === "gig_application"
                               ? "Yes, Withdraw"
                               : "Yes, Cancel Booking"
         }
@@ -7342,7 +7227,7 @@ export default function BookingsScreen() {
           modalMode !== "late_confirm" &&
           modalMode !== "clear_balance" &&
           !(modalMode === "decline" && selectedItem?.leader_approval_required)
-        } // Show input for cancel AND decline AND fire AND late AND report_access
+        } // Show input for cancel AND decline AND fire AND late
         danger={
           modalMode === "fire" ||
           modalMode === "decline" ||
@@ -7356,8 +7241,7 @@ export default function BookingsScreen() {
             (modalMode === "cancel" ||
               modalMode === "decline" ||
               modalMode === "fire" ||
-              modalMode === "late" ||
-              modalMode === "report_access") &&
+              modalMode === "late") &&
             !(modalMode === "decline" && selectedItem?.leader_approval_required) &&
             !normalizeVisibleInput(cancellationReason)
           ) {
@@ -7405,11 +7289,6 @@ export default function BookingsScreen() {
 
             if (modalMode === "late") {
               setModalMode("late_confirm");
-              return;
-            }
-
-            if (modalMode === "report_access") {
-              await handleReportAccessIssue(selectedItem, normalizeVisibleInput(cancellationReason));
               return;
             }
 

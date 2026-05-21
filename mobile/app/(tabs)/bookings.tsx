@@ -429,6 +429,11 @@ const getBookingPaidAmountLabel = (item: any) => {
   return formatPesoAmount(paidAmount);
 };
 
+const isStudioOwnerCancellation = (item: any, currentUserId?: string | null) =>
+  item?.type_id === "studio_booking" &&
+  !!currentUserId &&
+  item?.studio_owner_id === currentUserId;
+
 const isDownpaymentBalanceItem = (item: any) =>
   item?.payment_type === "downpayment" && getBookingRemainingBalance(item) > 0;
 
@@ -965,6 +970,12 @@ type BookingActionLoadingState = {
   message: string;
 } | null;
 
+type RelocationSlotOption = {
+  date: string;
+  start_time: string;
+  end_time: string;
+};
+
 const getStatusActionLoadingMessage = (status: string, typeId: string = "studio_booking") => {
   const normalizedStatus = String(status || "").trim().toLowerCase();
   const normalizedType = String(typeId || "").trim().toLowerCase();
@@ -1222,7 +1233,7 @@ export default function BookingsScreen() {
   const bookingDetailsRef =
     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const [modalMode, setModalMode] = useState<
-    "confirm" | "cancel" | "decline" | "fire" | "complete" | "clear_balance" | "late" | "late_confirm" | "report_access"
+    "confirm" | "cancel" | "decline" | "fire" | "complete" | "clear_balance" | "late" | "late_confirm"
   >("confirm");
 
   const handleBookingTabChange = useCallback((tab: Tab) => {
@@ -1242,7 +1253,6 @@ export default function BookingsScreen() {
   const [showScanModal, setShowScanModal] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
-  useBottomOverlayVisibility(showPaymentOptionModal || showScanModal, "BookingsPaymentOrScanModal");
   const initialBookingsCacheRef = useRef<BookingsScreenCachePayload | null>(
     userId ? bookingsScreenCache.get(userId) || null : null,
   );
@@ -1268,9 +1278,18 @@ export default function BookingsScreen() {
   const [staffBookingContext, setStaffBookingContext] = useState<any>(null);
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
   const [locallyReportedLateBookings, setLocallyReportedLateBookings] = useState<Record<string, boolean>>({});
-  const [locallyReportedAccessIssueBookings, setLocallyReportedAccessIssueBookings] = useState<Record<string, boolean>>({});
   const [requestActionId, setRequestActionId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<BookingActionLoadingState>(null);
+  const [preferredRelocationSlots, setPreferredRelocationSlots] = useState<Record<string, RelocationSlotOption>>({});
+  const [relocationSlotPickerVisible, setRelocationSlotPickerVisible] = useState(false);
+  const [relocationSlotPickerItem, setRelocationSlotPickerItem] = useState<any>(null);
+  const [relocationSlotOptions, setRelocationSlotOptions] = useState<RelocationSlotOption[]>([]);
+  const [relocationSlotLoading, setRelocationSlotLoading] = useState(false);
+  const [relocationSlotError, setRelocationSlotError] = useState<string | null>(null);
+  useBottomOverlayVisibility(
+    showPaymentOptionModal || showScanModal || relocationSlotPickerVisible,
+    "BookingsPaymentOrScanModal",
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState("All");
   const [showActivityFilters, setShowActivityFilters] = useState(false);
@@ -1444,7 +1463,6 @@ export default function BookingsScreen() {
 
   useEffect(() => {
     setLocallyReportedLateBookings({});
-    setLocallyReportedAccessIssueBookings({});
     lastProcessedBookingsSummaryRef.current = null;
   }, [userId]);
 
@@ -3197,86 +3215,6 @@ export default function BookingsScreen() {
     );
   }
 
-  async function handleReportAccessIssue(
-    item: any,
-    reason: string,
-  ): Promise<boolean> {
-    if (!item?.id) {
-      Alert.alert("Error", "Booking not found.");
-      return false;
-    }
-
-    try {
-      startActionLoading(item.id, "Submitting report");
-
-      const { data, error } = await supabase.functions.invoke("manage-bookings", {
-        body: {
-          action: "create_incident",
-          booking_id: item.id,
-          issue_type: "cannot_access_studio",
-          notes: reason,
-          userId,
-        },
-      });
-
-      if (error) {
-        const errorContext = (error as any)?.context;
-        let contextBody: any = null;
-
-        try {
-          contextBody = errorContext?.json ? await errorContext.json() : null;
-        } catch {
-          contextBody = null;
-        }
-
-        const contextMessage =
-          (contextBody &&
-            typeof contextBody === "object" &&
-            (contextBody.error || contextBody.message)) ||
-          null;
-
-        if (contextMessage && typeof contextMessage === "string") {
-          throw new Error(contextMessage);
-        }
-
-        throw error;
-      }
-
-      if (data?.incident?.booking_id) {
-        setLocallyReportedAccessIssueBookings((prev) => ({
-          ...prev,
-          [data.incident.booking_id]: true,
-        }));
-      } else {
-        setLocallyReportedAccessIssueBookings((prev) => ({
-          ...prev,
-          [item.id]: true,
-        }));
-      }
-
-      if (userId) fetchBookings(userId);
-      setModalVisible(false);
-      setCancellationReason("");
-
-      Alert.alert(
-        "Success",
-        "Your report was sent. The studio owner has been notified and the booking issue is now under review.",
-      );
-      return true;
-    } catch (e) {
-      debugLog("Error reporting access issue:", e);
-      const errorMessage =
-        (e as any)?.message ||
-        (typeof e === "string"
-          ? e
-          : "We could not submit your report. Please try again.");
-      Alert.alert("Error", errorMessage);
-      return false;
-    } finally {
-      clearActionLoading(item.id);
-    }
-  }
-
   const handleDetailsPress = (item: any) => {
     setSelectedItem(item);
     bookingDetailsRef.current?.present();
@@ -3740,15 +3678,6 @@ export default function BookingsScreen() {
     return Boolean(item?.has_late_report) || Boolean(locallyReportedLateBookings[item?.id]);
   };
 
-  const hasAccessIssueAlready = (item: any) => {
-    if (item?.type_id !== "studio_booking") return false;
-
-    return (
-      Boolean(item?.has_open_incident) ||
-      Boolean(locallyReportedAccessIssueBookings[item?.id])
-    );
-  };
-
   const isWithinLateReportWindow = (item: any) => {
     if (item?.type_id !== "studio_booking") return false;
     if (!item?.raw_date || !item?.start_time) return false;
@@ -3771,16 +3700,6 @@ export default function BookingsScreen() {
     if (isE2EFixtureMode() || String(item?.name || "").startsWith("E2E Studio")) return true;
 
     return isWithinLateReportWindow(item);
-  };
-
-  const shouldShowAccessIssueReportButton = (item: any) => {
-    if (renderActiveTab !== "Ongoing") return false;
-    if (item?.type_id !== "studio_booking") return false;
-    if (userRole !== "musician") return false;
-    if (item?.isCancelled) return false;
-    if (hasAccessIssueAlready(item)) return false;
-
-    return true;
   };
 
   const shouldShowMessageForItem = (item: any) => {
@@ -3994,7 +3913,480 @@ export default function BookingsScreen() {
     return formatFriendlyDateTime(parsed.toISOString());
   };
 
-  const handleRelocationDecision = async (item: any, accepted: boolean) => {
+  const normalizeRelocationTime = (value: unknown) =>
+    String(value || "").trim().substring(0, 5);
+
+  const relocationSlotKey = (slot: RelocationSlotOption) =>
+    `${slot.date}|${normalizeRelocationTime(slot.start_time)}|${normalizeRelocationTime(slot.end_time)}`;
+
+  const getRelocationSlotFromItem = (item: any): RelocationSlotOption | null => {
+    if (
+      !item?.relocation_proposed_date ||
+      !item?.relocation_proposed_start_time ||
+      !item?.relocation_proposed_end_time
+    ) {
+      return null;
+    }
+
+    return {
+      date: item.relocation_proposed_date,
+      start_time: normalizeRelocationTime(item.relocation_proposed_start_time),
+      end_time: normalizeRelocationTime(item.relocation_proposed_end_time),
+    };
+  };
+
+  const getSelectedRelocationSlot = (item: any): RelocationSlotOption | null =>
+    preferredRelocationSlots[item?.id] || getRelocationSlotFromItem(item);
+
+  const formatRelocationSlotLabel = (slot: RelocationSlotOption | null) => {
+    if (!slot) return "Choose a time";
+    return `${formatRelocationDateTime(slot.date, slot.start_time)} - ${normalizeRelocationTime(slot.end_time)}`;
+  };
+
+  const toRelocationMinutes = (time: unknown) => {
+    const [hours, minutes] = normalizeRelocationTime(time).split(":").map(Number);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+    return hours * 60 + minutes;
+  };
+
+  const toRelocationTimeString = (minutes: number) =>
+    `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+
+  const getRelocationLocalDateKey = (value: Date = new Date()) =>
+    `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+
+  const addRelocationDays = (value: Date, days: number) => {
+    const next = new Date(value);
+    next.setDate(next.getDate() + days);
+    return next;
+  };
+
+  const getRelocationDurationMinutes = (item: any) => {
+    const start = toRelocationMinutes(item?.start_time);
+    const end = toRelocationMinutes(item?.end_time);
+    if (start !== null && end !== null && end > start) return end - start;
+
+    const hours = Number(item?.duration_hours || item?.hours);
+    if (Number.isFinite(hours) && hours > 0) return Math.round(hours * 60);
+
+    return 120;
+  };
+
+  const relocationScheduleAllowsSession = (row: any, item: any) => {
+    const requested = String(item?.session_type || "").trim().toLowerCase();
+    if (!requested) return true;
+
+    const match = String(row?.reason || "").match(/session_type:(rehearsal|recording|both)/i);
+    const scheduleSession = match ? match[1].toLowerCase() : "both";
+    return scheduleSession === "both" || scheduleSession === requested;
+  };
+
+  const fetchRelocationSlotOptions = async (
+    item: any,
+    limit = 24,
+  ): Promise<RelocationSlotOption[]> => {
+    if (!item?.studio_id) return [];
+
+    const durationMinutes = getRelocationDurationMinutes(item);
+    if (durationMinutes <= 0) return [];
+
+    const today = getRelocationLocalDateKey();
+    const { data: settings, error: settingsError } = await supabase
+      .from("studio_settings")
+      .select("lead_time_hours, booking_horizon_days, slot_increment_minutes")
+      .eq("studio_id", item.studio_id)
+      .maybeSingle();
+
+    if (settingsError) throw settingsError;
+
+    const horizonDays = Math.min(
+      Math.max(Number(settings?.booking_horizon_days) || 30, 1),
+      90,
+    );
+    const incrementMinutes = Math.max(
+      Number(settings?.slot_increment_minutes) || 30,
+      15,
+    );
+    const minStartTime = new Date(
+      Date.now() + (Number(settings?.lead_time_hours) || 0) * 60 * 60 * 1000,
+    );
+    const maxDate = getRelocationLocalDateKey(addRelocationDays(new Date(), horizonDays - 1));
+
+    const [hoursResult, overridesResult] = await Promise.all([
+      supabase
+        .from("studio_operating_hours")
+        .select("day_of_week, is_open, open_time, close_time, slot_order, reason")
+        .eq("studio_id", item.studio_id)
+        .order("day_of_week", { ascending: true })
+        .order("slot_order", { ascending: true }),
+      supabase
+        .from("studio_date_overrides")
+        .select("override_date, is_open, open_time, close_time, slot_order, reason")
+        .eq("studio_id", item.studio_id)
+        .gte("override_date", today)
+        .lte("override_date", maxDate)
+        .order("override_date", { ascending: true })
+        .order("slot_order", { ascending: true }),
+    ]);
+
+    if (hoursResult.error) throw hoursResult.error;
+    if (overridesResult.error) throw overridesResult.error;
+
+    const operatingByDay = new Map<number, any[]>();
+    (hoursResult.data || []).forEach((row: any) => {
+      if (!row?.is_open || !row?.open_time || !row?.close_time) return;
+      if (!relocationScheduleAllowsSession(row, item)) return;
+      const day = Number(row.day_of_week);
+      if (!operatingByDay.has(day)) operatingByDay.set(day, []);
+      operatingByDay.get(day)?.push(row);
+    });
+
+    const overridesByDate = new Map<string, any[]>();
+    (overridesResult.data || []).forEach((row: any) => {
+      if (!overridesByDate.has(row.override_date)) overridesByDate.set(row.override_date, []);
+      overridesByDate.get(row.override_date)?.push(row);
+    });
+
+    const candidateSlots: RelocationSlotOption[] = [];
+    const seenCandidates = new Set<string>();
+    const addCandidate = (slot: RelocationSlotOption) => {
+      const key = relocationSlotKey(slot);
+      if (seenCandidates.has(key)) return;
+      seenCandidates.add(key);
+      candidateSlots.push(slot);
+    };
+
+    const proposedSlot = getRelocationSlotFromItem(item);
+    if (proposedSlot) addCandidate(proposedSlot);
+
+    for (let offset = 0; offset < horizonDays; offset += 1) {
+      const date = addRelocationDays(new Date(), offset);
+      const dateStr = getRelocationLocalDateKey(date);
+      const overridesForDate = overridesByDate.get(dateStr);
+      const scheduleRows = overridesForDate
+        ? overridesForDate
+            .filter((row) => row?.is_open && row?.open_time && row?.close_time)
+            .filter((row) => relocationScheduleAllowsSession(row, item))
+        : operatingByDay.get(date.getDay()) || [];
+
+      for (const row of scheduleRows) {
+        const windowStart = toRelocationMinutes(row.open_time);
+        const windowEnd = toRelocationMinutes(row.close_time);
+        if (windowStart === null || windowEnd === null || windowEnd <= windowStart) {
+          continue;
+        }
+
+        for (
+          let start = windowStart;
+          start + durationMinutes <= windowEnd;
+          start += incrementMinutes
+        ) {
+          const startTime = toRelocationTimeString(start);
+          const endTime = toRelocationTimeString(start + durationMinutes);
+          const startDateTime = new Date(`${dateStr}T${startTime}`);
+
+          if (startDateTime < minStartTime) continue;
+
+          addCandidate({
+            date: dateStr,
+            start_time: startTime,
+            end_time: endTime,
+          });
+        }
+      }
+    }
+
+    const availableSlots: RelocationSlotOption[] = [];
+    for (let index = 0; index < candidateSlots.length && availableSlots.length < limit; index += 8) {
+      const chunk = candidateSlots.slice(index, index + 8);
+      const checkedChunk = await Promise.all(
+        chunk.map(async (slot) => {
+          let { data: isAvailable, error } = await supabase.rpc("are_slots_available", {
+            p_studio_id: item.studio_id,
+            p_booking_date: slot.date,
+            p_time_slots: [{ start: slot.start_time, end: slot.end_time }],
+            p_user_id: userId,
+            p_exclude_booking_id: item.id,
+          });
+
+          if (error?.code === "PGRST202") {
+            const fallback = await supabase.rpc("is_slot_available", {
+              p_studio_id: item.studio_id,
+              p_booking_date: slot.date,
+              p_start_time: slot.start_time,
+              p_end_time: slot.end_time,
+              p_user_id: userId,
+            });
+            isAvailable = fallback.data;
+            error = fallback.error;
+          }
+
+          if (error) throw error;
+          return isAvailable ? slot : null;
+        }),
+      );
+
+      checkedChunk.forEach((slot) => {
+        if (slot && availableSlots.length < limit) {
+          availableSlots.push(slot);
+        }
+      });
+    }
+
+    return availableSlots;
+  };
+
+  const openRelocationSlotPicker = async (item: any) => {
+    if (!item?.id) return;
+
+    setRelocationSlotPickerItem(item);
+    setRelocationSlotPickerVisible(true);
+    setRelocationSlotOptions([]);
+    setRelocationSlotError(null);
+    setRelocationSlotLoading(true);
+
+    try {
+      const options = await fetchRelocationSlotOptions(item);
+      setRelocationSlotOptions(options);
+
+      if (!preferredRelocationSlots[item.id] && options[0]) {
+        setPreferredRelocationSlots((prev) => ({
+          ...prev,
+          [item.id]: options[0],
+        }));
+      }
+    } catch (error: any) {
+      setRelocationSlotError(
+        error?.message || "Could not load available relocation slots.",
+      );
+    } finally {
+      setRelocationSlotLoading(false);
+    }
+  };
+
+  const isMissingRelocationRpcError = (error: any) => {
+    const message = String(error?.message || error?.details || "").toLowerCase();
+    return (
+      error?.code === "PGRST202" ||
+      (message.includes("respond_to_studio_booking_relocation") &&
+        (message.includes("not found") || message.includes("could not find")))
+    );
+  };
+
+  const applyRelocationDecisionClientFallback = async (
+    item: any,
+    accepted: boolean,
+    latestBooking: any,
+    targetSlot: RelocationSlotOption | null,
+    isPaidRelocation: boolean,
+  ) => {
+    if (accepted) {
+      if (!targetSlot) {
+        throw new Error("Choose an available date and time first.");
+      }
+
+      let { data: isAvailable, error: availabilityError } = await supabase.rpc(
+        "are_slots_available",
+        {
+          p_studio_id: item.studio_id,
+          p_booking_date: targetSlot.date,
+          p_time_slots: [{ start: targetSlot.start_time, end: targetSlot.end_time }],
+          p_user_id: userId,
+          p_exclude_booking_id: item.id,
+        },
+      );
+
+      if (availabilityError?.code === "PGRST202") {
+        const fallbackAvailability = await supabase.rpc("is_slot_available", {
+          p_studio_id: item.studio_id,
+          p_booking_date: targetSlot.date,
+          p_start_time: targetSlot.start_time,
+          p_end_time: targetSlot.end_time,
+          p_user_id: userId,
+        });
+        isAvailable = fallbackAvailability.data;
+        availabilityError = fallbackAvailability.error;
+      }
+
+      if (availabilityError) throw availabilityError;
+      if (!isAvailable) {
+        throw new Error("Selected relocation slot is no longer available.");
+      }
+
+      const { error: acceptError } = await supabase
+        .from("studio_bookings")
+        .update({
+          status: "confirmed",
+          booking_date: targetSlot.date,
+          start_time: targetSlot.start_time,
+          end_time: targetSlot.end_time,
+          relocation_requested_at: null,
+          relocation_expires_at: null,
+          relocation_proposed_date: null,
+          relocation_proposed_start_time: null,
+          relocation_proposed_end_time: null,
+          notes:
+            (item.notes || "") +
+            "\nRelocation confirmed by musician. Original booking price and payment details preserved.",
+        })
+        .eq("id", item.id)
+        .eq("user_id", userId);
+
+      if (acceptError) throw acceptError;
+
+      const { error: clearSlotsError } = await supabase
+        .from("studio_booking_slots")
+        .delete()
+        .eq("booking_id", item.id);
+
+      if (!clearSlotsError) {
+        const { error: insertSlotError } = await supabase
+          .from("studio_booking_slots")
+          .insert({
+            booking_id: item.id,
+            start_time: targetSlot.start_time,
+            end_time: targetSlot.end_time,
+            sort_order: 0,
+          });
+
+        if (insertSlotError) {
+          console.warn("Relocation slot sync fallback insert failed", insertSlotError);
+        }
+      } else {
+        console.warn("Relocation slot sync fallback delete failed", clearSlotsError);
+      }
+
+      await supabase
+        .from("booking_holds")
+        .delete()
+        .eq("studio_id", item.studio_id)
+        .eq("user_id", userId)
+        .eq("booking_date", targetSlot.date)
+        .eq("start_time", targetSlot.start_time)
+        .eq("end_time", targetSlot.end_time);
+
+      if (item.studio_owner_id) {
+        await supabase.from("notifications").insert({
+          user_id: item.studio_owner_id,
+          type: "success",
+          title: "Relocation Accepted",
+          message: `The musician confirmed a new schedule for ${item.name}.`,
+          meta: buildNotificationRouteMeta("/bookings", undefined, {
+            bookingId: item.id,
+            studioId: item.studio_id,
+            event_type: "relocation_accepted",
+            selected_date: targetSlot.date,
+            selected_start_time: targetSlot.start_time,
+            selected_end_time: targetSlot.end_time,
+          }),
+        });
+      }
+
+      return { success: true, status: "confirmed" };
+    }
+
+    if (isPaidRelocation) {
+      const { data: cancelData, error: cancelError } =
+        await supabase.functions.invoke("manage-bookings", {
+          body: {
+            action: "update_status",
+            booking_id: item.id,
+            new_status: "cancelled",
+            type_id: "studio_booking",
+            cancellation_reason:
+              "Musician cancelled after an owner-requested schedule move. No musician completion-rate penalty.",
+            userId,
+          },
+        });
+
+      if (cancelError || cancelData?.error) {
+        throw cancelError || new Error(cancelData?.error || "Could not cancel relocation request.");
+      }
+
+      if (
+        latestBooking.relocation_proposed_date &&
+        latestBooking.relocation_proposed_start_time &&
+        latestBooking.relocation_proposed_end_time
+      ) {
+        await supabase
+          .from("booking_holds")
+          .delete()
+          .eq("studio_id", item.studio_id)
+          .eq("user_id", userId)
+          .eq("booking_date", latestBooking.relocation_proposed_date)
+          .eq("start_time", latestBooking.relocation_proposed_start_time)
+          .eq("end_time", latestBooking.relocation_proposed_end_time);
+      }
+
+      return {
+        success: true,
+        status: "cancelled",
+        payment_status: cancelData?.payment_status,
+        refund_amount: Number(
+          cancelData?.refund_amount || cancelData?.refund_result?.refund_amount || 0,
+        ),
+      };
+    }
+
+    const { error: declineError } = await supabase
+      .from("studio_bookings")
+      .update({
+        status: "cancelled",
+        payment_status: isPaidRelocation
+          ? "refund_pending"
+          : latestBooking.payment_status,
+        cancellation_reason:
+          "Musician cancelled after an owner-requested schedule move. No musician completion-rate penalty.",
+        relocation_requested_at: null,
+        relocation_expires_at: null,
+        relocation_proposed_date: null,
+        relocation_proposed_start_time: null,
+        relocation_proposed_end_time: null,
+      })
+      .eq("id", item.id)
+      .eq("user_id", userId);
+
+    if (declineError) throw declineError;
+
+    if (
+      latestBooking.relocation_proposed_date &&
+      latestBooking.relocation_proposed_start_time &&
+      latestBooking.relocation_proposed_end_time
+    ) {
+      await supabase
+        .from("booking_holds")
+        .delete()
+        .eq("studio_id", item.studio_id)
+        .eq("user_id", userId)
+        .eq("booking_date", latestBooking.relocation_proposed_date)
+        .eq("start_time", latestBooking.relocation_proposed_start_time)
+        .eq("end_time", latestBooking.relocation_proposed_end_time);
+    }
+
+    if (item.studio_owner_id) {
+      await supabase.from("notifications").insert({
+        user_id: item.studio_owner_id,
+        type: "warning",
+        title: "Relocation Declined",
+        message: isPaidRelocation
+          ? `The musician declined your relocation request for ${item.name}. Booking was cancelled and refund processing has started.`
+          : `The musician declined your relocation request for ${item.name}. Booking was cancelled.`,
+        meta: buildNotificationRouteMeta("/bookings", undefined, {
+          bookingId: item.id,
+          studioId: item.studio_id,
+          event_type: "relocation_declined",
+        }),
+      });
+    }
+
+    return { success: true, status: "cancelled" };
+  };
+
+  const handleRelocationDecision = async (
+    item: any,
+    accepted: boolean,
+    selectedSlot?: RelocationSlotOption | null,
+  ) => {
     if (!userId || !item?.id) return;
 
     try {
@@ -4039,90 +4431,80 @@ export default function BookingsScreen() {
         latestBooking.payment_status === "paid" ||
         latestBooking.payment_status === "partial";
 
-      if (accepted) {
-        const { error: acceptError } = await supabase
-          .from("studio_bookings")
-          .update({
-            status: "confirmed",
-            booking_date: latestBooking.relocation_proposed_date,
-            start_time: latestBooking.relocation_proposed_start_time,
-            end_time: latestBooking.relocation_proposed_end_time,
-            relocation_requested_at: null,
-            relocation_expires_at: null,
-            relocation_proposed_date: null,
-            relocation_proposed_start_time: null,
-            relocation_proposed_end_time: null,
-            notes:
-              (item.notes || "") +
-              "\nRelocation accepted by musician and applied.",
-          })
-          .eq("id", item.id)
-          .eq("user_id", userId);
+      const latestProposedSlot =
+        latestBooking.relocation_proposed_date &&
+        latestBooking.relocation_proposed_start_time &&
+        latestBooking.relocation_proposed_end_time
+          ? {
+              date: latestBooking.relocation_proposed_date,
+              start_time: normalizeRelocationTime(latestBooking.relocation_proposed_start_time),
+              end_time: normalizeRelocationTime(latestBooking.relocation_proposed_end_time),
+            }
+          : null;
+      const targetSlot =
+        accepted ? selectedSlot || getSelectedRelocationSlot(item) || latestProposedSlot : null;
 
-        if (acceptError) throw acceptError;
+      if (accepted && !targetSlot) {
+        throw new Error("Choose an available date and time first.");
+      }
 
-        if (item.studio_owner_id) {
-          await supabase.from("notifications").insert({
-            user_id: item.studio_owner_id,
-            type: "success",
-            title: "Relocation Accepted",
-            message: `The musician accepted your relocation request for ${item.name}.`,
-            meta: buildNotificationRouteMeta("/bookings", undefined, {
-              bookingId: item.id,
-              studioId: item.studio_id,
-              event_type: "relocation_accepted",
-            }),
-          });
-        }
+      const { data: rpcRelocationResult, error: relocationError } = await supabase.rpc(
+        "respond_to_studio_booking_relocation",
+        {
+          p_booking_id: item.id,
+          p_accept: accepted,
+          p_preferred_date: targetSlot?.date || null,
+          p_preferred_start_time: targetSlot?.start_time || null,
+          p_preferred_end_time: targetSlot?.end_time || null,
+        },
+      );
 
-        Alert.alert(
-          "Success",
-          "You accepted the moved schedule.",
-        );
-      } else {
-        const { error: declineError } = await supabase
-          .from("studio_bookings")
-          .update({
-            status: "cancelled",
-            payment_status: isPaidRelocation
-              ? "refund_pending"
-              : latestBooking.payment_status,
-            cancellation_reason:
-              "Musician declined the owner relocation request.",
-            relocation_requested_at: null,
-            relocation_expires_at: null,
-            relocation_proposed_date: null,
-            relocation_proposed_start_time: null,
-            relocation_proposed_end_time: null,
-          })
-          .eq("id", item.id)
-          .eq("user_id", userId);
+      const relocationResult =
+        relocationError && isMissingRelocationRpcError(relocationError)
+          ? await applyRelocationDecisionClientFallback(
+              item,
+              accepted,
+              latestBooking,
+              targetSlot,
+              isPaidRelocation,
+            )
+          : rpcRelocationResult;
 
-        if (declineError) throw declineError;
+      if (relocationError && !isMissingRelocationRpcError(relocationError)) {
+        throw relocationError;
+      }
 
-        if (item.studio_owner_id) {
-          await supabase.from("notifications").insert({
-            user_id: item.studio_owner_id,
-            type: "warning",
-            title: "Relocation Declined",
-            message: isPaidRelocation
-              ? `The musician declined your relocation request for ${item.name}. Booking was cancelled and refund processing has started.`
-              : `The musician declined your relocation request for ${item.name}. Booking was cancelled.`,
-            meta: buildNotificationRouteMeta("/bookings", undefined, {
-              bookingId: item.id,
-              studioId: item.studio_id,
-              event_type: "relocation_declined",
-            }),
-          });
-        }
-
-        Alert.alert(
-          "Info",
-          isPaidRelocation
-            ? "You declined the move request. Booking has been cancelled and refund processing has started."
-            : "You declined the move request. Booking has been cancelled.",
+      if (!relocationResult?.success) {
+        throw new Error(
+          relocationResult?.error || "Could not process relocation response.",
         );
       }
+
+      setPreferredRelocationSlots((prev) => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+
+      const relocationRefundAmount = Number(
+        relocationResult?.refund_amount || relocationResult?.refund_result?.refund_amount || 0,
+      );
+      const relocationWasRefunded =
+        relocationRefundAmount > 0 ||
+        String(relocationResult?.payment_status || "").toLowerCase() === "refunded";
+
+      Alert.alert(
+        accepted ? "Success" : "Info",
+        accepted
+          ? "Your preferred schedule has been confirmed. The original price and payment details stayed the same."
+          : relocationWasRefunded
+            ? relocationRefundAmount > 0
+              ? `You cancelled the owner-requested move. ${formatPesoAmount(relocationRefundAmount)} was credited to your wallet and this will not affect your completion rate.`
+              : "You cancelled the owner-requested move. Your paid amount was credited to your wallet and this will not affect your completion rate."
+          : isPaidRelocation
+            ? "You cancelled the owner-requested move. Refund processing has started and this will not affect your completion rate."
+            : "You cancelled the owner-requested move. This will not affect your completion rate.",
+      );
 
       await fetchBookings(userId);
     } catch (error: any) {
@@ -7175,13 +7557,16 @@ export default function BookingsScreen() {
                                   fontFamily: "Poppins_500Medium",
                                 }}
                               >
-                                New slot: {formatRelocationDateTime(
-                                  item.relocation_proposed_date,
-                                  item.relocation_proposed_start_time,
-                                )}
-                                {item.relocation_proposed_end_time
-                                  ? ` - ${item.relocation_proposed_end_time.substring(0, 5)}`
-                                  : ""}
+                                Preferred slot: {formatRelocationSlotLabel(getSelectedRelocationSlot(item))}
+                              </Text>
+                              <Text
+                                style={{
+                                  color: colors.textSecondary,
+                                  fontSize: 11,
+                                  fontFamily: "Poppins_400Regular",
+                                }}
+                              >
+                                Original price and booking details stay attached.
                               </Text>
                               {item.relocation_expires_at ? (
                                 <Text
@@ -7196,22 +7581,50 @@ export default function BookingsScreen() {
                               ) : null}
                             </View>
 
+                            <TouchableOpacity
+                              activeOpacity={0.78}
+                              disabled={isActionLoadingFor(item)}
+                              onPress={() => openRelocationSlotPicker(item)}
+                              style={[
+                                styles.outlineButton,
+                                {
+                                  borderColor: colors.primary,
+                                  width: "100%",
+                                  alignItems: "center",
+                                  borderRadius: 100,
+                                  flexDirection: "row",
+                                  gap: scale(8),
+                                  opacity: isActionLoadingFor(item) ? 0.65 : 1,
+                                },
+                              ]}
+                            >
+                              <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+                              <Text style={[styles.outlineButtonText, { color: colors.primary }]}>
+                                Choose Time
+                              </Text>
+                            </TouchableOpacity>
+
                             <View
                               style={{ flexDirection: "row", gap: scale(8) }}
                             >
-                              <TouchableOpacity activeOpacity={1}
-                                disabled={isActionLoadingFor(item)}
+                              <TouchableOpacity activeOpacity={0.78}
+                                disabled={isActionLoadingFor(item) || !getSelectedRelocationSlot(item)}
                                 onPress={() => {
+                                  const selectedRelocationSlot = getSelectedRelocationSlot(item);
                                   showAlert(
                                     "warning",
-                                    "Accept Move",
-                                    "Accept this relocated schedule?",
+                                    "Confirm Time",
+                                    `Confirm ${formatRelocationSlotLabel(selectedRelocationSlot)}? The original price and payment details will stay the same.`,
                                     [
                                       { text: "Cancel", style: "cancel" },
                                       {
-                                        text: "Accept",
+                                        text: "Confirm",
                                         onPress: () =>
-                                          handleRelocationDecision(item, true),
+                                          handleRelocationDecision(
+                                            item,
+                                            true,
+                                            selectedRelocationSlot,
+                                          ),
                                       },
                                     ],
                                   );
@@ -7223,28 +7636,31 @@ export default function BookingsScreen() {
                                     flex: 1,
                                     alignItems: "center",
                                     borderRadius: 100,
-                                    opacity: isActionLoadingFor(item) ? 0.65 : 1,
+                                    opacity:
+                                      isActionLoadingFor(item) || !getSelectedRelocationSlot(item)
+                                        ? 0.65
+                                        : 1,
                                   },
                                 ]}
                               >
                                 {isActionLoadingFor(item) ? (
                                   <ActivityIndicator size="small" color="white" />
                                 ) : (
-                                  <Text style={[styles.actionButtonText, { color: "white" }]}>Accept Move</Text>
+                                  <Text style={[styles.actionButtonText, { color: "white" }]}>Confirm Time</Text>
                                 )}
                               </TouchableOpacity>
 
-                              <TouchableOpacity activeOpacity={1}
+                              <TouchableOpacity activeOpacity={0.78}
                                 disabled={isActionLoadingFor(item)}
                                 onPress={() => {
                                   showAlert(
                                     "warning",
-                                    "Decline Move",
-                                    "Decline this move request? Booking will be cancelled.",
+                                    "Cancel Move Request",
+                                    "Cancel this owner-requested move? Your booking will be cancelled, refund processing will start if needed, and your completion rate will not be affected.",
                                     [
                                       { text: "Keep Booking", style: "cancel" },
                                       {
-                                        text: "Decline",
+                                        text: "Cancel Booking",
                                         style: "destructive",
                                         onPress: () =>
                                           handleRelocationDecision(item, false),
@@ -7276,7 +7692,7 @@ export default function BookingsScreen() {
                                         : { color: "#DC2626" },
                                     ]}
                                   >
-                                    Decline Move
+                                    Cancel Request
                                   </Text>
                                 )}
                               </TouchableOpacity>
@@ -7661,71 +8077,6 @@ export default function BookingsScreen() {
                                 </TouchableOpacity>
                               )}
 
-                            {shouldShowAccessIssueReportButton(item) && (
-                              <TouchableOpacity activeOpacity={1}
-                                testID={bookingActionTestId(item, "report-access-issue")}
-                                accessibilityLabel={bookingActionTestId(item, "report-access-issue")}
-                                onPress={() => {
-                                  setSelectedItem(item);
-                                  setModalMode("report_access");
-                                  setCancellationReason("");
-                                  setModalVisible(true);
-                                }}
-                                style={[
-                                  styles.outlineButton,
-                                  {
-                                    borderColor: "#EF4444",
-                                    backgroundColor: isDark
-                                      ? "rgba(239, 68, 68, 0.14)"
-                                      : "#FEF2F2",
-                                    width: "100%",
-                                    alignItems: "center",
-                                    borderRadius: 100,
-                                  },
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.outlineButtonText,
-                                    {
-                                      color: isDark ? "#FCA5A5" : "#B91C1C",
-                                    },
-                                  ]}
-                                >
-                                  Report Access Issue
-                                </Text>
-                              </TouchableOpacity>
-                            )}
-
-                            {renderActiveTab === "Ongoing" &&
-                              item.type_id === "studio_booking" &&
-                              userRole === "musician" &&
-                              hasAccessIssueAlready(item) && (
-                                <View
-                                  style={[
-                                    styles.outlineButton,
-                                    {
-                                      borderColor: colors.border,
-                                      backgroundColor: isDark
-                                        ? "rgba(148, 163, 184, 0.14)"
-                                        : "#F8FAFC",
-                                      width: "100%",
-                                      alignItems: "center",
-                                      borderRadius: 100,
-                                    },
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.outlineButtonText,
-                                      { color: colors.textSecondary },
-                                    ]}
-                                  >
-                                    Access Issue Reported
-                                  </Text>
-                                </View>
-                              )}
-
                             {renderActiveTab === "Ongoing" &&
                               item.type_id === "studio_booking" &&
                               (userRole === "studio-owner" || userRole === "venue-owner") &&
@@ -7972,9 +8323,7 @@ export default function BookingsScreen() {
                   ? "Complete Contract"
                   : modalMode === "clear_balance"
                     ? "Clear Remaining Balance"
-                    : modalMode === "report_access"
-                      ? "Report Access Issue"
-                      : modalMode === "late_confirm"
+                    : modalMode === "late_confirm"
                         ? "Confirm Late Report"
                       : modalMode === "late"
                         ? "Report Late"
@@ -8005,8 +8354,6 @@ export default function BookingsScreen() {
                       : "Confirm efficient completion of this gig?"
                     : modalMode === "clear_balance"
                       ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
-                      : modalMode === "report_access"
-                        ? "Please describe the issue so we can notify the studio owner and review this booking case."
                       : modalMode === "late_confirm"
                         ? `Send this late-arrival reason to the studio owner?\n\n${normalizeVisibleInput(cancellationReason)}`
                       : modalMode === "late"
@@ -8024,8 +8371,17 @@ export default function BookingsScreen() {
 
                             return "Are you sure you want to withdraw this application? The gig owner will be notified.";
                           } else {
-                            // For studio bookings - strictly no-refund policy
+                            // For studio bookings, owner cancellations refund the musician.
+                            const ownerCancellation = isStudioOwnerCancellation(selectedItem, userId);
                             const paidAmount = getBookingPaidAmount(selectedItem);
+
+                            if (ownerCancellation) {
+                              if (paidAmount > 0) {
+                                return `Cancelling as the studio owner will refund ${formatPesoAmount(paidAmount)} to the musician's wallet. The musician will be notified.`;
+                              }
+
+                              return "Cancelling as the studio owner will notify the musician. No paid amount has been recorded for this booking yet.";
+                            }
 
                             if (paidAmount > 0) {
                               const paidLabel =
@@ -8064,8 +8420,6 @@ export default function BookingsScreen() {
                     : "Complete"
                     : modalMode === "clear_balance"
                         ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
-                        : modalMode === "report_access"
-                          ? "Submit Report"
                         : modalMode === "late_confirm"
                           ? "Send Report"
                         : modalMode === "late"
@@ -8094,8 +8448,7 @@ export default function BookingsScreen() {
             (modalMode === "cancel" ||
               modalMode === "decline" ||
               modalMode === "fire" ||
-              modalMode === "late" ||
-              modalMode === "report_access") &&
+              modalMode === "late") &&
             !(modalMode === "decline" && selectedItem?.leader_approval_required) &&
             !normalizeVisibleInput(cancellationReason)
           ) {
@@ -8143,14 +8496,6 @@ export default function BookingsScreen() {
 
             if (modalMode === "late") {
               setModalMode("late_confirm");
-              return;
-            }
-
-            if (modalMode === "report_access") {
-              await handleReportAccessIssue(
-                selectedItem,
-                normalizeVisibleInput(cancellationReason),
-              );
               return;
             }
 
@@ -8234,6 +8579,132 @@ export default function BookingsScreen() {
           }
         }}
       />
+
+      {relocationSlotPickerVisible ? (
+        <RNModal
+          visible
+          transparent
+          statusBarTranslucent
+          navigationBarTranslucent
+          presentationStyle="overFullScreen"
+          hardwareAccelerated
+          animationType="fade"
+          onRequestClose={() => setRelocationSlotPickerVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View
+              style={[
+                styles.relocationPickerContainer,
+                { backgroundColor: colors.card },
+              ]}
+            >
+              <TouchableOpacity
+                activeOpacity={0.78}
+                onPress={() => setRelocationSlotPickerVisible(false)}
+                style={styles.modalCloseIcon}
+              >
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+
+              <Text style={[styles.relocationPickerTitle, { color: colors.text }]}>
+                Choose Time
+              </Text>
+              <Text style={[styles.relocationPickerSubtitle, { color: colors.textSecondary }]}>
+                Pick an available slot for this booking. The original price and payment details stay the same.
+              </Text>
+
+              {relocationSlotLoading ? (
+                <View style={styles.relocationPickerState}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={[styles.relocationPickerStateText, { color: colors.textSecondary }]}>
+                    Loading available times...
+                  </Text>
+                </View>
+              ) : relocationSlotError ? (
+                <View style={styles.relocationPickerState}>
+                  <Text style={[styles.relocationPickerStateText, { color: "#EF4444" }]}>
+                    {relocationSlotError}
+                  </Text>
+                  <TouchableOpacity
+                    activeOpacity={0.78}
+                    onPress={() => relocationSlotPickerItem && openRelocationSlotPicker(relocationSlotPickerItem)}
+                    style={[
+                      styles.outlineButton,
+                      {
+                        borderColor: colors.primary,
+                        alignItems: "center",
+                        marginTop: moderateScale(8),
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.outlineButtonText, { color: colors.primary }]}>
+                      Retry
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : relocationSlotOptions.length === 0 ? (
+                <View style={styles.relocationPickerState}>
+                  <Text style={[styles.relocationPickerStateText, { color: colors.textSecondary }]}>
+                    No matching available slots were found. You can cancel this owner-requested move without affecting your completion rate.
+                  </Text>
+                </View>
+              ) : (
+                <ScrollView
+                  style={styles.relocationSlotList}
+                  contentContainerStyle={styles.relocationSlotListContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {relocationSlotOptions.map((slot) => {
+                    const selectedSlot = getSelectedRelocationSlot(relocationSlotPickerItem);
+                    const isSelected =
+                      selectedSlot && relocationSlotKey(selectedSlot) === relocationSlotKey(slot);
+
+                    return (
+                      <TouchableOpacity
+                        key={relocationSlotKey(slot)}
+                        activeOpacity={0.78}
+                        onPress={() => {
+                          if (!relocationSlotPickerItem?.id) return;
+                          setPreferredRelocationSlots((prev) => ({
+                            ...prev,
+                            [relocationSlotPickerItem.id]: slot,
+                          }));
+                          setRelocationSlotPickerVisible(false);
+                        }}
+                        style={[
+                          styles.relocationSlotOption,
+                          {
+                            borderColor: isSelected ? colors.primary : colors.border,
+                            backgroundColor: isSelected
+                              ? colors.primary + "18"
+                              : isDark
+                                ? "rgba(255,255,255,0.06)"
+                                : "#F8FAFC",
+                          },
+                        ]}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.relocationSlotDate, { color: colors.text }]}>
+                            {formatRelocationDateTime(slot.date, slot.start_time)}
+                          </Text>
+                          <Text style={[styles.relocationSlotTime, { color: colors.textSecondary }]}>
+                            Until {normalizeRelocationTime(slot.end_time)}
+                          </Text>
+                        </View>
+                        {isSelected ? (
+                          <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
+                        ) : (
+                          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              )}
+            </View>
+          </View>
+        </RNModal>
+      ) : null}
 
       <CustomAlert
         visible={alertVisible}
@@ -8866,6 +9337,68 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 20,
     backgroundColor: "rgba(15,23,42,0.62)",
+  },
+  relocationPickerContainer: {
+    width: "100%",
+    maxWidth: 520,
+    maxHeight: "82%",
+    borderRadius: moderateScale(18),
+    padding: moderateScale(18),
+    position: "relative",
+  },
+  relocationPickerTitle: {
+    fontSize: moderateScale(20),
+    lineHeight: moderateScale(26),
+    fontFamily: "Poppins_700Bold",
+    paddingRight: scale(36),
+  },
+  relocationPickerSubtitle: {
+    marginTop: moderateScale(6),
+    fontSize: moderateScale(12),
+    lineHeight: moderateScale(18),
+    fontFamily: "Poppins_400Regular",
+    paddingRight: scale(10),
+  },
+  relocationPickerState: {
+    minHeight: moderateScale(130),
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: scale(12),
+    gap: moderateScale(8),
+  },
+  relocationPickerStateText: {
+    fontSize: moderateScale(12),
+    lineHeight: moderateScale(18),
+    fontFamily: "Poppins_500Medium",
+    textAlign: "center",
+  },
+  relocationSlotList: {
+    marginTop: moderateScale(14),
+  },
+  relocationSlotListContent: {
+    gap: moderateScale(8),
+    paddingBottom: moderateScale(4),
+  },
+  relocationSlotOption: {
+    minHeight: moderateScale(58),
+    borderRadius: moderateScale(12),
+    borderWidth: 1.5,
+    paddingHorizontal: scale(12),
+    paddingVertical: moderateScale(10),
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(10),
+  },
+  relocationSlotDate: {
+    fontSize: moderateScale(13),
+    lineHeight: moderateScale(18),
+    fontFamily: "Poppins_600SemiBold",
+  },
+  relocationSlotTime: {
+    marginTop: moderateScale(2),
+    fontSize: moderateScale(11),
+    lineHeight: moderateScale(15),
+    fontFamily: "Poppins_400Regular",
   },
   qrContainer: {
     width: "100%",

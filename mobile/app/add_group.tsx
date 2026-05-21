@@ -223,7 +223,6 @@ export default function AddGroupScreen() {
   const [isLeaderInstrumentFinalized, setIsLeaderInstrumentFinalized] = useState(false);
   const [memberInstrumentFinalization, setMemberInstrumentFinalization] = useState<Record<number, boolean>>({});
 
-  const [newMemberInstrument, setNewMemberInstrument] = useState("");
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [currentUserName, setCurrentUserName] = useState<string>("");
@@ -252,10 +251,6 @@ export default function AddGroupScreen() {
     setAlertVisible(true);
   };
 
-  // Musician search state
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
   const [selectedInviteTargets, setSelectedInviteTargets] = useState<GroupInviteTarget[]>([]);
   const [inviteMessage, setInviteMessage] = useState("");
   const isDuoSelection = isDuoGroupType(groupType);
@@ -293,149 +288,6 @@ export default function AddGroupScreen() {
       hideSub.remove();
     };
   }, []);
-
-  const getRequiredMemberCount = () =>
-    PH_MUSIC_GROUP_TYPES.find((type) => type.id === groupType)?.minMembers || 1;
-
-  const searchMusicians = async (query: string) => {
-    setSearchQuery(query);
-    if (query.length < 2) {
-      setSearchResults([]);
-      return;
-    }
-
-    const normalizeMemberName = (value?: string | null) =>
-      (value || "").trim().toLowerCase();
-
-    const isMusicianAlreadyAdded = (musician: {
-      id?: string | null;
-      full_name?: string | null;
-    }) => {
-      const musicianName = normalizeMemberName(musician.full_name);
-      return members.some((member) => {
-        const sameId = Boolean(
-          member.user_id && musician.id && member.user_id === musician.id,
-        );
-        const sameName = Boolean(
-          musicianName &&
-            normalizeMemberName(member.name) === musicianName,
-        );
-        return sameId || sameName;
-      });
-    };
-
-    setIsSearching(true);
-    try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, full_name, avatar_url, role")
-        .eq("role", "musician")
-        .ilike("full_name", `%${query}%`)
-        .limit(5);
-
-      if (error) throw error;
-      const filteredResults = (data || []).filter(
-        (musician) => !isMusicianAlreadyAdded(musician),
-      );
-      setSearchResults(filteredResults);
-    } catch (error) {
-      console.error("Error searching musicians:", error);
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  // Pending member to add (need to select instrument first)
-  const [pendingMember, setPendingMember] = useState<any>(null);
-
-  const selectMember = (musician: any) => {
-    if (isDuoSelection && members.length >= getRequiredMemberCount()) {
-      showAlert(
-        "warning",
-        "Duo Complete",
-        "A duo can only have two members. Remove the other member first if you need to replace them.",
-      );
-      setSearchQuery("");
-      setSearchResults([]);
-      return;
-    }
-
-    // Check if already added
-    if (
-      members.some((m) => {
-        const normalizedMusicianName = (musician.full_name || "")
-          .trim()
-          .toLowerCase();
-        const normalizedMemberName = (m.name || "").trim().toLowerCase();
-        return (
-          (m.user_id && musician.id && m.user_id === musician.id) ||
-          (normalizedMusicianName &&
-            normalizedMemberName === normalizedMusicianName)
-        );
-      })
-    ) {
-      showAlert(
-        "warning",
-        "Already Added",
-        "This musician is already in the group.",
-      );
-      setSearchQuery("");
-      setSearchResults([]);
-      return;
-    }
-    // Set as pending and prompt for instrument
-    Keyboard.dismiss();
-    setPendingMember(musician);
-    setSearchQuery("");
-    setSearchResults([]);
-  };
-
-  const confirmAddMember = (instrument: string) => {
-    if (!pendingMember) {
-      return;
-    }
-
-    if (isDuoSelection && members.length >= getRequiredMemberCount()) {
-      showAlert(
-        "warning",
-        "Duo Complete",
-        "A duo can only have two members. Remove the other member first if you need to replace them.",
-      );
-      setPendingMember(null);
-      setNewMemberInstrument("");
-      return;
-    }
-
-    const trimmedInstrument = instrument.trim();
-    if (!trimmedInstrument) {
-      showAlert(
-        "warning",
-        "Instrument Required",
-        "Enter an instrument for the selected member before adding them.",
-      );
-      return;
-    }
-
-    const newMember: MemberDetail = {
-      name: pendingMember.full_name,
-      instrument: trimmedInstrument,
-      user_id: pendingMember.id,
-      avatar_url: pendingMember.avatar_url,
-    };
-    setMembers((prev) => {
-      const nextMembers = [...prev, newMember];
-      setMemberInstrumentFinalization((prevFinalization) => ({
-        ...prevFinalization,
-        [nextMembers.length - 1]: true,
-      }));
-      return nextMembers;
-    });
-    Keyboard.dismiss();
-    setPendingMember(null);
-    setNewMemberInstrument("");
-  };
-
-
 
   // Images state
   const [images, setImages] = useState<string[]>([]);
@@ -691,28 +543,6 @@ export default function AddGroupScreen() {
         return true;
       }
 
-      // Validate member count based on group type
-      const selectedType = PH_MUSIC_GROUP_TYPES.find((t) => t.id === groupType);
-      if (selectedType) {
-        if (isDuoSelection && membersForValidation.length !== selectedType.minMembers) {
-          showAlert(
-            "warning",
-            `${selectedType.label} Requirement`,
-            `A ${selectedType.label} must have exactly ${selectedType.minMembers} members. You currently have ${membersForValidation.length}.`,
-          );
-          return false;
-        }
-
-        if (membersForValidation.length < selectedType.minMembers) {
-          const remainingMembers = selectedType.minMembers - membersForValidation.length;
-          showAlert(
-            "warning",
-            `${selectedType.label} Requirement`,
-            `A ${selectedType.label} must have at least ${selectedType.minMembers} members. You currently have ${membersForValidation.length}. Add ${remainingMembers} more member${remainingMembers === 1 ? "" : "s"} or choose a different group type.`
-          );
-          return false;
-        }
-      }
     }
     return true;
   };
@@ -1201,10 +1031,6 @@ export default function AddGroupScreen() {
   const disableNextForMissingInstruments =
     step === 2 &&
     (membersMissingInstrumentCount > 0 || membersNeedFinalizationCount > 0);
-  const selectedGroupType = PH_MUSIC_GROUP_TYPES.find((type) => type.id === groupType);
-  const requiredMemberCount = getRequiredMemberCount();
-  const remainingMemberCount = Math.max(requiredMemberCount - members.length, 0);
-  const isDuoRosterComplete = isDuoSelection && members.length >= requiredMemberCount;
   const isE2ELeaderOnlyComplete =
     isE2EFixtureMode() &&
     step === 2 &&
@@ -1219,12 +1045,12 @@ export default function AddGroupScreen() {
         Boolean(address && latitude && longitude) &&
         images.length > 0
       : step === 2
-        ? isE2ELeaderOnlyComplete || (remainingMemberCount === 0 && !disableNextForMissingInstruments)
+        ? isE2ELeaderOnlyComplete || !disableNextForMissingInstruments
         : true;
   const showMemberStepHint =
     step === 2 &&
     !isE2ELeaderOnlyComplete &&
-    (remainingMemberCount > 0 || disableNextForMissingInstruments);
+    disableNextForMissingInstruments;
   const footerClearance = NAVBAR_CLEARANCE + insets.bottom + 24;
 
   return (
@@ -1547,201 +1373,9 @@ export default function AddGroupScreen() {
                   }}
                 >
                   {isDuoSelection
-                    ? "Add yourself and one other member (exactly 2 members required)."
-                    : "Add yourself and at least 2 other members (minimum 3 members required)."}
+                    ? "Confirm your role before creating this duo. You can invite the other member after creation."
+                    : "Confirm your role before creating this group. You can invite members after creation."}
                 </Text>
-
-                {!isDuoRosterComplete && (
-                  <View
-                    style={[
-                      styles.addMemberRow,
-                      { flexDirection: "column", alignItems: "stretch" },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.inputWrapper,
-                        styles.memberSearchWrapper,
-                        {
-                          backgroundColor: isDark ? "#374151" : "#F3F4F6",
-                        },
-                      ]}
-                    >
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 10,
-                          paddingHorizontal: 16,
-                        }}
-                      >
-                        <Ionicons
-                          name="search"
-                          size={20}
-                          color={colors.textSecondary}
-                        />
-                        <TextInput
-                          value={searchQuery}
-                          onChangeText={searchMusicians}
-                          placeholder="Search musicians by name..."
-                          placeholderTextColor={colors.textSecondary}
-                          style={[
-                            styles.textInput,
-                            {
-                              color: colors.text,
-                              flex: 1,
-                              height: 48,
-                              fontFamily: "Poppins_500Medium",
-                              fontSize: 15,
-                              lineHeight: 20,
-                              includeFontPadding: false,
-                              textAlign: "left",
-                              padding: 0,
-                            },
-                          ]}
-                        />
-                        {isSearching && (
-                          <ActivityIndicator size="small" color={colors.primary} />
-                        )}
-                      </View>
-                    </View>
-
-                    {/* Search Results Dropdown */}
-                    {searchResults.length > 0 && (
-                      <View
-                        style={[
-                          styles.searchResultsContainer,
-                          {
-                            backgroundColor: colors.surface,
-                            borderColor: colors.border,
-                          },
-                        ]}
-                      >
-                        {searchResults.map((musician) => (
-                          <TouchableOpacity activeOpacity={1}
-                            key={musician.id}
-                            onPress={() => selectMember(musician)}
-                            style={[
-                              styles.searchResultItem,
-                              { borderBottomColor: colors.border },
-                            ]}
-                          >
-                            <ProfileAvatar
-                              uri={musician.avatar_url}
-                              style={[styles.avatarPlaceholder, { marginRight: 12 }]}
-                              backgroundColor={isDark ? "#374151" : "#E5E7EB"}
-                              iconColor={colors.textSecondary}
-                            />
-                            <View>
-                              <Text
-                                style={{
-                                  color: colors.text,
-                                  fontFamily: "Poppins_500Medium",
-                                }}
-                              >
-                                {musician.full_name}
-                              </Text>
-                              <Text
-                                style={{
-                                  color: colors.textSecondary,
-                                  fontSize: 12,
-                                }}
-                              >
-                                Musician
-                              </Text>
-                            </View>
-                            <Ionicons
-                              name="add-circle-outline"
-                              size={24}
-                              color={colors.primary}
-                              style={{ marginLeft: "auto" }}
-                            />
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                )}
-
-                {/* Pending Member Instrument Selection */}
-                {pendingMember && (
-                  <View
-                    style={[
-                      styles.memberItem,
-                      {
-                        backgroundColor: colors.primary + "10",
-                        borderColor: colors.primary,
-                        marginBottom: 16,
-                      },
-                    ]}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          marginBottom: 8,
-                        }}
-                      >
-                        <ProfileAvatar
-                          uri={pendingMember.avatar_url}
-                          style={[styles.avatarPlaceholder, { marginRight: 12 }]}
-                          backgroundColor={isDark ? "#374151" : "#E5E7EB"}
-                          iconColor={colors.textSecondary}
-                        />
-                        <Text
-                          style={{
-                            color: colors.text,
-                            fontFamily: "Poppins_500Medium",
-                          }}
-                        >
-                          {pendingMember.full_name}
-                        </Text>
-                      </View>
-                      <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
-                        <TextInput
-                          value={newMemberInstrument}
-                          onChangeText={setNewMemberInstrument}
-                          placeholder="Enter instrument (e.g., Vocals, Guitar)"
-                          placeholderTextColor={colors.textSecondary}
-                          style={[
-                            styles.textInput,
-                            {
-                              flex: 1,
-                              backgroundColor: colors.inputBackground,
-                              borderRadius: 8,
-                              height: 40,
-                              paddingHorizontal: 12,
-                              paddingVertical: 0,
-                              textAlign: "left",
-                              color: colors.text,
-                            },
-                          ]}
-                        />
-                        <TouchableOpacity activeOpacity={1}
-                          onPress={() => confirmAddMember(newMemberInstrument)}
-                          style={[
-                            styles.addBtn,
-                            { backgroundColor: colors.primary },
-                          ]}
-                        >
-                          <Ionicons name="checkmark" size={20} color="#fff" />
-                        </TouchableOpacity>
-                        <TouchableOpacity activeOpacity={1}
-                          onPress={() => {
-                            setPendingMember(null);
-                            setNewMemberInstrument("");
-                          }}
-                          style={[styles.addBtn, { backgroundColor: "#EF4444" }]}
-                        >
-                          <Ionicons name="close" size={20} color="#fff" />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  </View>
-                )}
-
-
 
                 {members.length === 0 ? (
                   <View
@@ -2130,9 +1764,7 @@ export default function AddGroupScreen() {
                     fontSize: 12,
                   }}
                 >
-                  {remainingMemberCount > 0
-                    ? `${selectedGroupType?.label || "This group type"} requires at least ${requiredMemberCount} members. Add ${remainingMemberCount} more member${remainingMemberCount === 1 ? "" : "s"} to continue.`
-                    : leaderNeedsFinalization
+                  {leaderNeedsFinalization
                       ? "Tap the check icon to finalize the leader instrument."
                       : nonLeaderNeedsFinalization
                         ? "Tap each check icon to finalize member instruments."
@@ -2414,22 +2046,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: "hidden",
   },
-  memberSearchWrapper: {
-    borderWidth: 0,
-    borderRadius: 16,
-    height: 48,
-  },
   textInput: {
     paddingHorizontal: 16,
     paddingVertical: 16, // added explicit vertical padding here too just in case
     fontFamily: "Poppins_400Regular",
     textAlign: "left",
     textAlignVertical: "center",
-  },
-  addMemberRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 24,
   },
   addBtn: {
     width: 48,
@@ -2551,23 +2173,6 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
     color: "#fff",
     fontSize: 16,
-  },
-  searchResultsContainer: {
-    marginTop: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: "hidden",
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  searchResultItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 12,
-    borderBottomWidth: 1,
   },
   typeButton: {
     paddingVertical: 16,

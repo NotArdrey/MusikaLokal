@@ -2983,44 +2983,28 @@ export default function EditStudioScreen() {
 
       for (const resolution of resolutions) {
         if (resolution.action === "cancel") {
-          // Cancel the booking
-          const { error } = await supabase
-            .from("studio_bookings")
-            .update({
-              status: "cancelled",
-              cancellation_reason:
-                "Studio schedule was updated by owner. Booking no longer fits available times.",
-            })
-            .eq("id", resolution.bookingId);
-
-          if (error) {
-            console.error("Error cancelling booking:", error);
-            throw error;
-          }
-
-          const { error: refundPendingError } = await supabase
-            .from("studio_bookings")
-            .update({ payment_status: "refund_pending" })
-            .eq("id", resolution.bookingId)
-            .in("payment_status", ["paid", "partial"]);
-
-          if (refundPendingError) {
-            console.error("Error marking refund pending:", refundPendingError);
-            throw refundPendingError;
-          }
-
-          // Create notification for the user
-          const conflict = conflictingBookings.find(
-            (c) => c.id === resolution.bookingId,
-          );
-          if (conflict) {
-            await supabase.from("notifications").insert({
-              user_id: conflict.user_id,
-              type: "warning",
-              title: "Booking Cancelled",
-              message: `Your booking at ${studioName} on ${formatDashedNumericDate(conflict.booking_date)} has been cancelled due to schedule changes. If payment was already made, refund processing has started.`,
-              meta: { bookingId: resolution.bookingId, studioId },
+          const cancellationReason =
+            "Studio schedule was updated by owner. Booking no longer fits available times. No musician completion-rate penalty.";
+          const { data: cancelData, error: cancelError } =
+            await supabase.functions.invoke("manage-bookings", {
+              body: {
+                action: "update_status",
+                booking_id: resolution.bookingId,
+                new_status: "cancelled",
+                type_id: "studio_booking",
+                cancellation_reason: cancellationReason,
+                userId: user.id,
+              },
             });
+
+          if (cancelError || cancelData?.error) {
+            console.error("Error cancelling and refunding booking:", cancelError || cancelData);
+            throw new Error(
+              cancelData?.error ||
+                cancelData?.message ||
+                cancelError?.message ||
+                "Failed to cancel and refund booking.",
+            );
           }
         } else if (resolution.action === "move" && resolution.newSlot) {
           const targetSlots = getEditedAvailableSlotsForDate(

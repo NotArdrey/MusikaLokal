@@ -109,7 +109,7 @@ export const normalizePaymentActionLabel = (action?: string | null) => {
   if (normalized === 'payment_partial') return 'Partial Payment';
   if (normalized === 'payment_pending') return 'Payment Pending';
   if (normalized === 'payment_failed') return 'Payment Failed';
-  if (normalized === 'payment_cancelled') return 'Payment Cancelled';
+  if (normalized === 'payment_cancelled') return 'Cancelled';
   if (normalized === 'payment_refunded') return 'Payment Refunded';
   if (normalized === 'payment_refund_pending') return 'Refund Pending';
 

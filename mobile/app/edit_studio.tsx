@@ -2759,55 +2759,29 @@ export default function EditStudioScreen() {
 
       for (const resolution of resolutions) {
         if (resolution.action === "cancel") {
-          // Cancel the booking
-          const { error } = await supabase
-            .from("studio_bookings")
-            .update({
-              status: "cancelled",
-              cancellation_reason:
-                "Studio schedule was updated by owner. Booking no longer fits available times.",
-            })
-            .eq("id", resolution.bookingId);
-
-          if (error) {
-            console.error("Error cancelling booking:", error);
-            throw error;
-          }
-
-          const { error: refundPendingError } = await supabase
-            .from("studio_bookings")
-            .update({ payment_status: "refund_pending" })
-            .eq("id", resolution.bookingId)
-            .in("payment_status", ["paid", "partial"]);
-
-          if (refundPendingError) {
-            console.error("Error marking refund pending:", refundPendingError);
-            throw refundPendingError;
-          }
-
-          // Create notification for the user
-          const conflict = conflictingBookings.find(
-            (c) => c.id === resolution.bookingId,
-          );
-          if (conflict) {
-            const { error: notificationError } = await supabase.from("notifications").insert({
-              user_id: conflict.user_id,
-              type: "warning",
-              title: "Booking Cancelled",
-              message: `Your booking at ${studioName} on ${formatDashedNumericDate(conflict.booking_date)} has been cancelled due to schedule changes. If payment was already made, refund processing has started.`,
-              meta: buildNotificationRouteMeta("/bookings", undefined, {
-                bookingId: resolution.bookingId,
-                studioId,
-              }),
+          const cancellationReason =
+            "Studio schedule was updated by owner. Booking no longer fits available times. No musician completion-rate penalty.";
+          const { data: cancelData, error: cancelError } =
+            await supabase.functions.invoke("manage-bookings", {
+              body: {
+                action: "update_status",
+                booking_id: resolution.bookingId,
+                new_status: "cancelled",
+                type_id: "studio_booking",
+                cancellation_reason: cancellationReason,
+                userId: user.id,
+              },
             });
-            if (notificationError) {
-              logActionError("edit_studio.cancel_booking_notification_failed", notificationError, {
-                bookingId: resolution.bookingId,
-                studioId,
-                userId: conflict.user_id,
-              });
-              throw new Error(`Failed to notify booking customer: ${formatSupabaseError(notificationError)}`);
-            }
+
+          if (cancelError || cancelData?.error) {
+            const errorPayload = cancelData?.error || cancelData?.message || cancelError;
+            logActionError("edit_studio.cancel_booking_failed", errorPayload, {
+              bookingId: resolution.bookingId,
+              studioId,
+            });
+            throw new Error(
+              `Failed to cancel and refund booking: ${formatSupabaseError(errorPayload)}`,
+            );
           }
         } else if (resolution.action === "move" && resolution.newSlot) {
           const targetSlots = getEditedAvailableSlotsForDate(
@@ -2978,6 +2952,56 @@ export default function EditStudioScreen() {
             throw error;
           }
 
+          if (movedBookingUserId) {
+            const holdPayload = {
+              user_id: movedBookingUserId,
+              studio_id: studioId,
+              booking_date: resolution.newSlot.date,
+              start_time: resolution.newSlot.start_time,
+              end_time: resolution.newSlot.end_time,
+              expires_at: relocationExpiresAt,
+            };
+
+            const { error: clearExistingHoldError } = await supabase
+              .from("booking_holds")
+              .delete()
+              .eq("studio_id", studioId)
+              .eq("user_id", movedBookingUserId)
+              .eq("booking_date", resolution.newSlot.date)
+              .eq("start_time", resolution.newSlot.start_time)
+              .eq("end_time", resolution.newSlot.end_time);
+
+            if (clearExistingHoldError) {
+              logActionError(
+                "edit_studio.clear_relocation_hold_failed",
+                clearExistingHoldError,
+                {
+                  bookingId: resolution.bookingId,
+                  studioId,
+                  userId: movedBookingUserId,
+                },
+              );
+              throw new Error(
+                `Failed to reserve relocation slot: ${formatSupabaseError(clearExistingHoldError)}`,
+              );
+            }
+
+            const { error: holdError } = await supabase
+              .from("booking_holds")
+              .insert(holdPayload);
+
+            if (holdError) {
+              logActionError("edit_studio.relocation_hold_failed", holdError, {
+                bookingId: resolution.bookingId,
+                studioId,
+                userId: movedBookingUserId,
+              });
+              throw new Error(
+                `Failed to reserve relocation slot: ${formatSupabaseError(holdError)}`,
+              );
+            }
+          }
+
           // Create notification for the user
           const conflict = conflictingBookings.find(
             (c) => c.id === resolution.bookingId,
@@ -2987,7 +3011,7 @@ export default function EditStudioScreen() {
               user_id: conflict.user_id,
               type: "warning",
               title: "Booking Relocation Request",
-              message: `Your booking at ${studioName} needs relocation to ${formatDashedNumericDate(resolution.newSlot.date)} at ${resolution.newSlot.start_time}. Your existing payment stays attached to this booking. Please accept within 24 hours or your booking will be cancelled; if payment was already made, refund processing will start.`,
+              message: `Your booking at ${studioName} needs relocation. A suggested slot is ${formatDashedNumericDate(resolution.newSlot.date)} at ${resolution.newSlot.start_time}, but you can choose another available time in Bookings. Your existing price and payment stay attached to this booking.`,
               meta: buildNotificationRouteMeta("/bookings", undefined, {
                 bookingId: resolution.bookingId,
                 studioId,

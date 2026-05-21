@@ -45,6 +45,22 @@ const getBookingDateKey = (booking: any) => {
     : parsedDate.toISOString().split("T")[0];
 };
 
+const ACTIVE_BOOKING_STATUSES = new Set([
+  "pending",
+  "confirmed",
+  "checked_in",
+  "pending_relocation",
+]);
+
+const normalizeBookingStatus = (value?: unknown) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
+
+const isActiveBookingStatus = (value?: unknown) =>
+  ACTIVE_BOOKING_STATUSES.has(normalizeBookingStatus(value));
+
+const withAlpha = (color: string, alpha: string) =>
+  /^#[0-9a-f]{6}$/i.test(color) ? `${color}${alpha}` : color;
+
 const canonicalizeStudioType = (
   value: unknown,
 ): "Rehearsal" | "Recording" | null => {
@@ -665,6 +681,83 @@ export default function StudioDetailsScreen() {
     return `${h12}:${minutes} ${period}`;
   };
 
+  const getBookingSlots = (booking: any) => {
+    const normalizedSlots =
+      Array.isArray(booking?.time_slots) && booking.time_slots.length > 0
+        ? booking.time_slots
+        : booking?.start_time && booking?.end_time
+          ? [{ start: booking.start_time, end: booking.end_time }]
+          : [];
+
+    return normalizedSlots.filter((slot: any) => slot?.start && slot?.end);
+  };
+
+  const getBookingTimeSummary = (booking: any) => {
+    const slots = getBookingSlots(booking);
+    if (slots.length > 1) return `${slots.length} slots`;
+    if (slots.length === 1) {
+      return `${formatTime(slots[0].start)} - ${formatTime(slots[0].end)}`;
+    }
+    return "Time TBA";
+  };
+
+  const formatCurrency = (value?: unknown) => {
+    const amount = Number(value || 0);
+    if (!Number.isFinite(amount) || amount <= 0) return "Price pending";
+    return `₱${amount.toLocaleString()}`;
+  };
+
+  const getBookingSessionLabel = (booking: any) =>
+    formatSessionTypeLabel(
+      booking?.session_type ||
+      booking?.modifiers_applied?.session_type ||
+      booking?.modifiers_applied?.recording_session?.session_type,
+    ) || "Studio session";
+
+  const getBookingStatusTone = (status?: unknown) => {
+    switch (normalizeBookingStatus(status)) {
+      case "confirmed":
+      case "checked_in":
+        return {
+          color: "#10B981",
+          icon: "checkmark-circle" as const,
+          label: "Active",
+        };
+      case "pending":
+        return {
+          color: "#F59E0B",
+          icon: "time-outline" as const,
+          label: "Pending",
+        };
+      case "pending_relocation":
+        return {
+          color: colors.primary,
+          icon: "swap-horizontal-outline" as const,
+          label: "Relocation",
+        };
+      case "completed":
+        return {
+          color: "#6366F1",
+          icon: "checkmark-done-circle" as const,
+          label: "Completed",
+        };
+      case "cancelled":
+      case "declined":
+      case "rejected":
+        return {
+          color: "#EF4444",
+          icon: "close-circle" as const,
+          label: "Inactive",
+        };
+      default:
+        return {
+          color: colors.textSecondary,
+          icon: "information-circle" as const,
+          label: "Status",
+        };
+    }
+  };
+
   // Open partial approval modal for multi-slot booking
   const openPartialApproval = (booking: any) => {
     setSelectedBookingForPartial(booking);
@@ -813,21 +906,106 @@ export default function StudioDetailsScreen() {
     8,
   );
   const bookingMarkedDates = useMemo(
-    () =>
-      bookings.reduce<Record<string, { marked: boolean; dotColor: string }>>(
-        (acc, booking) => {
-          const dateStr = getBookingDateKey(booking);
-          if (dateStr) {
-            acc[dateStr] = {
-              marked: true,
-              dotColor: colors.primary,
-            };
-          }
+    () => {
+      const summaries = bookings.reduce<
+        Record<string, { active: number; inactive: number; accentColor: string }>
+      >((acc, booking) => {
+        const dateStr = getBookingDateKey(booking);
+        if (!dateStr) return acc;
+
+        const isActive = isActiveBookingStatus(booking.status);
+        const tone = getBookingStatusTone(booking.status);
+        const existing = acc[dateStr] || {
+          active: 0,
+          inactive: 0,
+          accentColor: tone.color,
+        };
+
+        acc[dateStr] = {
+          active: existing.active + (isActive ? 1 : 0),
+          inactive: existing.inactive + (isActive ? 0 : 1),
+          accentColor:
+            existing.active > 0 && tone.color === "#F59E0B"
+              ? existing.accentColor
+              : tone.color,
+        };
+        return acc;
+      }, {});
+
+      const markedDates = Object.entries(summaries).reduce<Record<string, any>>(
+        (acc, [dateStr, summary]) => {
+          const hasActiveBooking = summary.active > 0;
+          const isSelected = selectedDate === dateStr;
+          const accentColor = hasActiveBooking
+            ? summary.accentColor || colors.primary
+            : colors.textSecondary;
+
+          acc[dateStr] = {
+            marked: true,
+            dotColor: isSelected ? "#FFFFFF" : accentColor,
+            customStyles: {
+              container: {
+                backgroundColor: isSelected
+                  ? colors.primary
+                  : hasActiveBooking
+                    ? withAlpha(accentColor, isDark ? "33" : "1F")
+                    : "transparent",
+                borderColor: hasActiveBooking ? accentColor : colors.border,
+                borderRadius: 10,
+                borderWidth: hasActiveBooking ? 1 : 0,
+              },
+              text: {
+                color: isSelected
+                  ? "#FFFFFF"
+                  : hasActiveBooking
+                    ? colors.text
+                    : colors.textSecondary,
+                fontFamily: hasActiveBooking
+                  ? "Poppins_600SemiBold"
+                  : "Poppins_500Medium",
+              },
+            },
+          };
           return acc;
         },
         {},
-      ),
-    [bookings, colors.primary],
+      );
+
+      if (selectedDate) {
+        const selectedMark = markedDates[selectedDate] || {};
+        markedDates[selectedDate] = {
+          ...selectedMark,
+          marked: selectedMark.marked,
+          dotColor: selectedMark.marked ? "#FFFFFF" : selectedMark.dotColor,
+          customStyles: {
+            ...(selectedMark.customStyles || {}),
+            container: {
+              ...(selectedMark.customStyles?.container || {}),
+              backgroundColor: colors.primary,
+              borderColor: colors.primary,
+              borderRadius: 10,
+              borderWidth: 1,
+            },
+            text: {
+              ...(selectedMark.customStyles?.text || {}),
+              color: "#FFFFFF",
+              fontFamily: "Poppins_700Bold",
+            },
+          },
+        };
+      }
+
+      return markedDates;
+    },
+    [
+      bookings,
+      colors.border,
+      colors.primary,
+      colors.text,
+      colors.textSecondary,
+      isDark,
+      selectedDate,
+    ],
   );
   const selectedDateBookings = useMemo(
     () =>
@@ -1713,14 +1891,8 @@ export default function StudioDetailsScreen() {
                     >
                       <Calendar
                         current={new Date().toISOString().split("T")[0]}
-                        markedDates={{
-                          ...bookingMarkedDates,
-                          [selectedDate]: {
-                            selected: true,
-                            selectedColor: colors.primary,
-                            selectedTextColor: "#FFFFFF",
-                          },
-                        }}
+                        markingType="custom"
+                        markedDates={bookingMarkedDates}
                         onDayPress={(day) => {
                           setSelectedDate(day.dateString);
                         }}
@@ -1769,100 +1941,250 @@ export default function StudioDetailsScreen() {
                         </Text>
                         {selectedDateBookings.length > 0 ? (
                           <View style={styles.tagsContainer}>
-                            {selectedDateBookings.map((booking, index) => (
-                                <TouchableOpacity activeOpacity={1}
+                            {selectedDateBookings.map((booking) => {
+                              const statusTone = getBookingStatusTone(booking.status);
+                              const isActive = isActiveBookingStatus(booking.status);
+                              const statusLabel = formatStatusLabel(booking.status);
+                              const badgeLabel =
+                                isActive &&
+                                  ["confirmed", "checked_in"].includes(
+                                    normalizeBookingStatus(booking.status),
+                                  )
+                                  ? `Active • ${statusLabel}`
+                                  : statusLabel;
+                              const slots = getBookingSlots(booking);
+                              const notes =
+                                typeof booking.notes === "string"
+                                  ? booking.notes.trim()
+                                  : "";
+                              const paymentLabel = booking.payment_status
+                                ? `Payment: ${formatStatusLabel(booking.payment_status)}`
+                                : "Payment not set";
+
+                              return (
+                                <View
                                   key={booking.id}
                                   style={[
-                                    styles.bookingCard,
+                                    styles.calendarBookingCard,
                                     {
-                                      backgroundColor: isDark
-                                        ? "#1F2937"
-                                        : "#F9FAFB",
-                                      borderColor:
-                                        booking.status === "confirmed"
-                                          ? colors.primary
-                                          : colors.border,
-                                      borderWidth:
-                                        booking.status === "confirmed" ? 2 : 1, // Gold/Neon border for confirmed
-                                      width: "100%",
-                                      flexDirection: "row",
-                                      justifyContent: "space-between",
-                                      marginBottom: 8,
+                                      backgroundColor: isActive
+                                        ? withAlpha(statusTone.color, isDark ? "24" : "12")
+                                        : isDark
+                                          ? "#1F2937"
+                                          : "#F9FAFB",
+                                      borderColor: isActive
+                                        ? statusTone.color
+                                        : colors.border,
                                     },
                                   ]}
                                 >
-                                  <View
-                                    style={{
-                                      flexDirection: "row",
-                                      alignItems: "center",
-                                      gap: 12,
-                                    }}
-                                  >
+                                  <View style={styles.calendarBookingTopRow}>
                                     <View
                                       style={[
-                                        styles.timeSlotChip,
+                                        styles.calendarTimePill,
+                                        { backgroundColor: statusTone.color },
+                                      ]}
+                                    >
+                                      <Text style={styles.calendarTimePillText}>
+                                        {getBookingTimeSummary(booking)}
+                                      </Text>
+                                    </View>
+
+                                    <View style={{ flex: 1, minWidth: 0 }}>
+                                      <Text
+                                        style={[
+                                          styles.calendarBookingName,
+                                          { color: colors.text },
+                                        ]}
+                                        numberOfLines={1}
+                                      >
+                                        {booking.user?.full_name ||
+                                          "Unknown User"}
+                                      </Text>
+                                      <Text
+                                        style={[
+                                          styles.calendarBookingEmail,
+                                          { color: colors.textSecondary },
+                                        ]}
+                                        numberOfLines={1}
+                                      >
+                                        {booking.user?.email || "No email on profile"}
+                                      </Text>
+                                    </View>
+
+                                    <View
+                                      style={[
+                                        styles.calendarStatusBadge,
                                         {
-                                          backgroundColor: colors.primary,
-                                          borderWidth: 0,
+                                          backgroundColor: withAlpha(
+                                            statusTone.color,
+                                            isDark ? "33" : "18",
+                                          ),
                                         },
                                       ]}
                                     >
+                                      <Ionicons
+                                        name={statusTone.icon}
+                                        size={14}
+                                        color={statusTone.color}
+                                      />
                                       <Text
-                                        style={{
-                                          color: "#FFF",
-                                          fontSize: 12,
-                                          fontFamily: "Poppins_600SemiBold",
-                                        }}
+                                        style={[
+                                          styles.calendarStatusBadgeText,
+                                          { color: statusTone.color },
+                                        ]}
                                       >
-                                        {booking.start_time &&
-                                          booking.start_time.includes(":")
-                                          ? (() => {
-                                            const [hours, minutes] =
-                                              booking.start_time.split(":");
-                                            const h = parseInt(hours);
-                                            const period =
-                                              h >= 12 ? "PM" : "AM";
-                                            const h12 = h % 12 || 12;
-                                            return `${h12}:${minutes} ${period}`;
-                                          })()
-                                          : new Date(
-                                            booking.start_time,
-                                          ).toLocaleTimeString([], {
-                                            hour: "2-digit",
-                                            minute: "2-digit",
-                                            hour12: true,
-                                          })}
-                                      </Text>
-                                    </View>
-                                    <View>
-                                      <Text
-                                        style={{
-                                          fontFamily: "Poppins_600SemiBold",
-                                          color: colors.text,
-                                        }}
-                                      >
-                                        {booking.user?.full_name ||
-                                          "Generous Patron"}
-                                      </Text>
-                                      <Text
-                                        style={{
-                                          fontSize: 12,
-                                          color: colors.textSecondary,
-                                        }}
-                                      >
-                                        {booking.status}
+                                        {badgeLabel}
                                       </Text>
                                     </View>
                                   </View>
-                                  {booking.status === "confirmed" && (
-                                    <Ionicons
-                                      name="checkmark-circle"
-                                      size={20}
-                                      color={colors.primary}
-                                    />
+
+                                  <View style={styles.calendarBookingMetaRow}>
+                                    <View
+                                      style={[
+                                        styles.calendarMetaPill,
+                                        {
+                                          backgroundColor: isDark
+                                            ? "rgba(15, 23, 42, 0.52)"
+                                            : "#FFFFFF",
+                                          borderColor: colors.border,
+                                        },
+                                      ]}
+                                    >
+                                      <Ionicons
+                                        name="musical-notes-outline"
+                                        size={14}
+                                        color={colors.primary}
+                                      />
+                                      <Text
+                                        style={[
+                                          styles.calendarMetaPillText,
+                                          { color: colors.text },
+                                        ]}
+                                      >
+                                        {getBookingSessionLabel(booking)}
+                                      </Text>
+                                    </View>
+
+                                    <View
+                                      style={[
+                                        styles.calendarMetaPill,
+                                        {
+                                          backgroundColor: isDark
+                                            ? "rgba(15, 23, 42, 0.52)"
+                                            : "#FFFFFF",
+                                          borderColor: colors.border,
+                                        },
+                                      ]}
+                                    >
+                                      <Ionicons
+                                        name="cash-outline"
+                                        size={14}
+                                        color={colors.primary}
+                                      />
+                                      <Text
+                                        style={[
+                                          styles.calendarMetaPillText,
+                                          { color: colors.text },
+                                        ]}
+                                      >
+                                        {formatCurrency(
+                                          booking.total_price || booking.final_price,
+                                        )}
+                                      </Text>
+                                    </View>
+
+                                    <View
+                                      style={[
+                                        styles.calendarMetaPill,
+                                        {
+                                          backgroundColor: isDark
+                                            ? "rgba(15, 23, 42, 0.52)"
+                                            : "#FFFFFF",
+                                          borderColor: colors.border,
+                                        },
+                                      ]}
+                                    >
+                                      <Ionicons
+                                        name="card-outline"
+                                        size={14}
+                                        color={colors.primary}
+                                      />
+                                      <Text
+                                        style={[
+                                          styles.calendarMetaPillText,
+                                          { color: colors.text },
+                                        ]}
+                                      >
+                                        {paymentLabel}
+                                      </Text>
+                                    </View>
+                                  </View>
+
+                                  {slots.length > 1 && (
+                                    <View style={styles.calendarSlotList}>
+                                      {slots.map((slot: any, slotIndex: number) => (
+                                        <View
+                                          key={`${slot.start}-${slot.end}-${slotIndex}`}
+                                          style={[
+                                            styles.calendarSlotMiniPill,
+                                            {
+                                              backgroundColor: isDark
+                                                ? "#111827"
+                                                : "#EEF2FF",
+                                            },
+                                          ]}
+                                        >
+                                          <Ionicons
+                                            name="time-outline"
+                                            size={13}
+                                            color={colors.primary}
+                                          />
+                                          <Text
+                                            style={[
+                                              styles.calendarSlotMiniText,
+                                              { color: colors.text },
+                                            ]}
+                                          >
+                                            {formatTime(slot.start)} -{" "}
+                                            {formatTime(slot.end)}
+                                          </Text>
+                                        </View>
+                                      ))}
+                                    </View>
                                   )}
-                                </TouchableOpacity>
-                              ))}
+
+                                  {notes ? (
+                                    <View
+                                      style={[
+                                        styles.calendarNotes,
+                                        {
+                                          backgroundColor: isDark
+                                            ? "rgba(15, 23, 42, 0.52)"
+                                            : "#FFFFFF",
+                                          borderColor: colors.border,
+                                        },
+                                      ]}
+                                    >
+                                      <Ionicons
+                                        name="chatbubble-ellipses-outline"
+                                        size={14}
+                                        color={colors.primary}
+                                      />
+                                      <Text
+                                        style={[
+                                          styles.calendarNotesText,
+                                          { color: colors.textSecondary },
+                                        ]}
+                                        numberOfLines={2}
+                                      >
+                                        {notes}
+                                      </Text>
+                                    </View>
+                                  ) : null}
+                                </View>
+                              );
+                            })}
                           </View>
                         ) : (
                           <Text
@@ -2736,6 +3058,112 @@ const styles = StyleSheet.create({
   bookingCard: {
     padding: 16,
     borderRadius: 24,
+  },
+  calendarBookingCard: {
+    width: "100%",
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 10,
+    gap: 12,
+  },
+  calendarBookingTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  calendarTimePill: {
+    minWidth: 92,
+    maxWidth: 118,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  calendarTimePillText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: "center",
+    fontFamily: "Poppins_700Bold",
+  },
+  calendarBookingName: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  calendarBookingEmail: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  calendarStatusBadge: {
+    maxWidth: 112,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  calendarStatusBadgeText: {
+    flexShrink: 1,
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 10,
+    lineHeight: 14,
+  },
+  calendarBookingMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  calendarMetaPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  calendarMetaPillText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  calendarSlotList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  calendarSlotMiniPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  calendarSlotMiniText: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  calendarNotes: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  calendarNotesText: {
+    flex: 1,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    lineHeight: 16,
   },
   bookingHeader: {
     flexDirection: "row",

@@ -257,7 +257,7 @@ export default function ConflictResolutionModal({
             </Text>
             <View style={styles.quickActionsButtons}>
               {moveableCount > 0 && (
-                <TouchableOpacity activeOpacity={1}
+                <TouchableOpacity activeOpacity={0.78}
                   style={[styles.quickActionBtn, { backgroundColor: colors.primary + '20' }]}
                   onPress={handleMoveAll}
                 >
@@ -267,7 +267,7 @@ export default function ConflictResolutionModal({
                   </Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity activeOpacity={1}
+              <TouchableOpacity activeOpacity={0.78}
                 style={[styles.quickActionBtn, { backgroundColor: 'rgba(239, 68, 68, 0.1)' }]}
                 onPress={handleCancelAll}
               >
