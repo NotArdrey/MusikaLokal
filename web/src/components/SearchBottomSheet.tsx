@@ -30,6 +30,7 @@ import {
 import { Easing } from "react-native-reanimated";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
+import { useGigApplicantCounts } from "../hooks/useGigApplicantCounts";
 import { useTheme } from "../context/ThemeContext";
 import ListingCard from "./ListingCard";
 
@@ -232,7 +233,17 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       spilloverRef.current = spillover;
     }, [spillover]);
 
-    const visibleData = data;
+    const gigApplicantCounts = useGigApplicantCounts(data, { isGuest, userRole });
+    const visibleData = useMemo(
+      () =>
+        data.map((item: any) =>
+          String(item?.type || "").trim().toLowerCase() === "gig" &&
+          Object.prototype.hasOwnProperty.call(gigApplicantCounts, item.id)
+            ? { ...item, applicant_count: gigApplicantCounts[item.id] }
+            : item,
+        ),
+      [data, gigApplicantCounts],
+    );
     const hasMoreResults = hasMore || spillover.length > 0;
 
     const renderBackdrop = useCallback(

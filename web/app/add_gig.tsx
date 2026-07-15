@@ -17,6 +17,10 @@ import {
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import GigRecommendationSettings, {
+  DEFAULT_GIG_RECOMMENDATION_SETTINGS,
+  type GigRecommendationSettingsValue,
+} from "../src/components/GigRecommendationSettings";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
@@ -242,6 +246,11 @@ export default function AddGigScreen() {
 
   // Anti-spam settings
   const [reapplicationCooldownDays, setReapplicationCooldownDays] = useState<number>(30);
+  const [aiRecommendationSettings, setAiRecommendationSettings] =
+    useState<GigRecommendationSettingsValue>(() => ({
+      ...DEFAULT_GIG_RECOMMENDATION_SETTINGS,
+      criteria: { ...DEFAULT_GIG_RECOMMENDATION_SETTINGS.criteria },
+    }));
 
   // Form Steps Configuration
   const steps = [
@@ -533,6 +542,7 @@ export default function AddGigScreen() {
             },
           },
           total_slots_needed: soloSlotsNeeded + duoSlotsNeeded + bandSlotsNeeded,
+          ai_recommendation_settings: aiRecommendationSettings,
         },
       };
 
@@ -2693,6 +2703,13 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     </Text>
                   </View>
                 )}
+              </View>
+
+              <View style={styles.inputContainer}>
+                <GigRecommendationSettings
+                  value={aiRecommendationSettings}
+                  onChange={setAiRecommendationSettings}
+                />
               </View>
 
               {/* Reapplication Cooldown Setting */}

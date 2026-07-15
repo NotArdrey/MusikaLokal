@@ -39,6 +39,7 @@ import {
 import { emitToast } from "../events/toastBus";
 import { useTheme } from "../context/ThemeContext";
 import { useSearchResultsQuery } from "../data/hooks";
+import { useGigApplicantCounts } from "../hooks/useGigApplicantCounts";
 import {
   buildSocialFollowKey,
   getListingSocialFollowTarget,
@@ -232,7 +233,21 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       [searchResultsQuery.data],
     );
 
-    const visibleData = queriedResults;
+    const gigApplicantCounts = useGigApplicantCounts(queriedResults, {
+      enabled: isSheetOpen,
+      isGuest,
+      userRole,
+    });
+    const visibleData = useMemo(
+      () =>
+        queriedResults.map((item: any) =>
+          String(item?.type || "").trim().toLowerCase() === "gig" &&
+          Object.prototype.hasOwnProperty.call(gigApplicantCounts, item.id)
+            ? { ...item, applicant_count: gigApplicantCounts[item.id] }
+            : item,
+        ),
+      [gigApplicantCounts, queriedResults],
+    );
     const loading = searchResultsQuery.isLoading && queriedResults.length === 0;
     const loadingMore = searchResultsQuery.isFetchingNextPage;
     const hasMoreResults = Boolean(searchResultsQuery.hasNextPage);

@@ -1735,6 +1735,9 @@ serve(async (req: Request) => {
             cv_url: g.cv_url,
             slot_type: g.slot_type,
             reviewed_by_applicant: g.reviewed_by_applicant || false,
+            feature_consent_status: g.feature_consent_status || "not_requested",
+            show_on_gig_page: g.show_on_gig_page === true,
+            show_on_profile: g.show_on_profile === true,
           };
 
           if (normalizedStatus === "pending") {
@@ -2010,7 +2013,7 @@ serve(async (req: Request) => {
         }
       }
 
-      // D. For Gig Owners: Fetch accepted applications for their gigs
+      // D. For Gig Owners: Fetch pending and resolved applications for their gigs
       if (activityRole === "venue-owner") {
         // First get their gigs
         const { data: gigs } = staffAssignment?.entity_type === "venue" && staffAssignment.gig_id
@@ -2078,6 +2081,7 @@ serve(async (req: Request) => {
             const item = {
               id: app.id,
               type_id: "gig_application",
+              created_at: app.created_at,
               gig_id: app.gig_id,
               group_id: app.group_id, // Include group_id
               applicant_id: app.applicant_id, // For renew contract

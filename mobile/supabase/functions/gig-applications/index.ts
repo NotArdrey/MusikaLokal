@@ -71,7 +71,7 @@ async function getVenueStaffAccessLevel(client: any, userId: string, gigId: stri
 
 const GIG_APPLICATION_SELECT = `
     *,
-    applicant:profiles!applicant_id(id, full_name, avatar_url, role, bio, location),
+    applicant:profiles!applicant_id(id, full_name, avatar_url, role, bio, location, is_verified, verification_status),
     submitter:profiles!submitted_by_user_id(id, full_name, avatar_url, email),
     group:groups!group_id(id, name, genre, description, location, rate, group_type),
     production_team:production_team_id(id, name, logo_url),
@@ -80,8 +80,32 @@ const GIG_APPLICATION_SELECT = `
         entity_kind,
         profile_id,
         group_id,
-        roster_profile:profile_id(id, full_name, avatar_url, role, bio, location),
+        roster_profile:profile_id(id, full_name, avatar_url, role, bio, location, is_verified, verification_status),
         roster_group:group_id(id, name, genre, description, location, rate, group_type)
+    )
+`
+
+const FEATURE_CONSENT_SELECT = `
+    id,
+    applicant_id,
+    group_id,
+    gig_id,
+    status,
+    feature_consent_status,
+    show_on_gig_page,
+    show_on_profile,
+    feature_consent_requested_at,
+    feature_consent_responded_at,
+    performer_snapshot,
+    gig:gig_id(id, name, organizer_id, event_date, location),
+    applicant:applicant_id(id, full_name, avatar_url),
+    group:group_id(id, name, owner_id),
+    production_roster:production_roster_id(
+        id,
+        profile_id,
+        group_id,
+        roster_profile:profile_id(id, full_name, avatar_url),
+        roster_group:group_id(id, name, owner_id)
     )
 `
 
@@ -340,6 +364,384 @@ async function hydrateLegacyApplicationFields(supabaseClient: any, input: any) {
     return Array.isArray(input) ? hydratedRows : hydratedRows[0] || null
 }
 
+type RecommendationCriterionMode = 'required' | 'preferred' | 'ignore'
+
+const DEFAULT_RECOMMENDATION_SETTINGS = {
+    enabled: false,
+    minimum_score: 75,
+    verified_only: true,
+    criteria: {
+        genres: 'preferred' as RecommendationCriterionMode,
+        instruments: 'required' as RecommendationCriterionMode,
+        location: 'preferred' as RecommendationCriterionMode,
+        portfolio: 'preferred' as RecommendationCriterionMode,
+    },
+}
+
+function normalizeCriterionMode(value: unknown, fallback: RecommendationCriterionMode) {
+    const normalized = String(value || '').trim().toLowerCase()
+    return normalized === 'required' || normalized === 'preferred' || normalized === 'ignore'
+        ? normalized as RecommendationCriterionMode
+        : fallback
+}
+
+function normalizeRecommendationSettings(value: any) {
+    const criteria = value?.criteria && typeof value.criteria === 'object' ? value.criteria : {}
+    const parsedMinimum = Number(value?.minimum_score)
+
+    return {
+        enabled: value?.enabled === true,
+        minimum_score: Number.isFinite(parsedMinimum)
+            ? Math.max(50, Math.min(95, Math.round(parsedMinimum)))
+            : DEFAULT_RECOMMENDATION_SETTINGS.minimum_score,
+        verified_only: true,
+        criteria: {
+            genres: normalizeCriterionMode(criteria.genres, DEFAULT_RECOMMENDATION_SETTINGS.criteria.genres),
+            instruments: normalizeCriterionMode(criteria.instruments, DEFAULT_RECOMMENDATION_SETTINGS.criteria.instruments),
+            location: normalizeCriterionMode(criteria.location, DEFAULT_RECOMMENDATION_SETTINGS.criteria.location),
+            portfolio: normalizeCriterionMode(criteria.portfolio, DEFAULT_RECOMMENDATION_SETTINGS.criteria.portfolio),
+        },
+    }
+}
+
+function normalizeMatchValue(value: unknown) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+}
+
+function stringValues(values: unknown[]) {
+    return uniqueStrings(
+        values
+            .flatMap((value) => Array.isArray(value) ? value : [value])
+            .map((value) => typeof value === 'string' ? value.trim() : '')
+            .filter(Boolean),
+    )
+}
+
+function valuesOverlap(expected: string[], actual: string[]) {
+    const normalizedActual = actual.map(normalizeMatchValue).filter(Boolean)
+    return expected.some((expectedValue) => {
+        const normalizedExpected = normalizeMatchValue(expectedValue)
+        if (!normalizedExpected) return false
+        return normalizedActual.some((actualValue) =>
+            actualValue === normalizedExpected ||
+            actualValue.includes(normalizedExpected) ||
+            normalizedExpected.includes(actualValue)
+        )
+    })
+}
+
+function getApplicationPerformer(application: any) {
+    const rosterProfile = application?.production_roster?.roster_profile
+    const rosterGroup = application?.production_roster?.roster_group
+    const profile = rosterProfile || application?.applicant || null
+    const group = rosterGroup || application?.group || null
+    const memberInstruments = Array.isArray(group?.members)
+        ? group.members.map((member: any) => typeof member === 'string' ? '' : member?.instrument)
+        : []
+
+    return {
+        profile,
+        group,
+        verified: profile?.is_verified === true &&
+            String(profile?.verification_status || '').trim().toUpperCase() === 'APPROVED',
+        genres: stringValues([profile?.genres, group?.genre]),
+        instruments: stringValues([profile?.skills, memberInstruments]),
+        location: String(group?.location || profile?.location || '').trim(),
+        hasPortfolio: Boolean(
+            application?.video_url ||
+            application?.cv_url ||
+            (Array.isArray(profile?.portfolio_urls) && profile.portfolio_urls.length > 0)
+        ),
+    }
+}
+
+function getRequirementValues(requirements: any, application: any) {
+    const slotType = String(application?.slot_type || '').trim().toLowerCase()
+    const slot = requirements?.slots?.[slotType] || {}
+
+    return {
+        genres: stringValues([requirements?.genres, slot?.preferred_genres]),
+        instruments: stringValues([requirements?.instruments, slot?.preferred_instruments, slot?.roles]),
+        location: String(requirements?.location || '').trim(),
+    }
+}
+
+function evaluateGigApplication(application: any, requirements: any, settings: ReturnType<typeof normalizeRecommendationSettings>) {
+    const performer = getApplicationPerformer(application)
+    const expected = getRequirementValues(requirements, application)
+    const matched: string[] = []
+    const missing: string[] = []
+    let possiblePoints = 20
+    let earnedPoints = performer.verified ? 20 : 0
+    let missingRequired = !performer.verified
+
+    if (performer.verified) matched.push('Verified identity')
+    else missing.push('Verified identity')
+
+    const applyCriterion = (
+        key: keyof typeof settings.criteria,
+        label: string,
+        weight: number,
+        isConfigured: boolean,
+        isMatch: boolean,
+    ) => {
+        const mode = settings.criteria[key]
+        if (mode === 'ignore' || !isConfigured) return
+        possiblePoints += weight
+        if (isMatch) {
+            earnedPoints += weight
+            matched.push(label)
+        } else {
+            missing.push(label)
+            if (mode === 'required') missingRequired = true
+        }
+    }
+
+    applyCriterion(
+        'instruments',
+        'Required instruments or roles',
+        30,
+        expected.instruments.length > 0,
+        valuesOverlap(expected.instruments, performer.instruments),
+    )
+    applyCriterion(
+        'genres',
+        'Preferred genres',
+        25,
+        expected.genres.length > 0,
+        valuesOverlap(expected.genres, performer.genres),
+    )
+
+    const gigLocation = String(requirements?.gig_location || requirements?.location || '').trim()
+    const normalizedGigLocation = normalizeMatchValue(gigLocation)
+    const normalizedPerformerLocation = normalizeMatchValue(performer.location)
+    applyCriterion(
+        'location',
+        'Location',
+        10,
+        Boolean(normalizedGigLocation),
+        Boolean(
+            normalizedGigLocation &&
+            normalizedPerformerLocation &&
+            (normalizedGigLocation.includes(normalizedPerformerLocation) ||
+                normalizedPerformerLocation.includes(normalizedGigLocation))
+        ),
+    )
+    applyCriterion('portfolio', 'Portfolio or application media', 15, true, performer.hasPortfolio)
+
+    const score = Math.max(0, Math.min(100, Math.round((earnedPoints / Math.max(possiblePoints, 1)) * 100)))
+    const isEligible = performer.verified && !missingRequired
+    const recommendationStatus = isEligible && score >= settings.minimum_score
+        ? 'recommended'
+        : isEligible
+            ? 'possible_match'
+            : 'not_eligible'
+    const explanation = recommendationStatus === 'recommended'
+        ? `Verified applicant with a ${score}% fit based on the gig's saved requirements.`
+        : recommendationStatus === 'possible_match'
+            ? `Verified applicant with a ${score}% fit; review the unmatched preferences before deciding.`
+            : 'Not recommended because verification or a required criterion is missing.'
+
+    return {
+        application_id: application.id,
+        gig_id: application.gig_id,
+        score,
+        is_verified: performer.verified,
+        is_eligible: isEligible,
+        recommendation_status: recommendationStatus,
+        matched_criteria: matched,
+        missing_criteria: missing,
+        explanation,
+        criteria_snapshot: { settings, requirements: expected },
+        model_provider: 'rules',
+        model_version: 'gig-fit-v1',
+    }
+}
+
+async function addGroqRecommendationExplanations(evaluations: any[]) {
+    const apiKey = Deno.env.get('GROQ_API_KEY') || ''
+    if (!apiKey || evaluations.length === 0) return evaluations
+
+    try {
+        const model = Deno.env.get('GROQ_MODEL') || 'llama-3.3-70b-versatile'
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model,
+                temperature: 0.1,
+                response_format: { type: 'json_object' },
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'Explain structured gig-applicant fit results. Never accept or reject applicants. Return JSON only as {"recommendations":[{"application_id":"uuid","explanation":"one concise neutral sentence"}]}. Do not infer protected or personal traits.',
+                    },
+                    {
+                        role: 'user',
+                        content: JSON.stringify(evaluations.map((item) => ({
+                            application_id: item.application_id,
+                            score: item.score,
+                            status: item.recommendation_status,
+                            matched: item.matched_criteria,
+                            missing: item.missing_criteria,
+                        }))),
+                    },
+                ],
+            }),
+            signal: AbortSignal.timeout(8000),
+        })
+
+        if (!response.ok) return evaluations
+        const payload = await response.json()
+        const content = payload?.choices?.[0]?.message?.content
+        const parsed = typeof content === 'string' ? JSON.parse(content) : null
+        const explanationById = new Map(
+            (Array.isArray(parsed?.recommendations) ? parsed.recommendations : [])
+                .filter((item: any) => typeof item?.application_id === 'string' && typeof item?.explanation === 'string')
+                .map((item: any) => [item.application_id, item.explanation.trim()]),
+        )
+
+        return evaluations.map((item) => ({
+            ...item,
+            explanation: explanationById.get(item.application_id) || item.explanation,
+            model_provider: explanationById.has(item.application_id) ? 'groq' : item.model_provider,
+            model_version: explanationById.has(item.application_id) ? model : item.model_version,
+        }))
+    } catch (error) {
+        console.warn('gig_recommendation_ai_explanation_failed', { message: String((error as any)?.message || error) })
+        return evaluations
+    }
+}
+
+async function attachGigApplicationRecommendations(supabaseClient: any, gigId: string, applications: any[]) {
+    const [
+        { data: requirementRows, error: requirementError },
+        { data: gigRecord, error: gigError },
+    ] = await Promise.all([
+        supabaseClient
+            .from('gig_requirements')
+            .select('requirement_key, requirement_value')
+            .eq('gig_id', gigId),
+        supabaseClient
+            .from('gigs')
+            .select('location')
+            .eq('id', gigId)
+            .maybeSingle(),
+    ])
+
+    if (requirementError) throw requirementError
+    if (gigError) throw gigError
+
+    const requirements = (requirementRows || []).reduce((acc: Record<string, any>, row: any) => {
+        if (row?.requirement_key) acc[row.requirement_key] = row.requirement_value
+        return acc
+    }, {})
+    requirements.gig_location = gigRecord?.location || requirements.location || ''
+
+    const settings = normalizeRecommendationSettings(requirements.ai_recommendation_settings)
+    if (!settings.enabled) {
+        return applications.map((application) => ({ ...application, ai_recommendation: null }))
+    }
+
+    let evaluations = applications.map((application) => evaluateGigApplication(application, requirements, settings))
+    evaluations = await addGroqRecommendationExplanations(evaluations)
+
+    if (evaluations.length > 0) {
+        const now = new Date().toISOString()
+        const { error: upsertError } = await supabaseClient
+            .from('gig_application_recommendations')
+            .upsert(
+                evaluations.map((item) => ({ ...item, generated_at: now, updated_at: now })),
+                { onConflict: 'application_id' },
+            )
+
+        if (upsertError) {
+            console.warn('gig_recommendation_audit_upsert_failed', { message: upsertError.message })
+        }
+    }
+
+    const evaluationById = new Map(evaluations.map((item) => [item.application_id, item]))
+    return applications
+        .map((application) => ({
+            ...application,
+            ai_recommendation: evaluationById.get(application.id) || null,
+        }))
+        .sort((left, right) => {
+            const leftRecommendation = left.ai_recommendation
+            const rightRecommendation = right.ai_recommendation
+            if (leftRecommendation?.is_eligible !== rightRecommendation?.is_eligible) {
+                return Number(rightRecommendation?.is_eligible || false) - Number(leftRecommendation?.is_eligible || false)
+            }
+            return Number(rightRecommendation?.score || 0) - Number(leftRecommendation?.score || 0)
+        })
+}
+
+async function getFeatureConsentApplication(supabaseClient: any, applicationId: string) {
+    const { data, error } = await supabaseClient
+        .from('gig_applications')
+        .select(FEATURE_CONSENT_SELECT)
+        .eq('id', applicationId)
+        .maybeSingle()
+
+    if (error) throw error
+    return data || null
+}
+
+async function getGroupFeatureConsentActors(supabaseClient: any, groupId: string | null) {
+    if (!groupId) return [] as string[]
+
+    const [{ data: group, error: groupError }, { data: members, error: memberError }] = await Promise.all([
+        supabaseClient.from('groups').select('owner_id').eq('id', groupId).maybeSingle(),
+        supabaseClient
+            .from('group_members')
+            .select('user_id, role')
+            .eq('group_id', groupId)
+            .in('role', ['owner', 'admin']),
+    ])
+
+    if (groupError) throw groupError
+    if (memberError) throw memberError
+    return uniqueStrings([group?.owner_id, ...(members || []).map((member: any) => member?.user_id)])
+}
+
+async function getFeatureConsentActorIds(supabaseClient: any, application: any) {
+    const rosterProfileId = application?.production_roster?.profile_id
+    const visibleGroupId = application?.production_roster?.group_id || application?.group_id
+    if (visibleGroupId) return getGroupFeatureConsentActors(supabaseClient, visibleGroupId)
+    if (rosterProfileId) return [rosterProfileId]
+    return uniqueStrings([application?.applicant_id])
+}
+
+async function notifyGigFeatureConsentRequest(supabaseClient: any, applicationId: string) {
+    const application = await getFeatureConsentApplication(supabaseClient, applicationId)
+    if (!application) return
+
+    const actorIds = await getFeatureConsentActorIds(supabaseClient, application)
+    const gigName = application?.gig?.name || 'the gig'
+    for (const userId of actorIds) {
+        await insertCoreNotification(supabaseClient, {
+            user_id: userId,
+            type: 'info',
+            title: 'Featuring permission requested',
+            message: `You were accepted for "${gigName}". Choose whether you want to be featured on the gig page or your public profile.`,
+            meta: buildNotificationRouteMeta('/gig_feature_consent', { applicationId }, {
+                event_type: 'gig_feature_consent_requested',
+                application_id: applicationId,
+                gig_id: application.gig_id,
+                consent_status: 'pending',
+            }),
+        })
+    }
+}
+
 Deno.serve(async (req: Request) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
@@ -439,7 +841,240 @@ Deno.serve(async (req: Request) => {
 
             if (error) throw error;
             const hydratedData = await hydrateLegacyApplicationFields(supabaseClient, data || [])
-            return new Response(JSON.stringify(hydratedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            const rankedData = await attachGigApplicationRecommendations(supabaseClient, gigId, hydratedData)
+            return new Response(JSON.stringify(rankedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // FETCH PENDING APPLICATION RECOMMENDATIONS FOR THE OWNER'S BOOKINGS PAGE
+        if (action === 'fetch_manager_pending_recommendations') {
+            const requestedGigIds = uniqueStrings(
+                Array.isArray(params.gigIds) ? params.gigIds : [],
+            ).slice(0, 25)
+
+            if (requestedGigIds.length === 0) {
+                return new Response(JSON.stringify([]), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                })
+            }
+
+            const { data: gigRecords, error: gigError } = await supabaseClient
+                .from('gigs')
+                .select('id, organizer_id')
+                .in('id', requestedGigIds)
+
+            if (gigError) throw gigError
+
+            const allowedGigIds = (
+                await Promise.all((gigRecords || []).map(async (gigRecord: any) => {
+                    if (gigRecord.organizer_id === effectiveUserId) return gigRecord.id
+                    const accessLevel = await getVenueStaffAccessLevel(
+                        supabaseClient,
+                        effectiveUserId,
+                        gigRecord.id,
+                    )
+                    return accessLevel !== null && accessLevel <= 2 ? gigRecord.id : null
+                }))
+            ).filter((gigId): gigId is string => typeof gigId === 'string')
+
+            if (allowedGigIds.length === 0) {
+                return new Response(JSON.stringify([]), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                })
+            }
+
+            const { data, error } = await supabaseClient
+                .from('gig_applications')
+                .select(GIG_APPLICATION_SELECT)
+                .in('gig_id', allowedGigIds)
+                .eq('status', 'pending')
+                .or('leader_approval_status.is.null,leader_approval_status.eq.approved')
+                .order('created_at', { ascending: false })
+
+            if (error) throw error
+
+            const hydratedData = await hydrateLegacyApplicationFields(supabaseClient, data || [])
+            const applicationIds = hydratedData.map((application: any) => application.id).filter(Boolean)
+            const [recommendationResult, settingsResult] = await Promise.all([
+                applicationIds.length > 0
+                    ? supabaseClient
+                        .from('gig_application_recommendations')
+                        .select('*')
+                        .in('application_id', applicationIds)
+                    : Promise.resolve({ data: [], error: null }),
+                supabaseClient
+                    .from('gig_requirements')
+                    .select('gig_id, requirement_value')
+                    .in('gig_id', allowedGigIds)
+                    .eq('requirement_key', 'ai_recommendation_settings'),
+            ])
+            const { data: existingRecommendations, error: recommendationError } = recommendationResult
+
+            if (recommendationError) throw recommendationError
+            if (settingsResult.error) throw settingsResult.error
+
+            const recommendationEnabledGigIds = new Set(
+                (settingsResult.data || [])
+                    .filter((row: any) => normalizeRecommendationSettings(row.requirement_value).enabled)
+                    .map((row: any) => row.gig_id),
+            )
+            const freshRecommendationCutoff = Date.now() - (5 * 60 * 1000)
+
+            const existingByApplicationId = new Map(
+                (existingRecommendations || [])
+                    .filter((recommendation: any) =>
+                        recommendationEnabledGigIds.has(recommendation.gig_id) &&
+                        new Date(recommendation.generated_at || 0).getTime() >= freshRecommendationCutoff
+                    )
+                    .map((recommendation: any) => [
+                        recommendation.application_id,
+                        recommendation,
+                    ]),
+            )
+            const applicationsByGig = new Map<string, any[]>()
+            hydratedData.forEach((application: any) => {
+                if (
+                    !recommendationEnabledGigIds.has(application.gig_id) ||
+                    existingByApplicationId.has(application.id)
+                ) return
+                const existing = applicationsByGig.get(application.gig_id) || []
+                existing.push(application)
+                applicationsByGig.set(application.gig_id, existing)
+            })
+
+            const rankedGroups = await Promise.all(
+                Array.from(applicationsByGig.entries()).map(([gigId, applications]) =>
+                    attachGigApplicationRecommendations(supabaseClient, gigId, applications),
+                ),
+            )
+
+            const generatedByApplicationId = new Map(
+                rankedGroups.flat().map((application: any) => [application.id, application.ai_recommendation || null]),
+            )
+            const rankedApplications = hydratedData
+                .map((application: any) => ({
+                    ...application,
+                    ai_recommendation: existingByApplicationId.get(application.id) ||
+                        generatedByApplicationId.get(application.id) ||
+                        null,
+                }))
+                .sort((left: any, right: any) => {
+                    const leftRecommendation = left.ai_recommendation
+                    const rightRecommendation = right.ai_recommendation
+                    if (leftRecommendation?.is_eligible !== rightRecommendation?.is_eligible) {
+                        return Number(rightRecommendation?.is_eligible || false) - Number(leftRecommendation?.is_eligible || false)
+                    }
+                    return Number(rightRecommendation?.score || 0) - Number(leftRecommendation?.score || 0)
+                })
+
+            return new Response(JSON.stringify(rankedApplications), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
+        if (action === 'fetch_feature_consent') {
+            const { applicationId } = params
+            if (!applicationId) {
+                return new Response(JSON.stringify({ error: 'applicationId is required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const application = await getFeatureConsentApplication(supabaseClient, applicationId)
+            if (!application) {
+                return new Response(JSON.stringify({ error: 'Application not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                })
+            }
+
+            const actorIds = await getFeatureConsentActorIds(supabaseClient, application)
+            if (!actorIds.includes(effectiveUserId)) {
+                return new Response(JSON.stringify({ error: 'Only the selected performer or authorized group leader can manage featuring permission' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                })
+            }
+
+            return new Response(JSON.stringify(application), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
+        if (action === 'respond_feature_consent') {
+            const { applicationId, showOnGigPage, showOnProfile } = params
+            if (!applicationId) {
+                return new Response(JSON.stringify({ error: 'applicationId is required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const application = await getFeatureConsentApplication(supabaseClient, applicationId)
+            if (!application) {
+                return new Response(JSON.stringify({ error: 'Application not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                })
+            }
+
+            const actorIds = await getFeatureConsentActorIds(supabaseClient, application)
+            if (!actorIds.includes(effectiveUserId)) {
+                return new Response(JSON.stringify({ error: 'Only the selected performer or authorized group leader can manage featuring permission' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                })
+            }
+
+            if (!['accepted', 'approved'].includes(String(application.status || '').toLowerCase())) {
+                return new Response(JSON.stringify({ error: 'Featuring permission is available only for accepted applications' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
+                })
+            }
+
+            const allowGigPage = showOnGigPage === true
+            const allowProfile = showOnProfile === true
+            const consentStatus = allowGigPage || allowProfile ? 'accepted' : 'declined'
+            const { data: updated, error: updateError } = await supabaseClient
+                .from('gig_applications')
+                .update({
+                    feature_consent_status: consentStatus,
+                    show_on_gig_page: allowGigPage,
+                    show_on_profile: allowProfile,
+                    feature_consent_responded_at: new Date().toISOString(),
+                })
+                .eq('id', applicationId)
+                .select(FEATURE_CONSENT_SELECT)
+                .single()
+
+            if (updateError) throw updateError
+
+            if (application?.gig?.organizer_id && application.gig.organizer_id !== effectiveUserId) {
+                await insertCoreNotification(supabaseClient, {
+                    user_id: application.gig.organizer_id,
+                    type: consentStatus === 'accepted' ? 'success' : 'info',
+                    title: consentStatus === 'accepted' ? 'Featuring permission granted' : 'Performer chose to stay private',
+                    message: consentStatus === 'accepted'
+                        ? `An accepted performer for "${application.gig.name || 'your gig'}" approved public featuring.`
+                        : `An accepted performer for "${application.gig.name || 'your gig'}" chose not to be publicly featured.`,
+                    meta: buildNotificationRouteMeta('/manage_gig', { id: application.gig_id, tab: 'Applicants' }, {
+                        event_type: 'gig_feature_consent_updated',
+                        application_id: applicationId,
+                        gig_id: application.gig_id,
+                        consent_status: consentStatus,
+                    }),
+                })
+            }
+
+            return new Response(JSON.stringify(updated), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
         }
 
         // FETCH GROUP APPLICATIONS (my applications as a group/musician)
@@ -808,6 +1443,10 @@ Deno.serve(async (req: Request) => {
                 actorUserId: effectiveUserId,
                 performerName,
             });
+
+            if (normalizedStatus === 'accepted' || normalizedStatus === 'approved') {
+                await notifyGigFeatureConsentRequest(supabaseClient, applicationId)
+            }
 
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }

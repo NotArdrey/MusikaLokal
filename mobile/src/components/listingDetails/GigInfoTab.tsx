@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
-import { Text, View } from "react-native";
+import React, { useEffect, useState } from "react";
+import { Image, Text, View } from "react-native";
+import { supabase } from "../../../lib/supabase";
 
 interface GigInfoTabProps {
   group: any;
@@ -10,6 +11,7 @@ interface GigInfoTabProps {
 }
 
 const GigInfoTab = ({ group, colors, isDark, styles }: GigInfoTabProps) => {
+  const [featuredPerformers, setFeaturedPerformers] = useState<any[]>([]);
   const requirements = group.requirements || {};
   const audioSetup =
     requirements.audio || requirements.sound_system || "Standard PA";
@@ -24,6 +26,20 @@ const GigInfoTab = ({ group, colors, isDark, styles }: GigInfoTabProps) => {
   if (techSpecs.length === 0 && group.amenities?.length > 0) {
     group.amenities.forEach((amenity: string) => techSpecs.push(amenity));
   }
+
+  useEffect(() => {
+    let isActive = true;
+    const loadFeaturedPerformers = async () => {
+      if (!group?.id) {
+        setFeaturedPerformers([]);
+        return;
+      }
+      const { data, error } = await supabase.rpc("get_gig_featured_performers", { p_gig_id: group.id });
+      if (isActive) setFeaturedPerformers(error ? [] : Array.isArray(data) ? data : []);
+    };
+    loadFeaturedPerformers();
+    return () => { isActive = false; };
+  }, [group?.id]);
 
   return (
     <View style={styles.tabContent}>
@@ -66,6 +82,39 @@ const GigInfoTab = ({ group, colors, isDark, styles }: GigInfoTabProps) => {
           </View>
         )}
       </View>
+
+      {featuredPerformers.length > 0 ? (
+        <View style={[styles.section, { marginTop: 24 }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <Ionicons name="people-circle-outline" size={22} color={colors.primary} />
+            <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Featured Accepted Performers</Text>
+          </View>
+          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginBottom: 10 }}>
+            These performers gave permission to appear on this gig page.
+          </Text>
+          {featuredPerformers.map((performer) => (
+            <View
+              key={performer.application_id}
+              style={{ flexDirection: "row", alignItems: "center", gap: 11, borderTopWidth: 1, borderTopColor: colors.border, paddingVertical: 11 }}
+            >
+              {performer.avatar_url ? (
+                <Image source={{ uri: performer.avatar_url }} style={{ width: 42, height: 42, borderRadius: 21 }} />
+              ) : (
+                <View style={{ width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: isDark ? "#374151" : "#E5E7EB" }}>
+                  <Ionicons name="musical-notes" size={19} color={colors.primary} />
+                </View>
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 13 }}>{performer.display_name}</Text>
+                <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10 }}>
+                  {performer.entity_type === "group" ? "Accepted group" : "Accepted musician"}
+                </Text>
+              </View>
+              <Ionicons name="checkmark-circle" size={19} color="#10B981" />
+            </View>
+          ))}
+        </View>
+      ) : null}
 
       {techSpecs.length > 0 && (
         <View style={[styles.section, { marginTop: 24 }]}>

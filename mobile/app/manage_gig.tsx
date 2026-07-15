@@ -47,15 +47,8 @@ const PORTFOLIO_ITEM_SIZE = (screenWidth - 48 - 8) / 3; // 3 columns with gaps
 const OWNER_GIG_TABS = ["About", "Applicants", "Review"];
 const VIEWER_GIG_TABS = ["About", "Review"];
 const ACCEPTED_GIG_STATUSES = ["accepted", "approved", "confirmed", "happening now", "completed"];
-const HIDDEN_APPLICANT_STATUSES = new Set([
-  "cancelled",
-  "canceled",
-  "completed",
-  "declined",
-  "fired",
-  "rejected",
-  "resigned",
-]);
+type ApplicationFilter = "All" | "Pending" | "Accepted" | "Declined" | "Recommended";
+const APPLICATION_FILTERS: ApplicationFilter[] = ["All", "Pending", "Accepted", "Declined", "Recommended"];
 
 import { useLocalSearchParams } from "expo-router";
 
@@ -82,6 +75,7 @@ export default function GigDetailsScreen() {
 
   const [gig, setGig] = useState<any>(null);
   const [applications, setApplications] = useState<any[]>([]);
+  const [applicationFilter, setApplicationFilter] = useState<ApplicationFilter>("All");
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [alertVisible, setAlertVisible] = useState(false);
@@ -620,13 +614,34 @@ export default function GigDetailsScreen() {
 
   const tabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
   const isInviteSubmitDisabled = sendingInvites || selectedInviteTargets.length === 0;
+  const countableApplications = applications;
+  const applicationCounts = useMemo(
+    () => countableApplications.reduce(
+      (counts, app) => {
+        const status = String(app?.status || "pending").trim().toLowerCase();
+        counts.total += 1;
+        if (status === "pending") counts.pending += 1;
+        if (status === "accepted" || status === "approved") counts.accepted += 1;
+        if (status === "rejected" || status === "declined") counts.declined += 1;
+        if (app?.ai_recommendation?.recommendation_status === "recommended") counts.recommended += 1;
+        return counts;
+      },
+      { total: 0, pending: 0, accepted: 0, declined: 0, recommended: 0 },
+    ),
+    [countableApplications],
+  );
   const visibleApplications = useMemo(
-    () =>
-      applications.filter((app) => {
-        const normalizedStatus = String(app?.status || "").trim().toLowerCase();
-        return !HIDDEN_APPLICANT_STATUSES.has(normalizedStatus);
-      }),
-    [applications],
+    () => countableApplications.filter((app) => {
+      const status = String(app?.status || "pending").trim().toLowerCase();
+      if (applicationFilter === "Pending") return status === "pending";
+      if (applicationFilter === "Accepted") return status === "accepted" || status === "approved";
+      if (applicationFilter === "Declined") return status === "rejected" || status === "declined";
+      if (applicationFilter === "Recommended") {
+        return app?.ai_recommendation?.recommendation_status === "recommended";
+      }
+      return true;
+    }),
+    [applicationFilter, countableApplications],
   );
   const renderedApplications = useStagedTabRows(
     visibleApplications,
@@ -1325,19 +1340,70 @@ export default function GigDetailsScreen() {
                       { color: colors.textSecondary },
                     ]}
                   >
-                    APPLICANTS LIST
+                    APPLICANTS ({applicationCounts.total})
                   </Text>
                   {canManageGig ? (
-                    <TouchableOpacity
-                      activeOpacity={1}
-                      onPress={() => setInviteModalVisible(true)}
-                      style={[styles.inviteBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="person-add-outline" size={16} color="#FFFFFF" />
-                      <Text style={styles.inviteBtnText}>Invite</Text>
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        testID="configure-ai-recommendations"
+                        onPress={() => router.push({
+                          pathname: "/edit_gig",
+                          params: { id: gig?.id, returnTab: "Applicants", focusSection: "ai" },
+                        })}
+                        style={[styles.inviteBtn, { backgroundColor: colors.inputBackground }]}
+                      >
+                        <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
+                        <Text style={[styles.inviteBtnText, { color: colors.primary }]}>AI settings</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        onPress={() => setInviteModalVisible(true)}
+                        style={[styles.inviteBtn, { backgroundColor: colors.primary }]}
+                      >
+                        <Ionicons name="person-add-outline" size={16} color="#FFFFFF" />
+                        <Text style={styles.inviteBtnText}>Invite</Text>
+                      </TouchableOpacity>
+                    </View>
                   ) : null}
                 </View>
+
+                <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, marginBottom: 10 }}>
+                  {applicationCounts.pending} pending • {applicationCounts.accepted} accepted • {applicationCounts.declined} declined
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 14 }}>
+                  {APPLICATION_FILTERS.map((filter) => {
+                    const count = filter === "All"
+                      ? applicationCounts.total
+                      : filter === "Pending"
+                        ? applicationCounts.pending
+                        : filter === "Accepted"
+                          ? applicationCounts.accepted
+                          : filter === "Declined"
+                            ? applicationCounts.declined
+                            : applicationCounts.recommended;
+                    const selected = applicationFilter === filter;
+                    return (
+                      <TouchableOpacity
+                        key={filter}
+                        testID={`applicant-filter-${filter.toLowerCase()}`}
+                        onPress={() => setApplicationFilter(filter)}
+                        style={{
+                          borderWidth: 1,
+                          borderColor: selected ? colors.primary : colors.border,
+                          backgroundColor: selected ? colors.primary + "18" : colors.surface,
+                          borderRadius: 999,
+                          paddingHorizontal: 12,
+                          paddingVertical: 7,
+                        }}
+                      >
+                        <Text style={{ color: selected ? colors.primary : colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
+                          {filter} ({count})
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
 
                 {visibleApplications.length === 0 ? (
                   <Text
@@ -1347,7 +1413,7 @@ export default function GigDetailsScreen() {
                       marginTop: 20,
                     }}
                   >
-                    No active applications yet.
+                    No applications match this filter.
                   </Text>
                 ) : (
                   renderedApplications.map((app) => {
@@ -1380,6 +1446,9 @@ export default function GigDetailsScreen() {
                       performerSnapshot.avatar_url ||
                       app.production_team?.logo_url ||
                       "https://i.pravatar.cc/100";
+                    const aiRecommendation = app.ai_recommendation;
+                    const isAccepted = ["accepted", "approved"].includes(String(app.status || "").toLowerCase());
+                    const consentStatus = String(app.feature_consent_status || "not_requested").toLowerCase();
 
                     return (
                     <View
@@ -1435,6 +1504,11 @@ export default function GigDetailsScreen() {
                                 {statusMeta.label}
                               </Text>
                             </View>
+                            {aiRecommendation?.is_verified ? (
+                              <View style={[styles.statusBadge, { backgroundColor: "#10B98115", borderWidth: 1, borderColor: "#10B981" }]}>
+                                <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 11, color: "#10B981" }}>Verified</Text>
+                              </View>
+                            ) : null}
                           </View>
                           <Text
                             style={{
@@ -1460,6 +1534,56 @@ export default function GigDetailsScreen() {
                           )}
                         </View>
                       </View>
+
+                      {aiRecommendation ? (
+                        <View
+                          testID={`ai-recommendation-${app.id}`}
+                          style={{
+                            backgroundColor: aiRecommendation.recommendation_status === "recommended" ? "#10B98112" : colors.inputBackground,
+                            borderColor: aiRecommendation.recommendation_status === "recommended" ? "#10B981" : colors.border,
+                            borderWidth: 1,
+                            borderRadius: 12,
+                            padding: 12,
+                            marginBottom: 12,
+                          }}
+                        >
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+                            <Ionicons name="sparkles" size={17} color={aiRecommendation.recommendation_status === "recommended" ? "#10B981" : colors.primary} />
+                            <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 13, flex: 1 }}>
+                              {aiRecommendation.recommendation_status === "recommended" ? "AI recommended" : "AI fit review"}
+                            </Text>
+                            <Text style={{ color: aiRecommendation.recommendation_status === "recommended" ? "#10B981" : colors.primary, fontFamily: "Poppins_700Bold", fontSize: 14 }}>
+                              {Number(aiRecommendation.score || 0)}%
+                            </Text>
+                          </View>
+                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 6 }}>
+                            {aiRecommendation.explanation}
+                          </Text>
+                          {Array.isArray(aiRecommendation.matched_criteria) && aiRecommendation.matched_criteria.length > 0 ? (
+                            <Text style={{ color: "#10B981", fontFamily: "Poppins_500Medium", fontSize: 10, marginTop: 7 }}>
+                              Matches: {aiRecommendation.matched_criteria.join(", ")}
+                            </Text>
+                          ) : null}
+                          {Array.isArray(aiRecommendation.missing_criteria) && aiRecommendation.missing_criteria.length > 0 ? (
+                            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, marginTop: 3 }}>
+                              Review: {aiRecommendation.missing_criteria.join(", ")}
+                            </Text>
+                          ) : null}
+                        </View>
+                      ) : null}
+
+                      {isAccepted ? (
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 12 }}>
+                          <Ionicons
+                            name={consentStatus === "accepted" ? "eye-outline" : consentStatus === "pending" ? "time-outline" : "eye-off-outline"}
+                            size={16}
+                            color={consentStatus === "accepted" ? "#10B981" : colors.textSecondary}
+                          />
+                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
+                            Feature consent: {consentStatus === "accepted" ? "Allowed" : consentStatus === "pending" ? "Waiting for applicant" : "Private"}
+                          </Text>
+                        </View>
+                      ) : null}
 
                       {/* Skills/Instruments */}
                       {displaySkills.length > 0 && (

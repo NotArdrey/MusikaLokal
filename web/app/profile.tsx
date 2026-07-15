@@ -1797,14 +1797,16 @@ export default function ProfileScreen() {
           supabase
             .from("gig_applications")
             .select("applicant_id, gigs(id,name,location,budget,event_date,status)")
-            .eq("status", "accepted")
+            .in("status", ["accepted", "approved"])
+            .eq("show_on_profile", true)
             .eq("applicant_id", targetId)
             .is("group_id", null),
           groupIds.length > 0
             ? supabase
               .from("gig_applications")
               .select("group_id, gigs(id,name,location,budget,event_date,status)")
-              .eq("status", "accepted")
+              .in("status", ["accepted", "approved"])
+              .eq("show_on_profile", true)
               .in("group_id", groupIds)
             : Promise.resolve({ data: [] as any[] }),
         ]);

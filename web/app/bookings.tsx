@@ -704,6 +704,193 @@ const mergeUniqueActivityItems = (...groups: any[][]) => {
   return merged;
 };
 
+const attachManagerPendingRecommendations = async (bookings: any) => {
+  const pendingApplications = (bookings?.Pending || []).filter(
+    (item: any) => item?.type_id === "gig_application" && item?.gig_id,
+  );
+  const gigIds = Array.from(
+    new Set(pendingApplications.map((item: any) => item.gig_id).filter(Boolean)),
+  );
+
+  if (gigIds.length === 0) return bookings;
+
+  const { data, error } = await supabase.functions.invoke(
+    "gig-applications",
+    {
+      body: {
+        action: "fetch_manager_pending_recommendations",
+        gigIds,
+      },
+    },
+  );
+
+  if (error) {
+    return {
+      ...bookings,
+      Pending: (bookings?.Pending || []).map((item: any) =>
+        item?.type_id === "gig_application"
+          ? { ...item, ai_recommendation_error: true }
+          : item,
+      ),
+    };
+  }
+
+  const rankedByApplicationId = new Map(
+    (Array.isArray(data) ? data : [])
+      .filter((application: any) => application?.id)
+      .map((application: any) => [application.id, application]),
+  );
+
+  return {
+    ...bookings,
+    Pending: (bookings?.Pending || []).map((item: any) => {
+      if (item?.type_id !== "gig_application") return item;
+      const rankedApplication: any = rankedByApplicationId.get(item.id);
+      if (!rankedApplication) return item;
+      const performerProfile =
+        rankedApplication?.production_roster?.roster_profile ||
+        rankedApplication?.applicant ||
+        null;
+      const isVerified =
+        rankedApplication?.ai_recommendation?.is_verified === true ||
+        (performerProfile?.is_verified === true &&
+          String(performerProfile?.verification_status || "").toUpperCase() === "APPROVED");
+
+      return {
+        ...item,
+        ai_recommendation: rankedApplication.ai_recommendation || null,
+        applicant_is_verified: isVerified,
+        ai_recommendation_loaded: true,
+        ai_recommendation_error: false,
+      };
+    }),
+  };
+};
+
+const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSummary({
+  item,
+  colors,
+  isDark,
+}: {
+  item: any;
+  colors: any;
+  isDark: boolean;
+}) {
+  const recommendation = item?.ai_recommendation;
+
+  if (!recommendation) {
+    if (item?.ai_recommendation_error === true) {
+      return (
+        <View
+          testID={`web-bookings-ai-recommendation-error-${item.id}`}
+          style={{
+            marginBottom: 10,
+            borderWidth: 1,
+            borderColor: colors.border,
+            borderRadius: 12,
+            padding: 10,
+            backgroundColor: isDark ? "rgba(245,158,11,0.08)" : "#FFFBEB",
+          }}
+        >
+          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
+            AI recommendation is temporarily unavailable. Open Review Applicant to refresh it.
+          </Text>
+        </View>
+      );
+    }
+
+    if (item?.ai_recommendation_loaded === true) {
+      return (
+        <View
+          testID={`web-bookings-ai-recommendation-disabled-${item.id}`}
+          style={{
+            marginBottom: 10,
+            borderWidth: 1,
+            borderColor: colors.border,
+            borderRadius: 12,
+            padding: 10,
+            backgroundColor: colors.card,
+          }}
+        >
+          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
+            AI recommendations are not enabled for this gig. Open Review Applicant to configure them.
+          </Text>
+        </View>
+      );
+    }
+
+    if (item?.applicant_is_verified === true) {
+      return (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
+          <Ionicons name="shield-checkmark" size={16} color="#10B981" />
+          <Text style={{ color: "#10B981", fontFamily: "Poppins_600SemiBold", fontSize: 11 }}>
+            Verified applicant
+          </Text>
+        </View>
+      );
+    }
+
+    return null;
+  }
+
+  const isRecommended = recommendation.recommendation_status === "recommended";
+  const matched = Array.isArray(recommendation.matched_criteria)
+    ? recommendation.matched_criteria.slice(0, 3).join(", ")
+    : "";
+  const missing = Array.isArray(recommendation.missing_criteria)
+    ? recommendation.missing_criteria.slice(0, 3).join(", ")
+    : "";
+
+  return (
+    <View
+      testID={`web-bookings-ai-recommendation-${item.id}`}
+      style={{
+        marginBottom: 10,
+        borderWidth: 1,
+        borderColor: isRecommended ? "#10B981" : colors.border,
+        borderRadius: 12,
+        padding: 11,
+        gap: 6,
+        backgroundColor: isRecommended
+          ? isDark
+            ? "rgba(16,185,129,0.10)"
+            : "#F0FDF4"
+          : colors.card,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
+          <Ionicons name="sparkles" size={16} color={isRecommended ? "#10B981" : colors.primary} />
+          <Text style={{ color: isRecommended ? "#10B981" : colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
+            {isRecommended ? "AI recommended" : "AI fit review"}
+          </Text>
+          {recommendation.is_verified === true ? (
+            <Ionicons name="shield-checkmark" size={15} color="#10B981" />
+          ) : null}
+        </View>
+        <Text style={{ color: isRecommended ? "#10B981" : colors.primary, fontFamily: "Poppins_700Bold", fontSize: 14 }}>
+          {Math.round(Number(recommendation.score) || 0)}%
+        </Text>
+      </View>
+      {recommendation.explanation ? (
+        <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 16 }}>
+          {recommendation.explanation}
+        </Text>
+      ) : null}
+      {matched ? (
+        <Text style={{ color: "#10B981", fontFamily: "Poppins_500Medium", fontSize: 10 }} numberOfLines={2}>
+          Matched: {matched}
+        </Text>
+      ) : null}
+      {missing ? (
+        <Text style={{ color: "#F59E0B", fontFamily: "Poppins_500Medium", fontSize: 10 }} numberOfLines={2}>
+          Review: {missing}
+        </Text>
+      ) : null}
+    </View>
+  );
+});
+
 const normalizeActivityRole = (role: unknown) =>
   String(role || "").trim().toLowerCase().replace(/[_\s]+/g, "-");
 
@@ -1631,6 +1818,9 @@ export default function BookingsScreen() {
         cv_url: app.cv_url,
         slot_type: app.slot_type,
         reviewed_by_applicant: app.reviewed_by_applicant || false,
+        feature_consent_status: app.feature_consent_status || "not_requested",
+        show_on_gig_page: app.show_on_gig_page === true,
+        show_on_profile: app.show_on_profile === true,
       };
 
       if (normalizedStatus === "pending") {
@@ -1965,6 +2155,7 @@ export default function BookingsScreen() {
             effectiveBookings?.Review || [],
           ),
         };
+        effectiveBookings = await attachManagerPendingRecommendations(effectiveBookings);
       }
 
 
@@ -2447,9 +2638,24 @@ export default function BookingsScreen() {
 
       // Sort lists
       applicants.sort(
-        (a: any, b: any) =>
-          new Date(b.created_at || b.raw_date).getTime() -
-          new Date(a.created_at || a.raw_date).getTime(),
+        (a: any, b: any) => {
+          const recommendationRank = (item: any) =>
+            item?.ai_recommendation?.recommendation_status === "recommended"
+              ? 2
+              : item?.ai_recommendation
+                ? 1
+                : 0;
+          const rankDifference = recommendationRank(b) - recommendationRank(a);
+          if (rankDifference !== 0) return rankDifference;
+          const scoreDifference =
+            Number(b?.ai_recommendation?.score || 0) -
+            Number(a?.ai_recommendation?.score || 0);
+          if (scoreDifference !== 0) return scoreDifference;
+          return (
+            new Date(b.created_at || b.raw_date).getTime() -
+            new Date(a.created_at || a.raw_date).getTime()
+          );
+        },
       );
       activeGigMusicians.sort(
         (a: any, b: any) =>
@@ -4181,7 +4387,7 @@ export default function BookingsScreen() {
             },
           ]}
         >
-          {tab}
+          {tab === "Applicants" ? "Pending" : tab}
         </Text>
 
         {/* Badge count if > 0 */}
@@ -4242,7 +4448,7 @@ export default function BookingsScreen() {
         >
           {tab === "Applicants"
             ? userRole === "venue-owner"
-              ? "Applicants"
+              ? "Pending"
               : "Applications"
             : tab}
         </Text>
@@ -4608,7 +4814,7 @@ export default function BookingsScreen() {
                 <Text
                   style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
                 >
-                  Gig applications and direct connection requests will appear here
+                  New gig applications and direct connection requests will appear in Pending.
                 </Text>
               )}
             </View>
@@ -5242,6 +5448,10 @@ export default function BookingsScreen() {
                         </View>
                       )}
 
+                      {!isMusicianView && activeTab === "Applicants" ? (
+                        <ManagerRecommendationSummary item={item} colors={colors} isDark={isDark} />
+                      ) : null}
+
                       {/* Footer: Actions */}
                       <View
                         style={[
@@ -5308,6 +5518,33 @@ export default function BookingsScreen() {
                             </TouchableOpacity>
                           )}
                         </View>
+                        {isMusicianView && isAcceptedGigApplicationItem(item) ? (
+                          <TouchableOpacity
+                            activeOpacity={1}
+                            testID={`web-bookings-feature-consent-${item.id}`}
+                            accessibilityLabel={`web-bookings-feature-consent-${item.id}`}
+                            onPress={() => router.push({ pathname: "/gig_feature_consent", params: { applicationId: item.id } })}
+                            style={{
+                              width: "100%",
+                              flexDirection: "row",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 7,
+                              borderWidth: 1,
+                              borderColor: colors.primary,
+                              backgroundColor: colors.primary + "12",
+                              padding: 10,
+                              borderRadius: 100,
+                            }}
+                          >
+                            <Ionicons name="megaphone-outline" size={16} color={colors.primary} />
+                            <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
+                              {String(item.feature_consent_status || "").toLowerCase() === "pending"
+                                ? "Respond to Featuring Request"
+                                : "Manage Featuring Permission"}
+                            </Text>
+                          </TouchableOpacity>
+                        ) : null}
                         {isHistoryTabView && isFiredApplication ? (
                           <View style={[styles.terminalStatusNotice, { backgroundColor: isDark ? "rgba(239,68,68,0.10)" : "#FEF2F2", borderColor: "rgba(239,68,68,0.35)" }]}>
                             <Ionicons name="remove-circle-outline" size={16} color="#EF4444" />
@@ -5396,7 +5633,12 @@ export default function BookingsScreen() {
                               <>
                                 {/* View Details Button for Gig Owners */}
                                 <TouchableOpacity activeOpacity={1}
-                                  onPress={() => handleDetailsPress(item)}
+                                  testID={`web-bookings-review-applicant-${item.id}`}
+                                  accessibilityLabel={`web-bookings-review-applicant-${item.id}`}
+                                  onPress={() => router.push({
+                                    pathname: "/manage_gig",
+                                    params: { id: item.gig_id, tab: "Applicants" },
+                                  })}
                                   style={{
                                     flexDirection: "row",
                                     alignItems: "center",
@@ -5410,7 +5652,7 @@ export default function BookingsScreen() {
                                   }}
                                 >
                                   <Ionicons
-                                    name="eye-outline"
+                                    name="people-outline"
                                     size={16}
                                     color={colors.primary}
                                   />
@@ -5421,12 +5663,14 @@ export default function BookingsScreen() {
                                       fontSize: 12,
                                     }}
                                   >
-                                    View Full Details
+                                    Review Applicant
                                   </Text>
                                 </TouchableOpacity>
                                 {/* Decline / Accept Row */}
                                 <View style={{ flexDirection: "row", gap: 8 }}>
                                   <TouchableOpacity activeOpacity={1}
+                                    testID={`web-bookings-decline-applicant-${item.id}`}
+                                    accessibilityLabel={`web-bookings-decline-applicant-${item.id}`}
                                     onPress={() => handleDeclineBooking(item)}
                                     style={{
                                       flex: 1,
@@ -5449,6 +5693,8 @@ export default function BookingsScreen() {
                                     </Text>
                                   </TouchableOpacity>
                                   <TouchableOpacity activeOpacity={1}
+                                    testID={`web-bookings-accept-applicant-${item.id}`}
+                                    accessibilityLabel={`web-bookings-accept-applicant-${item.id}`}
                                     onPress={() => {
                                       setSelectedItem(item);
                                       setModalMode("confirm");
@@ -7744,7 +7990,7 @@ const styles = StyleSheet.create({
     paddingVertical: moderateScale(5),
     borderRadius: moderateScale(9999),
     backgroundColor: "rgba(0,0,0,0.65)",
-    backdropFilter: "blur(4px)",
+    ...({ backdropFilter: "blur(4px)" } as any),
     alignItems: "center",
     justifyContent: "center",
   },

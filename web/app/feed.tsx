@@ -27,6 +27,7 @@ import Navbar from "../src/components/navbar";
 import PostDetailsModal from "../src/components/PostDetailsModal";
 import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
+import { useGigApplicantCounts } from "../src/hooks/useGigApplicantCounts";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { useRadioPlayer } from "../src/context/RadioPlayerContext";
@@ -1306,6 +1307,20 @@ const getSocialSuggestionQuickInfo = (item: any) => {
   const reviewCount = Number(item?.review_count || 0);
   const location = typeof item?.location === "string" ? item.location.trim() : "";
   const genre = typeof item?.genre === "string" ? item.genre.trim() : "";
+  const normalizedType = String(item?.type || "").trim().toLowerCase();
+  const applicantCount = Number(item?.applicant_count);
+
+  if (
+    (normalizedType === "gig" || normalizedType === "venue") &&
+    Number.isFinite(applicantCount) &&
+    applicantCount >= 0
+  ) {
+    quickInfo.push({
+      icon: "people-outline",
+      label: `${Math.round(applicantCount)} ${Math.round(applicantCount) === 1 ? "Applicant" : "Applicants"}`,
+      color: "#0F766E",
+    });
+  }
 
   if (similarity > 0) {
     quickInfo.push({
@@ -1827,7 +1842,7 @@ const readFunctionErrorMessage = async (error: any, fallback: string) => {
 
 export default function FeedScreen() {
   const { colors, isDark } = useTheme();
-  const { session, isGuest } = useAuth();
+  const { session, isGuest, userRole } = useAuth();
   const resolvedUserId = session?.user?.id ?? null;
   const canUseSocialActions = Boolean(resolvedUserId && !isGuest);
   const { width } = useWindowDimensions();
@@ -1861,6 +1876,7 @@ export default function FeedScreen() {
   const [tab, setTab] = useState<FeedTab>("for_you");
   const [posts, setPosts] = useState<any[]>([]);
   const [listingCards, setListingCards] = useState<any[]>([]);
+  const gigApplicantCounts = useGigApplicantCounts(listingCards, { isGuest, userRole });
   const [postBody, setPostBody] = useState("");
   const [postVisibility, setPostVisibility] = useState<"public" | "followers">("public");
   const [showCreate, setShowCreate] = useState(false);
@@ -2904,7 +2920,7 @@ export default function FeedScreen() {
     router.push({ pathname: "/production_team", params: { teamId } } as any);
   }, []);
 
-  const feedItems = useMemo(
+  const baseFeedItems = useMemo(
     () => {
       if (tab === "talent") {
         return dedupeFeedItems(listingCards);
@@ -2917,6 +2933,20 @@ export default function FeedScreen() {
       return dedupeFeedItems([...rankedCards, ...socialPosts]);
     },
     [listingCards, posts, tab],
+  );
+  const feedItems = useMemo(
+    () =>
+      baseFeedItems.map((item: any) => {
+        const normalizedType = String(item?.type || "").trim().toLowerCase();
+        if (
+          (normalizedType === "gig" || normalizedType === "venue") &&
+          Object.prototype.hasOwnProperty.call(gigApplicantCounts, item.id)
+        ) {
+          return { ...item, applicant_count: gigApplicantCounts[item.id] };
+        }
+        return item;
+      }),
+    [baseFeedItems, gigApplicantCounts],
   );
 
   const renderPost = useCallback(

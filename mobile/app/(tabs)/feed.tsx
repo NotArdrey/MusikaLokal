@@ -55,6 +55,7 @@ import {
 } from "../../src/context/RadioPlayerContext";
 import { emitToast } from "../../src/events/toastBus";
 import { useFeedQuery } from "../../src/data/hooks";
+import { useGigApplicantCounts } from "../../src/hooks/useGigApplicantCounts";
 import { useTheme } from "../../src/context/ThemeContext";
 import { resolveRadioMediaUrl } from "../../src/audio/radioTrackPlayer";
 import {
@@ -1246,6 +1247,19 @@ const getFeedQuickInfoItems = (item: any): FeedQuickInfoItem[] => {
     : rawLocation.split(",")[0]?.trim() || "";
 
   const quickInfoItems: FeedQuickInfoItem[] = [];
+
+  const normalizedType = String(item?.type || "").trim().toLowerCase();
+  const applicantCount = Number(item?.applicant_count);
+  if (
+    (normalizedType === "gig" || normalizedType === "venue") &&
+    Number.isFinite(applicantCount) &&
+    applicantCount >= 0
+  ) {
+    quickInfoItems.push({
+      icon: "people",
+      label: `${Math.round(applicantCount)} ${Math.round(applicantCount) === 1 ? "Applicant" : "Applicants"}`,
+    });
+  }
 
   if (rating > 0) {
     quickInfoItems.push({ icon: "star", label: `${rating.toFixed(1)} Rating` });
@@ -3267,6 +3281,11 @@ export default function FeedScreen() {
   const [followingKeys, setFollowingKeys] = useState<Set<string>>(new Set());
   const [followingEntities, setFollowingEntities] = useState<any[]>([]);
   const [followBusyByKey, setFollowBusyByKey] = useState<Record<string, boolean>>({});
+  const gigApplicantCounts = useGigApplicantCounts([...aiCards, ...followingEntities], {
+    enabled: roleResolved,
+    isGuest,
+    userRole,
+  });
 
   // Create-post modal
   const [showCreate, setShowCreate] = useState(false);
@@ -6674,7 +6693,7 @@ export default function FeedScreen() {
     );
   };
 
-  const feedItems = useMemo(() => {
+  const baseFeedItems = useMemo(() => {
     if (loading) return [];
     if (tab === "for_you") {
       const rankedCards = aiCards.filter((item) => item?.__feedKind === "ai_card");
@@ -6719,6 +6738,20 @@ export default function FeedScreen() {
     }
     return sortFeedItemsNewestFirst(dedupeFeedItems(posts));
   }, [aiCards, followingEntities, isFan, loading, posts, tab]);
+  const feedItems = useMemo(
+    () =>
+      baseFeedItems.map((item: any) => {
+        const normalizedType = String(item?.type || "").trim().toLowerCase();
+        if (
+          (normalizedType === "gig" || normalizedType === "venue") &&
+          Object.prototype.hasOwnProperty.call(gigApplicantCounts, item.id)
+        ) {
+          return { ...item, applicant_count: gigApplicantCounts[item.id] };
+        }
+        return item;
+      }),
+    [baseFeedItems, gigApplicantCounts],
+  );
 
   const isShowingAiCards = tab === "talent" && aiCards.length > 0;
   const showRecommendationLoadingState =

@@ -50,6 +50,14 @@ const ListingCard: React.FC<ListingCardProps> = ({
   const isFan = isFanUserRole(userRole);
   const [isLiked, setIsLiked] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
+  const normalizedListingType = String(item?.type || "").trim().toLowerCase();
+  const parsedApplicantCount = Number(item?.applicant_count);
+  const showApplicantCount =
+    !isFan &&
+    (normalizedListingType === "gig" || normalizedListingType === "venue") &&
+    Number.isFinite(parsedApplicantCount) &&
+    parsedApplicantCount >= 0;
+  const applicantCount = showApplicantCount ? Math.round(parsedApplicantCount) : 0;
   const horizontalWebScrollRef = useRef<ScrollView | null>(null);
   const verticalWebScrollRef = useRef<ScrollView | null>(null);
   const horizontalPagerRef = useRef<any>(null);
@@ -567,6 +575,14 @@ const ListingCard: React.FC<ListingCardProps> = ({
               <View style={[styles.tagBadge, { backgroundColor: badgeColor }]}>
                 <Text style={styles.tagText}>{badgeLabel}</Text>
               </View>
+              {showApplicantCount && (
+                <View style={[styles.tagBadge, { backgroundColor: "#0F766E", flexDirection: "row", alignItems: "center", gap: 4 }]}>
+                  <Ionicons name="people" size={13} color="#FFFFFF" />
+                  <Text style={styles.tagText}>
+                    {applicantCount} {applicantCount === 1 ? "Applicant" : "Applicants"}
+                  </Text>
+                </View>
+              )}
               {showCompletionBadge && (
                 <View style={[styles.tagBadge, { backgroundColor: completionRate === 100 ? "#10B981" : "#2563EB" }]}>
                   <Text style={styles.tagText}>Completion {completionRate}%</Text>
@@ -1046,6 +1062,27 @@ const ListingCard: React.FC<ListingCardProps> = ({
                 {badgeLabel}
               </Text>
             </View>
+            {showApplicantCount && (
+              <View
+                style={[
+                  styles.tagBadge,
+                  {
+                    backgroundColor: "#0F766E",
+                    paddingVertical: 3,
+                    paddingHorizontal: 8,
+                    marginBottom: 0,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                  },
+                ]}
+              >
+                <Ionicons name="people" size={12} color="#FFFFFF" />
+                <Text style={[styles.tagText, { fontSize: 10 }]}>
+                  {applicantCount} {applicantCount === 1 ? "Applicant" : "Applicants"}
+                </Text>
+              </View>
+            )}
             {showCompletionBadge && (
               <View
                 style={[

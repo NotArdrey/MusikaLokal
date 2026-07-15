@@ -14,6 +14,11 @@ import {
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import GigRecommendationSettings, {
+  DEFAULT_GIG_RECOMMENDATION_SETTINGS,
+  normalizeGigRecommendationSettings,
+  type GigRecommendationSettingsValue,
+} from "../src/components/GigRecommendationSettings";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
@@ -139,11 +144,16 @@ const normalizeEventSchedules = (items: any[]): EventSchedule[] =>
 export default function EditGigScreen() {
   const { colors, isDark } = useTheme();
   const todayCalendarDate = getLocalCalendarDate();
-  const { id, reapply } = useLocalSearchParams<{
+  const { id, reapply, focusSection } = useLocalSearchParams<{
     id?: string | string[];
     reapply?: string | string[];
     returnTab?: string | string[];
+    focusSection?: string | string[];
   }>();
+  const focusSectionParam = Array.isArray(focusSection) ? focusSection[0] : focusSection;
+  const editScrollRef = useRef<ScrollView>(null);
+  const focusedAiSectionRef = useRef(false);
+  const [aiSectionY, setAiSectionY] = useState(0);
   const returnTab = useLocalSearchParams<{
     returnTab?: string | string[];
   }>().returnTab;
@@ -154,6 +164,7 @@ export default function EditGigScreen() {
   const reapplyParam = Array.isArray(reapply) ? reapply[0] : reapply;
   const isReapplyRequested =
     reapplyParam === "1" || reapplyParam === "true";
+
   const [gigName, setGigName] = useState("");
   const [description, setDescription] = useState("");
   const [address, setAddress] = useState("");
@@ -169,6 +180,13 @@ export default function EditGigScreen() {
   const [saving, setSaving] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  useEffect(() => {
+    if (focusSectionParam !== "ai" || loading || aiSectionY <= 0 || focusedAiSectionRef.current) return;
+    focusedAiSectionRef.current = true;
+    const timer = setTimeout(() => editScrollRef.current?.scrollTo({ y: Math.max(0, aiSectionY - 20), animated: true }), 120);
+    return () => clearTimeout(timer);
+  }, [aiSectionY, focusSectionParam, loading]);
 
   // Custom Alert State
   const [alertVisible, setAlertVisible] = useState(false);
@@ -270,6 +288,11 @@ export default function EditGigScreen() {
 
   // Anti-spam settings
   const [reapplicationCooldownDays, setReapplicationCooldownDays] = useState<number>(30);
+  const [aiRecommendationSettings, setAiRecommendationSettings] =
+    useState<GigRecommendationSettingsValue>(() => ({
+      ...DEFAULT_GIG_RECOMMENDATION_SETTINGS,
+      criteria: { ...DEFAULT_GIG_RECOMMENDATION_SETTINGS.criteria },
+    }));
 
   // Contract state
   const [contractUrl, setContractUrl] = useState<string>("");
@@ -669,6 +692,9 @@ export default function EditGigScreen() {
 
       // Load anti-spam settings
       setReapplicationCooldownDays(data.reapplication_cooldown_days ?? 30);
+      setAiRecommendationSettings(
+        normalizeGigRecommendationSettings(data.requirements?.ai_recommendation_settings),
+      );
 
       setContractUrl(data.contract_url || "");
       if (data.contract_url) {
@@ -831,6 +857,7 @@ export default function EditGigScreen() {
             },
           },
           total_slots_needed: soloSlotsNeeded + duoSlotsNeeded + bandSlotsNeeded,
+          ai_recommendation_settings: aiRecommendationSettings,
         },
       };
 
@@ -1410,6 +1437,7 @@ export default function EditGigScreen() {
         <Header title="Edit Gig" onBackPress={handleAttemptLeave} />
 
         <ScrollView
+          ref={editScrollRef}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
           style={styles.flex1}
@@ -2393,6 +2421,13 @@ export default function EditGigScreen() {
               </View>
             )}
 
+          </View>
+
+          <View style={styles.inputContainer} onLayout={(event) => setAiSectionY(event.nativeEvent.layout.y)}>
+            <GigRecommendationSettings
+              value={aiRecommendationSettings}
+              onChange={setAiRecommendationSettings}
+            />
           </View>
 
           {/* Reapplication Cooldown Setting */}

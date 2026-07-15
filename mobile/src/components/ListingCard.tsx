@@ -266,6 +266,14 @@ const ListingCard: React.FC<ListingCardProps> = ({
   const [bookmarkBusy, setBookmarkBusy] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
   const isFeedVariant = variant === "feed";
+  const normalizedListingType = String(item?.type || "").trim().toLowerCase();
+  const parsedApplicantCount = Number(item?.applicant_count);
+  const showApplicantCount =
+    !isFan &&
+    (normalizedListingType === "gig" || normalizedListingType === "venue") &&
+    Number.isFinite(parsedApplicantCount) &&
+    parsedApplicantCount >= 0;
+  const applicantCount = showApplicantCount ? Math.round(parsedApplicantCount) : 0;
 
   // Check if current user can invite (ONLY venue-owner viewing a musician/Group)
   const canInvite = useMemo(
@@ -963,6 +971,14 @@ const ListingCard: React.FC<ListingCardProps> = ({
                 <View style={[styles.tagBadge, { backgroundColor: badgeColor }]}>
                   <Text style={styles.tagText}>{badgeLabel}</Text>
                 </View>
+                {showApplicantCount && (
+                  <View style={[styles.tagBadge, { backgroundColor: "#0F766E" }]}>
+                    <Ionicons name="people" size={13} color="#FFFFFF" />
+                    <Text style={styles.tagText}>
+                      {applicantCount} {applicantCount === 1 ? "Applicant" : "Applicants"}
+                    </Text>
+                  </View>
+                )}
                 {showCompletionBadge && (
                   <View style={[styles.tagBadge, { backgroundColor: completionRate === 100 ? "#10B981" : "#2563EB" }]}>
                     <Text style={styles.tagText}>Completion {completionRate}%</Text>
@@ -1448,6 +1464,19 @@ const ListingCard: React.FC<ListingCardProps> = ({
                       : gigDeadlineInfo.hoursLeft < 24
                         ? `${gigDeadlineInfo.hoursLeft}h left`
                         : `${Math.ceil(gigDeadlineInfo.hoursLeft / 24)}d left`}
+                  </Text>
+                </View>
+              )}
+              {showApplicantCount && (
+                <View
+                  style={[
+                    isFeedVariant ? styles.feedStatusBadge : [styles.tagBadge, styles.tagBadgeSmall],
+                    { backgroundColor: "#0F766E", flexDirection: "row", alignItems: "center", gap: 4 },
+                  ]}
+                >
+                  <Ionicons name="people" size={isFeedVariant ? 13 : 12} color="#FFFFFF" />
+                  <Text style={[styles.tagText, { fontSize: isFeedVariant ? 11 : 10 }]}>
+                    {applicantCount} {applicantCount === 1 ? "Applicant" : "Applicants"}
                   </Text>
                 </View>
               )}
