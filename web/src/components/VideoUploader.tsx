@@ -1,14 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/src/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 import React, { useState } from 'react';
 import { ActivityIndicator, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
+import { screenUploadsWithAiDecisions, UploadSafetyFileDecision } from '../services/uploadSafetyScreen';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
 const ALLOWED_VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'webm', 'm4v']);
+const COPYRIGHT_SAMPLE_BYTES = 4 * 1024 * 1024;
 
 const sanitizeVideoExtension = (rawExt?: string | null): string => {
   const cleaned = (rawExt || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -83,6 +86,98 @@ const readStorageUploadError = (status: number, body: string): string => {
   }
 };
 
+const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return globalThis.btoa(binary);
+};
+
+const readCopyrightVideoSample = async (
+  asset: ImagePicker.ImagePickerAsset,
+  mimeType: string,
+): Promise<string> => {
+  if (Platform.OS === 'web') {
+    const webFile = (asset as any)?.file as Blob | undefined;
+    const source = webFile || await (await fetch(asset.uri)).blob();
+    const sample = source.slice(0, Math.min(source.size, COPYRIGHT_SAMPLE_BYTES), mimeType);
+    return `data:${mimeType};base64,${arrayBufferToBase64(await sample.arrayBuffer())}`;
+  }
+
+  const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+    encoding: 'base64',
+    position: 0,
+    length: COPYRIGHT_SAMPLE_BYTES,
+  });
+  return `data:${mimeType};base64,${base64}`;
+};
+
+const base64ToUint8Array = (base64: string): Uint8Array => {
+  const binary = globalThis.atob(base64);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+};
+
+const createWebReviewFrame = async (uri: string, timeMs: number): Promise<Blob> => {
+  const video = document.createElement('video');
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = 'metadata';
+  video.src = uri;
+  await new Promise<void>((resolve, reject) => {
+    video.onloadedmetadata = () => {
+      const requestedSeconds = Math.max(0, timeMs / 1000);
+      video.currentTime = Math.min(requestedSeconds, Math.max(0, (video.duration || requestedSeconds) - 0.1));
+    };
+    video.onseeked = () => resolve();
+    video.onerror = () => reject(new Error('Unable to read a representative video frame.'));
+  });
+  const canvas = document.createElement('canvas');
+  const scale = Math.min(1, 1280 / Math.max(video.videoWidth, 1));
+  canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+  canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+  canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Unable to encode the video frame.')), 'image/jpeg', 0.82);
+  });
+};
+
+const uploadReviewFrame = async (input: {
+  assetUri: string;
+  userId: string;
+  bucketName: string;
+  folder: string;
+  timeMs: number;
+  frameIndex: number;
+}): Promise<string> => {
+  let body: Blob | Uint8Array;
+  if (Platform.OS === 'web') {
+    body = await createWebReviewFrame(input.assetUri, input.timeMs);
+  } else {
+    const thumbnail = await VideoThumbnails.getThumbnailAsync(input.assetUri, { time: input.timeMs, quality: 0.82 });
+    body = base64ToUint8Array(await FileSystem.readAsStringAsync(thumbnail.uri, { encoding: 'base64' }));
+  }
+  const path = `${input.userId}/${input.folder}/${Date.now()}_ai-review-frame-${input.frameIndex}.jpg`;
+  const { data, error } = await supabase.storage.from(input.bucketName).upload(path, body, {
+    contentType: 'image/jpeg',
+    upsert: false,
+  });
+  if (error) throw error;
+  return supabase.storage.from(input.bucketName).getPublicUrl(data.path).data.publicUrl;
+};
+
+const getReviewFrameTimes = (asset: ImagePicker.ImagePickerAsset): number[] => {
+  const durationMs = Number(asset.duration || 0);
+  if (!Number.isFinite(durationMs) || durationMs <= 2_000) return [1_000];
+  return Array.from(new Set([
+    1_000,
+    Math.max(1_000, Math.floor(durationMs / 2)),
+    Math.max(1_000, durationMs - 1_000),
+  ])).slice(0, 3);
+};
+
 const uploadVideoFile = async (input: {
   accessToken: string;
   assetUri: string;
@@ -134,6 +229,12 @@ interface VideoUploaderProps {
   bucketName?: string;
   folder?: string;
   maxSizeMB?: number;
+  enableReviewFrame?: boolean;
+  onReviewFrameChange?: (url: string | null) => void;
+  onReviewFramesChange?: (urls: string[]) => void;
+  enableCopyrightScreening?: boolean;
+  copyrightAcknowledged?: boolean;
+  onCopyrightDecisionChange?: (decision: UploadSafetyFileDecision | null) => void;
 }
 
 export default function VideoUploader({
@@ -142,7 +243,13 @@ export default function VideoUploader({
   userId,
   bucketName = 'documents',
   folder = 'performance-videos',
-  maxSizeMB = 50
+  maxSizeMB = 50,
+  enableReviewFrame = false,
+  onReviewFrameChange,
+  onReviewFramesChange,
+  enableCopyrightScreening = false,
+  copyrightAcknowledged = false,
+  onCopyrightDecisionChange,
 }: VideoUploaderProps) {
   const { colors, isDark } = useTheme();
   const [uploading, setUploading] = useState(false);
@@ -167,6 +274,11 @@ export default function VideoUploader({
 
   const pickAndUploadVideo = async () => {
     try {
+      if (enableCopyrightScreening && !copyrightAcknowledged) {
+        showAlert('warning', 'Permission Confirmation Required', 'Confirm that you own this performance or have permission to submit it before choosing a video.');
+        return;
+      }
+
       // Check authentication first
       const { data: { session }, error: authError } = await supabase.auth.getSession();
       if (authError || !session) {
@@ -208,6 +320,29 @@ export default function VideoUploader({
         const fileExt = resolveVideoExtension(asset, originalName);
         const mimeType = resolveVideoMimeType(asset, fileExt);
         const fileName = `${userId}/${folder}/${Date.now()}_video.${fileExt}`;
+
+        let copyrightDecision: UploadSafetyFileDecision | null = null;
+        if (enableCopyrightScreening) {
+          setUploadMessage('Checking released-recording matches...');
+          const contentDataUrl = await readCopyrightVideoSample(asset, mimeType);
+          const [decision] = await screenUploadsWithAiDecisions([{
+            name: originalName,
+            mimeType,
+            size: fileSizeBytes || undefined,
+            uri: asset.uri,
+            kind: 'video',
+            contentDataUrl,
+          }], 'gig_application_performance_video');
+
+          if (!decision?.allowed) {
+            throw new Error(decision?.reason || 'The performance video could not pass copyright screening.');
+          }
+          copyrightDecision = decision;
+          onCopyrightDecisionChange?.(decision);
+        } else {
+          onCopyrightDecisionChange?.(null);
+        }
+
         setUploadMessage('Uploading video...');
 
         debugLog('📤 Uploading video:', fileName);
@@ -228,8 +363,51 @@ export default function VideoUploader({
           .getPublicUrl(data.path);
 
         debugLog('Video uploaded successfully:', urlData.publicUrl);
+        if (copyrightDecision?.copyrightReviewId) {
+          try {
+            const { error: linkError } = await supabase.functions.invoke('upload-safety-screen', {
+              body: {
+                action: 'link_copyright_review_media',
+                reviewId: copyrightDecision.copyrightReviewId,
+                mediaUrl: urlData.publicUrl,
+              },
+            });
+            if (linkError) throw linkError;
+          } catch (linkError) {
+            console.warn('Video uploaded, but the ownership review media link could not be saved:', linkError);
+          }
+        }
+        if (enableReviewFrame && onReviewFrameChange) {
+          try {
+            setUploadMessage('Preparing representative review frames...');
+            const frameUrls: string[] = [];
+            for (const [frameIndex, timeMs] of getReviewFrameTimes(asset).entries()) {
+              try {
+                frameUrls.push(await uploadReviewFrame({ assetUri: asset.uri, userId, bucketName, folder, timeMs, frameIndex }));
+              } catch (frameError) {
+                console.warn(`Unable to prepare AI review frame ${frameIndex + 1}:`, frameError);
+              }
+            }
+            if (frameUrls.length === 0) throw new Error('No representative frames could be prepared.');
+            onReviewFrameChange(frameUrls[0]);
+            onReviewFramesChange?.(frameUrls);
+          } catch (frameError) {
+            console.warn('Unable to prepare AI review frame:', frameError);
+            onReviewFrameChange(null);
+            onReviewFramesChange?.([]);
+          }
+        } else {
+          onReviewFrameChange?.(null);
+          onReviewFramesChange?.([]);
+        }
         onVideoChange(urlData.publicUrl);
-        showAlert('success', 'Success', 'Video uploaded successfully!');
+        showAlert(
+          copyrightDecision?.requiresAdminReview ? 'warning' : 'success',
+          copyrightDecision?.requiresAdminReview ? 'Video Uploaded — Review Pending' : 'Success',
+          copyrightDecision?.requiresAdminReview
+            ? 'The video matched a released recording. Your application can continue while an admin reviews your ownership or permission claim.'
+            : 'Video uploaded successfully!',
+        );
       } catch (e: any) {
         console.error('Error uploading video:', e);
         const message = e.message || 'Failed to upload video';
@@ -256,7 +434,12 @@ export default function VideoUploader({
         {
           text: 'Remove',
           style: 'destructive',
-          onPress: () => onVideoChange(null)
+          onPress: () => {
+            onReviewFrameChange?.(null);
+            onReviewFramesChange?.([]);
+            onCopyrightDecisionChange?.(null);
+            onVideoChange(null);
+          }
         }
       ]
     );

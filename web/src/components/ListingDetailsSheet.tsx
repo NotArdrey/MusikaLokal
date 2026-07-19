@@ -37,9 +37,11 @@ import { useTheme } from "../context/ThemeContext";
 import { useApplicationSubmissionAction } from "../hooks/useApplicationSubmissionAction";
 import { useBookingRequestAction } from "../hooks/useBookingRequestAction";
 import { useCurrentUserVenueRole } from "../hooks/useCurrentUserVenueRole";
+import { useGigApplicantCounts } from "../hooks/useGigApplicantCounts";
 import { useListingSheetDerived } from "../hooks/useListingSheetDerived";
 import { useListingSheetEffects } from "../hooks/useListingSheetEffects";
 import { useProfileCompletion } from "../hooks/useProfileCompletion";
+import type { UploadSafetyFileDecision } from "../services/uploadSafetyScreen";
 import { getGigReapplicationCooldownInfo } from "../utils/gigReapplicationCooldown";
 import { submitListingRequest, uploadListingRequestDocument } from "../utils/listingRequests";
 import { isFanUserRole } from "../utils/roleRouting";
@@ -355,6 +357,11 @@ const ListingDetailsSheet = forwardRef<
   // Application State (for Gig applications)
   const [pitchMessage, setPitchMessage] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
+  const [aiPortfolioReviewConsent, setAiPortfolioReviewConsent] = useState(false);
+  const [videoReviewFrameUrl, setVideoReviewFrameUrl] = useState("");
+  const [videoReviewFrameUrls, setVideoReviewFrameUrls] = useState<string[]>([]);
+  const [videoCopyrightAcknowledged, setVideoCopyrightAcknowledged] = useState(false);
+  const [videoCopyrightDecision, setVideoCopyrightDecision] = useState<UploadSafetyFileDecision | null>(null);
   const [cvFile, setCvFile] = useState<any>(null); // File object from picker
   const [cvUrl, setCvUrl] = useState(""); // Uploaded URL (optional if we just upload on submit)
   const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
@@ -420,6 +427,8 @@ const ListingDetailsSheet = forwardRef<
   const [requestDocumentFile, setRequestDocumentFile] = useState<any>(null);
   const [requestDocumentUrl, setRequestDocumentUrl] = useState("");
   const [requestVideoUrl, setRequestVideoUrl] = useState("");
+  const [requestVideoCopyrightAcknowledged, setRequestVideoCopyrightAcknowledged] = useState(false);
+  const [requestVideoCopyrightDecision, setRequestVideoCopyrightDecision] = useState<UploadSafetyFileDecision | null>(null);
   const [isSendingRequest, setIsSendingRequest] = useState(false);
   const listingRequestInFlightRef = useRef(false);
 
@@ -1620,6 +1629,11 @@ const ListingDetailsSheet = forwardRef<
     cvFile,
     cvUrl,
     videoUrl,
+    aiPortfolioReviewConsent,
+    videoReviewFrameUrl,
+    videoReviewFrameUrls,
+    videoCopyrightAcknowledged,
+    videoCopyrightDecision,
     userGroups,
     setAlertConfig,
     setAlertVisible,
@@ -1631,6 +1645,11 @@ const ListingDetailsSheet = forwardRef<
     setExistingApplicationStatus,
     setPitchMessage,
     setVideoUrl,
+    setAiPortfolioReviewConsent,
+    setVideoReviewFrameUrl,
+    setVideoReviewFrameUrls,
+    setVideoCopyrightAcknowledged,
+    setVideoCopyrightDecision,
     setCvFile,
     setCvUrl,
     closeSheet: () => {
@@ -1664,6 +1683,11 @@ const ListingDetailsSheet = forwardRef<
       // Reset application state
       setPitchMessage("");
       setVideoUrl("");
+      setAiPortfolioReviewConsent(false);
+      setVideoReviewFrameUrl("");
+      setVideoReviewFrameUrls([]);
+      setVideoCopyrightAcknowledged(false);
+      setVideoCopyrightDecision(null);
       setHasExistingApplication(false);
       setExistingApplicationStatus(null);
       resetReapplicationCooldown();
@@ -1673,6 +1697,8 @@ const ListingDetailsSheet = forwardRef<
       setRequestDocumentFile(null);
       setRequestDocumentUrl("");
       setRequestVideoUrl("");
+      setRequestVideoCopyrightAcknowledged(false);
+      setRequestVideoCopyrightDecision(null);
       // Reset studio booking state
       setHasExistingStudioBooking(false);
       setExistingStudioBookingStatus(null);
@@ -2005,6 +2031,33 @@ const ListingDetailsSheet = forwardRef<
         };
 
         let resolvedImages = normalizeImageArray(data.images);
+
+        if (type === "Gig") {
+          const { data: gigMediaRows, error: gigMediaError } = await supabase
+            .from("gig_media")
+            .select("media_url, sort_order, created_at")
+            .eq("gig_id", data.id)
+            .eq("media_type", "image")
+            .order("sort_order", { ascending: true })
+            .order("created_at", { ascending: true });
+
+          if (gigMediaError) {
+            console.warn("[ListingDetailsSheet] Failed to load gig media", {
+              gigId: data.id,
+              message: gigMediaError.message,
+            });
+          } else {
+            const gigMediaImages = (gigMediaRows || [])
+              .map((row: any) => row?.media_url)
+              .filter((url: unknown): url is string => typeof url === "string")
+              .map((url: string) => url.trim())
+              .filter(Boolean);
+
+            if (gigMediaImages.length > 0) {
+              resolvedImages = gigMediaImages;
+            }
+          }
+        }
 
         if (type === "Group") {
           const [
@@ -2930,6 +2983,14 @@ const ListingDetailsSheet = forwardRef<
     );
   const effectiveUserRole = userRole || currentUserRole;
   const isFan = isFanUserRole(effectiveUserRole);
+  const gigApplicantCounts = useGigApplicantCounts(group ? [group] : [], {
+    isGuest,
+    userRole: effectiveUserRole,
+  });
+  const gigApplicantCount =
+    group?.type === "Gig" && typeof gigApplicantCounts[group.id] === "number"
+      ? gigApplicantCounts[group.id]
+      : undefined;
   const isMusicianUser = effectiveUserRole === "musician";
   const hasStructuredConnectionTab =
     !isGuest &&
@@ -3165,6 +3226,7 @@ const ListingDetailsSheet = forwardRef<
         colors={colors}
         isDark={isDark}
         styles={styles}
+        embedded={visibleActiveTab === "About"}
       />
     );
   };
@@ -3186,6 +3248,14 @@ const ListingDetailsSheet = forwardRef<
       setCvUrl={setCvUrl}
       videoUrl={videoUrl}
       setVideoUrl={setVideoUrl}
+      aiPortfolioReviewConsent={aiPortfolioReviewConsent}
+      setAiPortfolioReviewConsent={setAiPortfolioReviewConsent}
+      setVideoReviewFrameUrl={setVideoReviewFrameUrl}
+      setVideoReviewFrameUrls={setVideoReviewFrameUrls}
+      videoCopyrightAcknowledged={videoCopyrightAcknowledged}
+      setVideoCopyrightAcknowledged={setVideoCopyrightAcknowledged}
+      videoCopyrightDecision={videoCopyrightDecision}
+      setVideoCopyrightDecision={setVideoCopyrightDecision}
       isSubmittingApplication={isSubmittingApplication}
       hasExistingApplication={hasExistingApplication}
       existingApplicationStatus={existingApplicationStatus}
@@ -3228,6 +3298,14 @@ const ListingDetailsSheet = forwardRef<
       setCvUrl={setCvUrl}
       videoUrl={videoUrl}
       setVideoUrl={setVideoUrl}
+      aiPortfolioReviewConsent={false}
+      setAiPortfolioReviewConsent={() => {}}
+      setVideoReviewFrameUrl={() => {}}
+      setVideoReviewFrameUrls={() => {}}
+      videoCopyrightAcknowledged={false}
+      setVideoCopyrightAcknowledged={() => {}}
+      videoCopyrightDecision={null}
+      setVideoCopyrightDecision={() => {}}
       isSubmittingApplication={isSubmittingApplication}
       hasExistingApplication={hasExistingApplication}
       existingApplicationStatus={existingApplicationStatus}
@@ -3382,6 +3460,11 @@ const ListingDetailsSheet = forwardRef<
         return;
       }
 
+      if (request.requestKind === "application" && (!requestVideoCopyrightAcknowledged || requestVideoCopyrightDecision?.allowed !== true)) {
+        showSheetAlert("warning", "Video Rights Check Required", "Confirm your rights and upload the video again so its released-recording fingerprint can be checked.");
+        return;
+      }
+
       if (request.requireSlotSelection && requestSlotOptions.length > 0 && !selectedSlotType) {
         showSheetAlert("error", "Preferred Slot Required", "Choose the slot you want to fill before sending this application.");
         return;
@@ -3436,6 +3519,10 @@ const ListingDetailsSheet = forwardRef<
           request_kind: request.requestKind,
           cv_url: request.requestKind === "application" ? uploadedDocumentUrl : null,
           video_url: request.requestKind === "application" ? normalizedVideoUrl : null,
+          video_copyright_acknowledged: request.requestKind === "application" ? requestVideoCopyrightAcknowledged : false,
+          video_copyright_status: request.requestKind === "application" ? requestVideoCopyrightDecision?.copyrightStatus || "not_required" : "not_screened",
+          video_copyright_review_id: request.requestKind === "application" ? requestVideoCopyrightDecision?.copyrightReviewId || null : null,
+          video_copyright_metadata: request.requestKind === "application" ? requestVideoCopyrightDecision?.copyrightMetadata || {} : {},
           contract_url: request.requestKind === "invite" ? uploadedDocumentUrl : null,
           slot_type: selectedSlotType || null,
           roster_entry_id: selectedProductionRosterEntry?.id || null,
@@ -3477,6 +3564,8 @@ const ListingDetailsSheet = forwardRef<
         setRequestDocumentFile(null);
         setRequestDocumentUrl("");
         setRequestVideoUrl("");
+        setRequestVideoCopyrightAcknowledged(false);
+        setRequestVideoCopyrightDecision(null);
         showSheetAlert(
           "success",
           request.requestKind === "invite" ? "Invite Sent" : "Application Sent",
@@ -3506,6 +3595,8 @@ const ListingDetailsSheet = forwardRef<
       requestDocumentUrl,
       requestPitchMessage,
       requestVideoUrl,
+      requestVideoCopyrightAcknowledged,
+      requestVideoCopyrightDecision,
       filteredRequestRoster,
       isSendingRequest,
       selectedProductionRosterEntry,
@@ -3719,6 +3810,21 @@ const ListingDetailsSheet = forwardRef<
 
           {options.requestKind === "application" ? (
             <>
+              <TouchableOpacity
+                activeOpacity={0.78}
+                onPress={() => {
+                  const nextValue = !requestVideoCopyrightAcknowledged;
+                  setRequestVideoCopyrightAcknowledged(nextValue);
+                  if (!nextValue) {
+                    setRequestVideoCopyrightDecision(null);
+                    setRequestVideoUrl("");
+                  }
+                }}
+                style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, borderWidth: 1, borderColor: requestVideoCopyrightAcknowledged ? colors.primary : colors.border, borderRadius: 12, padding: 12, marginTop: 14 }}
+              >
+                <Ionicons name={requestVideoCopyrightAcknowledged ? "checkbox" : "square-outline"} size={21} color={requestVideoCopyrightAcknowledged ? colors.primary : colors.textSecondary} />
+                <Text style={{ color: colors.text, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, flex: 1 }}>I created this performance or have the rights, license, or permission to submit it. A fingerprint match may require admin review. *</Text>
+              </TouchableOpacity>
               <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Upload Video / Reel *</Text>
               <View style={{ marginTop: 8 }}>
                 <VideoUploader
@@ -3728,6 +3834,9 @@ const ListingDetailsSheet = forwardRef<
                   bucketName="documents"
                   folder="performance-videos"
                   maxSizeMB={50}
+                  enableCopyrightScreening
+                  copyrightAcknowledged={requestVideoCopyrightAcknowledged}
+                  onCopyrightDecisionChange={setRequestVideoCopyrightDecision}
                 />
               </View>
             </>
@@ -3917,6 +4026,7 @@ const ListingDetailsSheet = forwardRef<
       labels={labels}
       currentUserId={currentUserId}
       handleProfileNavigation={handleProfileNavigation}
+      applicantCount={gigApplicantCount}
     />
   );
 

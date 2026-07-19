@@ -8,9 +8,10 @@ interface GigInfoTabProps {
   colors: any;
   isDark: boolean;
   styles: any;
+  embedded?: boolean;
 }
 
-const GigInfoTab = ({ group, colors, isDark, styles }: GigInfoTabProps) => {
+const GigInfoTab = ({ group, colors, isDark, styles, embedded = false }: GigInfoTabProps) => {
   const [featuredPerformers, setFeaturedPerformers] = useState<any[]>([]);
   const requirements = group.requirements || {};
   const audioSetup =
@@ -42,7 +43,7 @@ const GigInfoTab = ({ group, colors, isDark, styles }: GigInfoTabProps) => {
   }, [group?.id]);
 
   return (
-    <View style={styles.tabContent}>
+    <View style={[styles.tabContent, embedded && { paddingTop: 16 }]}>
       <View style={{ flexDirection: "row", gap: 16 }}>
         <View
           style={[

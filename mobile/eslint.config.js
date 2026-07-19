@@ -11,7 +11,6 @@ module.exports = defineConfig([
       'supabase/.temp/**',
       'supabase/functions/**',
       'test-results/**',
-      'updateOpacity.js',
     ],
   },
 ]);

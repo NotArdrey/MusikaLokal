@@ -1155,11 +1155,13 @@ async function sendCopyrightOwnershipDeclinedEmail(
     recipientName,
     trackLabel,
     reviewNotes,
+    isPerformanceVideo = false,
   }: {
     userEmail: string;
     recipientName?: string | null;
     trackLabel: string;
     reviewNotes?: string | null;
+    isPerformanceVideo?: boolean;
   },
 ) {
   const normalizedEmail = String(userEmail || "").trim().toLowerCase();
@@ -1167,16 +1169,27 @@ async function sendCopyrightOwnershipDeclinedEmail(
     return { sent: false, queued: false, provider: "none", error: "Missing recipient email" };
   }
 
-  const safeTrackLabel = trackLabel || "your uploaded track";
-  const subject = "Track Ownership Declined - MusikaLokal";
+  const safeTrackLabel = trackLabel || (isPerformanceVideo ? "your performance video" : "your uploaded track");
+  const subject = isPerformanceVideo
+    ? "Performance Video Rights Declined - MusikaLokal"
+    : "Track Ownership Declined - MusikaLokal";
   const notesHtml = reviewNotes
     ? `<div style="background: #fef2f2; padding: 16px 18px; border-radius: 8px; border-left: 4px solid #dc2626; margin: 20px 0;"><p style="margin: 0; color: #7f1d1d;"><strong>Admin notes:</strong> ${escapeHtml(reviewNotes)}</p></div>`
     : "";
   const html = buildMusikaLokalEmail({
     eyebrow: "Music Review",
-    title: "Track Ownership Declined",
-    subtitle: "The MP3 was removed from your playlist",
-    bodyHtml: `
+    title: isPerformanceVideo ? "Performance Video Rights Declined" : "Track Ownership Declined",
+    subtitle: isPerformanceVideo ? "The application was flagged for organizer review" : "The MP3 was removed from your playlist",
+    bodyHtml: isPerformanceVideo ? `
+  <p style="margin: 0 0 12px;">We reviewed your ownership, license, or permission claim for <strong>${escapeHtml(safeTrackLabel)}</strong>, but we could not approve it.</p>
+  <p style="margin: 0 0 12px;">The video remains private in the gig application and is marked with a declined rights-review status for the organizer.</p>
+  <ul style="background: #f8fafc; padding: 20px 20px 20px 40px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 24px 0;">
+    <li>Submit only performances or recordings you own or have permission to use</li>
+    <li>Provide clear license or permission details when requested</li>
+    <li>Contact support if you believe the fingerprint match was incorrect</li>
+  </ul>
+  ${notesHtml}
+  <p style="margin: 16px 0 0;">Thank you,<br>MusikaLokal Team</p>` : `
   <p style="margin: 0 0 12px;">We reviewed your ownership request for <strong>${escapeHtml(safeTrackLabel)}</strong>, but we could not approve it.</p>
   <p style="margin: 0 0 12px;">The uploaded MP3 has been removed from your playlist and cannot be played on MusikaLokal.</p>
   <ul style="background: #f8fafc; padding: 20px 20px 20px 40px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 24px 0;">
@@ -1936,6 +1949,7 @@ serve(async (req: Request) => {
       let profilesById = new Map<string, any>();
       let verificationSessionsByRef = new Map<string, any>();
       let playlistItemsByReviewId = new Map<string, any[]>();
+      let gigApplicationsByReviewId = new Map<string, any[]>();
 
       if (userIds.length > 0) {
         const { data: linkedProfiles, error: linkedProfilesError } = await client
@@ -2013,6 +2027,27 @@ serve(async (req: Request) => {
               playlist: playlistsById.get(String(playlistItem?.playlist_id || "")) || null,
             });
             playlistItemsByReviewId.set(reviewId, existing);
+          }
+        }
+
+        const { data: linkedGigApplications, error: linkedGigApplicationsError } = await client
+          .from("gig_applications")
+          .select("id, gig_id, video_url, video_copyright_status, video_copyright_review_id, video_copyright_metadata, created_at, gig:gig_id(id, name)")
+          .in("video_copyright_review_id", copyrightReviewIds)
+          .order("created_at", { ascending: false });
+
+        if (linkedGigApplicationsError) {
+          console.warn("[admin-users-management] copyright_gig_applications_lookup_failed", {
+            message: linkedGigApplicationsError.message,
+          });
+        } else {
+          gigApplicationsByReviewId = new Map<string, any[]>();
+          for (const application of linkedGigApplications || []) {
+            const reviewId = String(application?.video_copyright_review_id || "").trim();
+            if (!reviewId) continue;
+            const existing = gigApplicationsByReviewId.get(reviewId) || [];
+            existing.push(application);
+            gigApplicationsByReviewId.set(reviewId, existing);
           }
         }
       }
@@ -2276,6 +2311,15 @@ serve(async (req: Request) => {
               created_at: playlistItem.created_at || null,
             };
           });
+        const copyrightGigApplications = (gigApplicationsByReviewId.get(String(displayReview.id || "")) || [])
+          .map((application: any) => ({
+            id: application.id || null,
+            gig_id: application.gig_id || null,
+            gig_name: (Array.isArray(application.gig) ? application.gig[0] : application.gig)?.name || null,
+            video_url: application.video_url || null,
+            copyright_status: application.video_copyright_status || null,
+            created_at: application.created_at || null,
+          }));
 
         const item = {
           ...displayReview,
@@ -2283,6 +2327,8 @@ serve(async (req: Request) => {
           didit_review: getDiditReviewInfo(displayReview),
           copyright_playlist_item: copyrightPlaylistItems[0] || null,
           copyright_playlist_items: copyrightPlaylistItems,
+          copyright_gig_application: copyrightGigApplications[0] || null,
+          copyright_gig_applications: copyrightGigApplications,
           duplicate_verified_identity_warning: duplicateMatches.length > 0
             ? {
                 same_verified_id_fingerprint: true,
@@ -2571,6 +2617,15 @@ serve(async (req: Request) => {
         }
 
         const linkedItems = linkedPlaylistItems || [];
+        const { data: linkedGigApplications, error: linkedGigApplicationsError } = await client
+          .from("gig_applications")
+          .select("id, video_url")
+          .eq("video_copyright_review_id", reviewId);
+        if (linkedGigApplicationsError && String(linkedGigApplicationsError.code || "") !== "42703") {
+          return jsonResponse({ error: linkedGigApplicationsError.message }, 400);
+        }
+        const linkedGigItems = linkedGigApplications || [];
+        const isPerformanceVideoReview = existingReviewMetadata.upload_kind === "gig_performance_video" || linkedGigItems.length > 0;
         let deletedAudioRefs: Array<{ bucket: string; path: string }> = [];
 
         if (decision === "DECLINED") {
@@ -2636,21 +2691,30 @@ serve(async (req: Request) => {
           return jsonResponse({ error: updatePlaylistItemsError.message }, 400);
         }
 
+        const decisionTitle = isPerformanceVideoReview
+          ? decision === "APPROVED" ? "Performance Video Rights Approved" : "Performance Video Rights Declined"
+          : decision === "APPROVED" ? "Track Ownership Approved" : "Track Ownership Declined";
+        const decisionMessage = isPerformanceVideoReview
+          ? decision === "APPROVED"
+            ? `Your ownership or permission review for ${trackLabel} was approved. The gig application now shows the approved review status.`
+            : `Your ownership or permission review for ${trackLabel} was declined. The performance video remains private in the application and is marked for the organizer's attention.`
+          : decision === "APPROVED"
+            ? `Your ownership review for ${trackLabel} was approved. The track is now available in your playlist.`
+            : `Your ownership review for ${trackLabel} was declined. The uploaded MP3 was removed from your playlist.`;
         const notificationPayload = {
           user_id: review.user_id,
           type: decision === "APPROVED" ? "success" : "warning",
-          title: decision === "APPROVED" ? "Track Ownership Approved" : "Track Ownership Declined",
-          message: decision === "APPROVED"
-            ? `Your ownership review for ${trackLabel} was approved. The track is now available in your playlist.`
-            : `Your ownership review for ${trackLabel} was declined. The uploaded MP3 was removed from your playlist.`,
+          title: decisionTitle,
+          message: decisionMessage,
           meta: {
             manual_identity_review_id: reviewId,
             source: COPYRIGHT_OWNERSHIP_REVIEW_SOURCE,
             decision,
             review_notes: reviewNotes,
             copyright_track_key: existingReviewMetadata.copyright_track_key || null,
-            declined_mp3_deleted: decision === "DECLINED",
+            declined_mp3_deleted: decision === "DECLINED" && linkedItems.length > 0,
             declined_mp3_storage_deleted: deletedAudioRefs.length > 0,
+            linked_gig_application_count: linkedGigItems.length,
           },
         };
 
@@ -2682,6 +2746,7 @@ serve(async (req: Request) => {
             recipientName: String(notificationProfile?.full_name || "").trim() || null,
             trackLabel,
             reviewNotes,
+            isPerformanceVideo: isPerformanceVideoReview,
           });
 
           if (decisionEmail.sent) {
@@ -2703,7 +2768,7 @@ serve(async (req: Request) => {
             declined_account_delete_attempted: false,
             declined_account_deleted: false,
             playlist_item_copyright_status: nextPlaylistItemCopyrightStatus,
-            declined_mp3_deleted: decision === "DECLINED",
+            declined_mp3_deleted: decision === "DECLINED" && linkedItems.length > 0,
             declined_mp3_storage_deleted: deletedAudioRefs.length > 0,
             declined_mp3_storage_ref_count: deletedAudioRefs.length,
             declined_playlist_item_count: linkedItems.length,

@@ -27,6 +27,7 @@ import * as VideoThumbnails from "expo-video-thumbnails";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase, supabaseAnonKey, supabaseUrl } from "../../lib/supabase";
 import CachedImage from "../../src/components/CachedImage";
+import { FeaturedGigPerformers } from "../../src/components/FeaturedGigPerformers";
 import GuestSignInGate from "../../src/components/GuestSignInGate";
 import Header from "../../src/components/header";
 import ListingDetailsSheet from "../../src/components/ListingDetailsSheet";
@@ -56,6 +57,7 @@ import {
 import { emitToast } from "../../src/events/toastBus";
 import { useFeedQuery } from "../../src/data/hooks";
 import { useGigApplicantCounts } from "../../src/hooks/useGigApplicantCounts";
+import { useGigFeaturedPerformers } from "../../src/hooks/useGigFeaturedPerformers";
 import { useTheme } from "../../src/context/ThemeContext";
 import { resolveRadioMediaUrl } from "../../src/audio/radioTrackPlayer";
 import {
@@ -1027,9 +1029,46 @@ const getFeedItemStableKey = (item: any) => {
 const getFeedItemListKey = (item: any, index: number) =>
   getFeedItemStableKey(item) || `row:${index}`;
 
+const DUPLICATE_POST_WINDOW_MS = 15_000;
+
+const getFeedPostSemanticKey = (item: any) => {
+  if (item?.__feedKind === "ai_card" || item?.__feedKind === "following_entity") {
+    return "";
+  }
+
+  const authorId = typeof item?.author_id === "string" ? item.author_id : "";
+  const content = String(item?.body ?? item?.content ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+  const createdAt = getFeedItemCreatedTime(item);
+  if (!authorId || !content || createdAt <= 0) return "";
+
+  const mediaSignature = (Array.isArray(item?.media) ? item.media : [])
+    .map((media: any) => String(media?.media_type || media?.mime_type || "media").toLowerCase())
+    .sort()
+    .join(",");
+
+  return [
+    authorId,
+    item?.post_type || "text",
+    item?.visibility || "public",
+    item?.linked_playlist_id || "",
+    item?.linked_product_id || "",
+    content,
+    mediaSignature,
+  ].join("|");
+};
+
+const getFeedPostEngagementScore = (item: any) =>
+  Number(item?.reaction_count || 0) +
+  Number(item?.comment_count || 0) +
+  Number(item?.share_count || 0);
+
 const dedupeFeedItems = (items: any[]) => {
   const seen = new Set<string>();
   const uniqueItems: any[] = [];
+  const semanticPosts = new Map<string, Array<{ index: number; timestamp: number }>>();
 
   for (const item of items) {
     const key = getFeedItemStableKey(item);
@@ -1038,6 +1077,34 @@ const dedupeFeedItems = (items: any[]) => {
         continue;
       }
       seen.add(key);
+    }
+
+    const semanticKey = getFeedPostSemanticKey(item);
+    if (semanticKey) {
+      const timestamp = getFeedItemCreatedTime(item);
+      const candidates = semanticPosts.get(semanticKey) || [];
+      const duplicate = candidates.find(
+        (candidate) => Math.abs(candidate.timestamp - timestamp) <= DUPLICATE_POST_WINDOW_MS,
+      );
+
+      if (duplicate) {
+        const existing = uniqueItems[duplicate.index];
+        const shouldReplace =
+          getFeedPostEngagementScore(item) > getFeedPostEngagementScore(existing) ||
+          (
+            getFeedPostEngagementScore(item) === getFeedPostEngagementScore(existing) &&
+            timestamp > duplicate.timestamp
+          );
+
+        if (shouldReplace) {
+          uniqueItems[duplicate.index] = item;
+          duplicate.timestamp = timestamp;
+        }
+        continue;
+      }
+
+      candidates.push({ index: uniqueItems.length, timestamp });
+      semanticPosts.set(semanticKey, candidates);
     }
 
     uniqueItems.push(item);
@@ -2834,6 +2901,13 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   const badges = useMemo(() => getFeedServiceBadges(item), [item]);
   const priceChips = useMemo(() => getFeedPriceChips(item), [item]);
   const quickInfoItems = useMemo(() => getFeedQuickInfoItems(item), [item]);
+  const featuredPerformers = useMemo(
+    () =>
+      isSuggestion && ["gig", "venue"].includes(suggestionType) && Array.isArray(item?.featured_performers)
+        ? item.featured_performers
+        : [],
+    [isSuggestion, item?.featured_performers, suggestionType],
+  );
   const avatarUri = useMemo(() => getFeedAvatarUri(item), [item]);
   const headerBadge = getFeedHeaderBadge(item);
   const bodyBadges = useMemo(
@@ -2847,7 +2921,8 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   const timestamp = getFeedTimestampLabel(item, timeAgo);
   const showHeaderFollow = Boolean(followTarget && (showAuthorFollow || isSuggestion));
   const showSuggestionDetails =
-    isSuggestion && (bodyBadges.length > 0 || priceChips.length > 0 || quickInfoItems.length > 0);
+    isSuggestion &&
+    (bodyBadges.length > 0 || priceChips.length > 0 || quickInfoItems.length > 0 || featuredPerformers.length > 0);
 
   const handleOpenPrimary = useCallback(() => {
     if (isSuggestion) {
@@ -3159,6 +3234,15 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
             </View>
           ) : null}
 
+          <FeaturedGigPerformers
+            performers={featuredPerformers}
+            primaryColor={colors.primary}
+            textColor={colors.text}
+            mutedTextColor={colors.textSecondary}
+            borderColor={borderColor}
+            isDark={isDark}
+          />
+
           {quickInfoItems.length > 0 ? (
             <View style={styles.socialQuickInfoRow}>
               {quickInfoItems.map((info, index) => {
@@ -3286,6 +3370,9 @@ export default function FeedScreen() {
     isGuest,
     userRole,
   });
+  const gigFeaturedPerformers = useGigFeaturedPerformers([...aiCards, ...followingEntities], {
+    enabled: roleResolved,
+  });
 
   // Create-post modal
   const [showCreate, setShowCreate] = useState(false);
@@ -3304,6 +3391,7 @@ export default function FeedScreen() {
   const [deletePostTarget, setDeletePostTarget] = useState<any | null>(null);
   const composerInputRef = React.useRef<TextInput>(null);
   const composerFocusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const postMutationInFlightRef = React.useRef(false);
   const createPostSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const searchSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const bottomSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
@@ -3621,7 +3709,14 @@ export default function FeedScreen() {
           post.is_following === true ||
           nextFollowingKeys.has(buildSocialFollowKey("profile", post.author_id)),
       }));
-    const nextPosts = fetchedPosts;
+    const nextPosts = dedupeFeedItems(fetchedPosts);
+    if (nextPosts.length !== fetchedPosts.length) {
+      logLoadTime("Feed", "duplicate-posts-collapsed", {
+        feedTab,
+        received: fetchedPosts.length,
+        retained: nextPosts.length,
+      });
+    }
 
     return {
       posts: nextPosts,
@@ -4931,7 +5026,14 @@ export default function FeedScreen() {
         posts: fetchedPosts.length,
       });
 
-      const nextPosts = fetchedPosts;
+      const nextPosts = dedupeFeedItems(fetchedPosts);
+      if (nextPosts.length !== fetchedPosts.length) {
+        logLoadTime("Feed", "duplicate-posts-collapsed", {
+          feedTab,
+          received: fetchedPosts.length,
+          retained: nextPosts.length,
+        });
+      }
       const nextAiCards: any[] = [];
       const nextAiFeedMessage = "";
       const nextAiFeedProvider = groqModelLabel;
@@ -5590,6 +5692,12 @@ export default function FeedScreen() {
 
   const handleCreatePost = async () => {
     const content = normalizeVisibleInput(postBody);
+    if (postMutationInFlightRef.current) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        console.warn("[Feed] Ignored duplicate post submission while a request is active");
+      }
+      return;
+    }
     if (!canCreatePosts) {
       setAlert({ type: "warning", title: "Posting unavailable", message: "Please sign in with an account that can post." });
       return;
@@ -5598,6 +5706,7 @@ export default function FeedScreen() {
       setAlert({ type: "warning", title: "Empty Post", message: "Please write something or attach media." });
       return;
     }
+    postMutationInFlightRef.current = true;
     setCreating(true);
     try {
       const shouldSendMedia = editingPost ? composerMediaDirty : postMedia.length > 0;
@@ -5659,6 +5768,7 @@ export default function FeedScreen() {
     } catch (e: any) {
       setAlert({ type: "error", title: "Error", message: e.message });
     } finally {
+      postMutationInFlightRef.current = false;
       setCreating(false);
     }
   };
@@ -6744,13 +6854,22 @@ export default function FeedScreen() {
         const normalizedType = String(item?.type || "").trim().toLowerCase();
         if (
           (normalizedType === "gig" || normalizedType === "venue") &&
-          Object.prototype.hasOwnProperty.call(gigApplicantCounts, item.id)
+          (
+            Object.prototype.hasOwnProperty.call(gigApplicantCounts, item.id) ||
+            Object.prototype.hasOwnProperty.call(gigFeaturedPerformers, item.id)
+          )
         ) {
-          return { ...item, applicant_count: gigApplicantCounts[item.id] };
+          return {
+            ...item,
+            ...(Object.prototype.hasOwnProperty.call(gigApplicantCounts, item.id)
+              ? { applicant_count: gigApplicantCounts[item.id] }
+              : {}),
+            featured_performers: gigFeaturedPerformers[item.id] || [],
+          };
         }
         return item;
       }),
-    [baseFeedItems, gigApplicantCounts],
+    [baseFeedItems, gigApplicantCounts, gigFeaturedPerformers],
   );
 
   const isShowingAiCards = tab === "talent" && aiCards.length > 0;

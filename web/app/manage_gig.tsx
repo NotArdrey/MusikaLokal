@@ -1248,6 +1248,29 @@ export default function GigDetailsScreen() {
                   visibleApplications.map((app) => {
                     const statusMeta = getApplicationStatusMeta(app.status);
                     const aiRecommendation = app.ai_recommendation;
+                    const aiPortfolioReview = app.ai_portfolio_review;
+                    const faceSimilarity = aiPortfolioReview?.face_similarity || null;
+                    const groupFaceSimilarities = Array.isArray(aiPortfolioReview?.group_face_similarity)
+                      ? aiPortfolioReview.group_face_similarity
+                      : [];
+                    const videoCopyrightStatus = String(app.video_copyright_status || "not_screened");
+                    const videoCopyrightMeta = app.video_copyright_metadata || {};
+                    const videoCopyrightColor = videoCopyrightStatus === "approved" || videoCopyrightStatus === "not_required"
+                      ? "#10B981"
+                      : videoCopyrightStatus === "declined"
+                        ? "#EF4444"
+                        : videoCopyrightStatus === "pending_review"
+                          ? "#F59E0B"
+                          : colors.textSecondary;
+                    const videoCopyrightLabel = videoCopyrightStatus === "not_required"
+                      ? "No released-recording match"
+                      : videoCopyrightStatus === "pending_review"
+                        ? "Ownership review pending"
+                        : videoCopyrightStatus === "approved"
+                          ? "Ownership/permission approved"
+                          : videoCopyrightStatus === "declined"
+                            ? "Ownership/permission declined"
+                            : "Legacy video — not screened";
                     const isAccepted = ["accepted", "approved"].includes(String(app.status || "").toLowerCase());
                     const consentStatus = String(app.feature_consent_status || "not_requested").toLowerCase();
                     return (
@@ -1331,6 +1354,27 @@ export default function GigDetailsScreen() {
                         </View>
                       </View>
 
+                      {app.video_url ? (
+                        <View
+                          testID={`video-copyright-${app.id}`}
+                          style={{ backgroundColor: colors.inputBackground, borderColor: videoCopyrightColor, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 }}
+                        >
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+                            <Ionicons name="shield-checkmark-outline" size={17} color={videoCopyrightColor} />
+                            <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 13, flex: 1 }}>Performance video rights</Text>
+                            <Text style={{ color: videoCopyrightColor, fontFamily: "Poppins_600SemiBold", fontSize: 10, textTransform: "uppercase" }}>{videoCopyrightLabel}</Text>
+                          </View>
+                          {videoCopyrightMeta.copyright_title ? (
+                            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 6 }}>
+                              Match: {videoCopyrightMeta.copyright_title}{videoCopyrightMeta.copyright_artist_label ? ` by ${videoCopyrightMeta.copyright_artist_label}` : ""}
+                            </Text>
+                          ) : null}
+                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 5 }}>
+                            {app.video_copyright_acknowledged ? "Applicant confirmed ownership, license, or permission. " : "No current rights acknowledgment is recorded. "}Fingerprint screening is a review signal, not a legal copyright decision.
+                          </Text>
+                        </View>
+                      ) : null}
+
                       {aiRecommendation ? (
                         <View
                           testID={`ai-recommendation-${app.id}`}
@@ -1365,6 +1409,89 @@ export default function GigDetailsScreen() {
                               Review: {aiRecommendation.missing_criteria.join(", ")}
                             </Text>
                           ) : null}
+                        </View>
+                      ) : null}
+
+                      {app.ai_portfolio_review_consent === true ? (
+                        <View
+                          testID={`ai-portfolio-review-${app.id}`}
+                          style={{ backgroundColor: colors.inputBackground, borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 }}
+                        >
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+                            <Ionicons name="document-text-outline" size={17} color={colors.primary} />
+                            <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 13, flex: 1 }}>AI portfolio evidence</Text>
+                            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 10, textTransform: "uppercase" }}>
+                              {String(aiPortfolioReview?.status || "queued").replace("_", " ")}
+                            </Text>
+                          </View>
+                          {!aiPortfolioReview || ["queued", "processing"].includes(String(aiPortfolioReview.status)) ? (
+                            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 7 }}>
+                              Reviewing consented CV text, video audio, and available portfolio images. Refresh shortly.
+                            </Text>
+                          ) : (
+                            <>
+                              <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 7 }}>
+                                {aiPortfolioReview.overall_summary || "The automated evidence review is unavailable. Review the original files directly."}
+                              </Text>
+                              {faceSimilarity?.status && groupFaceSimilarities.length === 0 ? (() => {
+                                const faceStatus = String(faceSimilarity.status);
+                                const faceColor = faceStatus === "likely_same_person" ? "#10B981" : faceStatus === "likely_different_person" ? "#EF4444" : "#F59E0B";
+                                const faceLabel = faceStatus === "likely_same_person" ? "Likely visually consistent" : faceStatus === "likely_different_person" ? "Possible mismatch" : faceStatus === "unclear" ? "Unclear" : "Not run";
+                                return (
+                                  <View style={{ marginTop: 9, padding: 10, borderWidth: 1, borderColor: faceColor, borderRadius: 10 }}>
+                                    <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+                                      <Ionicons name="person-circle-outline" size={16} color={faceColor} />
+                                      <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 11, flex: 1 }}>Advisory face similarity</Text>
+                                      <Text style={{ color: faceColor, fontFamily: "Poppins_600SemiBold", fontSize: 9, textTransform: "uppercase" }}>{faceLabel}</Text>
+                                    </View>
+                                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 5 }}>{faceSimilarity.summary}</Text>
+                                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 4 }}>Not identity verification. Compare the original profile photo and video yourself; never decide from this signal alone.</Text>
+                                  </View>
+                                );
+                              })() : null}
+                              {groupFaceSimilarities.map((memberResult: any) => {
+                                const faceStatus = String(memberResult?.status || "unclear");
+                                const faceColor = faceStatus === "likely_same_person" ? "#10B981" : faceStatus === "likely_different_person" ? "#EF4444" : "#F59E0B";
+                                const faceLabel = faceStatus === "likely_same_person" ? "Likely visually consistent" : faceStatus === "likely_different_person" ? "Possible mismatch" : faceStatus === "unclear" ? "Unclear" : "Not run";
+                                return (
+                                  <View key={String(memberResult?.profile_id || memberResult?.display_name)} style={{ marginTop: 9, padding: 10, borderWidth: 1, borderColor: faceColor, borderRadius: 10 }}>
+                                    <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+                                      <Ionicons name="people-circle-outline" size={16} color={faceColor} />
+                                      <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 11, flex: 1 }}>{memberResult?.display_name || "Group member"}</Text>
+                                      <Text style={{ color: faceColor, fontFamily: "Poppins_600SemiBold", fontSize: 9, textTransform: "uppercase" }}>{faceLabel}</Text>
+                                    </View>
+                                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 5 }}>{memberResult?.summary || "No comparison explanation was available."}</Text>
+                                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 4 }}>Advisory group-member similarity only. Inspect the member profile and original video yourself.</Text>
+                                  </View>
+                                );
+                              })}
+                              {(Array.isArray(aiPortfolioReview.evidence) ? aiPortfolioReview.evidence : []).map((criterion: any, criterionIndex: number) => {
+                                const result = String(criterion?.result || "unclear");
+                                const resultColor = result === "supported" ? "#10B981" : result === "not_supported" ? "#EF4444" : "#F59E0B";
+                                return (
+                                  <View key={`${criterion?.criterion || "criterion"}-${criterionIndex}`} style={{ marginTop: 9, paddingTop: 9, borderTopWidth: 1, borderTopColor: colors.border }}>
+                                    <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+                                      <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 11, flex: 1 }}>
+                                        {String(criterion?.criterion || "Requirement").replace(/_/g, " ")}
+                                      </Text>
+                                      <Text style={{ color: resultColor, fontFamily: "Poppins_600SemiBold", fontSize: 10, textTransform: "uppercase" }}>
+                                        {result.replace("_", " ")} · {Math.round(Number(criterion?.confidence || 0) * 100)}%
+                                      </Text>
+                                    </View>
+                                    {(Array.isArray(criterion?.evidence) ? criterion.evidence : []).slice(0, 3).map((entry: any, evidenceIndex: number) => (
+                                      <Text key={evidenceIndex} style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 4 }}>
+                                        • {entry?.observation}
+                                        {entry?.timestamp_seconds != null && Number.isFinite(Number(entry.timestamp_seconds)) ? ` (${Math.floor(Number(entry.timestamp_seconds) / 60)}:${String(Math.floor(Number(entry.timestamp_seconds) % 60)).padStart(2, "0")})` : ""}
+                                      </Text>
+                                    ))}
+                                  </View>
+                                );
+                              })}
+                              <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 9 }}>
+                                Advisory only—not identity verification, a talent score, or a hiring decision. Inspect the original CV and performance video.
+                              </Text>
+                            </>
+                          )}
                         </View>
                       ) : null}
 

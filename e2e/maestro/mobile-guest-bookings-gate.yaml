@@ -1,8 +1,0 @@
-appId: ${APP_ID}
----
-- openLink: "musikalokal://bookings"
-- extendedWaitUntil:
-    visible: "Sign in to view your bookings and activity."
-    timeout: 120000
-- assertNotVisible:
-    id: "mobile-bookings-page"

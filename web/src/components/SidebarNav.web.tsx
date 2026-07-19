@@ -499,7 +499,6 @@ export default function SidebarNav() {
         if (pathname === '/home' || pathname.startsWith('/home/')) return 'feed';
         if (pathname.includes('discover')) return 'discover';
         if (pathname.includes('bookings')) return 'activity';
-        if (pathname.includes('ai_suggestions')) return 'ai-suggest';
         if (pathname.includes('marketplace')) return 'marketplace';
         if (pathname.includes('profile') || pathname.includes('settings') || pathname.includes('wallet')) {
             return isFan ? (pathname.includes('settings') ? 'settings' : 'profile') : 'profile';
@@ -548,7 +547,6 @@ export default function SidebarNav() {
         return [
             { id: 'feed', icon: 'newspaper', label: 'Home', route: '/feed' },
             { id: 'discover', icon: 'compass', label: 'Discover', route: '/discover' },
-            { id: 'ai-suggest', icon: 'sparkles', label: 'AI Discovery', route: '/ai_suggestions' },
             { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
             { id: 'marketplace', icon: 'storefront', label: 'Marketplace', route: '/marketplace' },
             { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },

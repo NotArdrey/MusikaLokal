@@ -26,11 +26,11 @@ const LOCAL_ONLY_MODE = true;
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 const GROQ_MODEL_CANDIDATES = [
-    'llama-3.3-70b-versatile',
-    'llama-3.1-8b-instant',
+    Deno.env.get('GROQ_TEXT_MODEL')?.trim(),
     'openai/gpt-oss-120b',
+    'qwen/qwen3.6-27b',
     'openai/gpt-oss-20b',
-];
+].filter((model): model is string => Boolean(model));
 const GROQ_RETRYABLE_STATUS_CODES = new Set([403, 404, 408, 409, 429, 498, 500, 502, 503, 504]);
 
 interface AIProviderStatus {

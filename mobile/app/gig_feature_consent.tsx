@@ -151,8 +151,8 @@ export default function GigFeatureConsentScreen() {
 
             <View style={[styles.optionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <View style={styles.optionCopy}>
-                <Text style={[styles.optionTitle, { color: colors.text }]}>Feature me on the gig page</Text>
-                <Text style={[styles.optionDescription, { color: colors.textSecondary }]}>Show your approved performer name and avatar in the gig’s Featured Performers section.</Text>
+                <Text style={[styles.optionTitle, { color: colors.text }]}>Feature me on the gig and Feed pages</Text>
+                <Text style={[styles.optionDescription, { color: colors.textSecondary }]}>Show your approved performer name and avatar on the gig page and its cards in the Feed.</Text>
               </View>
               <Switch
                 testID="feature-on-gig-page-toggle"

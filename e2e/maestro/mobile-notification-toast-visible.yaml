@@ -1,5 +1,0 @@
-appId: ${APP_ID}
----
-- assertVisible:
-    id: ${E2E_NOTIFICATION_TOAST_ID}
-- assertVisible: ${E2E_NOTIFICATION_TOAST_TITLE}

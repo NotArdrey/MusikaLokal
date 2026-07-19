@@ -6,6 +6,11 @@ import {
     resolveGigApplicationAudience,
 } from "../_shared/gigApplicationAudience.ts";
 import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
+import {
+    attachGigPortfolioReviews,
+    queueGigPortfolioReview,
+    scheduleGigPortfolioReview,
+} from "../_shared/gigPortfolioReview.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -27,6 +32,7 @@ function extractAccessToken(authHeader: string): string | null {
 const ALLOWED_ORGANIZER_STATUSES = new Set(['accepted', 'approved', 'rejected', 'cancelled', 'completed', 'fired'])
 const ALLOWED_LEADER_DECISIONS = new Set(['approved', 'rejected'])
 const ACTIVE_GIG_APPLICATION_STATUSES = ['pending', 'accepted', 'approved']
+const PRODUCTION_GIG_APPLICATIONS_ENABLED = false
 
 async function insertCoreNotification(supabaseClient: any, payload: Record<string, unknown>) {
     const { error } = await supabaseClient
@@ -563,7 +569,7 @@ async function addGroqRecommendationExplanations(evaluations: any[]) {
     if (!apiKey || evaluations.length === 0) return evaluations
 
     try {
-        const model = Deno.env.get('GROQ_MODEL') || 'llama-3.3-70b-versatile'
+        const model = Deno.env.get('GROQ_MODEL') || 'openai/gpt-oss-120b'
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -726,7 +732,7 @@ async function notifyGigFeatureConsentRequest(supabaseClient: any, applicationId
             user_id: userId,
             type: 'info',
             title: 'Featuring permission requested',
-            message: `You were accepted for "${gigName}". Choose whether you want to be featured on the gig page or your public profile.`,
+            message: `You were accepted for "${gigName}". Choose whether you want to be featured on the gig and Feed pages or your public profile.`,
             meta: buildNotificationRouteMeta('/gig_feature_consent', { applicationId }, {
                 event_type: 'gig_feature_consent_requested',
                 application_id: applicationId,
@@ -795,6 +801,58 @@ Deno.serve(async (req: Request) => {
 
         const effectiveUserId = userId || authenticatedUserId
 
+        // Applicant-triggered enqueue. The response returns before media processing on Edge Runtime.
+        if (action === 'request_ai_portfolio_review') {
+            const { applicationId } = params
+            if (!applicationId) {
+                return new Response(JSON.stringify({ error: 'applicationId is required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const { data: application, error: applicationError } = await supabaseClient
+                .from('gig_applications')
+                .select('id, applicant_id, submitted_by_user_id, group_id, leader_approval_status, ai_portfolio_review_consent')
+                .eq('id', applicationId)
+                .maybeSingle()
+            if (applicationError) throw applicationError
+            if (!application) {
+                return new Response(JSON.stringify({ error: 'Application not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                })
+            }
+            if (application.applicant_id !== effectiveUserId && application.submitted_by_user_id !== effectiveUserId) {
+                return new Response(JSON.stringify({ error: 'Only the applicant who granted consent can request this review' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                })
+            }
+            if (application.ai_portfolio_review_consent !== true) {
+                return new Response(JSON.stringify({ error: 'AI portfolio review consent is required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
+                })
+            }
+            if (application.group_id && application.leader_approval_status === 'pending') {
+                return new Response(JSON.stringify({
+                    application_id: applicationId,
+                    status: 'awaiting_group_leader_approval',
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 202,
+                })
+            }
+
+            await queueGigPortfolioReview(supabaseClient, applicationId)
+            await scheduleGigPortfolioReview(supabaseClient, applicationId, supabaseUrl)
+            return new Response(JSON.stringify({ application_id: applicationId, status: 'queued' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 202,
+            })
+        }
+
         // FETCH GIG APPLICATIONS (for gig owner)
         if (action === 'fetch_gig_applications') {
             const { gigId } = params;
@@ -837,7 +895,8 @@ Deno.serve(async (req: Request) => {
             if (error) throw error;
             const hydratedData = await hydrateLegacyApplicationFields(supabaseClient, data || [])
             const rankedData = await attachGigApplicationRecommendations(supabaseClient, gigId, hydratedData)
-            return new Response(JSON.stringify(rankedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            const reviewedData = await attachGigPortfolioReviews(supabaseClient, rankedData)
+            return new Response(JSON.stringify(reviewedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
         // FETCH PENDING APPLICATION RECOMMENDATIONS FOR THE OWNER'S BOOKINGS PAGE
@@ -963,7 +1022,8 @@ Deno.serve(async (req: Request) => {
                     return Number(rightRecommendation?.score || 0) - Number(leftRecommendation?.score || 0)
                 })
 
-            return new Response(JSON.stringify(rankedApplications), {
+            const reviewedApplications = await attachGigPortfolioReviews(supabaseClient, rankedApplications)
+            return new Response(JSON.stringify(reviewedApplications), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
             })
@@ -1093,12 +1153,34 @@ Deno.serve(async (req: Request) => {
             return new Response(JSON.stringify(hydratedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
-        // SUBMIT PRODUCTION GIG APPLICATION
+        if (action === 'submit_production_gig_application' && !PRODUCTION_GIG_APPLICATIONS_ENABLED) {
+            return new Response(JSON.stringify({
+                error: 'Production accounts cannot apply to gigs. Apply from a musician account as solo, duo, or group.',
+                code: 'PRODUCTION_GIG_APPLICATIONS_DISABLED',
+            }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 403,
+            })
+        }
+
+        // Legacy implementation retained for historical reads; server and database gates keep it disabled.
         if (action === 'submit_production_gig_application') {
-            const { gigId, teamId, rosterId, pitchMessage, videoUrl, cvUrl, slotType } = params;
+            const {
+                gigId, teamId, rosterId, pitchMessage, videoUrl, cvUrl, slotType,
+                aiPortfolioReviewConsent, aiReviewFrameUrl, aiReviewFrameUrls,
+                videoCopyrightAcknowledged, videoCopyrightStatus,
+                videoCopyrightReviewId, videoCopyrightMetadata,
+            } = params;
 
             if (!gigId || !teamId || !rosterId) {
                 return new Response(JSON.stringify({ error: 'gigId, teamId, and rosterId are required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            if (videoUrl && videoCopyrightAcknowledged !== true) {
+                return new Response(JSON.stringify({ error: 'Performance video rights acknowledgment is required' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 400,
                 })
@@ -1225,6 +1307,17 @@ Deno.serve(async (req: Request) => {
                 leader_approval_status: rosterRecord.group_id ? 'approved' : null,
                 production_team_id: teamId,
                 production_roster_id: rosterId,
+                ai_portfolio_review_consent: aiPortfolioReviewConsent === true,
+                ai_review_frame_url: aiPortfolioReviewConsent === true ? aiReviewFrameUrl || null : null,
+                ai_review_frame_urls: aiPortfolioReviewConsent === true && Array.isArray(aiReviewFrameUrls)
+                    ? aiReviewFrameUrls.slice(0, 3)
+                    : [],
+                video_copyright_acknowledged: videoCopyrightAcknowledged === true,
+                video_copyright_status: String(videoCopyrightStatus || 'not_screened'),
+                video_copyright_review_id: videoCopyrightReviewId || null,
+                video_copyright_metadata: videoCopyrightMetadata && typeof videoCopyrightMetadata === 'object'
+                    ? videoCopyrightMetadata
+                    : {},
             };
 
             const { data: insertedApplication, error: insertError } = await supabaseClient
@@ -1287,6 +1380,18 @@ Deno.serve(async (req: Request) => {
                         performer_name: performerName,
                     })),
                 });
+            }
+
+            if (aiPortfolioReviewConsent === true) {
+                try {
+                    await queueGigPortfolioReview(supabaseClient, insertedApplication.id)
+                    await scheduleGigPortfolioReview(supabaseClient, insertedApplication.id, supabaseUrl)
+                } catch (reviewError) {
+                    console.warn('gig_ai_review_queue_failed', {
+                        applicationId: insertedApplication.id,
+                        message: String((reviewError as any)?.message || reviewError),
+                    })
+                }
             }
 
             return new Response(JSON.stringify(hydratedInsertedApplication), {
@@ -1475,6 +1580,7 @@ Deno.serve(async (req: Request) => {
                     submitted_by_user_id,
                     status,
                     leader_approval_status,
+                    ai_portfolio_review_consent,
                     gig:gig_id(id, name, organizer_id),
                     group:group_id(id, name, owner_id)
                 `)
@@ -1567,6 +1673,18 @@ Deno.serve(async (req: Request) => {
                         leader_approved_by: effectiveUserId,
                     }),
                 });
+            }
+
+            if (normalizedDecision === 'approved' && appDetails.ai_portfolio_review_consent === true) {
+                try {
+                    await queueGigPortfolioReview(supabaseClient, applicationId)
+                    await scheduleGigPortfolioReview(supabaseClient, applicationId, supabaseUrl)
+                } catch (reviewError) {
+                    console.warn('group_gig_ai_review_queue_failed', {
+                        applicationId,
+                        message: String((reviewError as any)?.message || reviewError),
+                    })
+                }
             }
 
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });

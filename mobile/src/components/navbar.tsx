@@ -56,7 +56,6 @@ type GlobalNavbarProps = Pick<NavbarProps, 'forceVisible'> & Partial<BottomTabBa
 const TAB_BAR_HOSTED_PATHS = new Set([
     '/feed',
     '/home',
-    '/ai_suggestions',
     '/bookings',
     '/marketplace',
     '/manage',
@@ -185,7 +184,6 @@ export function Navbar(_props: NavbarProps) {
 const getTabIdFromRouteName = (routeName: string | undefined) => {
     if (!routeName) return null;
     if (routeName === 'feed' || routeName === 'home') return 'home';
-    if (routeName === 'ai_suggestions') return 'ai';
     if (routeName === 'bookings' || routeName === 'chat' || routeName === 'notifications') return 'activity';
     if (routeName === 'marketplace') return 'marketplace';
     if (
@@ -204,7 +202,6 @@ const getTabIdFromRouteName = (routeName: string | undefined) => {
 const getTabIdFromPathname = (pathname: string) => {
     if (pathname.includes('feed') || pathname.includes('home')) return 'home';
     if (pathname.includes('marketplace') || pathname.includes('shop') || pathname.includes('seller_hub') || pathname.includes('orders') || pathname.includes('product_details')) return 'marketplace';
-    if (pathname.includes('ai_suggestions')) return 'ai';
     if (pathname.includes('bookings') || pathname.includes('chat') || pathname.includes('notification') || pathname.includes('payment-result') || pathname.includes('submit_review') || pathname.includes('to_review')) return 'activity';
     if (
         pathname.includes('profile') ||
@@ -290,7 +287,6 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
 
             return [
                 { id: 'home', icon: 'home', label: 'Home', route: '/feed', routeName: 'feed' },
-                { id: 'ai', icon: 'sparkles', label: 'AI', route: '/ai_suggestions', routeName: 'ai_suggestions' },
                 { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings', routeName: 'bookings' },
                 { id: 'marketplace', icon: 'storefront', label: 'Shop', route: '/marketplace', routeName: 'marketplace' },
                 { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute, routeName: manageRouteName },

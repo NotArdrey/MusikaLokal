@@ -3,6 +3,7 @@
   "main": "index.js",
   "version": "1.0.0",
   "scripts": {
+    "postinstall": "patch-package",
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
@@ -92,6 +93,7 @@
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
     "expo-module-scripts": "^5.0.8",
+    "patch-package": "^8.0.1",
     "playwright": "^1.59.1",
     "supabase": "^2.74.5",
     "typescript": "~5.9.2"

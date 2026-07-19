@@ -1,7 +1,0 @@
-appId: ${APP_ID}
----
-- openLink: "musikalokal://feed"
-- extendedWaitUntil:
-    visible:
-      id: "nav-profile"
-    timeout: 60000

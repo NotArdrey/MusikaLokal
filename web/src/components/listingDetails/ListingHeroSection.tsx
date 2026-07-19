@@ -4,6 +4,22 @@ import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import CachedImage from "../CachedImage";
 
+const GIG_FALLBACK_IMAGES = [
+  "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1000&q=75",
+  "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=1000&q=75",
+  "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=1000&q=75",
+];
+
+const getGigFallbackImage = (group: any) => {
+  if (group?.type !== "Gig") return null;
+
+  const seed = String(group?.id || group?.name || "Gig")
+    .split("")
+    .reduce((sum, character) => sum + character.charCodeAt(0), 0);
+
+  return GIG_FALLBACK_IMAGES[seed % GIG_FALLBACK_IMAGES.length];
+};
+
 interface ListingHeroSectionProps {
   group: any;
   colors: any;
@@ -42,6 +58,7 @@ const ListingHeroSection = ({
   <View style={styles.imageContainer}>
     <CachedImage
       uri={(group.images && group.images[0]) || group.image || null}
+      fallbackUri={getGigFallbackImage(group)}
       style={[styles.image, { backgroundColor: colors.border }]}
       width={1080}
       height={680}

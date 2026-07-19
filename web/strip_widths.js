@@ -2,7 +2,6 @@ const fs = require('fs');
 
 const files = [
   'app/bookings.tsx',
-  'app/ai_suggestions.tsx',
   'app/profile.tsx',
   'app/my_venue.tsx',
   'app/my_studio.tsx',

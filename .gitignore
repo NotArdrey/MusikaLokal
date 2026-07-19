@@ -1,7 +1,34 @@
 node_modules/
 .expo/
+expo-env.d.ts
 .env
-.env.e2e
-.env.local
+.env.*
+!.env*.example
 dist/
 build/
+
+# Local editor and operating-system state
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Test and coverage output
+**/test-results/
+**/test-report/
+**/playwright-report/
+coverage/
+
+# Runtime and diagnostic output
+*.log
+*.out
+*.err
+*.tmp
+*.patch
+!mobile/patches/*.patch
+**/.tmp_*
+**/tsc_output.txt
+**/errors*.txt
+**/new_errors.txt
+**/push_error*.txt
+**/env_decoded.txt

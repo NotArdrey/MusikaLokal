@@ -1,7 +1,0 @@
-appId: ${APP_ID}
----
-- openLink: ${E2E_REPORT_ROUTE}
-- assertVisible:
-    id: "post-report-button"
-- tapOn:
-    id: "post-report-button"

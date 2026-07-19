@@ -77,19 +77,23 @@ const MAX_HOME_TARGET_COUNT = 6;
 const GROQ_CHAT_COMPLETIONS_URL =
   "https://api.groq.com/openai/v1/chat/completions";
 
-const DEFAULT_GROQ_MODEL_ID = "llama-3.3-70b-versatile";
+const DEFAULT_GROQ_MODEL_ID = "openai/gpt-oss-120b";
 const GROQ_MODEL_FALLBACK_IDS = [
   DEFAULT_GROQ_MODEL_ID,
-  "llama-3.1-8b-instant",
-  "openai/gpt-oss-120b",
+  "qwen/qwen3.6-27b",
   "openai/gpt-oss-20b",
 ];
 const GROQ_MODEL_LABELS: Record<string, string> = {
-  "llama-3.3-70b-versatile": "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant": "llama-3.1-8b-instant",
   "openai/gpt-oss-120b": "openai/gpt-oss-120b",
+  "qwen/qwen3.6-27b": "qwen/qwen3.6-27b",
   "openai/gpt-oss-20b": "openai/gpt-oss-20b",
 };
+const RETIRED_OR_RETIRING_GROQ_MODELS = new Set([
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "meta-llama/llama-4-scout-17b-16e-instruct",
+  "qwen/qwen3-32b",
+]);
 
 export const GROQ_PRIMARY_MODEL_ID = DEFAULT_GROQ_MODEL_ID;
 export const GROQ_PRIMARY_LABEL = GROQ_MODEL_LABELS[DEFAULT_GROQ_MODEL_ID];
@@ -441,7 +445,9 @@ const getGroqModelLabel = (modelId: string) => GROQ_MODEL_LABELS[modelId] || mod
 
 const getConfiguredGroqModelId = () => {
   const configuredModelId = getResolvedGroqConfig().model.value || DEFAULT_GROQ_MODEL_ID;
-  return configuredModelId === "qwen/qwen3-32b" ? DEFAULT_GROQ_MODEL_ID : configuredModelId;
+  return RETIRED_OR_RETIRING_GROQ_MODELS.has(configuredModelId)
+    ? DEFAULT_GROQ_MODEL_ID
+    : configuredModelId;
 };
 
 const getGroqModelCandidates = () => {

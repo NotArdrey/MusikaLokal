@@ -11,6 +11,7 @@ import {
     View,
 } from "react-native";
 import { PH_MUSIC_GROUP_TYPES } from "../../constants/groupTypes";
+import type { UploadSafetyFileDecision } from "../../services/uploadSafetyScreen";
 import { getGigApplicationDeadlineInfo } from "../../utils/gigApplication";
 import DocumentUploader from "../DocumentUploader";
 import InAppMediaViewer from "../InAppMediaViewer";
@@ -34,6 +35,14 @@ interface GigApplyTabProps {
   setCvUrl: (value: string) => void;
   videoUrl: string;
   setVideoUrl: (value: string) => void;
+  aiPortfolioReviewConsent: boolean;
+  setAiPortfolioReviewConsent: (value: boolean) => void;
+  setVideoReviewFrameUrl: (value: string) => void;
+  setVideoReviewFrameUrls: (value: string[]) => void;
+  videoCopyrightAcknowledged: boolean;
+  setVideoCopyrightAcknowledged: (value: boolean) => void;
+  videoCopyrightDecision: UploadSafetyFileDecision | null;
+  setVideoCopyrightDecision: (value: UploadSafetyFileDecision | null) => void;
   isSubmittingApplication: boolean;
   hasExistingApplication: boolean;
   existingApplicationStatus: string | null;
@@ -74,6 +83,14 @@ const GigApplyTab = ({
   setCvUrl,
   videoUrl,
   setVideoUrl,
+  aiPortfolioReviewConsent,
+  setAiPortfolioReviewConsent,
+  setVideoReviewFrameUrl,
+  setVideoReviewFrameUrls,
+  videoCopyrightAcknowledged,
+  setVideoCopyrightAcknowledged,
+  videoCopyrightDecision,
+  setVideoCopyrightDecision,
   isSubmittingApplication,
   hasExistingApplication,
   existingApplicationStatus,
@@ -148,6 +165,12 @@ const GigApplyTab = ({
     if (selectedSlotType === "band") return entryGroupType === "band";
     return true;
   });
+  const selectedProductionRoster = selectedProductionRosterId
+    ? productionRoster.find((entry) => entry.id === selectedProductionRosterId)
+    : null;
+  const aiReviewCoversGroup = Boolean(
+    selectedGroupId || (isProducerFlow && getProductionRosterGroupType(selectedProductionRoster)),
+  );
 
   const getEnabledSlotTypes = () => {
     if (requiredSlotTypes.length === 0) return [] as ("solo" | "duo" | "band")[];
@@ -246,7 +269,11 @@ const GigApplyTab = ({
   const isPitchMissing = !pitchMessage.trim();
   const isCvMissing = !cvFile && !cvUrl;
   const isVideoMissing = !(videoUrl || "").trim();
-  const isTermsIncomplete = !isGroupApplicationFlow && (!isSystemTermsAccepted || (hasCustomContract && !isCustomContractAccepted));
+  const isTermsIncomplete = !isGroupApplicationFlow && (
+    !isSystemTermsAccepted ||
+    !videoCopyrightAcknowledged ||
+    (hasCustomContract && !isCustomContractAccepted)
+  );
   const isFormIncomplete =
     isPitchMissing ||
     isCvMissing ||
@@ -817,11 +844,95 @@ const GigApplyTab = ({
         </View>
       </View>
 
+      {!isGroupApplicationFlow && (
+        <TouchableOpacity
+          activeOpacity={0.78}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: aiPortfolioReviewConsent }}
+          accessibilityLabel="Consent to optional AI portfolio review"
+          onPress={() => {
+            const nextValue = !aiPortfolioReviewConsent;
+            setAiPortfolioReviewConsent(nextValue);
+            if (!nextValue) {
+              setVideoReviewFrameUrl("");
+              setVideoReviewFrameUrls([]);
+            }
+          }}
+          style={[
+            gigApplyStyles.termsRow,
+            {
+              borderWidth: 1,
+              borderColor: aiPortfolioReviewConsent ? colors.primary : colors.border,
+              borderRadius: 12,
+              padding: 12,
+              marginBottom: 16,
+              backgroundColor: aiPortfolioReviewConsent ? `${colors.primary}10` : "transparent",
+            },
+          ]}
+        >
+          <View style={[gigApplyStyles.checkbox, {
+            borderColor: aiPortfolioReviewConsent ? colors.primary : colors.border,
+            backgroundColor: aiPortfolioReviewConsent ? colors.primary : "transparent",
+          }]}>
+            {aiPortfolioReviewConsent && <Text style={gigApplyStyles.checkboxTick}>✓</Text>}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[gigApplyStyles.termsText, { color: colors.text, fontFamily: "Poppins_600SemiBold" }]}>AI portfolio review (optional)</Text>
+            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 3 }}>
+              {aiReviewCoversGroup
+                ? "For this group application, I confirm I am authorized by every currently listed group member to send their profile photo, redacted CV text, video audio, up to three representative video frames, and portfolio images to Groq for separate advisory face-similarity signals. This is not identity verification and cannot decide or change our score."
+                : "I consent, or confirm I am authorized, to send redacted CV text, video audio, up to three representative video frames, portfolio images, and my profile photo to Groq for an advisory face-similarity signal. This is not identity verification and cannot decide or change my score."} Groq may temporarily log inference data for up to 30 days unless Zero Data Retention is enabled.
+            </Text>
+          </View>
+        </TouchableOpacity>
+      )}
+
       <DocumentUploader
         label="Upload CV/Resume"
         onFileSelect={(file) => setCvFile(file)}
         existingUrl={cvUrl || undefined}
       />
+
+      {!isGroupApplicationFlow && (
+        <TouchableOpacity
+          activeOpacity={0.78}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: videoCopyrightAcknowledged }}
+          accessibilityLabel="Confirm performance video ownership, license, or permission"
+          onPress={() => {
+            const nextValue = !videoCopyrightAcknowledged;
+            setVideoCopyrightAcknowledged(nextValue);
+            if (!nextValue) {
+              setVideoCopyrightDecision(null);
+              if (videoUrl) setVideoUrl("");
+            }
+          }}
+          style={[
+            gigApplyStyles.termsRow,
+            {
+              borderWidth: 1,
+              borderColor: videoCopyrightAcknowledged ? colors.primary : colors.border,
+              borderRadius: 12,
+              padding: 12,
+              marginBottom: 16,
+              backgroundColor: videoCopyrightAcknowledged ? `${colors.primary}10` : "transparent",
+            },
+          ]}
+        >
+          <View style={[gigApplyStyles.checkbox, {
+            borderColor: videoCopyrightAcknowledged ? colors.primary : colors.border,
+            backgroundColor: videoCopyrightAcknowledged ? colors.primary : "transparent",
+          }]}>
+            {videoCopyrightAcknowledged && <Text style={gigApplyStyles.checkboxTick}>✓</Text>}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[gigApplyStyles.termsText, { color: colors.text, fontFamily: "Poppins_600SemiBold" }]}>Performance video rights *</Text>
+            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 3 }}>
+              I confirm that I created this performance or have the rights, license, or permission needed to submit it. A released-recording fingerprint match may be sent to Identity Review; this is a screening signal, not a legal ownership decision.
+            </Text>
+          </View>
+        </TouchableOpacity>
+      )}
 
       <VideoUploader
         videoUrl={videoUrl}
@@ -830,7 +941,20 @@ const GigApplyTab = ({
         bucketName="documents"
         folder="performance-videos"
         maxSizeMB={50}
+        enableReviewFrame={aiPortfolioReviewConsent}
+        onReviewFrameChange={(url) => setVideoReviewFrameUrl(url || "")}
+        onReviewFramesChange={setVideoReviewFrameUrls}
+        enableCopyrightScreening={!isGroupApplicationFlow}
+        copyrightAcknowledged={videoCopyrightAcknowledged}
+        onCopyrightDecisionChange={setVideoCopyrightDecision}
       />
+
+      {!isGroupApplicationFlow && videoCopyrightDecision?.requiresAdminReview && (
+        <View style={[styles.infoBox, { backgroundColor: "#F59E0B20", borderColor: "#F59E0B", marginBottom: 16 }]}>
+          <Ionicons name="shield-checkmark-outline" size={22} color="#F59E0B" />
+          <Text style={[styles.infoText, { color: colors.text }]}>Released-recording match found. Your application is allowed, with ownership or permission review pending.</Text>
+        </View>
+      )}
 
       {!isGroupApplicationFlow && (
         <View style={{ marginBottom: 24, gap: 12 }}>

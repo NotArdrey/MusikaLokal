@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react";
 import { supabase } from "../../lib/supabase";
+import type { UploadSafetyFileDecision } from "../services/uploadSafetyScreen";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
 import { getGigReapplicationCooldownInfo } from "../utils/gigReapplicationCooldown";
 import { submitListingRequest } from "../utils/listingRequests";
@@ -28,6 +29,11 @@ interface UseApplicationSubmissionActionParams {
   cvFile: any;
   cvUrl: string;
   videoUrl: string;
+  aiPortfolioReviewConsent: boolean;
+  videoReviewFrameUrl: string;
+  videoReviewFrameUrls: string[];
+  videoCopyrightAcknowledged: boolean;
+  videoCopyrightDecision: UploadSafetyFileDecision | null;
   userGroups: any[];
   setAlertConfig: (config: AlertConfig) => void;
   setAlertVisible: (visible: boolean) => void;
@@ -47,6 +53,11 @@ interface UseApplicationSubmissionActionParams {
   setExistingApplicationStatus: (value: string | null) => void;
   setPitchMessage: (value: string) => void;
   setVideoUrl: (value: string) => void;
+  setAiPortfolioReviewConsent: (value: boolean) => void;
+  setVideoReviewFrameUrl: (value: string) => void;
+  setVideoReviewFrameUrls: (value: string[]) => void;
+  setVideoCopyrightAcknowledged: (value: boolean) => void;
+  setVideoCopyrightDecision: (value: UploadSafetyFileDecision | null) => void;
   setCvFile: (value: any) => void;
   setCvUrl: (value: string) => void;
   closeSheet: () => void;
@@ -92,6 +103,11 @@ export const useApplicationSubmissionAction = ({
   cvFile,
   cvUrl,
   videoUrl,
+  aiPortfolioReviewConsent,
+  videoReviewFrameUrl,
+  videoReviewFrameUrls,
+  videoCopyrightAcknowledged,
+  videoCopyrightDecision,
   userGroups,
   setAlertConfig,
   setAlertVisible,
@@ -103,6 +119,11 @@ export const useApplicationSubmissionAction = ({
   setExistingApplicationStatus,
   setPitchMessage,
   setVideoUrl,
+  setAiPortfolioReviewConsent,
+  setVideoReviewFrameUrl,
+  setVideoReviewFrameUrls,
+  setVideoCopyrightAcknowledged,
+  setVideoCopyrightDecision,
   setCvFile,
   setCvUrl,
   closeSheet,
@@ -608,6 +629,13 @@ export const useApplicationSubmissionAction = ({
             videoUrl: videoUrl || null,
             cvUrl: uploadedCvUrl,
             slotType: selectedSlotType || null,
+            aiPortfolioReviewConsent,
+            aiReviewFrameUrl: aiPortfolioReviewConsent ? videoReviewFrameUrl || null : null,
+            aiReviewFrameUrls: aiPortfolioReviewConsent ? videoReviewFrameUrls.slice(0, 3) : [],
+            videoCopyrightAcknowledged,
+            videoCopyrightStatus: videoCopyrightDecision?.copyrightStatus || "not_required",
+            videoCopyrightReviewId: videoCopyrightDecision?.copyrightReviewId || null,
+            videoCopyrightMetadata: videoCopyrightDecision?.copyrightMetadata || {},
           },
         });
 
@@ -649,6 +677,11 @@ export const useApplicationSubmissionAction = ({
 
         setPitchMessage("");
         setVideoUrl("");
+        setAiPortfolioReviewConsent(false);
+        setVideoReviewFrameUrl("");
+        setVideoReviewFrameUrls([]);
+        setVideoCopyrightAcknowledged(false);
+        setVideoCopyrightDecision(null);
         setCvFile(null);
         setCvUrl("");
 
@@ -674,6 +707,13 @@ export const useApplicationSubmissionAction = ({
         pitch_message: pitchMessage,
         video_url: videoUrl || null,
         cv_url: uploadedCvUrl,
+        ai_portfolio_review_consent: aiPortfolioReviewConsent,
+        ai_review_frame_url: aiPortfolioReviewConsent ? videoReviewFrameUrl || null : null,
+        ai_review_frame_urls: aiPortfolioReviewConsent ? videoReviewFrameUrls.slice(0, 3) : [],
+        video_copyright_acknowledged: videoCopyrightAcknowledged,
+        video_copyright_status: videoCopyrightDecision?.copyrightStatus || "not_required",
+        video_copyright_review_id: videoCopyrightDecision?.copyrightReviewId || null,
+        video_copyright_metadata: videoCopyrightDecision?.copyrightMetadata || {},
         status: "pending",
       };
 
@@ -750,6 +790,19 @@ export const useApplicationSubmissionAction = ({
         }
         setAlertVisible(true);
         return;
+      }
+
+      if (data?.id && aiPortfolioReviewConsent) {
+        try {
+          const { error: reviewQueueError } = await supabase.functions.invoke("gig-applications", {
+            body: { action: "request_ai_portfolio_review", applicationId: data.id, userId },
+          });
+          if (reviewQueueError) {
+            console.warn("Application saved, but AI portfolio review could not be queued:", reviewQueueError.message);
+          }
+        } catch (reviewQueueError) {
+          console.warn("Application saved, but AI portfolio review queue failed:", reviewQueueError);
+        }
       }
 
 
@@ -858,6 +911,11 @@ export const useApplicationSubmissionAction = ({
 
       setPitchMessage("");
       setVideoUrl("");
+      setAiPortfolioReviewConsent(false);
+      setVideoReviewFrameUrl("");
+      setVideoReviewFrameUrls([]);
+      setVideoCopyrightAcknowledged(false);
+      setVideoCopyrightDecision(null);
       setCvFile(null);
       setCvUrl("");
 
@@ -880,6 +938,7 @@ export const useApplicationSubmissionAction = ({
     closeSheet,
     cvFile,
     cvUrl,
+    aiPortfolioReviewConsent,
     ensureGigIsStillAvailable,
     ensureGroupListingIsStillAvailable,
     ensureReapplicationCooldownHasPassed,
@@ -893,6 +952,7 @@ export const useApplicationSubmissionAction = ({
     selectedSlotType,
     setAlertConfig,
     setAlertVisible,
+    setAiPortfolioReviewConsent,
     setCvFile,
     setCvUrl,
     setExistingApplicationStatus,
@@ -907,6 +967,14 @@ export const useApplicationSubmissionAction = ({
     userId,
     userRole,
     videoUrl,
+    videoReviewFrameUrl,
+    videoReviewFrameUrls,
+    videoCopyrightAcknowledged,
+    videoCopyrightDecision,
+    setVideoReviewFrameUrl,
+    setVideoReviewFrameUrls,
+    setVideoCopyrightAcknowledged,
+    setVideoCopyrightDecision,
   ]);
 
   const handleSubmitApplication = useCallback(async () => {
@@ -920,6 +988,16 @@ export const useApplicationSubmissionAction = ({
         listingId,
         group,
       });
+      return;
+    }
+
+    if (group.type === "Gig" && userRole !== "musician") {
+      setAlertConfig({
+        type: "warning",
+        title: "Musician Account Required",
+        message: "Only musician accounts may apply to gigs as a solo artist, duo, or group.",
+      });
+      setAlertVisible(true);
       return;
     }
 
@@ -1201,6 +1279,16 @@ export const useApplicationSubmissionAction = ({
       return;
     }
 
+    if (!videoCopyrightAcknowledged || videoCopyrightDecision?.allowed !== true) {
+      setAlertConfig({
+        type: "warning",
+        title: "Video Rights Check Required",
+        message: "Confirm your rights and upload the performance video again so its released-recording fingerprint can be checked.",
+      });
+      setAlertVisible(true);
+      return;
+    }
+
     if (group.requirements?.total_slots_needed) {
       try {
         const { data: acceptedApps, error: countError } = await supabase
@@ -1273,6 +1361,8 @@ export const useApplicationSubmissionAction = ({
     userId,
     userRole,
     videoUrl,
+    videoCopyrightAcknowledged,
+    videoCopyrightDecision,
   ]);
 
   return {

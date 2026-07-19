@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
+import { FeaturedGigPerformers } from "../src/components/FeaturedGigPerformers";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
@@ -28,6 +29,7 @@ import PostDetailsModal from "../src/components/PostDetailsModal";
 import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
 import { useGigApplicantCounts } from "../src/hooks/useGigApplicantCounts";
+import { useGigFeaturedPerformers } from "../src/hooks/useGigFeaturedPerformers";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { useRadioPlayer } from "../src/context/RadioPlayerContext";
@@ -1408,6 +1410,13 @@ const SocialPostCard = React.memo(function SocialPostCard({
     [headerBadge, serviceBadges],
   );
   const suggestionQuickInfo = useMemo(() => getSocialSuggestionQuickInfo(item), [item]);
+  const featuredPerformers = useMemo(
+    () =>
+      isSuggestion && ["gig", "venue"].includes(suggestionType) && Array.isArray(item?.featured_performers)
+        ? item.featured_performers
+        : [],
+    [isSuggestion, item?.featured_performers, suggestionType],
+  );
   const reactionCount = getPositiveInteger(
     isSuggestion
       ? item?.favorites_count ?? item?.favorite_count ?? item?.reaction_count ?? 0
@@ -1697,6 +1706,15 @@ const SocialPostCard = React.memo(function SocialPostCard({
             </View>
           ) : null}
 
+          <FeaturedGigPerformers
+            performers={featuredPerformers}
+            primaryColor={colors.primary}
+            textColor={colors.text}
+            mutedTextColor={colors.textSecondary}
+            borderColor={borderColor}
+            isDark={isDark}
+          />
+
           {suggestionQuickInfo.length > 0 ? (
             <View style={styles.socialQuickInfoRow}>
               {suggestionQuickInfo.map((info, index) => (
@@ -1877,6 +1895,7 @@ export default function FeedScreen() {
   const [posts, setPosts] = useState<any[]>([]);
   const [listingCards, setListingCards] = useState<any[]>([]);
   const gigApplicantCounts = useGigApplicantCounts(listingCards, { isGuest, userRole });
+  const gigFeaturedPerformers = useGigFeaturedPerformers(listingCards);
   const [postBody, setPostBody] = useState("");
   const [postVisibility, setPostVisibility] = useState<"public" | "followers">("public");
   const [showCreate, setShowCreate] = useState(false);
@@ -2940,13 +2959,22 @@ export default function FeedScreen() {
         const normalizedType = String(item?.type || "").trim().toLowerCase();
         if (
           (normalizedType === "gig" || normalizedType === "venue") &&
-          Object.prototype.hasOwnProperty.call(gigApplicantCounts, item.id)
+          (
+            Object.prototype.hasOwnProperty.call(gigApplicantCounts, item.id) ||
+            Object.prototype.hasOwnProperty.call(gigFeaturedPerformers, item.id)
+          )
         ) {
-          return { ...item, applicant_count: gigApplicantCounts[item.id] };
+          return {
+            ...item,
+            ...(Object.prototype.hasOwnProperty.call(gigApplicantCounts, item.id)
+              ? { applicant_count: gigApplicantCounts[item.id] }
+              : {}),
+            featured_performers: gigFeaturedPerformers[item.id] || [],
+          };
         }
         return item;
       }),
-    [baseFeedItems, gigApplicantCounts],
+    [baseFeedItems, gigApplicantCounts, gigFeaturedPerformers],
   );
 
   const renderPost = useCallback(

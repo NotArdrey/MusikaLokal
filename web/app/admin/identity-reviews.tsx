@@ -167,6 +167,15 @@ interface CopyrightPlaylistItem {
   created_at?: string | null;
 }
 
+interface CopyrightGigApplication {
+  id?: string | null;
+  gig_id?: string | null;
+  gig_name?: string | null;
+  video_url?: string | null;
+  copyright_status?: string | null;
+  created_at?: string | null;
+}
+
 interface ManualIdentityReviewEntry {
   id: string;
   user_id: string;
@@ -227,6 +236,8 @@ interface ManualIdentityReviewEntry {
   music_video_url?: string | null;
   copyright_playlist_item?: CopyrightPlaylistItem | null;
   copyright_playlist_items?: CopyrightPlaylistItem[];
+  copyright_gig_application?: CopyrightGigApplication | null;
+  copyright_gig_applications?: CopyrightGigApplication[];
   profile?: {
     id?: string;
     full_name?: string | null;
@@ -365,6 +376,7 @@ const isCopyrightOwnershipReview = (review?: ManualIdentityReviewEntry | null) =
 const getCopyrightOwnershipInfo = (review?: ManualIdentityReviewEntry | null) => {
   const metadata = review?.metadata || {};
   const playlistItem = review?.copyright_playlist_item || null;
+  const gigApplication = review?.copyright_gig_application || null;
   const rawArtists = metadata['copyright_artists'];
   const artistLabel = Array.isArray(rawArtists)
     ? rawArtists.map((artist) => String(artist || '').trim()).filter(Boolean).join(', ')
@@ -387,6 +399,9 @@ const getCopyrightOwnershipInfo = (review?: ManualIdentityReviewEntry | null) =>
     playlistTitle: String(playlistItem?.playlist_title || '').trim(),
     playlistItemId: String(playlistItem?.id || '').trim(),
     copyrightStatus: String(playlistItem?.copyright_status || '').trim(),
+    videoUrl: String(gigApplication?.video_url || metadata['uploaded_video_url'] || '').trim(),
+    gigName: String(gigApplication?.gig_name || '').trim(),
+    isPerformanceVideo: Boolean(gigApplication?.video_url) || metadata['upload_kind'] === 'gig_performance_video',
   };
 };
 
@@ -1491,15 +1506,29 @@ export default function AdminIdentityReviewsPage() {
                         {ownershipInfo.playlistTitle ? (
                           <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Playlist: {ownershipInfo.playlistTitle}</Text>
                         ) : null}
-                        <View style={styles.ownershipPlayerWrap}>
-                          <AudioPreviewPlayer
-                            sourceUrl={ownershipInfo.audioUrl}
-                            title={ownershipInfo.title}
-                            subtitle={ownershipInfo.artistLabel || ownershipInfo.playlistTitle || 'Submitted MP3'}
-                            durationSeconds={ownershipInfo.durationSeconds}
-                            emptyMessage="The playlist item MP3 is not linked to this review yet."
-                          />
-                        </View>
+                        {ownershipInfo.gigName ? (
+                          <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Gig: {ownershipInfo.gigName}</Text>
+                        ) : null}
+                        {ownershipInfo.videoUrl ? (
+                          <TouchableOpacity
+                            activeOpacity={0.78}
+                            onPress={() => setManualReviewMediaPreview({ uri: ownershipInfo.videoUrl, title: 'Performance video' })}
+                            style={[styles.smallActionButton, { borderColor: colors.border, alignSelf: 'flex-start', marginTop: 8 }]}
+                          >
+                            <Ionicons name="videocam-outline" size={14} color={colors.text} />
+                            <Text style={[styles.smallActionText, { color: colors.text }]}>Open Performance Video</Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <View style={styles.ownershipPlayerWrap}>
+                            <AudioPreviewPlayer
+                              sourceUrl={ownershipInfo.audioUrl}
+                              title={ownershipInfo.title}
+                              subtitle={ownershipInfo.artistLabel || ownershipInfo.playlistTitle || 'Submitted MP3'}
+                              durationSeconds={ownershipInfo.durationSeconds}
+                              emptyMessage={ownershipInfo.isPerformanceVideo ? "The gig application video is not linked to this review yet." : "The playlist item MP3 is not linked to this review yet."}
+                            />
+                          </View>
+                        )}
                       </>
                     ) : (
                       <>
@@ -1709,7 +1738,9 @@ export default function AdminIdentityReviewsPage() {
             style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}
           >
             <Text style={[styles.modalTitle, { color: colors.text }]}>
-              {manualReviewIsOwnership ? 'Review Track Ownership' : 'Review Identity Submission'}
+              {manualReviewIsOwnership
+                ? manualReviewOwnershipInfo.isPerformanceVideo ? 'Review Performance Video Rights' : 'Review Track Ownership'
+                : 'Review Identity Submission'}
             </Text>
 
             <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
@@ -1746,13 +1777,27 @@ export default function AdminIdentityReviewsPage() {
                     Playlist: {manualReviewOwnershipInfo.playlistTitle}
                   </Text>
                 ) : null}
-                <AudioPreviewPlayer
-                  sourceUrl={manualReviewOwnershipInfo.audioUrl}
-                  title={manualReviewOwnershipInfo.title}
-                  subtitle={manualReviewOwnershipInfo.artistLabel || manualReviewOwnershipInfo.playlistTitle || 'Submitted MP3'}
-                  durationSeconds={manualReviewOwnershipInfo.durationSeconds}
-                  emptyMessage="The playlist item MP3 is not linked to this review yet."
-                />
+                {manualReviewOwnershipInfo.gigName ? (
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Gig: {manualReviewOwnershipInfo.gigName}</Text>
+                ) : null}
+                {manualReviewOwnershipInfo.videoUrl ? (
+                  <TouchableOpacity
+                    activeOpacity={0.78}
+                    onPress={() => setManualReviewMediaPreview({ uri: manualReviewOwnershipInfo.videoUrl, title: 'Performance video' })}
+                    style={[styles.smallActionButton, { borderColor: colors.border, alignSelf: 'flex-start', marginTop: 8 }]}
+                  >
+                    <Ionicons name="videocam-outline" size={14} color={colors.text} />
+                    <Text style={[styles.smallActionText, { color: colors.text }]}>Open Performance Video</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <AudioPreviewPlayer
+                    sourceUrl={manualReviewOwnershipInfo.audioUrl}
+                    title={manualReviewOwnershipInfo.title}
+                    subtitle={manualReviewOwnershipInfo.artistLabel || manualReviewOwnershipInfo.playlistTitle || 'Submitted MP3'}
+                    durationSeconds={manualReviewOwnershipInfo.durationSeconds}
+                    emptyMessage={manualReviewOwnershipInfo.isPerformanceVideo ? "The gig application video is not linked to this review yet." : "The playlist item MP3 is not linked to this review yet."}
+                  />
+                )}
               </>
             ) : (
               <>

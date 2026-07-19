@@ -17,7 +17,6 @@ export default function TabsLayout() {
       tabBar={(props) => <GlobalNavbar {...props} />}
     >
       <Tabs.Screen name="feed" options={{ title: 'Home' }} />
-      <Tabs.Screen name="ai_suggestions" options={{ title: 'AI' }} />
       <Tabs.Screen name="bookings" options={{ title: 'Activity' }} />
       <Tabs.Screen name="marketplace" options={{ title: 'Shop' }} />
       <Tabs.Screen name="manage" options={{ title: 'Manage' }} />

@@ -63,7 +63,7 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
     const isBrandMainHeader = title.trim().toLowerCase() === 'musikalokal';
     const isStaff = isStaffRole(userRole);
     const isMainNavPath = useMemo(
-        () => routePathname === "/home" || routePathname === "/feed" || routePathname === "/manage" || routePathname === "/bookings" || routePathname === "/ai_suggestions" || routePathname === "/marketplace" || routePathname === "/chat",
+        () => routePathname === "/home" || routePathname === "/feed" || routePathname === "/manage" || routePathname === "/bookings" || routePathname === "/marketplace" || routePathname === "/chat",
         [routePathname],
     );
 

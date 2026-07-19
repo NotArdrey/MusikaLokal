@@ -33,7 +33,7 @@ const ACRCLOUD_ACCESS_SECRET = Deno.env.get("ACRCLOUD_ACCESS_SECRET")?.trim() ||
 const ACRCLOUD_MIN_SCORE = Number(Deno.env.get("ACRCLOUD_MIN_SCORE") || "80");
 
 const MAX_FILES_PER_REQUEST = 10;
-const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
+const GROQ_VISION_MODEL = Deno.env.get("GROQ_VISION_MODEL")?.trim() || "qwen/qwen3.6-27b";
 const GROQ_SAFETY_TEXT_MODEL = "openai/gpt-oss-safeguard-20b";
 const MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024;
 const MAX_ACRCLOUD_AUDIO_SAMPLE_BYTES = 4 * 1024 * 1024;
@@ -125,6 +125,7 @@ const SAFE_AUDIO_MIMES = new Set([
   "audio/mp3",
 ]);
 const SAFE_AUDIO_EXTENSIONS = new Set(["mp3"]);
+const COPYRIGHT_MEDIA_MIMES = new Set([...SAFE_AUDIO_MIMES, ...SAFE_VIDEO_MIMES]);
 const COPYRIGHT_OWNERSHIP_REVIEW_SOURCE = "COPYRIGHT_OWNERSHIP";
 const COPYRIGHT_OWNERSHIP_REVIEW_REASON = "COPYRIGHT_OWNERSHIP_REVIEW";
 
@@ -347,26 +348,26 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function parseAudioDataUrl(
+function parseCopyrightMediaDataUrl(
   file: FileCandidate,
 ): { bytes: Uint8Array; mimeType: string; originalBytes: number; wasTruncated: boolean } | null {
   const raw = typeof file.contentDataUrl === "string" ? file.contentDataUrl.trim() : "";
   if (!raw) return null;
 
-  const match = raw.match(/^data:(audio\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i);
+  const match = raw.match(/^data:((?:audio|video)\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i);
   if (!match) {
-    throw new Error("Audio content must be sent as a base64 data URL.");
+    throw new Error("Copyright media must be sent as an audio or video base64 data URL.");
   }
 
   const mimeType = match[1].toLowerCase();
-  if (!SAFE_AUDIO_MIMES.has(mimeType)) {
-    throw new Error("Audio uploads must be MP3 files.");
+  if (!COPYRIGHT_MEDIA_MIMES.has(mimeType)) {
+    throw new Error("Copyright screening supports MP3, MP4, MOV, M4V, WebM, AVI, and MPEG media.");
   }
 
   const base64 = match[2].replace(/\s/g, "");
   const bytes = base64ToUint8Array(base64);
   if (bytes.byteLength === 0) {
-    throw new Error("Audio content is empty. Please upload a valid MP3 file.");
+    throw new Error("Copyright media is empty. Please upload a valid audio or video file.");
   }
 
   const wasTruncated = bytes.byteLength > MAX_ACRCLOUD_AUDIO_SAMPLE_BYTES;
@@ -535,6 +536,7 @@ async function queueCopyrightOwnershipReview(
   match: any,
   context?: string,
 ) {
+  const isGigPerformanceVideo = context === "gig_application_performance_video";
   const userId = String(user?.id || "").trim();
   if (!supabaseAdmin || !userId) {
     const metadata = buildCopyrightMatchMetadata(match);
@@ -585,7 +587,7 @@ async function queueCopyrightOwnershipReview(
     .eq("id", userId)
     .maybeSingle();
 
-  const submittedEmail = String(user.email || profile?.email || "unknown@musikalokal.local").trim().toLowerCase();
+  const submittedEmail = String(user?.email || profile?.email || "unknown@musikalokal.local").trim().toLowerCase();
   const submittedRole = String(profile?.role || "musician").trim().toLowerCase() || "musician";
   const nowIso = new Date().toISOString();
   const metadata = {
@@ -593,6 +595,7 @@ async function queueCopyrightOwnershipReview(
     review_reason: COPYRIGHT_OWNERSHIP_REVIEW_REASON,
     requested_from: "upload-safety-screen",
     requested_context: context || "playlist_audio_upload",
+    upload_kind: isGigPerformanceVideo ? "gig_performance_video" : "playlist_audio",
     uploaded_file_name: file.fileName || null,
     uploaded_mime_type: file.mimeType || null,
     uploaded_file_size: typeof file.fileSize === "number" ? file.fileSize : null,
@@ -605,14 +608,16 @@ async function queueCopyrightOwnershipReview(
       user_id: userId,
       submitted_by_email: submittedEmail,
       submitted_role: submittedRole,
-      document_type: "Released track ownership",
+      document_type: isGigPerformanceVideo ? "Performance video recording ownership" : "Released track ownership",
       document_type_key: "COPYRIGHT_OWNERSHIP",
       document_country: "PHL",
       source: COPYRIGHT_OWNERSHIP_REVIEW_SOURCE,
       status: "PENDING_REVIEW",
       review_reason: COPYRIGHT_OWNERSHIP_REVIEW_REASON,
       matched_on: "COPYRIGHT_TRACK",
-      review_notes: "Matched released recording requires admin ownership approval before upload.",
+      review_notes: isGigPerformanceVideo
+        ? "A gig performance video matched a released recording and requires admin ownership or permission review."
+        : "Matched released recording requires admin ownership approval before upload.",
       metadata,
       expected_decision_by: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     })
@@ -638,8 +643,10 @@ async function queueCopyrightOwnershipReview(
   await supabaseAdmin.from("notifications").insert({
     user_id: userId,
     type: "warning",
-    title: "Track Ownership Review Required",
-    message: "Your upload matched a released recording. Identity Review admin approval is required before you can upload this track.",
+    title: isGigPerformanceVideo ? "Performance Video Review Required" : "Track Ownership Review Required",
+    message: isGigPerformanceVideo
+      ? "Your performance video matched a released recording. Your gig application can continue, but an admin will review your ownership or permission claim."
+      : "Your upload matched a released recording. Identity Review admin approval is required before you can upload this track.",
     meta: {
       manual_identity_review_id: insertedReview?.id || null,
       source: COPYRIGHT_OWNERSHIP_REVIEW_SOURCE,
@@ -693,7 +700,7 @@ async function screenAudioCopyright(
     hasInlineAudio: typeof file.contentDataUrl === "string" && file.contentDataUrl.trim().length > 0,
   });
 
-  const parsedAudio = parseAudioDataUrl(file);
+  const parsedAudio = parseCopyrightMediaDataUrl(file);
   if (!parsedAudio) {
     console.log("[upload-safety-screen] acrcloud_copyright_check_skipped", {
       fileName: file.fileName || "(unknown)",
@@ -1505,6 +1512,63 @@ serve(async (req: Request) => {
     }
 
     const context = typeof body.context === "string" ? body.context : "add_edit_upload";
+
+    if (body.action === "link_copyright_review_media") {
+      const reviewId = typeof body.reviewId === "string" ? body.reviewId.trim() : "";
+      const mediaUrl = typeof body.mediaUrl === "string" ? body.mediaUrl.trim() : "";
+      if (!supabaseAdmin || !reviewId || !mediaUrl) {
+        return new Response(JSON.stringify({ error: "reviewId and mediaUrl are required." }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      let parsedMediaUrl: URL;
+      try {
+        parsedMediaUrl = new URL(mediaUrl);
+        const storageOrigin = new URL(supabaseUrl).origin;
+        if (parsedMediaUrl.origin !== storageOrigin || !parsedMediaUrl.pathname.startsWith("/storage/v1/object/")) {
+          throw new Error("invalid_storage_url");
+        }
+      } catch {
+        return new Response(JSON.stringify({ error: "mediaUrl must be a URL in this project's Supabase Storage." }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      const { data: review, error: reviewError } = await supabaseAdmin
+        .from("manual_identity_reviews")
+        .select("id, user_id, source, metadata")
+        .eq("id", reviewId)
+        .maybeSingle();
+      if (reviewError) throw reviewError;
+      if (!review || review.user_id !== user.id || String(review.source || "").toUpperCase() !== COPYRIGHT_OWNERSHIP_REVIEW_SOURCE) {
+        return new Response(JSON.stringify({ error: "Copyright review not found." }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 404,
+        });
+      }
+
+      const { error: linkError } = await supabaseAdmin
+        .from("manual_identity_reviews")
+        .update({
+          metadata: {
+            ...(review.metadata || {}),
+            uploaded_video_url: parsedMediaUrl.toString(),
+            media_linked_at: new Date().toISOString(),
+          },
+        })
+        .eq("id", reviewId)
+        .eq("user_id", user.id);
+      if (linkError) throw linkError;
+
+      return new Response(JSON.stringify({ linked: true, reviewId }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
     const rawFiles = Array.isArray(body.files) ? (body.files as FileCandidate[]) : [];
     console.log("[upload-safety-screen] request_received", {
       context,
@@ -1564,7 +1628,8 @@ serve(async (req: Request) => {
         }
 
         try {
-          const decision = file.kind === "audio"
+          const decision = file.kind === "audio" ||
+              (file.kind === "video" && context === "gig_application_performance_video")
             ? await screenAudioCopyright(file, {
                 supabaseAdmin,
                 user: { id: user.id, email: user.email || null },

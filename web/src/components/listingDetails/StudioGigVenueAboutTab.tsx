@@ -24,6 +24,7 @@ interface StudioGigVenueAboutTabProps {
   labels: { aboutTitle: string };
   currentUserId: string | null;
   handleProfileNavigation: () => void;
+  applicantCount?: number;
   connectionPanel?: React.ReactNode;
 }
 
@@ -39,6 +40,7 @@ const StudioGigVenueAboutTab = ({
   labels,
   currentUserId,
   handleProfileNavigation,
+  applicantCount,
   connectionPanel,
 }: StudioGigVenueAboutTabProps) => {
   const managerId = group.owner_id || group.organizer_id;
@@ -132,7 +134,12 @@ const StudioGigVenueAboutTab = ({
   };
 
   return (
-    <View style={styles.tabContent}>
+    <View
+      style={[
+        styles.tabContent,
+        group.type === "Gig" && { paddingBottom: 0 },
+      ]}
+    >
     {connectionPanel ? <View style={{ marginBottom: 24 }}>{connectionPanel}</View> : null}
     {group.type === "Gig" && (
       <View style={styles.section}>
@@ -224,6 +231,23 @@ const StudioGigVenueAboutTab = ({
                 : "TBA"}
           </Text>
         </View>
+        {typeof applicantCount === "number" && (
+          <View
+            style={[
+              styles.statCard,
+              {
+                backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                flexBasis: "100%",
+                flexGrow: 1,
+              },
+            ]}
+          >
+            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Applicants</Text>
+            <Text style={[styles.statValue, { color: colors.text }]}>
+              {applicantCount}
+            </Text>
+          </View>
+        )}
       </View>
     )}
 
@@ -535,7 +559,7 @@ const StudioGigVenueAboutTab = ({
             backgroundColor: colors.surface,
             borderColor: colors.border,
             borderWidth: 1,
-            marginBottom: 24,
+            marginBottom: 0,
           },
         ]}
       >

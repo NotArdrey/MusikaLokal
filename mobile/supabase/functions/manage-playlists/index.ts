@@ -26,11 +26,11 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")?.trim() || "";
 const GROQ_MODEL_CANDIDATES = [
-  "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant",
+  Deno.env.get("GROQ_TEXT_MODEL")?.trim(),
   "openai/gpt-oss-120b",
+  "qwen/qwen3.6-27b",
   "openai/gpt-oss-20b",
-];
+].filter((model): model is string => Boolean(model));
 const GROQ_RETRYABLE_STATUS_CODES = new Set([403, 404, 408, 409, 429, 498, 500, 502, 503, 504]);
 const AI_LOCAL_ONLY = ["1", "true", "yes", "on"].includes(
   (Deno.env.get("PLAYLIST_RADIO_LOCAL_ONLY") || Deno.env.get("AI_LOCAL_ONLY") || "").trim().toLowerCase(),

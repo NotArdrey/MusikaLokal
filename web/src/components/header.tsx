@@ -62,7 +62,7 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
         [routePathname],
     );
     const isMainNavPath = useMemo(
-        () => routePathname === "/explore" || routePathname === "/feed" || routePathname === "/manage" || routePathname === "/bookings" || routePathname === "/ai_suggestions",
+        () => routePathname === "/explore" || routePathname === "/feed" || routePathname === "/manage" || routePathname === "/bookings",
         [routePathname],
     );
 
