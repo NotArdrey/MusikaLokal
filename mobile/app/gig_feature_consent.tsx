@@ -15,15 +15,26 @@ import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 
 const acceptedStatuses = new Set(["accepted", "approved"]);
 
 export default function GigFeatureConsentScreen() {
   const { colors, isDark } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(32);
   const { applicationId: rawApplicationId } = useLocalSearchParams<{
     applicationId?: string | string[];
   }>();
   const applicationId = Array.isArray(rawApplicationId) ? rawApplicationId[0] : rawApplicationId;
+
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace({ pathname: "/bookings", params: { tab: "History" } });
+  };
   const [application, setApplication] = useState<any>(null);
   const [showOnGigPage, setShowOnGigPage] = useState(false);
   const [showOnProfile, setShowOnProfile] = useState(false);
@@ -106,8 +117,14 @@ export default function GigFeatureConsentScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <Header title="Featuring Permission" onBackPress={() => router.back()} />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <Header title="Featuring Permission" onBackPress={handleBack} />
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: contentBottomPadding },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         {loading ? (
           <View style={styles.centerState}>
             <ActivityIndicator color={colors.primary} />
@@ -213,7 +230,7 @@ export default function GigFeatureConsentScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  content: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 130 },
+  content: { paddingHorizontal: 20, paddingTop: 14 },
   centerState: { alignItems: "center", paddingTop: 50 },
   stateText: { fontFamily: "Poppins_400Regular", fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: 10 },
   messageCard: { borderWidth: 1, borderRadius: 16, padding: 22, alignItems: "center" },

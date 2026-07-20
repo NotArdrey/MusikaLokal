@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import ApplicantDetailsModal from "../src/components/ApplicantDetailsModal";
 import Header from "../src/components/header";
 import InAppMediaViewer, { isInAppMediaUrl } from "../src/components/InAppMediaViewer";
 import Modal from "../src/components/modal";
@@ -49,6 +50,20 @@ const VIEWER_GIG_TABS = ["About", "Review"];
 const ACCEPTED_GIG_STATUSES = ["accepted", "approved", "confirmed", "happening now", "completed"];
 type ApplicationFilter = "All" | "Pending" | "Accepted" | "Declined" | "Recommended";
 const APPLICATION_FILTERS: ApplicationFilter[] = ["All", "Pending", "Accepted", "Declined", "Recommended"];
+
+const shortenApplicantLocation = (value: unknown) => {
+  const ignored = /^(philippines|central luzon|region\s+[ivx]+|\d{4,})$/i;
+  const parts = String(value || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part && !ignored.test(part));
+  return parts.length > 2 ? parts.slice(-2).join(", ") : parts.join(", ");
+};
+
+const formatApplicantSlot = (value: unknown, hasGroup: boolean) => {
+  const slot = String(value || (hasGroup ? "band" : "solo artist")).replace(/_/g, " ");
+  return slot.replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
 
 import { useLocalSearchParams } from "expo-router";
 
@@ -91,6 +106,10 @@ export default function GigDetailsScreen() {
   });
   const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
   const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
+  const [selectedApplicantSummary, setSelectedApplicantSummary] = useState<any | null>(null);
+  const [selectedApplicantDetails, setSelectedApplicantDetails] = useState<any | null>(null);
+  const [applicantDetailsLoading, setApplicantDetailsLoading] = useState(false);
+  const [applicantDetailsError, setApplicantDetailsError] = useState<string | null>(null);
   const [inviteModalVisible, setInviteModalVisible] = useState(false);
   const [inviteMessage, setInviteMessage] = useState("");
   const [selectedInviteTargets, setSelectedInviteTargets] = useState<ProductionInviteTarget[]>([]);
@@ -191,6 +210,53 @@ export default function GigDetailsScreen() {
   };
 
   const Alert = { alert: showAlertNative };
+
+  const loadApplicantDetails = async (application: any) => {
+    if (!application?.id) return;
+    setSelectedApplicantSummary(application);
+    setSelectedApplicantDetails(null);
+    setApplicantDetailsError(null);
+    setApplicantDetailsLoading(true);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Your session has expired. Please sign in again.");
+      const { data, error } = await supabase.functions.invoke("gig-applications", {
+        body: {
+          action: "fetch_gig_application_details",
+          applicationId: application.id,
+          userId: currentUserId,
+        },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (error) {
+        let message = error.message || "Applicant details could not be loaded.";
+        const context = (error as any)?.context;
+        if (context && typeof context.json === "function") {
+          try {
+            const body = await context.json();
+            message = body?.error || body?.message || message;
+          } catch {
+            // Retain the invoke error when no response JSON is available.
+          }
+        }
+        throw new Error(message);
+      }
+      if (data?.error) throw new Error(data.error);
+      setSelectedApplicantDetails({ ...data, ai_recommendation: data?.ai_recommendation || application.ai_recommendation || null });
+    } catch (detailsError: any) {
+      setApplicantDetailsError(detailsError?.message || "Applicant details could not be loaded.");
+    } finally {
+      setApplicantDetailsLoading(false);
+    }
+  };
+
+  const closeApplicantDetails = () => {
+    setSelectedApplicantSummary(null);
+    setSelectedApplicantDetails(null);
+    setApplicantDetailsError(null);
+    setApplicantDetailsLoading(false);
+  };
 
   const fetchApplicationsFallback = async (gigId: string) => {
     const { data, error } = await supabase
@@ -506,8 +572,8 @@ export default function GigDetailsScreen() {
         }
         if (data?.error) throw new Error(data.error);
 
-        setApplications(
-          applications.map((a) =>
+        setApplications((currentApplications) =>
+          currentApplications.map((a) =>
             a.id === applicationId ? { ...a, ...data, status: data?.status || status } : a,
           ),
         );
@@ -1354,7 +1420,7 @@ export default function GigDetailsScreen() {
                         style={[styles.inviteBtn, { backgroundColor: colors.inputBackground }]}
                       >
                         <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
-                        <Text style={[styles.inviteBtnText, { color: colors.primary }]}>AI settings</Text>
+                        <Text style={[styles.inviteBtnText, { color: colors.primary }]}>AI Filter</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         activeOpacity={1}
@@ -1439,7 +1505,6 @@ export default function GigDetailsScreen() {
                     const displayLocation =
                       displayGroup?.location || displayApplicant?.location;
                     const displaySkills = displayApplicant?.skills || [];
-                    const displayPortfolio = displayApplicant?.portfolio_urls || [];
                     const displayAvatar =
                       displayGroup?.images?.[0] ||
                       displayApplicant?.avatar_url ||
@@ -1447,754 +1512,69 @@ export default function GigDetailsScreen() {
                       app.production_team?.logo_url ||
                       "https://i.pravatar.cc/100";
                     const aiRecommendation = app.ai_recommendation;
-                    const aiPortfolioReview = app.ai_portfolio_review;
-                    const faceSimilarity = aiPortfolioReview?.face_similarity || null;
-                    const groupFaceSimilarities = Array.isArray(aiPortfolioReview?.group_face_similarity)
-                      ? aiPortfolioReview.group_face_similarity
-                      : [];
-                    const videoCopyrightStatus = String(app.video_copyright_status || "not_screened");
-                    const videoCopyrightMeta = app.video_copyright_metadata || {};
-                    const videoCopyrightColor = videoCopyrightStatus === "approved" || videoCopyrightStatus === "not_required"
-                      ? "#10B981"
-                      : videoCopyrightStatus === "declined"
-                        ? "#EF4444"
-                        : videoCopyrightStatus === "pending_review"
-                          ? "#F59E0B"
-                          : colors.textSecondary;
-                    const videoCopyrightLabel = videoCopyrightStatus === "not_required"
-                      ? "No released-recording match"
-                      : videoCopyrightStatus === "pending_review"
-                        ? "Ownership review pending"
-                        : videoCopyrightStatus === "approved"
-                          ? "Ownership/permission approved"
-                          : videoCopyrightStatus === "declined"
-                            ? "Ownership/permission declined"
-                            : "Legacy video — not screened";
-                    const isAccepted = ["accepted", "approved"].includes(String(app.status || "").toLowerCase());
-                    const consentStatus = String(app.feature_consent_status || "not_requested").toLowerCase();
 
-                    return (
-                    <View
-                      key={app.id}
-                      style={[
-                        styles.applicantCard,
-                        { backgroundColor: colors.surface, marginBottom: 16 },
-                      ]}
-                    >
-                      {/* Applicant Header */}
-                      <View style={styles.applicantHeader}>
-                        <Image
-                          source={{
-                            uri: displayAvatar,
-                          }}
-                          style={styles.applicantImage}
-                        />
-                        <View style={{ flex: 1 }}>
-                          <View
-                            style={{
-                              flexDirection: "row",
-                              alignItems: "center",
-                              gap: 8,
-                              flexWrap: "wrap",
-                            }}
-                          >
-                            <Text
-                              style={{
-                                fontFamily: "Poppins_600SemiBold",
-                                fontSize: 16,
-                                color: colors.text,
-                              }}
-                            >
-                              {displayName}
-                            </Text>
-                            <View
-                              style={[
-                                styles.statusBadge,
-                                {
-                                  backgroundColor: statusMeta.backgroundColor,
-                                  borderWidth: 1,
-                                  borderColor: statusMeta.color,
-                                },
-                              ]}
-                            >
-                              <Text
-                                style={{
-                                  fontFamily: "Poppins_600SemiBold",
-                                  fontSize: 11,
-                                  color: statusMeta.color,
-                                }}
-                              >
-                                {statusMeta.label}
+                    if (app?.id) {
+                      const verified =
+                        displayApplicant?.is_verified === true &&
+                        String(displayApplicant?.verification_status || "").toUpperCase() === "APPROVED";
+                      const role = formatApplicantSlot(app.slot_type, Boolean(displayGroup));
+                      const primarySpecialty = displaySkills[0] || String(displayGenres || "").split(",")[0] || "Specialty not provided";
+                      const compactLocation = shortenApplicantLocation(displayLocation) || "Location not provided";
+
+                      return (
+                        <View
+                          key={app.id}
+                          testID={`applicant-summary-${app.id}`}
+                          style={[styles.compactApplicantCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                        >
+                          <View style={styles.compactApplicantHeader}>
+                            <ProfileAvatar
+                              uri={displayAvatar}
+                              size={52}
+                              backgroundColor={colors.inputBackground}
+                              iconColor={colors.textSecondary}
+                            />
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <Text numberOfLines={2} style={[styles.compactApplicantName, { color: colors.text }]}>
+                                {displayName}
                               </Text>
-                            </View>
-                            {aiRecommendation?.is_verified ? (
-                              <View style={[styles.statusBadge, { backgroundColor: "#10B98115", borderWidth: 1, borderColor: "#10B981" }]}>
-                                <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 11, color: "#10B981" }}>Verified</Text>
+                              <View style={styles.compactStatusRow}>
+                                <Text style={[styles.compactMeta, { color: statusMeta.color }]}>{statusMeta.label}</Text>
+                                {verified ? <Text style={[styles.compactMeta, { color: "#10B981" }]}>• Verified</Text> : null}
                               </View>
-                            ) : null}
-                          </View>
-                          <Text
-                            style={{
-                              fontFamily: "Poppins_400Regular",
-                              fontSize: 12,
-                              color: colors.textSecondary,
-                            }}
-                          >
-                            {displayGenres}
-                            {displayLocation && ` • ${displayLocation}`}
-                          </Text>
-                          {app.production_team?.name && (
-                            <Text
-                              style={{
-                                fontFamily: "Poppins_500Medium",
-                                fontSize: 11,
-                                color: colors.primary,
-                                marginTop: 4,
-                              }}
-                            >
-                              Submitted via {app.production_team.name}
-                            </Text>
-                          )}
-                        </View>
-                      </View>
-
-                      {app.video_url ? (
-                        <View
-                          testID={`video-copyright-${app.id}`}
-                          style={{ backgroundColor: colors.inputBackground, borderColor: videoCopyrightColor, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 }}
-                        >
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-                            <Ionicons name="shield-checkmark-outline" size={17} color={videoCopyrightColor} />
-                            <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 13, flex: 1 }}>Performance video rights</Text>
-                            <Text style={{ color: videoCopyrightColor, fontFamily: "Poppins_600SemiBold", fontSize: 10, textTransform: "uppercase" }}>{videoCopyrightLabel}</Text>
-                          </View>
-                          {videoCopyrightMeta.copyright_title ? (
-                            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 6 }}>
-                              Match: {videoCopyrightMeta.copyright_title}{videoCopyrightMeta.copyright_artist_label ? ` by ${videoCopyrightMeta.copyright_artist_label}` : ""}
-                            </Text>
-                          ) : null}
-                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 5 }}>
-                            {app.video_copyright_acknowledged ? "Applicant confirmed ownership, license, or permission. " : "No current rights acknowledgment is recorded. "}Fingerprint screening is a review signal, not a legal copyright decision.
-                          </Text>
-                        </View>
-                      ) : null}
-
-                      {aiRecommendation ? (
-                        <View
-                          testID={`ai-recommendation-${app.id}`}
-                          style={{
-                            backgroundColor: aiRecommendation.recommendation_status === "recommended" ? "#10B98112" : colors.inputBackground,
-                            borderColor: aiRecommendation.recommendation_status === "recommended" ? "#10B981" : colors.border,
-                            borderWidth: 1,
-                            borderRadius: 12,
-                            padding: 12,
-                            marginBottom: 12,
-                          }}
-                        >
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-                            <Ionicons name="sparkles" size={17} color={aiRecommendation.recommendation_status === "recommended" ? "#10B981" : colors.primary} />
-                            <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 13, flex: 1 }}>
-                              {aiRecommendation.recommendation_status === "recommended" ? "AI recommended" : "AI fit review"}
-                            </Text>
-                            <Text style={{ color: aiRecommendation.recommendation_status === "recommended" ? "#10B981" : colors.primary, fontFamily: "Poppins_700Bold", fontSize: 14 }}>
-                              {Number(aiRecommendation.score || 0)}%
-                            </Text>
-                          </View>
-                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 6 }}>
-                            {aiRecommendation.explanation}
-                          </Text>
-                          {Array.isArray(aiRecommendation.matched_criteria) && aiRecommendation.matched_criteria.length > 0 ? (
-                            <Text style={{ color: "#10B981", fontFamily: "Poppins_500Medium", fontSize: 10, marginTop: 7 }}>
-                              Matches: {aiRecommendation.matched_criteria.join(", ")}
-                            </Text>
-                          ) : null}
-                          {Array.isArray(aiRecommendation.missing_criteria) && aiRecommendation.missing_criteria.length > 0 ? (
-                            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, marginTop: 3 }}>
-                              Review: {aiRecommendation.missing_criteria.join(", ")}
-                            </Text>
-                          ) : null}
-                        </View>
-                      ) : null}
-
-                      {app.ai_portfolio_review_consent === true ? (
-                        <View
-                          testID={`ai-portfolio-review-${app.id}`}
-                          style={{
-                            backgroundColor: colors.inputBackground,
-                            borderColor: colors.border,
-                            borderWidth: 1,
-                            borderRadius: 12,
-                            padding: 12,
-                            marginBottom: 12,
-                          }}
-                        >
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-                            <Ionicons name="document-text-outline" size={17} color={colors.primary} />
-                            <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 13, flex: 1 }}>
-                              AI portfolio evidence
-                            </Text>
-                            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 10, textTransform: "uppercase" }}>
-                              {String(aiPortfolioReview?.status || "queued").replace("_", " ")}
-                            </Text>
-                          </View>
-
-                          {!aiPortfolioReview || ["queued", "processing"].includes(String(aiPortfolioReview.status)) ? (
-                            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 7 }}>
-                              Reviewing consented CV text, video audio, and available portfolio images. Refresh shortly.
-                            </Text>
-                          ) : (
-                            <>
-                              <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 7 }}>
-                                {aiPortfolioReview.overall_summary || "The automated evidence review is unavailable. Review the original files directly."}
-                              </Text>
-                              {faceSimilarity?.status && groupFaceSimilarities.length === 0 ? (() => {
-                                const faceStatus = String(faceSimilarity.status);
-                                const faceColor = faceStatus === "likely_same_person" ? "#10B981" : faceStatus === "likely_different_person" ? "#EF4444" : "#F59E0B";
-                                const faceLabel = faceStatus === "likely_same_person" ? "Likely visually consistent" : faceStatus === "likely_different_person" ? "Possible mismatch" : faceStatus === "unclear" ? "Unclear" : "Not run";
-                                return (
-                                  <View style={{ marginTop: 9, padding: 10, borderWidth: 1, borderColor: faceColor, borderRadius: 10 }}>
-                                    <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-                                      <Ionicons name="person-circle-outline" size={16} color={faceColor} />
-                                      <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 11, flex: 1 }}>Advisory face similarity</Text>
-                                      <Text style={{ color: faceColor, fontFamily: "Poppins_600SemiBold", fontSize: 9, textTransform: "uppercase" }}>{faceLabel}</Text>
-                                    </View>
-                                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 5 }}>{faceSimilarity.summary}</Text>
-                                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 4 }}>Not identity verification. Compare the original profile photo and video yourself; never decide from this signal alone.</Text>
-                                  </View>
-                                );
-                              })() : null}
-                              {groupFaceSimilarities.map((memberResult: any) => {
-                                const faceStatus = String(memberResult?.status || "unclear");
-                                const faceColor = faceStatus === "likely_same_person" ? "#10B981" : faceStatus === "likely_different_person" ? "#EF4444" : "#F59E0B";
-                                const faceLabel = faceStatus === "likely_same_person" ? "Likely visually consistent" : faceStatus === "likely_different_person" ? "Possible mismatch" : faceStatus === "unclear" ? "Unclear" : "Not run";
-                                return (
-                                  <View key={String(memberResult?.profile_id || memberResult?.display_name)} style={{ marginTop: 9, padding: 10, borderWidth: 1, borderColor: faceColor, borderRadius: 10 }}>
-                                    <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-                                      <Ionicons name="people-circle-outline" size={16} color={faceColor} />
-                                      <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 11, flex: 1 }}>{memberResult?.display_name || "Group member"}</Text>
-                                      <Text style={{ color: faceColor, fontFamily: "Poppins_600SemiBold", fontSize: 9, textTransform: "uppercase" }}>{faceLabel}</Text>
-                                    </View>
-                                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 5 }}>{memberResult?.summary || "No comparison explanation was available."}</Text>
-                                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 4 }}>Advisory group-member similarity only. Inspect the member profile and original video yourself.</Text>
-                                  </View>
-                                );
-                              })}
-                              {(Array.isArray(aiPortfolioReview.evidence) ? aiPortfolioReview.evidence : []).map((criterion: any, criterionIndex: number) => {
-                                const result = String(criterion?.result || "unclear");
-                                const resultColor = result === "supported" ? "#10B981" : result === "not_supported" ? "#EF4444" : "#F59E0B";
-                                return (
-                                  <View key={`${criterion?.criterion || "criterion"}-${criterionIndex}`} style={{ marginTop: 9, paddingTop: 9, borderTopWidth: 1, borderTopColor: colors.border }}>
-                                    <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-                                      <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 11, flex: 1 }}>
-                                        {String(criterion?.criterion || "Requirement").replace(/_/g, " ")}
-                                      </Text>
-                                      <Text style={{ color: resultColor, fontFamily: "Poppins_600SemiBold", fontSize: 10, textTransform: "uppercase" }}>
-                                        {result.replace("_", " ")} · {Math.round(Number(criterion?.confidence || 0) * 100)}%
-                                      </Text>
-                                    </View>
-                                    {(Array.isArray(criterion?.evidence) ? criterion.evidence : []).slice(0, 3).map((entry: any, evidenceIndex: number) => (
-                                      <Text key={evidenceIndex} style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 4 }}>
-                                        • {entry?.observation}
-                                        {entry?.timestamp_seconds != null && Number.isFinite(Number(entry.timestamp_seconds)) ? ` (${Math.floor(Number(entry.timestamp_seconds) / 60)}:${String(Math.floor(Number(entry.timestamp_seconds) % 60)).padStart(2, "0")})` : ""}
-                                      </Text>
-                                    ))}
-                                  </View>
-                                );
-                              })}
-                              <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 9 }}>
-                                Advisory only—not identity verification, a talent score, or a hiring decision. Inspect the original CV and performance video.
-                              </Text>
-                            </>
-                          )}
-                        </View>
-                      ) : null}
-
-                      {isAccepted ? (
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 12 }}>
-                          <Ionicons
-                            name={consentStatus === "accepted" ? "eye-outline" : consentStatus === "pending" ? "time-outline" : "eye-off-outline"}
-                            size={16}
-                            color={consentStatus === "accepted" ? "#10B981" : colors.textSecondary}
-                          />
-                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
-                            Feature consent: {consentStatus === "accepted" ? "Allowed" : consentStatus === "pending" ? "Waiting for applicant" : "Private"}
-                          </Text>
-                        </View>
-                      ) : null}
-
-                      {/* Skills/Instruments */}
-                      {displaySkills.length > 0 && (
-                          <View style={{ marginBottom: 12 }}>
-                            <Text
-                              style={{
-                                fontFamily: "Poppins_500Medium",
-                                fontSize: 12,
-                                color: colors.textSecondary,
-                                marginBottom: 6,
-                              }}
-                            >
-                              Skills
-                            </Text>
-                            <View
-                              style={{
-                                flexDirection: "row",
-                                flexWrap: "wrap",
-                                gap: 6,
-                              }}
-                            >
-                              {displaySkills
-                                .slice(0, 5)
-                                .map((skill: string, idx: number) => (
-                                  <View
-                                    key={idx}
-                                    style={[
-                                      styles.skillTag,
-                                      {
-                                        backgroundColor: colors.inputBackground,
-                                      },
-                                    ]}
-                                  >
-                                    <Text
-                                      style={{
-                                        fontFamily: "Poppins_500Medium",
-                                        fontSize: 11,
-                                        color: colors.text,
-                                      }}
-                                    >
-                                      {skill}
-                                    </Text>
-                                  </View>
-                                ))}
-                              {displaySkills.length > 5 && (
-                                <View
-                                  style={[
-                                    styles.skillTag,
-                                    { backgroundColor: colors.primary + "20" },
-                                  ]}
-                                >
-                                  <Text
-                                    style={{
-                                      fontFamily: "Poppins_500Medium",
-                                      fontSize: 11,
-                                      color: colors.primary,
-                                    }}
-                                  >
-                                    +{displaySkills.length - 5}
-                                  </Text>
-                                </View>
-                              )}
                             </View>
                           </View>
-                        )}
 
-                      {/* Group Members */}
-                      {displayGroup?.members && displayGroup.members.length > 0 && (
-                        <View style={{ marginBottom: 12 }}>
-                          <Text
-                            style={{
-                              fontFamily: "Poppins_500Medium",
-                              fontSize: 12,
-                              color: colors.textSecondary,
-                              marginBottom: 6,
-                            }}
-                          >
-                            Group Members ({displayGroup.members.length})
+                          <Text numberOfLines={1} style={[styles.compactMeta, { color: colors.textSecondary }]}>
+                            {role} • {primarySpecialty}
                           </Text>
-                          <Text
-                            style={{
-                              fontFamily: "Poppins_400Regular",
-                              fontSize: 13,
-                              color: colors.text,
-                            }}
-                          >
-                            {displayGroup.members
-                              .map((m: any) =>
-                                typeof m === "string" ? m : m.name,
-                              )
-                              .join(", ")}
-                          </Text>
-                        </View>
-                      )}
-
-                      {/* Pitch Message */}
-                      <View style={{ marginBottom: 12 }}>
-                        <Text
-                          style={{
-                            fontFamily: "Poppins_500Medium",
-                            fontSize: 12,
-                            color: colors.textSecondary,
-                            marginBottom: 6,
-                          }}
-                        >
-                          Pitch Message
-                        </Text>
-                        <View
-                          style={[
-                            styles.pitchBox,
-                            { backgroundColor: colors.inputBackground },
-                          ]}
-                        >
-                          <Ionicons
-                            name="chatbubble-outline"
-                            size={16}
-                            color={colors.textSecondary}
-                            style={{ marginRight: 8 }}
-                          />
-                          <Text
-                            style={{
-                              fontFamily: "Poppins_400Regular",
-                              fontSize: 13,
-                              color: colors.text,
-                              flex: 1,
-                              lineHeight: 20,
-                            }}
-                          >
-                            {app.pitch_message || "No pitch message provided."}
-                          </Text>
-                        </View>
-                      </View>
-
-                      {/* Demo Video */}
-                      {app.video_url && (
-                        <TouchableOpacity activeOpacity={1}
-                          onPress={() => openMediaOrExternal(app.video_url, "Demo Video")}
-                          style={[
-                            styles.mediaButton,
-                            {
-                              backgroundColor: colors.primary + "15",
-                              borderColor: colors.primary,
-                            },
-                          ]}
-                        >
-                          <Ionicons
-                            name="videocam"
-                            size={18}
-                            color={colors.primary}
-                          />
-                          <Text
-                            style={{
-                              fontFamily: "Poppins_500Medium",
-                              fontSize: 13,
-                              color: colors.primary,
-                              marginLeft: 8,
-                            }}
-                          >
-                            Watch Demo Video
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-
-                      {/* CV/Resume */}
-                      {app.cv_url && (
-                        <View style={{ marginBottom: 12 }}>
-                          <Text
-                            style={{
-                              fontFamily: "Poppins_500Medium",
-                              fontSize: 12,
-                              color: colors.textSecondary,
-                              marginBottom: 8,
-                            }}
-                          >
-                            CV / Resume
-                          </Text>
-                          <TouchableOpacity activeOpacity={1}
-                            onPress={() => openMediaOrExternal(app.cv_url, "CV / Resume")}
-                            style={[
-                              styles.cvButton,
-                              {
-                                backgroundColor: colors.primary + "15",
-                                borderColor: colors.primary,
-                              },
-                            ]}
-                          >
-                            <Ionicons
-                              name="document-text"
-                              size={18}
-                              color={colors.primary}
-                            />
-                            <Text
-                              style={{
-                                fontFamily: "Poppins_500Medium",
-                                fontSize: 13,
-                                color: colors.primary,
-                                marginLeft: 8,
-                                flex: 1,
-                              }}
-                            >
-                              View CV/Resume
+                          <View style={styles.compactLocationRow}>
+                            <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
+                            <Text numberOfLines={1} style={[styles.compactMeta, { color: colors.textSecondary, flex: 1 }]}>
+                              {compactLocation}
                             </Text>
-                            <Ionicons
-                              name="open-outline"
-                              size={16}
-                              color={colors.primary}
-                            />
-                          </TouchableOpacity>
-                        </View>
-                      )}
-
-                      {/* Portfolio/Music - Instagram Style Grid */}
-                      {displayPortfolio.length > 0 && (
-                          <View style={{ marginBottom: 12 }}>
-                            <Text
-                              style={{
-                                fontFamily: "Poppins_500Medium",
-                                fontSize: 12,
-                                color: colors.textSecondary,
-                                marginBottom: 12,
-                              }}
-                            >
-                              Music & Portfolio
-                            </Text>
-                            <View style={styles.portfolioGrid}>
-                              {displayPortfolio.map(
-                                (url: string, idx: number) => {
-                                  const isImage =
-                                    /\.(jpg|jpeg|png|gif|webp)$/i.test(url);
-                                  const isVideo =
-                                    /\.(mp4|mov|webm)$/i.test(url) ||
-                                    url.includes("youtube") ||
-                                    url.includes("vimeo");
-                                  const isSpotify = url.includes("spotify");
-                                  const isSoundCloud =
-                                    url.includes("soundcloud");
-
-                                  return (
-                                    <TouchableOpacity activeOpacity={1}
-                                      key={idx}
-                                      onPress={() => openMediaOrExternal(url, isVideo ? "Portfolio Video" : "Portfolio Media")}
-                                      style={[
-                                        styles.portfolioGridItem,
-                                        {
-                                          backgroundColor:
-                                            colors.inputBackground,
-                                        },
-                                      ]}
-                                    >
-                                      {isImage ? (
-                                        <Image
-                                          source={{ uri: url }}
-                                          style={styles.portfolioImage}
-                                          resizeMode="cover"
-                                        />
-                                      ) : (
-                                        <View
-                                          style={styles.portfolioPlaceholder}
-                                        >
-                                          <View
-                                            style={[
-                                              styles.portfolioIconCircle,
-                                              {
-                                                backgroundColor:
-                                                  colors.primary + "20",
-                                              },
-                                            ]}
-                                          >
-                                            <Ionicons
-                                              name={
-                                                isVideo
-                                                  ? "play"
-                                                  : isSpotify
-                                                    ? "musical-notes"
-                                                    : isSoundCloud
-                                                      ? "cloud"
-                                                      : "link"
-                                              }
-                                              size={24}
-                                              color={colors.primary}
-                                            />
-                                          </View>
-                                          <Text
-                                            style={{
-                                              fontFamily: "Poppins_500Medium",
-                                              fontSize: 10,
-                                              color: colors.textSecondary,
-                                              marginTop: 6,
-                                              textAlign: "center",
-                                            }}
-                                            numberOfLines={1}
-                                          >
-                                            {isVideo
-                                              ? "Video"
-                                              : isSpotify
-                                                ? "Spotify"
-                                                : isSoundCloud
-                                                  ? "SoundCloud"
-                                                  : "Link"}
-                                          </Text>
-                                        </View>
-                                      )}
-                                      {isVideo && (
-                                        <View
-                                          style={styles.portfolioPlayOverlay}
-                                        >
-                                          <Ionicons
-                                            name="play-circle"
-                                            size={32}
-                                            color="#fff"
-                                          />
-                                        </View>
-                                      )}
-                                    </TouchableOpacity>
-                                  );
-                                },
-                              )}
+                          </View>
+                          {aiRecommendation?.score !== null && aiRecommendation?.score !== undefined ? (
+                            <View style={[styles.aiFilterScoreRow, { backgroundColor: colors.inputBackground }]}>
+                              <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
+                              <Text style={[styles.aiFilterScoreLabel, { color: colors.text }]}>AI Filter Score</Text>
+                              <Text style={[styles.aiFilterScoreValue, { color: colors.primary }]}>{Number(aiRecommendation.score)}%</Text>
                             </View>
-                          </View>
-                        )}
-
-                      {/* Legacy Portfolio Links (for non-media URLs) */}
-                      {displayPortfolio.filter(
-                          (url: string) =>
-                            !/\.(jpg|jpeg|png|gif|webp|mp4|mov|webm)$/i.test(
-                              url,
-                            ) &&
-                            !url.includes("youtube") &&
-                            !url.includes("vimeo") &&
-                            !url.includes("spotify") &&
-                            !url.includes("soundcloud"),
-                        ).length > 0 && (
-                          <View style={{ marginBottom: 12 }}>
-                            <Text
-                              style={{
-                                fontFamily: "Poppins_500Medium",
-                                fontSize: 12,
-                                color: colors.textSecondary,
-                                marginBottom: 8,
-                              }}
-                            >
-                              Other Links
-                            </Text>
-                            {displayPortfolio
-                              .filter(
-                                (url: string) =>
-                                  !/\.(jpg|jpeg|png|gif|webp|mp4|mov|webm)$/i.test(
-                                    url,
-                                  ) &&
-                                  !url.includes("youtube") &&
-                                  !url.includes("vimeo") &&
-                                  !url.includes("spotify") &&
-                                  !url.includes("soundcloud"),
-                              )
-                              .slice(0, 3)
-                              .map((url: string, idx: number) => (
-                                <TouchableOpacity activeOpacity={1}
-                                  key={idx}
-                                  onPress={() => openMediaOrExternal(url, "Portfolio Link")}
-                                  style={[
-                                    styles.portfolioLink,
-                                    { backgroundColor: colors.inputBackground },
-                                  ]}
-                                >
-                                  <Ionicons
-                                    name="link"
-                                    size={16}
-                                    color={colors.primary}
-                                  />
-                                  <Text
-                                    style={{
-                                      fontFamily: "Poppins_400Regular",
-                                      fontSize: 12,
-                                      color: colors.primary,
-                                      flex: 1,
-                                      marginLeft: 8,
-                                    }}
-                                    numberOfLines={1}
-                                  >
-                                    {url.replace(/https?:\/\/(www\.)?/, "")}
-                                  </Text>
-                                  <Ionicons
-                                    name="open-outline"
-                                    size={14}
-                                    color={colors.textSecondary}
-                                  />
-                                </TouchableOpacity>
-                              ))}
-                          </View>
-                        )}
-
-                      {/* View Full Profile Button */}
-                      <TouchableOpacity activeOpacity={1}
-                        onPress={() => {
-                          if (displayGroup?.id) {
-                            router.push({
-                              pathname: "/group_details",
-                              params: { id: displayGroup.id },
-                            });
-                          } else if (displayApplicant?.id) {
-                            router.push({
-                              pathname: "/profile",
-                              params: { userId: displayApplicant.id },
-                            });
-                          } else if (app.applicant_id) {
-                            router.push({
-                              pathname: "/profile",
-                              params: { userId: app.applicant_id },
-                            });
-                          } else {
-                            Alert.alert("Error", "Unable to view profile");
-                          }
-                        }}
-                        style={[
-                          styles.viewProfileBtn,
-                          { borderColor: colors.border },
-                        ]}
-                      >
-                        <Ionicons
-                          name="person-circle-outline"
-                          size={18}
-                          color={colors.text}
-                        />
-                        <Text
-                          style={{
-                            fontFamily: "Poppins_500Medium",
-                            fontSize: 13,
-                            color: colors.text,
-                            marginLeft: 8,
-                          }}
-                        >
-                          View Full {displayGroup ? "Group" : "Profile"}
-                        </Text>
-                      </TouchableOpacity>
-
-                      {/* Action Buttons */}
-                      {canManageGig && String(app.status || "").toLowerCase() === "pending" && (
-                        <View style={[styles.actionButtons, { marginTop: 12 }]}>
-                          <TouchableOpacity activeOpacity={1}
-                            onPress={() => confirmAction(app.id, "rejected")}
-                            style={[
-                              styles.declineButton,
-                              { borderColor: colors.border },
-                            ]}
+                          ) : null}
+                          <TouchableOpacity
+                            testID={`view-applicant-${app.id}`}
+                            accessibilityRole="button"
+                            onPress={() => loadApplicantDetails(app)}
+                            style={[styles.viewApplicantButton, { backgroundColor: colors.primary }]}
                           >
-                            <Text
-                              style={{
-                                fontFamily: "Poppins_600SemiBold",
-                                color: colors.text,
-                              }}
-                            >
-                              Decline
-                            </Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity activeOpacity={1}
-                            onPress={() => confirmAction(app.id, "accepted")}
-                            style={[
-                              styles.acceptButton,
-                              { backgroundColor: colors.primary },
-                            ]}
-                          >
-                            <Text
-                              style={{
-                                fontFamily: "Poppins_600SemiBold",
-                                color: "#FFF",
-                              }}
-                            >
-                              Accept
-                            </Text>
+                            <Text style={styles.viewApplicantButtonText}>View Applicant</Text>
+                            <Ionicons name="arrow-forward" size={17} color="#FFF" />
                           </TouchableOpacity>
                         </View>
-                      )}
-                    </View>
-                    );
+                      );
+                    }
+
+                    return null;
                   })
                 )}
               </View>
@@ -2311,6 +1691,25 @@ export default function GigDetailsScreen() {
         message={modalMessage}
         buttonText={modalButtonText}
         danger={modalButtonText === "Decline"}
+      />
+      <ApplicantDetailsModal
+        visible={Boolean(selectedApplicantSummary)}
+        summary={selectedApplicantSummary}
+        details={selectedApplicantDetails}
+        loading={applicantDetailsLoading}
+        error={applicantDetailsError}
+        colors={colors}
+        onClose={closeApplicantDetails}
+        onRetry={() => selectedApplicantSummary && loadApplicantDetails(selectedApplicantSummary)}
+        onOpenMedia={openMediaOrExternal}
+        onAccept={(applicationId) => {
+          closeApplicantDetails();
+          confirmAction(applicationId, "accepted");
+        }}
+        onDecline={(applicationId) => {
+          closeApplicantDetails();
+          confirmAction(applicationId, "rejected");
+        }}
       />
       <TrackedBottomSheetModal
         ref={inviteSheetRef}
@@ -2651,6 +2050,72 @@ const styles = StyleSheet.create({
   applicantCard: {
     padding: 16,
     borderRadius: 24,
+  },
+  compactApplicantCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 12,
+    gap: 7,
+  },
+  compactApplicantHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
+  },
+  compactApplicantName: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  compactStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 4,
+    marginTop: 2,
+  },
+  compactMeta: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    lineHeight: 17,
+  },
+  compactLocationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  aiFilterScoreRow: {
+    minHeight: 36,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginTop: 2,
+  },
+  aiFilterScoreLabel: {
+    flex: 1,
+    fontFamily: "Poppins_500Medium",
+    fontSize: 11,
+  },
+  aiFilterScoreValue: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 13,
+  },
+  viewApplicantButton: {
+    minHeight: 42,
+    borderRadius: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    marginTop: 3,
+  },
+  viewApplicantButtonText: {
+    color: "#FFFFFF",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
   },
   applicantHeader: {
     flexDirection: "row",

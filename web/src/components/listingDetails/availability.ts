@@ -72,11 +72,14 @@ const AVAILABLE_DOT = "#10B981";
 type ScheduleSessionType = "rehearsal" | "recording" | "both";
 
 const toDateString = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}-${String(date.getDate()).padStart(2, "0")}`;
 
 export const isRecordingStudioMode = (
   studioType?: string | null,
-  selectedSessionType?: SessionType,
+  selectedSessionType?: SessionType
 ) => {
   const normalizedStudioType = normalizeStudioType(studioType);
   return (
@@ -86,7 +89,7 @@ export const isRecordingStudioMode = (
 };
 
 export const normalizeStudioType = (
-  studioType?: string | null,
+  studioType?: string | null
 ): CanonicalStudioType => {
   if (typeof studioType !== "string") {
     return null;
@@ -125,9 +128,11 @@ const getDotColor = (_isOverride: boolean | undefined, _primaryColor: string) =>
 
 const normalizeScheduleSessionType = (
   value: unknown,
-  fallback: ScheduleSessionType = "both",
+  fallback: ScheduleSessionType = "both"
 ): ScheduleSessionType => {
-  const normalized = String(value || "").trim().toLowerCase();
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
   if (
     normalized === "rehearsal" ||
     normalized === "recording" ||
@@ -140,15 +145,17 @@ const normalizeScheduleSessionType = (
 
 const parseScheduleSessionType = (
   reason: unknown,
-  fallback: ScheduleSessionType = "both",
+  fallback: ScheduleSessionType = "both"
 ): ScheduleSessionType => {
-  const match = String(reason || "").match(/session_type:(rehearsal|recording|both)/i);
+  const match = String(reason || "").match(
+    /session_type:(rehearsal|recording|both)/i
+  );
   return match ? normalizeScheduleSessionType(match[1], fallback) : fallback;
 };
 
 const getRequestedScheduleSessionType = (
   studioType?: string | null,
-  selectedSessionType?: SessionType,
+  selectedSessionType?: SessionType
 ): ScheduleSessionType | null => {
   if (selectedSessionType === "Rehearsal") return "rehearsal";
   if (selectedSessionType === "Recording") return "recording";
@@ -162,22 +169,25 @@ const getRequestedScheduleSessionType = (
 const getScheduleSessionType = (schedule: any): ScheduleSessionType =>
   normalizeScheduleSessionType(
     schedule?.sessionType ?? schedule?.session_type,
-    parseScheduleSessionType(schedule?.reason, "both"),
+    parseScheduleSessionType(schedule?.reason, "both")
   );
 
 const scheduleAllowsRequestedSession = (
   schedule: any,
   studioType?: string | null,
-  selectedSessionType?: SessionType,
+  selectedSessionType?: SessionType
 ) => {
   const requestedSessionType = getRequestedScheduleSessionType(
     studioType,
-    selectedSessionType,
+    selectedSessionType
   );
   if (!requestedSessionType) return true;
 
   const scheduleSessionType = getScheduleSessionType(schedule);
-  return scheduleSessionType === "both" || scheduleSessionType === requestedSessionType;
+  return (
+    scheduleSessionType === "both" ||
+    scheduleSessionType === requestedSessionType
+  );
 };
 
 const buildAvailabilityMap = (availability: DaySchedule[]) => {
@@ -226,20 +236,30 @@ const resolveDaySchedule = (
   availabilityMap: Record<number, DaySchedule>,
   dateOverrideMap: Record<string, DateOverride[]>,
   studioType?: string | null,
-  selectedSessionType?: SessionType,
+  selectedSessionType?: SessionType
 ): DaySchedule | null => {
   const dateOverrides = dateOverrideMap[dateStr];
 
   if (dateOverrides) {
     const openOverrides = dateOverrides
-      .filter((override) => override.is_open && override.open_time && override.close_time)
+      .filter(
+        (override) =>
+          override.is_open && override.open_time && override.close_time
+      )
       .filter((override) =>
-        scheduleAllowsRequestedSession(override, studioType, selectedSessionType),
+        scheduleAllowsRequestedSession(
+          override,
+          studioType,
+          selectedSessionType
+        )
       )
       .sort((a: any, b: any) => {
-        const orderDiff = Number(a?.slot_order ?? 0) - Number(b?.slot_order ?? 0);
+        const orderDiff =
+          Number(a?.slot_order ?? 0) - Number(b?.slot_order ?? 0);
         if (orderDiff !== 0) return orderDiff;
-        return String(a?.open_time || "").localeCompare(String(b?.open_time || ""));
+        return String(a?.open_time || "").localeCompare(
+          String(b?.open_time || "")
+        );
       });
 
     if (openOverrides.length > 0) {
@@ -264,12 +284,16 @@ const resolveDaySchedule = (
     scheduleAllowsRequestedSession(
       {
         ...slot,
-        sessionType: slot?.sessionType ?? slot?.session_type ?? weeklySchedule?.sessionType ?? weeklySchedule?.session_type,
+        sessionType:
+          slot?.sessionType ??
+          slot?.session_type ??
+          weeklySchedule?.sessionType ??
+          weeklySchedule?.session_type,
         reason: slot?.reason ?? weeklySchedule?.reason,
       },
       studioType,
-      selectedSessionType,
-    ),
+      selectedSessionType
+    )
   );
 
   if (sessionAllowedSlots.length === 0) return null;
@@ -284,7 +308,9 @@ const getBlockedTimeStringsFromDbBookings = (dayBookings: any[]) => {
   const blockedTimes = new Set<string>();
 
   dayBookings.forEach((booking) => {
-    const bookingStart = new Date(`${booking.booking_date}T${booking.start_time}`);
+    const bookingStart = new Date(
+      `${booking.booking_date}T${booking.start_time}`
+    );
     const bookingEnd = new Date(`${booking.booking_date}T${booking.end_time}`);
 
     if (isNaN(bookingStart.getTime()) || isNaN(bookingEnd.getTime())) {
@@ -304,7 +330,7 @@ const getBlockedTimeStringsFromDbBookings = (dayBookings: any[]) => {
 const blockTimesFromCartBookings = (
   blockedTimes: Set<string>,
   cartBookingsForDate: CartBooking[],
-  dateStr: string,
+  dateStr: string
 ) => {
   cartBookingsForDate.forEach((booking) => {
     if (booking.timeSlots && booking.timeSlots.length > 0) {
@@ -328,7 +354,10 @@ const blockTimesFromCartBookings = (
   });
 };
 
-const getCartBookingsForDate = (cartBookings: CartBooking[] | undefined, dateStr: string) =>
+const getCartBookingsForDate = (
+  cartBookings: CartBooking[] | undefined,
+  dateStr: string
+) =>
   (cartBookings || []).filter((booking) => {
     const cartDateStr = booking.date.toISOString().split("T")[0];
     return cartDateStr === dateStr;
@@ -356,7 +385,10 @@ export const buildMarkedDates = ({
 
   const availabilityMap = buildAvailabilityMap(availability || []);
   const dateOverrideMap = buildDateOverrideMap(dateOverrides);
-  const isRecordingStudio = isRecordingStudioMode(studioType, selectedSessionType);
+  const isRecordingStudio = isRecordingStudioMode(
+    studioType,
+    selectedSessionType
+  );
 
   for (let i = 0; i < 90; i++) {
     const date = new Date(today);
@@ -369,7 +401,7 @@ export const buildMarkedDates = ({
       availabilityMap,
       dateOverrideMap,
       studioType,
-      selectedSessionType,
+      selectedSessionType
     );
 
     if (!daySchedule || !daySchedule.slots || daySchedule.slots.length === 0) {
@@ -405,7 +437,8 @@ export const buildMarkedDates = ({
     }
 
     const dayDbBookings = safeDbBookings.filter((booking) => {
-      if (booking.status === "cancelled" || booking.status === "rejected") return false;
+      if (booking.status === "cancelled" || booking.status === "rejected")
+        return false;
       return booking.booking_date === dateStr;
     });
 
@@ -430,7 +463,9 @@ export const buildMarkedDates = ({
     const blockedTimes = getBlockedTimeStringsFromDbBookings(dayDbBookings);
     blockTimesFromCartBookings(blockedTimes, cartBookingsForDate, dateStr);
 
-    const availableCount = potentialSlots.filter((slot) => !blockedTimes.has(slot)).length;
+    const availableCount = potentialSlots.filter(
+      (slot) => !blockedTimes.has(slot)
+    ).length;
 
     marked[dateStr] =
       availableCount > 0
@@ -476,7 +511,7 @@ export const buildAvailableSlots = ({
     availabilityMap,
     dateOverrideMap,
     studioType,
-    selectedSessionType,
+    selectedSessionType
   );
 
   if (!daySchedule || !daySchedule.slots) {
@@ -487,13 +522,19 @@ export const buildAvailableSlots = ({
     };
   }
 
-  const safeExistingBookings = Array.isArray(existingBookings) ? existingBookings : [];
+  const safeExistingBookings = Array.isArray(existingBookings)
+    ? existingBookings
+    : [];
   const dayBookings = safeExistingBookings.filter((booking) => {
-    if (booking.status === "cancelled" || booking.status === "rejected") return false;
+    if (booking.status === "cancelled" || booking.status === "rejected")
+      return false;
     return booking.booking_date === dateStr;
   });
 
-  const isRecordingStudio = isRecordingStudioMode(studioType, selectedSessionType);
+  const isRecordingStudio = isRecordingStudioMode(
+    studioType,
+    selectedSessionType
+  );
   const cartBookingsForDate = getCartBookingsForDate(cartBookings, dateStr);
 
   if (isRecordingStudio) {

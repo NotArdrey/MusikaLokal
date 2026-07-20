@@ -3692,13 +3692,35 @@ serve(async (req: Request) => {
 
       const updateClient = table === "gig_applications" || table === "studio_bookings" ? supabaseAdmin : supabaseClient;
 
-      const { data, error } = await updateClient
-        .from(table)
-        .update(updateData)
-        .eq("id", booking_id)
-        .select()
-        .maybeSingle();
+      let data: any = null;
+      let error: any = null;
 
+      if (table === "gig_applications" && new_status === "rejected") {
+        const result = await supabaseAdmin.rpc("decline_gig_application_safely", {
+          p_application_id: booking_id,
+          p_actor_user_id: authUser.id,
+          p_reason: cancellation_reason || null,
+        });
+        data = result.data;
+        error = result.error;
+      } else if (table === "gig_applications" && new_status === "fired") {
+        const result = await supabaseAdmin.rpc("terminate_gig_application_safely", {
+          p_application_id: booking_id,
+          p_actor_user_id: authUser.id,
+          p_reason: cancellation_reason,
+        });
+        data = result.data;
+        error = result.error;
+      } else {
+        const result = await updateClient
+          .from(table)
+          .update(updateData)
+          .eq("id", booking_id)
+          .select()
+          .maybeSingle();
+        data = result.data;
+        error = result.error;
+      }
 
       if (error) throw error;
 
@@ -3896,6 +3918,11 @@ serve(async (req: Request) => {
                 gigRow?.name ||
                 application.gig?.name ||
                 "this gig";
+              const performerName =
+                application.group?.name ||
+                application.production_roster?.roster_profile?.full_name ||
+                application.production_roster?.roster_group?.name ||
+                "The performer";
               notificationImage = Array.isArray(gigRow?.images)
                 ? gigRow.images[0] || null
                 : null;
@@ -3952,13 +3979,20 @@ serve(async (req: Request) => {
 
               if (notificationTitle && notificationMessage) {
                 for (const member of audience) {
-                  if (member.user_id === authUser.id) continue;
+                  if (member.user_id === authUser.id && new_status !== "fired") continue;
+
+                  const memberTitle = new_status === "fired" && member.viewer_access === "organizer"
+                    ? "Performer Removed"
+                    : notificationTitle;
+                  const memberMessage = new_status === "fired" && member.viewer_access === "organizer"
+                    ? `${performerName} was removed from ${gigName}. The performer slot is available for a replacement.`
+                    : notificationMessage;
 
                   await insertNotificationIfMissing(supabaseAdmin, {
                     user_id: member.user_id,
                     type: notificationType,
-                    title: notificationTitle,
-                    message: notificationMessage,
+                    title: memberTitle,
+                    message: memberMessage,
                     image: notificationImage,
                     meta: buildNotificationRouteMeta(
                       "/bookings",

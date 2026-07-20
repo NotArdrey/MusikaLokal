@@ -76,7 +76,7 @@ import ReviewsTab from "./listingDetails/ReviewsTab";
 import StudioBookTab from "./listingDetails/StudioBookTab";
 import StudioGigVenueAboutTab from "./listingDetails/StudioGigVenueAboutTab";
 import StudioSetupTab from "./listingDetails/StudioSetupTab";
-import { isRecordingStudioMode, normalizeStudioType } from "./listingDetails/availability";
+import { isRecordingStudioMode, normalizeAvailability, normalizeStudioType, type DaySchedule } from "./listingDetails/availability";
 import Modal from "./modal";
 import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
 
@@ -524,6 +524,7 @@ const ListingDetailsSheet = forwardRef<
     reapplicationCooldownDaysRemaining,
     setReapplicationCooldownDaysRemaining,
   ] = useState<number | null>(null);
+  const [isReapplicationUnavailableForGig, setIsReapplicationUnavailableForGig] = useState(false);
 
   // Studio Booking State (prevent spam)
   const [hasExistingStudioBooking, setHasExistingStudioBooking] =
@@ -1418,6 +1419,7 @@ const ListingDetailsSheet = forwardRef<
     setIsReapplicationCooldownActive(false);
     setReapplicationCooldownReason(null);
     setReapplicationCooldownDaysRemaining(null);
+    setIsReapplicationUnavailableForGig(false);
   }, []);
 
   // Check if user has already applied to this gig
@@ -1554,7 +1556,23 @@ const ListingDetailsSheet = forwardRef<
       return;
     }
 
-    const cooldownDays = group.reapplication_cooldown_days ?? 30;
+    let cooldownDays = group.reapplication_cooldown_days;
+    if (cooldownDays === null || cooldownDays === undefined) {
+      const { data: gigSettings, error: gigSettingsError } = await supabase
+        .from("gigs")
+        .select("reapplication_cooldown_days")
+        .eq("id", listingId)
+        .maybeSingle();
+
+      if (gigSettingsError) {
+        console.error("Error loading the gig reapplication cooldown:", gigSettingsError);
+        resetReapplicationCooldown();
+        return;
+      }
+
+      cooldownDays = gigSettings?.reapplication_cooldown_days ?? 30;
+    }
+
     if (Number(cooldownDays) <= 0) {
       resetReapplicationCooldown();
       return;
@@ -1601,6 +1619,7 @@ const ListingDetailsSheet = forwardRef<
       setReapplicationCooldownDaysRemaining(
         cooldownInfo.isActive ? cooldownInfo.daysRemaining : null,
       );
+      setIsReapplicationUnavailableForGig(cooldownInfo.unavailableForGig);
     } catch (err) {
       console.error("Error checking reapplication cooldown:", err);
       resetReapplicationCooldown();
@@ -2656,7 +2675,7 @@ const ListingDetailsSheet = forwardRef<
               "⚠️ No operating hours found, checking availability column...",
             );
             // Fallback: check if availability exists in the data (JSONB column)
-            normalizedData.availability = data.availability;
+            normalizedData.availability = normalizeAvailability(data.availability);
             debugLog(
               "📅 Using availability from JSONB column:",
               data.availability,
@@ -2746,26 +2765,32 @@ const ListingDetailsSheet = forwardRef<
         debugLog("No data found for listingId:", listingId);
       }
     } catch (e) {
-      debugLog("Error fetching details:", e);
+      if (__DEV__) console.warn("Listing details could not be loaded", e);
+      if (latestListingIdRef.current === activeListingId && !cachedDetails?.data) {
+        setGroup(null);
+        setExistingBookings([]);
+        setMarkedDates({});
+      }
     } finally {
       clearListingDetailsRequestInFlight(activeListingId);
-      setLoading(false);
+      if (latestListingIdRef.current === activeListingId) setLoading(false);
       debugLog("fetchGroupDetails complete, loading:", false);
     }
   };
 
   const processAvailability = (
-    availability: any[],
+    availability: unknown,
     dbBookings: any[],
     dateOverrides?: any[],
     cartBookings?: any[],
     settingsOverride?: any,
   ) => {
+    const safeAvailability: DaySchedule[] = normalizeAvailability(availability);
     // Safeguard against undefined or non-array dbBookings
     const safeDbBookings = Array.isArray(dbBookings) ? dbBookings : [];
 
     debugLog("📅 processAvailability called with:", {
-      availability,
+      availability: safeAvailability,
       dbBookingsCount: safeDbBookings.length,
       dateOverridesCount: dateOverrides?.length || 0,
       cartBookingsCount: cartBookings?.length || 0,
@@ -2782,7 +2807,7 @@ const ListingDetailsSheet = forwardRef<
 
     // Map availability for easier lookup (weekly schedule)
     const availabilityMap: { [key: number]: any } = {};
-    availability.forEach((daySchedule: any) => {
+    safeAvailability.forEach((daySchedule) => {
       const dayIndex = [
         "sunday",
         "monday",
@@ -3037,8 +3062,8 @@ const ListingDetailsSheet = forwardRef<
 
     // Fall back to weekly schedule if no override
     if (!daySchedule) {
-      const weeklyDaySchedule = group.availability.find(
-        (a: any) => a.day.toLowerCase() === dayName,
+      const weeklyDaySchedule = normalizeAvailability(group.availability).find(
+        (schedule) => schedule.day.toLowerCase() === dayName,
       );
       if (
         weeklyDaySchedule &&
@@ -3722,6 +3747,7 @@ const ListingDetailsSheet = forwardRef<
       isReapplicationCooldownActive={isReapplicationCooldownActive}
       reapplicationCooldownReason={reapplicationCooldownReason}
       reapplicationCooldownDaysRemaining={reapplicationCooldownDaysRemaining}
+      isReapplicationUnavailableForGig={isReapplicationUnavailableForGig}
       isBlocked={isBlocked}
       blockReason={blockReason}
       userGroups={userGroups}
@@ -3772,6 +3798,7 @@ const ListingDetailsSheet = forwardRef<
       isReapplicationCooldownActive={isReapplicationCooldownActive}
       reapplicationCooldownReason={reapplicationCooldownReason}
       reapplicationCooldownDaysRemaining={reapplicationCooldownDaysRemaining}
+      isReapplicationUnavailableForGig={isReapplicationUnavailableForGig}
       isBlocked={isBlocked}
       blockReason={blockReason}
       userGroups={userGroups}

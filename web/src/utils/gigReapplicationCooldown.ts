@@ -37,13 +37,14 @@ const parseEventStartTime = (value: string) => {
 
 const getEventStartDate = (
   eventDate: string | Date | null | undefined,
-  eventStartTime: string | null | undefined,
+  eventStartTime: string | null | undefined
 ) => {
   if (!eventDate) return null;
 
-  const parsedDate = eventDate instanceof Date
-    ? new Date(eventDate.getTime())
-    : new Date(eventDate);
+  const parsedDate =
+    eventDate instanceof Date
+      ? new Date(eventDate.getTime())
+      : new Date(eventDate);
 
   if (!Number.isFinite(parsedDate.getTime())) return null;
 
@@ -92,7 +93,9 @@ export const getGigReapplicationCooldownInfo = ({
     };
   }
 
-  const cooldownEndsAt = new Date(rejectionTime + normalizedCooldownDays * DAY_MS);
+  const cooldownEndsAt = new Date(
+    rejectionTime + normalizedCooldownDays * DAY_MS
+  );
   const remainingMs = cooldownEndsAt.getTime() - now.getTime();
 
   if (remainingMs <= 0) {

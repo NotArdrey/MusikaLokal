@@ -5,6 +5,7 @@ export interface GigReapplicationCooldownInfo {
   daysRemaining: number;
   cooldownEndsAt: string | null;
   message: string | null;
+  unavailableForGig: boolean;
 }
 
 interface GigReapplicationCooldownInput {
@@ -37,13 +38,14 @@ const parseEventStartTime = (value: string) => {
 
 const getEventStartDate = (
   eventDate: string | Date | null | undefined,
-  eventStartTime: string | null | undefined,
+  eventStartTime: string | null | undefined
 ) => {
   if (!eventDate) return null;
 
-  const parsedDate = eventDate instanceof Date
-    ? new Date(eventDate.getTime())
-    : new Date(eventDate);
+  const parsedDate =
+    eventDate instanceof Date
+      ? new Date(eventDate.getTime())
+      : new Date(eventDate);
 
   if (!Number.isFinite(parsedDate.getTime())) return null;
 
@@ -77,6 +79,7 @@ export const getGigReapplicationCooldownInfo = ({
       daysRemaining: 0,
       cooldownEndsAt: null,
       message: null,
+      unavailableForGig: false,
     };
   }
 
@@ -89,10 +92,13 @@ export const getGigReapplicationCooldownInfo = ({
       daysRemaining: 0,
       cooldownEndsAt: null,
       message: null,
+      unavailableForGig: false,
     };
   }
 
-  const cooldownEndsAt = new Date(rejectionTime + normalizedCooldownDays * DAY_MS);
+  const cooldownEndsAt = new Date(
+    rejectionTime + normalizedCooldownDays * DAY_MS
+  );
   const remainingMs = cooldownEndsAt.getTime() - now.getTime();
 
   if (remainingMs <= 0) {
@@ -101,6 +107,7 @@ export const getGigReapplicationCooldownInfo = ({
       daysRemaining: 0,
       cooldownEndsAt: cooldownEndsAt.toISOString(),
       message: null,
+      unavailableForGig: false,
     };
   }
 
@@ -115,6 +122,7 @@ export const getGigReapplicationCooldownInfo = ({
       cooldownEndsAt: cooldownEndsAt.toISOString(),
       message:
         "Your application was declined. This gig has already started, so reapplications are closed.",
+      unavailableForGig: true,
     };
   }
 
@@ -125,6 +133,7 @@ export const getGigReapplicationCooldownInfo = ({
       cooldownEndsAt: cooldownEndsAt.toISOString(),
       message:
         "Your application was declined. This gig starts before your reapplication cooldown ends, so you cannot reapply.",
+      unavailableForGig: true,
     };
   }
 
@@ -133,5 +142,6 @@ export const getGigReapplicationCooldownInfo = ({
     daysRemaining,
     cooldownEndsAt: cooldownEndsAt.toISOString(),
     message: `Your application was declined. You can reapply to this gig in ${daysRemaining} more ${dayLabel}.`,
+    unavailableForGig: false,
   };
 };

@@ -1247,7 +1247,23 @@ const ListingDetailsSheet = forwardRef<
       return;
     }
 
-    const cooldownDays = group.reapplication_cooldown_days ?? 30;
+    let cooldownDays = group.reapplication_cooldown_days;
+    if (cooldownDays === null || cooldownDays === undefined) {
+      const { data: gigSettings, error: gigSettingsError } = await supabase
+        .from("gigs")
+        .select("reapplication_cooldown_days")
+        .eq("id", listingId)
+        .maybeSingle();
+
+      if (gigSettingsError) {
+        console.error("Error loading the gig reapplication cooldown:", gigSettingsError);
+        resetReapplicationCooldown();
+        return;
+      }
+
+      cooldownDays = gigSettings?.reapplication_cooldown_days ?? 30;
+    }
+
     if (Number(cooldownDays) <= 0) {
       resetReapplicationCooldown();
       return;

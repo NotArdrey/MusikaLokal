@@ -1009,7 +1009,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
           }}
         >
           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
-            AI recommendation is temporarily unavailable. Open Review Applicant to refresh it.
+            AI Filter is temporarily unavailable. Open Review Applicant to refresh it.
           </Text>
         </View>
       );
@@ -1029,7 +1029,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
           }}
         >
           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
-            AI recommendations are not enabled for this gig. Open Review Applicant to configure them.
+            AI Filter is not enabled for this gig. Open Review Applicant to configure it.
           </Text>
         </View>
       );
@@ -1078,7 +1078,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
           <Ionicons name="sparkles" size={16} color={isRecommended ? "#10B981" : colors.primary} />
           <Text style={{ color: isRecommended ? "#10B981" : colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
-            {isRecommended ? "AI recommended" : "AI fit review"}
+            AI Filter Review
           </Text>
           {recommendation.is_verified === true ? (
             <Ionicons name="shield-checkmark" size={15} color="#10B981" />
@@ -1095,12 +1095,17 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
       ) : null}
       {matched ? (
         <Text style={{ color: "#10B981", fontFamily: "Poppins_500Medium", fontSize: 10 }} numberOfLines={2}>
-          Matched: {matched}
+          Requirements met: {matched}
         </Text>
       ) : null}
       {missing ? (
         <Text style={{ color: "#F59E0B", fontFamily: "Poppins_500Medium", fontSize: 10 }} numberOfLines={2}>
           Review: {missing}
+        </Text>
+      ) : null}
+      {matched.includes("Application media provided") ? (
+        <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14 }}>
+          Media points confirm an upload only. Open Review Applicant for CV/content analysis and the optional profile-video comparison.
         </Text>
       ) : null}
     </View>
@@ -6758,7 +6763,10 @@ export default function BookingsScreen() {
                             activeOpacity={1}
                             testID={bookingActionTestId(item, "feature-consent")}
                             accessibilityLabel={bookingActionTestId(item, "feature-consent")}
-                            onPress={() => router.push({ pathname: "/gig_feature_consent", params: { applicationId: item.id } })}
+                            onPress={() => router.push({
+                              pathname: "/gig_feature_consent",
+                              params: { applicationId: item.id, returnTab: "History" },
+                            })}
                             style={{
                               width: "100%",
                               flexDirection: "row",
@@ -8653,7 +8661,7 @@ export default function BookingsScreen() {
                   : "Are you sure you want to decline this application? The musician will be notified and cannot re-apply to this gig."
                 : "Are you sure you want to decline this booking? The user will be notified."
               : modalMode === "fire"
-                ? "Are you sure you want to fire this musician? This will cancel their upcoming gigs with you."
+                ? "Terminate only this performer's assignment? Their record will remain in History and this slot will reopen for a replacement."
                 : modalMode === "complete"
                     ? selectedItem?.type_id === "studio_booking"
                       ? getBookingRemainingBalance(selectedItem) > 0 && !isBookingPaymentSettled(selectedItem)

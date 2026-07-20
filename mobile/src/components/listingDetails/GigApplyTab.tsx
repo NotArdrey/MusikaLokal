@@ -49,6 +49,7 @@ interface GigApplyTabProps {
   isReapplicationCooldownActive: boolean;
   reapplicationCooldownReason: string | null;
   reapplicationCooldownDaysRemaining: number | null;
+  isReapplicationUnavailableForGig: boolean;
   isBlocked: boolean;
   blockReason: string | null;
   userGroups: any[];
@@ -97,6 +98,7 @@ const GigApplyTab = ({
   isReapplicationCooldownActive,
   reapplicationCooldownReason,
   reapplicationCooldownDaysRemaining,
+  isReapplicationUnavailableForGig,
   isBlocked,
   blockReason,
   userGroups,
@@ -171,7 +173,6 @@ const GigApplyTab = ({
   const aiReviewCoversGroup = Boolean(
     selectedGroupId || (isProducerFlow && getProductionRosterGroupType(selectedProductionRoster)),
   );
-
   const getEnabledSlotTypes = () => {
     if (requiredSlotTypes.length === 0) return [] as ("solo" | "duo" | "band")[];
 
@@ -864,6 +865,21 @@ const GigApplyTab = ({
         existingUrl={cvUrl || undefined}
       />
 
+      <VideoUploader
+        videoUrl={videoUrl}
+        onVideoChange={(url) => setVideoUrl(url || "")}
+        userId={userId || ""}
+        bucketName="documents"
+        folder="performance-videos"
+        maxSizeMB={50}
+        enableReviewFrame={aiPortfolioReviewConsent}
+        onReviewFrameChange={(url) => setVideoReviewFrameUrl(url || "")}
+        onReviewFramesChange={setVideoReviewFrameUrls}
+        enableCopyrightScreening={!isGroupApplicationFlow}
+        copyrightAcknowledged={videoCopyrightAcknowledged}
+        onCopyrightDecisionChange={setVideoCopyrightDecision}
+      />
+
       {!isGroupApplicationFlow && (
         <TouchableOpacity
           activeOpacity={0.78}
@@ -878,17 +894,14 @@ const GigApplyTab = ({
               if (videoUrl) setVideoUrl("");
             }
           }}
-          style={[
-            gigApplyStyles.termsRow,
-            {
-              borderWidth: 1,
-              borderColor: videoCopyrightAcknowledged ? colors.primary : colors.border,
-              borderRadius: 12,
-              padding: 12,
-              marginBottom: 16,
-              backgroundColor: videoCopyrightAcknowledged ? `${colors.primary}10` : "transparent",
-            },
-          ]}
+          style={[gigApplyStyles.termsRow, {
+            borderWidth: 1,
+            borderColor: videoCopyrightAcknowledged ? colors.primary : colors.border,
+            borderRadius: 12,
+            padding: 12,
+            marginBottom: 16,
+            backgroundColor: videoCopyrightAcknowledged ? `${colors.primary}10` : "transparent",
+          }]}
         >
           <View style={[gigApplyStyles.checkbox, {
             borderColor: videoCopyrightAcknowledged ? colors.primary : colors.border,
@@ -905,21 +918,6 @@ const GigApplyTab = ({
         </TouchableOpacity>
       )}
 
-      <VideoUploader
-        videoUrl={videoUrl}
-        onVideoChange={(url) => setVideoUrl(url || "")}
-        userId={userId || ""}
-        bucketName="documents"
-        folder="performance-videos"
-        maxSizeMB={50}
-        enableReviewFrame={aiPortfolioReviewConsent}
-        onReviewFrameChange={(url) => setVideoReviewFrameUrl(url || "")}
-        onReviewFramesChange={setVideoReviewFrameUrls}
-        enableCopyrightScreening={!isGroupApplicationFlow}
-        copyrightAcknowledged={videoCopyrightAcknowledged}
-        onCopyrightDecisionChange={setVideoCopyrightDecision}
-      />
-
       {!isGroupApplicationFlow && videoCopyrightDecision?.requiresAdminReview && (
         <View style={[styles.infoBox, { backgroundColor: "#F59E0B20", borderColor: "#F59E0B", marginBottom: 16 }]}>
           <Ionicons name="shield-checkmark-outline" size={22} color="#F59E0B" />
@@ -930,7 +928,11 @@ const GigApplyTab = ({
       {!isGroupApplicationFlow && (
         <View style={{ marginBottom: 24, gap: 12 }}>
           {hasCustomContract && (
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity
+              activeOpacity={0.78}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: isCustomContractAccepted }}
+              accessibilityLabel={`Agree to ${group?.name || "the organizer"}'s custom contract`}
               onPress={() => setIsCustomContractAccepted((prev) => !prev)}
               style={gigApplyStyles.termsRow}
             >
@@ -946,36 +948,51 @@ const GigApplyTab = ({
                   <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>
                     {`${group?.name || 'the organizer'}'s`}
                   </Text>
-                  {' '}custom contract. *
+                  {' '}{`custom contract.\u00A0*`}
                 </Text>
-                <TouchableOpacity activeOpacity={1} onPress={() => setMediaViewerUrl(group.contract_url)} style={{ marginTop: 4 }}>
-                  <Text style={[gigApplyStyles.termsLink, { color: colors.primary }]}>View Custom Contract</Text>
-                </TouchableOpacity>
+                <Text
+                  accessibilityRole="link"
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    setMediaViewerUrl(group.contract_url);
+                  }}
+                  style={[gigApplyStyles.termsLink, { color: colors.primary }]}
+                >
+                  View Custom Contract
+                </Text>
               </View>
             </TouchableOpacity>
           )}
 
-          <View style={gigApplyStyles.termsRow}>
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={() => setIsSystemTermsAccepted((prev) => !prev)}
-              style={[gigApplyStyles.checkbox, {
+          <TouchableOpacity
+            activeOpacity={0.78}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: isSystemTermsAccepted }}
+            accessibilityLabel="Agree to Musika Lokal's Terms and Conditions"
+            onPress={() => setIsSystemTermsAccepted((prev) => !prev)}
+            style={gigApplyStyles.termsRow}
+          >
+            <View style={[gigApplyStyles.checkbox, {
                 borderColor: isSystemTermsAccepted ? colors.primary : colors.border,
                 backgroundColor: isSystemTermsAccepted ? colors.primary : 'transparent',
               }]}
             >
               {isSystemTermsAccepted && <Text style={gigApplyStyles.checkboxTick}>✓</Text>}
-            </TouchableOpacity>
+            </View>
             <Text style={[gigApplyStyles.termsText, { color: colors.text }]}>
               {"I agree to Musika Lokal's "}
               <Text
-                onPress={() => setTermsVisible(true)}
+                accessibilityRole="link"
+                onPress={(event) => {
+                  event.stopPropagation();
+                  setTermsVisible(true);
+                }}
                 style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary, textDecorationLine: 'underline' }}
               >
-                Terms and Conditions
-              </Text>. *
+                {`Terms and Conditions.\u00A0*`}
+              </Text>
             </Text>
-          </View>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -1054,7 +1071,9 @@ const GigApplyTab = ({
                   ? "Application Accepted"
                   : "Already Applied"
               : isReapplicationCooldownActive
-                ? reapplicationCooldownDaysRemaining
+                ? isReapplicationUnavailableForGig
+                  ? "Reapplication unavailable for this gig"
+                  : reapplicationCooldownDaysRemaining
                   ? `Reapply in ${reapplicationCooldownDaysRemaining} day${reapplicationCooldownDaysRemaining === 1 ? "" : "s"}`
                   : "Reapply Later"
               : groupAlreadyApplied
@@ -1151,6 +1170,8 @@ const gigApplyStyles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Poppins_500Medium',
     textDecorationLine: 'underline',
+    marginTop: 4,
+    alignSelf: 'flex-start',
   },
   termsOverlay: {
     flex: 1,

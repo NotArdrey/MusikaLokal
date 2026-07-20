@@ -1183,7 +1183,7 @@ export default function GigDetailsScreen() {
                         style={[styles.inviteBtn, { backgroundColor: colors.inputBackground }]}
                       >
                         <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
-                        <Text style={[styles.inviteBtnText, { color: colors.primary }]}>AI settings</Text>
+                        <Text style={[styles.inviteBtnText, { color: colors.primary }]}>AI Filter</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         activeOpacity={1}
@@ -1390,7 +1390,7 @@ export default function GigDetailsScreen() {
                           <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
                             <Ionicons name="sparkles" size={17} color={aiRecommendation.recommendation_status === "recommended" ? "#10B981" : colors.primary} />
                             <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 13, flex: 1 }}>
-                              {aiRecommendation.recommendation_status === "recommended" ? "AI recommended" : "AI fit review"}
+                              AI Filter Review
                             </Text>
                             <Text style={{ color: aiRecommendation.recommendation_status === "recommended" ? "#10B981" : colors.primary, fontFamily: "Poppins_700Bold", fontSize: 14 }}>
                               {Number(aiRecommendation.score || 0)}%
@@ -1401,7 +1401,7 @@ export default function GigDetailsScreen() {
                           </Text>
                           {Array.isArray(aiRecommendation.matched_criteria) && aiRecommendation.matched_criteria.length > 0 ? (
                             <Text style={{ color: "#10B981", fontFamily: "Poppins_500Medium", fontSize: 10, marginTop: 7 }}>
-                              Matches: {aiRecommendation.matched_criteria.join(", ")}
+                              Requirements met: {aiRecommendation.matched_criteria.join(", ")}
                             </Text>
                           ) : null}
                           {Array.isArray(aiRecommendation.missing_criteria) && aiRecommendation.missing_criteria.length > 0 ? (

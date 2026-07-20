@@ -122,8 +122,6 @@ export const useApplicationSubmissionAction = ({
   userGroups,
   setAlertConfig,
   setAlertVisible,
-  isReapplicationCooldownActive = false,
-  reapplicationCooldownReason = null,
   requestConfirmation,
   setIsSubmittingApplication,
   setHasExistingApplication,
@@ -261,7 +259,18 @@ export const useApplicationSubmissionAction = ({
       return inactive;
     }
 
-    const cooldownDays = group.reapplication_cooldown_days ?? 30;
+    let cooldownDays = group.reapplication_cooldown_days;
+    if (cooldownDays === null || cooldownDays === undefined) {
+      const { data: gigSettings, error: gigSettingsError } = await supabase
+        .from("gigs")
+        .select("reapplication_cooldown_days")
+        .eq("id", listingId)
+        .maybeSingle();
+
+      if (gigSettingsError) throw gigSettingsError;
+      cooldownDays = gigSettings?.reapplication_cooldown_days ?? 30;
+    }
+
     if (Number(cooldownDays) <= 0) {
       return inactive;
     }
@@ -309,18 +318,6 @@ export const useApplicationSubmissionAction = ({
   ]);
 
   const ensureReapplicationCooldownHasPassed = useCallback(async () => {
-    if (isReapplicationCooldownActive) {
-      setAlertConfig({
-        type: "warning",
-        title: "Reapplication Cooldown",
-        message:
-          reapplicationCooldownReason ||
-          "Your last application was declined. Please wait before applying again.",
-      });
-      setAlertVisible(true);
-      return false;
-    }
-
     try {
       const cooldownInfo = await fetchCurrentReapplicationCooldown();
 
@@ -349,8 +346,6 @@ export const useApplicationSubmissionAction = ({
     return true;
   }, [
     fetchCurrentReapplicationCooldown,
-    isReapplicationCooldownActive,
-    reapplicationCooldownReason,
     setAlertConfig,
     setAlertVisible,
   ]);

@@ -1,19 +1,12 @@
 // @ts-ignore
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from 'npm:@supabase/supabase-js@2'
+import { buildNotificationRouteMeta, withNotificationSeverityType } from '../_shared/notificationRoutes.ts'
+import { buildGigApplicationAudienceMeta, resolveGigApplicationAudience } from '../_shared/gigApplicationAudience.ts'
+import { scheduleCoreActionEmailForNotification } from '../_shared/coreActionEmail.ts'
 import {
-    buildNotificationRouteMeta,
-    withNotificationSeverityType,
-} from "../_shared/notificationRoutes.ts";
-import {
-    buildGigApplicationAudienceMeta,
-    resolveGigApplicationAudience,
-} from "../_shared/gigApplicationAudience.ts";
-import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
-import {
-    attachGigPortfolioReviews,
     queueGigPortfolioReview,
     scheduleGigPortfolioReview,
-} from "../_shared/gigPortfolioReview.ts";
+} from '../_shared/gigPortfolioReview.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -40,16 +33,18 @@ const PRODUCTION_GIG_APPLICATIONS_ENABLED = false
 async function insertCoreNotification(supabaseClient: any, payload: Record<string, unknown>) {
     const notificationPayload = withNotificationSeverityType(payload)
 
-    const { error } = await supabaseClient
-        .from('notifications')
-        .insert(notificationPayload)
+    const { error } = await supabaseClient.from('notifications').insert(notificationPayload)
 
     if (error) {
-        console.error('gig_application_notification_failed', { message: error.message })
+        console.error('gig_application_notification_failed', {
+            message: error.message,
+        })
         return
     }
 
-    scheduleCoreActionEmailForNotification(supabaseClient, notificationPayload, { source: 'gig-applications' })
+    scheduleCoreActionEmailForNotification(supabaseClient, notificationPayload, {
+        source: 'gig-applications',
+    })
 }
 
 async function getVenueStaffAccessLevel(client: any, userId: string, gigId: string): Promise<number | null> {
@@ -77,19 +72,105 @@ async function getVenueStaffAccessLevel(client: any, userId: string, gigId: stri
 
 const GIG_APPLICATION_SELECT = `
     *,
-    applicant:profiles!applicant_id(id, full_name, avatar_url, role, bio, location, is_verified, verification_status),
+    applicant:profiles!applicant_id(id, full_name, avatar_url, role, bio, location, latitude, longitude, is_verified, verification_status),
     submitter:profiles!submitted_by_user_id(id, full_name, avatar_url, email),
-    group:groups!group_id(id, name, genre, description, location, rate, group_type),
+    group:groups!group_id(id, name, genre, description, location, latitude, longitude, rate, group_type),
     production_team:production_team_id(id, name, logo_url),
     production_roster:production_roster_id(
         id,
         entity_kind,
         profile_id,
         group_id,
-        roster_profile:profile_id(id, full_name, avatar_url, role, bio, location, is_verified, verification_status),
-        roster_group:group_id(id, name, genre, description, location, rate, group_type)
+        roster_profile:profile_id(id, full_name, avatar_url, role, bio, location, latitude, longitude, is_verified, verification_status),
+        roster_group:group_id(id, name, genre, description, location, latitude, longitude, rate, group_type)
     )
 `
+
+const GIG_APPLICATION_SUMMARY_SELECT = `
+    id,
+    gig_id,
+    applicant_id,
+    group_id,
+    production_team_id,
+    production_roster_id,
+    status,
+    slot_type,
+    created_at,
+    performer_snapshot,
+    cv_url,
+    video_url,
+    applicant:profiles!applicant_id(id, full_name, avatar_url, location, latitude, longitude, is_verified, verification_status),
+    group:groups!group_id(id, name, genre, location, latitude, longitude, group_type),
+    production_team:production_team_id(id, name, logo_url),
+    production_roster:production_roster_id(
+        id,
+        entity_kind,
+        profile_id,
+        group_id,
+        roster_profile:profile_id(id, full_name, avatar_url, location, latitude, longitude, is_verified, verification_status),
+        roster_group:group_id(id, name, genre, location, latitude, longitude, group_type)
+    )
+`
+
+function toApplicationSummary(application: any) {
+    const pickProfile = (profile: any) =>
+        profile
+            ? {
+                  id: profile.id,
+                  full_name: profile.full_name,
+                  avatar_url: profile.avatar_url,
+                  location: profile.location,
+                  is_verified: profile.is_verified,
+                  verification_status: profile.verification_status,
+                  genres: Array.isArray(profile.genres) ? profile.genres : [],
+                  skills: Array.isArray(profile.skills) ? profile.skills : [],
+              }
+            : null
+    const pickGroup = (group: any) =>
+        group
+            ? {
+                  id: group.id,
+                  name: group.name,
+                  genre: group.genre,
+                  location: group.location,
+                  group_type: group.group_type,
+                  images: Array.isArray(group.images) ? group.images.slice(0, 1) : [],
+              }
+            : null
+
+    return {
+        id: application.id,
+        gig_id: application.gig_id,
+        applicant_id: application.applicant_id,
+        group_id: application.group_id,
+        production_team_id: application.production_team_id,
+        production_roster_id: application.production_roster_id,
+        status: application.status,
+        slot_type: application.slot_type,
+        created_at: application.created_at,
+        performer_snapshot: application.performer_snapshot || {},
+        applicant: pickProfile(application.applicant),
+        group: pickGroup(application.group),
+        production_team: application.production_team
+            ? {
+                  id: application.production_team.id,
+                  name: application.production_team.name,
+                  logo_url: application.production_team.logo_url,
+              }
+            : null,
+        production_roster: application.production_roster
+            ? {
+                  id: application.production_roster.id,
+                  entity_kind: application.production_roster.entity_kind,
+                  profile_id: application.production_roster.profile_id,
+                  group_id: application.production_roster.group_id,
+                  roster_profile: pickProfile(application.production_roster.roster_profile),
+                  roster_group: pickGroup(application.production_roster.roster_group),
+              }
+            : null,
+        ai_recommendation: application.ai_recommendation || null,
+    }
+}
 
 const FEATURE_CONSENT_SELECT = `
     id,
@@ -128,11 +209,7 @@ const ORGANIZER_APPLICATION_SELECT = `
     )
 `
 
-function getApplicationStatusNotification(
-    normalizedStatus: string,
-    gigName: string,
-    productionLabel = '',
-) {
+function getApplicationStatusNotification(normalizedStatus: string, gigName: string, productionLabel = '') {
     if (normalizedStatus === 'rejected') {
         return {
             type: 'warning',
@@ -189,26 +266,24 @@ async function notifyGigApplicationAudience(
     applicationId: string,
     normalizedStatus: string,
     options: {
-        gigName: string;
-        productionLabel?: string;
-        actorUserId?: string | null;
-        performerName?: string | null;
-        includeOrganizer?: boolean;
-    },
+        gigName: string
+        productionLabel?: string
+        actorUserId?: string | null
+        performerName?: string | null
+        includeOrganizer?: boolean
+    }
 ) {
     const notification = getApplicationStatusNotification(
         normalizedStatus,
         options.gigName,
-        options.productionLabel || '',
+        options.productionLabel || ''
     )
 
     if (!notification) return
 
-    const { application, audience } = await resolveGigApplicationAudience(
-        supabaseClient,
-        applicationId,
-        { includeOrganizer: options.includeOrganizer === true },
-    )
+    const { application, audience } = await resolveGigApplicationAudience(supabaseClient, applicationId, {
+        includeOrganizer: options.includeOrganizer === true,
+    })
 
     if (!application || audience.length === 0) return
 
@@ -231,21 +306,21 @@ async function notifyGigApplicationAudience(
             type: memberNotification.type,
             title: memberNotification.title,
             message: memberNotification.message,
-            meta: buildNotificationRouteMeta('/bookings', undefined, buildGigApplicationAudienceMeta(application, member, {
-                status: normalizedStatus,
-                event_type: eventType,
-                performer_name: options.performerName || null,
-            })),
+            meta: buildNotificationRouteMeta(
+                '/bookings',
+                undefined,
+                buildGigApplicationAudienceMeta(application, member, {
+                    status: normalizedStatus,
+                    event_type: eventType,
+                    performer_name: options.performerName || null,
+                })
+            ),
         })
     }
 }
 
 function uniqueStrings(values: unknown[]) {
-    return Array.from(
-        new Set(
-            values.filter((value): value is string => typeof value === 'string' && value.length > 0),
-        ),
-    )
+    return Array.from(new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0)))
 }
 
 async function loadProfileLegacyById(supabaseClient: any, profileIds: string[]) {
@@ -259,7 +334,6 @@ async function loadProfileLegacyById(supabaseClient: any, profileIds: string[]) 
         .in('id', ids)
 
     if (error) throw error
-
     ;(data || []).forEach((row: any) => legacyById.set(row.id, row))
     return legacyById
 }
@@ -275,7 +349,6 @@ async function loadGroupLegacyById(supabaseClient: any, groupIds: string[]) {
         .in('id', ids)
 
     if (error) throw error
-
     ;(data || []).forEach((row: any) => legacyById.set(row.id, row))
     return legacyById
 }
@@ -285,13 +358,9 @@ async function loadGigLegacyById(supabaseClient: any, gigIds: string[]) {
     const legacyById = new Map<string, any>()
     if (ids.length === 0) return legacyById
 
-    const { data, error } = await supabaseClient
-        .from('gigs_legacy_projection')
-        .select('id, images')
-        .in('id', ids)
+    const { data, error } = await supabaseClient.from('gigs_legacy_projection').select('id, images').in('id', ids)
 
     if (error) throw error
-
     ;(data || []).forEach((row: any) => legacyById.set(row.id, row))
     return legacyById
 }
@@ -352,10 +421,10 @@ async function hydrateLegacyApplicationFields(supabaseClient: any, input: any) {
     const hydratedRows = rows.map((row: any) => {
         const productionRoster = row.production_roster
             ? {
-                ...row.production_roster,
-                roster_profile: mergeProfileLegacy(row.production_roster.roster_profile, profileLegacyById),
-                roster_group: mergeGroupLegacy(row.production_roster.roster_group, groupLegacyById),
-            }
+                  ...row.production_roster,
+                  roster_profile: mergeProfileLegacy(row.production_roster.roster_profile, profileLegacyById),
+                  roster_group: mergeGroupLegacy(row.production_roster.roster_group, groupLegacyById),
+              }
             : row.production_roster
 
         return {
@@ -375,7 +444,7 @@ type RecommendationCriterionMode = 'required' | 'preferred' | 'ignore'
 const DEFAULT_RECOMMENDATION_SETTINGS = {
     enabled: false,
     minimum_score: 75,
-    verified_only: true,
+    location_radius_km: null as number | null,
     criteria: {
         genres: 'preferred' as RecommendationCriterionMode,
         instruments: 'required' as RecommendationCriterionMode,
@@ -385,25 +454,36 @@ const DEFAULT_RECOMMENDATION_SETTINGS = {
 }
 
 function normalizeCriterionMode(value: unknown, fallback: RecommendationCriterionMode) {
-    const normalized = String(value || '').trim().toLowerCase()
+    const normalized = String(value || '')
+        .trim()
+        .toLowerCase()
     return normalized === 'required' || normalized === 'preferred' || normalized === 'ignore'
-        ? normalized as RecommendationCriterionMode
+        ? (normalized as RecommendationCriterionMode)
         : fallback
 }
 
 function normalizeRecommendationSettings(value: any) {
     const criteria = value?.criteria && typeof value.criteria === 'object' ? value.criteria : {}
     const parsedMinimum = Number(value?.minimum_score)
+    const parsedRadius = Number(value?.location_radius_km)
 
     return {
         enabled: value?.enabled === true,
         minimum_score: Number.isFinite(parsedMinimum)
-            ? Math.max(50, Math.min(95, Math.round(parsedMinimum)))
+            ? Math.max(0, Math.min(100, Math.round(parsedMinimum)))
             : DEFAULT_RECOMMENDATION_SETTINGS.minimum_score,
-        verified_only: true,
+        location_radius_km:
+            value?.location_radius_km === null || value?.location_radius_km === 'any'
+                ? null
+                : [5, 10, 25, 50, 100].includes(parsedRadius)
+                ? parsedRadius
+                : null,
         criteria: {
             genres: normalizeCriterionMode(criteria.genres, DEFAULT_RECOMMENDATION_SETTINGS.criteria.genres),
-            instruments: normalizeCriterionMode(criteria.instruments, DEFAULT_RECOMMENDATION_SETTINGS.criteria.instruments),
+            instruments: normalizeCriterionMode(
+                criteria.instruments,
+                DEFAULT_RECOMMENDATION_SETTINGS.criteria.instruments
+            ),
             location: normalizeCriterionMode(criteria.location, DEFAULT_RECOMMENDATION_SETTINGS.criteria.location),
             portfolio: normalizeCriterionMode(criteria.portfolio, DEFAULT_RECOMMENDATION_SETTINGS.criteria.portfolio),
         },
@@ -422,9 +502,9 @@ function normalizeMatchValue(value: unknown) {
 function stringValues(values: unknown[]) {
     return uniqueStrings(
         values
-            .flatMap((value) => Array.isArray(value) ? value : [value])
-            .map((value) => typeof value === 'string' ? value.trim() : '')
-            .filter(Boolean),
+            .flatMap((value) => (Array.isArray(value) ? value : [value]))
+            .map((value) => (typeof value === 'string' ? value.trim() : ''))
+            .filter(Boolean)
     )
 }
 
@@ -433,12 +513,38 @@ function valuesOverlap(expected: string[], actual: string[]) {
     return expected.some((expectedValue) => {
         const normalizedExpected = normalizeMatchValue(expectedValue)
         if (!normalizedExpected) return false
-        return normalizedActual.some((actualValue) =>
-            actualValue === normalizedExpected ||
-            actualValue.includes(normalizedExpected) ||
-            normalizedExpected.includes(actualValue)
+        return normalizedActual.some(
+            (actualValue) =>
+                actualValue === normalizedExpected ||
+                actualValue.includes(normalizedExpected) ||
+                normalizedExpected.includes(actualValue)
         )
     })
+}
+
+function readCoordinates(source: any) {
+    if (source?.latitude === null || source?.latitude === undefined || source?.latitude === '') return null
+    if (source?.longitude === null || source?.longitude === undefined || source?.longitude === '') return null
+    const latitude = Number(source?.latitude)
+    const longitude = Number(source?.longitude)
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) return null
+    if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) return null
+    return { latitude, longitude }
+}
+
+function haversineDistanceKm(
+    from: { latitude: number; longitude: number },
+    to: { latitude: number; longitude: number }
+) {
+    const radians = (degrees: number) => (degrees * Math.PI) / 180
+    const earthRadiusKm = 6371
+    const deltaLatitude = radians(to.latitude - from.latitude)
+    const deltaLongitude = radians(to.longitude - from.longitude)
+    const latitude1 = radians(from.latitude)
+    const latitude2 = radians(to.latitude)
+    const a =
+        Math.sin(deltaLatitude / 2) ** 2 + Math.cos(latitude1) * Math.cos(latitude2) * Math.sin(deltaLongitude / 2) ** 2
+    return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
 function getApplicationPerformer(application: any) {
@@ -447,27 +553,33 @@ function getApplicationPerformer(application: any) {
     const profile = rosterProfile || application?.applicant || null
     const group = rosterGroup || application?.group || null
     const memberInstruments = Array.isArray(group?.members)
-        ? group.members.map((member: any) => typeof member === 'string' ? '' : member?.instrument)
+        ? group.members.map((member: any) => (typeof member === 'string' ? '' : member?.instrument))
         : []
 
     return {
         profile,
         group,
-        verified: profile?.is_verified === true &&
-            String(profile?.verification_status || '').trim().toUpperCase() === 'APPROVED',
+        verified:
+            profile?.is_verified === true &&
+            String(profile?.verification_status || '')
+                .trim()
+                .toUpperCase() === 'APPROVED',
         genres: stringValues([profile?.genres, group?.genre]),
         instruments: stringValues([profile?.skills, memberInstruments]),
         location: String(group?.location || profile?.location || '').trim(),
+        coordinates: readCoordinates(group) || readCoordinates(profile),
         hasPortfolio: Boolean(
             application?.video_url ||
-            application?.cv_url ||
-            (Array.isArray(profile?.portfolio_urls) && profile.portfolio_urls.length > 0)
+                application?.cv_url ||
+                (Array.isArray(profile?.portfolio_urls) && profile.portfolio_urls.length > 0)
         ),
     }
 }
 
 function getRequirementValues(requirements: any, application: any) {
-    const slotType = String(application?.slot_type || '').trim().toLowerCase()
+    const slotType = String(application?.slot_type || '')
+        .trim()
+        .toLowerCase()
     const slot = requirements?.slots?.[slotType] || {}
 
     return {
@@ -477,27 +589,37 @@ function getRequirementValues(requirements: any, application: any) {
     }
 }
 
-function evaluateGigApplication(application: any, requirements: any, settings: ReturnType<typeof normalizeRecommendationSettings>) {
+function evaluateGigApplication(
+    application: any,
+    requirements: any,
+    settings: ReturnType<typeof normalizeRecommendationSettings>
+) {
     const performer = getApplicationPerformer(application)
     const expected = getRequirementValues(requirements, application)
     const matched: string[] = []
     const missing: string[] = []
-    let possiblePoints = 20
-    let earnedPoints = performer.verified ? 20 : 0
-    let missingRequired = !performer.verified
-
-    if (performer.verified) matched.push('Verified identity')
-    else missing.push('Verified identity')
+    let possiblePoints = 0
+    let earnedPoints = 0
+    let missingRequired = false
+    let requiredSourceMissing = false
 
     const applyCriterion = (
         key: keyof typeof settings.criteria,
         label: string,
         weight: number,
         isConfigured: boolean,
-        isMatch: boolean,
+        isMatch: boolean
     ) => {
         const mode = settings.criteria[key]
-        if (mode === 'ignore' || !isConfigured) return
+        if (mode === 'ignore') return
+        if (!isConfigured) {
+            missing.push(`${label} data unavailable`)
+            if (mode === 'required') {
+                missingRequired = true
+                requiredSourceMissing = true
+            }
+            return
+        }
         possiblePoints += weight
         if (isMatch) {
             earnedPoints += weight
@@ -513,45 +635,58 @@ function evaluateGigApplication(application: any, requirements: any, settings: R
         'Required instruments or roles',
         30,
         expected.instruments.length > 0,
-        valuesOverlap(expected.instruments, performer.instruments),
+        valuesOverlap(expected.instruments, performer.instruments)
     )
     applyCriterion(
         'genres',
         'Preferred genres',
         25,
         expected.genres.length > 0,
-        valuesOverlap(expected.genres, performer.genres),
+        valuesOverlap(expected.genres, performer.genres)
     )
 
-    const gigLocation = String(requirements?.gig_location || requirements?.location || '').trim()
-    const normalizedGigLocation = normalizeMatchValue(gigLocation)
-    const normalizedPerformerLocation = normalizeMatchValue(performer.location)
+    const gigCoordinates = readCoordinates(requirements?.gig_coordinates)
+    const distanceKm =
+        gigCoordinates && performer.coordinates ? haversineDistanceKm(gigCoordinates, performer.coordinates) : null
+    const hasLocationPreference = settings.criteria.location !== 'ignore' && settings.location_radius_km !== null
+    if (hasLocationPreference) {
+        possiblePoints += 10
+        if (distanceKm === null) {
+            missing.push('Location distance unavailable')
+        } else if (distanceKm <= Number(settings.location_radius_km)) {
+            earnedPoints += 10
+            matched.push(`Within ${settings.location_radius_km} km location range`)
+        } else {
+            missing.push(`Outside ${settings.location_radius_km} km preferred range`)
+        }
+    }
     applyCriterion(
-        'location',
-        'Location',
-        10,
-        Boolean(normalizedGigLocation),
-        Boolean(
-            normalizedGigLocation &&
-            normalizedPerformerLocation &&
-            (normalizedGigLocation.includes(normalizedPerformerLocation) ||
-                normalizedPerformerLocation.includes(normalizedGigLocation))
-        ),
+        'portfolio',
+        'Relevant performance or portfolio evidence',
+        15,
+        true,
+        false
     )
-    applyCriterion('portfolio', 'Portfolio or application media', 15, true, performer.hasPortfolio)
 
-    const score = Math.max(0, Math.min(100, Math.round((earnedPoints / Math.max(possiblePoints, 1)) * 100)))
-    const isEligible = performer.verified && !missingRequired
-    const recommendationStatus = isEligible && score >= settings.minimum_score
+    const score = requiredSourceMissing
+        ? null
+        : Math.max(0, Math.min(100, Math.round((earnedPoints / Math.max(possiblePoints, 1)) * 100)))
+    const isEligible = !missingRequired
+    const recommendationStatus = requiredSourceMissing
+        ? 'insufficient_data'
+        : isEligible && Number(score) >= settings.minimum_score
         ? 'recommended'
         : isEligible
-            ? 'possible_match'
-            : 'not_eligible'
-    const explanation = recommendationStatus === 'recommended'
-        ? `Verified applicant with a ${score}% fit based on the gig's saved requirements.`
-        : recommendationStatus === 'possible_match'
-            ? `Verified applicant with a ${score}% fit; review the unmatched preferences before deciding.`
-            : 'Not recommended because verification or a required criterion is missing.'
+        ? 'possible_match'
+        : 'not_eligible'
+    const explanation =
+        recommendationStatus === 'recommended'
+            ? `${score}% advisory fit based on the gig's saved requirements.`
+            : recommendationStatus === 'possible_match'
+            ? `${score}% advisory fit; review the unmatched preferences before deciding.`
+            : recommendationStatus === 'insufficient_data'
+            ? 'A required recommendation source is missing or malformed, so no score was assigned.'
+            : 'Not recommended because a required gig criterion is missing.'
 
     return {
         application_id: application.id,
@@ -563,7 +698,20 @@ function evaluateGigApplication(application: any, requirements: any, settings: R
         matched_criteria: matched,
         missing_criteria: missing,
         explanation,
-        criteria_snapshot: { settings, requirements: expected },
+        distance_km: distanceKm === null ? null : Number(distanceKm.toFixed(1)),
+        distance_status:
+            distanceKm === null
+                ? 'unavailable'
+                : settings.location_radius_km === null
+                ? 'any_distance'
+                : distanceKm <= Number(settings.location_radius_km)
+                ? 'inside_range'
+                : 'outside_range',
+        criteria_snapshot: {
+            settings,
+            requirements: expected,
+            distance_km: distanceKm,
+        },
         model_provider: 'rules',
         model_version: 'gig-fit-v1',
     }
@@ -588,17 +736,20 @@ async function addGroqRecommendationExplanations(evaluations: any[]) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'Explain structured gig-applicant fit results. Never accept or reject applicants. Return JSON only as {"recommendations":[{"application_id":"uuid","explanation":"one concise neutral sentence"}]}. Do not infer protected or personal traits.',
+                        content:
+                            'Explain structured gig-applicant fit results. Never accept or reject applicants. Return JSON only as {"recommendations":[{"application_id":"uuid","explanation":"one concise neutral sentence"}]}. Do not infer protected or personal traits.',
                     },
                     {
                         role: 'user',
-                        content: JSON.stringify(evaluations.map((item) => ({
-                            application_id: item.application_id,
-                            score: item.score,
-                            status: item.recommendation_status,
-                            matched: item.matched_criteria,
-                            missing: item.missing_criteria,
-                        }))),
+                        content: JSON.stringify(
+                            evaluations.map((item) => ({
+                                application_id: item.application_id,
+                                score: item.score,
+                                status: item.recommendation_status,
+                                matched: item.matched_criteria,
+                                missing: item.missing_criteria,
+                            }))
+                        ),
                     },
                 ],
             }),
@@ -611,8 +762,10 @@ async function addGroqRecommendationExplanations(evaluations: any[]) {
         const parsed = typeof content === 'string' ? JSON.parse(content) : null
         const explanationById = new Map(
             (Array.isArray(parsed?.recommendations) ? parsed.recommendations : [])
-                .filter((item: any) => typeof item?.application_id === 'string' && typeof item?.explanation === 'string')
-                .map((item: any) => [item.application_id, item.explanation.trim()]),
+                .filter(
+                    (item: any) => typeof item?.application_id === 'string' && typeof item?.explanation === 'string'
+                )
+                .map((item: any) => [item.application_id, item.explanation.trim()])
         )
 
         return evaluations.map((item) => ({
@@ -622,26 +775,182 @@ async function addGroqRecommendationExplanations(evaluations: any[]) {
             model_version: explanationById.has(item.application_id) ? model : item.model_version,
         }))
     } catch (error) {
-        console.warn('gig_recommendation_ai_explanation_failed', { message: String((error as any)?.message || error) })
+        console.warn('gig_recommendation_ai_explanation_failed', {
+            message: String((error as any)?.message || error),
+        })
         return evaluations
     }
 }
 
+async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evaluations: any[]) {
+    const applicationIds = evaluations
+        .map((item) => item?.application_id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    if (applicationIds.length === 0) return evaluations
+
+    const { data, error } = await supabaseClient
+        .from('gig_application_ai_reviews')
+        .select('application_id, status, source_summary, face_similarity, evidence')
+        .in('application_id', applicationIds)
+
+    if (error) {
+        console.warn('gig_recommendation_media_review_read_failed', { message: error.message })
+        return evaluations
+    }
+
+    const reviewByApplicationId = new Map(
+        (data || []).map((review: any) => [String(review.application_id), review])
+    )
+
+    return evaluations.map((item) => {
+        const review: any = reviewByApplicationId.get(String(item.application_id))
+        if (!review || !['completed', 'partial'].includes(String(review.status || ''))) return item
+
+        const portfolioEvidence = (Array.isArray(review?.evidence) ? review.evidence : []).find(
+            (entry: any) => String(entry?.criterion || '') === 'portfolio_requirement'
+        )
+        const portfolioResult = String(portfolioEvidence?.result || 'unclear')
+        const mediaLabels = new Set([
+            'Portfolio or application media',
+            'Application media provided (content not verified)',
+            'Relevant performance or portfolio evidence',
+        ])
+        const matchedCriteria = (Array.isArray(item.matched_criteria) ? item.matched_criteria : []).filter(
+            (label: string) => !mediaLabels.has(label)
+        )
+        const missingCriteria = (Array.isArray(item.missing_criteria) ? item.missing_criteria : []).filter(
+            (label: string) => !mediaLabels.has(label)
+        )
+        if (portfolioResult === 'supported') matchedCriteria.push('Relevant performance or portfolio evidence')
+        else missingCriteria.push('Relevant performance or portfolio evidence')
+
+        const settings = item?.criteria_snapshot?.settings || {}
+        const expected = item?.criteria_snapshot?.requirements || {}
+        const criteria = settings?.criteria || {}
+        const hasMatched = (label: string) => matchedCriteria.includes(label)
+        let possiblePoints = 0
+        let earnedPoints = 0
+        let missingRequired = false
+        let requiredSourceMissing = false
+
+        const addScoredCriterion = (
+            mode: string,
+            configured: boolean,
+            matched: boolean,
+            weight: number
+        ) => {
+            if (mode === 'ignore') return
+            if (!configured) {
+                if (mode === 'required') {
+                    missingRequired = true
+                    requiredSourceMissing = true
+                }
+                return
+            }
+            possiblePoints += weight
+            if (matched) earnedPoints += weight
+            else if (mode === 'required') missingRequired = true
+        }
+
+        addScoredCriterion(
+            String(criteria.instruments || ''),
+            Array.isArray(expected.instruments) && expected.instruments.length > 0,
+            hasMatched('Required instruments or roles'),
+            30
+        )
+        addScoredCriterion(
+            String(criteria.genres || ''),
+            Array.isArray(expected.genres) && expected.genres.length > 0,
+            hasMatched('Preferred genres'),
+            25
+        )
+        if (criteria.location !== 'ignore' && settings.location_radius_km !== null) {
+            possiblePoints += 10
+            if (matchedCriteria.some((label: string) => label.startsWith('Within '))) earnedPoints += 10
+        }
+        addScoredCriterion(
+            String(criteria.portfolio || ''),
+            true,
+            portfolioResult === 'supported',
+            15
+        )
+
+        const score = requiredSourceMissing
+            ? null
+            : Math.max(0, Math.min(100, Math.round((earnedPoints / Math.max(possiblePoints, 1)) * 100)))
+        const isEligible = !missingRequired
+        const recommendationStatus = requiredSourceMissing
+            ? 'insufficient_data'
+            : isEligible && Number(score) >= Number(settings.minimum_score || 75)
+            ? 'recommended'
+            : isEligible
+            ? 'possible_match'
+            : 'not_eligible'
+        const notes: string[] = []
+        const cvStatus = String(review?.source_summary?.cv_document_classification?.status || '')
+        if (cvStatus === 'not_a_cv') {
+            notes.push('The uploaded document does not appear to be a CV or resume.')
+        } else if (cvStatus === 'uncertain') {
+            notes.push('The uploaded document could not be confirmed as a CV or resume.')
+        }
+        if (portfolioResult === 'not_supported') {
+            notes.push('The submitted media does not show relevant performance or portfolio experience.')
+        } else if (portfolioResult === 'unclear') {
+            notes.push('The submitted media could not be reviewed clearly.')
+        }
+
+        const faceStatus = String(review?.face_similarity?.status || '')
+        if (faceStatus === 'likely_same_person') {
+            notes.push('The person in the video appears to match the profile photo.')
+        } else if (faceStatus === 'likely_different_person') {
+            notes.push('The person in the video may not match the profile photo. Please review the original files.')
+        } else if (faceStatus === 'unclear') {
+            notes.push('The profile photo and video could not be compared clearly.')
+        } else if (faceStatus === 'not_run') {
+            notes.push('The profile photo and video could not be compared.')
+        }
+
+        const missingRequiredItems = [
+            criteria.instruments === 'required' && !hasMatched('Required instruments or roles')
+                ? 'instrument_or_role'
+                : '',
+            criteria.genres === 'required' && !hasMatched('Preferred genres') ? 'genre' : '',
+            criteria.portfolio === 'required' && portfolioResult !== 'supported' ? 'portfolio' : '',
+        ].filter(Boolean)
+        const requiredMismatchExplanation =
+            missingRequiredItems.length !== 1
+                ? 'This applicant does not match one or more required gig requirements.'
+                : missingRequiredItems[0] === 'instrument_or_role'
+                ? 'This applicant does not match the required instrument or role.'
+                : missingRequiredItems[0] === 'genre'
+                ? 'This applicant does not match the required genre.'
+                : 'This applicant does not provide the required performance or portfolio evidence.'
+        const baseExplanation =
+            recommendationStatus === 'recommended'
+                ? 'This applicant appears to match the gig requirements.'
+                : recommendationStatus === 'possible_match'
+                ? 'This applicant may be a match. Please review the items below.'
+                : recommendationStatus === 'insufficient_data'
+                ? 'Some required information is missing, so a score could not be calculated.'
+                : requiredMismatchExplanation
+        return {
+            ...item,
+            score,
+            is_eligible: isEligible,
+            recommendation_status: recommendationStatus,
+            matched_criteria: matchedCriteria,
+            missing_criteria: missingCriteria,
+            explanation: `${baseExplanation} ${notes.join(' ')}`.trim(),
+        }
+    })
+}
+
 async function attachGigApplicationRecommendations(supabaseClient: any, gigId: string, applications: any[]) {
-    const [
-        { data: requirementRows, error: requirementError },
-        { data: gigRecord, error: gigError },
-    ] = await Promise.all([
-        supabaseClient
-            .from('gig_requirements')
-            .select('requirement_key, requirement_value')
-            .eq('gig_id', gigId),
-        supabaseClient
-            .from('gigs')
-            .select('location')
-            .eq('id', gigId)
-            .maybeSingle(),
-    ])
+    const [{ data: requirementRows, error: requirementError }, { data: gigRecord, error: gigError }] =
+        await Promise.all([
+            supabaseClient.from('gig_requirements').select('requirement_key, requirement_value').eq('gig_id', gigId),
+            supabaseClient.from('gigs').select('location, latitude, longitude').eq('id', gigId).maybeSingle(),
+        ])
 
     if (requirementError) throw requirementError
     if (gigError) throw gigError
@@ -651,26 +960,35 @@ async function attachGigApplicationRecommendations(supabaseClient: any, gigId: s
         return acc
     }, {})
     requirements.gig_location = gigRecord?.location || requirements.location || ''
+    requirements.gig_coordinates = readCoordinates(gigRecord)
 
     const settings = normalizeRecommendationSettings(requirements.ai_recommendation_settings)
     if (!settings.enabled) {
-        return applications.map((application) => ({ ...application, ai_recommendation: null }))
+        return applications.map((application) => ({
+            ...application,
+            ai_recommendation: null,
+        }))
     }
 
     let evaluations = applications.map((application) => evaluateGigApplication(application, requirements, settings))
     evaluations = await addGroqRecommendationExplanations(evaluations)
+    evaluations = await addAdvisoryMediaReviewSummaries(supabaseClient, evaluations)
 
     if (evaluations.length > 0) {
         const now = new Date().toISOString()
-        const { error: upsertError } = await supabaseClient
-            .from('gig_application_recommendations')
-            .upsert(
-                evaluations.map((item) => ({ ...item, generated_at: now, updated_at: now })),
-                { onConflict: 'application_id' },
-            )
+        const { error: upsertError } = await supabaseClient.from('gig_application_recommendations').upsert(
+            evaluations.map((item) => ({
+                ...item,
+                generated_at: now,
+                updated_at: now,
+            })),
+            { onConflict: 'application_id' }
+        )
 
         if (upsertError) {
-            console.warn('gig_recommendation_audit_upsert_failed', { message: upsertError.message })
+            console.warn('gig_recommendation_audit_upsert_failed', {
+                message: upsertError.message,
+            })
         }
     }
 
@@ -684,7 +1002,9 @@ async function attachGigApplicationRecommendations(supabaseClient: any, gigId: s
             const leftRecommendation = left.ai_recommendation
             const rightRecommendation = right.ai_recommendation
             if (leftRecommendation?.is_eligible !== rightRecommendation?.is_eligible) {
-                return Number(rightRecommendation?.is_eligible || false) - Number(leftRecommendation?.is_eligible || false)
+                return (
+                    Number(rightRecommendation?.is_eligible || false) - Number(leftRecommendation?.is_eligible || false)
+                )
             }
             return Number(rightRecommendation?.score || 0) - Number(leftRecommendation?.score || 0)
         })
@@ -738,12 +1058,16 @@ async function notifyGigFeatureConsentRequest(supabaseClient: any, applicationId
             type: 'info',
             title: 'Featuring permission requested',
             message: `You were accepted for "${gigName}". Choose whether you want to be featured on the gig and Feed pages or your public profile.`,
-            meta: buildNotificationRouteMeta('/gig_feature_consent', { applicationId }, {
-                event_type: 'gig_feature_consent_requested',
-                application_id: applicationId,
-                gig_id: application.gig_id,
-                consent_status: 'pending',
-            }),
+            meta: buildNotificationRouteMeta(
+                '/gig_feature_consent',
+                { applicationId },
+                {
+                    event_type: 'gig_feature_consent_requested',
+                    application_id: applicationId,
+                    gig_id: application.gig_id,
+                    consent_status: 'pending',
+                }
+            ),
         })
     }
 }
@@ -769,16 +1093,18 @@ Deno.serve(async (req: Request) => {
 
         if (!supabaseUrl || !serviceRoleKey) {
             console.error('Missing Supabase env vars')
-            return new Response(JSON.stringify({ error: 'Server misconfiguration: Missing Supabase env vars' }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 500,
-            })
+            return new Response(
+                JSON.stringify({
+                    error: 'Server misconfiguration: Missing Supabase env vars',
+                }),
+                {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 500,
+                }
+            )
         }
 
-        const supabaseClient = createClient(
-            supabaseUrl,
-            serviceRoleKey,
-        )
+        const supabaseClient = createClient(supabaseUrl, serviceRoleKey)
 
         const {
             data: { user: authUser },
@@ -806,7 +1132,6 @@ Deno.serve(async (req: Request) => {
 
         const effectiveUserId = userId || authenticatedUserId
 
-        // Applicant-triggered enqueue. The response returns before media processing on Edge Runtime.
         if (action === 'request_ai_portfolio_review') {
             const { applicationId } = params
             if (!applicationId) {
@@ -860,7 +1185,7 @@ Deno.serve(async (req: Request) => {
 
         // FETCH GIG APPLICATIONS (for gig owner)
         if (action === 'fetch_gig_applications') {
-            const { gigId } = params;
+            const { gigId } = params
 
             if (!gigId) {
                 return new Response(JSON.stringify({ error: 'gigId is required' }), {
@@ -873,7 +1198,7 @@ Deno.serve(async (req: Request) => {
                 .from('gigs')
                 .select('id, organizer_id')
                 .eq('id', gigId)
-                .single();
+                .single()
 
             if (gigError || !gigRecord) {
                 return new Response(JSON.stringify({ error: 'Gig not found' }), {
@@ -883,7 +1208,10 @@ Deno.serve(async (req: Request) => {
             }
 
             const venueStaffAccessLevel = await getVenueStaffAccessLevel(supabaseClient, effectiveUserId, gigId)
-            if (gigRecord.organizer_id !== effectiveUserId && !(venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2)) {
+            if (
+                gigRecord.organizer_id !== effectiveUserId &&
+                !(venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2)
+            ) {
                 return new Response(JSON.stringify({ error: 'Forbidden' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 403,
@@ -892,23 +1220,108 @@ Deno.serve(async (req: Request) => {
 
             const { data, error } = await supabaseClient
                 .from('gig_applications')
-                .select(GIG_APPLICATION_SELECT)
+                .select(GIG_APPLICATION_SUMMARY_SELECT)
                 .eq('gig_id', gigId)
                 .or('leader_approval_status.is.null,leader_approval_status.eq.approved')
-                .order('created_at', { ascending: false });
+                .order('created_at', { ascending: false })
 
-            if (error) throw error;
+            if (error) throw error
             const hydratedData = await hydrateLegacyApplicationFields(supabaseClient, data || [])
             const rankedData = await attachGigApplicationRecommendations(supabaseClient, gigId, hydratedData)
-            const reviewedData = await attachGigPortfolioReviews(supabaseClient, rankedData)
-            return new Response(JSON.stringify(reviewedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            return new Response(JSON.stringify(rankedData.map(toApplicationSummary)), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
+        // FETCH ONE COMPLETE APPLICATION AFTER THE ORGANIZER OPENS IT.
+        // CV, video, portfolio, screening metadata, and stored analyses are intentionally
+        // excluded from the summary endpoint above.
+        if (action === 'fetch_gig_application_details') {
+            const { applicationId } = params
+            if (!applicationId) {
+                return new Response(JSON.stringify({ error: 'applicationId is required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const { data: applicationRecord, error: applicationError } = await supabaseClient
+                .from('gig_applications')
+                .select(GIG_APPLICATION_SELECT)
+                .eq('id', applicationId)
+                .maybeSingle()
+
+            if (applicationError) throw applicationError
+            if (!applicationRecord) {
+                return new Response(JSON.stringify({ error: 'Application not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                })
+            }
+
+            const { data: gigRecord, error: gigError } = await supabaseClient
+                .from('gigs')
+                .select('id, organizer_id')
+                .eq('id', applicationRecord.gig_id)
+                .maybeSingle()
+            if (gigError) throw gigError
+
+            const venueStaffAccessLevel = await getVenueStaffAccessLevel(
+                supabaseClient,
+                effectiveUserId,
+                applicationRecord.gig_id
+            )
+            if (
+                !gigRecord ||
+                (gigRecord.organizer_id !== effectiveUserId &&
+                    !(venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2))
+            ) {
+                return new Response(JSON.stringify({ error: 'Forbidden' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                })
+            }
+
+            const [hydratedApplication, reviewResult, recommendationResult] = await Promise.all([
+                hydrateLegacyApplicationFields(supabaseClient, applicationRecord),
+                supabaseClient
+                    .from('gig_application_ai_reviews')
+                    .select('*')
+                    .eq('application_id', applicationId)
+                    .maybeSingle(),
+                supabaseClient
+                    .from('gig_application_recommendations')
+                    .select('*')
+                    .eq('application_id', applicationId)
+                    .maybeSingle(),
+            ])
+
+            if (reviewResult.error) {
+                console.warn('gig_application_ai_review_read_failed', { message: reviewResult.error.message })
+            }
+            if (recommendationResult.error) {
+                console.warn('gig_application_recommendation_read_failed', {
+                    message: recommendationResult.error.message,
+                })
+            }
+
+            return new Response(
+                JSON.stringify({
+                    ...hydratedApplication,
+                    ai_portfolio_review: reviewResult.error ? null : reviewResult.data || null,
+                    ai_recommendation: recommendationResult.error ? null : recommendationResult.data || null,
+                }),
+                {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                }
+            )
         }
 
         // FETCH PENDING APPLICATION RECOMMENDATIONS FOR THE OWNER'S BOOKINGS PAGE
         if (action === 'fetch_manager_pending_recommendations') {
-            const requestedGigIds = uniqueStrings(
-                Array.isArray(params.gigIds) ? params.gigIds : [],
-            ).slice(0, 25)
+            const requestedGigIds = uniqueStrings(Array.isArray(params.gigIds) ? params.gigIds : []).slice(0, 25)
 
             if (requestedGigIds.length === 0) {
                 return new Response(JSON.stringify([]), {
@@ -925,15 +1338,17 @@ Deno.serve(async (req: Request) => {
             if (gigError) throw gigError
 
             const allowedGigIds = (
-                await Promise.all((gigRecords || []).map(async (gigRecord: any) => {
-                    if (gigRecord.organizer_id === effectiveUserId) return gigRecord.id
-                    const accessLevel = await getVenueStaffAccessLevel(
-                        supabaseClient,
-                        effectiveUserId,
-                        gigRecord.id,
-                    )
-                    return accessLevel !== null && accessLevel <= 2 ? gigRecord.id : null
-                }))
+                await Promise.all(
+                    (gigRecords || []).map(async (gigRecord: any) => {
+                        if (gigRecord.organizer_id === effectiveUserId) return gigRecord.id
+                        const accessLevel = await getVenueStaffAccessLevel(
+                            supabaseClient,
+                            effectiveUserId,
+                            gigRecord.id
+                        )
+                        return accessLevel !== null && accessLevel <= 2 ? gigRecord.id : null
+                    })
+                )
             ).filter((gigId): gigId is string => typeof gigId === 'string')
 
             if (allowedGigIds.length === 0) {
@@ -958,9 +1373,9 @@ Deno.serve(async (req: Request) => {
             const [recommendationResult, settingsResult] = await Promise.all([
                 applicationIds.length > 0
                     ? supabaseClient
-                        .from('gig_application_recommendations')
-                        .select('*')
-                        .in('application_id', applicationIds)
+                          .from('gig_application_recommendations')
+                          .select('*')
+                          .in('application_id', applicationIds)
                     : Promise.resolve({ data: [], error: null }),
                 supabaseClient
                     .from('gig_requirements')
@@ -976,27 +1391,23 @@ Deno.serve(async (req: Request) => {
             const recommendationEnabledGigIds = new Set(
                 (settingsResult.data || [])
                     .filter((row: any) => normalizeRecommendationSettings(row.requirement_value).enabled)
-                    .map((row: any) => row.gig_id),
+                    .map((row: any) => row.gig_id)
             )
-            const freshRecommendationCutoff = Date.now() - (5 * 60 * 1000)
+            const freshRecommendationCutoff = Date.now() - 5 * 60 * 1000
 
             const existingByApplicationId = new Map(
                 (existingRecommendations || [])
-                    .filter((recommendation: any) =>
-                        recommendationEnabledGigIds.has(recommendation.gig_id) &&
-                        new Date(recommendation.generated_at || 0).getTime() >= freshRecommendationCutoff
+                    .filter(
+                        (recommendation: any) =>
+                            recommendationEnabledGigIds.has(recommendation.gig_id) &&
+                            new Date(recommendation.generated_at || 0).getTime() >= freshRecommendationCutoff
                     )
-                    .map((recommendation: any) => [
-                        recommendation.application_id,
-                        recommendation,
-                    ]),
+                    .map((recommendation: any) => [recommendation.application_id, recommendation])
             )
             const applicationsByGig = new Map<string, any[]>()
             hydratedData.forEach((application: any) => {
-                if (
-                    !recommendationEnabledGigIds.has(application.gig_id) ||
-                    existingByApplicationId.has(application.id)
-                ) return
+                if (!recommendationEnabledGigIds.has(application.gig_id) || existingByApplicationId.has(application.id))
+                    return
                 const existing = applicationsByGig.get(application.gig_id) || []
                 existing.push(application)
                 applicationsByGig.set(application.gig_id, existing)
@@ -1004,17 +1415,18 @@ Deno.serve(async (req: Request) => {
 
             const rankedGroups = await Promise.all(
                 Array.from(applicationsByGig.entries()).map(([gigId, applications]) =>
-                    attachGigApplicationRecommendations(supabaseClient, gigId, applications),
-                ),
+                    attachGigApplicationRecommendations(supabaseClient, gigId, applications)
+                )
             )
 
             const generatedByApplicationId = new Map(
-                rankedGroups.flat().map((application: any) => [application.id, application.ai_recommendation || null]),
+                rankedGroups.flat().map((application: any) => [application.id, application.ai_recommendation || null])
             )
             const rankedApplications = hydratedData
                 .map((application: any) => ({
                     ...application,
-                    ai_recommendation: existingByApplicationId.get(application.id) ||
+                    ai_recommendation:
+                        existingByApplicationId.get(application.id) ||
                         generatedByApplicationId.get(application.id) ||
                         null,
                 }))
@@ -1022,13 +1434,15 @@ Deno.serve(async (req: Request) => {
                     const leftRecommendation = left.ai_recommendation
                     const rightRecommendation = right.ai_recommendation
                     if (leftRecommendation?.is_eligible !== rightRecommendation?.is_eligible) {
-                        return Number(rightRecommendation?.is_eligible || false) - Number(leftRecommendation?.is_eligible || false)
+                        return (
+                            Number(rightRecommendation?.is_eligible || false) -
+                            Number(leftRecommendation?.is_eligible || false)
+                        )
                     }
                     return Number(rightRecommendation?.score || 0) - Number(leftRecommendation?.score || 0)
                 })
 
-            const reviewedApplications = await attachGigPortfolioReviews(supabaseClient, rankedApplications)
-            return new Response(JSON.stringify(reviewedApplications), {
+            return new Response(JSON.stringify(rankedApplications), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
             })
@@ -1053,10 +1467,15 @@ Deno.serve(async (req: Request) => {
 
             const actorIds = await getFeatureConsentActorIds(supabaseClient, application)
             if (!actorIds.includes(effectiveUserId)) {
-                return new Response(JSON.stringify({ error: 'Only the selected performer or authorized group leader can manage featuring permission' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 403,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'Only the selected performer or authorized group leader can manage featuring permission',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 403,
+                    }
+                )
             }
 
             return new Response(JSON.stringify(application), {
@@ -1084,17 +1503,27 @@ Deno.serve(async (req: Request) => {
 
             const actorIds = await getFeatureConsentActorIds(supabaseClient, application)
             if (!actorIds.includes(effectiveUserId)) {
-                return new Response(JSON.stringify({ error: 'Only the selected performer or authorized group leader can manage featuring permission' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 403,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'Only the selected performer or authorized group leader can manage featuring permission',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 403,
+                    }
+                )
             }
 
             if (!['accepted', 'approved'].includes(String(application.status || '').toLowerCase())) {
-                return new Response(JSON.stringify({ error: 'Featuring permission is available only for accepted applications' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 409,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'Featuring permission is available only for accepted applications',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    }
+                )
             }
 
             const allowGigPage = showOnGigPage === true
@@ -1118,16 +1547,28 @@ Deno.serve(async (req: Request) => {
                 await insertCoreNotification(supabaseClient, {
                     user_id: application.gig.organizer_id,
                     type: consentStatus === 'accepted' ? 'success' : 'info',
-                    title: consentStatus === 'accepted' ? 'Featuring permission granted' : 'Performer chose to stay private',
-                    message: consentStatus === 'accepted'
-                        ? `An accepted performer for "${application.gig.name || 'your gig'}" approved public featuring.`
-                        : `An accepted performer for "${application.gig.name || 'your gig'}" chose not to be publicly featured.`,
-                    meta: buildNotificationRouteMeta('/manage_gig', { id: application.gig_id, tab: 'Applicants' }, {
-                        event_type: 'gig_feature_consent_updated',
-                        application_id: applicationId,
-                        gig_id: application.gig_id,
-                        consent_status: consentStatus,
-                    }),
+                    title:
+                        consentStatus === 'accepted'
+                            ? 'Featuring permission granted'
+                            : 'Performer chose to stay private',
+                    message:
+                        consentStatus === 'accepted'
+                            ? `An accepted performer for "${
+                                  application.gig.name || 'your gig'
+                              }" approved public featuring.`
+                            : `An accepted performer for "${
+                                  application.gig.name || 'your gig'
+                              }" chose not to be publicly featured.`,
+                    meta: buildNotificationRouteMeta(
+                        '/manage_gig',
+                        { id: application.gig_id, tab: 'Applicants' },
+                        {
+                            event_type: 'gig_feature_consent_updated',
+                            application_id: applicationId,
+                            gig_id: application.gig_id,
+                            consent_status: consentStatus,
+                        }
+                    ),
                 })
             }
 
@@ -1139,43 +1580,58 @@ Deno.serve(async (req: Request) => {
 
         // FETCH GROUP APPLICATIONS (my applications as a group/musician)
         if (action === 'fetch_group_applications') {
-            const { groupId } = params;
+            const { groupId } = params
             let query = supabaseClient.from('gig_applications').select(`
                 *,
                 gig:gigs!gig_id(id, name, location, budget, event_date, status)
-             `);
+             `)
 
             if (groupId) {
-                query = query.eq('group_id', groupId);
+                query = query.eq('group_id', groupId)
             } else {
-                query = query.eq('applicant_id', effectiveUserId);
+                query = query.eq('applicant_id', effectiveUserId)
             }
 
-            const { data, error } = await query.order('created_at', { ascending: false });
+            const { data, error } = await query.order('created_at', {
+                ascending: false,
+            })
 
-            if (error) throw error;
+            if (error) throw error
             const hydratedData = await hydrateLegacyApplicationFields(supabaseClient, data || [])
-            return new Response(JSON.stringify(hydratedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            return new Response(JSON.stringify(hydratedData), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
         }
 
         if (action === 'submit_production_gig_application' && !PRODUCTION_GIG_APPLICATIONS_ENABLED) {
-            return new Response(JSON.stringify({
-                error: 'Production accounts cannot apply to gigs. Apply from a musician account as solo, duo, or group.',
-                code: 'PRODUCTION_GIG_APPLICATIONS_DISABLED',
-            }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 403,
-            })
+            return new Response(
+                JSON.stringify({
+                    error: 'Production accounts cannot apply to gigs. Apply from a musician account as solo, duo, or group.',
+                    code: 'PRODUCTION_GIG_APPLICATIONS_DISABLED',
+                }),
+                {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                }
+            )
         }
 
         // Legacy implementation retained for historical reads; server and database gates keep it disabled.
         if (action === 'submit_production_gig_application') {
             const {
-                gigId, teamId, rosterId, pitchMessage, videoUrl, cvUrl, slotType,
-                aiPortfolioReviewConsent, aiReviewFrameUrl, aiReviewFrameUrls,
-                videoCopyrightAcknowledged, videoCopyrightStatus,
-                videoCopyrightReviewId, videoCopyrightMetadata,
-            } = params;
+                gigId,
+                teamId,
+                rosterId,
+                pitchMessage,
+                videoUrl,
+                cvUrl,
+                slotType,
+                videoCopyrightAcknowledged,
+                videoCopyrightStatus,
+                videoCopyrightReviewId,
+                videoCopyrightMetadata,
+            } = params
 
             if (!gigId || !teamId || !rosterId) {
                 return new Response(JSON.stringify({ error: 'gigId, teamId, and rosterId are required' }), {
@@ -1185,10 +1641,15 @@ Deno.serve(async (req: Request) => {
             }
 
             if (videoUrl && videoCopyrightAcknowledged !== true) {
-                return new Response(JSON.stringify({ error: 'Performance video rights acknowledgment is required' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 400,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'Performance video rights acknowledgment is required',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 400,
+                    }
+                )
             }
 
             const { data: teamMembership, error: teamMembershipError } = await supabaseClient
@@ -1197,22 +1658,27 @@ Deno.serve(async (req: Request) => {
                 .eq('team_id', teamId)
                 .eq('user_id', effectiveUserId)
                 .in('role', ['owner', 'manager'])
-                .maybeSingle();
+                .maybeSingle()
 
-            if (teamMembershipError) throw teamMembershipError;
+            if (teamMembershipError) throw teamMembershipError
 
             if (!teamMembership) {
-                return new Response(JSON.stringify({ error: 'Only production team owners or managers can send this application' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 403,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'Only production team owners or managers can send this application',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 403,
+                    }
+                )
             }
 
             const { data: gigRecord, error: gigError } = await supabaseClient
                 .from('gigs')
                 .select('id, name, organizer_id, status')
                 .eq('id', gigId)
-                .single();
+                .single()
 
             if (gigError || !gigRecord) {
                 return new Response(JSON.stringify({ error: 'Gig not found' }), {
@@ -1222,63 +1688,85 @@ Deno.serve(async (req: Request) => {
             }
 
             if (gigRecord.status && String(gigRecord.status).toLowerCase() !== 'open') {
-                return new Response(JSON.stringify({ error: 'This gig is not currently accepting applications' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 409,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'This gig is not currently accepting applications',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    }
+                )
             }
 
             const { data: rosterRecord, error: rosterError } = await supabaseClient
                 .from('production_team_roster')
-                .select(`
+                .select(
+                    `
                     id,
                     team_id,
                     entity_kind,
                     profile_id,
                     group_id,
                     group:group_id(id, name, group_type)
-                `)
+                `
+                )
                 .eq('id', rosterId)
                 .eq('team_id', teamId)
-                .maybeSingle();
+                .maybeSingle()
 
-            if (rosterError) throw rosterError;
+            if (rosterError) throw rosterError
 
             if (!rosterRecord) {
-                return new Response(JSON.stringify({ error: 'Selected production roster entry was not found' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 404,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'Selected production roster entry was not found',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 404,
+                    }
+                )
             }
 
             const resolvedSlotType = String(
-                slotType ||
-                (rosterRecord.group?.group_type === 'duo'
-                    ? 'duo'
-                    : rosterRecord.group
-                        ? 'band'
-                        : 'solo'),
-            ).toLowerCase();
+                slotType || (rosterRecord.group?.group_type === 'duo' ? 'duo' : rosterRecord.group ? 'band' : 'solo')
+            ).toLowerCase()
 
             if (rosterRecord.profile_id && resolvedSlotType !== 'solo') {
-                return new Response(JSON.stringify({ error: 'A musician roster entry can only be submitted to a solo slot' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 400,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'A musician roster entry can only be submitted to a solo slot',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 400,
+                    }
+                )
             }
 
             if (rosterRecord.group_id && rosterRecord.group?.group_type === 'duo' && resolvedSlotType !== 'duo') {
-                return new Response(JSON.stringify({ error: 'A duo roster entry can only be submitted to a duo slot' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 400,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'A duo roster entry can only be submitted to a duo slot',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 400,
+                    }
+                )
             }
 
             if (rosterRecord.group_id && rosterRecord.group?.group_type === 'band' && resolvedSlotType !== 'band') {
-                return new Response(JSON.stringify({ error: 'A group roster entry can only be submitted to a band slot' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 400,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'A group roster entry can only be submitted to a band slot',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 400,
+                    }
+                )
             }
 
             const { data: existingTeamApplication, error: existingTeamApplicationError } = await supabaseClient
@@ -1287,15 +1775,20 @@ Deno.serve(async (req: Request) => {
                 .eq('gig_id', gigId)
                 .eq('production_team_id', teamId)
                 .in('status', ACTIVE_GIG_APPLICATION_STATUSES)
-                .maybeSingle();
+                .maybeSingle()
 
-            if (existingTeamApplicationError) throw existingTeamApplicationError;
+            if (existingTeamApplicationError) throw existingTeamApplicationError
 
             if (existingTeamApplication) {
-                return new Response(JSON.stringify({ error: 'This production team already has an active application for the selected gig' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 409,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'This production team already has an active application for the selected gig',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    }
+                )
             }
 
             const applicationPayload: Record<string, unknown> = {
@@ -1312,41 +1805,43 @@ Deno.serve(async (req: Request) => {
                 leader_approval_status: rosterRecord.group_id ? 'approved' : null,
                 production_team_id: teamId,
                 production_roster_id: rosterId,
-                ai_portfolio_review_consent: aiPortfolioReviewConsent === true,
-                ai_review_frame_url: aiPortfolioReviewConsent === true ? aiReviewFrameUrl || null : null,
-                ai_review_frame_urls: aiPortfolioReviewConsent === true && Array.isArray(aiReviewFrameUrls)
-                    ? aiReviewFrameUrls.slice(0, 3)
-                    : [],
                 video_copyright_acknowledged: videoCopyrightAcknowledged === true,
                 video_copyright_status: String(videoCopyrightStatus || 'not_screened'),
                 video_copyright_review_id: videoCopyrightReviewId || null,
-                video_copyright_metadata: videoCopyrightMetadata && typeof videoCopyrightMetadata === 'object'
-                    ? videoCopyrightMetadata
-                    : {},
-            };
+                video_copyright_metadata:
+                    videoCopyrightMetadata && typeof videoCopyrightMetadata === 'object' ? videoCopyrightMetadata : {},
+            }
 
             const { data: insertedApplication, error: insertError } = await supabaseClient
                 .from('gig_applications')
                 .insert(applicationPayload)
                 .select(GIG_APPLICATION_SELECT)
-                .single();
+                .single()
 
             if (insertError) {
                 if (insertError.code === '23505') {
-                    return new Response(JSON.stringify({ error: 'This production team already sent an application for this gig' }), {
-                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                        status: 409,
-                    })
+                    return new Response(
+                        JSON.stringify({
+                            error: 'This production team already sent an application for this gig',
+                        }),
+                        {
+                            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                            status: 409,
+                        }
+                    )
                 }
-                throw insertError;
+                throw insertError
             }
 
-            const hydratedInsertedApplication = await hydrateLegacyApplicationFields(supabaseClient, insertedApplication)
+            const hydratedInsertedApplication = await hydrateLegacyApplicationFields(
+                supabaseClient,
+                insertedApplication
+            )
             const performerName =
                 rosterRecord.group?.name ||
                 hydratedInsertedApplication?.production_roster?.roster_profile?.full_name ||
-                'the selected performer';
-            const teamName = hydratedInsertedApplication?.production_team?.name || 'Production team';
+                'the selected performer'
+            const teamName = hydratedInsertedApplication?.production_team?.name || 'Production team'
 
             if (gigRecord.organizer_id && gigRecord.organizer_id !== effectiveUserId) {
                 await insertCoreNotification(supabaseClient, {
@@ -1354,24 +1849,28 @@ Deno.serve(async (req: Request) => {
                     type: 'info',
                     title: 'New Application from a Production Team',
                     message: `${teamName} sent ${performerName} for "${gigRecord.name}".`,
-                    meta: buildNotificationRouteMeta('/manage_gig', { id: gigId }, {
-                        gig_id: gigId,
-                        application_id: insertedApplication.id,
-                        production_team_id: teamId,
-                        production_roster_id: rosterId,
-                        performer_name: performerName,
-                    }),
-                });
+                    meta: buildNotificationRouteMeta(
+                        '/manage_gig',
+                        { id: gigId },
+                        {
+                            gig_id: gigId,
+                            application_id: insertedApplication.id,
+                            production_team_id: teamId,
+                            production_roster_id: rosterId,
+                            performer_name: performerName,
+                        }
+                    ),
+                })
             }
 
             const { application: audienceApplication, audience } = await resolveGigApplicationAudience(
                 supabaseClient,
-                insertedApplication.id,
-            );
+                insertedApplication.id
+            )
 
             for (const member of audience) {
                 if (member.viewer_can_act || member.user_id === effectiveUserId) {
-                    continue;
+                    continue
                 }
 
                 await insertCoreNotification(supabaseClient, {
@@ -1379,24 +1878,16 @@ Deno.serve(async (req: Request) => {
                     type: 'info',
                     title: 'Application Sent',
                     message: `${teamName} sent ${performerName} for "${gigRecord.name}".`,
-                    meta: buildNotificationRouteMeta('/bookings', undefined, buildGigApplicationAudienceMeta(audienceApplication, member, {
-                        status: 'pending',
-                        event_type: 'production_gig_application_submitted',
-                        performer_name: performerName,
-                    })),
-                });
-            }
-
-            if (aiPortfolioReviewConsent === true) {
-                try {
-                    await queueGigPortfolioReview(supabaseClient, insertedApplication.id)
-                    await scheduleGigPortfolioReview(supabaseClient, insertedApplication.id, supabaseUrl)
-                } catch (reviewError) {
-                    console.warn('gig_ai_review_queue_failed', {
-                        applicationId: insertedApplication.id,
-                        message: String((reviewError as any)?.message || reviewError),
-                    })
-                }
+                    meta: buildNotificationRouteMeta(
+                        '/bookings',
+                        undefined,
+                        buildGigApplicationAudienceMeta(audienceApplication, member, {
+                            status: 'pending',
+                            event_type: 'production_gig_application_submitted',
+                            performer_name: performerName,
+                        })
+                    ),
+                })
             }
 
             return new Response(JSON.stringify(hydratedInsertedApplication), {
@@ -1407,7 +1898,7 @@ Deno.serve(async (req: Request) => {
 
         // CHECK EXISTING PRODUCTION GIG APPLICATION
         if (action === 'check_existing_production_application') {
-            const { gigId, teamId } = params;
+            const { gigId, teamId } = params
 
             if (!gigId || !teamId) {
                 return new Response(JSON.stringify({ error: 'gigId and teamId are required' }), {
@@ -1421,15 +1912,20 @@ Deno.serve(async (req: Request) => {
                 .select('role')
                 .eq('team_id', teamId)
                 .eq('user_id', effectiveUserId)
-                .maybeSingle();
+                .maybeSingle()
 
-            if (membershipError) throw membershipError;
+            if (membershipError) throw membershipError
 
             if (!membership) {
-                return new Response(JSON.stringify({ error: 'Only team members can view this application' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 403,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'Only team members can view this application',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 403,
+                    }
+                )
             }
 
             const { data: application, error } = await supabaseClient
@@ -1440,9 +1936,9 @@ Deno.serve(async (req: Request) => {
                 .in('status', ACTIVE_GIG_APPLICATION_STATUSES)
                 .order('created_at', { ascending: false })
                 .limit(1)
-                .maybeSingle();
+                .maybeSingle()
 
-            if (error) throw error;
+            if (error) throw error
             const hydratedApplication = await hydrateLegacyApplicationFields(supabaseClient, application || null)
 
             return new Response(JSON.stringify({ application: hydratedApplication || null }), {
@@ -1453,7 +1949,7 @@ Deno.serve(async (req: Request) => {
 
         // UPDATE APPLICATION STATUS
         if (action === 'update_application_status') {
-            const { applicationId, status } = params;
+            const { applicationId, status } = params
 
             if (!applicationId || !status) {
                 return new Response(JSON.stringify({ error: 'applicationId and status are required' }), {
@@ -1462,7 +1958,7 @@ Deno.serve(async (req: Request) => {
                 })
             }
 
-            const normalizedStatus = String(status).toLowerCase();
+            const normalizedStatus = String(status).toLowerCase()
             if (!ALLOWED_ORGANIZER_STATUSES.has(normalizedStatus)) {
                 return new Response(JSON.stringify({ error: `Invalid status: ${status}` }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -1474,19 +1970,17 @@ Deno.serve(async (req: Request) => {
                 .from('gig_applications')
                 .select(ORGANIZER_APPLICATION_SELECT)
                 .eq('id', applicationId)
-                .single();
+                .single()
 
-            if (appError) throw appError;
+            if (appError) throw appError
 
             const venueStaffAccessLevel = appDetails?.gig_id
                 ? await getVenueStaffAccessLevel(supabaseClient, effectiveUserId, appDetails.gig_id)
                 : null
             if (
                 !appDetails ||
-                (
-                    appDetails.gig?.organizer_id !== effectiveUserId &&
-                    !(venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2)
-                )
+                (appDetails.gig?.organizer_id !== effectiveUserId &&
+                    !(venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2))
             ) {
                 return new Response(JSON.stringify({ error: 'Forbidden' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -1495,13 +1989,18 @@ Deno.serve(async (req: Request) => {
             }
 
             if (appDetails.leader_approval_status === 'pending') {
-                return new Response(JSON.stringify({ error: 'Application is still awaiting group leader approval' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 409,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'Application is still awaiting group leader approval',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    }
+                )
             }
 
-            let data: any = null;
+            let data: any = null
 
             if (normalizedStatus === 'accepted' || normalizedStatus === 'approved') {
                 const { data: acceptedApplication, error: acceptError } = await supabaseClient.rpc(
@@ -1510,55 +2009,80 @@ Deno.serve(async (req: Request) => {
                         p_application_id: applicationId,
                         p_actor_user_id: effectiveUserId,
                         p_new_status: normalizedStatus,
-                    },
-                );
+                    }
+                )
 
-                if (acceptError) throw acceptError;
-                data = acceptedApplication;
+                if (acceptError) throw acceptError
+                data = acceptedApplication
+            } else if (normalizedStatus === 'rejected') {
+                const { data: declinedApplication, error: declineError } = await supabaseClient.rpc(
+                    'decline_gig_application_safely',
+                    {
+                        p_application_id: applicationId,
+                        p_actor_user_id: effectiveUserId,
+                        p_reason: params.reason || null,
+                    }
+                )
+
+                if (declineError) throw declineError
+                data = declinedApplication
+            } else if (normalizedStatus === 'fired') {
+                const { data: firedApplication, error: fireError } = await supabaseClient.rpc(
+                    'terminate_gig_application_safely',
+                    {
+                        p_application_id: applicationId,
+                        p_actor_user_id: effectiveUserId,
+                        p_reason: params.reason,
+                    }
+                )
+
+                if (fireError) throw fireError
+                data = firedApplication
             } else {
                 const { data: updatedApplication, error } = await supabaseClient
                     .from('gig_applications')
                     .update({ status: normalizedStatus })
                     .eq('id', applicationId)
                     .select()
-                    .single();
+                    .single()
 
-                if (error) throw error;
-                data = updatedApplication;
+                if (error) throw error
+                data = updatedApplication
             }
 
-            const gigName = appDetails.gig?.name || 'the gig';
+            const gigName = appDetails.gig?.name || 'the gig'
             const performerSnapshot =
                 appDetails.performer_snapshot && typeof appDetails.performer_snapshot === 'object'
                     ? appDetails.performer_snapshot
-                    : {};
+                    : {}
             const performerName =
                 appDetails.group?.name ||
                 appDetails.production_roster?.roster_profile?.full_name ||
                 appDetails.production_roster?.roster_group?.name ||
                 performerSnapshot.display_name ||
                 appDetails.applicant?.full_name ||
-                'Applicant';
-            const productionLabel = appDetails.production_team?.name
-                ? ` via ${appDetails.production_team.name}`
-                : '';
+                'Applicant'
+            const productionLabel = appDetails.production_team?.name ? ` via ${appDetails.production_team.name}` : ''
             await notifyGigApplicationAudience(supabaseClient, applicationId, normalizedStatus, {
                 gigName,
                 productionLabel,
                 actorUserId: effectiveUserId,
                 performerName,
-            });
+            })
 
             if (normalizedStatus === 'accepted' || normalizedStatus === 'approved') {
                 await notifyGigFeatureConsentRequest(supabaseClient, applicationId)
             }
 
-            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            return new Response(JSON.stringify(data), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
         }
 
         // UPDATE LEADER APPROVAL (group leader approves/rejects member-submitted application)
         if (action === 'update_leader_approval') {
-            const { applicationId, decision } = params;
+            const { applicationId, decision } = params
 
             if (!applicationId || !decision) {
                 return new Response(JSON.stringify({ error: 'applicationId and decision are required' }), {
@@ -1567,7 +2091,7 @@ Deno.serve(async (req: Request) => {
                 })
             }
 
-            const normalizedDecision = String(decision).toLowerCase();
+            const normalizedDecision = String(decision).toLowerCase()
             if (!ALLOWED_LEADER_DECISIONS.has(normalizedDecision)) {
                 return new Response(JSON.stringify({ error: `Invalid decision: ${decision}` }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -1577,7 +2101,8 @@ Deno.serve(async (req: Request) => {
 
             const { data: appDetails, error: appError } = await supabaseClient
                 .from('gig_applications')
-                .select(`
+                .select(
+                    `
                     id,
                     gig_id,
                     group_id,
@@ -1588,9 +2113,10 @@ Deno.serve(async (req: Request) => {
                     ai_portfolio_review_consent,
                     gig:gig_id(id, name, organizer_id),
                     group:group_id(id, name, owner_id)
-                `)
+                `
+                )
                 .eq('id', applicationId)
-                .single();
+                .single()
 
             if (appError || !appDetails) {
                 return new Response(JSON.stringify({ error: 'Application not found' }), {
@@ -1600,33 +2126,48 @@ Deno.serve(async (req: Request) => {
             }
 
             if (!appDetails.group || appDetails.group.owner_id !== effectiveUserId) {
-                return new Response(JSON.stringify({ error: 'Only the group leader can review this application' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 403,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'Only the group leader can review this application',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 403,
+                    }
+                )
             }
 
             if (appDetails.status !== 'pending') {
-                return new Response(JSON.stringify({ error: 'Only pending applications can be reviewed by the group leader' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 409,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'Only pending applications can be reviewed by the group leader',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    }
+                )
             }
 
             if (appDetails.leader_approval_status && appDetails.leader_approval_status !== 'pending') {
-                return new Response(JSON.stringify({ error: 'Application has already been reviewed by the group leader' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 409,
-                })
+                return new Response(
+                    JSON.stringify({
+                        error: 'Application has already been reviewed by the group leader',
+                    }),
+                    {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    }
+                )
             }
 
             const updates: Record<string, any> = {
                 leader_approval_status: normalizedDecision,
                 leader_reviewed_at: new Date().toISOString(),
-            };
+            }
 
             if (normalizedDecision === 'rejected') {
-                updates.status = 'rejected';
+                updates.status = 'rejected'
             }
 
             const { data, error } = await supabaseClient
@@ -1634,13 +2175,24 @@ Deno.serve(async (req: Request) => {
                 .update(updates)
                 .eq('id', applicationId)
                 .select()
-                .single();
+                .single()
 
-            if (error) throw error;
+            if (error) throw error
 
-            const gigName = appDetails.gig?.name || 'the gig';
-            const groupName = appDetails.group?.name || 'your group';
-            const submitterId = appDetails.submitted_by_user_id || appDetails.applicant_id;
+            if (normalizedDecision === 'approved' && appDetails.ai_portfolio_review_consent === true) {
+                try {
+                    await queueGigPortfolioReview(supabaseClient, applicationId)
+                    await scheduleGigPortfolioReview(supabaseClient, applicationId, supabaseUrl)
+                } catch (reviewError) {
+                    console.warn('group_gig_ai_review_queue_failed', {
+                        message: String((reviewError as any)?.message || reviewError),
+                    })
+                }
+            }
+
+            const gigName = appDetails.gig?.name || 'the gig'
+            const groupName = appDetails.group?.name || 'your group'
+            const submitterId = appDetails.submitted_by_user_id || appDetails.applicant_id
 
             if (submitterId && submitterId !== effectiveUserId) {
                 await insertCoreNotification(supabaseClient, {
@@ -1660,103 +2212,108 @@ Deno.serve(async (req: Request) => {
                         group_id: appDetails.group_id,
                         leader_approval_status: normalizedDecision,
                     }),
-                });
+                })
             }
 
-            if (normalizedDecision === 'approved' && appDetails.gig?.organizer_id && appDetails.gig.organizer_id !== effectiveUserId) {
+            if (
+                normalizedDecision === 'approved' &&
+                appDetails.gig?.organizer_id &&
+                appDetails.gig.organizer_id !== effectiveUserId
+            ) {
                 await insertCoreNotification(supabaseClient, {
                     user_id: appDetails.gig.organizer_id,
                     type: 'info',
                     title: 'New Gig Application',
                     message: `${groupName} has a new application for "${gigName}" awaiting your review.`,
-                    meta: buildNotificationRouteMeta('/manage_gig', { id: appDetails.gig_id }, {
-                        gig_id: appDetails.gig_id,
-                        application_id: applicationId,
-                        applicant_id: appDetails.applicant_id,
-                        group_id: appDetails.group_id,
-                        submitted_by_user_id: appDetails.submitted_by_user_id,
-                        leader_approved_by: effectiveUserId,
-                    }),
-                });
+                    meta: buildNotificationRouteMeta(
+                        '/manage_gig',
+                        { id: appDetails.gig_id },
+                        {
+                            gig_id: appDetails.gig_id,
+                            application_id: applicationId,
+                            applicant_id: appDetails.applicant_id,
+                            group_id: appDetails.group_id,
+                            submitted_by_user_id: appDetails.submitted_by_user_id,
+                            leader_approved_by: effectiveUserId,
+                        }
+                    ),
+                })
             }
 
-            if (normalizedDecision === 'approved' && appDetails.ai_portfolio_review_consent === true) {
-                try {
-                    await queueGigPortfolioReview(supabaseClient, applicationId)
-                    await scheduleGigPortfolioReview(supabaseClient, applicationId, supabaseUrl)
-                } catch (reviewError) {
-                    console.warn('group_gig_ai_review_queue_failed', {
-                        applicationId,
-                        message: String((reviewError as any)?.message || reviewError),
-                    })
-                }
-            }
-
-            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            return new Response(JSON.stringify(data), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
         }
 
         // CHECK ELIGIBILITY (Spam Block Check)
         if (action === 'check_eligibility') {
-            const { gigId, groupId, productionTeamId } = params;
+            const { gigId, groupId, productionTeamId } = params
 
             if (!gigId) {
-                return new Response(JSON.stringify({ blocked: false }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+                return new Response(JSON.stringify({ blocked: false }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                })
             }
 
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+            const thirtyDaysAgo = new Date()
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
             let cancellationQuery = supabaseClient
                 .from('gig_applications')
                 .select('id', { count: 'exact', head: true })
                 .eq('status', 'cancelled')
                 .eq('gig_id', gigId)
-                .gte('updated_at', thirtyDaysAgo.toISOString());
+                .gte('updated_at', thirtyDaysAgo.toISOString())
 
             if (productionTeamId) {
-                cancellationQuery = cancellationQuery.eq('production_team_id', productionTeamId);
+                cancellationQuery = cancellationQuery.eq('production_team_id', productionTeamId)
             } else if (groupId) {
-                cancellationQuery = cancellationQuery
-                    .eq('group_id', groupId)
-                    .is('production_team_id', null);
+                cancellationQuery = cancellationQuery.eq('group_id', groupId).is('production_team_id', null)
             } else {
                 cancellationQuery = cancellationQuery
                     .eq('applicant_id', effectiveUserId)
                     .is('group_id', null)
-                    .is('production_team_id', null);
+                    .is('production_team_id', null)
             }
 
-            const { count, error: countError } = await cancellationQuery;
+            const { count, error: countError } = await cancellationQuery
 
-            if (countError) throw countError;
+            if (countError) throw countError
 
-            const blocked = (count || 0) >= 3;
-            return new Response(JSON.stringify({
-                blocked,
-                reason: blocked ? 'Maximum attempts reached for this gig.' : null
-            }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            const blocked = (count || 0) >= 3
+            return new Response(
+                JSON.stringify({
+                    blocked,
+                    reason: blocked ? 'Maximum attempts reached for this gig.' : null,
+                }),
+                {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                }
+            )
         }
 
         // CANCEL APPLICATION
         if (action === 'cancel_application') {
-            const { applicationId } = params;
+            const { applicationId } = params
 
             const { data: existingApp, error: fetchError } = await supabaseClient
                 .from('gig_applications')
-                .select('applicant_id, submitted_by_user_id, gig_id, group_id, production_team_id, group:groups!group_id(owner_id), gig:gig_id(name)')
+                .select(
+                    'applicant_id, submitted_by_user_id, gig_id, group_id, production_team_id, group:groups!group_id(owner_id), gig:gig_id(name)'
+                )
                 .eq('id', applicationId)
-                .single();
+                .single()
 
-            if (fetchError) throw fetchError;
-            if (!existingApp) throw new Error('Application not found');
+            if (fetchError) throw fetchError
+            if (!existingApp) throw new Error('Application not found')
 
             const isApplicant =
-                existingApp.applicant_id === effectiveUserId ||
-                existingApp.submitted_by_user_id === effectiveUserId;
-            const isGroupOwner =
-                !existingApp.production_team_id &&
-                existingApp.group?.owner_id === effectiveUserId;
-            let isProductionManager = false;
+                existingApp.applicant_id === effectiveUserId || existingApp.submitted_by_user_id === effectiveUserId
+            const isGroupOwner = !existingApp.production_team_id && existingApp.group?.owner_id === effectiveUserId
+            let isProductionManager = false
 
             if (existingApp.production_team_id) {
                 const { data: teamMembership, error: teamMembershipError } = await supabaseClient
@@ -1765,81 +2322,92 @@ Deno.serve(async (req: Request) => {
                     .eq('team_id', existingApp.production_team_id)
                     .eq('user_id', effectiveUserId)
                     .in('role', ['owner', 'manager'])
-                    .maybeSingle();
+                    .maybeSingle()
 
-                if (teamMembershipError) throw teamMembershipError;
-                isProductionManager = !!teamMembership;
+                if (teamMembershipError) throw teamMembershipError
+                isProductionManager = !!teamMembership
             }
 
             if (!isApplicant && !isGroupOwner && !isProductionManager) {
                 return new Response(JSON.stringify({ error: 'Unauthorized to cancel this application' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 403,
-                });
+                })
             }
 
             const { error: updateError } = await supabaseClient
                 .from('gig_applications')
                 .update({ status: 'cancelled' })
-                .eq('id', applicationId);
+                .eq('id', applicationId)
 
-            if (updateError) throw updateError;
+            if (updateError) throw updateError
 
             try {
                 await notifyGigApplicationAudience(supabaseClient, applicationId, 'cancelled', {
                     gigName: existingApp.gig?.name || 'this gig',
                     actorUserId: effectiveUserId,
                     includeOrganizer: true,
-                });
+                })
             } catch (notifyError) {
-                console.error('Failed to notify gig application audience:', notifyError);
+                console.error('Failed to notify gig application audience:', notifyError)
             }
 
-            let cancellationCount = 0;
+            let cancellationCount = 0
 
             if (existingApp.gig_id) {
-                const thirtyDaysAgo = new Date();
-                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                const thirtyDaysAgo = new Date()
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
                 let cancellationQuery = supabaseClient
                     .from('gig_applications')
                     .select('id', { count: 'exact', head: true })
                     .eq('status', 'cancelled')
                     .eq('gig_id', existingApp.gig_id)
-                    .gte('updated_at', thirtyDaysAgo.toISOString());
+                    .gte('updated_at', thirtyDaysAgo.toISOString())
 
                 if (existingApp.production_team_id) {
-                    cancellationQuery = cancellationQuery.eq('production_team_id', existingApp.production_team_id);
+                    cancellationQuery = cancellationQuery.eq('production_team_id', existingApp.production_team_id)
                 } else if (existingApp.group_id) {
                     cancellationQuery = cancellationQuery
                         .eq('group_id', existingApp.group_id)
-                        .is('production_team_id', null);
+                        .is('production_team_id', null)
                 } else {
                     cancellationQuery = cancellationQuery
                         .eq('applicant_id', existingApp.applicant_id)
                         .is('group_id', null)
-                        .is('production_team_id', null);
+                        .is('production_team_id', null)
                 }
 
-                const { count } = await cancellationQuery;
-                cancellationCount = count || 0;
+                const { count } = await cancellationQuery
+                cancellationCount = count || 0
             }
 
-            return new Response(JSON.stringify({ success: true, cancellation_count: cancellationCount }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            return new Response(
+                JSON.stringify({
+                    success: true,
+                    cancellation_count: cancellationCount,
+                }),
+                {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                }
+            )
         }
 
         throw new Error('Invalid action')
-
     } catch (error: any) {
-        console.error('❌ Edge Function Error:', error);
-        return new Response(JSON.stringify({
-            error: error.message,
-            details: error.toString(),
-            hint: error.hint || null,
-            code: error.code || null
-        }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 400,
-        })
+        console.error('❌ Edge Function Error:', error)
+        return new Response(
+            JSON.stringify({
+                error: error.message,
+                details: error.toString(),
+                hint: error.hint || null,
+                code: error.code || null,
+            }),
+            {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 400,
+            }
+        )
     }
 })

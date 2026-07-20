@@ -202,7 +202,7 @@ const getTabIdFromRouteName = (routeName: string | undefined) => {
 const getTabIdFromPathname = (pathname: string) => {
     if (pathname.includes('feed') || pathname.includes('home')) return 'home';
     if (pathname.includes('marketplace') || pathname.includes('shop') || pathname.includes('seller_hub') || pathname.includes('orders') || pathname.includes('product_details')) return 'marketplace';
-    if (pathname.includes('bookings') || pathname.includes('chat') || pathname.includes('notification') || pathname.includes('payment-result') || pathname.includes('submit_review') || pathname.includes('to_review')) return 'activity';
+    if (pathname.includes('bookings') || pathname.includes('chat') || pathname.includes('notification') || pathname.includes('payment-result') || pathname.includes('submit_review') || pathname.includes('to_review') || pathname.includes('gig_feature_consent')) return 'activity';
     if (
         pathname.includes('profile') ||
         pathname.includes('settings') ||

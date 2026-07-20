@@ -140,6 +140,8 @@ export default function EditProfileScreen() {
   const [displayName, setDisplayName] = useState("");
   const [contactNumber, setContactNumber] = useState("");
   const [location, setLocation] = useState("");
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
   const [bio, setBio] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<any>(DEFAULT_AVATAR);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
@@ -180,6 +182,8 @@ export default function EditProfileScreen() {
   const initialSnapshotRef = useRef<{
     contactNumber: string;
     location: string;
+    latitude: number | null;
+    longitude: number | null;
     bio: string;
     roles: string[];
     genres: string[];
@@ -194,11 +198,13 @@ export default function EditProfileScreen() {
     () => ({
       contactNumber: contactNumber.trim(),
       location: location.trim(),
+      latitude,
+      longitude,
       bio: bio.trim(),
       roles: normalizeList(selectedRoles),
       genres: normalizeList(selectedGenres),
     }),
-    [contactNumber, location, bio, selectedRoles, selectedGenres],
+    [contactNumber, location, latitude, longitude, bio, selectedRoles, selectedGenres],
   );
 
   const hasIncompleteRequiredFields = useMemo(
@@ -218,6 +224,8 @@ export default function EditProfileScreen() {
     return (
       initial.contactNumber !== currentSnapshot.contactNumber ||
       initial.location !== currentSnapshot.location ||
+      initial.latitude !== currentSnapshot.latitude ||
+      initial.longitude !== currentSnapshot.longitude ||
       initial.bio !== currentSnapshot.bio ||
       JSON.stringify(initial.roles) !== JSON.stringify(currentSnapshot.roles) ||
       JSON.stringify(initial.genres) !== JSON.stringify(currentSnapshot.genres) ||
@@ -341,6 +349,8 @@ export default function EditProfileScreen() {
         setDisplayName(resolvedProfile.full_name || "");
         setContactNumber(resolvedProfile.contact_number || "");
         setLocation(resolvedProfile.address || resolvedProfile.location || "");
+        setLatitude(Number.isFinite(Number(resolvedProfile.latitude)) ? Number(resolvedProfile.latitude) : null);
+        setLongitude(Number.isFinite(Number(resolvedProfile.longitude)) ? Number(resolvedProfile.longitude) : null);
         setBio(resolvedProfile.bio || "");
         const normalizedAvatarUrl = sanitizeAvatarUrl(resolvedProfile.avatar_url);
         setAvatarUrl(normalizedAvatarUrl || DEFAULT_AVATAR);
@@ -350,6 +360,8 @@ export default function EditProfileScreen() {
         initialSnapshotRef.current = {
           contactNumber: (resolvedProfile.contact_number || "").trim(),
           location: (resolvedProfile.address || resolvedProfile.location || "").trim(),
+          latitude: Number.isFinite(Number(resolvedProfile.latitude)) ? Number(resolvedProfile.latitude) : null,
+          longitude: Number.isFinite(Number(resolvedProfile.longitude)) ? Number(resolvedProfile.longitude) : null,
           bio: (resolvedProfile.bio || "").trim(),
           roles: normalizeList(resolvedSkills),
           genres: normalizeList(resolvedGenres),
@@ -611,6 +623,8 @@ export default function EditProfileScreen() {
         contact_number: contactNumber,
         address: location,
         location,
+        latitude,
+        longitude,
       };
 
       if (uploadedAvatarUrl) {
@@ -723,6 +737,8 @@ export default function EditProfileScreen() {
       initialSnapshotRef.current = {
         contactNumber: contactNumber.trim(),
         location: location.trim(),
+        latitude,
+        longitude,
         bio: bio.trim(),
         roles: normalizeList(cleanedRoles),
         genres: normalizeList(cleanedGenres),
@@ -873,7 +889,11 @@ export default function EditProfileScreen() {
           </Text>
           <LeafletAddressPicker
             value={location}
-            onAddressSelect={(address) => setLocation(address)}
+            onAddressSelect={(address, lat, lng) => {
+              setLocation(address);
+              setLatitude(typeof lat === "number" && Number.isFinite(lat) ? lat : null);
+              setLongitude(typeof lng === "number" && Number.isFinite(lng) ? lng : null);
+            }}
             placeholder="Tap to select your address"
           />
         </View>
