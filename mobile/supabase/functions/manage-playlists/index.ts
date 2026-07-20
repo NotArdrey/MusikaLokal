@@ -259,6 +259,51 @@ async function indexPlaylistItemAudio(params: {
   }
 }
 
+async function deleteAcrCloudPlaylistItemAudio(supabaseAdmin: any, playlistItemIds: string[]) {
+  const normalizedItemIds = Array.from(new Set(
+    (playlistItemIds || []).map((value) => String(value || "").trim()).filter(Boolean),
+  ));
+  if (normalizedItemIds.length === 0) return;
+
+  const { data: fingerprints, error: lookupError } = await supabaseAdmin
+    .from("playlist_audio_fingerprints")
+    .select("playlist_item_id, provider_bucket_id, provider_file_id, provider_acrid")
+    .in("playlist_item_id", normalizedItemIds)
+    .eq("provider", "acrcloud_custom");
+  if (lookupError) throw new Error(`Unable to inspect playlist audio fingerprints: ${lookupError.message}`);
+
+  const providerIds = Array.from(new Set<string>(
+    (fingerprints || [])
+      .filter((row: any) => !row?.provider_bucket_id || String(row.provider_bucket_id) === ACRCLOUD_CUSTOM_BUCKET_ID)
+      .map((row: any) => String(row?.provider_file_id || row?.provider_acrid || "").trim())
+      .filter(Boolean),
+  ));
+  if (providerIds.length === 0) return;
+  if (!ACRCLOUD_CONSOLE_TOKEN || !ACRCLOUD_CUSTOM_BUCKET_ID) {
+    throw new Error("ACRCloud playlist cleanup is not configured.");
+  }
+
+  const response = await fetch(
+    `${ACRCLOUD_CONSOLE_API_URL}/api/buckets/${encodeURIComponent(ACRCLOUD_CUSTOM_BUCKET_ID)}/files/${providerIds.map((providerId) => encodeURIComponent(providerId)).join(",")}`,
+    {
+      method: "DELETE",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${ACRCLOUD_CONSOLE_TOKEN}`,
+      },
+    },
+  );
+  if (!response.ok && response.status !== 404) {
+    const responseText = await response.text();
+    throw new Error(`ACRCloud playlist cleanup failed (HTTP ${response.status}): ${responseText.slice(0, 300)}`);
+  }
+
+  console.log("[manage-playlists] internal_audio_index_deleted", {
+    playlistItemCount: normalizedItemIds.length,
+    providerFileCount: providerIds.length,
+  });
+}
+
 function normalizeOptionalImageUrl(value: unknown): string | null {
   const trimmed = typeof value === "string" ? value.trim() : "";
   return trimmed || null;
@@ -2406,7 +2451,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: playlistItemsForCleanup } = await supabaseAdmin
         .from("playlist_items")
-        .select("audio_url, cover_image_url, teaser:playlist_teaser_assets!teaser_asset_id(storage_path)")
+        .select("id, audio_url, cover_image_url, teaser:playlist_teaser_assets!teaser_asset_id(storage_path)")
         .eq("playlist_id", playlist_id);
 
       for (const item of playlistItemsForCleanup || []) {
@@ -2423,6 +2468,17 @@ Deno.serve(async (req: Request) => {
 
       for (const asset of teaserAssetsForCleanup || []) {
         addStorageRef(storageRefs, PLAYLIST_ASSET_BUCKET, asset?.storage_path);
+      }
+
+      try {
+        await deleteAcrCloudPlaylistItemAudio(
+          supabaseAdmin,
+          (playlistItemsForCleanup || []).map((item: any) => String(item?.id || "")),
+        );
+      } catch (cleanupError) {
+        const message = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+        console.error("manage-playlists delete_playlist acrcloud cleanup failed", { playlist_id, message });
+        return jsonResponse({ error: message }, 502);
       }
 
       let { error } = await supabaseAdmin.from("playlists").delete().eq("id", playlist_id);
@@ -2763,6 +2819,23 @@ Deno.serve(async (req: Request) => {
         if (!pl) return jsonResponse({ error: "Playlist not found" }, 404);
         if (!(await canManagePlaylist(supabaseAdmin, pl, uid, requesterRole))) return jsonResponse({ error: "Forbidden" }, 403);
 
+        const { data: existingItem, error: itemLookupError } = await supabaseAdmin
+          .from("playlist_items")
+          .select("id, audio_url, teaser:playlist_teaser_assets!teaser_asset_id(storage_path)")
+          .eq("id", item_id)
+          .eq("playlist_id", playlist_id)
+          .maybeSingle();
+
+        if (itemLookupError) return jsonResponse({ error: itemLookupError.message }, 500);
+        if (!existingItem) return jsonResponse({ success: true, already_removed: true });
+
+        try {
+          await deleteAcrCloudPlaylistItemAudio(supabaseAdmin, [item_id]);
+        } catch (cleanupError) {
+          const message = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+          return jsonResponse({ error: message }, 502);
+        }
+
         const { data: deletedItem, error: deleteError } = await supabaseAdmin
           .from("playlist_items")
           .delete()
@@ -2772,12 +2845,17 @@ Deno.serve(async (req: Request) => {
           .maybeSingle();
 
         if (deleteError) return jsonResponse({ error: deleteError.message }, 500);
+        const storageRefs = new Map<string, Set<string>>();
+        addParsedStorageRef(storageRefs, existingItem.audio_url);
+        const teaser = Array.isArray(existingItem?.teaser) ? existingItem.teaser[0] : existingItem?.teaser;
+        addStorageRef(storageRefs, PLAYLIST_ASSET_BUCKET, teaser?.storage_path);
+        await removePlaylistStorageRefs(supabaseAdmin, storageRefs);
         return jsonResponse({ success: true, already_removed: !deletedItem });
       }
 
       const { data: item } = await supabaseAdmin
         .from("playlist_items")
-        .select("playlist_id")
+        .select("playlist_id, audio_url, teaser:playlist_teaser_assets!teaser_asset_id(storage_path)")
         .eq("id", item_id)
         .maybeSingle();
 
@@ -2786,8 +2864,20 @@ Deno.serve(async (req: Request) => {
       const { data: pl } = await supabaseAdmin.from("playlists").select("creator_id, owner_group_id").eq("id", item.playlist_id).single();
       if (!pl || !(await canManagePlaylist(supabaseAdmin, pl, uid, requesterRole))) return jsonResponse({ error: "Forbidden" }, 403);
 
+      try {
+        await deleteAcrCloudPlaylistItemAudio(supabaseAdmin, [item_id]);
+      } catch (cleanupError) {
+        const message = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+        return jsonResponse({ error: message }, 502);
+      }
+
       const { error } = await supabaseAdmin.from("playlist_items").delete().eq("id", item_id);
       if (error) return jsonResponse({ error: error.message }, 500);
+      const storageRefs = new Map<string, Set<string>>();
+      addParsedStorageRef(storageRefs, item.audio_url);
+      const teaser = Array.isArray(item?.teaser) ? item.teaser[0] : item?.teaser;
+      addStorageRef(storageRefs, PLAYLIST_ASSET_BUCKET, teaser?.storage_path);
+      await removePlaylistStorageRefs(supabaseAdmin, storageRefs);
       return jsonResponse({ success: true });
     }
 
