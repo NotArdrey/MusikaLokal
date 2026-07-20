@@ -1369,6 +1369,11 @@ export default function GigDetailsScreen() {
                               Match: {videoCopyrightMeta.copyright_title}{videoCopyrightMeta.copyright_artist_label ? ` by ${videoCopyrightMeta.copyright_artist_label}` : ""}
                             </Text>
                           ) : null}
+                          {videoCopyrightMeta.internal_match_playlist_title ? (
+                            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 6 }}>
+                              Playlist recording: {videoCopyrightMeta.internal_match_playlist_title}{videoCopyrightMeta.internal_match_playlist_artist ? ` by ${videoCopyrightMeta.internal_match_playlist_artist}` : ""} ({String(videoCopyrightMeta.internal_match_similarity_score || "strong")} match)
+                            </Text>
+                          ) : null}
                           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 5 }}>
                             {app.video_copyright_acknowledged ? "Applicant confirmed ownership, license, or permission. " : "No current rights acknowledgment is recorded. "}Fingerprint screening is a review signal, not a legal copyright decision.
                           </Text>

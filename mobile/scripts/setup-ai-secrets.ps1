@@ -39,7 +39,20 @@ if (-not $ProjectRef) {
     throw "Unable to determine project ref. Pass -ProjectRef or set EXPO_PUBLIC_SUPABASE_URL in $EnvFile"
 }
 
-$secretNames = @('GROQ_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'ACRCLOUD_HOST', 'ACRCLOUD_ACCESS_KEY', 'ACRCLOUD_ACCESS_SECRET', 'ACRCLOUD_MIN_SCORE')
+$secretNames = @(
+    'GROQ_API_KEY',
+    'GEMINI_API_KEY',
+    'OPENAI_API_KEY',
+    'ACRCLOUD_HOST',
+    'ACRCLOUD_ACCESS_KEY',
+    'ACRCLOUD_ACCESS_SECRET',
+    'ACRCLOUD_MIN_SCORE',
+    'ACRCLOUD_CONSOLE_TOKEN',
+    'ACRCLOUD_CUSTOM_BUCKET_ID',
+    'ACRCLOUD_CUSTOM_HOST',
+    'ACRCLOUD_CUSTOM_ACCESS_KEY',
+    'ACRCLOUD_CUSTOM_ACCESS_SECRET'
+)
 $secretPairs = @()
 $configuredKeys = @()
 

@@ -399,6 +399,12 @@ const getCopyrightOwnershipInfo = (review?: ManualIdentityReviewEntry | null) =>
     playlistTitle: String(playlistItem?.playlist_title || '').trim(),
     playlistItemId: String(playlistItem?.id || '').trim(),
     copyrightStatus: String(playlistItem?.copyright_status || '').trim(),
+    internalPlaylistItemId: String(metadata['internal_match_playlist_item_id'] || '').trim(),
+    internalPlaylistTitle: String(metadata['internal_match_playlist_title'] || '').trim(),
+    internalPlaylistArtist: String(metadata['internal_match_playlist_artist'] || '').trim(),
+    internalSimilarityScore: metadata['internal_match_similarity_score'],
+    internalMatchStrength: String(metadata['internal_match_strength'] || '').trim(),
+    ownershipVerification: String(metadata['ownership_verification'] || '').trim(),
     videoUrl: String(gigApplication?.video_url || metadata['uploaded_video_url'] || '').trim(),
     gigName: String(gigApplication?.gig_name || '').trim(),
     isPerformanceVideo: Boolean(gigApplication?.video_url) || metadata['upload_kind'] === 'gig_performance_video',
@@ -1506,6 +1512,12 @@ export default function AdminIdentityReviewsPage() {
                         {ownershipInfo.playlistTitle ? (
                           <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Playlist: {ownershipInfo.playlistTitle}</Text>
                         ) : null}
+                        {ownershipInfo.internalPlaylistTitle ? (
+                          <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Internal recording: {ownershipInfo.internalPlaylistTitle}{ownershipInfo.internalPlaylistArtist ? ` by ${ownershipInfo.internalPlaylistArtist}` : ''}</Text>
+                        ) : null}
+                        {ownershipInfo.internalSimilarityScore ? (
+                          <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Internal match: {String(ownershipInfo.internalSimilarityScore)}% ({ownershipInfo.internalMatchStrength || 'fingerprint match'})</Text>
+                        ) : null}
                         {ownershipInfo.gigName ? (
                           <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Gig: {ownershipInfo.gigName}</Text>
                         ) : null}
@@ -1776,6 +1788,12 @@ export default function AdminIdentityReviewsPage() {
                   <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
                     Playlist: {manualReviewOwnershipInfo.playlistTitle}
                   </Text>
+                ) : null}
+                {manualReviewOwnershipInfo.internalPlaylistTitle ? (
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Internal recording: {manualReviewOwnershipInfo.internalPlaylistTitle}{manualReviewOwnershipInfo.internalPlaylistArtist ? ` by ${manualReviewOwnershipInfo.internalPlaylistArtist}` : ''}</Text>
+                ) : null}
+                {manualReviewOwnershipInfo.internalSimilarityScore ? (
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Internal match: {String(manualReviewOwnershipInfo.internalSimilarityScore)}% ({manualReviewOwnershipInfo.internalMatchStrength || 'fingerprint match'})</Text>
                 ) : null}
                 {manualReviewOwnershipInfo.gigName ? (
                   <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Gig: {manualReviewOwnershipInfo.gigName}</Text>

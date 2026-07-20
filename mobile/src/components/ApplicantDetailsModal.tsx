@@ -276,6 +276,7 @@ export default function ApplicantDetailsModal({
               </View>
               <Text style={[styles.body, { color: colors.textSecondary }]}>{screening.message}</Text>
               {application.video_copyright_metadata?.copyright_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Possible match: {application.video_copyright_metadata.copyright_title}{application.video_copyright_metadata.copyright_artist_label ? ` by ${application.video_copyright_metadata.copyright_artist_label}` : ""}</Text> : null}
+              {application.video_copyright_metadata?.internal_match_playlist_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Playlist recording: {application.video_copyright_metadata.internal_match_playlist_title}{application.video_copyright_metadata.internal_match_playlist_artist ? ` by ${application.video_copyright_metadata.internal_match_playlist_artist}` : ""} ({String(application.video_copyright_metadata.internal_match_similarity_score || "strong")} match)</Text> : null}
               <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>Content-match screening is a review signal, not a legal copyright decision.</Text>
             </Section>
 

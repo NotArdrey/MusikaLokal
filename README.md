@@ -84,6 +84,21 @@ Deploy `20260719020000_add_gig_video_copyright_screening.sql` before the updated
 Functions. Configure `ACRCLOUD_HOST`, `ACRCLOUD_ACCESS_KEY`, and
 `ACRCLOUD_ACCESS_SECRET`; uploads fail closed when fingerprinting is unavailable.
 
+Direct playlist-to-gig matching additionally uses an ACRCloud custom-content
+bucket. Deploy `20260720233000_add_playlist_audio_fingerprints.sql`, then deploy
+the updated `manage-playlists` and `upload-safety-screen` functions. Configure
+`ACRCLOUD_CONSOLE_TOKEN`, `ACRCLOUD_CUSTOM_BUCKET_ID`,
+`ACRCLOUD_CUSTOM_HOST`, `ACRCLOUD_CUSTOM_ACCESS_KEY`, and
+`ACRCLOUD_CUSTOM_ACCESS_SECRET`. Bind the custom bucket to the custom
+recognition project and use the recorded-audio mode for gig samples. New and
+edited MP3 tracks are indexed automatically. Existing tracks can be indexed in
+batches by invoking `manage-playlists` with action
+`backfill_playlist_audio_fingerprints`, `offset` (starting at `0`), and `limit`
+(up to `25`) until `next_offset` is `null`. Same-user matches reuse only a
+linked `APPROVED` ownership review; other matches remain admin-review evidence.
+If the standard ACRCloud project has melody/humming recognition enabled, those
+results are also considered for live gig performances.
+
 Operational Groq text defaults now use `openai/gpt-oss-120b`, then
 `qwen/qwen3.6-27b` and `openai/gpt-oss-20b`. Vision defaults to
 `qwen/qwen3.6-27b`. Environment overrides remain available through

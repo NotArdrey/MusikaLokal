@@ -31,6 +31,9 @@ const ACRCLOUD_HOST = Deno.env.get("ACRCLOUD_HOST")?.trim() || "";
 const ACRCLOUD_ACCESS_KEY = Deno.env.get("ACRCLOUD_ACCESS_KEY")?.trim() || "";
 const ACRCLOUD_ACCESS_SECRET = Deno.env.get("ACRCLOUD_ACCESS_SECRET")?.trim() || "";
 const ACRCLOUD_MIN_SCORE = Number(Deno.env.get("ACRCLOUD_MIN_SCORE") || "80");
+const ACRCLOUD_CUSTOM_HOST = Deno.env.get("ACRCLOUD_CUSTOM_HOST")?.trim() || "";
+const ACRCLOUD_CUSTOM_ACCESS_KEY = Deno.env.get("ACRCLOUD_CUSTOM_ACCESS_KEY")?.trim() || "";
+const ACRCLOUD_CUSTOM_ACCESS_SECRET = Deno.env.get("ACRCLOUD_CUSTOM_ACCESS_SECRET")?.trim() || "";
 
 const MAX_FILES_PER_REQUEST = 10;
 const GROQ_VISION_MODEL = Deno.env.get("GROQ_VISION_MODEL")?.trim() || "qwen/qwen3.6-27b";
@@ -486,6 +489,7 @@ function buildCopyrightMatchMetadata(match: any) {
     copyright_album: String(match?.album?.name || match?.album || "").trim() || null,
     copyright_release_date: String(match?.release_date || "").trim() || null,
     copyright_rights_owner: rightsOwner || null,
+    copyright_match_type: String(match?._musikalokal_match_type || "audio_fingerprint"),
   };
 }
 
@@ -540,11 +544,12 @@ async function queueCopyrightOwnershipReview(
   file: FileCandidate,
   match: any,
   context?: string,
+  supportingMetadata: Record<string, unknown> = {},
 ) {
   const isGigPerformanceVideo = context === "gig_application_performance_video";
   const userId = String(user?.id || "").trim();
   if (!supabaseAdmin || !userId) {
-    const metadata = buildCopyrightMatchMetadata(match);
+    const metadata = { ...buildCopyrightMatchMetadata(match), ...supportingMetadata };
     return {
       approved: false,
       queued: false,
@@ -555,7 +560,7 @@ async function queueCopyrightOwnershipReview(
     };
   }
 
-  const matchMetadata = buildCopyrightMatchMetadata(match);
+  const matchMetadata = { ...buildCopyrightMatchMetadata(match), ...supportingMetadata };
   const trackKey = matchMetadata.copyright_track_key;
   const existingReview = await findCopyrightOwnershipReview(
     supabaseAdmin,
@@ -677,8 +682,21 @@ async function queueCopyrightOwnershipReview(
   };
 }
 
-function getBestAcrMusicMatch(response: any): any | null {
-  const matches = Array.isArray(response?.metadata?.music) ? response.metadata.music : [];
+function getBestAcrMusicMatch(response: any, includeMelodyMatches = false): any | null {
+  const musicMatches = Array.isArray(response?.metadata?.music)
+    ? response.metadata.music.map((match: any) => ({ ...match, _musikalokal_match_type: "audio_fingerprint" }))
+    : [];
+  const melodyMatches = includeMelodyMatches && Array.isArray(response?.metadata?.humming)
+    ? response.metadata.humming.map((match: any) => {
+        const rawScore = Number(match?.score || 0);
+        return {
+          ...match,
+          score: rawScore > 0 && rawScore <= 1 ? rawScore * 100 : rawScore,
+          _musikalokal_match_type: "melody_humming",
+        };
+      })
+    : [];
+  const matches = [...musicMatches, ...melodyMatches];
   if (matches.length === 0) {
     return null;
   }
@@ -717,6 +735,223 @@ function getAcrCloudFailureReason(statusCode: number): string {
   }
 }
 
+type InternalPlaylistMatch = {
+  customMatch: any;
+  playlistItem: any;
+  fingerprint: any;
+  approvedReview: any | null;
+  evidence: Record<string, unknown>;
+};
+
+async function findInternalPlaylistMatch(
+  file: FileCandidate,
+  parsedAudio: { bytes: Uint8Array; mimeType: string },
+  screeningContext: CopyrightScreeningContext,
+): Promise<InternalPlaylistMatch | null> {
+  const userId = String(screeningContext.user?.id || "").trim();
+  if (
+    screeningContext.context !== "gig_application_performance_video" ||
+    !screeningContext.supabaseAdmin ||
+    !userId ||
+    !ACRCLOUD_CUSTOM_HOST ||
+    !ACRCLOUD_CUSTOM_ACCESS_KEY ||
+    !ACRCLOUD_CUSTOM_ACCESS_SECRET
+  ) {
+    return null;
+  }
+
+  try {
+    const httpMethod = "POST";
+    const httpUri = "/v1/identify";
+    const dataType = "audio";
+    const signatureVersion = "1";
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const signature = await createAcrCloudSignature(
+      ACRCLOUD_CUSTOM_ACCESS_SECRET,
+      [httpMethod, httpUri, ACRCLOUD_CUSTOM_ACCESS_KEY, dataType, signatureVersion, timestamp].join("\n"),
+    );
+    const sampleBytes = parsedAudio.bytes.buffer.slice(
+      parsedAudio.bytes.byteOffset,
+      parsedAudio.bytes.byteOffset + parsedAudio.bytes.byteLength,
+    ) as ArrayBuffer;
+    const formData = new FormData();
+    formData.append("sample", new Blob([sampleBytes], { type: parsedAudio.mimeType }), file.fileName || "gig-audio.m4a");
+    formData.append("access_key", ACRCLOUD_CUSTOM_ACCESS_KEY);
+    formData.append("sample_bytes", String(parsedAudio.bytes.byteLength));
+    formData.append("timestamp", timestamp);
+    formData.append("signature", signature);
+    formData.append("data_type", dataType);
+    formData.append("signature_version", signatureVersion);
+
+    const response = await fetch(getAcrCloudIdentifyUrl(ACRCLOUD_CUSTOM_HOST), {
+      method: httpMethod,
+      body: formData,
+    });
+    if (!response.ok) {
+      console.warn("[upload-safety-screen] internal_audio_match_unavailable", {
+        status: response.status,
+        reason: "custom_identify_http_error",
+      });
+      return null;
+    }
+
+    const payload = await response.json();
+    if (Number(payload?.status?.code) !== 0) {
+      console.log("[upload-safety-screen] internal_audio_match_none", {
+        statusCode: payload?.status?.code ?? null,
+      });
+      return null;
+    }
+
+    const customMatches = Array.isArray(payload?.metadata?.custom_files)
+      ? payload.metadata.custom_files
+      : [];
+    for (const customMatch of customMatches) {
+      const providerAcrid = String(customMatch?.acrid || customMatch?.arcid || "").trim();
+      if (!providerAcrid) continue;
+
+      const { data: fingerprint, error: fingerprintError } = await screeningContext.supabaseAdmin
+        .from("playlist_audio_fingerprints")
+        .select("id, playlist_item_id, owner_user_id, provider, provider_file_id, provider_acrid, status, metadata")
+        .eq("provider", "acrcloud_custom")
+        .eq("provider_acrid", providerAcrid)
+        .eq("owner_user_id", userId)
+        .maybeSingle();
+      if (fingerprintError) {
+        console.error("[upload-safety-screen] internal_audio_fingerprint_lookup_failed", {
+          providerAcrid,
+          message: fingerprintError.message,
+        });
+        continue;
+      }
+      if (!fingerprint) continue;
+
+      const { data: playlistItem, error: itemError } = await screeningContext.supabaseAdmin
+        .from("playlist_items")
+        .select("id, playlist_id, title, artist_name, copyright_status, copyright_review_id, copyright_metadata")
+        .eq("id", fingerprint.playlist_item_id)
+        .maybeSingle();
+      if (itemError || !playlistItem) {
+        if (itemError) {
+          console.error("[upload-safety-screen] internal_audio_playlist_item_lookup_failed", {
+            playlistItemId: fingerprint.playlist_item_id,
+            message: itemError.message,
+          });
+        }
+        continue;
+      }
+
+      let approvedReview: any | null = null;
+      if (playlistItem.copyright_status === "approved" && playlistItem.copyright_review_id) {
+        const { data: review } = await screeningContext.supabaseAdmin
+          .from("manual_identity_reviews")
+          .select("id, user_id, source, status, metadata")
+          .eq("id", playlistItem.copyright_review_id)
+          .eq("user_id", userId)
+          .eq("source", COPYRIGHT_OWNERSHIP_REVIEW_SOURCE)
+          .eq("status", "APPROVED")
+          .maybeSingle();
+        approvedReview = review || null;
+      }
+
+      const rawScore = Number(customMatch?.score);
+      const hasProviderScore = Number.isFinite(rawScore) && rawScore > 0;
+      const normalizedScore = hasProviderScore && rawScore <= 1 ? rawScore * 100 : rawScore;
+      const evidence = {
+        internal_match_type: "same_recording_fingerprint",
+        internal_match_strength: "strong",
+        internal_match_similarity_score: hasProviderScore ? normalizedScore : 100,
+        internal_match_score_basis: hasProviderScore
+          ? "acrcloud_custom_score"
+          : "normalized_binary_fingerprint_match",
+        internal_match_playlist_item_id: playlistItem.id,
+        internal_match_playlist_id: playlistItem.playlist_id,
+        internal_match_playlist_title: playlistItem.title,
+        internal_match_playlist_artist: playlistItem.artist_name || null,
+        internal_match_provider: "acrcloud_custom",
+        internal_match_provider_acrid: providerAcrid,
+        internal_match_provider_file_id: fingerprint.provider_file_id || null,
+        internal_match_detected_at: new Date().toISOString(),
+        ownership_verification: approvedReview ? "previously_verified" : "requires_admin_review",
+      };
+
+      await screeningContext.supabaseAdmin
+        .from("playlist_audio_fingerprints")
+        .update({ status: "ready", error_message: null, updated_at: new Date().toISOString() })
+        .eq("id", fingerprint.id);
+
+      console.log("[upload-safety-screen] internal_audio_match_found", {
+        userId,
+        playlistItemId: playlistItem.id,
+        providerAcrid,
+        approvedOwnershipReview: Boolean(approvedReview),
+      });
+      return { customMatch, playlistItem, fingerprint, approvedReview, evidence };
+    }
+  } catch (error) {
+    console.warn("[upload-safety-screen] internal_audio_match_unavailable", {
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return null;
+}
+
+async function resolveInternalPlaylistMatch(
+  file: FileCandidate,
+  internalMatch: InternalPlaylistMatch,
+  screeningContext: CopyrightScreeningContext,
+): Promise<Omit<ScreeningResult, "id">> {
+  if (internalMatch.approvedReview) {
+    const reviewMetadata = internalMatch.approvedReview.metadata &&
+        typeof internalMatch.approvedReview.metadata === "object"
+      ? internalMatch.approvedReview.metadata
+      : {};
+    return {
+      allowed: true,
+      publiclyAvailable: true,
+      copyrightStatus: "approved",
+      copyrightReviewId: internalMatch.approvedReview.id,
+      copyrightTrackKey: String(reviewMetadata.copyright_track_key || "") || null,
+      copyrightMetadata: { ...reviewMetadata, ...internalMatch.evidence },
+    };
+  }
+
+  const syntheticMatch = {
+    title: internalMatch.playlistItem.title || "Playlist recording",
+    artists: internalMatch.playlistItem.artist_name
+      ? [{ name: internalMatch.playlistItem.artist_name }]
+      : [],
+    score: internalMatch.evidence.internal_match_similarity_score,
+    acrid: `internal:${internalMatch.fingerprint.provider_acrid}`,
+  };
+  const ownershipReview = await queueCopyrightOwnershipReview(
+    screeningContext.supabaseAdmin,
+    screeningContext.user || null,
+    file,
+    syntheticMatch,
+    screeningContext.context,
+    internalMatch.evidence,
+  );
+  if (!ownershipReview.reviewId && !ownershipReview.queued) {
+    return {
+      allowed: false,
+      reason: "This video matches one of your playlist recordings, but the ownership review could not be sent. Please try again.",
+    };
+  }
+
+  return {
+    allowed: true,
+    reason: "This performance video matches a recording in your playlist. Your application can continue while an admin reviews the ownership evidence.",
+    requiresAdminReview: true,
+    publiclyAvailable: false,
+    copyrightStatus: "pending_review",
+    copyrightReviewId: ownershipReview.reviewId,
+    copyrightTrackKey: ownershipReview.trackKey,
+    copyrightMetadata: ownershipReview.metadata,
+  };
+}
+
 async function screenAudioCopyright(
   file: FileCandidate,
   screeningContext: CopyrightScreeningContext = {},
@@ -737,7 +972,20 @@ async function screenAudioCopyright(
     return { allowed: true, publiclyAvailable: true, copyrightStatus: "not_required" };
   }
 
+  const internalMatch = await findInternalPlaylistMatch(file, parsedAudio, screeningContext);
+  if (internalMatch?.approvedReview) {
+    console.log("[upload-safety-screen] internal_audio_match_allowed", {
+      playlistItemId: internalMatch.playlistItem.id,
+      reviewId: internalMatch.approvedReview.id,
+      reason: "ownership_previously_verified",
+    });
+    return resolveInternalPlaylistMatch(file, internalMatch, screeningContext);
+  }
+
   if (!ACRCLOUD_HOST || !ACRCLOUD_ACCESS_KEY || !ACRCLOUD_ACCESS_SECRET) {
+    if (internalMatch) {
+      return resolveInternalPlaylistMatch(file, internalMatch, screeningContext);
+    }
     console.error("[upload-safety-screen] acrcloud_config_missing", {
       hasHost: Boolean(ACRCLOUD_HOST),
       hasAccessKey: Boolean(ACRCLOUD_ACCESS_KEY),
@@ -805,6 +1053,9 @@ async function screenAudioCopyright(
       statusText: response.statusText,
       body: errorBody.slice(0, 1000),
     });
+    if (internalMatch) {
+      return resolveInternalPlaylistMatch(file, internalMatch, screeningContext);
+    }
     return {
       allowed: false,
       reason: `ACRCloud could not be reached (HTTP ${response.status}). Please try again in a moment.`,
@@ -827,7 +1078,9 @@ async function screenAudioCopyright(
       reason: "no_match",
       statusCode,
     });
-    return { allowed: true, publiclyAvailable: true, copyrightStatus: "not_required" };
+    return internalMatch
+      ? resolveInternalPlaylistMatch(file, internalMatch, screeningContext)
+      : { allowed: true, publiclyAvailable: true, copyrightStatus: "not_required" };
   }
 
   if (statusCode !== 0) {
@@ -835,13 +1088,19 @@ async function screenAudioCopyright(
       code: acrResult?.status?.code,
       message: acrResult?.status?.msg,
     });
+    if (internalMatch) {
+      return resolveInternalPlaylistMatch(file, internalMatch, screeningContext);
+    }
     return {
       allowed: false,
       reason: getAcrCloudFailureReason(statusCode),
     };
   }
 
-  const bestMatch = getBestAcrMusicMatch(acrResult);
+  const bestMatch = getBestAcrMusicMatch(
+    acrResult,
+    screeningContext.context === "gig_application_performance_video",
+  );
   const minScore = Number.isFinite(ACRCLOUD_MIN_SCORE) ? ACRCLOUD_MIN_SCORE : 80;
   console.log("[upload-safety-screen] acrcloud_best_match", {
     found: Boolean(bestMatch),
@@ -854,6 +1113,7 @@ async function screenAudioCopyright(
     isrc: bestMatch?.external_ids?.isrc || null,
     upc: bestMatch?.external_ids?.upc || null,
     label: bestMatch?.label || null,
+    matchType: bestMatch?._musikalokal_match_type || null,
     minScore,
   });
 
@@ -864,6 +1124,7 @@ async function screenAudioCopyright(
       file,
       bestMatch,
       screeningContext.context,
+      internalMatch?.evidence || {},
     );
 
     if (ownershipReview.approved) {
@@ -919,7 +1180,9 @@ async function screenAudioCopyright(
     minScore,
   });
 
-  return { allowed: true, publiclyAvailable: true, copyrightStatus: "not_required" };
+  return internalMatch
+    ? resolveInternalPlaylistMatch(file, internalMatch, screeningContext)
+    : { allowed: true, publiclyAvailable: true, copyrightStatus: "not_required" };
 }
 
 function getFileId(file: FileCandidate, index: number): string {

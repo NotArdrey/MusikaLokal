@@ -22,6 +22,9 @@ const PLAYLIST_ASSET_BUCKET = "playlist-assets";
 const PLAYLIST_RADIO_ID_PREFIX = "playlist-radio:";
 const COPYRIGHT_OWNERSHIP_REVIEW_SOURCE = "COPYRIGHT_OWNERSHIP";
 const PUBLIC_PLAYLIST_ITEM_COPYRIGHT_STATUSES = new Set(["not_required", "approved"]);
+const ACRCLOUD_CONSOLE_API_URL = "https://api-v2.acrcloud.com";
+const ACRCLOUD_CONSOLE_TOKEN = Deno.env.get("ACRCLOUD_CONSOLE_TOKEN")?.trim() || "";
+const ACRCLOUD_CUSTOM_BUCKET_ID = Deno.env.get("ACRCLOUD_CUSTOM_BUCKET_ID")?.trim() || "";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")?.trim() || "";
@@ -98,6 +101,162 @@ function normalizeOptionalAudioUrl(value: unknown): string | null {
   }
 
   return trimmed;
+}
+
+function isProjectStorageObjectUrl(value: string, supabaseUrl: string): boolean {
+  try {
+    const candidate = new URL(value);
+    const projectOrigin = new URL(supabaseUrl).origin;
+    return candidate.origin === projectOrigin &&
+      candidate.pathname.startsWith("/storage/v1/object/");
+  } catch {
+    return false;
+  }
+}
+
+async function indexPlaylistItemAudio(params: {
+  supabaseAdmin: any;
+  supabaseUrl: string;
+  playlistItem: any;
+  ownerUserId: string;
+}) {
+  const { supabaseAdmin, supabaseUrl, playlistItem, ownerUserId } = params;
+  const playlistItemId = String(playlistItem?.id || "").trim();
+  const audioUrl = String(playlistItem?.audio_url || "").trim();
+  if (!playlistItemId || !audioUrl || !ACRCLOUD_CONSOLE_TOKEN || !ACRCLOUD_CUSTOM_BUCKET_ID) {
+    return;
+  }
+
+  // ACRCloud must fetch only media already stored by this Supabase project. This
+  // prevents the service-role function from becoming a general URL fetcher.
+  if (!isProjectStorageObjectUrl(audioUrl, supabaseUrl)) {
+    console.warn("[manage-playlists] internal_audio_index_skipped", {
+      playlistItemId,
+      reason: "audio_url_is_not_project_storage",
+    });
+    return;
+  }
+
+  const { data: existingFingerprint } = await supabaseAdmin
+    .from("playlist_audio_fingerprints")
+    .select("provider_acrid, metadata")
+    .eq("playlist_item_id", playlistItemId)
+    .eq("owner_user_id", ownerUserId)
+    .maybeSingle();
+  if (
+    existingFingerprint?.provider_acrid &&
+    String(existingFingerprint?.metadata?.source_audio_url || "") === audioUrl
+  ) {
+    return;
+  }
+
+  const queuedAt = new Date().toISOString();
+  const baseRecord = {
+    playlist_item_id: playlistItemId,
+    owner_user_id: ownerUserId,
+    provider: "acrcloud_custom",
+    provider_bucket_id: ACRCLOUD_CUSTOM_BUCKET_ID,
+    provider_file_id: null,
+    provider_acrid: null,
+    status: "processing",
+    error_message: null,
+    updated_at: queuedAt,
+    metadata: {
+      indexed_from: "manage-playlists",
+      source_audio_url: audioUrl,
+      queued_at: queuedAt,
+    },
+  };
+
+  const { error: queueError } = await supabaseAdmin
+    .from("playlist_audio_fingerprints")
+    .upsert(baseRecord, { onConflict: "playlist_item_id" });
+  if (queueError) {
+    console.error("[manage-playlists] internal_audio_index_record_failed", {
+      playlistItemId,
+      message: queueError.message,
+    });
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `${ACRCLOUD_CONSOLE_API_URL}/api/buckets/${encodeURIComponent(ACRCLOUD_CUSTOM_BUCKET_ID)}/files`,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${ACRCLOUD_CONSOLE_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          data_type: "audio_url",
+          title: `musikalokal-playlist-item:${playlistItemId}`,
+          url: audioUrl,
+          user_defined: {
+            musikalokal_playlist_item_id: playlistItemId,
+            musikalokal_owner_user_id: ownerUserId,
+          },
+        }),
+      },
+    );
+
+    const responseText = await response.text();
+    let payload: any = null;
+    try {
+      payload = responseText ? JSON.parse(responseText) : null;
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok || !payload?.data?.acr_id) {
+      throw new Error(
+        `ACRCloud custom-file upload failed (HTTP ${response.status}): ${responseText.slice(0, 300)}`,
+      );
+    }
+
+    const providerFile = payload.data;
+    const providerState = Number(providerFile?.state);
+    const { error: updateError } = await supabaseAdmin
+      .from("playlist_audio_fingerprints")
+      .update({
+        provider_file_id: String(providerFile?.id || "") || null,
+        provider_acrid: String(providerFile?.acr_id || "") || null,
+        status: providerState === 1 ? "ready" : "processing",
+        error_message: null,
+        updated_at: new Date().toISOString(),
+        metadata: {
+          ...baseRecord.metadata,
+          provider_state: Number.isFinite(providerState) ? providerState : null,
+          provider_created_at: providerFile?.created_at || null,
+        },
+      })
+      .eq("playlist_item_id", playlistItemId)
+      .eq("owner_user_id", ownerUserId);
+    if (updateError) throw updateError;
+
+    console.log("[manage-playlists] internal_audio_index_queued", {
+      playlistItemId,
+      providerFileId: providerFile?.id || null,
+      providerAcrid: providerFile?.acr_id || null,
+      providerState: Number.isFinite(providerState) ? providerState : null,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[manage-playlists] internal_audio_index_failed", {
+      playlistItemId,
+      message,
+    });
+    await supabaseAdmin
+      .from("playlist_audio_fingerprints")
+      .update({
+        status: "error",
+        error_message: message.slice(0, 1000),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("playlist_item_id", playlistItemId)
+      .eq("owner_user_id", ownerUserId);
+  }
 }
 
 function normalizeOptionalImageUrl(value: unknown): string | null {
@@ -2170,7 +2329,14 @@ Deno.serve(async (req: Request) => {
           return jsonResponse({ error: "Each playlist item requires a title" }, 400);
         }
 
-        await supabaseAdmin.from("playlist_items").insert(itemRows);
+        const { data: insertedItems, error: insertItemsError } = await supabaseAdmin
+          .from("playlist_items")
+          .insert(itemRows)
+          .select();
+        if (insertItemsError) return jsonResponse({ error: insertItemsError.message }, 500);
+        for (const playlistItem of insertedItems || []) {
+          await indexPlaylistItemAudio({ supabaseAdmin, supabaseUrl, playlistItem, ownerUserId: uid });
+        }
       }
 
       return jsonResponse({ success: true, data: playlist });
@@ -2417,6 +2583,44 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── add_playlist_item ───────────────────────────────────────────
+    if (action === "backfill_playlist_audio_fingerprints") {
+      const requestedOwnerId = normalizeProfileId(params.owner_user_id);
+      if (requestedOwnerId && requestedOwnerId !== uid && requesterRole !== "admin") {
+        return jsonResponse({ error: "Forbidden" }, 403);
+      }
+      const ownerUserId = requestedOwnerId || uid;
+      const limit = normalizePositiveInteger(params.limit, 25, 1, 25);
+      const offset = normalizePositiveInteger(params.offset, 0, 0, 1000000);
+      const { data: ownedPlaylists, error: playlistsError } = await supabaseAdmin
+        .from("playlists")
+        .select("id")
+        .eq("creator_id", ownerUserId);
+      if (playlistsError) return jsonResponse({ error: playlistsError.message }, 500);
+
+      const playlistIds = (ownedPlaylists || []).map((playlist: any) => playlist.id).filter(Boolean);
+      if (playlistIds.length === 0) {
+        return jsonResponse({ success: true, processed: 0, next_offset: null });
+      }
+      const { data: playlistItems, error: itemsError } = await supabaseAdmin
+        .from("playlist_items")
+        .select("id, audio_url")
+        .in("playlist_id", playlistIds)
+        .not("audio_url", "is", null)
+        .order("created_at", { ascending: true })
+        .range(offset, offset + limit - 1);
+      if (itemsError) return jsonResponse({ error: itemsError.message }, 500);
+
+      for (const playlistItem of playlistItems || []) {
+        await indexPlaylistItemAudio({ supabaseAdmin, supabaseUrl, playlistItem, ownerUserId });
+      }
+      const processed = playlistItems?.length || 0;
+      return jsonResponse({
+        success: true,
+        processed,
+        next_offset: processed === limit ? offset + processed : null,
+      });
+    }
+
     if (action === "add_playlist_item") {
       const { playlist_id, title, artist_name, duration_seconds, teaser_asset_id, external_link_id, audio_url, cover_image_url } = params;
       if (!playlist_id || !title) return jsonResponse({ error: "playlist_id and title are required" }, 400);
@@ -2466,6 +2670,12 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (error) return jsonResponse({ error: error.message }, 500);
+      await indexPlaylistItemAudio({
+        supabaseAdmin,
+        supabaseUrl,
+        playlistItem: data,
+        ownerUserId: pl.creator_id,
+      });
       return jsonResponse({ success: true, data });
     }
 
@@ -2526,6 +2736,14 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (error) return jsonResponse({ error: error.message }, 500);
+      if (normalizedAudioUrl) {
+        await indexPlaylistItemAudio({
+          supabaseAdmin,
+          supabaseUrl,
+          playlistItem: data,
+          ownerUserId: pl.creator_id,
+        });
+      }
       return jsonResponse({ success: true, data });
     }
 
