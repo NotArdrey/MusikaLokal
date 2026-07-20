@@ -2501,7 +2501,7 @@ export default function EditGigScreen() {
           {renderSectionHeader("Requirements", "list")}
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-              Genres
+              Default genres (optional)
             </Text>
             <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
               <View
@@ -2574,7 +2574,7 @@ export default function EditGigScreen() {
 
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}> 
-              Provided equipments
+              Equipment supplied by organizer (optional)
             </Text>
             <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
               <View

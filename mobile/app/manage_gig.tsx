@@ -1024,7 +1024,7 @@ export default function GigDetailsScreen() {
                           marginBottom: 6,
                         }}
                       >
-                        Provided equipments
+                        Equipment supplied by organizer
                       </Text>
                       <View
                         style={{
@@ -1057,7 +1057,7 @@ export default function GigDetailsScreen() {
                           )
                         ) : (
                           <Text style={{ color: colors.textSecondary }}>
-                            No provided equipments
+                            No equipment supplied
                           </Text>
                         )}
                       </View>
@@ -1558,7 +1558,9 @@ export default function GigDetailsScreen() {
                             <View style={[styles.aiFilterScoreRow, { backgroundColor: colors.inputBackground }]}>
                               <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
                               <Text style={[styles.aiFilterScoreLabel, { color: colors.text }]}>AI Filter Score</Text>
-                              <Text style={[styles.aiFilterScoreValue, { color: colors.primary }]}>{Number(aiRecommendation.score)}%</Text>
+                              <Text style={[styles.aiFilterScoreValue, { color: colors.primary }]}>
+                                {aiRecommendation.score == null ? "—" : `${Math.round(Number(aiRecommendation.score))}%`}
+                              </Text>
                             </View>
                           ) : null}
                           <TouchableOpacity

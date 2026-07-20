@@ -125,7 +125,12 @@ const SAFE_AUDIO_MIMES = new Set([
   "audio/mp3",
 ]);
 const SAFE_AUDIO_EXTENSIONS = new Set(["mp3"]);
-const COPYRIGHT_MEDIA_MIMES = new Set([...SAFE_AUDIO_MIMES, ...SAFE_VIDEO_MIMES]);
+const COPYRIGHT_MEDIA_MIMES = new Set([
+  ...SAFE_AUDIO_MIMES,
+  ...SAFE_VIDEO_MIMES,
+  "audio/mp4",
+  "audio/x-m4a",
+]);
 const COPYRIGHT_OWNERSHIP_REVIEW_SOURCE = "COPYRIGHT_OWNERSHIP";
 const COPYRIGHT_OWNERSHIP_REVIEW_REASON = "COPYRIGHT_OWNERSHIP_REVIEW";
 
@@ -689,6 +694,29 @@ function summarizeAcrMusicMatch(match: any): string {
   return `This audio appears to match ${buildCopyrightMatchDetails(match)}. If this is your song, an ownership request has been sent to Identity Review for admin approval.`;
 }
 
+function getAcrCloudFailureReason(statusCode: number): string {
+  switch (statusCode) {
+    case 2004:
+      return "ACRCloud could not decode the audio sample (code 2004). Please try another MP4/MOV video or re-export this file.";
+    case 3001:
+      return "ACRCloud credentials were rejected (code 3001). Please contact support.";
+    case 3003:
+      return "ACRCloud's monthly request limit has been reached (code 3003). Please contact support.";
+    case 3014:
+      return "ACRCloud rejected the request signature (code 3014). Please contact support.";
+    case 3015:
+      return "ACRCloud is receiving too many requests (code 3015). Please wait a few seconds and try again.";
+    case 3000:
+    case 3010:
+      return `ACRCloud's recognition service is temporarily unavailable (code ${statusCode}). Please try again shortly.`;
+    case 3002:
+    case 3006:
+      return `ACRCloud rejected the screening request (code ${statusCode}). Please contact support.`;
+    default:
+      return `ACRCloud could not verify this video (code ${Number.isFinite(statusCode) ? statusCode : "unknown"}). Please try again.`;
+  }
+}
+
 async function screenAudioCopyright(
   file: FileCandidate,
   screeningContext: CopyrightScreeningContext = {},
@@ -779,7 +807,7 @@ async function screenAudioCopyright(
     });
     return {
       allowed: false,
-      reason: "Audio copyright check failed. Please try again in a moment.",
+      reason: `ACRCloud could not be reached (HTTP ${response.status}). Please try again in a moment.`,
     };
   }
 
@@ -809,7 +837,7 @@ async function screenAudioCopyright(
     });
     return {
       allowed: false,
-      reason: "Audio copyright check could not verify this track. Please try again.",
+      reason: getAcrCloudFailureReason(statusCode),
     };
   }
 

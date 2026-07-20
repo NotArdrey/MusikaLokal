@@ -1085,7 +1085,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
           ) : null}
         </View>
         <Text style={{ color: isRecommended ? "#10B981" : colors.primary, fontFamily: "Poppins_700Bold", fontSize: 14 }}>
-          {Math.round(Number(recommendation.score) || 0)}%
+          {recommendation.score == null ? "—" : `${Math.round(Number(recommendation.score))}%`}
         </Text>
       </View>
       {recommendation.explanation ? (

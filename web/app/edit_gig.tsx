@@ -2730,7 +2730,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           {renderSectionHeader("Requirements", "list")}
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-              Genres
+              Default genres (optional)
             </Text>
             <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
               <View
@@ -2803,7 +2803,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
 
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}> 
-              Provided equipments
+              Equipment supplied by organizer (optional)
             </Text>
             <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
               <View

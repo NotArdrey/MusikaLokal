@@ -4330,6 +4330,7 @@ const ListingDetailsSheet = forwardRef<
                   folder="performance-videos"
                   maxSizeMB={50}
                   enableCopyrightScreening
+                  allowPortfolioSelection
                   copyrightAcknowledged={requestVideoCopyrightAcknowledged}
                   onCopyrightDecisionChange={setRequestVideoCopyrightDecision}
                 />

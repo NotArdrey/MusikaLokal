@@ -1870,7 +1870,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
 
               {/* Genre Requirements (searchable chips) */}
               <View style={styles.inputContainer}>
-                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Genres</Text>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Default genres (optional)</Text>
                 {requiredGenres.length > 0 && (
                   <View style={styles.selectedChips}>
                     {requiredGenres.map((genre) => (
@@ -1920,7 +1920,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 <Text
                   style={[styles.inputLabel, { color: colors.textSecondary }]}
                 >
-                  Provided equipments
+                  Equipment supplied by organizer (optional)
                 </Text>
                 <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
                   <View
@@ -2865,7 +2865,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                                 { color: colors.textSecondary },
                               ]}
                             >
-                              Provided equipments:
+                              Equipment supplied by organizer (optional):
                             </Text>
                             <Text style={{ color: colors.text }}>
                               {requiredInstruments.join(", ")}

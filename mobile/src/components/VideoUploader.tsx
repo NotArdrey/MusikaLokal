@@ -3,17 +3,22 @@ import * as FileSystem from 'expo-file-system/src/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import React, { useState } from 'react';
-import { ActivityIndicator, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 import { screenUploadsWithAiDecisions, UploadSafetyFileDecision } from '../services/uploadSafetyScreen';
+import {
+  createCopyrightVideoSample,
+  removeCopyrightVideoTemporaryFile,
+  type CopyrightVideoSample,
+} from '../utils/videoCopyrightSample';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
 const ALLOWED_VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'webm', 'm4v']);
 const VIDEO_UPLOAD_RECOVERY_CHECKS = 3;
 const VIDEO_UPLOAD_RECOVERY_DELAY_MS = 1200;
-const COPYRIGHT_SAMPLE_BYTES = 4 * 1024 * 1024;
+const PORTFOLIO_VIDEO_EXTENSION_PATTERN = /\.(mp4|mov|m4v|webm|avi|mpeg|mpg)(?:$|[?#])/i;
 
 const sanitizeVideoExtension = (rawExt?: string | null): string => {
   const cleaned = (rawExt || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -48,6 +53,20 @@ const resolveVideoMimeType = (asset: ImagePicker.ImagePickerAsset, ext: string):
     m4v: 'video/x-m4v',
   };
   return map[ext] || 'video/mp4';
+};
+
+const getPortfolioVideoName = (url: string): string => {
+  const rawName = url.split(/[?#]/)[0].split('/').pop() || 'portfolio-video.mp4';
+  try {
+    return decodeURIComponent(rawName);
+  } catch {
+    return rawName;
+  }
+};
+
+const getPortfolioVideoMimeType = (url: string): string => {
+  const extension = sanitizeVideoExtension(getPortfolioVideoName(url).split('.').pop());
+  return resolveVideoMimeType({ mimeType: undefined } as ImagePicker.ImagePickerAsset, extension);
 };
 
 
@@ -186,35 +205,6 @@ const base64ToUint8Array = (base64: string): Uint8Array => {
   }
 
   return bytes;
-};
-
-const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
-  }
-  return globalThis.btoa(binary);
-};
-
-const readCopyrightVideoSample = async (
-  asset: ImagePicker.ImagePickerAsset,
-  mimeType: string,
-): Promise<string> => {
-  if (Platform.OS === 'web') {
-    const webFile = (asset as any)?.file as Blob | undefined;
-    const source = webFile || await (await fetch(asset.uri)).blob();
-    const sample = source.slice(0, Math.min(source.size, COPYRIGHT_SAMPLE_BYTES), mimeType);
-    return `data:${mimeType};base64,${arrayBufferToBase64(await sample.arrayBuffer())}`;
-  }
-
-  const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-    encoding: 'base64',
-    position: 0,
-    length: COPYRIGHT_SAMPLE_BYTES,
-  });
-  return `data:${mimeType};base64,${base64}`;
 };
 
 const createWebReviewFrame = async (uri: string, timeMs: number): Promise<Blob> => {
@@ -391,6 +381,7 @@ interface VideoUploaderProps {
   onReviewFrameChange?: (url: string | null) => void;
   onReviewFramesChange?: (urls: string[]) => void;
   enableCopyrightScreening?: boolean;
+  allowPortfolioSelection?: boolean;
   copyrightAcknowledged?: boolean;
   onCopyrightDecisionChange?: (decision: UploadSafetyFileDecision | null) => void;
 }
@@ -406,6 +397,7 @@ export default function VideoUploader({
   onReviewFrameChange,
   onReviewFramesChange,
   enableCopyrightScreening = false,
+  allowPortfolioSelection = false,
   copyrightAcknowledged = false,
   onCopyrightDecisionChange,
 }: VideoUploaderProps) {
@@ -413,6 +405,9 @@ export default function VideoUploader({
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('Preparing video...');
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [portfolioPickerVisible, setPortfolioPickerVisible] = useState(false);
+  const [portfolioVideos, setPortfolioVideos] = useState<string[]>([]);
+  const [loadingPortfolioVideos, setLoadingPortfolioVideos] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -428,6 +423,175 @@ export default function VideoUploader({
   const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
     setAlertConfig({ type, title, message, buttons });
     setAlertVisible(true);
+  };
+
+  const screenCopyrightVideo = async (source: {
+    uri: string;
+    fileName: string;
+    mimeType: string;
+    fileSize?: number | null;
+    webFile?: Blob | null;
+  }): Promise<{ decision: UploadSafetyFileDecision; sample: CopyrightVideoSample }> => {
+    setUploadMessage('Preparing a valid audio sample...');
+    const sample = await createCopyrightVideoSample({
+      uri: source.uri,
+      fileName: source.fileName,
+      mimeType: source.mimeType,
+      webFile: source.webFile,
+    });
+    try {
+      setUploadMessage('Checking released-recording matches...');
+      const [decision] = await screenUploadsWithAiDecisions([{
+        name: source.fileName,
+        mimeType: source.mimeType,
+        size: source.fileSize || sample.byteLength,
+        uri: source.uri,
+        kind: 'video',
+        contentDataUrl: sample.contentDataUrl,
+      }], 'gig_application_performance_video');
+
+      if (!decision?.allowed) {
+        throw new Error(decision?.reason || 'The performance video could not pass copyright screening.');
+      }
+      return { decision, sample };
+    } catch (error) {
+      await removeCopyrightVideoTemporaryFile(sample);
+      throw error;
+    }
+  };
+
+  const linkCopyrightReviewMedia = async (
+    decision: UploadSafetyFileDecision | null,
+    mediaUrl: string,
+  ) => {
+    if (!decision?.copyrightReviewId) return;
+    try {
+      const { error } = await supabase.functions.invoke('upload-safety-screen', {
+        body: {
+          action: 'link_copyright_review_media',
+          reviewId: decision.copyrightReviewId,
+          mediaUrl,
+        },
+      });
+      if (error) throw error;
+    } catch (error) {
+      console.warn('Video selected, but the ownership review media link could not be saved:', error);
+    }
+  };
+
+  const loadPortfolioVideos = async (): Promise<string[]> => {
+    setLoadingPortfolioVideos(true);
+    try {
+      const { data, error } = await supabase
+        .from('profile_portfolio_urls')
+        .select('portfolio_url, sort_order')
+        .eq('profile_id', userId)
+        .order('sort_order', { ascending: true });
+      if (error) throw error;
+      const videos = (data || [])
+        .map((item: any) => String(item?.portfolio_url || '').trim())
+        .filter((url: string) => PORTFOLIO_VIDEO_EXTENSION_PATTERN.test(url));
+      setPortfolioVideos(videos);
+      return videos;
+    } finally {
+      setLoadingPortfolioVideos(false);
+    }
+  };
+
+  const prepareReviewFrames = async (assetUri: string) => {
+    if (!enableReviewFrame || !onReviewFrameChange) {
+      onReviewFrameChange?.(null);
+      onReviewFramesChange?.([]);
+      return;
+    }
+
+    setUploadMessage('Preparing representative review frames...');
+    const frameUrls: string[] = [];
+    for (const [frameIndex, timeMs] of [0, 5000, 10000].entries()) {
+      try {
+        frameUrls.push(await uploadReviewFrame({
+          assetUri,
+          userId,
+          bucketName,
+          folder,
+          timeMs,
+          frameIndex,
+        }));
+      } catch (error) {
+        console.warn(`Unable to prepare AI review frame ${frameIndex + 1}:`, error);
+      }
+    }
+    onReviewFrameChange(frameUrls[0] || null);
+    onReviewFramesChange?.(frameUrls);
+  };
+
+  const selectPortfolioVideo = async (url: string) => {
+    if (enableCopyrightScreening && !copyrightAcknowledged) {
+      showAlert('warning', 'Permission Confirmation Required', 'Confirm that you own this performance or have permission to submit it before choosing a video.');
+      return;
+    }
+
+    setPortfolioPickerVisible(false);
+    setUploading(true);
+    setUploadProgress(0);
+    let sample: CopyrightVideoSample | null = null;
+    try {
+      const fileName = getPortfolioVideoName(url);
+      const mimeType = getPortfolioVideoMimeType(url);
+      let decision: UploadSafetyFileDecision | null = null;
+      if (enableCopyrightScreening) {
+        const screened = await screenCopyrightVideo({ uri: url, fileName, mimeType });
+        decision = screened.decision;
+        sample = screened.sample;
+        onCopyrightDecisionChange?.(decision);
+      } else {
+        onCopyrightDecisionChange?.(null);
+      }
+
+      await prepareReviewFrames(sample?.temporaryUri || url);
+      await linkCopyrightReviewMedia(decision, url);
+      onVideoChange(url);
+      showAlert(
+        decision?.requiresAdminReview ? 'warning' : 'success',
+        decision?.requiresAdminReview ? 'Video Selected — Review Pending' : 'Video Selected',
+        decision?.requiresAdminReview
+          ? 'The My Media video matched a released recording. Your application can continue while an admin reviews it.'
+          : 'Your My Media video is ready for this application.',
+      );
+    } catch (error: any) {
+      console.warn('Error selecting portfolio video:', error);
+      showAlert('error', 'Video unavailable', error?.message || 'This My Media video could not be used.');
+    } finally {
+      await removeCopyrightVideoTemporaryFile(sample);
+      setUploading(false);
+      setUploadProgress(0);
+    }
+  };
+
+  const chooseVideoSource = async () => {
+    if (enableCopyrightScreening && !copyrightAcknowledged) {
+      showAlert('warning', 'Permission Confirmation Required', 'Confirm that you own this performance or have permission to submit it before choosing a video.');
+      return;
+    }
+    if (!allowPortfolioSelection) {
+      await pickAndUploadVideo();
+      return;
+    }
+
+    try {
+      const videos = await loadPortfolioVideos();
+      if (videos.length === 0) {
+        await pickAndUploadVideo();
+        return;
+      }
+      setPortfolioPickerVisible(true);
+    } catch (error: any) {
+      console.warn('Unable to load My Media videos:', error);
+      showAlert('warning', 'My Media unavailable', 'Could not load your profile videos. You can still choose one from this device.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Choose from device', onPress: () => void pickAndUploadVideo() },
+      ]);
+    }
   };
 
   const pickAndUploadVideo = async () => {
@@ -472,6 +636,7 @@ export default function VideoUploader({
       setUploading(true);
       setUploadMessage('Preparing video...');
       setUploadProgress(0);
+      let copyrightSample: CopyrightVideoSample | null = null;
 
       try {
         const originalName = getVideoOriginalName(asset);
@@ -481,22 +646,16 @@ export default function VideoUploader({
 
         let copyrightDecision: UploadSafetyFileDecision | null = null;
         if (enableCopyrightScreening) {
-          setUploadMessage('Checking released-recording matches...');
-          const contentDataUrl = await readCopyrightVideoSample(asset, mimeType);
-          const [decision] = await screenUploadsWithAiDecisions([{
-            name: originalName,
-            mimeType,
-            size: fileSizeBytes || undefined,
+          const screened = await screenCopyrightVideo({
             uri: asset.uri,
-            kind: 'video',
-            contentDataUrl,
-          }], 'gig_application_performance_video');
-
-          if (!decision?.allowed) {
-            throw new Error(decision?.reason || 'The performance video could not pass copyright screening.');
-          }
-          copyrightDecision = decision;
-          onCopyrightDecisionChange?.(decision);
+            fileName: originalName,
+            mimeType,
+            fileSize: fileSizeBytes,
+            webFile: (asset as any)?.file as Blob | undefined,
+          });
+          copyrightDecision = screened.decision;
+          copyrightSample = screened.sample;
+          onCopyrightDecisionChange?.(screened.decision);
         } else {
           onCopyrightDecisionChange?.(null);
         }
@@ -523,20 +682,7 @@ export default function VideoUploader({
           .getPublicUrl(data.path);
 
         debugLog('Video uploaded successfully:', urlData.publicUrl);
-        if (copyrightDecision?.copyrightReviewId) {
-          try {
-            const { error: linkError } = await supabase.functions.invoke('upload-safety-screen', {
-              body: {
-                action: 'link_copyright_review_media',
-                reviewId: copyrightDecision.copyrightReviewId,
-                mediaUrl: urlData.publicUrl,
-              },
-            });
-            if (linkError) throw linkError;
-          } catch (linkError) {
-            console.warn('Video uploaded, but the ownership review media link could not be saved:', linkError);
-          }
-        }
+        await linkCopyrightReviewMedia(copyrightDecision, urlData.publicUrl);
         setUploadProgress(100);
         if (enableReviewFrame && onReviewFrameChange) {
           try {
@@ -584,6 +730,7 @@ export default function VideoUploader({
           : rawMessage;
         showAlert('error', 'Upload failed', message);
       } finally {
+        await removeCopyrightVideoTemporaryFile(copyrightSample);
         setUploading(false);
         setUploadProgress(0);
       }
@@ -618,6 +765,62 @@ export default function VideoUploader({
 
   return (
     <View>
+      <Modal
+        visible={portfolioPickerVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setPortfolioPickerVisible(false)}
+      >
+        <View style={styles.loadingOverlay}>
+          <View style={[styles.portfolioPickerCard, { backgroundColor: colors.surface }]}>
+            <View style={styles.portfolioPickerHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.portfolioPickerTitle, { color: colors.text }]}>Choose from My Media</Text>
+                <Text style={[styles.portfolioPickerSubtitle, { color: colors.textSecondary }]}>The selected video will be screened and reused without another upload.</Text>
+              </View>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Close My Media video picker"
+                onPress={() => setPortfolioPickerVisible(false)}
+                style={styles.closeButton}
+              >
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.portfolioVideoList} contentContainerStyle={{ gap: 8 }}>
+              {portfolioVideos.map((url) => (
+                <TouchableOpacity
+                  key={url}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Use ${getPortfolioVideoName(url)} from My Media`}
+                  onPress={() => void selectPortfolioVideo(url)}
+                  style={[styles.portfolioVideoRow, { borderColor: colors.border }]}
+                >
+                  <Ionicons name="videocam" size={22} color={colors.primary} />
+                  <Text numberOfLines={2} style={[styles.portfolioVideoName, { color: colors.text }]}>
+                    {getPortfolioVideoName(url)}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Choose a new video from this device"
+              onPress={() => {
+                setPortfolioPickerVisible(false);
+                void pickAndUploadVideo();
+              }}
+              style={[styles.deviceVideoButton, { backgroundColor: colors.primary }]}
+            >
+              <Ionicons name="phone-portrait-outline" size={19} color="#FFF" />
+              <Text style={styles.deviceVideoButtonText}>Choose from device</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={uploading} transparent animationType="fade" statusBarTranslucent>
         <View style={styles.loadingOverlay}>
           <View style={[styles.loadingCard, { backgroundColor: colors.surface }]}>
@@ -647,16 +850,18 @@ export default function VideoUploader({
         </View>
       ) : (
         <TouchableOpacity
-          style={[styles.uploadBox, { borderColor: colors.border, opacity: uploading ? 0.6 : 1 }]}
-          onPress={pickAndUploadVideo}
-          disabled={uploading}
+          style={[styles.uploadBox, { borderColor: colors.border, opacity: uploading || loadingPortfolioVideos ? 0.6 : 1 }]}
+          onPress={() => void chooseVideoSource()}
+          disabled={uploading || loadingPortfolioVideos}
           activeOpacity={uploading ? 1 : 0.78}
+          accessibilityRole="button"
+          accessibilityLabel={allowPortfolioSelection ? 'Choose a performance video from My Media or this device' : 'Upload a performance video'}
         >
-          {uploading ? (
+          {uploading || loadingPortfolioVideos ? (
             <>
               <ActivityIndicator size="large" color={colors.primary} />
               <Text style={{ color: colors.text, marginTop: 8, fontFamily: 'Poppins_500Medium' }}>
-                Uploading... {uploadProgress}%
+                {loadingPortfolioVideos ? 'Loading My Media...' : `Uploading... ${uploadProgress}%`}
               </Text>
             </>
           ) : (
@@ -668,6 +873,11 @@ export default function VideoUploader({
               <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
                 Max {maxSizeMB}MB • MP4, MOV
               </Text>
+              {allowPortfolioSelection ? (
+                <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }}>
+                  Choose from My Media or this device
+                </Text>
+              ) : null}
             </>
           )}
         </TouchableOpacity>
@@ -743,6 +953,70 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
     elevation: 10,
+  },
+  portfolioPickerCard: {
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: '78%',
+    borderRadius: 18,
+    padding: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
+  },
+  portfolioPickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 14,
+  },
+  portfolioPickerTitle: {
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 17,
+  },
+  portfolioPickerSubtitle: {
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 11,
+    lineHeight: 17,
+    marginTop: 3,
+  },
+  closeButton: {
+    padding: 6,
+    marginLeft: 8,
+  },
+  portfolioVideoList: {
+    flexGrow: 0,
+    maxHeight: 330,
+  },
+  portfolioVideoRow: {
+    minHeight: 56,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  portfolioVideoName: {
+    flex: 1,
+    fontFamily: 'Poppins_500Medium',
+    fontSize: 12,
+  },
+  deviceVideoButton: {
+    minHeight: 48,
+    borderRadius: 12,
+    marginTop: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  deviceVideoButtonText: {
+    color: '#FFF',
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 13,
   },
   loadingTitle: {
     marginTop: 14,

@@ -441,11 +441,13 @@ const DEFAULT_RECOMMENDATION_SETTINGS = {
     location_radius_km: null as number | null,
     criteria: {
         genres: 'preferred' as RecommendationCriterionMode,
-        instruments: 'required' as RecommendationCriterionMode,
+        instruments: 'preferred' as RecommendationCriterionMode,
         location: 'preferred' as RecommendationCriterionMode,
         portfolio: 'preferred' as RecommendationCriterionMode,
     },
 }
+
+const RECOMMENDATION_MODEL_VERSION = 'gig-fit-v4'
 
 function normalizeCriterionMode(value: unknown, fallback: RecommendationCriterionMode) {
     const normalized = String(value || '')
@@ -494,12 +496,41 @@ function normalizeMatchValue(value: unknown) {
 }
 
 function stringValues(values: unknown[]) {
-    return uniqueStrings(
-        values
-            .flatMap((value) => (Array.isArray(value) ? value : [value]))
-            .map((value) => (typeof value === 'string' ? value.trim() : ''))
-            .filter(Boolean)
-    )
+    const collected: string[] = []
+    const supportedObjectKeys = [
+        'name',
+        'label',
+        'value',
+        'skill',
+        'skills',
+        'instrument',
+        'instruments',
+        'preferred_instruments',
+        'required_instruments',
+        'role',
+        'roles',
+        'member_role',
+        'required_roles',
+    ]
+    const visit = (value: unknown) => {
+        if (typeof value === 'string') {
+            const trimmed = value.trim()
+            if (trimmed) collected.push(trimmed)
+            return
+        }
+        if (Array.isArray(value)) {
+            value.forEach(visit)
+            return
+        }
+        if (!value || typeof value !== 'object') return
+        const record = value as Record<string, unknown>
+        supportedObjectKeys.forEach((key) => {
+            if (Object.prototype.hasOwnProperty.call(record, key)) visit(record[key])
+        })
+    }
+
+    values.forEach(visit)
+    return uniqueStrings(collected)
 }
 
 function valuesOverlap(expected: string[], actual: string[]) {
@@ -546,9 +577,14 @@ function getApplicationPerformer(application: any) {
     const rosterGroup = application?.production_roster?.roster_group
     const profile = rosterProfile || application?.applicant || null
     const group = rosterGroup || application?.group || null
-    const memberInstruments = Array.isArray(group?.members)
-        ? group.members.map((member: any) => (typeof member === 'string' ? '' : member?.instrument))
+    const memberRolesAndInstruments = Array.isArray(group?.members)
+        ? group.members.flatMap((member: any) =>
+              typeof member === 'string'
+                  ? [member]
+                  : [member?.instrument, member?.instruments, member?.role, member?.roles, member?.member_role, member?.skills]
+          )
         : []
+    const snapshot = application?.performer_snapshot || {}
 
     return {
         profile,
@@ -558,8 +594,20 @@ function getApplicationPerformer(application: any) {
             String(profile?.verification_status || '')
                 .trim()
                 .toUpperCase() === 'APPROVED',
-        genres: stringValues([profile?.genres, group?.genre]),
-        instruments: stringValues([profile?.skills, memberInstruments]),
+        genres: stringValues([profile?.genres, group?.genre, snapshot?.genres, snapshot?.group_genre]),
+        instruments: stringValues([
+            profile?.skills,
+            profile?.instruments,
+            profile?.musician_roles,
+            group?.instruments,
+            group?.roles,
+            memberRolesAndInstruments,
+            snapshot?.skills,
+            snapshot?.instruments,
+            snapshot?.roles,
+            snapshot?.instrument,
+            snapshot?.role,
+        ]),
         location: String(group?.location || profile?.location || '').trim(),
         coordinates: readCoordinates(group) || readCoordinates(profile),
         hasPortfolio: Boolean(
@@ -571,14 +619,40 @@ function getApplicationPerformer(application: any) {
 }
 
 function getRequirementValues(requirements: any, application: any) {
-    const slotType = String(application?.slot_type || '')
+    const rawSlotType = String(application?.slot_type || '')
         .trim()
         .toLowerCase()
-    const slot = requirements?.slots?.[slotType] || {}
+    const slotType = rawSlotType.replace(/[\s-]+/g, '_')
+    const normalizedSlotType =
+        slotType === 'solo_artist' || slotType === 'individual'
+            ? 'solo'
+            : slotType === 'group' || slotType === 'music_group'
+            ? String(application?.group?.group_type || application?.production_roster?.roster_group?.group_type || '').toLowerCase() ===
+              'duo'
+                ? 'duo'
+                : 'band'
+            : slotType
+    const slot = requirements?.slots?.[normalizedSlotType] || requirements?.slots?.[rawSlotType] || {}
+    const globalGenres = stringValues([
+        requirements?.genres,
+        requirements?.preferred_genres,
+        requirements?.required_genres,
+    ])
+    const slotGenres = stringValues([slot?.genres, slot?.preferred_genres, slot?.required_genres])
 
     return {
-        genres: stringValues([requirements?.genres, slot?.preferred_genres]),
-        instruments: stringValues([requirements?.instruments, slot?.preferred_instruments, slot?.roles]),
+        genres: slotGenres.length > 0 ? slotGenres : globalGenres,
+        instruments: stringValues([
+            requirements?.preferred_instruments,
+            requirements?.required_instruments,
+            requirements?.roles,
+            requirements?.required_roles,
+            slot?.instruments,
+            slot?.preferred_instruments,
+            slot?.required_instruments,
+            slot?.roles,
+            slot?.required_roles,
+        ]),
         location: String(requirements?.location || '').trim(),
     }
 }
@@ -595,27 +669,26 @@ function evaluateGigApplication(
     let possiblePoints = 0
     let earnedPoints = 0
     let missingRequired = false
-    let requiredSourceMissing = false
 
-    const applyCriterion = (
+    const applyValueCriterion = (
         key: keyof typeof settings.criteria,
         label: string,
         weight: number,
-        isConfigured: boolean,
-        isMatch: boolean
+        expectedValues: string[],
+        performerValues: string[]
     ) => {
         const mode = settings.criteria[key]
-        if (mode === 'ignore') return
-        if (!isConfigured) {
-            missing.push(`${label} data unavailable`)
-            if (mode === 'required') {
-                missingRequired = true
-                requiredSourceMissing = true
-            }
+        // Empty gig fields are optional. A mode only affects a criterion after
+        // the organizer has supplied values for it.
+        if (mode === 'ignore' || expectedValues.length === 0) return
+
+        possiblePoints += weight
+        if (performerValues.length === 0) {
+            missing.push(`${label} unavailable on the applicant profile or group roster`)
+            if (mode === 'required') missingRequired = true
             return
         }
-        possiblePoints += weight
-        if (isMatch) {
+        if (valuesOverlap(expectedValues, performerValues)) {
             earnedPoints += weight
             matched.push(label)
         } else {
@@ -624,19 +697,19 @@ function evaluateGigApplication(
         }
     }
 
-    applyCriterion(
+    applyValueCriterion(
         'instruments',
-        'Required instruments or roles',
+        'Instrument or role fit',
         30,
-        expected.instruments.length > 0,
-        valuesOverlap(expected.instruments, performer.instruments)
+        expected.instruments,
+        performer.instruments
     )
-    applyCriterion(
+    applyValueCriterion(
         'genres',
-        'Preferred genres',
+        'Genre fit',
         25,
-        expected.genres.length > 0,
-        valuesOverlap(expected.genres, performer.genres)
+        expected.genres,
+        performer.genres
     )
 
     const gigCoordinates = readCoordinates(requirements?.gig_coordinates)
@@ -645,25 +718,35 @@ function evaluateGigApplication(
     const hasLocationPreference = settings.criteria.location !== 'ignore' && settings.location_radius_km !== null
     if (hasLocationPreference) {
         possiblePoints += 10
-        if (distanceKm === null) missing.push('Location distance unavailable')
+        if (distanceKm === null) {
+            missing.push('Location distance unavailable')
+            if (settings.criteria.location === 'required') missingRequired = true
+        }
         else if (distanceKm <= Number(settings.location_radius_km)) {
             earnedPoints += 10
             matched.push(`Within ${settings.location_radius_km} km location range`)
-        } else missing.push(`Outside ${settings.location_radius_km} km preferred range`)
+        } else {
+            missing.push(`Outside ${settings.location_radius_km} km preferred range`)
+            if (settings.criteria.location === 'required') missingRequired = true
+        }
     }
-    applyCriterion(
-        'portfolio',
-        'Relevant performance or portfolio evidence',
-        15,
-        true,
-        false
-    )
+    if (settings.criteria.portfolio !== 'ignore') {
+        possiblePoints += 15
+        if (performer.hasPortfolio) {
+            earnedPoints += 15
+            matched.push('Portfolio or application media provided')
+        } else {
+            missing.push('Portfolio or application media not provided')
+            if (settings.criteria.portfolio === 'required') missingRequired = true
+        }
+    }
 
-    const score = requiredSourceMissing
-        ? null
-        : Math.max(0, Math.min(100, Math.round((earnedPoints / Math.max(possiblePoints, 1)) * 100)))
-    const isEligible = !missingRequired
-    const recommendationStatus = requiredSourceMissing
+    const hasApplicableCriteria = possiblePoints > 0
+    const score = hasApplicableCriteria
+        ? Math.max(0, Math.min(100, Math.round((earnedPoints / possiblePoints) * 100)))
+        : null
+    const isEligible = hasApplicableCriteria && !missingRequired
+    const recommendationStatus = !hasApplicableCriteria
         ? 'insufficient_data'
         : isEligible && Number(score) >= settings.minimum_score
         ? 'recommended'
@@ -676,7 +759,7 @@ function evaluateGigApplication(
             : recommendationStatus === 'possible_match'
             ? `${score}% advisory fit; review the unmatched preferences before deciding.`
             : recommendationStatus === 'insufficient_data'
-            ? 'A required recommendation source is missing or malformed, so no score was assigned.'
+            ? 'No applicable AI filter criteria are configured for this gig.'
             : 'Not recommended because a required gig criterion is missing.'
 
     return {
@@ -698,9 +781,18 @@ function evaluateGigApplication(
                 : distanceKm <= Number(settings.location_radius_km)
                 ? 'inside_range'
                 : 'outside_range',
-        criteria_snapshot: { settings, requirements: expected },
+        criteria_snapshot: {
+            settings,
+            requirements: expected,
+            performer: {
+                genres: performer.genres,
+                instruments: performer.instruments,
+                has_portfolio: performer.hasPortfolio,
+            },
+            distance_km: distanceKm,
+        },
         model_provider: 'rules',
-        model_version: 'gig-fit-v1',
+        model_version: RECOMMENDATION_MODEL_VERSION,
     }
 }
 
@@ -759,7 +851,6 @@ async function addGroqRecommendationExplanations(evaluations: any[]) {
             ...item,
             explanation: explanationById.get(item.application_id) || item.explanation,
             model_provider: explanationById.has(item.application_id) ? 'groq' : item.model_provider,
-            model_version: explanationById.has(item.application_id) ? model : item.model_version,
         }))
     } catch (error) {
         console.warn('gig_recommendation_ai_explanation_failed', {
@@ -793,23 +884,28 @@ async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evaluations:
         const review: any = reviewByApplicationId.get(String(item.application_id))
         if (!review || !['completed', 'partial'].includes(String(review.status || ''))) return item
 
-        const portfolioEvidence = (Array.isArray(review?.evidence) ? review.evidence : []).find(
+        const reviewEvidence = Array.isArray(review?.evidence) ? review.evidence : []
+        const portfolioEvidence = reviewEvidence.find(
             (entry: any) => String(entry?.criterion || '') === 'portfolio_requirement'
         )
+        const instrumentEvidence = reviewEvidence.find(
+            (entry: any) => String(entry?.criterion || '') === 'instrument_requirement'
+        )
+        const genreEvidence = reviewEvidence.find(
+            (entry: any) => String(entry?.criterion || '') === 'genre_requirement'
+        )
         const portfolioResult = String(portfolioEvidence?.result || 'unclear')
-        const mediaLabels = new Set([
-            'Portfolio or application media',
-            'Application media provided (content not verified)',
-            'Relevant performance or portfolio evidence',
-        ])
-        const matchedCriteria = (Array.isArray(item.matched_criteria) ? item.matched_criteria : []).filter(
-            (label: string) => !mediaLabels.has(label)
-        )
-        const missingCriteria = (Array.isArray(item.missing_criteria) ? item.missing_criteria : []).filter(
-            (label: string) => !mediaLabels.has(label)
-        )
-        if (portfolioResult === 'supported') matchedCriteria.push('Relevant performance or portfolio evidence')
-        else missingCriteria.push('Relevant performance or portfolio evidence')
+        const instrumentResult = String(instrumentEvidence?.result || 'unclear')
+        const genreResult = String(genreEvidence?.result || 'unclear')
+        let matchedCriteria = Array.isArray(item.matched_criteria) ? item.matched_criteria : []
+        let missingCriteria = Array.isArray(item.missing_criteria) ? item.missing_criteria : []
+        const applySupportingEvidence = (label: string, result: string) => {
+            if (result !== 'supported') return
+            missingCriteria = missingCriteria.filter((itemLabel: string) => !itemLabel.startsWith(label))
+            if (!matchedCriteria.includes(label)) matchedCriteria = [...matchedCriteria, label]
+        }
+        applySupportingEvidence('Instrument or role fit', instrumentResult)
+        applySupportingEvidence('Genre fit', genreResult)
 
         const settings = item?.criteria_snapshot?.settings || {}
         const expected = item?.criteria_snapshot?.requirements || {}
@@ -818,7 +914,6 @@ async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evaluations:
         let possiblePoints = 0
         let earnedPoints = 0
         let missingRequired = false
-        let requiredSourceMissing = false
 
         const addScoredCriterion = (
             mode: string,
@@ -826,14 +921,7 @@ async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evaluations:
             matched: boolean,
             weight: number
         ) => {
-            if (mode === 'ignore') return
-            if (!configured) {
-                if (mode === 'required') {
-                    missingRequired = true
-                    requiredSourceMissing = true
-                }
-                return
-            }
+            if (mode === 'ignore' || !configured) return
             possiblePoints += weight
             if (matched) earnedPoints += weight
             else if (mode === 'required') missingRequired = true
@@ -842,31 +930,33 @@ async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evaluations:
         addScoredCriterion(
             String(criteria.instruments || ''),
             Array.isArray(expected.instruments) && expected.instruments.length > 0,
-            hasMatched('Required instruments or roles'),
+            hasMatched('Instrument or role fit'),
             30
         )
         addScoredCriterion(
             String(criteria.genres || ''),
             Array.isArray(expected.genres) && expected.genres.length > 0,
-            hasMatched('Preferred genres'),
+            hasMatched('Genre fit'),
             25
         )
         if (criteria.location !== 'ignore' && settings.location_radius_km !== null) {
             possiblePoints += 10
             if (matchedCriteria.some((label: string) => label.startsWith('Within '))) earnedPoints += 10
+            else if (criteria.location === 'required') missingRequired = true
         }
         addScoredCriterion(
             String(criteria.portfolio || ''),
             true,
-            portfolioResult === 'supported',
+            hasMatched('Portfolio or application media provided'),
             15
         )
 
-        const score = requiredSourceMissing
-            ? null
-            : Math.max(0, Math.min(100, Math.round((earnedPoints / Math.max(possiblePoints, 1)) * 100)))
-        const isEligible = !missingRequired
-        const recommendationStatus = requiredSourceMissing
+        const hasApplicableCriteria = possiblePoints > 0
+        const score = hasApplicableCriteria
+            ? Math.max(0, Math.min(100, Math.round((earnedPoints / possiblePoints) * 100)))
+            : null
+        const isEligible = hasApplicableCriteria && !missingRequired
+        const recommendationStatus = !hasApplicableCriteria
             ? 'insufficient_data'
             : isEligible && Number(score) >= Number(settings.minimum_score || 75)
             ? 'recommended'
@@ -898,11 +988,26 @@ async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evaluations:
         }
 
         const missingRequiredItems = [
-            criteria.instruments === 'required' && !hasMatched('Required instruments or roles')
+            criteria.instruments === 'required' &&
+            Array.isArray(expected.instruments) &&
+            expected.instruments.length > 0 &&
+            !hasMatched('Instrument or role fit')
                 ? 'instrument_or_role'
                 : '',
-            criteria.genres === 'required' && !hasMatched('Preferred genres') ? 'genre' : '',
-            criteria.portfolio === 'required' && portfolioResult !== 'supported' ? 'portfolio' : '',
+            criteria.genres === 'required' &&
+            Array.isArray(expected.genres) &&
+            expected.genres.length > 0 &&
+            !hasMatched('Genre fit')
+                ? 'genre'
+                : '',
+            criteria.location === 'required' &&
+            settings.location_radius_km !== null &&
+            !matchedCriteria.some((label: string) => label.startsWith('Within '))
+                ? 'location'
+                : '',
+            criteria.portfolio === 'required' && !hasMatched('Portfolio or application media provided')
+                ? 'portfolio'
+                : '',
         ].filter(Boolean)
         const requiredMismatchExplanation =
             missingRequiredItems.length !== 1
@@ -911,6 +1016,8 @@ async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evaluations:
                 ? 'This applicant does not match the required instrument or role.'
                 : missingRequiredItems[0] === 'genre'
                 ? 'This applicant does not match the required genre.'
+                : missingRequiredItems[0] === 'location'
+                ? 'This applicant does not match the required location range.'
                 : 'This applicant does not provide the required performance or portfolio evidence.'
         const baseExplanation =
             recommendationStatus === 'recommended'
@@ -918,7 +1025,7 @@ async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evaluations:
                 : recommendationStatus === 'possible_match'
                 ? 'This applicant may be a match. Please review the items below.'
                 : recommendationStatus === 'insufficient_data'
-                ? 'Some required information is missing, so a score could not be calculated.'
+                ? 'No applicable AI filter criteria are configured for this gig.'
                 : requiredMismatchExplanation
         return {
             ...item,
@@ -1328,6 +1435,7 @@ Deno.serve(async (req: Request) => {
                     .filter(
                         (recommendation: any) =>
                             recommendationEnabledGigIds.has(recommendation.gig_id) &&
+                            recommendation.model_version === RECOMMENDATION_MODEL_VERSION &&
                             new Date(recommendation.generated_at || 0).getTime() >= freshRecommendationCutoff
                     )
                     .map((recommendation: any) => [recommendation.application_id, recommendation])

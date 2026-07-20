@@ -33,7 +33,7 @@ export const DEFAULT_GIG_RECOMMENDATION_SETTINGS: GigRecommendationSettingsValue
     location_radius_km: null,
     criteria: {
       genres: "preferred",
-      instruments: "required",
+      instruments: "preferred",
       location: "preferred",
       portfolio: "preferred",
     },
@@ -98,13 +98,13 @@ const CRITERIA: {
 }[] = [
   {
     key: "instruments",
-    label: "Instruments and roles",
-    description: "Uses the instruments and slot roles saved above.",
+    label: "Performer instruments and roles",
+    description: "Uses only the selected slot's roles and preferred instruments. Equipment supplied by the organizer is never used.",
   },
   {
     key: "genres",
     label: "Genres",
-    description: "Compares preferred gig genres with the performer profile.",
+    description: "Uses genres for the selected slot, falling back to the gig's default genres when that slot has none.",
   },
   {
     key: "location",
@@ -318,6 +318,10 @@ export default function GigRecommendationSettings({ value, onChange }: Props) {
 
           <Text style={[styles.sectionLabel, { color: colors.text }]}>
             How each criterion is used
+          </Text>
+          <Text style={[styles.smallCopy, { color: colors.textSecondary }]}>
+            Required can disqualify a mismatch. Preferred affects only the
+            score. Criteria with no saved values are skipped.
           </Text>
           {CRITERIA.map((criterion) => (
             <View

@@ -240,6 +240,9 @@ const sanitizeUploadSafetyReason = (rawReason?: string): string => {
   }
 
   const lower = reason.toLowerCase();
+  if (lower.includes("acrcloud")) {
+    return reason;
+  }
   if (
     lower.includes("rate_limit") ||
     lower.includes("rate limit") ||

@@ -862,7 +862,7 @@ export default function GigDetailsScreen() {
                           marginBottom: 6,
                         }}
                       >
-                        Provided equipments
+                        Equipment supplied by organizer
                       </Text>
                       <View
                         style={{
@@ -895,7 +895,7 @@ export default function GigDetailsScreen() {
                           )
                         ) : (
                           <Text style={{ color: colors.textSecondary }}>
-                            No provided equipments
+                            No equipment supplied
                           </Text>
                         )}
                       </View>
@@ -1393,7 +1393,7 @@ export default function GigDetailsScreen() {
                               AI Filter Review
                             </Text>
                             <Text style={{ color: aiRecommendation.recommendation_status === "recommended" ? "#10B981" : colors.primary, fontFamily: "Poppins_700Bold", fontSize: 14 }}>
-                              {Number(aiRecommendation.score || 0)}%
+                              {aiRecommendation.score == null ? "—" : `${Math.round(Number(aiRecommendation.score))}%`}
                             </Text>
                           </View>
                           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 6 }}>

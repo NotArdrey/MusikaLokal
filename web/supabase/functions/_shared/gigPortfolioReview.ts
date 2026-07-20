@@ -460,14 +460,32 @@ async function compareApplicantFace(
     }
 }
 
-function requirementCriteria(requirements: Record<string, any>, slotType: string, gigLocation: string) {
-    const slot = requirements?.slots?.[slotType] || {}
+function requirementCriteria(requirements: Record<string, any>, slotType: string, gigLocation: string, groupType = '') {
+    const normalizedSlotType = String(slotType || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+    const slotKey = normalizedSlotType === 'solo_artist' || normalizedSlotType === 'individual'
+        ? 'solo'
+        : normalizedSlotType === 'group' || normalizedSlotType === 'music_group'
+            ? String(groupType).trim().toLowerCase() === 'duo' ? 'duo' : 'band'
+            : normalizedSlotType
+    const slot = requirements?.slots?.[slotKey] || requirements?.slots?.[slotType] || {}
     const instruments = uniqueStrings([
-        requirements?.instruments,
+        requirements?.preferred_instruments,
+        requirements?.required_instruments,
+        requirements?.roles,
+        requirements?.required_roles,
+        slot?.instruments,
         slot?.roles,
+        slot?.required_roles,
         slot?.preferred_instruments,
+        slot?.required_instruments,
     ])
-    const genres = uniqueStrings([requirements?.genres, slot?.preferred_genres])
+    const globalGenres = uniqueStrings([
+        requirements?.genres,
+        requirements?.preferred_genres,
+        requirements?.required_genres,
+    ])
+    const slotGenres = uniqueStrings([slot?.genres, slot?.preferred_genres, slot?.required_genres])
+    const genres = slotGenres.length > 0 ? slotGenres : globalGenres
     const settings = requirements?.ai_recommendation_settings || {}
     const modes = settings?.criteria || {}
     const criteria: Array<{ key: string; requirement: string }> = []
@@ -629,7 +647,7 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
             : []
         const reviewedGroupMemberIds = groupMemberIds.slice(0, maxGroupFaceMembers)
 
-        const [gigResult, requirementResult, profileResult, skillsResult, genresResult, portfolioResult, groupResult, groupMediaResult, groupMemberProfilesResult] = await Promise.all([
+        const [gigResult, requirementResult, profileResult, skillsResult, genresResult, portfolioResult, groupResult, groupRosterResult, groupMediaResult, groupMemberProfilesResult] = await Promise.all([
             client.from('gigs').select('name, description, location').eq('id', application.gig_id).maybeSingle(),
             client.from('gig_requirements').select('requirement_key, requirement_value').eq('gig_id', application.gig_id),
             profileId ? client.from('profiles').select('full_name, bio, location, avatar_url').eq('id', profileId).maybeSingle() : Promise.resolve({ data: null, error: null }),
@@ -637,6 +655,7 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
             profileId ? client.from('profile_genres').select('genre').eq('profile_id', profileId) : Promise.resolve({ data: [], error: null }),
             profileId ? client.from('profile_portfolio_urls').select('portfolio_url, sort_order').eq('profile_id', profileId).order('sort_order') : Promise.resolve({ data: [], error: null }),
             groupId ? client.from('groups').select('name, description, genre, location, group_type').eq('id', groupId).maybeSingle() : Promise.resolve({ data: null, error: null }),
+            groupId ? client.from('group_roster_members').select('member_role, instrument').eq('group_id', groupId) : Promise.resolve({ data: [], error: null }),
             groupId ? client.from('group_media').select('media_url, media_type, sort_order').eq('group_id', groupId).order('sort_order') : Promise.resolve({ data: [], error: null }),
             reviewedGroupMemberIds.length > 0
                 ? client.from('profiles').select('id, full_name, avatar_url').in('id', reviewedGroupMemberIds)
@@ -649,7 +668,12 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
             if (row?.requirement_key) result[row.requirement_key] = row.requirement_value
             return result
         }, {})
-        const criteria = requirementCriteria(requirements, String(application.slot_type || ''), cleanText(gigResult.data?.location, 300))
+        const criteria = requirementCriteria(
+            requirements,
+            String(application.slot_type || ''),
+            cleanText(gigResult.data?.location, 300),
+            String(groupResult.data?.group_type || ''),
+        )
 
         const portfolioUrls = uniqueStrings([
             (portfolioResult.data || []).map((item: any) => item.portfolio_url),
@@ -735,7 +759,10 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
         const profileContext = {
             bio: redactSensitiveText(profileResult.data?.bio, 1_500),
             location: cleanText(groupResult.data?.location || profileResult.data?.location, 300),
-            skills: uniqueStrings((skillsResult.data || []).map((item: any) => item.skill)).slice(0, 40),
+            skills: uniqueStrings([
+                (skillsResult.data || []).map((item: any) => item.skill),
+                (groupRosterResult.data || []).flatMap((item: any) => [item.instrument, item.member_role]),
+            ]).slice(0, 40),
             genres: uniqueStrings([
                 (genresResult.data || []).map((item: any) => item.genre),
                 groupResult.data?.genre,

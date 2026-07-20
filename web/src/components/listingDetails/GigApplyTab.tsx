@@ -945,6 +945,7 @@ const GigApplyTab = ({
         onReviewFrameChange={(url) => setVideoReviewFrameUrl(url || "")}
         onReviewFramesChange={setVideoReviewFrameUrls}
         enableCopyrightScreening={!isGroupApplicationFlow}
+        allowPortfolioSelection={!isGroupApplicationFlow}
         copyrightAcknowledged={videoCopyrightAcknowledged}
         onCopyrightDecisionChange={setVideoCopyrightDecision}
       />
