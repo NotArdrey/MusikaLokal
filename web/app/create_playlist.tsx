@@ -18,6 +18,7 @@ import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import GigPresetDropdown, { GIG_GENRE_OPTIONS } from "../src/components/GigPresetDropdown";
 import ImageUploader from "../src/components/ImageUploader";
 import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
@@ -660,6 +661,8 @@ export default function CreatePlaylistScreen() {
           <Text style={[styles.label, { color: colors.text }]}>Description</Text>
           <TextInput style={[styles.input, styles.multiline, { color: colors.text, borderColor: borderCol, backgroundColor: cardBg }]} value={description} onChangeText={setDescription} placeholder="Describe your playlist" placeholderTextColor={colors.textSecondary} multiline numberOfLines={4} maxLength={500} />
           <Text style={[styles.label, { color: colors.text }]}>Genre</Text>
+          <GigPresetDropdown options={GIG_GENRE_OPTIONS} selectedValues={genre ? [genre] : []} onSelect={setGenre} placeholder="Choose a genre" />
+          <TextInput style={[styles.input, { color: colors.text, borderColor: borderCol, backgroundColor: cardBg }]} value={genre} onChangeText={setGenre} placeholder="Enter another genre..." placeholderTextColor={colors.textSecondary} />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
             {GENRES.map((g) => (
               <TouchableOpacity activeOpacity={1} key={g} onPress={() => setGenre(genre === g ? "" : g)} style={[styles.chip, { backgroundColor: genre === g ? colors.primary : "transparent", borderColor: genre === g ? colors.primary : borderCol }]}>

@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import GigPresetDropdown, { GIG_GENRE_OPTIONS } from "../src/components/GigPresetDropdown";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import Modal from "../src/components/modal";
@@ -1460,6 +1461,8 @@ export default function GroupDetailsScreen() {
               />
 
               <Text style={[styles.playlistPopupLabel, { color: colors.text }]}>Genre</Text>
+              <GigPresetDropdown options={GIG_GENRE_OPTIONS} selectedValues={playlistGenre ? [playlistGenre] : []} onSelect={setPlaylistGenre} placeholder="Choose a genre" />
+              <TextInput value={playlistGenre} onChangeText={setPlaylistGenre} placeholder="Enter another genre..." placeholderTextColor={colors.textSecondary} style={[styles.playlistPopupInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]} />
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.playlistChipRow}>
                 {PLAYLIST_GENRES.map((genreOption) => {
                   const selected = playlistGenre === genreOption;

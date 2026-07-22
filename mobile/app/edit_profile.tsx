@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import GigPresetDropdown, { GIG_GENRE_OPTIONS } from "../src/components/GigPresetDropdown";
 import Header from "../src/components/header";
 import LeafletAddressPicker from "../src/components/LeafletAddressPicker";
 import Modal from "../src/components/modal";
@@ -177,7 +178,6 @@ export default function EditProfileScreen() {
 
   const isFanProfile = isFanUserRole(profileRole);
   const roleFieldLabel = isFanProfile ? "INTERESTS" : "ROLES & INSTRUMENTS";
-  const roleSearchPlaceholder = isFanProfile ? "Search interests..." : "Search roles & instruments...";
 
   const initialSnapshotRef = useRef<{
     contactNumber: string;
@@ -938,6 +938,7 @@ export default function EditProfileScreen() {
               ))}
             </View>
           )}
+          <GigPresetDropdown options={ROLES} selectedValues={selectedRoles} onSelect={toggleRole} placeholder={isFanProfile ? "Choose an interest" : "Choose a role or instrument"} />
           {/* Search input */}
           <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
             <Ionicons name="search" size={20} color={colors.textSecondary} />
@@ -947,8 +948,14 @@ export default function EditProfileScreen() {
               style={[styles.searchInput, { color: colors.text }]}
               value={roleSearch}
               onChangeText={setRoleSearch}
-              placeholder={roleSearchPlaceholder}
+              placeholder={isFanProfile ? "Enter another interest..." : "Enter another role or instrument..."}
               placeholderTextColor={colors.textSecondary}
+              onSubmitEditing={() => {
+                const value = roleSearch.trim();
+                if (!value || selectedRoles.some((role) => role.toLowerCase() === value.toLowerCase())) return;
+                toggleRole(value);
+                setRoleSearch("");
+              }}
             />
           </View>
           {/* Filtered chips */}
@@ -1032,6 +1039,7 @@ export default function EditProfileScreen() {
               ))}
             </View>
           )}
+          <GigPresetDropdown options={GIG_GENRE_OPTIONS} selectedValues={selectedGenres} onSelect={toggleGenre} placeholder="Choose a genre" />
           {/* Search input */}
           <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
             <Ionicons name="search" size={20} color={colors.textSecondary} />
@@ -1041,8 +1049,14 @@ export default function EditProfileScreen() {
               style={[styles.searchInput, { color: colors.text }]}
               value={genreSearch}
               onChangeText={setGenreSearch}
-              placeholder="Search genres..."
+              placeholder="Enter another genre..."
               placeholderTextColor={colors.textSecondary}
+              onSubmitEditing={() => {
+                const value = genreSearch.trim();
+                if (!value || selectedGenres.some((genre) => genre.toLowerCase() === value.toLowerCase())) return;
+                toggleGenre(value);
+                setGenreSearch("");
+              }}
             />
           </View>
           {/* Filtered chips */}

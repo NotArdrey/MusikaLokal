@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import Header from '../../src/components/header';
 import CustomAlert from '../../src/components/CustomAlert';
+import GigPresetDropdown, { GIG_GENRE_OPTIONS } from '../../src/components/GigPresetDropdown';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
@@ -938,6 +939,7 @@ export default function AdminStationsPage() {
             <View style={styles.modalInputRow}>
               <View style={styles.halfField}>
                 <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Genre</Text>
+                <GigPresetDropdown options={GIG_GENRE_OPTIONS} selectedValues={stationGenre ? [stationGenre] : []} onSelect={setStationGenre} placeholder="Choose a genre" />
                 <TextInput
                   testID="admin-station-genre-input"
                   accessibilityLabel="admin-station-genre-input"

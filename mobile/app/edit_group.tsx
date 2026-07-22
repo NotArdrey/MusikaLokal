@@ -20,6 +20,11 @@ import {
     View
 } from "react-native";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import GigPresetDropdown, {
+  GIG_GENRE_OPTIONS,
+  GIG_INSTRUMENT_OPTIONS,
+  GIG_ROLE_OPTIONS,
+} from "../src/components/GigPresetDropdown";
 import GroupInviteSection from "../src/components/GroupInviteSection";
 import PlaylistSelectionSection from "../src/components/PlaylistSelectionSection";
 import Header from "../src/components/header";
@@ -185,6 +190,7 @@ export default function EditGroupScreen() {
     : "About";
   const [groupName, setGroupName] = useState("");
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [customGenre, setCustomGenre] = useState("");
   const [showAllGenres, setShowAllGenres] = useState(false);
   const [description, setDescription] = useState("");
   const [address, setAddress] = useState("");
@@ -282,6 +288,7 @@ export default function EditGroupScreen() {
 
   // Group type based on the constants
   const [groupType, setGroupType] = useState<string>(mapDbGroupTypeToUiGroupType("band"));
+  const [customGroupType, setCustomGroupType] = useState("");
   const [groupTypeModalVisible, setGroupTypeModalVisible] = useState(false);
   const groupTypeSheetSurfaceColor = isDark ? "#1E2530" : "#FFFFFF";
   const renderGroupTypeSheetBackdrop = useCallback((props: any) => (
@@ -1610,6 +1617,11 @@ export default function EditGroupScreen() {
               <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
 
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+              <TextInput value={customGroupType} onChangeText={setCustomGroupType} placeholder="Enter another group type..." placeholderTextColor={colors.textSecondary} style={[styles.input, { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.border }]} />
+              <TouchableOpacity accessibilityLabel="Use custom group type" onPress={() => { const value = customGroupType.trim(); if (!value) return; setGroupType(value); setCustomGroupType(""); }} style={{ width: 44, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary }}><Ionicons name="add" size={22} color="#fff" /></TouchableOpacity>
+            </View>
+
             {/* Info about selected type */}
             {groupType && PH_MUSIC_GROUP_TYPES.find(t => t.id === groupType) && (
               <View style={{ marginTop: 8, paddingHorizontal: 4 }}>
@@ -1664,9 +1676,16 @@ export default function EditGroupScreen() {
           {/* Genre Multi-Select */}
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-              Genre
-            </Text>
-            <View style={styles.genreChipsContainer}>
+                Genre
+              </Text>
+              <GigPresetDropdown options={GIG_GENRE_OPTIONS} selectedValues={selectedGenres} onSelect={(value) => setSelectedGenres((current) => [...current, value])} placeholder="Choose a genre" />
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 8, marginBottom: 12 }}>
+                <TextInput value={customGenre} onChangeText={setCustomGenre} placeholder="Enter another genre..." placeholderTextColor={colors.textSecondary} style={[styles.input, { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.border }]} />
+                <TouchableOpacity accessibilityLabel="Add custom genre" onPress={() => { const value = customGenre.trim(); if (!value || selectedGenres.some((genre) => genre.toLowerCase() === value.toLowerCase())) return; setSelectedGenres((current) => [...current, value]); setCustomGenre(""); }} style={{ width: 46, height: 46, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary }}>
+                  <Ionicons name="add" size={22} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.genreChipsContainer}>
               {(showAllGenres ? GENRES : GENRES.slice(0, 8)).map((genre) => {
                 const selected = selectedGenres.includes(genre);
                 return (
@@ -1869,6 +1888,9 @@ export default function EditGroupScreen() {
                   </Text>
                 </View>
                 <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
+                  <View style={{ width: "100%" }}>
+                    <GigPresetDropdown options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS]} selectedValues={newMemberInstrument ? [newMemberInstrument] : []} onSelect={setNewMemberInstrument} placeholder="Choose an instrument or role" />
+                  </View>
                   <TextInput
                     value={newMemberInstrument}
                     onChangeText={setNewMemberInstrument}
@@ -1981,6 +2003,7 @@ export default function EditGroupScreen() {
                         <View
                           style={{
                             flexDirection: "row",
+                            flexWrap: "wrap",
                             gap: 8,
                             marginTop: 6,
                             alignItems: "center",
@@ -2027,6 +2050,9 @@ export default function EditGroupScreen() {
                             alignItems: "center",
                           }}
                         >
+                          <View style={{ width: "100%" }}>
+                            <GigPresetDropdown options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS]} selectedValues={currentInstrument ? [currentInstrument] : []} onSelect={(value) => updateMemberInstrument(index, value)} placeholder="Choose an instrument or role" />
+                          </View>
                           <TextInput
                             placeholder="Enter instrument (e.g., Vocals, Guitar)"
                             placeholderTextColor={colors.textSecondary}

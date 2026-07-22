@@ -19,6 +19,11 @@ import GigRecommendationSettings, {
   DEFAULT_GIG_RECOMMENDATION_SETTINGS,
   type GigRecommendationSettingsValue,
 } from "../src/components/GigRecommendationSettings";
+import GigPresetDropdown, {
+  GIG_GENRE_OPTIONS,
+  GIG_INSTRUMENT_OPTIONS,
+  GIG_ROLE_OPTIONS,
+} from "../src/components/GigPresetDropdown";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
@@ -263,7 +268,7 @@ export default function AddGigScreen() {
 
   // Preferred group types for band slots
   const [preferredGroupTypes, setPreferredGroupTypes] = useState<string[]>([]);
-  const [groupTypePickerVisible, setGroupTypePickerVisible] = useState(false);
+  const [newGroupType, setNewGroupType] = useState("");
 
   // Anti-spam settings
   const [reapplicationCooldownDays, setReapplicationCooldownDays] = useState<number>(30);
@@ -1941,14 +1946,27 @@ export default function AddGigScreen() {
                   </View>
                 )}
 
+                <GigPresetDropdown
+                  options={GIG_GENRE_OPTIONS}
+                  selectedValues={requiredGenres}
+                  onSelect={(value) => setRequiredGenres((current) => [...current, value])}
+                  placeholder="Choose a genre"
+                />
+
                 <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
                   <Ionicons name="search" size={20} color={colors.textSecondary} />
                   <TextInput
                     style={[styles.searchInput, { color: colors.text }]}
                     value={genreSearch}
                     onChangeText={setGenreSearch}
-                    placeholder="Search genres..."
+                    placeholder="Enter another genre..."
                     placeholderTextColor={colors.textSecondary}
+                    onSubmitEditing={() => {
+                      const trimmed = genreSearch.trim();
+                      if (!trimmed || requiredGenres.some((genre) => genre.toLowerCase() === trimmed.toLowerCase())) return;
+                      setRequiredGenres((current) => [...current, trimmed]);
+                      setGenreSearch("");
+                    }}
                   />
                 </View>
 
@@ -1977,6 +1995,12 @@ export default function AddGigScreen() {
                 >
                   Equipment supplied by organizer (optional)
                 </Text>
+                <GigPresetDropdown
+                  options={GIG_INSTRUMENT_OPTIONS}
+                  selectedValues={requiredInstruments}
+                  onSelect={(value) => setRequiredInstruments((current) => [...current, value])}
+                  placeholder="Choose supplied equipment"
+                />
                 <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
                   <View
                     style={[
@@ -2104,6 +2128,12 @@ export default function AddGigScreen() {
                       <Text style={[styles.slotSubLabel, { color: colors.textSecondary }]}>
                         Specific roles/instruments needed (optional):
                       </Text>
+                      <GigPresetDropdown
+                        options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS]}
+                        selectedValues={soloRolesNeeded}
+                        onSelect={(value) => setSoloRolesNeeded((current) => [...current, value])}
+                        placeholder="Choose a role or instrument"
+                      />
                       <View style={[styles.addMemberRow, { marginTop: 8 }]}>
                         <View
                           style={[
@@ -2152,8 +2182,14 @@ export default function AddGigScreen() {
                       )}
 
                       <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
-                        Preferred genres (optional):
+                        Genres (optional):
                       </Text>
+                      <GigPresetDropdown
+                        options={GIG_GENRE_OPTIONS}
+                        selectedValues={soloPreferredGenres}
+                        onSelect={(value) => setSoloPreferredGenres((current) => [...current, value])}
+                        placeholder="Choose a genre"
+                      />
                       <View style={[styles.addMemberRow, { marginTop: 8 }]}>
                         <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
                           <TextInput
@@ -2204,8 +2240,14 @@ export default function AddGigScreen() {
                       )}
 
                       <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
-                        Preferred instruments (optional):
+                        Instruments (optional):
                       </Text>
+                      <GigPresetDropdown
+                        options={GIG_INSTRUMENT_OPTIONS}
+                        selectedValues={soloPreferredInstruments}
+                        onSelect={(value) => setSoloPreferredInstruments((current) => [...current, value])}
+                        placeholder="Choose an instrument"
+                      />
                       <View style={[styles.addMemberRow, { marginTop: 8 }]}>
                         <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
                           <TextInput
@@ -2286,6 +2328,12 @@ export default function AddGigScreen() {
                       <Text style={[styles.slotSubLabel, { color: colors.textSecondary }]}>
                         Specific roles/instruments needed (optional):
                       </Text>
+                      <GigPresetDropdown
+                        options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS]}
+                        selectedValues={duoRolesNeeded}
+                        onSelect={(value) => setDuoRolesNeeded((current) => [...current, value])}
+                        placeholder="Choose a role or instrument"
+                      />
                       <View style={[styles.addMemberRow, { marginTop: 8 }]}>
                         <View
                           style={[
@@ -2334,8 +2382,14 @@ export default function AddGigScreen() {
                       )}
 
                       <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
-                        Preferred genres (optional):
+                        Genres (optional):
                       </Text>
+                      <GigPresetDropdown
+                        options={GIG_GENRE_OPTIONS}
+                        selectedValues={duoPreferredGenres}
+                        onSelect={(value) => setDuoPreferredGenres((current) => [...current, value])}
+                        placeholder="Choose a genre"
+                      />
                       <View style={[styles.addMemberRow, { marginTop: 8 }]}>
                         <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
                           <TextInput
@@ -2386,8 +2440,14 @@ export default function AddGigScreen() {
                       )}
 
                       <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
-                        Preferred instruments (optional):
+                        Instruments (optional):
                       </Text>
+                      <GigPresetDropdown
+                        options={GIG_INSTRUMENT_OPTIONS}
+                        selectedValues={duoPreferredInstruments}
+                        onSelect={(value) => setDuoPreferredInstruments((current) => [...current, value])}
+                        placeholder="Choose an instrument"
+                      />
                       <View style={[styles.addMemberRow, { marginTop: 8 }]}>
                         <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
                           <TextInput
@@ -2445,7 +2505,7 @@ export default function AddGigScreen() {
                   <View style={styles.slotHeader}>
                     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                       <Ionicons name="musical-notes" size={20} color="#3B82F6" />
-                      <Text style={[styles.slotTitle, { color: colors.text }]}>Preferred Group Type</Text>
+                      <Text style={[styles.slotTitle, { color: colors.text }]}>Group Type</Text>
                     </View>
                     <Text style={[styles.counterValue, { color: colors.text }]}>{bandSlotsNeeded}</Text>
                   </View>
@@ -2456,6 +2516,15 @@ export default function AddGigScreen() {
                     <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: "Poppins_400Regular", marginBottom: 12, textAlign: "center" }}>
                       Tap + to add. Use the remove icon on selected types to reduce by 1.
                     </Text>
+                    <GigPresetDropdown options={PH_MUSIC_GROUP_TYPES.map((type) => ({ label: type.label, value: type.id }))} selectedValues={preferredGroupTypes} onSelect={(value) => setPreferredGroupTypes((current) => [...current, value])} placeholder="Choose a group type" allowDuplicates />
+                    <View style={[styles.addMemberRow, { marginTop: 8, marginBottom: 12 }]}>
+                      <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
+                        <TextInput value={newGroupType} onChangeText={setNewGroupType} placeholder="Enter another group type..." placeholderTextColor={colors.textSecondary} style={[styles.textInput, { color: colors.text }]} />
+                      </View>
+                      <TouchableOpacity onPress={() => { const trimmed = newGroupType.trim(); if (!trimmed) return; setPreferredGroupTypes((current) => [...current, trimmed]); setNewGroupType(""); }} style={[styles.addBtn, { backgroundColor: colors.primary }]}>
+                        <Ionicons name="add" size={20} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
                     {preferredGroupTypes.length > 0 && (
                       <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
                         <TouchableOpacity
@@ -2543,9 +2612,24 @@ export default function AddGigScreen() {
                       })}
                     </View>
 
+                    {preferredGroupTypes
+                      .filter((value, index, values) => !PH_MUSIC_GROUP_TYPES.some((type) => type.id === value) && values.indexOf(value) === index)
+                      .map((value) => (
+                        <TouchableOpacity key={value} onPress={() => setPreferredGroupTypes((current) => { const index = current.lastIndexOf(value); return current.filter((_, itemIndex) => itemIndex !== index); })} style={[styles.chip, { alignSelf: "flex-start", backgroundColor: "rgba(59, 130, 246, 0.2)", marginBottom: 8 }]}>
+                          <Text style={[styles.chipText, { color: "#3B82F6" }]}>{value} ({preferredGroupTypes.filter((item) => item === value).length})</Text>
+                          <Ionicons name="close-circle" size={16} color="#3B82F6" />
+                        </TouchableOpacity>
+                      ))}
+
                     <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 16 }]}>
                       Any other specific requirements/genres (optional):
                     </Text>
+                    <GigPresetDropdown
+                      options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS, ...GIG_GENRE_OPTIONS]}
+                      selectedValues={bandRolesNeeded}
+                      onSelect={(value) => setBandRolesNeeded((current) => [...current, value])}
+                      placeholder="Choose a requirement"
+                    />
                     <View style={[styles.addMemberRow, { marginTop: 8 }]}>
                       <View
                         style={[
@@ -2594,8 +2678,14 @@ export default function AddGigScreen() {
                     )}
 
                     <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
-                      Preferred genres (optional):
+                      Genres (optional):
                     </Text>
+                    <GigPresetDropdown
+                      options={GIG_GENRE_OPTIONS}
+                      selectedValues={bandPreferredGenres}
+                      onSelect={(value) => setBandPreferredGenres((current) => [...current, value])}
+                      placeholder="Choose a genre"
+                    />
                     <View style={[styles.addMemberRow, { marginTop: 8 }]}>
                       <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
                         <TextInput
@@ -2646,8 +2736,14 @@ export default function AddGigScreen() {
                     )}
 
                     <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
-                      Preferred instruments (optional):
+                      Instruments (optional):
                     </Text>
+                    <GigPresetDropdown
+                      options={GIG_INSTRUMENT_OPTIONS}
+                      selectedValues={bandPreferredInstruments}
+                      onSelect={(value) => setBandPreferredInstruments((current) => [...current, value])}
+                      placeholder="Choose an instrument"
+                    />
                     <View style={[styles.addMemberRow, { marginTop: 8 }]}>
                       <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
                         <TextInput

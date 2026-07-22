@@ -25,6 +25,7 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import GigPresetDropdown, { GIG_GENRE_OPTIONS } from "../src/components/GigPresetDropdown";
 import InAppMediaViewer, { getInAppMediaType } from "../src/components/InAppMediaViewer";
 import ReportModal from "../src/components/ReportModal";
 import GuestSignInGate from "../src/components/GuestSignInGate";
@@ -3965,6 +3966,14 @@ export default function ProfileScreen() {
                   />
 
                   <Text style={[styles.playlistModalLabel, { color: colors.text }]}>Genre</Text>
+                  <GigPresetDropdown options={GIG_GENRE_OPTIONS} selectedValues={playlistGenre ? [playlistGenre] : []} onSelect={setPlaylistGenre} placeholder="Choose a genre" />
+                  <TextInput
+                    value={playlistGenre}
+                    onChangeText={setPlaylistGenre}
+                    placeholder="Enter another genre..."
+                    placeholderTextColor={colors.textSecondary}
+                    style={[styles.playlistModalInput, { color: colors.text, backgroundColor: surfaceBackground, borderColor: borderSoft }]}
+                  />
                   <View style={styles.playlistGenreWrap}>
                     {PLAYLIST_GENRES.map((genre) => {
                       const selected = playlistGenre === genre;

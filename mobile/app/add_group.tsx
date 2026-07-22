@@ -22,6 +22,11 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import GigPresetDropdown, {
+  GIG_GENRE_OPTIONS,
+  GIG_INSTRUMENT_OPTIONS,
+  GIG_ROLE_OPTIONS,
+} from "../src/components/GigPresetDropdown";
 import GroupInviteSection from "../src/components/GroupInviteSection";
 import Header from "../src/components/header";
 import PlaylistSelectionSection from "../src/components/PlaylistSelectionSection";
@@ -180,6 +185,7 @@ export default function AddGroupScreen() {
   const [longitude, setLongitude] = useState<number | null>(null);
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [customGenre, setCustomGenre] = useState("");
   const [showAllGenres, setShowAllGenres] = useState(false);
   const [description, setDescription] = useState("");
   const [modalVisible, setModalVisible] = useState(false);
@@ -187,6 +193,7 @@ export default function AddGroupScreen() {
   const [groupType, setGroupType] = useState<string>(
     mapDbGroupTypeToUiGroupType(isDuoMode ? "duo" : "band"),
   );
+  const [customGroupType, setCustomGroupType] = useState("");
   const [groupTypeModalVisible, setGroupTypeModalVisible] = useState(false);
   const groupTypeSheetSurfaceColor = isDark ? "#1E2530" : "#FFFFFF";
   const renderGroupTypeSheetBackdrop = useCallback((props: any) => (
@@ -1185,10 +1192,15 @@ export default function AddGroupScreen() {
                       onPress={() => setGroupTypeModalVisible(true)}
                     >
                       <Text style={{ color: colors.text, fontFamily: "Poppins_400Regular" }}>
-                        {PH_MUSIC_GROUP_TYPES.find(t => t.id === groupType)?.label || "Select Group Type"}
+                        {PH_MUSIC_GROUP_TYPES.find(t => t.id === groupType)?.label || groupType || "Select Group Type"}
                       </Text>
                       <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
                     </TouchableOpacity>
+
+                    <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                      <TextInput value={customGroupType} onChangeText={setCustomGroupType} placeholder="Enter another group type..." placeholderTextColor={colors.textSecondary} style={[styles.textInput, { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.border }]} />
+                      <TouchableOpacity accessibilityLabel="Use custom group type" onPress={() => { const value = customGroupType.trim(); if (!value) return; setGroupType(value); setCustomGroupType(""); }} style={{ width: 44, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary }}><Ionicons name="add" size={22} color="#fff" /></TouchableOpacity>
+                    </View>
 
                     {/* Info about selected type */}
                     {groupType && (
@@ -1217,6 +1229,13 @@ export default function AddGroupScreen() {
                   >
                     Genre
                   </Text>
+                  <GigPresetDropdown options={GIG_GENRE_OPTIONS} selectedValues={selectedGenres} onSelect={(value) => setSelectedGenres((current) => [...current, value])} placeholder="Choose a genre" />
+                  <View style={{ flexDirection: "row", gap: 8, marginTop: 8, marginBottom: 12 }}>
+                    <TextInput value={customGenre} onChangeText={setCustomGenre} placeholder="Enter another genre..." placeholderTextColor={colors.textSecondary} style={[styles.textInput, { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.border }]} />
+                    <TouchableOpacity accessibilityLabel="Add custom genre" onPress={() => { const value = customGenre.trim(); if (!value || selectedGenres.some((genre) => genre.toLowerCase() === value.toLowerCase())) return; setSelectedGenres((current) => [...current, value]); setCustomGenre(""); }} style={{ width: 46, height: 46, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary }}>
+                      <Ionicons name="add" size={22} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
                   <View style={styles.genreChipsContainer}>
                     {(showAllGenres ? GENRES : GENRES.slice(0, 8)).map(
                       (genre) => {
@@ -1445,6 +1464,7 @@ export default function AddGroupScreen() {
                                 <View
                                   style={{
                                     flexDirection: "row",
+                                    flexWrap: "wrap",
                                     gap: 8,
                                     marginTop: 6,
                                     alignItems: "center",
@@ -1491,6 +1511,9 @@ export default function AddGroupScreen() {
                                     alignItems: "center",
                                   }}
                                 >
+                                  <View style={{ width: "100%" }}>
+                                    <GigPresetDropdown options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS]} selectedValues={currentInstrument ? [currentInstrument] : []} onSelect={(value) => updateMemberInstrument(index, value)} placeholder="Choose an instrument or role" />
+                                  </View>
                                   <TextInput
                                     testID={`mobile-add-group-member-instrument-${index}`}
                                     accessibilityLabel={`mobile-add-group-member-instrument-${index}`}

@@ -16,6 +16,7 @@ import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import GigPresetDropdown, { GIG_GENRE_OPTIONS } from "../src/components/GigPresetDropdown";
 import ImageUploader from "../src/components/ImageUploader";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
@@ -779,6 +780,7 @@ export default function CreatePlaylistScreen() {
         />
 
         <Text style={[styles.label, { color: colors.text }]}>Genre</Text>
+        <GigPresetDropdown options={GIG_GENRE_OPTIONS} selectedValues={genre ? [genre] : []} onSelect={setGenre} placeholder="Choose a genre" />
         <TextInput
           testID="mobile-playlist-genre-input"
           accessibilityLabel="mobile-playlist-genre-input"

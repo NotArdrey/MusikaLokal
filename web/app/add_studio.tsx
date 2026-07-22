@@ -19,6 +19,7 @@ import {
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import GigPresetDropdown from "../src/components/GigPresetDropdown";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
@@ -4005,6 +4006,16 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 >
                   Or quickly select from common equipment
                 </Text>
+
+                <GigPresetDropdown
+                  options={INSTRUMENT_OPTIONS.map((instrument) => instrument.name)}
+                  selectedValues={selectedInstruments.map((instrument) => instrument.name)}
+                  onSelect={(value) => {
+                    const instrument = INSTRUMENT_OPTIONS.find((option) => option.name === value);
+                    if (instrument) toggleInstrument(instrument);
+                  }}
+                  placeholder="Choose common equipment"
+                />
 
                 <View style={styles.instrumentsGrid}>
                   {INSTRUMENT_OPTIONS.map((instrument) => {

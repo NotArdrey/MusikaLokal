@@ -11,7 +11,6 @@ import { useTheme } from "../context/ThemeContext";
 
 export type GigRecommendationCriterionMode =
   | "required"
-  | "preferred"
   | "ignore";
 
 export type GigRecommendationSettingsValue = {
@@ -32,10 +31,10 @@ export const DEFAULT_GIG_RECOMMENDATION_SETTINGS: GigRecommendationSettingsValue
     minimum_score: 75,
     location_radius_km: null,
     criteria: {
-      genres: "preferred",
-      instruments: "preferred",
-      location: "preferred",
-      portfolio: "preferred",
+      genres: "required",
+      instruments: "required",
+      location: "required",
+      portfolio: "required",
     },
   };
 
@@ -46,9 +45,9 @@ export const normalizeGigRecommendationSettings = (
     candidate: unknown,
     fallback: GigRecommendationCriterionMode
   ): GigRecommendationCriterionMode =>
-    candidate === "required" ||
-    candidate === "preferred" ||
-    candidate === "ignore"
+    candidate === "preferred"
+      ? "required"
+      : candidate === "required" || candidate === "ignore"
       ? candidate
       : fallback;
   const minimumScore = Number(value?.minimum_score);
@@ -99,7 +98,7 @@ const CRITERIA: {
   {
     key: "instruments",
     label: "Performer instruments and roles",
-    description: "Uses only the selected slot's roles and preferred instruments. Equipment supplied by the organizer is never used.",
+    description: "Uses only the selected slot's roles and instruments. Equipment supplied by the organizer is never used.",
   },
   {
     key: "genres",
@@ -121,7 +120,6 @@ const CRITERIA: {
 
 const MODES: GigRecommendationCriterionMode[] = [
   "required",
-  "preferred",
   "ignore",
 ];
 const LOCATION_RANGES: (number | null)[] = [5, 10, 25, 50, 100, null];
@@ -318,8 +316,8 @@ export default function GigRecommendationSettings({ value, onChange }: Props) {
             How each criterion is used
           </Text>
           <Text style={[styles.smallCopy, { color: colors.textSecondary }]}>
-            Required can disqualify a mismatch. Preferred affects only the
-            score. Criteria with no saved values are skipped.
+            Required can disqualify a mismatch. Ignored criteria are not used,
+            and criteria with no saved values are skipped.
           </Text>
           {CRITERIA.map((criterion) => (
             <View
