@@ -550,7 +550,7 @@ serve(async (req: Request) => {
                     throw new Error('You already have a pending application for this gig.');
                 }
 
-                const cooldownDays = gigData.reapplication_cooldown_days ?? 30;
+                const cooldownDays = Number(gigData.reapplication_cooldown_days ?? 30);
 
                 if (cooldownDays > 0) {
                     const { data: rejectedApp, error: rejectedError } = await supabaseClient
@@ -567,17 +567,17 @@ serve(async (req: Request) => {
 
                     if (rejectedApp) {
                         const rejectionDate = rejectedApp.rejected_at || rejectedApp.created_at;
-                        const cooldownEnds = new Date(rejectionDate);
-                        cooldownEnds.setDate(cooldownEnds.getDate() + cooldownDays);
+                        const cooldownEnds = new Date(
+                            new Date(rejectionDate).getTime() + cooldownDays * 24 * 60 * 60 * 1000
+                        );
 
                         const nowTime = Date.now();
                         if (nowTime < cooldownEnds.getTime()) {
                             if (eventStartsAt && eventStartsAt.getTime() <= cooldownEnds.getTime()) {
-                                throw new Error('Your application was declined. This gig starts before your reapplication cooldown ends, so you cannot reapply.');
+                                throw new Error(`Your application was declined. Your cooldown ends on ${cooldownEnds.toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' })}, after this gig starts, so you cannot reapply.`);
                             }
 
-                            const daysRemaining = Math.ceil((cooldownEnds.getTime() - nowTime) / (1000 * 60 * 60 * 24));
-                            throw new Error(`You cannot reapply to this gig yet. Please wait ${daysRemaining} more day(s).`);
+                            throw new Error(`You cannot reapply to this gig until ${cooldownEnds.toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' })}.`);
                         }
                     }
                 }
@@ -806,6 +806,11 @@ serve(async (req: Request) => {
                         filteredPayload[key] = updatePayload[key];
                     }
                 }
+                const reapplicationCooldownDays =
+                    filteredPayload.reapplication_cooldown_days === undefined
+                        ? null
+                        : Number(filteredPayload.reapplication_cooldown_days);
+                delete filteredPayload.reapplication_cooldown_days;
 
                 const { data: rpcData, error: rpcError } = await supabaseClient.rpc('update_gig_safely', {
                     p_gig_id: id,
@@ -826,9 +831,22 @@ serve(async (req: Request) => {
                     });
                 }
 
+                if (reapplicationCooldownDays !== null) {
+                    const { error: cooldownError } = await supabaseClient
+                        .from('gigs')
+                        .update({ reapplication_cooldown_days: reapplicationCooldownDays })
+                        .eq('id', id);
+                    if (cooldownError) throw cooldownError;
+                }
+
                 await syncGig3NF(supabaseClient, id)
 
-                return new Response(JSON.stringify(rpcResult.gig), {
+                return new Response(JSON.stringify({
+                    ...rpcResult.gig,
+                    ...(reapplicationCooldownDays === null
+                        ? {}
+                        : { reapplication_cooldown_days: reapplicationCooldownDays }),
+                }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 200,
                 });

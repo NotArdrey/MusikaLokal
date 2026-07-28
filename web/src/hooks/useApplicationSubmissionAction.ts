@@ -78,6 +78,8 @@ const GIG_UNAVAILABLE_MESSAGE =
   "This gig is no longer available. It may have been deleted or closed by the gig owner. Please refresh and choose another gig.";
 const GROUP_UNAVAILABLE_MESSAGE =
   "This group is no longer available. It may have been deleted by the owner. Please refresh and choose another group.";
+const GIG_CONFIRMATION_ESTIMATE =
+  "Estimated confirmation time: 3–7 days.";
 
 const isDeletedGigApplicationError = (error: any) => {
   const errorText = [
@@ -251,8 +253,10 @@ export const useApplicationSubmissionAction = ({
     const inactive = {
       isActive: false,
       daysRemaining: 0,
+      remainingLabel: null,
       cooldownEndsAt: null,
       message: null,
+      unavailableForGig: false,
     };
 
     if (group?.type !== "Gig" || !listingId || !userId) {
@@ -634,7 +638,7 @@ export const useApplicationSubmissionAction = ({
         setAlertConfig({
           type: "success",
           title: "Application Sent",
-          message: `${selectedProductionRoster?.display_name || "Your selected performer"} was sent to the gig owner from your production team. We'll let you know when they respond.`,
+          message: `${selectedProductionRoster?.display_name || "Your selected performer"} was sent to the gig owner from your production team. ${GIG_CONFIRMATION_ESTIMATE}`,
         });
         setAlertVisible(true);
 
@@ -837,9 +841,9 @@ export const useApplicationSubmissionAction = ({
         title: "Application Sent",
         message: selectedGroupId
           ? needsLeaderApproval
-            ? "Your group application was sent to your group leader for approval. Once approved, it will be visible to the gig owner."
-            : "Your group application has been sent. Group members have been notified. The gig owner will review it and get back to you soon."
-          : "Your application has been sent to the gig owner. They'll review it and get back to you soon.",
+            ? "Your group application was sent to your group leader for approval. Once approved, it will be visible to the gig owner. The gig owner’s estimated confirmation time after that is 3–7 days."
+            : `Your group application has been sent. Group members have been notified. ${GIG_CONFIRMATION_ESTIMATE}`
+          : `Your application has been sent to the gig owner. ${GIG_CONFIRMATION_ESTIMATE}`,
       });
       setAlertVisible(true);
 

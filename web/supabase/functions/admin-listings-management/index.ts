@@ -1126,7 +1126,7 @@ async function createResource(client: any, resourceType: ResourceType, payload: 
       business_permit_url: nullableText(payload.business_permit_url),
       latitude: numberOrNull(payload.latitude),
       longitude: numberOrNull(payload.longitude),
-      reapplication_cooldown_days: integerOrNull(payload.reapplication_cooldown_days) ?? 30,
+      reapplication_cooldown_days: numberOrNull(payload.reapplication_cooldown_days) ?? 30,
       permit_status: normalizePermitStatus(payload.permit_status),
     };
 
@@ -1209,7 +1209,7 @@ async function updateResource(client: any, resourceType: ResourceType, id: strin
       ...(payload.latitude !== undefined ? { latitude: numberOrNull(payload.latitude) } : {}),
       ...(payload.longitude !== undefined ? { longitude: numberOrNull(payload.longitude) } : {}),
       ...(payload.reapplication_cooldown_days !== undefined
-        ? { reapplication_cooldown_days: integerOrNull(payload.reapplication_cooldown_days) ?? 30 }
+        ? { reapplication_cooldown_days: numberOrNull(payload.reapplication_cooldown_days) ?? 30 }
         : {}),
       ...(payload.permit_status !== undefined ? { permit_status: normalizePermitStatus(payload.permit_status) } : {}),
     };

@@ -48,7 +48,7 @@ export const motion = {
       easing: Easing.in(Easing.cubic),
     },
     tab: {
-      duration: 220,
+      duration: 150,
       easing: Easing.bezier(0.2, 0, 0, 1),
     },
   },

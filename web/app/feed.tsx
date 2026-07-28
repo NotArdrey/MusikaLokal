@@ -890,6 +890,27 @@ const getFeedItemCreatedTime = (item: any) => {
 const sortFeedItemsNewestFirst = (items: any[]) =>
   [...items].sort((a, b) => getFeedItemCreatedTime(b) - getFeedItemCreatedTime(a));
 
+const interleaveFeedRecommendations = (socialPosts: any[], recommendations: any[]) => {
+  if (socialPosts.length === 0) return recommendations;
+  if (recommendations.length === 0) return socialPosts;
+
+  const mixed: any[] = [];
+  let recommendationIndex = 0;
+
+  socialPosts.forEach((post, index) => {
+    mixed.push(post);
+
+    // Keep the newest social posts at the top, then add recommendations
+    // gradually instead of making users scroll past the entire AI batch.
+    if ((index + 1) % 4 === 0 && recommendationIndex < recommendations.length) {
+      mixed.push(recommendations[recommendationIndex]);
+      recommendationIndex += 1;
+    }
+  });
+
+  return [...mixed, ...recommendations.slice(recommendationIndex)];
+};
+
 const getPositiveInteger = (value: unknown) => {
   if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, Math.round(value));
   if (typeof value !== "string") return 0;
@@ -1911,6 +1932,8 @@ export default function FeedScreen() {
   const [hasMore, setHasMore] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
   const activeTabRef = useRef<FeedTab>(tab);
+  const postsLengthRef = useRef(0);
+  const feedRequestIdRef = useRef(0);
   const feedImpressedKeysRef = useRef<Set<string>>(new Set());
   const feedInteractedKeysRef = useRef<Set<string>>(new Set());
   const feedSkippedKeysRef = useRef<Set<string>>(new Set());
@@ -1923,6 +1946,10 @@ export default function FeedScreen() {
   useEffect(() => {
     activeTabRef.current = tab;
   }, [tab]);
+
+  useEffect(() => {
+    postsLengthRef.current = posts.length;
+  }, [posts.length]);
 
   const bg = isWebDesktop ? "#1E293B" : feedColors.background;
   const cardBg = isWebDesktop ? "#1E293B" : feedColors.surface;
@@ -2155,7 +2182,10 @@ export default function FeedScreen() {
 
   const fetchFeed = useCallback(
     async (feedTab: FeedTab, append = false) => {
-      if (!session || isGuest) {
+      const requestId = ++feedRequestIdRef.current;
+      const isCurrentRequest = () => feedRequestIdRef.current === requestId;
+
+      if (!resolvedUserId || isGuest) {
         setPosts([]);
         setListingCards([]);
         setHasMore(false);
@@ -2174,6 +2204,7 @@ export default function FeedScreen() {
         if (feedTab === "talent") {
           if (append) return;
           const cards = await fetchTalentCards();
+          if (!isCurrentRequest()) return;
           setPosts([]);
           setListingCards(cards);
           setHasMore(false);
@@ -2182,7 +2213,7 @@ export default function FeedScreen() {
 
         if (feedTab === "for_you") {
           if (append) {
-            const offset = posts.length;
+            const offset = postsLengthRef.current;
             const { data, error } = await supabase.functions.invoke("manage-social-feed", {
               body: {
                 action: "get_feed",
@@ -2204,23 +2235,26 @@ export default function FeedScreen() {
             }
 
             const page = Array.isArray(data?.data) ? data.data.map(normalizeFeedPost) : [];
+            if (!isCurrentRequest()) return;
             setPosts((current) => [...current, ...page]);
             setHasMore(page.length === FEED_PAGE_SIZE);
             return;
           }
 
-          const [feedResult, aiCards] = await Promise.all([
-            supabase.functions.invoke("manage-social-feed", {
-              body: {
-                action: "get_feed",
-                feed_type: "for_you",
-                include_entities: false,
-                limit: FEED_PAGE_SIZE,
-                offset: 0,
-              },
-            }),
-            fetchAiRecommendationCards("for_you"),
-          ]);
+          const feedRequest = supabase.functions.invoke("manage-social-feed", {
+            body: {
+              action: "get_feed",
+              feed_type: "for_you",
+              include_entities: false,
+              limit: FEED_PAGE_SIZE,
+              offset: 0,
+            },
+          });
+          const recommendationRequest = fetchAiRecommendationCards("for_you");
+
+          // Render the current social feed as soon as it arrives. Recommendations
+          // can enrich the list independently without blocking the first paint.
+          const feedResult = await feedRequest;
 
           if (feedResult.error) {
             logFeedInvokeError("manage-social-feed:get_feed", feedResult.error, {
@@ -2232,16 +2266,23 @@ export default function FeedScreen() {
             throw feedResult.error;
           }
 
+          if (!isCurrentRequest()) return;
+
           const page = Array.isArray(feedResult.data?.data)
             ? feedResult.data.data.map(normalizeFeedPost)
             : [];
           setPosts(page);
-          setListingCards(aiCards);
           setHasMore(page.length === FEED_PAGE_SIZE);
+
+          void recommendationRequest.then((aiCards) => {
+            if (isCurrentRequest() && activeTabRef.current === feedTab) {
+              setListingCards(aiCards);
+            }
+          });
           return;
         }
 
-        const offset = append ? posts.length : 0;
+        const offset = append ? postsLengthRef.current : 0;
         const { data, error } = await supabase.functions.invoke("manage-social-feed", {
           body: {
             action: "get_feed",
@@ -2262,22 +2303,27 @@ export default function FeedScreen() {
           throw error;
         }
 
+        if (!isCurrentRequest()) return;
+
         const page = Array.isArray(data?.data) ? data.data.map(normalizeFeedPost) : [];
         setPosts((current) => (append ? [...current, ...page] : page));
         setHasMore(page.length === FEED_PAGE_SIZE);
       } catch (e: any) {
+        if (!isCurrentRequest()) return;
         setAlert({ type: "error", title: "Error", message: e?.message || "Failed to load feed." });
         if (!append) {
           setPosts([]);
           setListingCards([]);
         }
       } finally {
-        setLoading(false);
-        setRefreshing(false);
-        setLoadingMore(false);
+        if (isCurrentRequest()) {
+          setLoading(false);
+          setRefreshing(false);
+          setLoadingMore(false);
+        }
       }
     },
-    [fetchAiRecommendationCards, fetchTalentCards, isGuest, posts.length, session],
+    [fetchAiRecommendationCards, fetchTalentCards, isGuest, resolvedUserId],
   );
 
   const presentListingDetailsWithRetry = useCallback(() => {
@@ -2949,7 +2995,7 @@ export default function FeedScreen() {
       }
       const rankedCards = listingCards.filter((item) => item?.__feedKind === "ai_card");
       const socialPosts = sortFeedItemsNewestFirst(posts.filter((item) => item?.__feedKind !== "ai_card"));
-      return dedupeFeedItems([...rankedCards, ...socialPosts]);
+      return dedupeFeedItems(interleaveFeedRecommendations(socialPosts, rankedCards));
     },
     [listingCards, posts, tab],
   );
@@ -3043,6 +3089,11 @@ export default function FeedScreen() {
               refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={feedColors.primary} />}
               onEndReached={loadMore}
               onEndReachedThreshold={0.35}
+              initialNumToRender={4}
+              maxToRenderPerBatch={4}
+              updateCellsBatchingPeriod={40}
+              windowSize={7}
+              removeClippedSubviews={Platform.OS !== "web"}
               onViewableItemsChanged={onFeedViewableItemsChanged}
               viewabilityConfig={FEED_ACTIVITY_VIEWABILITY_CONFIG}
               contentContainerStyle={[styles.listContent, isWebDesktop && styles.listContentWeb]}

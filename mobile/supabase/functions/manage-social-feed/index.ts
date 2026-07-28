@@ -1204,17 +1204,47 @@ Deno.serve(async (req: Request) => {
       const includeEntityCards = params?.include_entities === true;
       const feedPostSelect =
         "id, author_id, post_type, content, visibility, is_pinned, linked_playlist_id, linked_product_id, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role, is_verified, verification_status), media:post_media(id, post_id, media_type, storage_path, thumbnail_path, is_cover, mime_type, width, height, duration_seconds, display_order, safety_status, safety_metadata)";
-      const cursorCreatedAt =
-        typeof cursor === "string" && cursor.trim().length > 0
-          ? cursor.trim()
-          : null;
+      const parseFeedCursor = (value: unknown) => {
+        if (typeof value !== "string" || value.trim().length === 0) {
+          return null;
+        }
+
+        const normalized = value.trim();
+        try {
+          const parsed = JSON.parse(normalized);
+          if (
+            parsed &&
+            typeof parsed.createdAt === "string" &&
+            parsed.createdAt.length > 0 &&
+            typeof parsed.id === "string" &&
+            parsed.id.length > 0
+          ) {
+            return { createdAt: parsed.createdAt, id: parsed.id };
+          }
+        } catch {
+          // Accept legacy timestamp-only cursors during the mobile rollout.
+        }
+
+        return { createdAt: normalized, id: "" };
+      };
+      const feedCursor = parseFeedCursor(cursor);
 
       const sourceLimit =
         params.cursor !== undefined ? pageSize + 1 : pageOffset + pageSize + 1;
       const withCursorAndLimit = (query: any) => {
-        const ordered = query.order("created_at", { ascending: false });
-        return (cursorCreatedAt ? ordered.lt("created_at", cursorCreatedAt) : ordered)
-          .limit(sourceLimit);
+        const ordered = query
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false });
+        if (!feedCursor) {
+          return ordered.limit(sourceLimit);
+        }
+
+        const cursorFiltered = feedCursor.id
+          ? ordered.or(
+              `created_at.lt.${feedCursor.createdAt},and(created_at.eq.${feedCursor.createdAt},id.lt.${feedCursor.id})`,
+            )
+          : ordered.lt("created_at", feedCursor.createdAt);
+        return cursorFiltered.limit(sourceLimit);
       };
       const emptyResult = () => Promise.resolve({ data: [], error: null });
       const resultRows = (result: any) => Array.isArray(result?.data) ? result.data : [];
@@ -1222,6 +1252,14 @@ Deno.serve(async (req: Request) => {
         const value = typeof item?.created_at === "string" ? item.created_at : "";
         const time = value ? Date.parse(value) : 0;
         return Number.isFinite(time) ? time : 0;
+      };
+      const compareFeedRowsNewestFirst = (a: any, b: any) => {
+        const timeDifference = getSortTime(b) - getSortTime(a);
+        if (timeDifference !== 0) {
+          return timeDifference;
+        }
+
+        return String(b?.id || "").localeCompare(String(a?.id || ""));
       };
       const dedupeMixedFeedItems = (items: any[]) => {
         const seen = new Set<string>();
@@ -1616,13 +1654,16 @@ Deno.serve(async (req: Request) => {
 
       const postsMs = Math.round(performance.now() - feedStartedAt);
       const rows = dedupeMixedFeedItems(mixedRows)
-        .sort((a, b) => getSortTime(b) - getSortTime(a));
+        .sort(compareFeedRowsNewestFirst);
       const pageRows = params.cursor !== undefined
         ? rows.slice(0, pageSize)
         : rows.slice(pageOffset, pageOffset + pageSize);
       const nextCursor =
-        params.cursor !== undefined && (rows.length > pageSize || sourceHadExtra)
-          ? pageRows[pageRows.length - 1]?.created_at || null
+        params.cursor !== undefined && pageRows.length > 0 && (rows.length > pageSize || sourceHadExtra)
+          ? JSON.stringify({
+              createdAt: pageRows[pageRows.length - 1]?.created_at || "",
+              id: pageRows[pageRows.length - 1]?.id || "",
+            })
           : null;
 
       const enrichmentStartedAt = performance.now();

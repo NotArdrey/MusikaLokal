@@ -48,7 +48,7 @@ interface GigApplyTabProps {
   existingApplicationStatus: string | null;
   isReapplicationCooldownActive: boolean;
   reapplicationCooldownReason: string | null;
-  reapplicationCooldownDaysRemaining: number | null;
+  reapplicationCooldownRemainingLabel: string | null;
   isBlocked: boolean;
   blockReason: string | null;
   userGroups: any[];
@@ -96,7 +96,7 @@ const GigApplyTab = ({
   existingApplicationStatus,
   isReapplicationCooldownActive,
   reapplicationCooldownReason,
-  reapplicationCooldownDaysRemaining,
+  reapplicationCooldownRemainingLabel,
   isBlocked,
   blockReason,
   userGroups,
@@ -1054,8 +1054,8 @@ const GigApplyTab = ({
                   ? "Application Accepted"
                   : "Already Applied"
               : isReapplicationCooldownActive
-                ? reapplicationCooldownDaysRemaining
-                  ? `Reapply in ${reapplicationCooldownDaysRemaining} day${reapplicationCooldownDaysRemaining === 1 ? "" : "s"}`
+                ? reapplicationCooldownRemainingLabel
+                  ? `Reapply in ${reapplicationCooldownRemainingLabel}`
                   : "Reapply Later"
               : groupAlreadyApplied
                 ? "Group Already Applied"

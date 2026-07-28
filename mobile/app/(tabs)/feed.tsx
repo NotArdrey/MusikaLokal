@@ -2,10 +2,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { BottomSheetBackdrop, BottomSheetView, useBottomSheetSpringConfigs } from "@gorhom/bottom-sheet";
 import { useFocusEffect } from "@react-navigation/native";
+import { useQueryClient } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Dimensions,
   FlatList,
   Image,
@@ -28,6 +30,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase, supabaseAnonKey, supabaseUrl } from "../../lib/supabase";
 import CachedImage from "../../src/components/CachedImage";
 import { FeaturedGigPerformers } from "../../src/components/FeaturedGigPerformers";
+import { FeedList } from "../../src/components/feed/FeedList";
+import { FeedMediaGallery } from "../../src/components/feed/FeedMediaGallery";
 import GuestSignInGate from "../../src/components/GuestSignInGate";
 import Header from "../../src/components/header";
 import ListingDetailsSheet from "../../src/components/ListingDetailsSheet";
@@ -87,10 +91,23 @@ const isVisibleProfileSkill = (value: unknown) =>
   value.trim().length > 0 &&
   !PROFILE_SKILL_DISPLAY_EXCLUSIONS.has(value.trim().toLowerCase());
 
-type FeedTab = "for_you" | "talent" | "following";
+type FeedTab = "for_you" | "latest" | "talent" | "following";
+type FeedRefreshReason =
+  | "app-resume"
+  | "auth-ready"
+  | "background-prefetch"
+  | "focus"
+  | "follow-change"
+  | "post-created"
+  | "realtime"
+  | "search-follow-change"
+  | "tab-change"
+  | "tab-state-change"
+  | "user-refresh";
 const isForYouFeedTab = (feedTab: FeedTab) => feedTab === "for_you";
 const FEED_TABS = [
   { key: "for_you", label: "For You" },
+  { key: "latest", label: "Latest" },
   { key: "talent", label: "Talent" },
   { key: "following", label: "Following" },
 ] as const;
@@ -122,6 +139,7 @@ const createEmptyFeedCacheEntry = (provider: string): FeedCacheEntry => ({
 
 const createFeedCache = (provider: string): Record<FeedTab, FeedCacheEntry> => ({
   for_you: createEmptyFeedCacheEntry(provider),
+  latest: createEmptyFeedCacheEntry(provider),
   talent: createEmptyFeedCacheEntry(provider),
   following: createEmptyFeedCacheEntry(provider),
 });
@@ -169,9 +187,9 @@ const FEED_PAGE_SIZE = 12;
 const AI_CARD_LIMIT = 20;
 const AI_RECOMMENDATION_CARD_LIMIT = 12;
 const TALENT_CARD_LIMIT = 32;
-const FEED_FOCUS_REFRESH_COOLDOWN_MS = 120000;
-const FEED_BACKGROUND_PREFETCH_DELAY_MS = 180;
-const FEED_BACKGROUND_PREFETCH_GAP_MS = 260;
+const FEED_FOCUS_REFRESH_COOLDOWN_MS = 15_000;
+const FEED_BACKGROUND_PREFETCH_DELAY_MS = 1_000;
+const FEED_BACKGROUND_PREFETCH_GAP_MS = 650;
 const MAX_FEED_HEADER_NAME_LENGTH = 26;
 const PESO_SIGN = "\u20B1";
 const POST_MEDIA_BUCKET = "post-media";
@@ -193,6 +211,27 @@ const FEED_ACTIVITY_INTERACTION_EVENTS = new Set([
   "feed_card_unfavorited",
   "feed_card_shared",
 ]);
+const feedCardRenderCounts = new Map<string, number>();
+let feedCardRenderLogTimer: ReturnType<typeof setTimeout> | null = null;
+
+const recordFeedCardRender = (item: any) => {
+  if (!__DEV__) return;
+
+  const key = getFeedItemStableKey(item) || "unknown";
+  feedCardRenderCounts.set(key, (feedCardRenderCounts.get(key) || 0) + 1);
+  if (feedCardRenderLogTimer) return;
+
+  feedCardRenderLogTimer = setTimeout(() => {
+    feedCardRenderLogTimer = null;
+    const counts = Array.from(feedCardRenderCounts.values());
+    logLoadTime("FeedCard", "render-batch", {
+      maxRendersPerCard: counts.length > 0 ? Math.max(...counts) : 0,
+      totalRenders: counts.reduce((total, count) => total + count, 0),
+      uniqueCards: counts.length,
+    });
+    feedCardRenderCounts.clear();
+  }, 1000);
+};
 const POST_MIME_BY_EXTENSION: Record<string, string> = {
   gif: "image/gif",
   heic: "image/heic",
@@ -427,10 +466,16 @@ const getFeedItemCreatedTime = (item: any) => {
 };
 
 const sortFeedItemsNewestFirst = (items: any[]) =>
-  [...items].sort((a, b) => getFeedItemCreatedTime(b) - getFeedItemCreatedTime(a));
+  [...items].sort((a, b) => {
+    const timeDifference = getFeedItemCreatedTime(b) - getFeedItemCreatedTime(a);
+    return timeDifference !== 0
+      ? timeDifference
+      : String(b?.id || "").localeCompare(String(a?.id || ""));
+  });
 
 const feedLastFetchAt: Record<FeedTab, number> = {
   for_you: 0,
+  latest: 0,
   talent: 0,
   following: 0,
 };
@@ -438,9 +483,11 @@ const feedLastFetchAt: Record<FeedTab, number> = {
 const resetFeedScreenCacheForIdentity = (provider: string, identity: string) => {
   const nextCache = createFeedCache(provider);
   feedScreenCache.for_you = nextCache.for_you;
+  feedScreenCache.latest = nextCache.latest;
   feedScreenCache.talent = nextCache.talent;
   feedScreenCache.following = nextCache.following;
   feedLastFetchAt.for_you = 0;
+  feedLastFetchAt.latest = 0;
   feedLastFetchAt.talent = 0;
   feedLastFetchAt.following = 0;
   feedScreenCacheIdentity = identity;
@@ -1555,100 +1602,6 @@ const getFeedMediaUrls = (item: any) => {
   const primaryImage = resolveFeedMediaUrl(typeof item?.image === "string" ? item.image : "");
   return Array.from(new Set([primaryImage, ...imageUrls].filter((value) => value.length > 0)));
 };
-
-const SOCIAL_GALLERY_GAP = 3;
-const SOCIAL_GALLERY_VISIBLE_LIMIT = 4;
-
-type SocialMediaGalleryProps = {
-  mediaUrls: string[];
-  mediaWidth: number;
-  onPress: () => void;
-};
-
-const SocialMediaGallery = React.memo(function SocialMediaGallery({
-  mediaUrls,
-  mediaWidth,
-  onPress,
-}: SocialMediaGalleryProps) {
-  const visibleMedia = mediaUrls.slice(0, SOCIAL_GALLERY_VISIBLE_LIMIT);
-  const remainingCount = Math.max(0, mediaUrls.length - visibleMedia.length);
-
-  const renderImageCell = (
-    uri: string,
-    index: number,
-    imageWidth: number,
-    imageHeight: number,
-    extraStyle?: any,
-  ) => (
-    <View key={`${uri}-${index}`} style={[styles.socialGalleryCell, extraStyle]}>
-      <CachedImage
-        uri={uri}
-        style={styles.socialGalleryImage}
-        width={Math.round(imageWidth)}
-        height={Math.round(imageHeight)}
-        contentFit="cover"
-        priority={index === 0 ? "normal" : "low"}
-      />
-      {index === visibleMedia.length - 1 && remainingCount > 0 ? (
-        <View style={styles.socialGalleryMoreOverlay}>
-          <Text style={styles.socialGalleryMoreText}>+{remainingCount}</Text>
-        </View>
-      ) : null}
-    </View>
-  );
-
-  if (visibleMedia.length === 0) return null;
-
-  const singleHeight = Math.min(240, Math.round(mediaWidth * 9 / 16));
-  const halfWidth = (mediaWidth - SOCIAL_GALLERY_GAP) / 2;
-
-  let galleryContent: React.ReactNode;
-
-  if (visibleMedia.length === 1) {
-    galleryContent = renderImageCell(visibleMedia[0], 0, mediaWidth, singleHeight, {
-      height: singleHeight,
-    });
-  } else if (visibleMedia.length === 2) {
-    const rowHeight = singleHeight;
-    galleryContent = (
-      <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
-        {visibleMedia.map((uri, index) => renderImageCell(uri, index, halfWidth, rowHeight))}
-      </View>
-    );
-  } else if (visibleMedia.length === 3) {
-    const rowHeight = singleHeight;
-    const stackedHeight = (rowHeight - SOCIAL_GALLERY_GAP) / 2;
-    galleryContent = (
-      <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
-        {renderImageCell(visibleMedia[0], 0, halfWidth, rowHeight)}
-        <View style={styles.socialGalleryColumn}>
-          {renderImageCell(visibleMedia[1], 1, halfWidth, stackedHeight)}
-          {renderImageCell(visibleMedia[2], 2, halfWidth, stackedHeight)}
-        </View>
-      </View>
-    );
-  } else {
-    const rowHeight = Math.round((singleHeight - SOCIAL_GALLERY_GAP) / 2);
-    galleryContent = (
-      <View style={styles.socialGalleryGrid}>
-        <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
-          {visibleMedia.slice(0, 2).map((uri, index) => renderImageCell(uri, index, halfWidth, rowHeight))}
-        </View>
-        <View style={[styles.socialGalleryRow, { height: rowHeight }]}>
-          {visibleMedia.slice(2, 4).map((uri, index) =>
-            renderImageCell(uri, index + 2, halfWidth, rowHeight),
-          )}
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <TouchableOpacity activeOpacity={0.92} onPress={onPress} style={styles.socialMediaWrap}>
-      {galleryContent}
-    </TouchableOpacity>
-  );
-});
 
 const getFeedUploaderAvatarUri = (item: any) =>
   resolveFeedMediaUrl(
@@ -2894,6 +2847,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   showAuthorFollow,
   timeAgo,
 }: SocialFeedCardProps) {
+  recordFeedCardRender(item);
   const isSuggestion = item?.__feedKind === "ai_card";
   const suggestionType = String(item?.type || "").trim().toLowerCase();
   const [commentBusy, setCommentBusy] = useState(false);
@@ -3155,7 +3109,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
       </TouchableOpacity>
 
       {mediaUrls.length > 0 ? (
-        <SocialMediaGallery mediaUrls={mediaUrls} mediaWidth={mediaWidth} onPress={handleOpenPrimary} />
+        <FeedMediaGallery mediaUrls={mediaUrls} mediaWidth={mediaWidth} onPress={handleOpenPrimary} />
       ) : null}
 
       {!isSuggestion && (bodyBadges.length > 0 || priceChips.length > 0) ? (
@@ -3331,6 +3285,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
 });
 
 export default function FeedScreen() {
+  const queryClient = useQueryClient();
   const { colors, isDark } = useTheme();
   const { session, userId, isGuest, loading: authLoading, roleResolved, userRole } = useAuth();
   const resolvedUserId = session?.user?.id ?? userId ?? null;
@@ -3358,6 +3313,7 @@ export default function FeedScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [fetchingByTab, setFetchingByTab] = useState<Record<FeedTab, boolean>>({
     for_you: false,
+    latest: false,
     talent: false,
     following: false,
   });
@@ -3399,13 +3355,28 @@ export default function FeedScreen() {
   const activeTabRef = React.useRef<FeedTab>(tab);
   const visibleFeedTabRef = React.useRef<FeedTab>(tab);
   const feedCacheRef = React.useRef<Record<FeedTab, FeedCacheEntry>>(feedScreenCache);
-  const feedInFlightRef = React.useRef<Record<FeedTab, boolean>>({ for_you: false, talent: false, following: false });
-  const feedRequestIdRef = React.useRef<Record<FeedTab, number>>({ for_you: 0, talent: 0, following: 0 });
+  const feedInFlightRef = React.useRef<Record<FeedTab, boolean>>({ for_you: false, latest: false, talent: false, following: false });
+  const feedRefreshPromiseRef = React.useRef<Record<FeedTab, Promise<void> | null>>({
+    for_you: null,
+    latest: null,
+    talent: null,
+    following: null,
+  });
+  const feedRefreshStartedAtRef = React.useRef<Record<FeedTab, number | null>>({
+    for_you: null,
+    latest: null,
+    talent: null,
+    following: null,
+  });
+  const firstPostFrameRef = React.useRef<number | null>(null);
+  const realtimeRefreshTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const feedRequestIdRef = React.useRef<Record<FeedTab, number>>({ for_you: 0, latest: 0, talent: 0, following: 0 });
   const feedPublicFallbackCursorRef = React.useRef<string | null>(null);
   const feedCacheIdentityRef = React.useRef(feedScreenCacheIdentity);
   const followingKeysRef = React.useRef<Set<string>>(new Set());
   const prefetchedTabsIdentityRef = React.useRef<string | null>(null);
   const hasFocusedFeedRef = React.useRef(false);
+  const isFeedFocusedRef = React.useRef(false);
   const previousTabRef = React.useRef<FeedTab>(tab);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
   const [selectedListingPreview, setSelectedListingPreview] = useState<any | null>(null);
@@ -3560,6 +3531,15 @@ export default function FeedScreen() {
     personalize: shouldPersonalizeForYouFeed,
     userId: resolvedUserId,
   });
+  const latestFeedQuery = useFeedQuery({
+    enabled: false,
+    feedTab: "latest",
+    feedType: "public",
+    includeEntities: false,
+    limit: FEED_PAGE_SIZE,
+    personalize: false,
+    userId: resolvedUserId,
+  });
   const followingFeedQuery = useFeedQuery({
     enabled: false,
     feedTab: "following",
@@ -3569,12 +3549,14 @@ export default function FeedScreen() {
     userId: resolvedUserId,
   });
   const forYouFeedQueryRef = React.useRef(forYouFeedQuery);
+  const latestFeedQueryRef = React.useRef(latestFeedQuery);
   const followingFeedQueryRef = React.useRef(followingFeedQuery);
 
   useEffect(() => {
     forYouFeedQueryRef.current = forYouFeedQuery;
+    latestFeedQueryRef.current = latestFeedQuery;
     followingFeedQueryRef.current = followingFeedQuery;
-  }, [followingFeedQuery, forYouFeedQuery]);
+  }, [followingFeedQuery, forYouFeedQuery, latestFeedQuery]);
 
   useEffect(() => {
     followingKeysRef.current = followingKeys;
@@ -3617,6 +3599,7 @@ export default function FeedScreen() {
     queries: {
       followingFeed: followingFeedQuery,
       forYouFeed: forYouFeedQuery,
+      latestFeed: latestFeedQuery,
     },
     ready: !authLoading && !loading,
     refreshing,
@@ -3634,10 +3617,13 @@ export default function FeedScreen() {
     feedCacheIdentityRef.current = feedIdentityKey;
     feedCacheRef.current = resetFeedScreenCacheForIdentity(groqModelLabel, feedIdentityKey);
     feedPublicFallbackCursorRef.current = null;
-    feedInFlightRef.current = { for_you: false, talent: false, following: false };
+    feedInFlightRef.current = { for_you: false, latest: false, talent: false, following: false };
+    feedRefreshPromiseRef.current = { for_you: null, latest: null, talent: null, following: null };
+    feedRefreshStartedAtRef.current = { for_you: null, latest: null, talent: null, following: null };
     prefetchedTabsIdentityRef.current = null;
     feedRequestIdRef.current = {
       for_you: feedRequestIdRef.current.for_you + 1,
+      latest: feedRequestIdRef.current.latest + 1,
       talent: feedRequestIdRef.current.talent + 1,
       following: feedRequestIdRef.current.following + 1,
     };
@@ -3654,7 +3640,7 @@ export default function FeedScreen() {
     setLoading(Boolean(session && !isGuest && !authLoading));
     setRefreshing(false);
     setLoadingMore(false);
-    setFetchingByTab({ for_you: false, talent: false, following: false });
+    setFetchingByTab({ for_you: false, latest: false, talent: false, following: false });
   }, [authLoading, feedIdentityKey, groqModelLabel, isGuest, session, tab]);
 
   const applyFeedSnapshot = useCallback((snapshot: FeedCacheEntry, feedTab: FeedTab = activeTabRef.current) => {
@@ -3735,14 +3721,14 @@ export default function FeedScreen() {
         return false;
       }
 
-      const queryData =
+      const activeQuery =
         feedTab === "following"
-          ? followingFeedQueryRef.current.data
-          : forYouFeedQueryRef.current.data;
-      const queryUpdatedAt =
-        feedTab === "following"
-          ? followingFeedQueryRef.current.dataUpdatedAt
-          : forYouFeedQueryRef.current.dataUpdatedAt;
+          ? followingFeedQueryRef.current
+          : feedTab === "latest"
+            ? latestFeedQueryRef.current
+            : forYouFeedQueryRef.current;
+      const queryData = activeQuery.data;
+      const queryUpdatedAt = activeQuery.dataUpdatedAt;
       const querySnapshot = buildFeedSnapshotFromPages(feedTab, queryData);
 
       if (!querySnapshot) {
@@ -4826,7 +4812,7 @@ export default function FeedScreen() {
       setFollowingEntities([]);
       setFollowBusyByKey({});
       setIsAiCardsLoading(false);
-      setFetchingByTab({ for_you: false, talent: false, following: false });
+      setFetchingByTab({ for_you: false, latest: false, talent: false, following: false });
 
       if (activeTabRef.current === feedTab) {
         applyFeedSnapshot(createEmptyFeedCacheEntry(groqModelLabel), feedTab);
@@ -4856,7 +4842,10 @@ export default function FeedScreen() {
     });
 
     feedInFlightRef.current[feedTab] = true;
-    markFeedFetching(feedTab, true);
+    const shouldReportFetching = activeTabRef.current === feedTab;
+    if (shouldReportFetching) {
+      markFeedFetching(feedTab, true);
+    }
     const requestId = ++feedRequestIdRef.current[feedTab];
 
     try {
@@ -4937,6 +4926,7 @@ export default function FeedScreen() {
         }
 
         feedPublicFallbackCursorRef.current = null;
+        const aiRequest = fetchAiRecommendationCards("for_you");
         const queryResult = await forYouFeedQueryRef.current.refetch();
 
         if (requestId !== feedRequestIdRef.current[feedTab]) {
@@ -4956,7 +4946,25 @@ export default function FeedScreen() {
         const postSnapshot = queryResult.error
           ? null
           : buildFeedSnapshotFromPages(feedTab, queryResult.data);
-        const aiResult = await fetchAiRecommendationCards("for_you");
+
+        if (postSnapshot) {
+          const currentSnapshot = feedCacheRef.current[feedTab];
+          const postsReadySnapshot: FeedCacheEntry = {
+            ...postSnapshot,
+            aiCards: currentSnapshot.aiCards,
+            aiFeedMessage: currentSnapshot.aiFeedMessage,
+            aiFeedProvider: currentSnapshot.aiFeedProvider,
+          };
+
+          feedCacheRef.current[feedTab] = postsReadySnapshot;
+          feedLastFetchAt[feedTab] = Date.now();
+
+          if (activeTabRef.current === feedTab) {
+            applyFeedSnapshot(postsReadySnapshot, feedTab);
+          }
+        }
+
+        const aiResult = await aiRequest;
 
         if (requestId !== feedRequestIdRef.current[feedTab]) {
           return;
@@ -4982,10 +4990,12 @@ export default function FeedScreen() {
         return;
       }
 
-      const currentFollowingQuery = followingFeedQueryRef.current;
+      const currentFeedQuery = feedTab === "latest"
+        ? latestFeedQueryRef.current
+        : followingFeedQueryRef.current;
       const queryResult = append
-        ? await currentFollowingQuery.fetchNextPage()
-        : await currentFollowingQuery.refetch();
+        ? await currentFeedQuery.fetchNextPage()
+        : await currentFeedQuery.refetch();
 
       if (queryResult.error) {
         logFeedInvokeError("manage-social-feed:get_feed", queryResult.error, {
@@ -5067,7 +5077,7 @@ export default function FeedScreen() {
         applyFeedSnapshot(nextSnapshot, feedTab);
       }
 
-      if (!append) {
+      if (!append && feedTab === "following") {
         void loadFollowingGraph().catch(() => {
           // Follow metadata is nice-to-have; feed readiness should not wait on it.
         });
@@ -5108,7 +5118,9 @@ export default function FeedScreen() {
       }
     } finally {
       feedInFlightRef.current[feedTab] = false;
-      markFeedFetching(feedTab, false);
+      if (shouldReportFetching) {
+        markFeedFetching(feedTab, false);
+      }
       if (requestId === feedRequestIdRef.current[feedTab]) {
         setIsAiCardsLoading(false);
       }
@@ -5136,14 +5148,126 @@ export default function FeedScreen() {
     resolvedUserId,
   ]);
 
-  useFocusEffect(useCallback(() => {
-    const currentTab = activeTabRef.current;
-    if (authLoading || (currentTab === "for_you" && Boolean(resolvedUserId) && !isGuest && !roleResolved)) {
+  const ensureFeedFresh = useCallback(({
+    feedTab = activeTabRef.current,
+    force = false,
+    reason,
+  }: {
+    feedTab?: FeedTab;
+    force?: boolean;
+    reason: FeedRefreshReason;
+  }) => {
+    const existingRequest = feedRefreshPromiseRef.current[feedTab];
+    if (existingRequest) {
+      logLoadTime("Feed", "refresh-deduped", {
+        feedTab,
+        reason,
+      });
+      return existingRequest;
+    }
+
+    const cacheAgeMs = Date.now() - feedLastFetchAt[feedTab];
+    if (!force && cacheAgeMs < FEED_FOCUS_REFRESH_COOLDOWN_MS) {
+      logLoadTime("Feed", "refresh-skipped-fresh", {
+        cacheAgeMs,
+        feedTab,
+        reason,
+      });
+      return Promise.resolve();
+    }
+
+    const requestedAt = Date.now();
+    feedRefreshStartedAtRef.current[feedTab] = activeTabRef.current === feedTab
+      ? requestedAt
+      : null;
+    const previousSuccessfulFetchAt = feedLastFetchAt[feedTab];
+    logLoadTime("Feed", "refresh-requested", {
+      cacheAgeMs,
+      feedTab,
+      force,
+      reason,
+      requestedAt: new Date(requestedAt).toISOString(),
+    });
+
+    let request: Promise<void>;
+    request = fetchFeed(feedTab).finally(() => {
+      if (feedRefreshPromiseRef.current[feedTab] === request) {
+        feedRefreshPromiseRef.current[feedTab] = null;
+      }
+
+      logLoadTime("Feed", "refresh-settled", {
+        durationMs: Date.now() - requestedAt,
+        feedTab,
+        reason,
+        successful: feedLastFetchAt[feedTab] > previousSuccessfulFetchAt,
+      });
+    });
+
+    feedRefreshPromiseRef.current[feedTab] = request;
+    return request;
+  }, [fetchFeed]);
+
+  const scheduleRealtimeFeedRefresh = useCallback(() => {
+    if (realtimeRefreshTimerRef.current) {
+      clearTimeout(realtimeRefreshTimerRef.current);
+    }
+
+    realtimeRefreshTimerRef.current = setTimeout(() => {
+      realtimeRefreshTimerRef.current = null;
+      if (!isFeedFocusedRef.current) {
+        return;
+      }
+
+      void ensureFeedFresh({ force: true, reason: "realtime" });
+    }, 500);
+  }, [ensureFeedFresh]);
+
+  useEffect(() => {
+    if (posts.length === 0) {
       return;
     }
 
-    if (currentTab === "for_you" && session && !isGuest && !resolvedUserId) {
+    const visibleTab = visibleFeedTabRef.current;
+    const requestedAt = feedRefreshStartedAtRef.current[visibleTab];
+    if (requestedAt === null) {
       return;
+    }
+
+    feedRefreshStartedAtRef.current[visibleTab] = null;
+    if (firstPostFrameRef.current !== null) {
+      return;
+    }
+
+    firstPostFrameRef.current = requestAnimationFrame(() => {
+      firstPostFrameRef.current = null;
+      logLoadTime("Feed", "first-post-frame", {
+        durationMs: Date.now() - requestedAt,
+        feedTab: visibleTab,
+        posts: posts.length,
+      });
+    });
+  }, [posts]);
+
+  useEffect(() => () => {
+    if (firstPostFrameRef.current !== null) {
+      cancelAnimationFrame(firstPostFrameRef.current);
+      firstPostFrameRef.current = null;
+    }
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    isFeedFocusedRef.current = true;
+    const markFeedBlurred = () => {
+      isFeedFocusedRef.current = false;
+    };
+
+    const currentTab = activeTabRef.current;
+    if (authLoading || (currentTab === "for_you" && Boolean(resolvedUserId) && !isGuest && !roleResolved)) {
+      return markFeedBlurred;
+    }
+
+    if (currentTab === "for_you" && session && !isGuest && !resolvedUserId) {
+      return markFeedBlurred;
     }
 
     hasFocusedFeedRef.current = true;
@@ -5183,7 +5307,7 @@ export default function FeedScreen() {
     const startRefresh = () => {
       if (!isActive || refreshStarted || !shouldRefreshFeed) return;
       refreshStarted = true;
-      void fetchFeed(currentTab);
+      void ensureFeedFresh({ feedTab: currentTab, reason: "focus" });
     };
 
     if (shouldRefreshFeed) {
@@ -5208,11 +5332,54 @@ export default function FeedScreen() {
     void restorePendingReopen();
 
     return () => {
+      markFeedBlurred();
       isActive = false;
       focusRefreshTask?.cancel();
       if (refreshFallbackTimer) clearTimeout(refreshFallbackTimer);
     };
-  }, [authLoading, clearBottomOverlays, fetchFeed, hydrateCachedFeed, isEmptyBlockingFeedSnapshot, isGuest, resolvedUserId, roleResolved, session]));
+  }, [authLoading, clearBottomOverlays, ensureFeedFresh, hydrateCachedFeed, isEmptyBlockingFeedSnapshot, isGuest, resolvedUserId, roleResolved, session]));
+
+  useEffect(() => queryClient.getQueryCache().subscribe((event) => {
+    if (
+      event.query.queryKey[0] !== "feed" ||
+      !event.query.state.isInvalidated ||
+      !isFeedFocusedRef.current
+    ) {
+      return;
+    }
+
+    if (activeTabRef.current === "talent") {
+      return;
+    }
+
+    scheduleRealtimeFeedRefresh();
+  }), [queryClient, scheduleRealtimeFeedRefresh]);
+
+  useEffect(() => () => {
+    if (realtimeRefreshTimerRef.current) {
+      clearTimeout(realtimeRefreshTimerRef.current);
+      realtimeRefreshTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let previousState = AppState.currentState;
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      const returnedToForeground = previousState !== "active" && nextState === "active";
+      previousState = nextState;
+
+      if (!returnedToForeground || !isFeedFocusedRef.current) {
+        return;
+      }
+
+      const activeFeedTab = activeTabRef.current;
+      if (activeFeedTab !== "talent") {
+        void ensureFeedFresh({ feedTab: activeFeedTab, reason: "app-resume" });
+      }
+    });
+
+    return () => subscription.remove();
+  }, [ensureFeedFresh]);
 
   useEffect(() => {
     if (authLoading || !hasFocusedFeedRef.current || (tab === "for_you" && Boolean(resolvedUserId) && !isGuest && !roleResolved)) {
@@ -5258,7 +5425,7 @@ export default function FeedScreen() {
     }
 
     if (!hydrated || isHydratedEmptyBlockingTab) {
-      void fetchFeed(tab);
+      void ensureFeedFresh({ feedTab: tab, reason: "tab-state-change" });
       return;
     }
 
@@ -5267,7 +5434,7 @@ export default function FeedScreen() {
     const startTabRefresh = () => {
       if (!isActive || refreshStarted) return;
       refreshStarted = true;
-      void fetchFeed(tab);
+      void ensureFeedFresh({ feedTab: tab, reason: "tab-state-change" });
     };
     const tabSwitchTask = InteractionManager.runAfterInteractions(startTabRefresh);
     const tabRefreshFallbackTimer = setTimeout(startTabRefresh, 800);
@@ -5277,7 +5444,7 @@ export default function FeedScreen() {
       tabSwitchTask.cancel();
       clearTimeout(tabRefreshFallbackTimer);
     };
-  }, [authLoading, fetchFeed, hydrateCachedFeed, isEmptyBlockingFeedSnapshot, isGuest, resolvedUserId, roleResolved, session, tab]);
+  }, [authLoading, ensureFeedFresh, hydrateCachedFeed, isEmptyBlockingFeedSnapshot, isGuest, resolvedUserId, roleResolved, session, tab]);
 
   useEffect(() => {
     if (
@@ -5299,8 +5466,8 @@ export default function FeedScreen() {
       setIsAiCardsLoading(true);
     }
     setLoading(false);
-    void fetchFeed(tab);
-  }, [authLoading, fetchFeed, isFeedCacheValidForTab, isGuest, resolvedUserId, roleResolved, session, tab]);
+    void ensureFeedFresh({ feedTab: tab, force: true, reason: "auth-ready" });
+  }, [authLoading, ensureFeedFresh, isFeedCacheValidForTab, isGuest, resolvedUserId, roleResolved, session, tab]);
 
   const onRefresh = useCallback(() => {
     if (authLoading || (tab === "for_you" && Boolean(resolvedUserId) && !isGuest && !roleResolved)) {
@@ -5318,8 +5485,8 @@ export default function FeedScreen() {
     ) {
       setIsAiCardsLoading(true);
     }
-    void fetchFeed(tab);
-  }, [aiCards.length, authLoading, fetchFeed, hasVisibleForYouPost, isGuest, posts, resolvedUserId, roleResolved, session, tab]);
+    void ensureFeedFresh({ feedTab: tab, force: true, reason: "user-refresh" });
+  }, [aiCards.length, authLoading, ensureFeedFresh, hasVisibleForYouPost, isGuest, posts, resolvedUserId, roleResolved, session, tab]);
 
   const resetVisibleFeedForTab = useCallback((feedTab: FeedTab) => {
     visibleFeedTabRef.current = feedTab;
@@ -5369,12 +5536,12 @@ export default function FeedScreen() {
 
     setSmoothTab(setTab, targetTab);
 
-    if (cacheNeedsRefresh && !feedInFlightRef.current[targetTab]) {
-      void fetchFeed(targetTab);
+    if (cacheNeedsRefresh) {
+      void ensureFeedFresh({ feedTab: targetTab, reason: "tab-change" });
     }
   }, [
     applyFeedSnapshot,
-    fetchFeed,
+    ensureFeedFresh,
     isFan,
     isEmptyBlockingFeedSnapshot,
     isFeedCacheValidForTab,
@@ -5431,11 +5598,11 @@ export default function FeedScreen() {
           cached.loaded &&
           Date.now() - feedLastFetchAt[feedTab] < FEED_FOCUS_REFRESH_COOLDOWN_MS;
 
-        if (isFresh || feedInFlightRef.current[feedTab]) {
+        if (isFresh) {
           return;
         }
 
-        void fetchFeed(feedTab);
+        void ensureFeedFresh({ feedTab, reason: "background-prefetch" });
       }, FEED_BACKGROUND_PREFETCH_DELAY_MS + index * FEED_BACKGROUND_PREFETCH_GAP_MS),
     );
 
@@ -5445,7 +5612,7 @@ export default function FeedScreen() {
   }, [
     authLoading,
     feedIdentityKey,
-    fetchFeed,
+    ensureFeedFresh,
     isGuest,
     loading,
     resolvedUserId,
@@ -5743,10 +5910,36 @@ export default function FeedScreen() {
 
           feedCacheRef.current = {
             for_you: addCreatedPost(feedCacheRef.current.for_you),
+            latest: addCreatedPost(feedCacheRef.current.latest),
             talent: feedCacheRef.current.talent,
             following: addCreatedPost(feedCacheRef.current.following),
           };
           setPosts((current) => sortFeedItemsNewestFirst(dedupeFeedItems([createdPost, ...current])));
+          queryClient.setQueriesData({ queryKey: ["feed"] }, (current: any) => {
+            if (!Array.isArray(current?.pages) || current.pages.length === 0) {
+              return current;
+            }
+
+            const firstPage = current.pages[0] || {};
+            const firstPageItems = Array.isArray(firstPage.items)
+              ? firstPage.items
+              : Array.isArray(firstPage.data)
+                ? firstPage.data
+                : [];
+            const nextFirstPageItems = dedupeFeedItems([createdPost, ...firstPageItems]);
+
+            return {
+              ...current,
+              pages: [
+                {
+                  ...firstPage,
+                  data: nextFirstPageItems,
+                  items: nextFirstPageItems,
+                },
+                ...current.pages.slice(1),
+              ],
+            };
+          });
         }
 
         emitToast({
@@ -5755,7 +5948,7 @@ export default function FeedScreen() {
           message: editingPost ? "Your changes are live." : "Your post is live.",
         });
         handleComposerClose();
-        void fetchFeed(activeTabRef.current);
+        void ensureFeedFresh({ force: true, reason: "post-created" });
       } else if (data?.blocked || data?.pending_review || data?.status === "blocked" || data?.status === "pending_review") {
         setAlert({
           type: "warning",
@@ -5834,7 +6027,7 @@ export default function FeedScreen() {
       invalidateFeedCache("following");
 
       if (tab === "following") {
-        void fetchFeed("following");
+        void ensureFeedFresh({ feedTab: "following", force: true, reason: "follow-change" });
       } else if (nextIsFollowing) {
         void loadFollowingGraph();
       }
@@ -5852,7 +6045,7 @@ export default function FeedScreen() {
         return next;
       });
     }
-  }, [canUseSocialActions, fetchFeed, followBusyByKey, invalidateFeedCache, loadFollowingGraph, tab]);
+  }, [canUseSocialActions, ensureFeedFresh, followBusyByKey, invalidateFeedCache, loadFollowingGraph, tab]);
 
   /* ── Renderers ── */
 
@@ -5862,10 +6055,10 @@ export default function FeedScreen() {
       trackFeedActivity("feed_post_opened", initialPost);
     }
     setSelectedPostPreview(initialPost || null);
+    setSelectedPostId(postId);
     void prefetchPostDetails(postId, initialPost).catch(() => {
       // The modal owns user-visible error handling if the request fails.
     });
-    setSelectedPostId(postId);
   }, [trackFeedActivity]);
 
   const patchTalentGigCommentPost = useCallback((gigId: string, postId: string, commentCount?: number) => {
@@ -5951,6 +6144,10 @@ export default function FeedScreen() {
       for_you: {
         ...feedCacheRef.current.for_you,
         posts: updatePosts(feedCacheRef.current.for_you.posts),
+      },
+      latest: {
+        ...feedCacheRef.current.latest,
+        posts: updatePosts(feedCacheRef.current.latest.posts),
       },
       talent: {
         ...feedCacheRef.current.talent,
@@ -6104,6 +6301,7 @@ export default function FeedScreen() {
         ...feedCacheRef.current.for_you,
         aiCards: updateCards(feedCacheRef.current.for_you.aiCards),
       },
+      latest: feedCacheRef.current.latest,
       talent: {
         ...feedCacheRef.current.talent,
         aiCards: updateCards(feedCacheRef.current.talent.aiCards),
@@ -6710,6 +6908,7 @@ export default function FeedScreen() {
   const activeTabIsFetching =
     fetchingByTab[tab] ||
     (tab === "for_you" && forYouFeedQuery.isFetching) ||
+    (tab === "latest" && latestFeedQuery.isFetching) ||
     (tab === "following" && followingFeedQuery.isFetching) ||
     (tab === "talent" && isAiCardsLoading);
   const shouldWaitForActiveFeedLoad = authLoading || Boolean(session && !isGuest);
@@ -6976,6 +7175,10 @@ export default function FeedScreen() {
     () => ({ paddingBottom: feedBottomSpacer }),
     [feedBottomSpacer],
   );
+  const feedScrollIndicatorInsets = useMemo(
+    () => ({ bottom: feedBottomSpacer }),
+    [feedBottomSpacer],
+  );
   const optionsTargetIsPost = postOptionsTarget ? postOptionsTarget.__feedKind !== "ai_card" : false;
   const optionsTargetIsOwn = postOptionsTarget ? isOwnFeedReportTarget(postOptionsTarget, resolvedUserId) : false;
   const optionsTargetLabel = postOptionsTarget ? getFeedReportTypeLabel(postOptionsTarget) : "Post";
@@ -7039,7 +7242,7 @@ export default function FeedScreen() {
           {feedFooter}
         </ScrollView>
       ) : (
-        <FlatList
+        <FeedList
             style={styles.feedViewport}
             data={feedItems}
             keyExtractor={feedKeyExtractor}
@@ -7051,10 +7254,12 @@ export default function FeedScreen() {
             onEndReachedThreshold={0.3}
             onViewableItemsChanged={onFeedViewableItemsChanged}
             viewabilityConfig={FEED_ACTIVITY_VIEWABILITY_CONFIG}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            refreshTintColor={colors.primary}
             ItemSeparatorComponent={feedSeparator}
             contentContainerStyle={feedContentContainerStyle}
-            scrollIndicatorInsets={{ bottom: feedBottomSpacer }}
+            scrollIndicatorInsets={feedScrollIndicatorInsets}
           />
       )}
 
@@ -7261,7 +7466,7 @@ export default function FeedScreen() {
         onProductionTeamPress={(teamId) => openProductionTeamDetails(teamId)}
         onFollowChanged={() => {
           invalidateFeedCache("following");
-          void fetchFeed(activeTabRef.current);
+          void ensureFeedFresh({ force: true, reason: "search-follow-change" });
         }}
       />
 
@@ -7752,64 +7957,6 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(14),
     fontFamily: "Poppins_400Regular",
     lineHeight: 20,
-  },
-  socialMediaWrap: {
-    marginHorizontal: 16,
-    marginTop: 0,
-    borderRadius: 12,
-    overflow: "hidden",
-    backgroundColor: "#E2E8F0",
-    position: "relative",
-  },
-  socialGalleryGrid: {
-    gap: SOCIAL_GALLERY_GAP,
-  },
-  socialGalleryRow: {
-    flexDirection: "row",
-    gap: SOCIAL_GALLERY_GAP,
-  },
-  socialGalleryColumn: {
-    flex: 1,
-    gap: SOCIAL_GALLERY_GAP,
-  },
-  socialGalleryCell: {
-    flex: 1,
-    overflow: "hidden",
-    backgroundColor: "#CBD5E1",
-    position: "relative",
-  },
-  socialGalleryImage: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 0,
-  },
-  socialGalleryMoreOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(15,23,42,0.56)",
-  },
-  socialGalleryMoreText: {
-    color: "#FFFFFF",
-    fontSize: moderateScale(28),
-    fontFamily: "Poppins_700Bold",
-  },
-  socialMediaCount: {
-    position: "absolute",
-    right: 10,
-    top: 10,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    backgroundColor: "rgba(15,23,42,0.72)",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  socialMediaCountText: {
-    color: "#FFFFFF",
-    fontSize: moderateScale(10),
-    fontFamily: "Poppins_700Bold",
   },
   socialChipRow: {
     flexDirection: "row",

@@ -1273,6 +1273,10 @@ export default function GigDetailsScreen() {
                             : "Legacy video — not screened";
                     const isAccepted = ["accepted", "approved"].includes(String(app.status || "").toLowerCase());
                     const consentStatus = String(app.feature_consent_status || "not_requested").toLowerCase();
+                    const priorApplicationCounts = app.prior_application_counts || null;
+                    const hasPriorApplicationCounts =
+                      Number.isInteger(priorApplicationCounts?.this_gig) &&
+                      Number.isInteger(priorApplicationCounts?.owner_gigs);
                     return (
                     <View
                       key={app.id}
@@ -1353,6 +1357,34 @@ export default function GigDetailsScreen() {
                           </Text>
                         </View>
                       </View>
+
+                      {hasPriorApplicationCounts ? (
+                        <View
+                          testID={`prior-application-counts-${app.id}`}
+                          style={{
+                            backgroundColor: colors.inputBackground,
+                            borderColor: colors.border,
+                            borderWidth: 1,
+                            borderRadius: 12,
+                            padding: 12,
+                            marginBottom: 12,
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 9,
+                          }}
+                        >
+                          <Ionicons name="repeat-outline" size={20} color={colors.primary} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
+                              Applied {priorApplicationCounts.owner_gigs + 1}{" "}
+                              {priorApplicationCounts.owner_gigs === 0 ? "time" : "times"} to your gigs
+                            </Text>
+                            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, marginTop: 2 }}>
+                              {priorApplicationCounts.this_gig + 1} total to this gig • {priorApplicationCounts.owner_gigs} earlier before this application
+                            </Text>
+                          </View>
+                        </View>
+                      ) : null}
 
                       {app.video_url ? (
                         <View

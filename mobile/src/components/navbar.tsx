@@ -10,6 +10,7 @@ import { useBottomOverlay } from '../context/BottomOverlayContext';
 import { useTheme } from '../context/ThemeContext';
 import { prefetchNavbarColdBootQueries } from '../data/coldBootPrefetch';
 import { isE2EFixtureMode } from '../utils/e2eFixtures';
+import { logLoadTime } from '../utils/loadTimeLogger';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 
 export const NAVBAR_BOTTOM_OFFSET = 24;
@@ -19,7 +20,7 @@ export const NAVBAR_WIDTH = '90%' as const;
 export const NAVBAR_MAX_WIDTH = 400;
 
 const NAVBAR_DEBUG_LOGS = false;
-const NAVBAR_MOTION_MS = 220;
+const NAVBAR_MOTION_MS = 150;
 const NAVBAR_LAYER = 50;
 const NAVBAR_SURFACE_ELEVATION = 16;
 const NAVBAR_DARK_SURFACE = '#121218';
@@ -249,6 +250,7 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
     const queryClient = useQueryClient();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
+    const tabPressTimingRef = useRef<{ startedAt: number; targetTab: string } | null>(null);
     const isFan = isFanUserRole(userRole);
     const hideForE2EForm = isE2EFixtureMode() && E2E_NAVBAR_HIDDEN_ROUTES.has(pathname);
     const hasTabNavigator = Boolean(state && navigation);
@@ -322,15 +324,27 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
             return;
         }
 
-        if (item.id === 'profile') {
-            router.replace('/profile' as any);
-            return;
-        }
-
         if (activeTab !== item.id) {
+            tabPressTimingRef.current = {
+                startedAt: Date.now(),
+                targetTab: item.id,
+            };
             navigation.navigate(targetRoute.name, targetRoute.params);
         }
     }, [activeTab, navigation, state]);
+
+    useEffect(() => {
+        const timing = tabPressTimingRef.current;
+        if (!timing || timing.targetTab !== activeTab) {
+            return;
+        }
+
+        logLoadTime('Navigation', 'tab-interactive', {
+            durationMs: Date.now() - timing.startedAt,
+            tab: activeTab,
+        });
+        tabPressTimingRef.current = null;
+    }, [activeTab]);
 
     useEffect(() => {
         logNavbarDebug('state', {

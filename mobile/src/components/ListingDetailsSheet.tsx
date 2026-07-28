@@ -521,9 +521,9 @@ const ListingDetailsSheet = forwardRef<
   const [reapplicationCooldownReason, setReapplicationCooldownReason] =
     useState<string | null>(null);
   const [
-    reapplicationCooldownDaysRemaining,
-    setReapplicationCooldownDaysRemaining,
-  ] = useState<number | null>(null);
+    reapplicationCooldownRemainingLabel,
+    setReapplicationCooldownRemainingLabel,
+  ] = useState<string | null>(null);
   const [isReapplicationUnavailableForGig, setIsReapplicationUnavailableForGig] = useState(false);
 
   // Studio Booking State (prevent spam)
@@ -1418,7 +1418,7 @@ const ListingDetailsSheet = forwardRef<
   const resetReapplicationCooldown = useCallback(() => {
     setIsReapplicationCooldownActive(false);
     setReapplicationCooldownReason(null);
-    setReapplicationCooldownDaysRemaining(null);
+    setReapplicationCooldownRemainingLabel(null);
     setIsReapplicationUnavailableForGig(false);
   }, []);
 
@@ -1616,8 +1616,8 @@ const ListingDetailsSheet = forwardRef<
 
       setIsReapplicationCooldownActive(cooldownInfo.isActive);
       setReapplicationCooldownReason(cooldownInfo.message);
-      setReapplicationCooldownDaysRemaining(
-        cooldownInfo.isActive ? cooldownInfo.daysRemaining : null,
+      setReapplicationCooldownRemainingLabel(
+        cooldownInfo.isActive ? cooldownInfo.remainingLabel : null,
       );
       setIsReapplicationUnavailableForGig(cooldownInfo.unavailableForGig);
     } catch (err) {
@@ -3746,7 +3746,7 @@ const ListingDetailsSheet = forwardRef<
       existingApplicationStatus={existingApplicationStatus}
       isReapplicationCooldownActive={isReapplicationCooldownActive}
       reapplicationCooldownReason={reapplicationCooldownReason}
-      reapplicationCooldownDaysRemaining={reapplicationCooldownDaysRemaining}
+      reapplicationCooldownRemainingLabel={reapplicationCooldownRemainingLabel}
       isReapplicationUnavailableForGig={isReapplicationUnavailableForGig}
       isBlocked={isBlocked}
       blockReason={blockReason}
@@ -3797,7 +3797,7 @@ const ListingDetailsSheet = forwardRef<
       existingApplicationStatus={existingApplicationStatus}
       isReapplicationCooldownActive={isReapplicationCooldownActive}
       reapplicationCooldownReason={reapplicationCooldownReason}
-      reapplicationCooldownDaysRemaining={reapplicationCooldownDaysRemaining}
+      reapplicationCooldownRemainingLabel={reapplicationCooldownRemainingLabel}
       isReapplicationUnavailableForGig={isReapplicationUnavailableForGig}
       isBlocked={isBlocked}
       blockReason={blockReason}

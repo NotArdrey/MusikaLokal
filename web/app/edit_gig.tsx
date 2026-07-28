@@ -16,6 +16,9 @@ import {
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import GigReapplicationCooldownField, {
+  formatGigReapplicationCooldown,
+} from "../src/components/GigReapplicationCooldownField";
 import GigRecommendationSettings, {
   DEFAULT_GIG_RECOMMENDATION_SETTINGS,
   normalizeGigRecommendationSettings,
@@ -405,7 +408,7 @@ export default function EditGigScreen() {
   const [newGroupType, setNewGroupType] = useState("");
 
   // Anti-spam settings
-  const [reapplicationCooldownDays, setReapplicationCooldownDays] = useState<number>(30);
+  const [reapplicationCooldownHours, setReapplicationCooldownHours] = useState<number>(30 * 24);
   const [aiRecommendationSettings, setAiRecommendationSettings] =
     useState<GigRecommendationSettingsValue>(() => ({
       ...DEFAULT_GIG_RECOMMENDATION_SETTINGS,
@@ -833,7 +836,9 @@ export default function EditGigScreen() {
       }
 
       // Load anti-spam settings
-      setReapplicationCooldownDays(data.reapplication_cooldown_days ?? 30);
+      setReapplicationCooldownHours(
+        Math.round(Number(data.reapplication_cooldown_days ?? 30) * 24),
+      );
       setAiRecommendationSettings(
         normalizeGigRecommendationSettings(data.requirements?.ai_recommendation_settings),
       );
@@ -971,7 +976,7 @@ export default function EditGigScreen() {
         latitude,
         longitude,
         event_date: primarySchedule?.date || eventDate,
-        reapplication_cooldown_days: reapplicationCooldownDays,
+        reapplication_cooldown_days: reapplicationCooldownHours / 24,
         requirements: {
           genres: requiredGenres,
           instruments: requiredInstruments,
@@ -1015,7 +1020,6 @@ export default function EditGigScreen() {
         latitude: payload.latitude,
         longitude: payload.longitude,
         event_date: payload.event_date,
-        reapplication_cooldown_days: payload.reapplication_cooldown_days,
         requirements: payload.requirements,
       };
 
@@ -1035,9 +1039,10 @@ export default function EditGigScreen() {
       );
 
       const { data: responseData, error: updateError } = await supabase.rpc(
-        'update_gig_safely',
+        'update_gig_with_cooldown_safely',
         {
           p_gig_id: gigId,
+          p_cooldown_hours: reapplicationCooldownHours,
           p_payload: rpcPayload,
           p_reason: 'Updated from Edit Gig screen by organizer',
         },
@@ -2712,50 +2717,17 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 </View>
                 <View style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: colors.primary + '20' }}>
                   <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', fontSize: 14 }}>
-                    {reapplicationCooldownDays === 0 ? "None" : `${reapplicationCooldownDays} days`}
+                    {formatGigReapplicationCooldown(reapplicationCooldownHours)}
                   </Text>
                 </View>
               </View>
-              <View style={{ marginTop: 8 }}>
-                <Text style={[styles.slotSubLabel, { color: colors.textSecondary, fontSize: 11 }]}>
-                  {reapplicationCooldownDays === 0
-                    ? "Musicians can reapply immediately after rejection."
-                    : `Musicians must wait ${reapplicationCooldownDays} days after rejection before reapplying.`}
-                </Text>
-              </View>
-              <View style={{ flexDirection: "row", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                {[
-                  { label: "None", value: 0 },
-                  { label: "7 days", value: 7 },
-                  { label: "14 days", value: 14 },
-                  { label: "30 days", value: 30 },
-                  { label: "90 days", value: 90 },
-                ].map((preset) => (
-                  <TouchableOpacity activeOpacity={1}
-                    key={preset.value}
-                    onPress={() => setReapplicationCooldownDays(preset.value)}
-                    style={[
-                      {
-                        paddingHorizontal: 12,
-                        paddingVertical: 6,
-                        borderRadius: 16,
-                        backgroundColor: reapplicationCooldownDays === preset.value
-                          ? colors.primary
-                          : isDark ? "#374151" : "#E5E7EB",
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 12,
-                        fontFamily: "Poppins_500Medium",
-                        color: reapplicationCooldownDays === preset.value ? "#fff" : colors.text,
-                      }}
-                    >
-                      {preset.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={{ marginTop: 12 }}>
+                <GigReapplicationCooldownField
+                  hours={reapplicationCooldownHours}
+                  onChangeHours={setReapplicationCooldownHours}
+                  colors={colors}
+                  isDark={isDark}
+                />
               </View>
             </View>
           </View>

@@ -75,7 +75,6 @@ const CustomModal: React.FC<CustomModalProps> = ({
   const [showTermsContent, setShowTermsContent] = React.useState(false);
   const [feedbackVisible, setFeedbackVisible] = React.useState(false);
   const [feedbackMessage, setFeedbackMessage] = React.useState('');
-  const [canInteract, setCanInteract] = React.useState(false);
   const hasCustomContract = Boolean(contractUrl);
   const confirmationLockedRef = React.useRef(false);
   const [rendered, setRendered] = React.useState(visible);
@@ -89,18 +88,11 @@ const CustomModal: React.FC<CustomModalProps> = ({
       setShowTermsContent(false);
       setFeedbackVisible(false);
       setFeedbackMessage('');
-      setCanInteract(false);
       confirmationLockedRef.current = false;
       return;
     }
 
-    setCanInteract(false);
     confirmationLockedRef.current = false;
-    const timeout = setTimeout(() => {
-      setCanInteract(true);
-    }, 180);
-
-    return () => clearTimeout(timeout);
   }, [visible]);
 
   React.useEffect(() => {
@@ -109,7 +101,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
     }
   }, [loading, visible]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     const wasVisible = wasVisibleRef.current;
     wasVisibleRef.current = visible;
 
@@ -126,7 +118,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
 
       Animated.timing(modalProgress, {
         toValue: 1,
-        duration: 220,
+        duration: 140,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }).start();
@@ -140,7 +132,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
     modalProgress.stopAnimation();
     Animated.timing(modalProgress, {
       toValue: 0,
-      duration: 180,
+      duration: 110,
       easing: Easing.in(Easing.cubic),
       useNativeDriver: true,
     }).start(({ finished }) => {
@@ -167,7 +159,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
     confirmDisabled ||
     (requireTermsAcceptance && !isTermsAccepted) ||
     (hasCustomContract && !isContractAccepted);
-  const isConfirmButtonDisabled = !canInteract || loading || isConfirmDisabled;
+  const isConfirmButtonDisabled = !visible || loading || isConfirmDisabled;
 
   const getValidationFeedback = () => {
     if (hasEmptyRequiredInput) {
@@ -198,7 +190,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
   };
 
   const handleConfirmPress = () => {
-    if (!canInteract || loading || confirmationLockedRef.current) {
+    if (!visible || loading || confirmationLockedRef.current) {
       return;
     }
 
@@ -389,7 +381,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
 
                 {showCancelButton ? (
                   <TouchableOpacity
-                    activeOpacity={!canInteract ? 1 : 0.78}
+                    activeOpacity={!visible ? 1 : 0.78}
                     style={[
                       styles.cancelButton,
                       {
@@ -397,7 +389,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                         backgroundColor: colors.background,
                       },
                     ]}
-                    disabled={!canInteract}
+                    disabled={!visible}
                     onPress={onClose}
                   >
                     <Text style={[styles.cancelButtonText, { color: colors.textSecondary }]}>Cancel</Text>

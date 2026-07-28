@@ -6,6 +6,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -785,28 +786,45 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     await run;
   };
 
+  const contextValue = useMemo<AuthContextType>(() => ({
+    session,
+    loading,
+    isGuest,
+    setGuestMode,
+    isAdmin,
+    userRole,
+    roleResolved,
+    userId: session?.user?.id || null,
+    isSystemLocked,
+    unpaidBalance,
+    unpaidBookings,
+    checkSystemLock,
+    showLockAlert,
+    identityStatus,
+    identityRequired,
+    identityChecked,
+    checkIdentityStatus,
+  }), [
+    checkIdentityStatus,
+    checkSystemLock,
+    identityChecked,
+    identityRequired,
+    identityStatus,
+    isAdmin,
+    isGuest,
+    isSystemLocked,
+    loading,
+    roleResolved,
+    session,
+    setGuestMode,
+    showLockAlert,
+    unpaidBalance,
+    unpaidBookings,
+    userRole,
+  ]);
+
   return (
-    <AuthContext.Provider
-      value={{
-        session,
-        loading,
-        isGuest,
-        setGuestMode,
-        isAdmin,
-        userRole,
-        roleResolved,
-        userId: session?.user?.id || null,
-        isSystemLocked,
-        unpaidBalance,
-        unpaidBookings,
-        checkSystemLock,
-        showLockAlert,
-        identityStatus,
-        identityRequired,
-        identityChecked,
-        checkIdentityStatus,
-      }}
-    >
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

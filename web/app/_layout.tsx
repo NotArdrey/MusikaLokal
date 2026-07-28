@@ -635,7 +635,7 @@ function RootContent() {
             screenOptions={{
               headerShown: false,
               contentStyle: { backgroundColor: colors.background },
-              animation: "fade",
+              animation: Platform.OS === "web" ? "none" : "fade",
             }}
           />
         </View>

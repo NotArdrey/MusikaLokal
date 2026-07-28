@@ -1520,6 +1520,10 @@ export default function GigDetailsScreen() {
                       const role = formatApplicantSlot(app.slot_type, Boolean(displayGroup));
                       const primarySpecialty = displaySkills[0] || String(displayGenres || "").split(",")[0] || "Specialty not provided";
                       const compactLocation = shortenApplicantLocation(displayLocation) || "Location not provided";
+                      const priorApplicationCounts = app.prior_application_counts || null;
+                      const hasPriorApplicationCounts =
+                        Number.isInteger(priorApplicationCounts?.this_gig) &&
+                        Number.isInteger(priorApplicationCounts?.owner_gigs);
 
                       return (
                         <View
@@ -1554,6 +1558,28 @@ export default function GigDetailsScreen() {
                               {compactLocation}
                             </Text>
                           </View>
+                          {hasPriorApplicationCounts ? (
+                            <View
+                              testID={`prior-application-counts-${app.id}`}
+                              style={[
+                                styles.aiFilterScoreRow,
+                                {
+                                  backgroundColor: colors.primary + "14",
+                                  borderWidth: 1,
+                                  borderColor: colors.primary + "55",
+                                },
+                              ]}
+                            >
+                              <Ionicons name="repeat-outline" size={17} color={colors.primary} />
+                              <Text style={[styles.aiFilterScoreLabel, { color: colors.text, flex: 1 }]}>
+                                Applied {priorApplicationCounts.owner_gigs + 1}{" "}
+                                {priorApplicationCounts.owner_gigs === 0 ? "time" : "times"} to your gigs
+                              </Text>
+                              <Text style={[styles.aiFilterScoreValue, { color: colors.primary }]}>
+                                {priorApplicationCounts.this_gig + 1}× here
+                              </Text>
+                            </View>
+                          ) : null}
                           {aiRecommendation?.score !== null && aiRecommendation?.score !== undefined ? (
                             <View style={[styles.aiFilterScoreRow, { backgroundColor: colors.inputBackground }]}>
                               <Ionicons name="sparkles-outline" size={15} color={colors.primary} />

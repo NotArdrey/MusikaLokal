@@ -169,7 +169,104 @@ function toApplicationSummary(application: any) {
               }
             : null,
         ai_recommendation: application.ai_recommendation || null,
+        prior_application_counts: application.prior_application_counts || null,
     }
+}
+
+async function attachPriorApplicationCounts(
+    client: any,
+    organizerId: string,
+    applications: any[]
+) {
+    if (!organizerId || !Array.isArray(applications) || applications.length === 0) {
+        return applications
+    }
+
+    const applicantIds = Array.from(
+        new Set(
+            applications
+                .map((application: any) => application?.applicant_id)
+                .filter((value: unknown): value is string => typeof value === 'string' && value.length > 0)
+        )
+    )
+
+    if (applicantIds.length === 0) {
+        return applications.map((application: any) => ({
+            ...application,
+            prior_application_counts: { this_gig: 0, owner_gigs: 0 },
+        }))
+    }
+
+    const { data: ownerGigs, error: ownerGigsError } = await client
+        .from('gigs')
+        .select('id')
+        .eq('organizer_id', organizerId)
+
+    if (ownerGigsError) throw ownerGigsError
+
+    const ownerGigIds = (ownerGigs || [])
+        .map((gig: any) => gig?.id)
+        .filter((value: unknown): value is string => typeof value === 'string' && value.length > 0)
+
+    if (ownerGigIds.length === 0) {
+        return applications.map((application: any) => ({
+            ...application,
+            prior_application_counts: { this_gig: 0, owner_gigs: 0 },
+        }))
+    }
+
+    const { data: historyRows, error: historyError } = await client
+        .from('gig_applications')
+        .select('id, gig_id, applicant_id, created_at')
+        .in('gig_id', ownerGigIds)
+        .in('applicant_id', applicantIds)
+        .or('leader_approval_status.is.null,leader_approval_status.eq.approved')
+
+    if (historyError) throw historyError
+
+    const historyByApplicant = new Map<string, any[]>()
+    for (const historyRow of historyRows || []) {
+        const applicantId = String(historyRow?.applicant_id || '')
+        if (!applicantId) continue
+        const existingRows = historyByApplicant.get(applicantId)
+        if (existingRows) {
+            existingRows.push(historyRow)
+        } else {
+            historyByApplicant.set(applicantId, [historyRow])
+        }
+    }
+
+    return applications.map((application: any) => {
+        const submittedAt = Date.parse(String(application?.created_at || ''))
+        const applicantHistory = historyByApplicant.get(String(application?.applicant_id || '')) || []
+        let thisGig = 0
+        let ownerGigs = 0
+
+        for (const historyRow of applicantHistory) {
+            if (historyRow.id === application.id) continue
+            const historySubmittedAt = Date.parse(String(historyRow?.created_at || ''))
+            if (
+                !Number.isFinite(submittedAt) ||
+                !Number.isFinite(historySubmittedAt) ||
+                historySubmittedAt >= submittedAt
+            ) {
+                continue
+            }
+
+            ownerGigs += 1
+            if (historyRow.gig_id === application.gig_id) {
+                thisGig += 1
+            }
+        }
+
+        return {
+            ...application,
+            prior_application_counts: {
+                this_gig: thisGig,
+                owner_gigs: ownerGigs,
+            },
+        }
+    })
 }
 
 const FEATURE_CONSENT_SELECT = `
@@ -1327,7 +1424,12 @@ Deno.serve(async (req: Request) => {
             if (error) throw error
             const hydratedData = await hydrateLegacyApplicationFields(supabaseClient, data || [])
             const rankedData = await attachGigApplicationRecommendations(supabaseClient, gigId, hydratedData)
-            return new Response(JSON.stringify(rankedData.map(toApplicationSummary)), {
+            const rankedDataWithHistory = await attachPriorApplicationCounts(
+                supabaseClient,
+                gigRecord.organizer_id,
+                rankedData
+            )
+            return new Response(JSON.stringify(rankedDataWithHistory.map(toApplicationSummary)), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
             })
@@ -1405,9 +1507,15 @@ Deno.serve(async (req: Request) => {
                 })
             }
 
+            const [applicationWithHistory] = await attachPriorApplicationCounts(
+                supabaseClient,
+                gigRecord.organizer_id,
+                [hydratedApplication]
+            )
+
             return new Response(
                 JSON.stringify({
-                    ...hydratedApplication,
+                    ...applicationWithHistory,
                     ai_portfolio_review: reviewResult.error ? null : reviewResult.data || null,
                     ai_recommendation: recommendationResult.error ? null : recommendationResult.data || null,
                 }),

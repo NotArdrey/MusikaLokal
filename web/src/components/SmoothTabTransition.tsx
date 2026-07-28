@@ -25,7 +25,7 @@ const SmoothTabTransition = ({
 
     Animated.timing(translateX, {
       toValue: 0,
-      duration: 220,
+      duration: 150,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();

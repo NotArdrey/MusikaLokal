@@ -154,6 +154,10 @@ export default function ApplicantDetailsModal({
   const faceSimilarity = aiReview?.face_similarity || null;
   const groupFaceSimilarity = list(aiReview?.group_face_similarity);
   const isPending = String(application.status || "pending").toLowerCase() === "pending";
+  const priorApplicationCounts = application.prior_application_counts || null;
+  const hasPriorApplicationCounts =
+    Number.isInteger(priorApplicationCounts?.this_gig) &&
+    Number.isInteger(priorApplicationCounts?.owner_gigs);
 
   const cvResult = useMemo(() => {
     const matched = cvEvidence.filter((item) => item?.result === "supported");
@@ -322,6 +326,23 @@ export default function ApplicantDetailsModal({
             </Section>
 
             <Section title="Application History" icon="time-outline" colors={colors}>
+              {hasPriorApplicationCounts ? (
+                <View
+                  testID="prior-application-counts"
+                  style={[styles.historySummary, { backgroundColor: colors.inputBackground }]}
+                >
+                  <Text style={[styles.label, { color: colors.text }]}>
+                    Applied {priorApplicationCounts.owner_gigs + 1}{" "}
+                    {priorApplicationCounts.owner_gigs === 0 ? "time" : "times"} to your gigs
+                  </Text>
+                  <Text style={[styles.body, { color: colors.textSecondary }]}>
+                    Total applications to this gig: {priorApplicationCounts.this_gig + 1}
+                  </Text>
+                  <Text style={[styles.body, { color: colors.textSecondary }]}>
+                    Earlier applications before this one: {priorApplicationCounts.owner_gigs}
+                  </Text>
+                </View>
+              ) : null}
               <Text style={[styles.body, { color: colors.textSecondary }]}>• Application submitted {application.created_at ? new Date(application.created_at).toLocaleString() : "date unavailable"}</Text>
               {application.updated_at ? <Text style={[styles.body, { color: colors.textSecondary }]}>• Last updated {new Date(application.updated_at).toLocaleString()}</Text> : null}
               <Text style={[styles.body, { color: colors.textSecondary }]}>• Current status: {titleCase(application.status || "pending")}</Text>
@@ -366,6 +387,7 @@ const styles = StyleSheet.create({
   stackSmall: { gap: 2 },
   stackMedium: { gap: 7 },
   memberSignal: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 3 },
+  historySummary: { borderRadius: 11, padding: 12, gap: 3, marginBottom: 3 },
   outlineButton: { minHeight: 44, borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 8 },
   outlineButtonText: { flex: 1, fontFamily: "Poppins_600SemiBold", fontSize: 12 },
   primaryButton: { minHeight: 44, borderRadius: 11, paddingHorizontal: 22, alignItems: "center", justifyContent: "center" },

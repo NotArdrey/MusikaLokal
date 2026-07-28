@@ -433,7 +433,16 @@ const getDetailSections = (resource: AdminResource): DetailSection[] => {
           { label: 'Listing Status', value: resource.status },
           { label: 'Permit Status', value: resource.permit_status },
           { label: 'Permit Rejection', value: resource.permit_rejection_reason },
-          { label: 'Reapply Cooldown', value: resource.reapplication_cooldown_days ? `${resource.reapplication_cooldown_days} day(s)` : '-' },
+          {
+            label: 'Reapply Cooldown',
+            value: resource.reapplication_cooldown_days == null
+              ? '-'
+              : Number(resource.reapplication_cooldown_days) === 0
+                ? 'Immediate'
+                : Number(resource.reapplication_cooldown_days) < 1
+                  ? `${Math.round(Number(resource.reapplication_cooldown_days) * 24)} hour(s)`
+                  : `${resource.reapplication_cooldown_days} day(s)`,
+          },
         ],
       },
       {
@@ -1539,7 +1548,7 @@ export default function AdminManagePage() {
                   />
                   <View style={styles.twoColumn}>
                     <SmallField label="Budget" value={form.budget} onChange={(budget) => updateForm({ budget })} colors={colors} />
-                    <SmallField label="Cooldown Days" value={form.reapplicationCooldownDays} onChange={(reapplicationCooldownDays) => updateForm({ reapplicationCooldownDays })} colors={colors} />
+                    <SmallField label="Cooldown Days (decimals allowed)" value={form.reapplicationCooldownDays} onChange={(reapplicationCooldownDays) => updateForm({ reapplicationCooldownDays })} colors={colors} />
                   </View>
                   <FieldLabel label="Event Date" colors={colors} />
                   <TouchableOpacity

@@ -7,6 +7,7 @@ import React, {
   useRef,
 } from "react";
 import { useBottomOverlayRegistration } from "../context/BottomOverlayContext";
+import { logLoadTime } from "../utils/loadTimeLogger";
 
 let nextTrackedBottomSheetDebugId = 0;
 const TRACKED_BOTTOM_SHEET_DEBUG_LOGS = __DEV__;
@@ -48,6 +49,7 @@ const TrackedBottomSheetModal = forwardRef<BottomSheetModal, TrackedBottomSheetM
     const releaseFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const debugSheetIdRef = useRef(createTrackedBottomSheetDebugId());
     const debugSheetId = debugSheetIdRef.current;
+    const presentRequestedAtRef = useRef<number | null>(null);
     const { registerOverlay, unregisterOverlay } = useBottomOverlayRegistration(overlayLabel);
 
     const clearReleaseFallback = useCallback(() => {
@@ -119,6 +121,7 @@ const TrackedBottomSheetModal = forwardRef<BottomSheetModal, TrackedBottomSheetM
 
     useImperativeHandle(ref, () => ({
       present: (...args: any[]) => {
+        presentRequestedAtRef.current = Date.now();
         logTrackedBottomSheetDebug(debugSheetId, "present", {
           argsLength: args.length,
         });
@@ -233,6 +236,14 @@ const TrackedBottomSheetModal = forwardRef<BottomSheetModal, TrackedBottomSheetM
         type,
       });
       if (typeof index === "number" && index >= 0) {
+        const requestedAt = presentRequestedAtRef.current;
+        if (requestedAt !== null) {
+          logLoadTime("Modal", "sheet-visible", {
+            durationMs: Date.now() - requestedAt,
+            overlayLabel,
+          });
+          presentRequestedAtRef.current = null;
+        }
         if (!isClosingRef.current && isOpenCommandedRef.current) {
           markOverlayOpen(`change:${index}`);
         } else if (isClosingRef.current) {
@@ -250,7 +261,7 @@ const TrackedBottomSheetModal = forwardRef<BottomSheetModal, TrackedBottomSheetM
         markOverlayClosing(`change:${index}`);
       }
       onChange?.(index, position, type);
-    }, [debugSheetId, markOverlayClosing, markOverlayOpen, onChange]);
+    }, [debugSheetId, markOverlayClosing, markOverlayOpen, onChange, overlayLabel]);
 
     const handleDismiss = useCallback(() => {
       logTrackedBottomSheetDebug(debugSheetId, "onDismiss", {});

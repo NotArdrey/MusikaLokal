@@ -21,6 +21,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { useBottomOverlayRegistration } from "../context/BottomOverlayContext";
+import { logLoadTime } from "../utils/loadTimeLogger";
 import { motion } from "../utils/motion";
 
 type BottomModalProps = {
@@ -66,6 +67,8 @@ export default function BottomModal({
   const dismissFallbackRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const dismissTokenRef = React.useRef(0);
   const wasVisibleRef = React.useRef(visible);
+  const visibleRequestedAtRef = React.useRef<number | null>(visible ? Date.now() : null);
+  const visibleFrameRef = React.useRef<number | null>(null);
   const { registerOverlay, unregisterOverlay } = useBottomOverlayRegistration(overlayLabel);
 
   const clearDismissFallback = useCallback(() => {
@@ -79,11 +82,30 @@ export default function BottomModal({
 
   React.useLayoutEffect(() => {
     if (visible) {
+      visibleRequestedAtRef.current = Date.now();
       dismissTokenRef.current += 1;
       clearDismissFallback();
       registerOverlay();
+      visibleFrameRef.current = requestAnimationFrame(() => {
+        visibleFrameRef.current = null;
+        const requestedAt = visibleRequestedAtRef.current;
+        if (requestedAt !== null) {
+          logLoadTime("Modal", "shell-visible", {
+            durationMs: Date.now() - requestedAt,
+            overlayLabel,
+          });
+          visibleRequestedAtRef.current = null;
+        }
+      });
     }
-  }, [clearDismissFallback, registerOverlay, visible]);
+
+    return () => {
+      if (visibleFrameRef.current !== null) {
+        cancelAnimationFrame(visibleFrameRef.current);
+        visibleFrameRef.current = null;
+      }
+    };
+  }, [clearDismissFallback, overlayLabel, registerOverlay, visible]);
 
   useEffect(() => {
     if (Platform.OS !== "android" || !visible || !navigationBarStyleWhileVisible) {
@@ -124,7 +146,7 @@ export default function BottomModal({
 
       if (!wasVisible) {
         progress.value = withTiming(1, {
-          duration: 240,
+          duration: 160,
           easing: motion.easing.standard,
         });
       }
@@ -140,7 +162,7 @@ export default function BottomModal({
     dismissTokenRef.current = dismissToken;
     clearDismissFallback();
     progress.value = withTiming(0, {
-      duration: 200,
+      duration: 120,
       easing: motion.easing.exit,
     }, (finished) => {
       if (finished) {
@@ -150,7 +172,7 @@ export default function BottomModal({
 
     dismissFallbackRef.current = setTimeout(() => {
       finishDismiss(dismissToken);
-    }, 260);
+    }, 180);
   }, [clearDismissFallback, finishDismiss, overlayLabel, progress, rendered, unregisterOverlay, visible]);
 
   const backdropAnimatedStyle = useAnimatedStyle(() => ({

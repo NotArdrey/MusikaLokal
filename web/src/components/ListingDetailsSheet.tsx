@@ -374,9 +374,9 @@ const ListingDetailsSheet = forwardRef<
   const [reapplicationCooldownReason, setReapplicationCooldownReason] =
     useState<string | null>(null);
   const [
-    reapplicationCooldownDaysRemaining,
-    setReapplicationCooldownDaysRemaining,
-  ] = useState<number | null>(null);
+    reapplicationCooldownRemainingLabel,
+    setReapplicationCooldownRemainingLabel,
+  ] = useState<string | null>(null);
 
   // Studio Booking State (prevent spam)
   const [hasExistingStudioBooking, setHasExistingStudioBooking] =
@@ -1115,7 +1115,7 @@ const ListingDetailsSheet = forwardRef<
   const resetReapplicationCooldown = useCallback(() => {
     setIsReapplicationCooldownActive(false);
     setReapplicationCooldownReason(null);
-    setReapplicationCooldownDaysRemaining(null);
+    setReapplicationCooldownRemainingLabel(null);
   }, []);
 
   // Check if user has already applied to this gig or group listing
@@ -1307,8 +1307,8 @@ const ListingDetailsSheet = forwardRef<
 
       setIsReapplicationCooldownActive(cooldownInfo.isActive);
       setReapplicationCooldownReason(cooldownInfo.message);
-      setReapplicationCooldownDaysRemaining(
-        cooldownInfo.isActive ? cooldownInfo.daysRemaining : null,
+      setReapplicationCooldownRemainingLabel(
+        cooldownInfo.isActive ? cooldownInfo.remainingLabel : null,
       );
     } catch (err) {
       console.error("Error checking reapplication cooldown:", err);
@@ -3277,7 +3277,7 @@ const ListingDetailsSheet = forwardRef<
       existingApplicationStatus={existingApplicationStatus}
       isReapplicationCooldownActive={isReapplicationCooldownActive}
       reapplicationCooldownReason={reapplicationCooldownReason}
-      reapplicationCooldownDaysRemaining={reapplicationCooldownDaysRemaining}
+      reapplicationCooldownRemainingLabel={reapplicationCooldownRemainingLabel}
       isBlocked={isBlocked}
       blockReason={blockReason}
       userGroups={userGroups}
@@ -3327,7 +3327,7 @@ const ListingDetailsSheet = forwardRef<
       existingApplicationStatus={existingApplicationStatus}
       isReapplicationCooldownActive={isReapplicationCooldownActive}
       reapplicationCooldownReason={reapplicationCooldownReason}
-      reapplicationCooldownDaysRemaining={reapplicationCooldownDaysRemaining}
+      reapplicationCooldownRemainingLabel={reapplicationCooldownRemainingLabel}
       isBlocked={isBlocked}
       blockReason={blockReason}
       userGroups={userGroups}

@@ -7,7 +7,7 @@ import { invokeEdgeFunction } from "./api";
 import { queryKeys } from "./queryKeys";
 import { logLoadTime } from "../utils/loadTimeLogger";
 
-const FEED_STALE_TIME_MS = 120_000;
+const FEED_STALE_TIME_MS = 15_000;
 
 export type PaginatedResponse<T> = {
   data?: T[];

@@ -20,7 +20,6 @@ import "../global.css";
 import { clearSupabaseAuthStorage, prepareRealtimeAuth, supabase } from "../lib/supabase";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
 import CustomAlert from "../src/components/CustomAlert";
-import { GlobalNavbar } from "../src/components/navbar";
 import { BottomOverlayProvider, useBottomOverlay } from "../src/context/BottomOverlayContext";
 import { usePushNotifications } from "../src/hooks/usePushNotifications";
 import {
@@ -963,8 +962,8 @@ function RootContent() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: colors.background }, // Also ensure stack content has background
-          animation: Platform.OS === "ios" ? "simple_push" : "fade_from_bottom",
-          animationDuration: 240,
+          animation: Platform.OS === "ios" ? "simple_push" : "none",
+          animationDuration: 180,
           freezeOnBlur: true,
         }}
       >
@@ -978,7 +977,6 @@ function RootContent() {
       </Stack>
 
       <GlobalRadioMiniPlayer />
-      <GlobalNavbar />
       <CustomAlert
         visible={Boolean(networkFallbackAlert)}
         type="error"

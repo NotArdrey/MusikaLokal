@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { WebView } from "react-native-webview";
+import { logLoadTime } from "../utils/loadTimeLogger";
 
 type InAppMediaType = "image" | "video" | "document" | "web";
 
@@ -31,6 +32,7 @@ const DOCUMENT_EXTENSIONS = [
   "rtf",
 ];
 const PREVIEWABLE_DOCUMENT_EXTENSIONS = ["pdf", "csv", "txt", "rtf"];
+let activeFeedVideoPlayers = 0;
 
 const getUrlPath = (url: string) => {
   try {
@@ -105,6 +107,24 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
       setLoading(mediaType === "image" || (mediaType === "document" && canPreviewDocument) || mediaType === "web");
     }
   }, [canPreviewDocument, mediaType, visible, uri]);
+
+  useEffect(() => {
+    if (!visible || mediaType !== "video") {
+      return;
+    }
+
+    activeFeedVideoPlayers += 1;
+    logLoadTime("FeedMedia", "video-player-mounted", {
+      activeVideoPlayers: activeFeedVideoPlayers,
+    });
+
+    return () => {
+      activeFeedVideoPlayers = Math.max(0, activeFeedVideoPlayers - 1);
+      logLoadTime("FeedMedia", "video-player-unmounted", {
+        activeVideoPlayers: activeFeedVideoPlayers,
+      });
+    };
+  }, [mediaType, visible]);
 
   if (!visible || !uri) {
     return null;
