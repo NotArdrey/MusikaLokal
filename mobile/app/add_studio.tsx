@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system/src/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
@@ -36,27 +35,6 @@ import {
   isStudioDateOverrideDateSelectable,
 } from "../src/utils/studioAvailabilityLeadTime";
 import { sanitizeStorageFileName, uploadStorageObject } from "../src/utils/storageUpload";
-
-// Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
-const base64ToUint8Array = (base64: string): Uint8Array => {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const lookup = new Uint8Array(256);
-  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
-  const b64 = base64.replace(/=/g, "");
-  const bufLen = Math.floor(b64.length * 0.75);
-  const bytes = new Uint8Array(bufLen);
-  let p = 0;
-  for (let i = 0; i < b64.length; i += 4) {
-    const e1 = lookup[b64.charCodeAt(i)];
-    const e2 = lookup[b64.charCodeAt(i + 1)];
-    const e3 = lookup[b64.charCodeAt(i + 2)];
-    const e4 = lookup[b64.charCodeAt(i + 3)];
-    if (p < bufLen) bytes[p++] = (e1 << 2) | (e2 >> 4);
-    if (p < bufLen) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
-    if (p < bufLen) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
-  }
-  return bytes;
-};
 
 // Helper function to format time input
 const formatTimeInput = (text: string): string => {
@@ -2282,16 +2260,16 @@ export default function AddStudioScreen() {
       const fileExt = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
       const fileName = `${session.user.id}/equipment/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-        encoding: FileSystem.EncodingType.Base64,
+      const { data, error } = await uploadStorageObject({
+        bucket: "listings",
+        path: fileName,
+        contentType: `image/${fileExt}`,
+        upsert: false,
+        uri: asset.uri,
+        body: typeof Blob !== "undefined" && (asset as any)?.file instanceof Blob
+          ? (asset as any).file
+          : undefined,
       });
-      const bytes = base64ToUint8Array(base64);
-      const { data, error } = await supabase.storage
-        .from("listings")
-        .upload(fileName, bytes, {
-          contentType: `image/${fileExt}`,
-          upsert: false,
-        });
 
       if (error) {
         throw error;

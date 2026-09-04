@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system/src/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -38,27 +37,6 @@ import {
     isStudioDateOverrideDateSelectable,
 } from "../src/utils/studioAvailabilityLeadTime";
 import { sanitizeStorageFileName, uploadStorageObject } from "../src/utils/storageUpload";
-
-// Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
-const base64ToUint8Array = (base64: string): Uint8Array => {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const lookup = new Uint8Array(256);
-  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
-  const b64 = base64.replace(/=/g, "");
-  const bufLen = Math.floor(b64.length * 0.75);
-  const bytes = new Uint8Array(bufLen);
-  let p = 0;
-  for (let i = 0; i < b64.length; i += 4) {
-    const e1 = lookup[b64.charCodeAt(i)];
-    const e2 = lookup[b64.charCodeAt(i + 1)];
-    const e3 = lookup[b64.charCodeAt(i + 2)];
-    const e4 = lookup[b64.charCodeAt(i + 3)];
-    if (p < bufLen) bytes[p++] = (e1 << 2) | (e2 >> 4);
-    if (p < bufLen) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
-    if (p < bufLen) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
-  }
-  return bytes;
-};
 
 import { useLocalSearchParams } from "expo-router";
 import { supabase } from "../lib/supabase";
@@ -3891,7 +3869,7 @@ export default function EditStudioScreen() {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
         quality: 0.8,
-        base64: Platform.OS !== 'web',
+        base64: false,
       });
 
       if (result.canceled || !result.assets || result.assets.length === 0)
@@ -3903,38 +3881,23 @@ export default function EditStudioScreen() {
       const fileName = `${session.user.id}/equipment/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
       const contentType = `image/${fileExt}`;
 
-      if (Platform.OS === 'web') {
-        // On web, asset.uri is a blob URI, which can be fetched and converted to a blob
-        const response = await fetch(asset.uri);
-        const blob = await response.blob();
-        const { data, error } = await supabase.storage
-          .from("listings")
-          .upload(fileName, blob, { contentType, upsert: false });
+      const { data, error } = await uploadStorageObject({
+        bucket: "listings",
+        path: fileName,
+        contentType,
+        upsert: false,
+        uri: asset.uri,
+        body: typeof Blob !== "undefined" && (asset as any)?.file instanceof Blob
+          ? (asset as any).file
+          : undefined,
+      });
 
-        if (error) throw error;
+      if (error) throw error;
 
-        const { data: urlData } = supabase.storage
-          .from("listings")
-          .getPublicUrl(data.path);
-        setEquipmentForm({ ...equipmentForm, image: urlData.publicUrl });
-
-      } else {
-        // On native, use the base64 string
-        if (!asset.base64) {
-          throw new Error("Image base64 data is missing on native platform.");
-        }
-        const bytes = base64ToUint8Array(asset.base64);
-        const { data, error } = await supabase.storage
-          .from("listings")
-          .upload(fileName, bytes, { contentType, upsert: false });
-
-        if (error) throw error;
-
-        const { data: urlData } = supabase.storage
-          .from("listings")
-          .getPublicUrl(data.path);
-        setEquipmentForm({ ...equipmentForm, image: urlData.publicUrl });
-      }
+      const { data: urlData } = supabase.storage
+        .from("listings")
+        .getPublicUrl(data.path);
+      setEquipmentForm({ ...equipmentForm, image: urlData.publicUrl });
     } catch (error) {
       console.error("Error uploading equipment image:", error);
       showAlert("warning", "Upload Failed", "Failed to upload image. Please try again.");

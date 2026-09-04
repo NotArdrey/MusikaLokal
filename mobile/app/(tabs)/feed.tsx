@@ -272,7 +272,6 @@ type PostComposerMedia = {
   width?: number | null;
   height?: number | null;
   duration_seconds?: number | null;
-  base64?: string;
   is_cover: boolean;
   thumbnailChoices: PostComposerThumbnail[];
   selectedThumbnailIndex: number;
@@ -714,7 +713,6 @@ const preparePostComposerMedia = async (asset: any): Promise<PostComposerMedia> 
     is_cover: false,
     thumbnailChoices: [],
     selectedThumbnailIndex: 0,
-    base64,
     safetyMetadata: { reason: screeningSummary.reason || null },
   };
 };
@@ -5727,11 +5725,8 @@ export default function FeedScreen() {
 
       const stamp = `${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`;
       const storagePath = `${userId}/posts/${stamp}.${item.ext}`;
-      const bytes = item.media_type === "image"
-        ? base64ToUint8Array(item.base64 || await FileSystem.readAsStringAsync(item.uri, { encoding: "base64" }))
-        : undefined;
 
-      const uploadResult = await uploadPostMediaFile(item.uri, storagePath, item.mime_type, bytes);
+      const uploadResult = await uploadPostMediaFile(item.uri, storagePath, item.mime_type);
       if (uploadResult.error) throw uploadResult.error;
 
       let thumbnailPath: string | null = null;

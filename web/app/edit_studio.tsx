@@ -36,6 +36,7 @@ import {
     getStudioDateOverrideLeadTimeError,
     isStudioDateOverrideDateSelectable,
 } from "../src/utils/studioAvailabilityLeadTime";
+import { uploadStorageObject } from "../src/utils/storageUpload";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
 const base64ToUint8Array = (base64: string): Uint8Array => {
@@ -4135,16 +4136,16 @@ export default function EditStudioScreen() {
       const fileExt = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
       const fileName = `${session.user.id}/equipment/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-        encoding: FileSystem.EncodingType.Base64,
+      const { data, error } = await uploadStorageObject({
+        bucket: "listings",
+        path: fileName,
+        contentType: `image/${fileExt}`,
+        upsert: false,
+        uri: asset.uri,
+        body: typeof Blob !== "undefined" && (asset as any)?.file instanceof Blob
+          ? (asset as any).file
+          : undefined,
       });
-      const bytes = base64ToUint8Array(base64);
-      const { data, error } = await supabase.storage
-        .from("listings")
-        .upload(fileName, bytes, {
-          contentType: `image/${fileExt}`,
-          upsert: false,
-        });
 
       if (error) {
         throw error;

@@ -508,6 +508,7 @@ const FEED_PAGE_SIZE = 20;
 const AI_CARD_LIMIT = 12;
 const TALENT_CARD_LIMIT = 80;
 const MAX_FEED_HEADER_NAME_LENGTH = 26;
+const MAX_CONCURRENT_POST_MEDIA_UPLOADS = 3;
 const PENDING_REOPEN_LISTING_STORAGE_KEY = "pending_reopen_listing_id";
 const PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY = "pending_reopen_listing_type";
 const SOCIAL_MEDIA_ASPECT_RATIO = 16 / 9;
@@ -2525,24 +2526,28 @@ export default function FeedScreen() {
       }[] = [];
 
       if (selectedMedia.length > 0 && userId) {
-        for (const item of selectedMedia) {
-          const ext = (item.file.name.split(".").pop() || "bin").toLowerCase();
-          const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext}`;
-          const path = `${userId}/posts/${filename}`;
-          const { error: upErr } = await supabase.storage
-            .from("post-media")
-            .upload(path, item.file, { contentType: item.file.type, upsert: false });
-          if (upErr) throw upErr;
-          uploadedMedia.push({
-            storage_path: path,
-            media_type: item.file.type.startsWith("video") ? "video" : "image",
-            mime_type: item.file.type,
-            is_cover: uploadedMedia.length === 0,
-            safety_status: "passed",
-            safety_context: "social_post_media",
-            safety_checked_at: new Date().toISOString(),
-            safety_metadata: { client_screened: false },
-          });
+        for (let start = 0; start < selectedMedia.length; start += MAX_CONCURRENT_POST_MEDIA_UPLOADS) {
+          const batch = selectedMedia.slice(start, start + MAX_CONCURRENT_POST_MEDIA_UPLOADS);
+          const batchUploads = await Promise.all(batch.map(async (item, offset) => {
+            const ext = (item.file.name.split(".").pop() || "bin").toLowerCase();
+            const filename = `${Date.now()}-${start + offset}-${Math.random().toString(36).slice(2, 9)}.${ext}`;
+            const path = `${userId}/posts/${filename}`;
+            const { error: upErr } = await supabase.storage
+              .from("post-media")
+              .upload(path, item.file, { contentType: item.file.type, upsert: false });
+            if (upErr) throw upErr;
+            return {
+              storage_path: path,
+              media_type: item.file.type.startsWith("video") ? "video" as const : "image" as const,
+              mime_type: item.file.type,
+              is_cover: start + offset === 0,
+              safety_status: "passed" as const,
+              safety_context: "social_post_media",
+              safety_checked_at: new Date().toISOString(),
+              safety_metadata: { client_screened: false },
+            };
+          }));
+          uploadedMedia.push(...batchUploads);
         }
       }
 
