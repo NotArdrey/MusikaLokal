@@ -7,9 +7,11 @@ import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 import { screenUploadsWithAiDecisions } from '../services/uploadSafetyScreen';
 import { createE2EImageFixtureUrls, isE2EFixtureMode } from '../utils/e2eFixtures';
+import { uploadStorageObject } from '../utils/storageUpload';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
+const MAX_CONCURRENT_IMAGE_UPLOADS = 3;
 
 const sanitizeExtension = (rawExt?: string | null): string => {
   const cleaned = (rawExt || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -55,34 +57,6 @@ const estimateBase64Bytes = (base64: string): number => {
   return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
 };
 
-const base64ToUint8Array = (base64: string): Uint8Array => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  const lookup = new Uint8Array(256);
-  for (let i = 0; i < chars.length; i += 1) {
-    lookup[chars.charCodeAt(i)] = i;
-  }
-
-  let bufferLength = base64.length * 0.75;
-  if (base64[base64.length - 1] === '=') bufferLength -= 1;
-  if (base64[base64.length - 2] === '=') bufferLength -= 1;
-
-  const bytes = new Uint8Array(Math.floor(bufferLength));
-  let p = 0;
-
-  for (let i = 0; i < base64.length; i += 4) {
-    const e1 = lookup[base64.charCodeAt(i)];
-    const e2 = lookup[base64.charCodeAt(i + 1)];
-    const e3 = lookup[base64.charCodeAt(i + 2)];
-    const e4 = lookup[base64.charCodeAt(i + 3)];
-
-    if (p < bytes.length) bytes[p++] = (e1 << 2) | (e2 >> 4);
-    if (p < bytes.length) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
-    if (p < bytes.length) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
-  }
-
-  return bytes;
-};
-
 const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
   const bytes = new Uint8Array(buffer);
   const chunkSize = 0x8000;
@@ -96,6 +70,21 @@ const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
   return btoa(binary);
 };
 
+const blobToDataUrl = async (blob: Blob): Promise<string> => {
+  if (typeof FileReader === 'undefined') {
+    return `data:${blob.type || 'application/octet-stream'};base64,${arrayBufferToBase64(await blob.arrayBuffer())}`;
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string'
+      ? resolve(reader.result)
+      : reject(new Error('Could not read the selected image.'));
+    reader.onerror = () => reject(reader.error || new Error('Could not read the selected image.'));
+    reader.readAsDataURL(blob);
+  });
+};
+
 interface PreparedImageUpload {
   asset: ImagePicker.ImagePickerAsset;
   originalName: string;
@@ -103,7 +92,7 @@ interface PreparedImageUpload {
   mimeType: string;
   size: number;
   contentDataUrl: string;
-  uploadBody: ArrayBuffer | Blob | Uint8Array;
+  uploadBody?: Blob;
 }
 
 interface SkippedImageFeedback {
@@ -141,21 +130,22 @@ const prepareImageForUpload = async (
   const extension = getExtensionFromName(originalName || fallbackName);
   const mimeType = resolveMimeType(asset, extension);
   let base64 = '';
+  let contentDataUrl = '';
   let size = typeof (asset as any)?.fileSize === 'number' ? (asset as any).fileSize : 0;
-  let uploadBody: ArrayBuffer | Blob | Uint8Array;
+  let uploadBody: Blob | undefined;
 
   const webFile = Platform.OS === 'web' ? (asset as any)?.file : null;
   if (typeof Blob !== 'undefined' && webFile instanceof Blob) {
-    const arrayBuffer = await webFile.arrayBuffer();
-    base64 = arrayBufferToBase64(arrayBuffer);
-    size = webFile.size || arrayBuffer.byteLength;
+    contentDataUrl = await blobToDataUrl(webFile);
+    base64 = contentDataUrl.split(',')[1] || '';
+    size = webFile.size || estimateBase64Bytes(base64);
     uploadBody = webFile;
   } else {
     base64 = await FileSystem.readAsStringAsync(asset.uri, {
       encoding: 'base64',
     });
     size = size || estimateBase64Bytes(base64);
-    uploadBody = base64ToUint8Array(base64);
+    contentDataUrl = `data:${mimeType};base64,${base64}`;
   }
 
   if (!base64 || size <= 0) {
@@ -168,7 +158,7 @@ const prepareImageForUpload = async (
     extension,
     mimeType,
     size,
-    contentDataUrl: `data:${mimeType};base64,${base64}`,
+    contentDataUrl,
     uploadBody,
   };
 };
@@ -273,6 +263,7 @@ export default function ImageUploader({
         mediaTypes: 'images',
         allowsMultipleSelection: true,
         quality: 0.8,
+        selectionLimit: Math.max(1, maxImages - images.length),
       });
 
       if (result.canceled || !result.assets || result.assets.length === 0) return;
@@ -352,9 +343,8 @@ export default function ImageUploader({
       }
 
       setUploadMessage('Uploading photos...');
-      const uploadedUrls: string[] = [];
-
-      for (const item of approvedUploads) {
+      let completedUploads = 0;
+      const uploadOne = async (item: PreparedImageUpload): Promise<string> => {
         try {
           const fileName = `${userId}/${folder}/${Date.now()}_${Math.random().toString(36).substring(7)}.${item.extension}`;
 
@@ -366,12 +356,14 @@ export default function ImageUploader({
             throw new Error('File is empty');
           }
 
-          const { data, error } = await supabase.storage
-            .from(bucketName)
-            .upload(fileName, item.uploadBody, {
-              contentType: item.mimeType,
-              upsert: false 
-            });
+          const { data, error } = await uploadStorageObject({
+            bucket: bucketName,
+            path: fileName,
+            contentType: item.mimeType,
+            upsert: false,
+            uri: Platform.OS === 'web' ? undefined : item.asset.uri,
+            body: item.uploadBody,
+          });
 
           if (error) {
             console.error('❌ Upload error for file:', error.message);
@@ -388,7 +380,7 @@ export default function ImageUploader({
             }
             
             skippedImages.push({ name: item.originalName, reason: errorMsg });
-            continue;
+            return '';
           }
 
           // Get public URL
@@ -397,15 +389,26 @@ export default function ImageUploader({
             .getPublicUrl(data.path);
 
           debugLog(`✅ Upload successful: ${urlData.publicUrl}`);
-          uploadedUrls.push(urlData.publicUrl);
+          return urlData.publicUrl;
         } catch (e: any) {
           console.error('❌ Error processing image:', e.message || e);
           skippedImages.push({
             name: item.originalName,
             reason: e.message || 'Processing error',
           });
+          return '';
+        } finally {
+          completedUploads += 1;
+          setUploadMessage(`Uploading photos (${completedUploads}/${approvedUploads.length})...`);
         }
+      };
+
+      const uploadResults: string[] = [];
+      for (let index = 0; index < approvedUploads.length; index += MAX_CONCURRENT_IMAGE_UPLOADS) {
+        const batch = approvedUploads.slice(index, index + MAX_CONCURRENT_IMAGE_UPLOADS);
+        uploadResults.push(...await Promise.all(batch.map(uploadOne)));
       }
+      const uploadedUrls = uploadResults.filter(Boolean);
 
       if (uploadedUrls.length > 0) {
         onImagesChange([...images, ...uploadedUrls]);

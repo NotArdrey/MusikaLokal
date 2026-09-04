@@ -2042,69 +2042,59 @@ export default function EditGroupScreen() {
                           </TouchableOpacity>
                         </View>
                       ) : (
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            gap: 8,
-                            marginTop: 6,
-                            alignItems: "center",
-                          }}
-                        >
-                          <View style={{ width: "100%" }}>
-                            <GigPresetDropdown options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS]} selectedValues={currentInstrument ? [currentInstrument] : []} onSelect={(value) => updateMemberInstrument(index, value)} placeholder="Choose an instrument or role" />
-                          </View>
-                          <TextInput
-                            placeholder="Enter instrument (e.g., Vocals, Guitar)"
-                            placeholderTextColor={colors.textSecondary}
-                            value={currentInstrument}
-                            onChangeText={(text) =>
-                              updateMemberInstrument(index, text)
-                            }
-                            onEndEditing={(event) =>
-                              updateMemberInstrument(
-                                index,
-                                normalizeVisibleInput(event.nativeEvent.text),
-                              )
-                            }
-                            style={[
-                              styles.input,
-                              {
-                                flex: 1,
-                                backgroundColor: colors.inputBackground,
-                                borderRadius: 8,
-                                height: 40,
-                                paddingHorizontal: 12,
-                                paddingVertical: 0,
-                                textAlign: "left",
-                                color: colors.text,
-                                borderWidth: 1,
-                                borderColor: needsInstrument || needsMemberFinalization
-                                  ? "#F59E0B"
-                                  : isDark
-                                    ? "#374151"
-                                    : "#E5E7EB",
-                              },
-                            ]}
+                        <View style={styles.memberInstrumentEditor}>
+                          <GigPresetDropdown
+                            options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS]}
+                            selectedValues={currentInstrument ? [currentInstrument] : []}
+                            onSelect={(value) => updateMemberInstrument(index, value)}
+                            placeholder="Choose an instrument or role"
                           />
-                          <TouchableOpacity
-                            activeOpacity={!normalizeVisibleInput(currentInstrument) ? 1 : 0.78}
-                            onPress={() => finalizeMemberInstrument(index)}
-                            disabled={!normalizeVisibleInput(currentInstrument)}
-                            style={[
-                              styles.addMemberButton,
-                              {
-                                width: 40,
-                                height: 40,
-                                borderRadius: 8,
-                                backgroundColor: !normalizeVisibleInput(currentInstrument)
-                                  ? "#9CA3AF"
-                                  : colors.primary,
-                                opacity: !normalizeVisibleInput(currentInstrument) ? 0.6 : 1,
-                              },
-                            ]}
-                          >
-                            <Ionicons name="checkmark" size={20} color="#fff" />
-                          </TouchableOpacity>
+                          <View style={styles.memberInstrumentManualRow}>
+                            <TextInput
+                              placeholder="Enter instrument (e.g., Vocals, Guitar)"
+                              placeholderTextColor={colors.textSecondary}
+                              value={currentInstrument}
+                              onChangeText={(text) =>
+                                updateMemberInstrument(index, text)
+                              }
+                              onEndEditing={(event) =>
+                                updateMemberInstrument(
+                                  index,
+                                  normalizeVisibleInput(event.nativeEvent.text),
+                                )
+                              }
+                              style={[
+                                styles.input,
+                                styles.memberInstrumentInput,
+                                {
+                                  backgroundColor: colors.inputBackground,
+                                  color: colors.text,
+                                  borderColor: needsInstrument || needsMemberFinalization
+                                    ? "#F59E0B"
+                                    : isDark
+                                      ? "#374151"
+                                      : "#E5E7EB",
+                                },
+                              ]}
+                            />
+                            <TouchableOpacity
+                              activeOpacity={!normalizeVisibleInput(currentInstrument) ? 1 : 0.78}
+                              onPress={() => finalizeMemberInstrument(index)}
+                              disabled={!normalizeVisibleInput(currentInstrument)}
+                              style={[
+                                styles.addMemberButton,
+                                styles.memberInstrumentConfirmButton,
+                                {
+                                  backgroundColor: !normalizeVisibleInput(currentInstrument)
+                                    ? "#9CA3AF"
+                                    : colors.primary,
+                                  opacity: !normalizeVisibleInput(currentInstrument) ? 0.6 : 1,
+                                },
+                              ]}
+                            >
+                              <Ionicons name="checkmark" size={20} color="#fff" />
+                            </TouchableOpacity>
+                          </View>
                         </View>
                       )}
                       <Text
@@ -2562,9 +2552,35 @@ const styles = StyleSheet.create({
   },
   memberInfo: {
     flex: 1,
+    minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+  },
+  memberInstrumentEditor: {
+    marginTop: 6,
+    width: "100%",
+  },
+  memberInstrumentManualRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  memberInstrumentInput: {
+    flex: 1,
+    minWidth: 0,
+    height: 40,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 0,
+    textAlign: "left",
+  },
+  memberInstrumentConfirmButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    flexShrink: 0,
   },
   memberText: {
     marginRight: 8,

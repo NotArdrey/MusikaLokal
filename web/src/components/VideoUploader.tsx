@@ -276,15 +276,17 @@ const uploadVideoWithSupabaseClient = async (input: {
   bucketName: string;
   fileName: string;
   mimeType: string;
+  uploadBody?: Blob;
 }): Promise<{ path: string }> => {
-  const body =
+  const body = input.uploadBody || (
     Platform.OS === 'web'
       ? await (await fetch(input.assetUri)).arrayBuffer()
       : base64ToUint8Array(
         await FileSystem.readAsStringAsync(input.assetUri, {
           encoding: 'base64',
         }),
-      );
+      )
+  );
 
   const { data, error } = await supabase.storage
     .from(input.bucketName)
@@ -310,6 +312,7 @@ const uploadVideoFile = async (input: {
   bucketName: string;
   fileName: string;
   mimeType: string;
+  uploadBody?: Blob;
   onMessage?: (message: string) => void;
   onProgress?: (progress: number) => void;
 }): Promise<{ path: string }> => {
@@ -672,6 +675,9 @@ export default function VideoUploader({
           bucketName,
           fileName,
           mimeType,
+          uploadBody: Platform.OS === 'web' && (asset as any)?.file instanceof Blob
+            ? (asset as any).file
+            : undefined,
           onMessage: setUploadMessage,
           onProgress: setUploadProgress,
         });
@@ -687,21 +693,26 @@ export default function VideoUploader({
         if (enableReviewFrame && onReviewFrameChange) {
           try {
             setUploadMessage('Preparing representative review frames...');
-            const frameUrls: string[] = [];
-            for (const [frameIndex, timeMs] of getReviewFrameTimes(asset).entries()) {
-              try {
-                frameUrls.push(await uploadReviewFrame({
+            const frameResults = await Promise.allSettled(
+              getReviewFrameTimes(asset).map((timeMs, frameIndex) =>
+                uploadReviewFrame({
                   assetUri: asset.uri,
                   userId,
                   bucketName,
                   folder,
                   timeMs,
                   frameIndex,
-                }));
-              } catch (frameError) {
-                console.warn(`Unable to prepare AI review frame ${frameIndex + 1}:`, frameError);
+                }),
+              ),
+            );
+            frameResults.forEach((result, frameIndex) => {
+              if (result.status === 'rejected') {
+                console.warn(`Unable to prepare AI review frame ${frameIndex + 1}:`, result.reason);
               }
-            }
+            });
+            const frameUrls = frameResults
+              .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+              .map((result) => result.value);
             if (frameUrls.length === 0) throw new Error('No representative frames could be prepared.');
             onReviewFrameChange(frameUrls[0]);
             onReviewFramesChange?.(frameUrls);

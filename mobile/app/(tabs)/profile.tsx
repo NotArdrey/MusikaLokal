@@ -39,7 +39,7 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { supabase, supabaseAnonKey, supabaseUrl } from "../../lib/supabase";
+import { supabase } from "../../lib/supabase";
 import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
 import InAppMediaViewer, { getInAppMediaType } from "../../src/components/InAppMediaViewer";
 import ReportModal from "../../src/components/ReportModal";
@@ -72,6 +72,7 @@ import { getSmoothTabIndex, setSmoothTab } from "../../src/utils/smoothTabs";
 import { bottomSheetSpringConfig, motion } from "../../src/utils/motion";
 import { isFanUserRole } from "../../src/utils/roleRouting";
 import { isStaffRole } from "../../src/utils/staffAccess";
+import { uploadStorageObject } from "../../src/utils/storageUpload";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const PROFILE_CONTENT_HORIZONTAL_PADDING = 24;
@@ -86,7 +87,6 @@ const DRAWER_EDGE_GESTURE_HEADER_CLEARANCE = 96;
 const DRAWER_CLOSE_FALLBACK_MS = 520;
 const DRAWER_SPRING_CONFIG = motion.spring.overlay;
 const PENDING_REOPEN_LISTING_STORAGE_KEY = "pending_reopen_listing_id";
-const PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY = "pending_reopen_listing_type";
 const KNOWN_PROFILE_MEDIA_BUCKETS = [
   "avatars",
   "images",
@@ -663,27 +663,6 @@ const sanitizeAvatarUrl = (value: unknown): string | null => {
   return normalized;
 };
 
-// Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
-const base64ToUint8Array = (base64: string): Uint8Array => {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const lookup = new Uint8Array(256);
-  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
-  const b64 = base64.replace(/=/g, "");
-  let bufLen = Math.floor(b64.length * 0.75);
-  const bytes = new Uint8Array(bufLen);
-  let p = 0;
-  for (let i = 0; i < b64.length; i += 4) {
-    const e1 = lookup[b64.charCodeAt(i)];
-    const e2 = lookup[b64.charCodeAt(i + 1)];
-    const e3 = lookup[b64.charCodeAt(i + 2)];
-    const e4 = lookup[b64.charCodeAt(i + 3)];
-    if (p < bufLen) bytes[p++] = (e1 << 2) | (e2 >> 4);
-    if (p < bufLen) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
-    if (p < bufLen) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
-  }
-  return bytes;
-};
-
 const sanitizePortfolioExtension = (value?: string | null): string => {
   const cleaned = (value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   if (!cleaned || cleaned === "quicktime") return cleaned === "quicktime" ? "mov" : "";
@@ -967,66 +946,17 @@ const uploadPortfolioMediaFile = async (
   options: {
     fileName: string;
     mimeType: string;
-    bytes?: Uint8Array;
-    streamFile: boolean;
   },
-) => {
-  if (!options.streamFile && options.bytes) {
-    return supabase.storage
-      .from("portfolio")
-      .upload(options.fileName, options.bytes, {
-        contentType: options.mimeType,
-        upsert: true,
-      });
-  }
-
-  const {
-    data: { session },
-    error: sessionError,
-  } = await supabase.auth.getSession();
-
-  if (sessionError || !session?.access_token) {
-    throw new Error("Your session expired. Please log in again before uploading media.");
-  }
-
-  const baseUrl = supabaseUrl.endsWith("/") ? supabaseUrl.slice(0, -1) : supabaseUrl;
-  const encodedPath = options.fileName
-    .split("/")
-    .map((part) => encodeURIComponent(part))
-    .join("/");
-  const uploadUrl = `${baseUrl}/storage/v1/object/portfolio/${encodedPath}`;
-  const uploadResult = await FileSystem.uploadAsync(uploadUrl, file.uri, {
-    httpMethod: "POST",
-    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-      apikey: supabaseAnonKey,
-      "Content-Type": options.mimeType,
-      "x-upsert": "true",
-    },
-  });
-
-  if (uploadResult.status < 200 || uploadResult.status >= 300) {
-    let message = `Storage upload failed with status ${uploadResult.status}.`;
-    try {
-      const parsed = JSON.parse(uploadResult.body || "{}");
-      message = parsed?.message || parsed?.error || message;
-    } catch {
-      if (uploadResult.body) {
-        message = uploadResult.body;
-      }
-    }
-    return {
-      data: null,
-      error: new Error(message),
-    };
-  }
-
-  return {
-    data: { path: options.fileName },
-    error: null,
-  };
-};
+) => uploadStorageObject({
+  bucket: "portfolio",
+  path: options.fileName,
+  contentType: options.mimeType,
+  upsert: true,
+  uri: file.uri,
+  body: typeof Blob !== "undefined" && (file as any)?.file instanceof Blob
+    ? (file as any).file
+    : undefined,
+});
 
 const withSafetyTimeout = async (promise: Promise<void>): Promise<void> => {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -2532,31 +2462,30 @@ export default function ProfileScreen() {
     navigateBackToPreviousOrHome();
   }, [navigateBackToPreviousOrHome, params.returnListingId, params.returnToHome]);
 
-  const openBookmarkedListing = async (item: any) => {
+  const openBookmarkedListing = (item: any) => {
     const itemId = item?.id;
     if (!itemId) return;
     const listingType = getBookmarkListingTypeParam(item);
 
-    try {
-      const pendingWrites: [string, string][] = [
-        [PENDING_REOPEN_LISTING_STORAGE_KEY, itemId],
-      ];
+    if (listingType === "profile") {
+      router.push({
+        pathname: "/profile",
+        params: { userId: itemId },
+      });
+      return;
+    }
 
-      if (listingType) {
-        pendingWrites.push([PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY, listingType]);
-      }
-
-      await AsyncStorage.multiSet(pendingWrites);
-    } catch {
-      // Continue navigation even if cache write fails.
+    if (listingType === "production_team") {
+      router.push({
+        pathname: "/production_team",
+        params: { teamId: itemId },
+      });
+      return;
     }
 
     router.push({
-      pathname: "/home" as any,
-      params: {
-        reopenListingId: itemId,
-        listingType,
-      },
+      pathname: "/feed",
+      params: { reopenListingId: itemId },
     });
   };
 
@@ -2732,28 +2661,26 @@ export default function ProfileScreen() {
       });
 
       let base64: string | undefined;
-      let bytes: Uint8Array | undefined;
       if (uploadKind === "photo") {
         base64 = await FileSystem.readAsStringAsync(file.uri, { encoding: "base64" });
-        bytes = base64ToUint8Array(base64);
       }
 
       logProfileMedia("file_prepared", {
-        byteLength: bytes?.byteLength || fileSize,
+        byteLength: fileSize,
         base64Length: base64?.length || 0,
-        uploadMode: uploadKind === "photo" ? "inline_bytes" : "streamed_file",
+        uploadMode: "streamed_file",
       });
       setUploadMessage(`Checking media ${index + 1}/${selectedAssets.length}...`);
       logProfileMedia("safety_check_started", {
         fileName,
         mimeType,
-        byteLength: bytes?.byteLength || fileSize,
+        byteLength: fileSize,
       });
       await withSafetyTimeout(screenProfilePortfolioMedia(file, {
         fileExt,
         mimeType,
         uploadKind,
-        size: bytes?.byteLength || fileSize,
+        size: fileSize,
         base64,
       }));
       logProfileMedia("safety_check_passed", { fileName });
@@ -2767,8 +2694,6 @@ export default function ProfileScreen() {
       const { data: uploadData, error: uploadError } = await uploadPortfolioMediaFile(file, {
         fileName,
         mimeType,
-        bytes,
-        streamFile: uploadKind !== "photo",
       });
 
       if (uploadError) {

@@ -1503,73 +1503,63 @@ export default function AddGroupScreen() {
                                   </TouchableOpacity>
                                 </View>
                               ) : (
-                                <View
-                                  style={{
-                                    flexDirection: "row",
-                                    gap: 8,
-                                    marginTop: 6,
-                                    alignItems: "center",
-                                  }}
-                                >
-                                  <View style={{ width: "100%" }}>
-                                    <GigPresetDropdown options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS]} selectedValues={currentInstrument ? [currentInstrument] : []} onSelect={(value) => updateMemberInstrument(index, value)} placeholder="Choose an instrument or role" />
-                                  </View>
-                                  <TextInput
-                                    testID={`mobile-add-group-member-instrument-${index}`}
-                                    accessibilityLabel={`mobile-add-group-member-instrument-${index}`}
-                                    placeholder="Enter instrument (e.g., Vocals, Guitar)"
-                                    placeholderTextColor={colors.textSecondary}
-                                    value={currentInstrument}
-                                    onChangeText={(text) =>
-                                      updateMemberInstrument(index, text)
-                                    }
-                                    onEndEditing={(event) =>
-                                      updateMemberInstrument(
-                                        index,
-                                        normalizeVisibleInput(event.nativeEvent.text),
-                                      )
-                                    }
-                                    style={[
-                                      styles.textInput,
-                                      {
-                                        flex: 1,
-                                        backgroundColor: colors.inputBackground,
-                                        borderRadius: 8,
-                                        height: 40,
-                                        paddingHorizontal: 12,
-                                        paddingVertical: 0,
-                                        textAlign: "left",
-                                        color: colors.text,
-                                        borderWidth: 1,
-                                        borderColor: needsInstrument || needsMemberFinalization
-                                          ? "#F59E0B"
-                                          : isDark
-                                            ? "#374151"
-                                            : "#E5E7EB",
-                                      },
-                                    ]}
+                                <View style={styles.memberInstrumentEditor}>
+                                  <GigPresetDropdown
+                                    options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS]}
+                                    selectedValues={currentInstrument ? [currentInstrument] : []}
+                                    onSelect={(value) => updateMemberInstrument(index, value)}
+                                    placeholder="Choose an instrument or role"
                                   />
-                                  <TouchableOpacity
-                                    testID={`mobile-add-group-member-finalize-${index}`}
-                                    accessibilityLabel={`mobile-add-group-member-finalize-${index}`}
-                                    activeOpacity={!normalizeVisibleInput(currentInstrument) ? 1 : 0.78}
-                                    onPress={() => finalizeMemberInstrument(index)}
-                                    disabled={!normalizeVisibleInput(currentInstrument)}
-                                    style={[
-                                      styles.addBtn,
-                                      {
-                                        width: 40,
-                                        height: 40,
-                                        borderRadius: 8,
-                                        backgroundColor: !normalizeVisibleInput(currentInstrument)
-                                          ? "#9CA3AF"
-                                          : colors.primary,
-                                        opacity: !normalizeVisibleInput(currentInstrument) ? 0.6 : 1,
-                                      },
-                                    ]}
-                                  >
-                                    <Ionicons name="checkmark" size={20} color="#fff" />
-                                  </TouchableOpacity>
+                                  <View style={styles.memberInstrumentManualRow}>
+                                    <TextInput
+                                      testID={`mobile-add-group-member-instrument-${index}`}
+                                      accessibilityLabel={`mobile-add-group-member-instrument-${index}`}
+                                      placeholder="Enter instrument (e.g., Vocals, Guitar)"
+                                      placeholderTextColor={colors.textSecondary}
+                                      value={currentInstrument}
+                                      onChangeText={(text) =>
+                                        updateMemberInstrument(index, text)
+                                      }
+                                      onEndEditing={(event) =>
+                                        updateMemberInstrument(
+                                          index,
+                                          normalizeVisibleInput(event.nativeEvent.text),
+                                        )
+                                      }
+                                      style={[
+                                        styles.textInput,
+                                        styles.memberInstrumentInput,
+                                        {
+                                          backgroundColor: colors.inputBackground,
+                                          color: colors.text,
+                                          borderColor: needsInstrument || needsMemberFinalization
+                                            ? "#F59E0B"
+                                            : isDark
+                                              ? "#374151"
+                                              : "#E5E7EB",
+                                        },
+                                      ]}
+                                    />
+                                    <TouchableOpacity
+                                      testID={`mobile-add-group-member-finalize-${index}`}
+                                      accessibilityLabel={`mobile-add-group-member-finalize-${index}`}
+                                      activeOpacity={!normalizeVisibleInput(currentInstrument) ? 1 : 0.78}
+                                      onPress={() => finalizeMemberInstrument(index)}
+                                      disabled={!normalizeVisibleInput(currentInstrument)}
+                                      style={[
+                                        styles.addBtn,
+                                        styles.memberInstrumentConfirmButton,
+                                        {
+                                          backgroundColor: !normalizeVisibleInput(currentInstrument)
+                                            ? "#9CA3AF"
+                                            : colors.primary,
+                                          opacity: !normalizeVisibleInput(currentInstrument) ? 0.6 : 1,
+                                        },
+                                      ]}
+                                    >
+                                      <Ionicons name="checkmark" size={20} color="#fff" />
+                                    </TouchableOpacity>
+                                  </View>
                                 </View>
                               )}
                               <Text
@@ -1779,9 +1769,7 @@ export default function AddGroupScreen() {
               {showMemberStepHint && (
                 <Text
                   style={{
-                    width: "100%",
                     textAlign: "center",
-                    marginBottom: 8,
                     color: "#F59E0B",
                     fontFamily: "Poppins_500Medium",
                     fontSize: 12,
@@ -1794,60 +1782,60 @@ export default function AddGroupScreen() {
                         : "Add instruments for all members to continue."}
                 </Text>
               )}
-              <TouchableOpacity
-                testID="mobile-add-group-back-button"
-                accessibilityLabel="mobile-add-group-back-button"
-                onPress={handleBack}
-                disabled={creating}
-                activeOpacity={creating ? 1 : 0.78}
-                style={[
-                  styles.backBtn,
-                  {
-                    flex: 1,
-                    borderColor: isDark ? "#6366F1" : "#E5E7EB",
-                    backgroundColor: isDark ? "transparent" : "#fff",
-                    opacity: creating ? 0.5 : 1,
-                  },
-                ]}
-              >
-                <Text
+              <View style={styles.navigationButtonRow}>
+                <TouchableOpacity
+                  testID="mobile-add-group-back-button"
+                  accessibilityLabel="mobile-add-group-back-button"
+                  onPress={handleBack}
+                  disabled={creating}
+                  activeOpacity={creating ? 1 : 0.78}
                   style={[
-                    styles.backBtnText,
-                    { color: isDark ? "#A5B4FC" : colors.text },
+                    styles.backBtn,
+                    {
+                      borderColor: isDark ? "#6366F1" : "#E5E7EB",
+                      backgroundColor: isDark ? "transparent" : "#fff",
+                      opacity: creating ? 0.5 : 1,
+                    },
                   ]}
                 >
-                  {step === 1 ? "Cancel" : "Back"}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                testID="mobile-add-group-next-button"
-                accessibilityLabel="mobile-add-group-next-button"
-                onPress={handleNext}
-                disabled={creating || !isCurrentStepComplete}
-                activeOpacity={creating || !isCurrentStepComplete ? 1 : 0.78}
-                style={[
-                  styles.nextBtn,
-                  {
-                  backgroundColor: creating
-                    ? isDark
-                      ? "#4338CA"
-                      : "#9CA3AF"
-                    : isCurrentStepComplete
-                      ? colors.primary
-                      : colors.border,
-                    opacity: creating || !isCurrentStepComplete ? 0.6 : 1,
-                    flex: 1
-                  },
-                ]}
-              >
-                {creating ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={[styles.nextBtnText, { color: isCurrentStepComplete ? "#FFFFFF" : colors.textSecondary }]}>
-                    {step === 3 ? "Create Group" : "Next"}
+                  <Text
+                    style={[
+                      styles.backBtnText,
+                      { color: isDark ? "#A5B4FC" : colors.text },
+                    ]}
+                  >
+                    {step === 1 ? "Cancel" : "Back"}
                   </Text>
-                )}
-              </TouchableOpacity>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  testID="mobile-add-group-next-button"
+                  accessibilityLabel="mobile-add-group-next-button"
+                  onPress={handleNext}
+                  disabled={creating || !isCurrentStepComplete}
+                  activeOpacity={creating || !isCurrentStepComplete ? 1 : 0.78}
+                  style={[
+                    styles.nextBtn,
+                    {
+                      backgroundColor: creating
+                        ? isDark
+                          ? "#4338CA"
+                          : "#9CA3AF"
+                        : isCurrentStepComplete
+                          ? colors.primary
+                          : colors.border,
+                      opacity: creating || !isCurrentStepComplete ? 0.6 : 1,
+                    },
+                  ]}
+                >
+                  {creating ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={[styles.nextBtnText, { color: isCurrentStepComplete ? "#FFFFFF" : colors.textSecondary }]}>
+                      {step === 3 ? "Create Group" : "Next"}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -2113,6 +2101,32 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+    flex: 1,
+    minWidth: 0,
+  },
+  memberInstrumentEditor: {
+    marginTop: 6,
+    width: "100%",
+  },
+  memberInstrumentManualRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  memberInstrumentInput: {
+    flex: 1,
+    minWidth: 0,
+    height: 40,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 0,
+  },
+  memberInstrumentConfirmButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    flexShrink: 0,
   },
   avatarPlaceholder: {
     width: 32,
@@ -2167,9 +2181,13 @@ const styles = StyleSheet.create({
   },
   navigationButtons: {
     marginTop: 32,
+    gap: 8,
+    marginBottom: 16,
+  },
+  navigationButtonRow: {
     flexDirection: "row",
     gap: 16,
-    marginBottom: 16,
+    width: "100%",
   },
   backBtn: {
     flex: 1,
@@ -2185,6 +2203,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   nextBtn: {
+    flex: 1,
     paddingVertical: 16,
     paddingHorizontal: 24,
     borderRadius: 12,

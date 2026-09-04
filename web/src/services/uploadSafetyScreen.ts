@@ -64,6 +64,7 @@ const SAFETY_UNAVAILABLE_CACHE_TTL_MS = 5 * 60 * 1000;
 const SAFETY_OWNERSHIP_REVIEW_CACHE_TTL_MS = 30 * 1000;
 const SCREENING_FUNCTION_NAME = "upload-safety-screen";
 const MAX_CANDIDATES_PER_REQUEST = 10;
+const MAX_CONCURRENT_INLINE_SCREENINGS = 2;
 const SCREENING_UNAVAILABLE_BLOCK_MESSAGE =
   "Safety check is temporarily unavailable. Please try again in a moment.";
 const SAFETY_RATE_LIMIT_MESSAGE =
@@ -85,6 +86,25 @@ const AUDIO_COPYRIGHT_REASON_PATTERN =
 
 const memoryDecisionCache = new Map<string, CachedUploadSafetyDecision>();
 const inFlightDecisionCache = new Map<string, Promise<CachedUploadSafetyDecision>>();
+
+const forEachWithConcurrency = async <T>(
+  items: T[],
+  concurrency: number,
+  callback: (item: T) => Promise<void>,
+): Promise<void> => {
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+  const worker = async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex];
+      nextIndex += 1;
+      await callback(item);
+    }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+};
 
 const normalizeText = (value: unknown): string =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -468,13 +488,16 @@ export const screenUploadsWithAiDecisions = async (
     chunks.push(uncachedItems.slice(i, i + chunkSize));
   }
 
-  for (const chunk of chunks) {
+  await forEachWithConcurrency(
+    chunks,
+    chunkSize === 1 ? MAX_CONCURRENT_INLINE_SCREENINGS : 1,
+    async (chunk) => {
     // If only one file needs review, route through single-flight cache for efficiency.
     if (chunk.length === 1) {
       const [single] = chunk;
       const decision = await resolveDecisionForKey(single.cacheKey, single.input, contextTag);
       decisionsByKey.set(single.cacheKey, decision);
-      continue;
+      return;
     }
 
     await screenChunkWithRemoteAi(chunk, contextTag);
@@ -490,7 +513,8 @@ export const screenUploadsWithAiDecisions = async (
         ),
       );
     }
-  }
+    },
+  );
 
   return normalizedInputs.map((input) => {
     const cacheKey = getCacheKey(input);

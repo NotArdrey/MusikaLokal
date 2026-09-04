@@ -27,6 +27,7 @@ import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useTheme } from "../src/context/ThemeContext";
 import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
 import { isFanUserRole, normalizeUserRole } from "../src/utils/roleRouting";
+import { uploadStorageObject } from "../src/utils/storageUpload";
 
 
 const DISALLOWED_PROFILE_SKILLS = new Set(["producer"]);
@@ -152,8 +153,9 @@ export default function EditProfileScreen() {
   const [genreSearch, setGenreSearch] = useState("");
   const [profileRole, setProfileRole] = useState<string | null>(null);
   const [pendingAvatar, setPendingAvatar] = useState<{
-    base64: string;
     ext: string;
+    uri: string;
+    body?: Blob;
   } | null>(null);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
@@ -403,7 +405,13 @@ export default function EditProfileScreen() {
         },
         "edit_profile_avatar",
       );
-      setPendingAvatar({ base64: asset.base64, ext });
+      setPendingAvatar({
+        ext,
+        uri: asset.uri,
+        body: Platform.OS === "web" && typeof Blob !== "undefined" && (asset as any)?.file instanceof Blob
+          ? (asset as any).file
+          : undefined,
+      });
       setAvatarUrl(asset.uri);
       showAlert("info", "Photo selected", "Tap Save Profile to apply your new photo.");
     } catch (err: any) {
@@ -457,7 +465,13 @@ export default function EditProfileScreen() {
         },
         "edit_profile_avatar",
       );
-      setPendingAvatar({ base64: asset.base64, ext });
+      setPendingAvatar({
+        ext,
+        uri: asset.uri,
+        body: Platform.OS === "web" && typeof Blob !== "undefined" && (asset as any)?.file instanceof Blob
+          ? (asset as any).file
+          : undefined,
+      });
       setAvatarUrl(asset.uri);
       showAlert("info", "Photo selected", "Tap Save Profile to apply your new photo.");
     } catch (err: any) {
@@ -531,39 +545,14 @@ export default function EditProfileScreen() {
 
         const path = `${userId}/${Date.now()}.${pendingAvatar.ext}`;
         const contentType = `image/${pendingAvatar.ext === "jpg" ? "jpeg" : pendingAvatar.ext}`;
-        const base64 = pendingAvatar.base64;
-
-        const chars =
-          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        const lookup = new Uint8Array(256);
-        for (let i = 0; i < chars.length; i++) {
-          lookup[chars.charCodeAt(i)] = i;
-        }
-
-        let bufferLength = base64.length * 0.75;
-        if (base64[base64.length - 1] === "=") bufferLength--;
-        if (base64[base64.length - 2] === "=") bufferLength--;
-
-        const bytes = new Uint8Array(Math.floor(bufferLength));
-        let p = 0;
-
-        for (let i = 0; i < base64.length; i += 4) {
-          const e1 = lookup[base64.charCodeAt(i)];
-          const e2 = lookup[base64.charCodeAt(i + 1)];
-          const e3 = lookup[base64.charCodeAt(i + 2)];
-          const e4 = lookup[base64.charCodeAt(i + 3)];
-
-          if (p < bytes.length) bytes[p++] = (e1 << 2) | (e2 >> 4);
-          if (p < bytes.length) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
-          if (p < bytes.length) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
-        }
-
-        const { data, error } = await supabase.storage
-          .from("avatars")
-          .upload(path, bytes, {
-            contentType,
-            upsert: true,
-          });
+        const { data, error } = await uploadStorageObject({
+          bucket: "avatars",
+          path,
+          contentType,
+          upsert: true,
+          uri: Platform.OS === "web" ? undefined : pendingAvatar.uri,
+          body: pendingAvatar.body,
+        });
 
         if (error) {
           throw error;
