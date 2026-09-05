@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import ProfileAvatar from "./ProfileAvatar";
+import { isActiveApplication } from "../utils/gigApplicantFilters";
 
 type Colors = {
   background: string;
@@ -34,6 +35,7 @@ type Props = {
   onOpenMedia: (url: string, title: string) => void;
   onAccept: (applicationId: string) => void;
   onDecline: (applicationId: string) => void;
+  onFire?: (applicationId: string) => void;
 };
 
 const titleCase = (value: unknown) =>
@@ -128,6 +130,7 @@ export default function ApplicantDetailsModal({
   onOpenMedia,
   onAccept,
   onDecline,
+  onFire,
 }: Props) {
   const application = details || summary || {};
   const rosterProfile = application.production_roster?.roster_profile;
@@ -356,7 +359,16 @@ export default function ApplicantDetailsModal({
                 <TouchableOpacity testID="accept-applicant-details" onPress={() => onAccept(application.id)} style={[styles.actionButton, { backgroundColor: colors.primary, borderColor: colors.primary }]}>
                   <Text style={[styles.actionButtonText, { color: "#FFF" }]}>Accept</Text>
                 </TouchableOpacity>
-              </View> : <EmptyState colors={colors}>Actions are unavailable for an application with status {titleCase(application.status)}.</EmptyState>}
+              </View> : isActiveApplication(application.status) && onFire ? (
+                <TouchableOpacity
+                  testID="fire-applicant-details"
+                  accessibilityRole="button"
+                  onPress={() => onFire(application.id)}
+                  style={[styles.actionButton, { borderColor: "#EF4444" }]}
+                >
+                  <Text style={[styles.actionButtonText, { color: "#EF4444" }]}>Fire</Text>
+                </TouchableOpacity>
+              ) : <EmptyState colors={colors}>Actions are unavailable for an application with status {titleCase(application.status)}.</EmptyState>}
             </Section>
           </ScrollView>
         )}

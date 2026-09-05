@@ -43,13 +43,16 @@ import { getSmoothTabIndex, setSmoothTab, useStagedTabRows } from "../src/utils/
 import { bottomSheetSpringConfig } from "../src/utils/motion";
 import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 
+import {
+  APPLICATION_FILTERS, ApplicationFilter, filterAndSortApplications,
+  getApplicationCounts, isActiveApplication,
+} from "../src/utils/gigApplicantFilters";
+
 const { width: screenWidth } = Dimensions.get("window");
 const PORTFOLIO_ITEM_SIZE = (screenWidth - 48 - 8) / 3; // 3 columns with gaps
 const OWNER_GIG_TABS = ["About", "Applicants", "Review"];
 const VIEWER_GIG_TABS = ["About", "Review"];
 const ACCEPTED_GIG_STATUSES = ["accepted", "approved", "confirmed", "happening now", "completed"];
-type ApplicationFilter = "All" | "Pending" | "Accepted" | "Declined" | "Recommended";
-const APPLICATION_FILTERS: ApplicationFilter[] = ["All", "Pending", "Accepted", "Declined", "Recommended"];
 
 const shortenApplicantLocation = (value: unknown) => {
   const ignored = /^(philippines|central luzon|region\s+[ivx]+|\d{4,})$/i;
@@ -79,9 +82,10 @@ export default function GigDetailsScreen() {
   const [modalTitle, setModalTitle] = useState("");
   const [modalMessage, setModalMessage] = useState("");
   const [modalButtonText, setModalButtonText] = useState("");
-  const [modalAction, setModalAction] = useState<() => Promise<void> | void>(
-    () => { },
-  );
+  const [pendingAction, setPendingAction] = useState<{ applicationId: string; status: string } | null>(null);
+  const [actionReason, setActionReason] = useState("");
+  const [updatingApplication, setUpdatingApplication] = useState(false);
+  const actionInFlight = useRef(false);
 
   const [authorized, setAuthorized] = useState(false);
   const [canManageGig, setCanManageGig] = useState(false);
@@ -528,61 +532,68 @@ export default function GigDetailsScreen() {
   };
 
   const confirmAction = (applicationId: string, status: string) => {
-    setModalTitle(
-      status === "accepted" ? "Accept Application" : "Decline Application",
-    );
-    setModalMessage(
-      `Are you sure you want to ${status === "accepted" ? "accept" : "decline"} this application?`,
-    );
-    setModalButtonText(status === "accepted" ? "Accept" : "Decline");
-    setModalAction(() => async () => {
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!user || !session) return;
-
-        const { data, error } = await supabase.functions.invoke("gig-applications", {
-          body: {
-            action: "update_application_status",
-            applicationId,
-            status,
-            userId: user.id,
-          },
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        });
-        if (error) {
-          let message = error.message || "Failed to update application status";
-          const context = (error as any)?.context;
-          if (context && typeof context.json === "function") {
-            try {
-              const body = await context.json();
-              message = body?.error || body?.message || message;
-            } catch {
-              // Keep the client error message when the response body is unavailable.
-            }
-          }
-          throw new Error(message);
-        }
-        if (data?.error) throw new Error(data.error);
-
-        setApplications((currentApplications) =>
-          currentApplications.map((a) =>
-            a.id === applicationId ? { ...a, ...data, status: data?.status || status } : a,
-          ),
-        );
-        setModalVisible(false);
-      } catch (e: any) {
-        Alert.alert("Error", e?.message || "Failed to update application status");
-      }
-    });
+    if (!canManageGig || actionInFlight.current) return;
+    const application = applications.find((item) => item.id === applicationId);
+    if (status === "fired" && !isActiveApplication(application?.status)) return;
+    const actionLabel = status === "accepted" ? "Accept" : status === "fired" ? "Fire" : "Decline";
+    setPendingAction({ applicationId, status });
+    setActionReason("");
+    setModalTitle(status === "fired" ? "Fire Performer" : `${actionLabel} Application`);
+    setModalMessage(status === "fired"
+      ? "End this performer's active contract? Enter a reason. The performer will be notified."
+      : `Are you sure you want to ${actionLabel.toLowerCase()} this application?`);
+    setModalButtonText(actionLabel);
     setModalVisible(true);
+  };
+
+  const handleApplicationAction = async () => {
+    if (!pendingAction || !canManageGig || actionInFlight.current) return;
+    const { applicationId, status } = pendingAction;
+    const reason = actionReason.trim();
+    if (status === "fired" && !reason) return;
+    actionInFlight.current = true;
+    setUpdatingApplication(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Your session expired. Please sign in again.");
+      const { data, error } = await supabase.functions.invoke("gig-applications", {
+        body: {
+          action: "update_application_status",
+          applicationId,
+          status,
+          userId: session.user.id,
+          ...(status === "fired" ? { reason } : {}),
+        },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (error) {
+        let message = error.message || "Failed to update application status";
+        const context = (error as any)?.context;
+        if (context && typeof context.json === "function") {
+          try {
+            const body = await context.json();
+            message = body?.error || body?.message || message;
+          } catch {
+            // Keep the client error if the response body is unavailable.
+          }
+        }
+        throw new Error(message);
+      }
+      if (data?.error) throw new Error(data.error);
+      setApplications((current) => current.map((application) =>
+        application.id === applicationId
+          ? { ...application, ...data, status: data?.status || status }
+          : application,
+      ));
+      setModalVisible(false);
+      setPendingAction(null);
+      await fetchData(session.user.id, true);
+    } catch (error: any) {
+      Alert.alert("Couldn't Update Application", error?.message || "Please try again.");
+    } finally {
+      actionInFlight.current = false;
+      setUpdatingApplication(false);
+    }
   };
 
   const getApplicationStatusMeta = (status: unknown) => {
@@ -597,7 +608,7 @@ export default function GigDetailsScreen() {
     }
 
     if (normalizedStatus === "completed") {
-      return { label: "Completed", color: "#2563EB", backgroundColor: "#2563EB15" };
+      return { label: "Done Contract", color: "#2563EB", backgroundColor: "#2563EB15" };
     }
 
     if (normalizedStatus === "fired") {
@@ -680,34 +691,10 @@ export default function GigDetailsScreen() {
 
   const tabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
   const isInviteSubmitDisabled = sendingInvites || selectedInviteTargets.length === 0;
-  const countableApplications = applications;
-  const applicationCounts = useMemo(
-    () => countableApplications.reduce(
-      (counts, app) => {
-        const status = String(app?.status || "pending").trim().toLowerCase();
-        counts.total += 1;
-        if (status === "pending") counts.pending += 1;
-        if (status === "accepted" || status === "approved") counts.accepted += 1;
-        if (status === "rejected" || status === "declined") counts.declined += 1;
-        if (app?.ai_recommendation?.recommendation_status === "recommended") counts.recommended += 1;
-        return counts;
-      },
-      { total: 0, pending: 0, accepted: 0, declined: 0, recommended: 0 },
-    ),
-    [countableApplications],
-  );
+  const applicationCounts = useMemo(() => getApplicationCounts(applications), [applications]);
   const visibleApplications = useMemo(
-    () => countableApplications.filter((app) => {
-      const status = String(app?.status || "pending").trim().toLowerCase();
-      if (applicationFilter === "Pending") return status === "pending";
-      if (applicationFilter === "Accepted") return status === "accepted" || status === "approved";
-      if (applicationFilter === "Declined") return status === "rejected" || status === "declined";
-      if (applicationFilter === "Recommended") {
-        return app?.ai_recommendation?.recommendation_status === "recommended";
-      }
-      return true;
-    }),
-    [applicationFilter, countableApplications],
+    () => filterAndSortApplications(applications, applicationFilter),
+    [applications, applicationFilter],
   );
   const renderedApplications = useStagedTabRows(
     visibleApplications,
@@ -1406,7 +1393,7 @@ export default function GigDetailsScreen() {
                       { color: colors.textSecondary },
                     ]}
                   >
-                    APPLICANTS ({applicationCounts.total})
+                    APPLICANTS ({applicationCounts["All"]})
                   </Text>
                   {canManageGig ? (
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -1435,24 +1422,18 @@ export default function GigDetailsScreen() {
                 </View>
 
                 <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, marginBottom: 10 }}>
-                  {applicationCounts.pending} pending • {applicationCounts.accepted} accepted • {applicationCounts.declined} declined
+                  {applicationCounts["Pending"]} pending • {applicationCounts["Accepted"]} accepted • {applicationCounts["Declined"]} declined
                 </Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 14 }}>
                   {APPLICATION_FILTERS.map((filter) => {
-                    const count = filter === "All"
-                      ? applicationCounts.total
-                      : filter === "Pending"
-                        ? applicationCounts.pending
-                        : filter === "Accepted"
-                          ? applicationCounts.accepted
-                          : filter === "Declined"
-                            ? applicationCounts.declined
-                            : applicationCounts.recommended;
+                    const count = applicationCounts[filter];
                     const selected = applicationFilter === filter;
                     return (
                       <TouchableOpacity
                         key={filter}
-                        testID={`applicant-filter-${filter.toLowerCase()}`}
+                        testID={`applicant-filter-${filter.toLowerCase().replace(/ /g, "-")}`}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
                         onPress={() => setApplicationFilter(filter)}
                         style={{
                           borderWidth: 1,
@@ -1598,6 +1579,19 @@ export default function GigDetailsScreen() {
                             <Text style={styles.viewApplicantButtonText}>View Applicant</Text>
                             <Ionicons name="arrow-forward" size={17} color="#FFF" />
                           </TouchableOpacity>
+                          {canManageGig && isActiveApplication(app.status) ? (
+                            <TouchableOpacity
+                              testID={`fire-applicant-${app.id}`}
+                              accessibilityRole="button"
+                              accessibilityLabel="Fire performer"
+                              disabled={updatingApplication}
+                              onPress={() => confirmAction(app.id, "fired")}
+                              style={{ marginTop: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: "#EF4444", alignItems: "center", opacity: updatingApplication ? 0.5 : 1 }}
+                            >
+                              <Text style={{ color: "#EF4444", fontFamily: "Poppins_600SemiBold" }}>Fire</Text>
+                            </TouchableOpacity>
+                          ) : null}
+
                         </View>
                       );
                     }
@@ -1713,12 +1707,19 @@ export default function GigDetailsScreen() {
       </View>
       <Modal
         visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        onConfirm={modalAction}
+        onClose={() => { if (!actionInFlight.current) setModalVisible(false); }}
+        onConfirm={handleApplicationAction}
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}
-        danger={modalButtonText === "Decline"}
+        danger={modalButtonText === "Decline" || modalButtonText === "Fire"}
+        showInput={pendingAction?.status === "fired"}
+        inputValue={actionReason}
+        onInputChange={setActionReason}
+        inputPlaceholder="Reason for ending this contract"
+        confirmDisabled={updatingApplication || (pendingAction?.status === "fired" && !actionReason.trim())}
+        loading={updatingApplication}
+        loadingMessage="Updating application..."
       />
       <ApplicantDetailsModal
         visible={Boolean(selectedApplicantSummary)}
@@ -1737,6 +1738,10 @@ export default function GigDetailsScreen() {
         onDecline={(applicationId) => {
           closeApplicantDetails();
           confirmAction(applicationId, "rejected");
+        }}
+        onFire={(applicationId) => {
+          closeApplicantDetails();
+          confirmAction(applicationId, "fired");
         }}
       />
       <TrackedBottomSheetModal

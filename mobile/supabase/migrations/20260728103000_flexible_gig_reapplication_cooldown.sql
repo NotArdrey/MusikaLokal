@@ -1,6 +1,8 @@
 begin;
 
+-- Both views expose the cooldown column and must be recreated in this transaction.
 drop view if exists public.gigs_with_stats;
+drop view if exists public.gigs_with_verification;
 
 alter table public.gigs
   drop constraint if exists gigs_reapplication_cooldown_days_check;
@@ -18,6 +20,48 @@ alter table public.gigs
 
 comment on column public.gigs.reapplication_cooldown_days is
   'Cooldown after rejection expressed in days; fractional values support exact hours (for example, 0.5 = 12 hours). Zero allows immediate reapplication.';
+
+create view public.gigs_with_verification as
+ SELECT g.id,
+    g.organizer_id,
+    g.name,
+    g.location,
+    g.budget,
+    g.description,
+    g.event_date,
+    g.status,
+    g.latitude,
+    g.longitude,
+    g.created_at,
+    g.embedding,
+    g.rate,
+    g.contract_url,
+    g.address_verification_status,
+    g.address_verification_session_id,
+    g.address_verified_at,
+    g.verified_address,
+    g.address_verification_completed_at,
+    g.business_permit_url,
+    g.reapplication_cooldown_days,
+    g.total_slots_filled,
+    g.permit_status,
+    g.permit_reviewed_by,
+    g.permit_reviewed_at,
+    g.permit_admin_notes,
+    g.permit_rejection_reason,
+    g.permit_resubmissions_used,
+        CASE
+            WHEN (g.address_verification_status = 'APPROVED'::text) THEN true
+            ELSE false
+        END AS is_address_verified,
+    avs.extracted_address,
+    avs.extracted_name,
+    avs.issuer AS verification_issuer,
+    avs.notes AS verification_notes
+   FROM (gigs g
+     LEFT JOIN address_verification_sessions avs ON (((avs.entity_type = 'gig'::text) AND (avs.entity_id = g.id) AND (avs.status = g.address_verification_status))));
+
+grant all on public.gigs_with_verification to anon, authenticated, service_role;
 
 create view public.gigs_with_stats as
 select
@@ -78,7 +122,7 @@ group by
 comment on column public.gigs_with_stats.reapplication_cooldown_days is
   'Gig-owner configured delay before a declined applicant may reapply; fractional days preserve exact hours.';
 
-grant select on public.gigs_with_stats to anon, authenticated, service_role;
+grant all on public.gigs_with_stats to anon, authenticated, service_role;
 
 create or replace function public.can_musician_reapply(
   p_gig_id uuid,
@@ -187,5 +231,7 @@ $$;
 
 revoke all on function public.update_gig_with_cooldown_safely(uuid, jsonb, integer, text) from public;
 grant execute on function public.update_gig_with_cooldown_safely(uuid, jsonb, integer, text) to authenticated;
+
+notify pgrst, 'reload schema';
 
 commit;
