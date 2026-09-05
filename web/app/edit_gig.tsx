@@ -1,3 +1,4 @@
+import { cleanupRemovedStorageObjects } from "../src/utils/storageCleanup";
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/src/legacy";
 import { router } from "expo-router";
@@ -59,7 +60,7 @@ const base64ToUint8Array = (base64: string): Uint8Array => {
 };
 
 import { useLocalSearchParams } from "expo-router";
-import { supabase } from "../lib/supabase";
+import { supabase, supabaseUrl } from "../lib/supabase";
 import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 
 // Helper function to format time input
@@ -108,11 +109,6 @@ type EventSchedule = {
   date: string;
   start_time: string;
   end_time: string;
-};
-
-type StorageRef = {
-  bucket: string;
-  path: string;
 };
 
 const DATE_ONLY_PREFIX = /^(\d{4}-\d{2}-\d{2})/;
@@ -172,90 +168,6 @@ const normalizeEventSchedules = (items: any[]): EventSchedule[] =>
       end_time: toDisplayTimeString(item?.end_time ?? item?.end),
     }))
     .filter((item) => item.date && item.start_time && item.end_time);
-
-const parseStorageRef = (rawUrl: string): StorageRef | null => {
-  if (!rawUrl || typeof rawUrl !== "string") return null;
-  const trimmed = rawUrl.trim();
-  if (!trimmed) return null;
-
-  const safeDecode = (value: string) => {
-    try {
-      return decodeURIComponent(value || "");
-    } catch {
-      return value || "";
-    }
-  };
-
-  const parsePath = (pathname: string) => {
-    const match = pathname.match(
-      /\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/,
-    );
-    if (!match) return null;
-
-    const bucket = safeDecode(match[1] || "").trim();
-    const path = safeDecode((match[2] || "").split("?")[0] || "").trim();
-
-    if (!bucket || !path) return null;
-    return { bucket, path };
-  };
-
-  try {
-    const parsed = new URL(trimmed);
-    return parsePath(parsed.pathname);
-  } catch {
-    if (trimmed.startsWith("/storage/v1/object/")) {
-      return parsePath(trimmed);
-    }
-    return null;
-  }
-};
-
-const chunkArray = <T,>(items: T[], size: number): T[][] => {
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-  return chunks;
-};
-
-const removeStorageObjectsByUrl = async (urls: string[]) => {
-  const dedup = new Map<string, StorageRef>();
-
-  urls.forEach((url) => {
-    const parsed = parseStorageRef(url);
-    if (!parsed) return;
-    dedup.set(`${parsed.bucket}::${parsed.path}`, parsed);
-  });
-
-  const grouped = new Map<string, string[]>();
-  dedup.forEach(({ bucket, path }) => {
-    if (!grouped.has(bucket)) grouped.set(bucket, []);
-    grouped.get(bucket)!.push(path);
-  });
-
-  let deletedObjects = 0;
-  const errors: Array<{ bucket: string; message: string }> = [];
-
-  for (const [bucket, paths] of grouped.entries()) {
-    const chunks = chunkArray(paths, 100);
-    for (const pathsChunk of chunks) {
-      const { data, error } = await supabase.storage.from(bucket).remove(pathsChunk);
-
-      if (error) {
-        errors.push({ bucket, message: error.message });
-        continue;
-      }
-
-      deletedObjects += Array.isArray(data) ? data.length : 0;
-    }
-  }
-
-  return {
-    parsedObjects: dedup.size,
-    deletedObjects,
-    errors,
-  };
-};
 
 export default function EditGigScreen() {
   const { colors, isDark } = useTheme();
@@ -367,7 +279,6 @@ export default function EditGigScreen() {
   // Mock Data
   const [documents, setDocuments] = useState(["Contract.pdf", "Rider_v2.pdf"]);
   const [images, setImages] = useState<string[]>([]);
-  const [initialImages, setInitialImages] = useState<string[]>([]);
   const [thumbnailIndex, setThumbnailIndex] = useState(0);
   const [musicianType, setMusicianType] = useState<"solo" | "group" | "both">(
     "both",
@@ -417,7 +328,6 @@ export default function EditGigScreen() {
 
   // Contract state
   const [contractUrl, setContractUrl] = useState<string>("");
-  const [initialContractUrl, setInitialContractUrl] = useState<string>("");
   const [contractFileName, setContractFileName] = useState<string>("");
   const [uploadingContract, setUploadingContract] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -844,7 +754,6 @@ export default function EditGigScreen() {
       );
 
       setContractUrl(data.contract_url || "");
-      setInitialContractUrl(data.contract_url || "");
       if (data.contract_url) {
         const fileName = data.contract_url.split("/").pop() || "Contract.pdf";
         setContractFileName(decodeURIComponent(fileName));
@@ -861,7 +770,6 @@ export default function EditGigScreen() {
         console.log('🔧 setBusinessPermitFileName:', fileName);
       }
       setImages(data.images || []);
-      setInitialImages(data.images || []);
       console.log('🔧 setImages:', data.images || []);
 
       if (data.images && data.images.length > 0) {
@@ -954,8 +862,6 @@ export default function EditGigScreen() {
         return;
       }
 
-      const previousImages = [...initialImages];
-      const previousContract = initialContractUrl || "";
       const previousBusinessPermit = initialBusinessPermitUrl || "";
 
       const orderedImages = images.length > 0 && images[thumbnailIndex]
@@ -1013,6 +919,9 @@ export default function EditGigScreen() {
       };
 
       const rpcPayload = {
+        images: payload.images,
+        contract_url: payload.contract_url,
+        business_permit_url: payload.business_permit_url,
         name: payload.name,
         description: payload.description,
         location: payload.location,
@@ -1086,72 +995,6 @@ export default function EditGigScreen() {
         throw new Error(rpcResult?.message || 'Failed to update gig');
       }
 
-      const contractChanged = previousContract !== (payload.contract_url || "");
-      const businessPermitChanged =
-        previousBusinessPermit !== (payload.business_permit_url || "");
-
-      if (contractChanged || businessPermitChanged) {
-        const { error: refsError } = await supabase
-          .from("gigs")
-          .update({
-            contract_url: payload.contract_url,
-            business_permit_url: payload.business_permit_url,
-          })
-          .eq("id", gigId);
-
-        if (refsError) {
-          throw new Error(`Failed to update gig file references: ${refsError.message}`);
-        }
-      }
-
-      const { error: deleteImagesError } = await supabase
-        .from("gig_media")
-        .delete()
-        .eq("gig_id", gigId)
-        .eq("media_type", "image");
-
-      if (deleteImagesError) {
-        throw new Error(`Failed to sync gig images: ${deleteImagesError.message}`);
-      }
-
-      if (payload.images.length > 0) {
-        const { error: insertImagesError } = await supabase
-          .from("gig_media")
-          .insert(
-            payload.images.map((media_url: string, index: number) => ({
-              gig_id: gigId,
-              media_type: "image",
-              media_url,
-              sort_order: index,
-            })),
-          );
-
-        if (insertImagesError) {
-          throw new Error(`Failed to sync gig images: ${insertImagesError.message}`);
-        }
-      }
-
-      const removedUrls = [
-        ...previousImages.filter((url) => !!url && !payload.images.includes(url)),
-        ...(previousContract && previousContract !== (payload.contract_url || "")
-          ? [previousContract]
-          : []),
-        ...(previousBusinessPermit && previousBusinessPermit !== (payload.business_permit_url || "")
-          ? [previousBusinessPermit]
-          : []),
-      ];
-
-      let storageCleanupWarnings: string[] = [];
-      if (removedUrls.length > 0) {
-        const storageCleanup = await removeStorageObjectsByUrl(removedUrls);
-        if (storageCleanup.errors.length > 0) {
-          storageCleanupWarnings = storageCleanup.errors.map(
-            (item) => `${item.bucket}: ${item.message}`,
-          );
-          console.warn("Storage cleanup warnings:", storageCleanupWarnings);
-        }
-      }
-
       const shouldResetPermitReview =
         !!businessPermitUrl &&
         businessPermitUrl !== previousBusinessPermit;
@@ -1189,6 +1032,16 @@ export default function EditGigScreen() {
         if (nextPermitStatus === "resubmitted") {
           setPermitResubmissionsUsed(1);
         }
+      }
+
+      const storageCleanup = await cleanupRemovedStorageObjects(
+        supabase,
+        supabaseUrl,
+        rpcResult?.storage_cleanup?.removed_urls || [],
+      );
+      const storageCleanupWarnings = storageCleanup.errors;
+      if (storageCleanupWarnings.length > 0) {
+        console.warn("Storage cleanup warnings:", storageCleanupWarnings);
       }
 
       const reconfirmRequired = Number(rpcResult?.reconfirmation?.required_count || 0);
@@ -1230,8 +1083,6 @@ export default function EditGigScreen() {
         successMessage += `\n\n${updateNotes.join('\n')}`;
       }
 
-      setInitialImages(payload.images);
-      setInitialContractUrl(payload.contract_url || "");
       setInitialBusinessPermitUrl(payload.business_permit_url || "");
 
       console.log("✅ Gig Updated successfully");

@@ -37,7 +37,8 @@ import { useTheme } from "../src/context/ThemeContext";
 import { sanitizeStorageFileName, uploadStorageObject } from "../src/utils/storageUpload";
 
 import { useLocalSearchParams } from "expo-router";
-import { supabase } from "../lib/supabase";
+import { supabase, supabaseUrl } from "../lib/supabase";
+import { cleanupRemovedStorageObjects } from "../src/utils/storageCleanup";
 import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 
 // Helper function to format time input
@@ -970,6 +971,16 @@ export default function EditGigScreen() {
         }
       }
 
+      const storageCleanup = await cleanupRemovedStorageObjects(
+        supabase,
+        supabaseUrl,
+        rpcResult?.storage_cleanup?.removed_urls || [],
+      );
+      const storageCleanupWarnings = storageCleanup.errors;
+      if (storageCleanupWarnings.length > 0) {
+        console.warn("Storage cleanup warnings:", storageCleanupWarnings);
+      }
+
       const reconfirmRequired = Number(rpcResult?.reconfirmation?.required_count || 0);
       const systemRejectedPending = Number(rpcResult?.system_rejected_pending_count || 0);
       const softClosed = Boolean(rpcResult?.soft_closed);
@@ -1001,9 +1012,15 @@ export default function EditGigScreen() {
         updateNotes.push('Permit remains rejected because the one allowed resubmission after decline was already used.');
       }
 
+      if (storageCleanupWarnings.length > 0) {
+        updateNotes.push('Your gig was saved, but some replaced files could not be cleaned up.');
+      }
+
       if (updateNotes.length > 0) {
         successMessage += `\n\n${updateNotes.join('\n')}`;
       }
+
+      setInitialBusinessPermitUrl(payload.business_permit_url || "");
 
       showAlert("success", "Success", successMessage, [
         {

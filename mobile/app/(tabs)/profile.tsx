@@ -39,7 +39,8 @@ import Animated, {
   withSpring,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { supabase } from "../../lib/supabase";
+import { supabase, supabaseUrl } from "../../lib/supabase";
+import { cleanupRemovedStorageObjects } from "../../src/utils/storageCleanup";
 import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
 import InAppMediaViewer, { getInAppMediaType } from "../../src/components/InAppMediaViewer";
 import ReportModal from "../../src/components/ReportModal";
@@ -1041,15 +1042,6 @@ const formatSkippedProfileMediaFeedback = (items: SkippedProfileMediaFeedback[])
   return `\n\nSkipped media:\n${visibleItems}${remainingText}`;
 };
 
-const resolveStorageObjectFromPublicUrl = (url: string): { bucket: string; path: string } | null => {
-  const match = url.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
-  if (!match) return null;
-
-  return {
-    bucket: decodeURIComponent(match[1]),
-    path: decodeURIComponent(match[2].split("?")[0]),
-  };
-};
 
 export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
@@ -2556,22 +2548,9 @@ export default function ProfileScreen() {
 
       logProfileMedia("remove_db_success", { url });
 
-      const storageObject = resolveStorageObjectFromPublicUrl(url);
-      if (storageObject) {
-        const { error: storageError } = await supabase.storage
-          .from(storageObject.bucket)
-          .remove([storageObject.path]);
-
-        if (storageError) {
-          logProfileMedia("remove_storage_failed_non_blocking", {
-            ...storageObject,
-            message: storageError.message,
-          });
-        } else {
-          logProfileMedia("remove_storage_success", storageObject);
-        }
-      } else {
-        logProfileMedia("remove_storage_skipped_unrecognized_url", { url });
+      const cleanup = await cleanupRemovedStorageObjects(supabase, supabaseUrl, [url]);
+      if (cleanup.errors.length > 0) {
+        logProfileMedia("remove_storage_failed_non_blocking", { errors: cleanup.errors });
       }
 
       setProfile((prev: any) => ({
