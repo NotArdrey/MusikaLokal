@@ -1,3 +1,4 @@
+import { createUploadModerationCase, findUploadModerationCase, moderationCaseDecision, type VisualDecision } from "../_shared/uploadModeration.ts";
 // @ts-ignore
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
@@ -140,6 +141,8 @@ const COPYRIGHT_OWNERSHIP_REVIEW_REASON = "COPYRIGHT_OWNERSHIP_REVIEW";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface FileCandidate {
+  relatedType?: string;
+  relatedId?: string;
   id?: string;
   fingerprint?: string;
   fileName?: string;
@@ -150,6 +153,8 @@ interface FileCandidate {
 }
 
 type ScreeningResult = {
+  moderationCaseId?: string;
+  moderationStatus?: string;
   id: string;
   allowed: boolean;
   reason?: string;
@@ -179,7 +184,7 @@ function extractExtension(fileName: string): string {
   return cleaned.slice(dotIndex + 1);
 }
 
-function ruleBasedScreen(file: FileCandidate): { allowed: boolean; reason?: string } {
+function ruleBasedScreen(file: FileCandidate): VisualDecision {
   const ext = extractExtension(file.fileName || "");
 
   if (ext && BLOCKED_EXTENSIONS.has(ext)) {
@@ -1268,8 +1273,9 @@ Block the image ONLY if it contains one of these categories:
 Allow everything else, including ordinary selfies, profile photos, gig photos, posters, landscapes, food, screenshots, documents, and non-music images.
 Do not block an image because it lacks music, instruments, performances, artists, stages, or other musical content.
 
+Include confidence as an estimate from 0 to 1, or null when unavailable.
 Return ONLY valid JSON:
-{"allowed": true, "categories": {"sexual": false, "nudity": false, "violence": false, "gore": false, "hate_symbols": false, "illegal": false}, "reason": ""}`;
+{"allowed": true, "categories": {"sexual": false, "nudity": false, "violence": false, "gore": false, "hate_symbols": false, "illegal": false}, "confidence": null, "reason": ""}`;
 }
 
 function parseLooseBoolean(value: unknown): boolean | null {
@@ -1281,7 +1287,7 @@ function parseLooseBoolean(value: unknown): boolean | null {
   return null;
 }
 
-function parseVisualReviewDecision(raw: string | null): { allowed: boolean; reason?: string } | null {
+function parseVisualReviewDecision(raw: string | null): VisualDecision | null {
   if (!raw) return null;
 
   try {
@@ -1294,23 +1300,29 @@ function parseVisualReviewDecision(raw: string | null): { allowed: boolean; reas
       ? parsed.categories
       : {};
 
+    const evidence = {
+      categories: Object.keys(categories).filter(key => parseLooseBoolean(categories[key]) === true),
+      confidence: typeof parsed.confidence === 'number' && parsed.confidence >= 0 && parsed.confidence <= 1 ? parsed.confidence : null,
+    };
     const blockedCategory = hasBlockedCategory(categories, VISUAL_BLOCK_REASONS);
     if (blockedCategory) {
       return {
         allowed: false,
         reason: parsed?.reason || `Blocked for ${blockedCategory}.`,
+        ...evidence,
       };
     }
 
     const allowed = parseLooseBoolean(parsed?.allowed);
-    if (allowed === false && isBlockedPolicyReason(parsed?.reason)) {
+    if (allowed === false) {
       return {
         allowed: false,
         reason: typeof parsed?.reason === "string" ? parsed.reason : undefined,
+        ...evidence,
       };
     }
 
-    return { allowed: true };
+    return allowed === true ? { allowed: true } : null;
   } catch {
     return null;
   }
@@ -1320,7 +1332,7 @@ async function callOpenAiImageModeration(
   context: string,
   file: FileCandidate,
   dataUrl: string,
-): Promise<{ allowed: boolean; reason?: string }> {
+): Promise<VisualDecision> {
   const response = await fetch(OPENAI_MODERATION_API_URL, {
     method: "POST",
     headers: {
@@ -1350,7 +1362,9 @@ async function callOpenAiImageModeration(
   const result = data?.results?.[0] || null;
   const blockedReason = resolveBlockedModerationReason(result);
   if (blockedReason) {
-    return { allowed: false, reason: blockedReason };
+    const categories = Object.keys(result?.categories || {}).filter(key => result.categories[key] === true);
+    const scores = categories.map(key => result?.category_scores?.[key]).filter(value => typeof value === 'number' && value >= 0 && value <= 1);
+    return { allowed: false, reason: blockedReason, categories, confidence: scores.length ? Math.max(...scores) : null, provider: 'openai-moderation' };
   }
 
   return { allowed: true };
@@ -1359,7 +1373,7 @@ async function callOpenAiImageModeration(
 async function callOpenAiVisualReview(
   prompt: string,
   dataUrl: string,
-): Promise<{ allowed: boolean; reason?: string } | null> {
+): Promise<VisualDecision | null> {
   const response = await fetch(OPENAI_CHAT_API_URL, {
     method: "POST",
     headers: {
@@ -1394,7 +1408,7 @@ async function callOpenAiVisualReview(
 async function callGroqVisualReview(
   prompt: string,
   dataUrl: string,
-): Promise<{ allowed: boolean; reason?: string } | null> {
+): Promise<VisualDecision | null> {
   console.log("[upload-safety-screen] groq_visual_review_start", {
     model: GROQ_VISION_MODEL,
     imageBytesApprox: estimateBase64Bytes(dataUrl.split(",")[1] || ""),
@@ -1450,7 +1464,7 @@ async function callGeminiVisualReview(
   prompt: string,
   mimeType: string,
   base64: string,
-): Promise<{ allowed: boolean; reason?: string } | null> {
+): Promise<VisualDecision | null> {
   const url = `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`;
   const response = await fetch(url, {
     method: "POST",
@@ -1479,10 +1493,10 @@ async function callGeminiVisualReview(
 async function screenVisualContent(
   context: string,
   file: FileCandidate,
-): Promise<{ allowed: boolean; reason?: string }> {
+): Promise<VisualDecision> {
   const parsedImage = parseImageDataUrl(file);
   if (!parsedImage) {
-    return { allowed: true };
+    throw new Error("Media bytes could not be screened. Please select the file again.");
   }
 
   const prompt = buildVisualReviewPrompt(context, file);
@@ -1505,7 +1519,7 @@ async function screenVisualContent(
       if (visualDecision) {
         reviewed = true;
         if (!visualDecision.allowed) {
-          return visualDecision;
+          return { ...visualDecision, provider: 'openai-vision' };
         }
       }
     } catch (error) {
@@ -1523,7 +1537,7 @@ async function screenVisualContent(
       if (visualDecision) {
         reviewed = true;
         if (!visualDecision.allowed) {
-          return visualDecision;
+          return { ...visualDecision, provider: 'groq-vision' };
         }
       } else {
         providerFailures.push("Groq: no valid JSON decision returned");
@@ -1547,7 +1561,7 @@ async function screenVisualContent(
       if (visualDecision) {
         reviewed = true;
         if (!visualDecision.allowed) {
-          return visualDecision;
+          return { ...visualDecision, provider: 'gemini-vision' };
         }
       } else {
         providerFailures.push("Gemini: no valid JSON decision returned");
@@ -1565,7 +1579,7 @@ async function screenVisualContent(
     return { allowed: true };
   }
 
-  console.warn("[upload-safety-screen] visual_review_unavailable_allowing", {
+  console.warn("[upload-safety-screen] visual_review_unavailable", {
     fileName: file.fileName || "(unknown)",
     kind: file.kind || "photo",
     providerFailures,
@@ -1574,10 +1588,7 @@ async function screenVisualContent(
     hasGemini: Boolean(GEMINI_API_KEY),
   });
 
-  return {
-    allowed: true,
-    reason: "Visual safety screening is unavailable; upload allowed after rule-based checks.",
-  };
+  throw new Error("Visual safety screening is temporarily unavailable. Please try again.");
 }
 
 // ─── AI screening ─────────────────────────────────────────────────────────────
@@ -1802,7 +1813,30 @@ serve(async (req: Request) => {
       });
     }
 
-    const context = typeof body.context === "string" ? body.context : "add_edit_upload";
+    const context = typeof body.context === "string" ? body.context.slice(0, 160) : "add_edit_upload";
+    if (!supabaseAdmin) throw new Error('Moderation storage is unavailable.');
+
+    if (body.action === 'attach_moderation_evidence') {
+      const caseId = String(body.caseId || '');
+      const path = String(body.path || '');
+      const { data: entry, error } = await supabaseAdmin.from('upload_moderation_cases').select('id,user_id,media_path,status').eq('id', caseId).single();
+      if (error || !entry || entry.user_id !== user.id || entry.status !== 'pending_review') {
+        return new Response(JSON.stringify({ error: 'Moderation case unavailable.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      const folder = `${user.id}/${caseId}`;
+      const filename = path.slice(folder.length + 1);
+      if (!path.startsWith(folder + '/') || !/^original\.[a-z0-9]+$/.test(filename)) throw new Error('Invalid evidence path');
+      const { data: objects, error: storageError } = await supabaseAdmin.storage.from('moderation-quarantine').list(folder, { search: filename });
+      if (storageError || !objects?.some((object: any) => object.name === filename)) throw new Error('Evidence upload not found');
+      const { error: attachError } = await supabaseAdmin.from('upload_moderation_cases').update({ media_path: path }).eq('id', caseId).is('media_path', null);
+      if (attachError) throw attachError;
+      return new Response(JSON.stringify({ attached: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    const { data: restriction, error: restrictionError } = await supabaseAdmin.from('upload_moderation_restrictions').select('restricted_until').eq('user_id', user.id).gt('restricted_until', new Date().toISOString()).maybeSingle();
+    if (restrictionError) throw restrictionError;
+    if (restriction) {
+      return new Response(JSON.stringify({ error: `Media uploads are restricted until ${restriction.restricted_until}.` }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
     if (body.action === "link_copyright_review_media") {
       const reviewId = typeof body.reviewId === "string" ? body.reviewId.trim() : "";
@@ -1881,24 +1915,6 @@ serve(async (req: Request) => {
 
     // Step 1: Rule-based pre-screen
     const ruleResults = files.map((file) => ruleBasedScreen(file));
-    const blockedByRules = ruleResults.some((r) => !r.allowed);
-
-    // If any file is blocked by rules, skip AI entirely and return immediately
-    if (blockedByRules) {
-      const results: ScreeningResult[] = files.map((file, i) => {
-        return {
-          id: getFileId(file, i),
-          allowed: ruleResults[i].allowed,
-          reason: ruleResults[i].reason,
-        };
-      });
-
-      return new Response(JSON.stringify({ results }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 200,
-      });
-    }
-
     // Step 2: Content screening when the client provides actual media bytes.
     const hasInlineMediaContent = files.some(
       (file) => typeof file.contentDataUrl === "string" && file.contentDataUrl.trim().length > 0,
@@ -1913,12 +1929,22 @@ serve(async (req: Request) => {
         const hasContentDataUrl =
           typeof file.contentDataUrl === "string" && file.contentDataUrl.trim().length > 0;
 
+        if (!ruleResults[i].allowed) {
+          results.push({ id: fileId, ...ruleResults[i] });
+          continue;
+        }
         if (!hasContentDataUrl) {
-          results.push({ id: fileId, allowed: true });
+          results.push({ id: fileId, allowed: file.kind === 'document', reason: file.kind === 'document' ? undefined : 'Media bytes are required for safety screening. Please select the file again.' });
           continue;
         }
 
         try {
+          const isCopyright = file.kind === 'audio' || (file.kind === 'video' && context === 'gig_application_performance_video');
+          const review = !isCopyright ? await findUploadModerationCase(supabaseAdmin, user.id, context, file) : { existing: null, hash: null };
+          if (review.existing) {
+            results.push({ id: fileId, ...moderationCaseDecision(review.existing) });
+            continue;
+          }
           const decision = file.kind === "audio" ||
               (file.kind === "video" && context === "gig_application_performance_video")
             ? await screenAudioCopyright(file, {
@@ -1927,6 +1953,11 @@ serve(async (req: Request) => {
                 context,
               })
             : await screenVisualContent(context, file);
+          if (!decision.allowed && !isCopyright) {
+            const moderation = await createUploadModerationCase(supabaseAdmin, user.id, context, file, decision, review.hash);
+            results.push({ id: fileId, ...moderation });
+            continue;
+          }
           results.push({
             id: fileId,
             ...decision,
@@ -1952,12 +1983,17 @@ serve(async (req: Request) => {
 
     // Step 3: AI metadata screening for files that passed rule-based check
     const aiPrompt = buildAiPrompt(context, files);
-    const aiRaw = await callAi(aiPrompt);
+    const metadataOnlySupported = files.some(file => file.kind === "document" || file.kind === "audio");
+    const aiRaw = metadataOnlySupported ? await callAi(aiPrompt) : null;
     const aiDecisions = parseAiResults(aiRaw, files);
 
-    const results: ScreeningResult[] = files.map((file, i) => {
+    const results: ScreeningResult[] = await Promise.all(files.map(async (file, i) => {
       const fileId = getFileId(file, i);
 
+      if (!ruleResults[i].allowed) return { id: fileId, ...ruleResults[i] };
+      if (file.kind !== 'document' && file.kind !== 'audio') {
+        return { id: fileId, allowed: false, reason: 'Media bytes are required for safety screening. Please select the file again.' };
+      }
       if (!aiDecisions) {
         // AI unavailable — allow files that passed rule-based check
         return { id: fileId, allowed: true };
@@ -1969,12 +2005,16 @@ serve(async (req: Request) => {
         return { id: fileId, allowed: true };
       }
 
+      if (!aiDecision.allowed && file.kind !== 'audio') {
+        const moderation = await createUploadModerationCase(supabaseAdmin, user.id, context, file, aiDecision, null);
+        return { id: fileId, ...moderation };
+      }
       return {
         id: fileId,
         allowed: aiDecision.allowed !== false,
         reason: aiDecision.allowed === false ? aiDecision.reason : undefined,
       };
-    });
+    }));
 
     return new Response(JSON.stringify({ results }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

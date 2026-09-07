@@ -164,6 +164,8 @@ const prepareImageForUpload = async (
 };
 
 interface ImageUploaderProps {
+  relatedType?: string;
+  relatedId?: string;
   images: string[];
   onImagesChange: (images: string[]) => void;
   thumbnailIndex?: number;
@@ -183,6 +185,8 @@ type ImageUploadAlertConfig = {
 };
 
 export default function ImageUploader({
+  relatedType,
+  relatedId,
   images,
   onImagesChange,
   thumbnailIndex = 0,
@@ -315,6 +319,7 @@ export default function ImageUploader({
           uri: item.asset.uri,
           kind: 'photo' as const,
           contentDataUrl: item.contentDataUrl,
+          relatedType, relatedId,
         })),
         safetyContext,
       );

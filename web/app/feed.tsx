@@ -1,3 +1,4 @@
+import { screenVisualUpload } from "../src/services/visualUploadScreen";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
@@ -2525,6 +2526,13 @@ export default function FeedScreen() {
         safety_metadata: Record<string, unknown>;
       }[] = [];
 
+      // Screen the entire batch before any public storage upload starts.
+      for (const item of selectedMedia) {
+        const uri = URL.createObjectURL(item.file);
+        try {
+          await screenVisualUpload({ uri, name: item.file.name, mimeType: item.file.type, size: item.file.size, kind: item.file.type.startsWith('video') ? 'video' : 'photo', relatedType: 'post' }, 'social_post_media');
+        } finally { URL.revokeObjectURL(uri); }
+      }
       if (selectedMedia.length > 0 && userId) {
         for (let start = 0; start < selectedMedia.length; start += MAX_CONCURRENT_POST_MEDIA_UPLOADS) {
           const batch = selectedMedia.slice(start, start + MAX_CONCURRENT_POST_MEDIA_UPLOADS);
@@ -2544,7 +2552,7 @@ export default function FeedScreen() {
               safety_status: "passed" as const,
               safety_context: "social_post_media",
               safety_checked_at: new Date().toISOString(),
-              safety_metadata: { client_screened: false },
+              safety_metadata: { client_screened: true },
             };
           }));
           uploadedMedia.push(...batchUploads);

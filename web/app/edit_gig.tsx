@@ -1549,7 +1549,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
               Event Photos
             </Text>
-            <ImageUploader
+            <ImageUploader relatedType="gig" relatedId={Array.isArray(id) ? id[0] : id}
               images={images}
               onImagesChange={setImages}
               thumbnailIndex={thumbnailIndex}

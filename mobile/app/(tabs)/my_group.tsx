@@ -1,3 +1,4 @@
+import GigHistorySection from '../../src/components/GigHistorySection';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useState } from 'react';
@@ -494,6 +495,7 @@ export default function MyGroupScreen() {
                             );
                         })
                     )}
+                <GigHistorySection />
                 </ScrollView>
 
                 <Navbar />

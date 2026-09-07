@@ -1,3 +1,4 @@
+import { screenVisualUpload } from "../services/visualUploadScreen";
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/src/legacy';
 import * as ImagePicker from 'expo-image-picker';
@@ -541,6 +542,7 @@ export default function VideoUploader({
     try {
       const fileName = getPortfolioVideoName(url);
       const mimeType = getPortfolioVideoMimeType(url);
+      await screenVisualUpload({ uri: url, name: fileName, mimeType, kind: 'video' }, 'gig_video_content');
       let decision: UploadSafetyFileDecision | null = null;
       if (enableCopyrightScreening) {
         const screened = await screenCopyrightVideo({ uri: url, fileName, mimeType });
@@ -647,6 +649,8 @@ export default function VideoUploader({
         const mimeType = resolveVideoMimeType(asset, fileExt);
         const fileName = `${userId}/${folder}/${Date.now()}_video.${fileExt}`;
 
+        setUploadMessage('Checking video content...');
+        await screenVisualUpload({ uri: asset.uri, name: originalName, mimeType, size: fileSizeBytes || undefined, kind: 'video', durationMs: asset.duration || undefined }, 'gig_video_content');
         let copyrightDecision: UploadSafetyFileDecision | null = null;
         if (enableCopyrightScreening) {
           const screened = await screenCopyrightVideo({

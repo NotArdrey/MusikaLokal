@@ -1326,7 +1326,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                 >
                   Event Photos
                 </Text>
-                <ImageUploader
+                <ImageUploader relatedType="gig" relatedId={newGigId || undefined}
                   images={images}
                   onImagesChange={setImages}
                   thumbnailIndex={thumbnailIndex}

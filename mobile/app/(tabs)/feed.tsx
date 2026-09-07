@@ -652,6 +652,8 @@ const preparePostComposerMedia = async (asset: any): Promise<PostComposerMedia> 
         mimeType: "image/jpeg",
         size,
         uri: `${asset.uri}#frame-${index + 1}`,
+        originalUri: asset.uri,
+        originalMimeType: mimeType,
         contentDataUrl: choice.dataUrl,
         kind: "video" as const,
       })),

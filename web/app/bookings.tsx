@@ -1,3 +1,4 @@
+import GigHistorySection from '../src/components/GigHistorySection';
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -4776,6 +4777,7 @@ export default function BookingsScreen() {
               </View>
             )}
 
+          {activeTab === "History" && <GigHistorySection />}
           {loading ? (
             <View style={styles.centerContainer}>
               <Text
@@ -4806,7 +4808,7 @@ export default function BookingsScreen() {
                       ? "No pending booking requests below"
                       : activeTab === "Review"
                         ? "No reviews pending"
-                      : `No ${activeTab.toLowerCase()} bookings`}
+                      : activeTab === "History" ? "No other booking history" : `No ${activeTab.toLowerCase()} bookings`}
               </Text>
                 {userRole === "studio-owner" && activeTab === "Pending" && pendingPermitStudios.length > 0 && (
                   <Text

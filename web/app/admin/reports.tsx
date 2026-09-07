@@ -1,3 +1,4 @@
+import UploadModerationPanel from "../../src/components/UploadModerationPanel";
 ﻿
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -2089,6 +2090,7 @@ export default function AdminReportsPage() {
 
   const renderReportsManagementSection = () => (
     <View style={styles.sectionGap}>
+      <UploadModerationPanel />
       <TextInput
         testID="admin-reports-search-input"
         accessibilityLabel="admin-reports-search-input"

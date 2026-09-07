@@ -3,12 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "test:workflows": "node --test scripts/test-gig-history-upload-moderation.mjs scripts/test-upload-screening.mjs",
     "e2e:admin-crud": "playwright test -c e2e/playwright.config.ts --project=admin",
     "e2e:mobile-crud": "playwright test -c e2e/playwright.config.ts --project=mobile",
     "e2e:cross-app": "playwright test -c e2e/playwright.config.ts --project=cross-app",
     "e2e:crud-full": "playwright test -c e2e/playwright.config.ts"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@playwright/test": "^1.59.1",
     "@supabase/supabase-js": "^2.93.1",
     "@types/node": "^24.10.1",

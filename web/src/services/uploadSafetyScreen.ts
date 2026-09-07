@@ -1,10 +1,15 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { uploadStorageObject } from "../utils/storageUpload";
 import { supabase } from "../../lib/supabase";
 
 export type UploadSafetyKind = "photo" | "document" | "video" | "audio";
 
 export interface UploadSafetyFileInput {
   name: string;
+  originalUri?: string;
+  originalMimeType?: string;
+  relatedType?: string;
+  relatedId?: string;
   mimeType?: string;
   size?: number;
   uri?: string;
@@ -21,6 +26,8 @@ export interface UploadSafetyScreeningSummary {
 export type UploadSafetyCopyrightStatus = "not_required" | "pending_review" | "approved" | "declined";
 
 export interface UploadSafetyFileDecision {
+  moderationCaseId?: string | null;
+  moderationStatus?: string;
   input: UploadSafetyFileInput;
   allowed: boolean;
   reason?: string;
@@ -33,6 +40,8 @@ export interface UploadSafetyFileDecision {
 }
 
 interface CachedUploadSafetyDecision {
+  moderationCaseId?: string | null;
+  moderationStatus?: string;
   allowed: boolean;
   reason?: string;
   requiresAdminReview?: boolean;
@@ -46,6 +55,9 @@ interface CachedUploadSafetyDecision {
 }
 
 interface RemoteUploadSafetyResult {
+  moderationEvidenceAttached?: boolean;
+  moderationCaseId?: string | null;
+  moderationStatus?: string;
   id?: string;
   fingerprint?: string;
   allowed?: boolean;
@@ -58,7 +70,7 @@ interface RemoteUploadSafetyResult {
   copyrightMetadata?: Record<string, unknown>;
 }
 
-const SAFETY_CACHE_PREFIX = "upload_safety_screen:v12:";
+const SAFETY_CACHE_PREFIX = "upload_safety_screen:v13:";
 const SAFETY_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SAFETY_UNAVAILABLE_CACHE_TTL_MS = 5 * 60 * 1000;
 const SAFETY_OWNERSHIP_REVIEW_CACHE_TTL_MS = 30 * 1000;
@@ -131,8 +143,9 @@ const hashValue = (value: string): string => {
   return (hash >>> 0).toString(16);
 };
 
-const getCacheKey = (input: UploadSafetyFileInput): string => {
+const getCacheKey = (input: UploadSafetyFileInput, scope: string): string => {
   const payload = [
+    scope, input.relatedType || "", input.relatedId || "",
     input.kind,
     normalizeText(input.name),
     normalizeText(input.mimeType),
@@ -310,6 +323,33 @@ const resolveDecisionReason = (input: UploadSafetyFileInput, rawReason?: string)
   return `${input.name} was blocked by safety screening. ${reason}`;
 };
 
+const evidenceAttachments = new Map<string, Promise<void>>();
+const preserveModerationOriginal = async (input: UploadSafetyFileInput, caseId: string): Promise<void> => {
+  const uri = input.originalUri || input.uri?.replace(/#frame-\d+$/, '');
+  if (!uri || input.kind === 'audio' || input.kind === 'document') return;
+  const existing = evidenceAttachments.get(caseId);
+  if (existing) return existing;
+  const upload = (async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Please sign in again.');
+    const ext = /\.(mp4|mov|webm|m4v|avi|mpeg|jpg|jpeg|png|webp|gif|heic|heif)(?:$|[?#])/i.exec(uri)?.[1]?.toLowerCase();
+    const mime = input.originalMimeType || (input.kind === 'video'
+      ? ({ mov: 'video/quicktime', webm: 'video/webm', avi: 'video/x-msvideo', m4v: 'video/x-m4v' } as Record<string,string>)[ext || ''] || 'video/mp4'
+      : input.mimeType || 'image/jpeg');
+    const extension = ext || (input.kind === 'video' ? 'mp4' : mime.split('/')[1] || 'jpg');
+    const path = `${session.user.id}/${caseId}/original.${extension}`;
+    const { error } = await uploadStorageObject({ bucket: 'moderation-quarantine', path, contentType: mime, uri, upsert: false });
+    // A retry may find the immutable object uploaded by a previous attempt.
+    if (error && !/already exists|duplicate/i.test(error.message)) throw error;
+    const { error: attachError } = await supabase.functions.invoke(SCREENING_FUNCTION_NAME, {
+      body: { action: 'attach_moderation_evidence', caseId, path },
+    });
+    if (attachError) throw attachError;
+  })();
+  evidenceAttachments.set(caseId, upload);
+  try { await upload; } catch (error) { evidenceAttachments.delete(caseId); throw error; }
+};
+
 const screenChunkWithRemoteAi = async (
   chunk: { cacheKey: string; input: UploadSafetyFileInput }[],
   contextTag?: string,
@@ -324,11 +364,22 @@ const screenChunkWithRemoteAi = async (
         fileSize: clampSize(input.size),
         kind: input.kind,
         contentDataUrl: input.contentDataUrl || null,
+        relatedType: input.relatedType || null,
+        relatedId: input.relatedId || null,
       })),
     },
   });
 
   if (error) {
+    console.error("[UploadSafetyScreen] invoke_failed", {
+      message: error.message,
+      status: (error as any).status,
+      code: (error as any).code,
+      details: (error as any).details,
+      hint: (error as any).hint,
+      context: contextTag || "add_edit_upload",
+      fileNames: chunk.map((item) => item.input.name),
+    });
     throw new Error(SCREENING_UNAVAILABLE_BLOCK_MESSAGE);
   }
 
@@ -374,6 +425,8 @@ const screenChunkWithRemoteAi = async (
       getDecisionCacheTtlMs(allowed, reason, requiresAdminReview),
       {
         requiresAdminReview,
+        moderationCaseId: remote.moderationCaseId || null,
+        moderationStatus: remote.moderationStatus,
         publiclyAvailable: typeof remote.publiclyAvailable === "boolean"
           ? remote.publiclyAvailable
           : allowed && !requiresAdminReview,
@@ -384,6 +437,32 @@ const screenChunkWithRemoteAi = async (
       },
     );
 
+    console.log("[UploadSafetyScreen] remote_decision", {
+      context: contextTag || "add_edit_upload",
+      fileName: item.input.name,
+      kind: item.input.kind,
+      allowed,
+      requiresAdminReview,
+      publiclyAvailable: decision.publiclyAvailable,
+      copyrightStatus: decision.copyrightStatus || null,
+      copyrightReviewId: decision.copyrightReviewId || null,
+      reason: decision.reason || null,
+    });
+
+    if (remote.moderationCaseId && !allowed) {
+      decision.expiresAt = Date.now() + SAFETY_OWNERSHIP_REVIEW_CACHE_TTL_MS;
+      if (remote.moderationStatus === 'pending_review' && !remote.moderationEvidenceAttached) {
+        try {
+          await preserveModerationOriginal(item.input, remote.moderationCaseId);
+        } catch (error) {
+          // The server already retained the exact AI evidence and case. Keep the
+          // upload blocked even if the full original cannot be attached.
+          console.error('[UploadModeration] Original evidence upload failed', error);
+          decision.reason = 'Your upload is blocked and reported for review, but its original could not be saved. Please retry to attach it.';
+          decision.expiresAt = Date.now() + 1000;
+        }
+      }
+    }
     await setCachedDecision(item.cacheKey, decision);
   }
 };
@@ -394,7 +473,7 @@ const resolveDecisionForKey = async (
   contextTag?: string,
 ): Promise<CachedUploadSafetyDecision> => {
   const cached = await getCachedDecision(cacheKey);
-  if (cached) {
+  if (cached && !cached.moderationCaseId) {
     return cached;
   }
 
@@ -456,7 +535,13 @@ export const screenUploadsWithAiDecisions = async (
   inputs: UploadSafetyFileInput[],
   contextTag?: string,
 ): Promise<UploadSafetyFileDecision[]> => {
-  const normalizedInputs = inputs.filter((item) => item && typeof item.name === "string");
+  const { data: { session } } = await supabase.auth.getSession();
+  const cacheScope = `${session?.user.id || 'anonymous'}|${contextTag || 'add_edit_upload'}`;
+  const normalizedInputs = inputs.filter((item) => item && typeof item.name === "string").map(input => ({
+    ...input,
+    relatedType: input.relatedType || (/profile|avatar|cover/.test(contextTag || '') ? 'profile' : undefined),
+    relatedId: input.relatedId || (/profile|avatar|cover/.test(contextTag || '') ? session?.user.id : undefined),
+  }));
   if (normalizedInputs.length === 0) {
     return [];
   }
@@ -466,9 +551,9 @@ export const screenUploadsWithAiDecisions = async (
   const seenKeys = new Set<string>();
 
   for (const input of normalizedInputs) {
-    const cacheKey = getCacheKey(input);
+    const cacheKey = getCacheKey(input, cacheScope);
     const cached = await getCachedDecision(cacheKey);
-    if (cached) {
+    if (cached && !cached.moderationCaseId) {
       decisionsByKey.set(cacheKey, cached);
       continue;
     }
@@ -517,7 +602,7 @@ export const screenUploadsWithAiDecisions = async (
   );
 
   return normalizedInputs.map((input) => {
-    const cacheKey = getCacheKey(input);
+    const cacheKey = getCacheKey(input, cacheScope);
     const decision = decisionsByKey.get(cacheKey);
 
     return {
@@ -530,6 +615,8 @@ export const screenUploadsWithAiDecisions = async (
           : decision
             ? undefined
             : SCREENING_UNAVAILABLE_BLOCK_MESSAGE,
+      moderationCaseId: decision?.moderationCaseId || null,
+      moderationStatus: decision?.moderationStatus,
       requiresAdminReview: Boolean(decision?.requiresAdminReview),
       publiclyAvailable: typeof decision?.publiclyAvailable === "boolean"
         ? decision.publiclyAvailable
@@ -547,6 +634,14 @@ export const ensureUploadPassesSafetyScreening = async (
   contextTag?: string,
 ): Promise<void> => {
   const summary = await screenUploadsWithAi([input], contextTag);
+  console.log("[UploadSafetyScreen] summary", {
+    context: contextTag || "add_edit_upload",
+    fileName: input.name,
+    kind: input.kind,
+    allowed: summary.allowed,
+    blockedCount: summary.blockedCount,
+    reason: summary.reason || null,
+  });
   if (!summary.allowed) {
     throw new Error(summary.reason || "Upload blocked by safety screening.");
   }

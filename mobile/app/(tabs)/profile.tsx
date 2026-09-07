@@ -916,6 +916,8 @@ const screenProfilePortfolioMedia = async (
           mimeType: options.mimeType,
           size: options.size,
           uri: `${file.uri}#frame-${index + 1}`,
+          originalUri: file.uri,
+          originalMimeType: options.mimeType,
           contentDataUrl,
           kind: "video" as const,
         }))
@@ -1714,6 +1716,7 @@ export default function ProfileScreen() {
   }, [currentUserId, profile?.full_name, profile?.id]);
 
   // Refresh profile data every time the screen comes into focus
+  const displayedProfileIdRef = useRef<string | null>(null);
   const fetchProfile = useCallback(async (
     options: { showLoading?: boolean; force?: boolean } = {},
   ) => {
@@ -1795,7 +1798,6 @@ export default function ProfileScreen() {
       profileFetchInFlightRef.current = targetId;
       const shouldApplyFetchResult = () => profileFetchRequestIdRef.current === requestId;
 
-
       // Check ownership
       const ownership = resolvedCurrentUserId && targetId === resolvedCurrentUserId;
       if (!shouldApplyFetchResult()) return;
@@ -1825,7 +1827,7 @@ export default function ProfileScreen() {
         return "upcoming";
       };
 
-      const [profileStatsResult, profileResult] = await Promise.all([
+      const [profileStatsResult, profileResult, skillsResult, genresResult, portfolioResult] = await Promise.all([
         supabase
           .from("profiles_with_stats")
           .select("*")
@@ -1836,6 +1838,20 @@ export default function ProfileScreen() {
           .select("*")
           .eq("id", targetId)
           .maybeSingle(),
+
+        supabase
+          .from("profile_skills")
+          .select("skill")
+          .eq("profile_id", targetId),
+        supabase
+          .from("profile_genres")
+          .select("genre")
+          .eq("profile_id", targetId),
+        supabase
+          .from("profile_portfolio_urls")
+          .select("portfolio_url, sort_order")
+          .eq("profile_id", targetId)
+          .order("sort_order", { ascending: true }),
       ]);
       const profileStatsData = profileStatsResult.data;
       const { data: profileData, error: profileError } = profileResult;
@@ -1860,6 +1876,32 @@ export default function ProfileScreen() {
         done: [],
       };
 
+      const normalizedAvatarUrl =
+        sanitizeAvatarUrl(profileData?.avatar_url) ||
+        sanitizeAvatarUrl(profileStatsData?.avatar_url);
+
+      const nextProfile = {
+        ...(profileStatsData || {}),
+        ...profileData,
+        avatar_url: normalizedAvatarUrl,
+        skills: (skillsResult.data || []).map((row: any) => row.skill).filter(Boolean),
+        genres: (genresResult.data || []).map((row: any) => row.genre).filter(Boolean),
+        portfolio_urls: (portfolioResult.data || [])
+          .map((row: any) => row.portfolio_url)
+          .filter(Boolean),
+      };
+      if (displayedProfileIdRef.current !== targetId) {
+        displayedProfileIdRef.current = targetId;
+        setGigStats({ active: 0, upcoming: 0, done: 0 });
+        setGigTimeline({ active: [], upcoming: [], done: [] });
+        setProfileFollowerCount(0);
+        setProfileFollowingCount(0);
+        setProfileFollowers([]);
+        setProfileFollowing([]);
+      }
+      setProfile(nextProfile);
+      setLoading(false);
+      // Secondary sections hydrate after the visible profile is ready.
       if (profileData.role === "musician") {
         const { data: ownedGroups } = await supabase
           .from("groups")
@@ -1933,39 +1975,7 @@ export default function ProfileScreen() {
         setGigTimeline(nextGigTimeline);
       }
 
-      const [skillsResult, genresResult, portfolioResult] = await Promise.all([
-        supabase
-          .from("profile_skills")
-          .select("skill")
-          .eq("profile_id", targetId),
-        supabase
-          .from("profile_genres")
-          .select("genre")
-          .eq("profile_id", targetId),
-        supabase
-          .from("profile_portfolio_urls")
-          .select("portfolio_url, sort_order")
-          .eq("profile_id", targetId)
-          .order("sort_order", { ascending: true }),
-      ]);
-
       if (!shouldApplyFetchResult()) return;
-
-      const normalizedAvatarUrl =
-        sanitizeAvatarUrl(profileData?.avatar_url) ||
-        sanitizeAvatarUrl(profileStatsData?.avatar_url);
-
-      const nextProfile = {
-        ...(profileStatsData || {}),
-        ...profileData,
-        avatar_url: normalizedAvatarUrl,
-        skills: (skillsResult.data || []).map((row: any) => row.skill).filter(Boolean),
-        genres: (genresResult.data || []).map((row: any) => row.genre).filter(Boolean),
-        portfolio_urls: (portfolioResult.data || [])
-          .map((row: any) => row.portfolio_url)
-          .filter(Boolean),
-      };
-      setProfile(nextProfile);
 
       const fallbackFollowerCount = Number(
         profileStatsData?.followers_count ??
@@ -1978,13 +1988,11 @@ export default function ProfileScreen() {
         ? Math.max(0, Math.floor(fallbackFollowerCount))
         : 0;
       let nextProfileFollowingCount = 0;
-      let nextProfileFollowers: ProfileConnectionItem[] = [];
-      let nextProfileFollowing: ProfileConnectionItem[] = [];
+      const nextProfileFollowers: ProfileConnectionItem[] = [];
+      const nextProfileFollowing: ProfileConnectionItem[] = [];
       setProfileFollowerCount(nextProfileFollowerCount);
       setProfileFollowingCount(nextProfileFollowingCount);
-      setProfileFollowers(nextProfileFollowers);
-      setProfileFollowing(nextProfileFollowing);
-      setLoadingProfileFollowers(!isGuest);
+
 
       try {
         const [followerCountResult, followingCountResult] = await Promise.all([
@@ -2012,93 +2020,6 @@ export default function ProfileScreen() {
         }
       } catch {
         // Keep fallback counts when follows queries are unavailable.
-      }
-
-      if (!isGuest) {
-        try {
-          const [followingResult, followersResult] = await Promise.all([
-            supabase.functions.invoke("manage-social-feed", {
-              body: {
-                action: "get_following",
-                target_user_id: targetId,
-              },
-            }),
-            supabase.functions.invoke("manage-social-feed", {
-              body: {
-                action: "get_followers",
-                target_user_id: targetId,
-                target_type: "profile",
-              },
-            }),
-          ]);
-          const followingResponse = followingResult.data;
-          const followingError = followingResult.error;
-          const followersResponse = followersResult.data;
-          const followersError = followersResult.error;
-
-          if (!shouldApplyFetchResult()) return;
-
-          if (!followingError && Array.isArray(followingResponse?.data)) {
-            nextProfileFollowingCount = followingResponse.data.length;
-            setProfileFollowingCount(nextProfileFollowingCount);
-            nextProfileFollowing = uniqueConnectionItems(
-              followingResponse.data
-                .map(normalizeFollowingProfile)
-                .filter((item: ProfileConnectionItem | null): item is ProfileConnectionItem => Boolean(item)),
-            );
-
-            if (followingResponse.data.length > 0 && nextProfileFollowing.length === 0) {
-              nextProfileFollowing = await fetchProfileFollowingDirect(targetId);
-            }
-
-            if (!shouldApplyFetchResult()) return;
-            setProfileFollowing(nextProfileFollowing);
-          } else {
-            nextProfileFollowing = await fetchProfileFollowingDirect(targetId);
-            if (!shouldApplyFetchResult()) return;
-            nextProfileFollowingCount = Math.max(nextProfileFollowingCount, nextProfileFollowing.length);
-            setProfileFollowingCount(nextProfileFollowingCount);
-            setProfileFollowing(nextProfileFollowing);
-          }
-
-          if (followersError) {
-            nextProfileFollowers = await fetchProfileFollowersDirect(targetId);
-            if (!shouldApplyFetchResult()) return;
-          } else {
-            const seenFollowerIds = new Set<string>();
-            nextProfileFollowers = (Array.isArray(followersResponse?.data) ? followersResponse.data : [])
-              .map(normalizeFollowerProfile)
-              .filter((item: ProfileConnectionItem | null): item is ProfileConnectionItem => {
-                if (!item || seenFollowerIds.has(item.id)) {
-                  return false;
-                }
-                seenFollowerIds.add(item.id);
-                return true;
-              });
-          }
-
-          if (
-            Array.isArray(followersResponse?.data) &&
-            followersResponse.data.length > 0 &&
-            nextProfileFollowers.length === 0
-          ) {
-            nextProfileFollowers = await fetchProfileFollowersDirect(targetId);
-            if (!shouldApplyFetchResult()) return;
-          }
-
-          setProfileFollowers(nextProfileFollowers);
-          nextProfileFollowerCount = Math.max(nextProfileFollowerCount, nextProfileFollowers.length);
-          setProfileFollowerCount(nextProfileFollowerCount);
-        } catch {
-          // Counts still render when the follower list endpoint is unavailable.
-        } finally {
-          if (shouldApplyFetchResult()) {
-            setLoadingProfileFollowers(false);
-          }
-        }
-      } else {
-        if (!shouldApplyFetchResult()) return;
-        setLoadingProfileFollowers(false);
       }
 
       if (!shouldApplyFetchResult()) return;
@@ -2130,7 +2051,7 @@ export default function ProfileScreen() {
       }
     } catch (e) {
     } finally {
-      if (targetIdForRequest && profileFetchInFlightRef.current === targetIdForRequest) {
+      if (!skippedDuplicateFetch && profileFetchRequestIdRef.current === requestId && targetIdForRequest && profileFetchInFlightRef.current === targetIdForRequest) {
         profileFetchInFlightRef.current = null;
       }
       if (!skippedDuplicateFetch && (!requestId || profileFetchRequestIdRef.current === requestId)) {
@@ -2210,6 +2131,24 @@ export default function ProfileScreen() {
       }
     }, [authLoading, currentUserId, fetchProfile, normalizedParamUserId, normalizedRefresh]),
   );
+
+  useEffect(() => {
+    const targetId = normalizedParamUserId || currentUserId;
+    if (!followListModal || !targetId || isGuest) return;
+    let active = true;
+    setLoadingProfileFollowers(true);
+    const request = followListModal === 'following'
+      ? fetchProfileFollowingDirect(targetId)
+      : fetchProfileFollowersDirect(targetId);
+    void request.then(items => {
+      if (!active) return;
+      if (followListModal === 'following') setProfileFollowing(items);
+      else setProfileFollowers(items);
+    }).catch(() => {
+      if (active) emitToast({ type: 'error', title: 'Could not load connections', message: 'Please close this list and try again.' });
+    }).finally(() => { if (active) setLoadingProfileFollowers(false); });
+    return () => { active = false; };
+  }, [followListModal, currentUserId, normalizedParamUserId, isGuest]);
 
   const MENU_ITEMS = [
     { label: "Edit Profile", icon: "person-outline", route: "/edit_profile" },

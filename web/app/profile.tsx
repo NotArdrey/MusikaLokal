@@ -938,6 +938,8 @@ const screenProfilePortfolioMedia = async (
           mimeType: options.mimeType,
           size: options.size,
           uri: `${file.uri}#frame-${index + 1}`,
+          originalUri: file.uri,
+          originalMimeType: options.mimeType,
           contentDataUrl,
           kind: "video" as const,
         }))
@@ -1645,9 +1647,14 @@ export default function ProfileScreen() {
     }, [params.userId, params.refresh, authLoading, currentUserId, isGuest]),
   );
 
+  const displayedProfileIdRef = useRef<string | null>(null);
+  const profileFetchRequestIdRef = useRef(0);
+  useEffect(() => () => { profileFetchRequestIdRef.current++; }, [normalizedParamUserId, currentUserId]);
   async function fetchProfile() {
+    const requestId = ++profileFetchRequestIdRef.current;
+    const shouldApplyFetchResult = () => profileFetchRequestIdRef.current === requestId;
     try {
-      setLoading(true);
+      setLoading(!profile || profile.id !== (normalizedParamUserId || currentUserId));
       // Determine target ID: param OR current user
       // Handle case where userId might be an array
       const paramUserId = normalizedParamUserId;
@@ -1751,17 +1758,27 @@ export default function ProfileScreen() {
         return "upcoming";
       };
 
-      const { data: profileStatsData } = await supabase
-        .from("profiles_with_stats")
-        .select("*")
-        .eq("id", targetId)
-        .maybeSingle();
+      const [profileStatsResult, profileResult, skillsResult, genresResult, portfolioResult] = await Promise.all([
+        supabase.from('profiles_with_stats').select('*').eq('id', targetId).maybeSingle(),
+        supabase.from('profiles').select('*').eq('id', targetId).maybeSingle(),
 
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", targetId)
-        .maybeSingle();
+        supabase
+          .from("profile_skills")
+          .select("skill")
+          .eq("profile_id", targetId),
+        supabase
+          .from("profile_genres")
+          .select("genre")
+          .eq("profile_id", targetId),
+        supabase
+          .from("profile_portfolio_urls")
+          .select("portfolio_url, sort_order")
+          .eq("profile_id", targetId)
+          .order("sort_order", { ascending: true }),
+      ]);
+      if (!shouldApplyFetchResult()) return;
+      const profileStatsData = profileStatsResult.data;
+      const { data: profileData, error: profileError } = profileResult;
 
       if (profileError) throw profileError;
 
@@ -1775,6 +1792,27 @@ export default function ProfileScreen() {
       );
       setSupportsGigVisibilityPreference(hasGigVisibilityPreference);
 
+      const nextProfile = {
+        ...(profileStatsData || {}),
+        ...profileData,
+        skills: (skillsResult.data || []).map((row: any) => row.skill).filter(Boolean),
+        genres: (genresResult.data || []).map((row: any) => row.genre).filter(Boolean),
+        portfolio_urls: (portfolioResult.data || [])
+          .map((row: any) => row.portfolio_url)
+          .filter(Boolean),
+      };
+      if (displayedProfileIdRef.current !== targetId) {
+        displayedProfileIdRef.current = targetId;
+        setGigStats({ active: 0, upcoming: 0, done: 0 });
+        setGigTimeline({ active: [], upcoming: [], done: [] });
+        setProfileFollowerCount(0);
+        setProfileFollowingCount(0);
+        setProfileFollowers([]);
+        setProfileFollowing([]);
+      }
+      setProfile(nextProfile);
+      setLoading(false);
+      // Secondary sections hydrate after the visible profile is ready.
       if (profileData.role === "musician") {
         const { data: ownedGroups } = await supabase
           .from("groups")
@@ -1804,6 +1842,7 @@ export default function ProfileScreen() {
             : Promise.resolve({ data: [] as any[] }),
         ]);
 
+        if (!shouldApplyFetchResult()) return;
         const stats = { active: 0, upcoming: 0, done: 0 };
         const timelineBuckets: { active: any[]; upcoming: any[]; done: any[] } = {
           active: [],
@@ -1844,34 +1883,7 @@ export default function ProfileScreen() {
         setGigTimeline({ active: [], upcoming: [], done: [] });
       }
 
-      const [skillsResult, genresResult, portfolioResult] = await Promise.all([
-        supabase
-          .from("profile_skills")
-          .select("skill")
-          .eq("profile_id", targetId),
-        supabase
-          .from("profile_genres")
-          .select("genre")
-          .eq("profile_id", targetId),
-        supabase
-          .from("profile_portfolio_urls")
-          .select("portfolio_url, sort_order")
-          .eq("profile_id", targetId)
-          .order("sort_order", { ascending: true }),
-      ]);
-
-      const nextProfile = {
-        ...(profileStatsData || {}),
-        ...profileData,
-        skills: (skillsResult.data || []).map((row: any) => row.skill).filter(Boolean),
-        genres: (genresResult.data || []).map((row: any) => row.genre).filter(Boolean),
-        portfolio_urls: (portfolioResult.data || [])
-          .map((row: any) => row.portfolio_url)
-          .filter(Boolean),
-      };
-      setProfile(nextProfile);
-
-      await fetchBookmarkedListings(targetId, !!ownership && !isGuest);
+      void fetchBookmarkedListings(targetId, !!ownership && !isGuest);
       if (isFanUserRole(nextProfile.role)) {
         setUserPlaylists([]);
         setLoadingPlaylists(false);
@@ -1884,7 +1896,7 @@ export default function ProfileScreen() {
     } catch (e) {
       console.log("Error fetching profile:", e);
     } finally {
-      setLoading(false);
+      if (shouldApplyFetchResult()) setLoading(false);
     }
   }
 

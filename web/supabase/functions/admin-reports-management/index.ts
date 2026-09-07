@@ -1,3 +1,4 @@
+import { handleUploadModerationAdmin } from "../_shared/uploadModeration.ts";
 // @ts-ignore
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
@@ -691,6 +692,13 @@ serve(async (req: Request) => {
 
     const { action, ...params } = await req.json();
 
+    if (['fetch_upload_moderation_cases', 'fetch_upload_moderation_details', 'review_upload_moderation_case'].includes(action)) {
+      try {
+        return jsonResponse(await handleUploadModerationAdmin(client, userId, action, params));
+      } catch (error) {
+        return jsonResponse({ error: error instanceof Error ? error.message : (error as any)?.message || 'Moderation request failed.' }, 400);
+      }
+    }
     if (action === "fetch_reports") {
       const statusFilter = String(params.statusFilter || "all").trim().toLowerCase();
       const escalationFilterRaw = String(params.escalationFilter || "all").trim().toLowerCase();

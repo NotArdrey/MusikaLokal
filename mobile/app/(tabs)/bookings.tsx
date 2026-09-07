@@ -1,3 +1,4 @@
+import GigHistorySection from '../../src/components/GigHistorySection';
 import { Ionicons } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect } from "@react-navigation/native";
@@ -5756,6 +5757,7 @@ export default function BookingsScreen() {
           ListHeaderComponent={
             <>
               {bookingsControlsHeader}
+              {renderActiveTab === "History" && <GigHistorySection />}
               {!loading &&
               ((userRole === "studio-owner" && renderActiveTab === "Pending") ||
                 (userRole === "venue-owner" && renderActiveTab === "Applicants")) &&
@@ -6017,7 +6019,7 @@ export default function BookingsScreen() {
                           : renderActiveTab === "Review"
                             ? "No reviews pending"
                           : renderActiveTab === "History"
-                            ? "No history yet"
+                            ? "No other booking history"
                             : isProducerActivityRole(userRole)
                               ? `No ${renderActiveTab.toLowerCase()} activity`
                               : `No ${renderActiveTab.toLowerCase()} bookings`}
