@@ -1,4 +1,3 @@
-import GigHistorySection from '../src/components/GigHistorySection';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useState } from 'react';
@@ -428,7 +427,6 @@ export default function MyGroupScreen() {
                                 })}
                             </View>
                         )}
-                        <GigHistorySection />
                     </ScrollView>
 
                     <Navbar />
@@ -449,6 +447,8 @@ export default function MyGroupScreen() {
                 onInputChange={setDeleteConfirmationText}
                 requiredInputValue={selectedName}
                 confirmDisabled={!isDeleteConfirmed || deleting}
+                loading={deleting}
+                loadingMessage="Deleting group..."
             />
             <CustomAlert
                 visible={alertVisible}

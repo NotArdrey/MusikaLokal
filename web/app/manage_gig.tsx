@@ -711,7 +711,7 @@ export default function GigDetailsScreen() {
             </View>
 
             <Text style={[styles.headerTitle, { color: colors.text }]}>
-              {gig?.name || "Loading..."}
+              {gig?.name || "Loading gig..."}
             </Text>
             <Text
               style={[styles.headerLocation, { color: colors.textSecondary }]}

@@ -169,7 +169,7 @@ export function TopToastProvider({ children }: { children: React.ReactNode }) {
       <View style={styles.root}>
         {children}
 
-        <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
+        <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
           <View pointerEvents="box-none" style={[styles.toastStack, { top: topOffset }]}>
             {toasts.map((toast, index) => (
               <ToastCard

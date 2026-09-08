@@ -2,7 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   Dimensions,
   FlatList,
   Platform,
@@ -16,6 +15,7 @@ import {
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
+import LoadingState from "../src/components/LoadingState";
 import Navbar from "../src/components/navbar";
 import ReportModal from "../src/components/ReportModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -150,7 +150,7 @@ export default function PlaylistDetailsScreen() {
     }
   };
 
-  if (loading) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Playlist" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /><Navbar /></View>;
+  if (loading) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Playlist" onBackPress={() => router.back()} /><LoadingState message="Loading playlist..." style={{ flex: 1 }} /><Navbar /></View>;
   if (!playlist) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Playlist" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Playlist not found</Text></View><Navbar /></View>;
 
   const isOwner = (playlist.owner_id || playlist.creator_id) === userId;

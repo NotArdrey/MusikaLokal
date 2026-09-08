@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
+import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
@@ -799,8 +800,7 @@ export default function AdminAuditPage() {
   if (loading || !roleResolved || initializingAudit) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading activity history...</Text>
+        <LoadingState message={initializingAudit ? "Loading audit log..." : "Checking admin access..."} />
       </View>
     );
   }

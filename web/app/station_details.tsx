@@ -15,6 +15,7 @@ import {
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
+import LoadingState from "../src/components/LoadingState";
 import Navbar from "../src/components/navbar";
 import { useRadioPlayer } from "../src/context/RadioPlayerContext";
 import { useTheme } from "../src/context/ThemeContext";
@@ -100,7 +101,7 @@ export default function StationDetailsScreen() {
     return () => clearInterval(liveClockTimer);
   }, []);
 
-  if (loading) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Station" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /><Navbar /></View>;
+  if (loading) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Station" onBackPress={() => router.back()} /><LoadingState message="Loading station..." style={{ flex: 1 }} /><Navbar /></View>;
   if (!station) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Station" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Station not found</Text></View><Navbar /></View>;
 
   const liveSlots = Array.isArray(station.live_slots) && station.live_slots.length > 0

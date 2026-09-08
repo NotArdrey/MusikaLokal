@@ -16,6 +16,7 @@ import {
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
+import LoadingState from "../src/components/LoadingState";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -603,7 +604,7 @@ export default function StationDetailsScreen() {
             </Text>
 
             {loadingPlaylists ? (
-              <ActivityIndicator size="large" color={colors.primary} style={{ marginVertical: 24 }} />
+              <LoadingState message="Loading your playlists..." />
             ) : ownerPlaylists.length > 0 ? (
               <ScrollView style={{ maxHeight: 400 }}>
                 {ownerPlaylists.map((pl: any) => {

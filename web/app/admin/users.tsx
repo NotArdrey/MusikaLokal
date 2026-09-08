@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
+import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
@@ -1679,8 +1680,7 @@ export default function AdminUsersPage() {
   if (loading || !roleResolved || initializingUsers) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading users...</Text>
+        <LoadingState message={initializingUsers ? "Loading users..." : "Checking admin access..."} />
       </View>
     );
   }

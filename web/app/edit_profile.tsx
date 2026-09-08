@@ -21,6 +21,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import GigPresetDropdown, { GIG_GENRE_OPTIONS } from "../src/components/GigPresetDropdown";
 import Header from "../src/components/header";
 import LeafletAddressPicker from "../src/components/LeafletAddressPicker";
+import LoadingState from "../src/components/LoadingState";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
@@ -657,10 +658,7 @@ export default function EditProfileScreen() {
   if (loading) {
     return (
       <View style={[styles.centered, { backgroundColor: pageBackground }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-          Loading...
-        </Text>
+        <LoadingState message="Loading your profile..." />
       </View>
     );
   }

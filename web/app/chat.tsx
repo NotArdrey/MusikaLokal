@@ -1,10 +1,11 @@
 ﻿import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import ChatScreen from '../src/components/ChatScreen';
 import ConversationsList from '../src/components/ConversationsList';
 import GuestSignInGate from '../src/components/GuestSignInGate';
+import LoadingState from '../src/components/LoadingState';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { Conversation, isConversationMuted, useConversation, useGroupConversation } from '../src/hooks/useChat';
@@ -217,8 +218,8 @@ export default function ChatPage() {
 
     if (loading || authLoading) {
         return (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
-                <ActivityIndicator size="large" color={colors.primary} />
+            <View style={{ flex: 1, backgroundColor: colors.background }}>
+                <LoadingState message={authLoading ? "Restoring your session..." : "Loading conversations..."} style={{ flex: 1 }} />
             </View>
         );
     }
@@ -278,7 +279,7 @@ export default function ChatPage() {
 
             return (
                 <View style={[styles.emptyChatPane, { backgroundColor: colors.background }]}>
-                    <ActivityIndicator size="large" color={colors.primary} />
+                    <LoadingState message="Opening conversation..." />
                 </View>
             );
         };

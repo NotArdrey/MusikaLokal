@@ -2,7 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   Dimensions,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,7 @@ import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import LoadingState, { LoadingButtonContent } from "../src/components/LoadingState";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
@@ -125,7 +125,7 @@ export default function CreateStationScreen() {
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Header title={isEditing ? "Edit Station" : "Create Station"} onBackPress={() => router.back()} />
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <LoadingState message={isEditing ? "Loading station details..." : "Preparing station setup..."} />
         </View>
       </View>
     );
@@ -199,7 +199,7 @@ export default function CreateStationScreen() {
           disabled={isSaveDisabled}
         >
           {saving ? (
-            <ActivityIndicator color="#fff" />
+            <LoadingButtonContent message={isEditing ? "Updating station..." : "Creating station..."} />
           ) : (
             <Text style={[styles.saveBtnText, { color: isSaveReady ? "#FFFFFF" : colors.textSecondary }]}>{isEditing ? "Update Station" : "Create Station"}</Text>
           )}

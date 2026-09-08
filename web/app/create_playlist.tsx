@@ -20,6 +20,7 @@ import Navbar from "../src/components/navbar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import GigPresetDropdown, { GIG_GENRE_OPTIONS } from "../src/components/GigPresetDropdown";
 import ImageUploader from "../src/components/ImageUploader";
+import LoadingState, { LoadingButtonContent } from "../src/components/LoadingState";
 import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
@@ -636,7 +637,7 @@ export default function CreatePlaylistScreen() {
   const isSubmitReady = title.trim().length > 0 && hasValidTrackDrafts;
   const isSubmitDisabled = submitting || authLoading || !isSubmitReady;
 
-  if (loading) return <View style={[styles.container, { backgroundColor: bg }]}><Header title={screenTitle} onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /></View>;
+  if (loading) return <View style={[styles.container, { backgroundColor: bg }]}><Header title={screenTitle} onBackPress={() => router.back()} /><LoadingState message={isEdit ? "Loading playlist..." : "Preparing playlist editor..."} style={{ flex: 1 }} /></View>;
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
@@ -828,7 +829,7 @@ export default function CreatePlaylistScreen() {
             </View>
           )}
           <TouchableOpacity activeOpacity={isSubmitDisabled ? 1 : 0.78} style={[styles.submitBtn, { backgroundColor: isSubmitReady ? colors.primary : colors.border, opacity: isSubmitDisabled ? 0.6 : 1 }]} onPress={handleSubmit} disabled={isSubmitDisabled}>
-            {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={[styles.submitText, { color: isSubmitReady ? "#FFFFFF" : colors.textSecondary }]}>{isEdit ? "Update Playlist" : isGroupPlaylistCreate ? "Create Group Playlist" : "Create Playlist"}</Text>}
+            {submitting ? <LoadingButtonContent message={isEdit ? "Updating playlist..." : "Creating playlist..."} /> : <Text style={[styles.submitText, { color: isSubmitReady ? "#FFFFFF" : colors.textSecondary }]}>{isEdit ? "Update Playlist" : isGroupPlaylistCreate ? "Create Group Playlist" : "Create Playlist"}</Text>}
           </TouchableOpacity>
           <View style={{ height: 100 }} />
         </View>

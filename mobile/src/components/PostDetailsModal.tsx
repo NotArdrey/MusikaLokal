@@ -22,6 +22,7 @@ import { SafeAreaView, useSafeAreaInsets, type Edge } from "react-native-safe-ar
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
+import LoadingState from "./LoadingState";
 import { emitToast } from "../events/toastBus";
 import BottomModal from "./BottomModal";
 import CachedImage from "./CachedImage";
@@ -938,7 +939,7 @@ export default function PostDetailsModal({
 
       {loading || !post ? (
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <LoadingState message="Loading post..." />
         </View>
       ) : (
         <>

@@ -3,7 +3,6 @@ import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
-  ActivityIndicator,
   FlatList,
   ScrollView,
   StyleSheet,
@@ -14,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import Header from '../../src/components/header';
+import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
@@ -109,7 +109,7 @@ export default function AdminProductsPage() {
     }
   };
 
-  if (loading || !roleResolved) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /></View>;
+  if (loading || !roleResolved) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><LoadingState message="Checking admin access..." style={{ flex: 1 }} /></View>;
   if (!isAdmin) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>Access denied</Text></View></View>;
 
   return (
@@ -155,7 +155,7 @@ export default function AdminProductsPage() {
           ))}
         </ScrollView>
       </View>
-      {loadingProducts ? <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /> : (
+      {loadingProducts ? <LoadingState message="Loading products..." style={{ flex: 1 }} /> : (
         <FlatList
           data={products}
           keyExtractor={(i) => i.id}

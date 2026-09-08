@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
     FlatList,
     Modal,
     StyleSheet,
@@ -13,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
+import LoadingState from './LoadingState';
 import ProfileAvatar from './ProfileAvatar';
 
 interface User {
@@ -246,7 +246,7 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
                 {/* Content */}
                 {loading ? (
                     <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color={colors.primary} />
+                        <LoadingState message="Searching people..." />
                     </View>
                 ) : searchQuery.length > 0 ? (
                     // Search results

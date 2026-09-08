@@ -10,7 +10,6 @@ import React, {
   useState,
 } from "react";
 import {
-    ActivityIndicator,
     Dimensions,
     Linking,
     Modal as RNModal,
@@ -23,6 +22,7 @@ import {
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../context/ThemeContext";
+import LoadingState from "./LoadingState";
 import {
   formatRecordingHours,
   getRecordingRequiredBlocks,
@@ -472,7 +472,7 @@ const BookingDetailsSheet = forwardRef<
 
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={colors.primary} />
+              <LoadingState message="Loading booking details..." />
             </View>
           ) : (
             <>

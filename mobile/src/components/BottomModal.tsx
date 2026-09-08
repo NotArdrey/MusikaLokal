@@ -256,13 +256,13 @@ export default function BottomModal({
         <Animated.View
           pointerEvents="none"
           style={[
-            StyleSheet.absoluteFillObject,
+            StyleSheet.absoluteFill,
             { backgroundColor: backdropColor },
             backdropAnimatedStyle,
           ]}
         />
         {closeOnBackdropPress ? (
-          <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         ) : null}
         {keyboardAvoiding ? (
           <KeyboardAvoidingView

@@ -17,6 +17,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import { prepareRealtimeAuth, supabase } from "../lib/supabase";
 import SidebarNav from "../src/components/SidebarNav";
+import LoadingState from "../src/components/LoadingState";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
 import { BottomOverlayProvider } from "../src/context/BottomOverlayContext";
 import {
@@ -625,6 +626,18 @@ function RootContent() {
   const showSidebar = Platform.OS === 'web' && width >= 768 && !isAuthScreen;
   const isAdminContext = userRole === 'admin' || segmentStrings.includes('admin');
   const useSidebarLayout = showSidebar && (isAdminContext || isGuest);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <LoadingState
+          message="Getting Musika Lokal ready..."
+          detail="Restoring your session and preferences."
+          style={{ flex: 1 }}
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, flexDirection: useSidebarLayout ? 'row' : 'column' }}>

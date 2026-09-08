@@ -20,6 +20,7 @@ import "../global.css";
 import { clearSupabaseAuthStorage, prepareRealtimeAuth, supabase } from "../lib/supabase";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
 import CustomAlert from "../src/components/CustomAlert";
+import LoadingState from "../src/components/LoadingState";
 import { BottomOverlayProvider, useBottomOverlay } from "../src/context/BottomOverlayContext";
 import { usePushNotifications } from "../src/hooks/usePushNotifications";
 import {
@@ -50,7 +51,6 @@ LogBox.ignoreLogs([
   "TypeError: Network request failed",
   "SafeAreaView has been deprecated and will be removed in a future release.",
   "setLayoutAnimationEnabledExperimental is currently a no-op in the New Architecture.",
-  "[expo-av]: Expo AV has been deprecated and will be removed in SDK 54.",
   "Unable to activate keep awake",
 ]);
 
@@ -955,10 +955,23 @@ function RootContent() {
   // Profile check is now handled via components and action-gates (e.g. Booking) rather than a hard app-lock.
   // This allows users to browse even if profile is incomplete.
 
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <LoadingState
+          message="Getting Musika Lokal ready..."
+          detail="Restoring your session and preferences."
+          style={{ flex: 1 }}
+        />
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <BottomOverlayRouteReset routeName={routeName} />
       <Stack
+        initialRouteName="index"
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: colors.background }, // Also ensure stack content has background
@@ -967,6 +980,7 @@ function RootContent() {
           freezeOnBlur: true,
         }}
       >
+        <Stack.Screen name="index" />
         <Stack.Screen
           name="(tabs)"
           options={{

@@ -24,6 +24,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import LoadingState from './LoadingState';
 import { emitToast } from '../events/toastBus';
 import {
     ConversationParticipant,
@@ -869,7 +870,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             >
                 {loading ? (
                     <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color={colors.primary} />
+                        <LoadingState message="Loading messages..." />
                     </View>
                 ) : messages.length === 0 ? (
                     <View style={styles.emptyContainer}>

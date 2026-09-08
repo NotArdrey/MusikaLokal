@@ -18,6 +18,7 @@ import {
 import { Calendar } from 'react-native-calendars';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
+import LoadingState from '../../src/components/LoadingState';
 import ImageUploader from '../../src/components/ImageUploader';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -1108,7 +1109,7 @@ export default function AdminManagePage() {
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Header title="Admin" onBackPress={() => router.back()} />
         <View style={styles.centered}>
-          <ActivityIndicator color={colors.primary} size="large" />
+          <LoadingState message="Checking admin access..." />
         </View>
       </View>
     );

@@ -9,7 +9,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCameraPermissions } from 'expo-camera';
-import * as FileSystem from 'expo-file-system/src/legacy';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
+import { LoadingButtonContent } from '../src/components/LoadingState';
 import TrackedBottomSheetModal from '../src/components/TrackedBottomSheetModal';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
@@ -3358,7 +3359,7 @@ export default function SignupScreen() {
                 ]}
                 testID="signup-next-button"
             >
-                {loading ? <ActivityIndicator color="white" /> : <Text style={[styles.nextButtonText, { color: isDetailsStepReady ? "white" : colors.textSecondary }]}>Next</Text>}
+                {loading ? <LoadingButtonContent message="Saving your details..." /> : <Text style={[styles.nextButtonText, { color: isDetailsStepReady ? "white" : colors.textSecondary }]}>Next</Text>}
             </TouchableOpacity>
 
             <View style={styles.authFooterLinkContainer}>
@@ -3814,7 +3815,7 @@ export default function SignupScreen() {
                                 !isManualReviewReady ? styles.nextButtonDisabled : null,
                             ]}
                         >
-                            {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={[styles.nextButtonText, { color: isManualReviewReady ? "white" : colors.textSecondary }]}>Submit for Manual Review</Text>}
+                            {loading ? <LoadingButtonContent message="Submitting for review..." /> : <Text style={[styles.nextButtonText, { color: isManualReviewReady ? "white" : colors.textSecondary }]}>Submit for Manual Review</Text>}
                         </TouchableOpacity>
                     </ScrollView>
 

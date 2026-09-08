@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
+import { LoadingButtonContent } from '../src/components/LoadingState';
 import Header from '../src/components/header';
 import ImageUploader from '../src/components/ImageUploader';
 import Navbar from '../src/components/navbar';
@@ -252,7 +253,7 @@ export default function AddProductionScreen() {
             onPress={handleSubmit}
             disabled={saving || hasIncompleteRequiredFields}
           >
-            {saving ? <ActivityIndicator color="#fff" /> : <Text style={[styles.submitBtnText, { color: hasIncompleteRequiredFields ? colors.textSecondary : "#fff" }]}>Create Production Team</Text>}
+            {saving ? <LoadingButtonContent message="Creating production team..." /> : <Text style={[styles.submitBtnText, { color: hasIncompleteRequiredFields ? colors.textSecondary : "#fff" }]}>Create Production Team</Text>}
           </TouchableOpacity>
         </View>
       </ScrollView>

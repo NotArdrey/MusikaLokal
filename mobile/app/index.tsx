@@ -817,14 +817,18 @@ export default function LoginScreen() {
 
             <TouchableOpacity
               testID="auth-sign-in-button"
-              accessibilityLabel="auth-sign-in-button"
+              accessibilityLabel={loading ? "Signing you in" : "Sign in"}
+              accessibilityLiveRegion="polite"
               onPress={handleLogin}
               disabled={loading}
               activeOpacity={loading ? 1 : 0.78}
               style={[styles.loginButton, themeStyles.primaryButton, styles.shadow, { opacity: loading ? 0.6 : 1 }]}
             >
               {loading ? (
-                <ActivityIndicator color="white" />
+                <View style={styles.loadingButtonContent}>
+                  <ActivityIndicator color="white" size="small" />
+                  <Text style={styles.loginButtonText}>Signing you in...</Text>
+                </View>
               ) : (
                 <Text style={styles.loginButtonText}>
                   Sign In
@@ -918,16 +922,16 @@ const styles = StyleSheet.create({
   },
   logoSection: {
     alignItems: 'center',
-    marginBottom: 48, // mb-12
+    marginBottom: 32,
   },
   logoWrapper: {
-    width: 220,
-    height: 220,
+    width: 196,
+    height: 196,
     borderRadius: 24, // rounded-3xl
     backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24, // mb-6
+    marginBottom: 4,
     // Shadow props
   },
   logoImage: {
@@ -986,6 +990,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 16, // mt-4
+  },
+  loadingButtonContent: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'center',
   },
   loginButtonText: {
     fontFamily: 'Poppins_600SemiBold',

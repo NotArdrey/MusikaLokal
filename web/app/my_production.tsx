@@ -326,6 +326,8 @@ export default function MyProductionScreen() {
         onInputChange={setDeleteConfirmationText}
         requiredInputValue={selectedTeamName}
         confirmDisabled={!isDeleteConfirmed || deleting}
+        loading={deleting}
+        loadingMessage="Deleting production team..."
       />
 
       <CustomAlert

@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Audio, type AVPlaybackStatus } from "expo-av";
+import { AudioSound, type PlaybackStatus } from "../src/audio/AudioSound";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -244,7 +244,7 @@ export default function PlaylistDetailsScreen() {
   const [addingTrack, setAddingTrack] = useState(false);
   const [audioUploadMessage, setAudioUploadMessage] = useState<string | null>(null);
   const [showReportModal, setShowReportModal] = useState(false);
-  const previewSoundRef = useRef<Audio.Sound | null>(null);
+  const previewSoundRef = useRef<AudioSound | null>(null);
   const [resolvedCoverUrl, setResolvedCoverUrl] = useState<string | null>(null);
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -579,7 +579,7 @@ export default function PlaylistDetailsScreen() {
       await unloadPreviewSound();
       setPreviewLoading(true);
 
-      const { sound } = await Audio.Sound.createAsync(
+      const { sound } = await AudioSound.createAsync(
         { uri: previewUrl },
         { shouldPlay: true, progressUpdateIntervalMillis: 250 },
       );
@@ -589,7 +589,7 @@ export default function PlaylistDetailsScreen() {
       setPreviewLoading(false);
       setPreviewPlaying(true);
 
-      sound.setOnPlaybackStatusUpdate((status: AVPlaybackStatus) => {
+      sound.setOnPlaybackStatusUpdate((status: PlaybackStatus) => {
         if (!status.isLoaded) {
           if (status.error) {
             console.warn("Playlist teaser playback failed", status.error);
@@ -1177,7 +1177,7 @@ export default function PlaylistDetailsScreen() {
           ) : (
             <Ionicons name={previewPlaying ? "pause" : "play"} size={22} color="#fff" />
           )}
-          <Text style={styles.playBtnText}>{previewLoading ? "Loading..." : previewPlaying ? "Pause Playlist" : "Play Playlist"}</Text>
+          <Text style={styles.playBtnText}>{previewLoading ? "Preparing playlist..." : previewPlaying ? "Pause Playlist" : "Play Playlist"}</Text>
         </TouchableOpacity>
 
         {/* Tracks */}

@@ -1161,7 +1161,7 @@ export default function StudioDetailsScreen() {
             </View>
 
             <Text style={[styles.headerTitle, { color: colors.text }]}>
-              {studio?.name || "Loading..."}
+              {studio?.name || "Loading studio..."}
             </Text>
             <Text
               style={[styles.headerLocation, { color: colors.textSecondary }]}

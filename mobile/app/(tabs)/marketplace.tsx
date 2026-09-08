@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,6 +24,7 @@ import Skeleton from "../../src/components/Skeleton";
 import SlidingTabBar from "../../src/components/SlidingTabBar";
 import SmoothTabTransition from "../../src/components/SmoothTabTransition";
 import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
+import { LoadingButtonContent } from "../../src/components/LoadingState";
 import { useBottomBarClearance } from "../../src/hooks/useBottomBarClearance";
 import { useAuth } from "../../src/context/AuthContext";
 import { useBottomOverlay } from "../../src/context/BottomOverlayContext";
@@ -976,7 +977,7 @@ export default function MarketplaceScreen() {
                   onPress={handleSubmitProductE2E}
                   disabled={adding || !isProductFormReady}
                 >
-                  {adding ? <ActivityIndicator color="#fff" /> : <Text style={[styles.submitBtnText, { color: isProductFormReady ? "#FFFFFF" : colors.textSecondary }]}>Post Listing</Text>}
+                  {adding ? <LoadingButtonContent message="Posting listing..." /> : <Text style={[styles.submitBtnText, { color: isProductFormReady ? "#FFFFFF" : colors.textSecondary }]}>Post Listing</Text>}
                 </TouchableOpacity>
               )}
               <Text style={[styles.inputLabel, { color: colors.text }]}>Description</Text>
@@ -1041,7 +1042,7 @@ export default function MarketplaceScreen() {
                 onPress={handleSubmitProduct}
                 disabled={adding || !isProductFormReady}
               >
-                {adding ? <ActivityIndicator color="#fff" /> : <Text style={[styles.submitBtnText, { color: isProductFormReady ? "#FFFFFF" : colors.textSecondary }]}>{editingProductId ? "Save Changes" : "Post Listing"}</Text>}
+                {adding ? <LoadingButtonContent message={editingProductId ? "Saving changes..." : "Posting listing..."} /> : <Text style={[styles.submitBtnText, { color: isProductFormReady ? "#FFFFFF" : colors.textSecondary }]}>{editingProductId ? "Save Changes" : "Post Listing"}</Text>}
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -1082,7 +1083,7 @@ const styles = StyleSheet.create({
   productImageWrap: { position: "relative", width: "100%", height: CARD_WIDTH },
   productImage: { width: "100%", height: CARD_WIDTH },
   productImagePlaceholder: { width: "100%", height: CARD_WIDTH, alignItems: "center", justifyContent: "center" },
-  soldOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15, 23, 42, 0.42)" },
+  soldOverlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15, 23, 42, 0.42)" },
   soldBadge: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 999, backgroundColor: "#F97316", paddingHorizontal: 10, paddingVertical: 6 },
   soldBadgeText: { color: "#fff", fontSize: moderateScale(11), fontFamily: "Poppins_700Bold" },
   productInfo: { padding: 10 },

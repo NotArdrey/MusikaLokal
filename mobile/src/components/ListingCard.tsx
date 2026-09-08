@@ -814,7 +814,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
         >
           {/* Full Background Image / Slideshow */}
           {showProfileImagePlaceholder && (
-            <View style={[styles.profileImagePlaceholder, StyleSheet.absoluteFillObject]}>
+            <View style={[styles.profileImagePlaceholder, StyleSheet.absoluteFill]}>
               <Ionicons
                 name="person"
                 size={84}
@@ -828,8 +828,8 @@ const ListingCard: React.FC<ListingCardProps> = ({
             pageIndex={pageIndex}
             onPageIndexChange={setPageIndex}
             fallbackUri={fallbackImageUri}
-            pagerStyle={StyleSheet.absoluteFillObject}
-            imageStyle={StyleSheet.absoluteFillObject}
+            pagerStyle={StyleSheet.absoluteFill}
+            imageStyle={StyleSheet.absoluteFill}
             pageWidth={cardWidth}
             imageWidth={cardWidth}
             imageHeight={cardHeight}
@@ -839,7 +839,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
           {/* Gradient Overlay */}
           <LinearGradient
             colors={["transparent", "rgba(0,0,0,0.2)", "rgba(0,0,0,0.85)"]}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             start={{ x: 0.5, y: 0.3 }}
             end={{ x: 0.5, y: 1 }}
             pointerEvents="none" // Allow touches to pass through
@@ -1249,7 +1249,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
         {/* Image Section */}
         <View style={[styles.imageContainer, isFeedVariant && styles.feedImageContainer, { height: imageHeight }]}>
           {showProfileImagePlaceholder && (
-            <View style={[styles.profileImagePlaceholder, StyleSheet.absoluteFillObject]}>
+            <View style={[styles.profileImagePlaceholder, StyleSheet.absoluteFill]}>
               <Ionicons
                 name="person"
                 size={72}

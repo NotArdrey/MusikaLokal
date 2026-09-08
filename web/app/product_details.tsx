@@ -15,6 +15,7 @@ import {
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
+import LoadingState from "../src/components/LoadingState";
 import Navbar from "../src/components/navbar";
 import ReportModal from "../src/components/ReportModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -133,7 +134,7 @@ export default function ProductDetailsScreen() {
     }
   };
 
-  if (loading) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Product" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /><Navbar /></View>;
+  if (loading) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Product" onBackPress={() => router.back()} /><LoadingState message="Loading product details..." style={{ flex: 1 }} /><Navbar /></View>;
   if (!product) return <View style={[styles.container, { backgroundColor: bg }]}><Header title="Product" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary }}>Product not found</Text></View><Navbar /></View>;
 
   const isSeller = product?.seller_id === userId;

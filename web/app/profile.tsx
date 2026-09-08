@@ -3850,7 +3850,7 @@ export default function ProfileScreen() {
                   {loadingProfileFollowers ? (
                     <View style={styles.followModalLoading}>
                       <ActivityIndicator size="small" color={colors.primary} />
-                      <Text style={[styles.followModalEmptyText, { color: colors.textSecondary }]}>Loading...</Text>
+                      <Text style={[styles.followModalEmptyText, { color: colors.textSecondary }]}>Loading {followListModal === "following" ? "following" : "followers"}...</Text>
                     </View>
                   ) : (followListModal === "following" ? profileFollowing : profileFollowers).length === 0 ? (
                     <Text style={[styles.followModalEmptyText, { color: colors.textSecondary }]}>

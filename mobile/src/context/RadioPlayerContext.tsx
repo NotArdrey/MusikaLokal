@@ -1,5 +1,6 @@
+import { setAudioModeAsync } from "expo-audio";
 import { Ionicons } from "@expo/vector-icons";
-import { Audio, type AVPlaybackStatus } from "expo-av";
+import { AudioSound, type PlaybackStatus } from "../audio/AudioSound";
 import { router } from "expo-router";
 import React, {
   createContext,
@@ -332,8 +333,8 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
   const prepareRequestIdRef = useRef(0);
   const pendingPrepareKeyRef = useRef<string | null>(null);
   const pendingPreparedQueueRef = useRef<PendingPreparedRadioStationQueue | null>(null);
-  const preparedFallbackSoundRef = useRef<Audio.Sound | null>(null);
-  const fallbackSoundRef = useRef<Audio.Sound | null>(null);
+  const preparedFallbackSoundRef = useRef<AudioSound | null>(null);
+  const fallbackSoundRef = useRef<AudioSound | null>(null);
   const fallbackAudioModePromiseRef = useRef<Promise<void> | null>(null);
   const fallbackPrearmCooldownUntilRef = useRef(0);
   const playQueueIndexRef = useRef<(queueIndex: number, shouldPlay?: boolean) => Promise<void>>(async () => undefined);
@@ -428,10 +429,10 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
 
   const setupFallbackAudioModeOnce = useCallback(() => {
     if (!fallbackAudioModePromiseRef.current) {
-      fallbackAudioModePromiseRef.current = Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
-        staysActiveInBackground: true,
+      fallbackAudioModePromiseRef.current = setAudioModeAsync({
+        playsInSilentMode: true,
+        interruptionMode: "duckOthers",
+        shouldPlayInBackground: true,
       }).catch((error) => {
         fallbackAudioModePromiseRef.current = null;
         throw error;
@@ -901,7 +902,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
             const fallbackStartPositionSeconds = fastCursor.isSynchronized
               ? Math.max(0, Math.floor(fastCursor.positionSeconds))
               : 0;
-            const { sound } = await Audio.Sound.createAsync(
+            const { sound } = await AudioSound.createAsync(
               { uri: queue[0].url },
               {
                 positionMillis: fallbackStartPositionSeconds * 1000,
@@ -909,8 +910,6 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
                 progressUpdateIntervalMillis: 1000,
                 volume: isMutedRef.current ? 0 : 1,
               },
-              undefined,
-              true,
             );
             const createDurationMs = Date.now() - createStartedAt;
             if (createDurationMs > RADIO_FALLBACK_PREARM_SLOW_MS) {
@@ -1026,7 +1025,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const handleFallbackStatusUpdate = useCallback((status: AVPlaybackStatus, requestId: number) => {
+  const handleFallbackStatusUpdate = useCallback((status: PlaybackStatus, requestId: number) => {
     if (!isPlaybackRequestCurrent(requestId)) {
       return;
     }
@@ -1099,7 +1098,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       }
 
       const startPositionMillis = Math.max(0, Math.floor(startPositionSeconds * 1000));
-      const { sound, status } = await Audio.Sound.createAsync(
+      const { sound, status } = await AudioSound.createAsync(
         { uri: fullQueue[safeIndex].url },
         {
           positionMillis: startPositionMillis,
@@ -1110,7 +1109,6 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
         (nextStatus) => {
           handleFallbackStatusUpdate(nextStatus, requestId);
         },
-        true,
       );
 
       if (!isCurrentRequest()) {
@@ -1123,6 +1121,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       }
 
       fallbackSoundRef.current = sound;
+      sound.enableBackgroundPlayback(fullQueue[safeIndex].title || "MusikaLokal Radio");
       updateSharedQueueState(stationData, fullQueue, safeIndex);
 
       playWhenReadyRef.current = shouldPlay;
@@ -1383,7 +1382,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
   const playPreparedFallbackQueue = useCallback(async (
     stationData: any,
     fullQueue: RadioQueueTrack[],
-    preparedSound: Audio.Sound,
+    preparedSound: AudioSound,
     requestId: number,
     startPositionSeconds = 0,
   ) => {
@@ -1405,6 +1404,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       }
 
       fallbackSoundRef.current = preparedSound;
+      preparedSound.enableBackgroundPlayback(fullQueue[0].title || "MusikaLokal Radio");
       preparedSound.setOnPlaybackStatusUpdate((status) => {
         handleFallbackStatusUpdate(status, requestId);
       });

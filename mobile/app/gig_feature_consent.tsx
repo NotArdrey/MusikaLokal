@@ -15,6 +15,7 @@ import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
+import { LoadingButtonContent } from "../src/components/LoadingState";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 
 const acceptedStatuses = new Set(["accepted", "approved"]);
@@ -210,7 +211,7 @@ export default function GigFeatureConsentScreen() {
               onPress={() => saveConsent()}
               style={[styles.primaryButton, { backgroundColor: colors.primary, opacity: !canRespond || saving ? 0.55 : 1 }]}
             >
-              {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Save Featuring Choices</Text>}
+              {saving ? <LoadingButtonContent message="Saving choices..." /> : <Text style={styles.primaryButtonText}>Save Featuring Choices</Text>}
             </TouchableOpacity>
             <TouchableOpacity
               testID="keep-feature-private"

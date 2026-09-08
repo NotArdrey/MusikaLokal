@@ -1,4 +1,3 @@
-import GigHistorySection from '../src/components/GigHistorySection';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -496,9 +495,9 @@ export default function MyVenueScreen() {
                         ) : gigs.length === 0 ? (
                             <View style={styles.emptyState}>
                                 <Ionicons name="musical-notes-outline" size={48} color={colors.textSecondary} />
-                                <Text style={[styles.emptyTitle, { color: colors.text }]}>{isMusicianView ? 'No joined gigs yet' : 'No gigs yet'}</Text>
+                                <Text style={[styles.emptyTitle, { color: colors.text }]}>No active gigs</Text>
                                 <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                                    {isMusicianView ? 'Accepted gigs will appear here.' : 'Create your first gig to manage applications and event details.'}
+                                    {isMusicianView ? 'Your accepted upcoming and ongoing gigs appear here.' : 'Your upcoming and ongoing gigs appear here.'}
                                 </Text>
                             </View>
                         ) : (
@@ -642,7 +641,6 @@ export default function MyVenueScreen() {
                             </View>
                         )}
 
-                        <GigHistorySection />
                     </ScrollView>
 
                     <Navbar />
@@ -662,6 +660,8 @@ export default function MyVenueScreen() {
                 inputValue={cancellationReason}
                 onInputChange={setCancellationReason}
                 confirmDisabled={deleting}
+                loading={deleting}
+                loadingMessage="Deleting gig and notifying applicants..."
             />
             <CustomAlert
                 visible={alertVisible}

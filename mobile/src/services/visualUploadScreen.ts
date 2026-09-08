@@ -1,4 +1,4 @@
-import * as FileSystem from "expo-file-system/src/legacy";
+import * as FileSystem from "expo-file-system/legacy";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { Platform } from "react-native";
 import {

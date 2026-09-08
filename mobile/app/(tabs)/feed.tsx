@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { BottomSheetBackdrop, BottomSheetView, useBottomSheetSpringConfigs } from "@gorhom/bottom-sheet";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -23,7 +23,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import * as FileSystem from "expo-file-system/src/legacy";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -33,6 +33,7 @@ import { FeaturedGigPerformers } from "../../src/components/FeaturedGigPerformer
 import { FeedList } from "../../src/components/feed/FeedList";
 import { FeedMediaGallery } from "../../src/components/feed/FeedMediaGallery";
 import GuestSignInGate from "../../src/components/GuestSignInGate";
+import { LoadingButtonContent } from "../../src/components/LoadingState";
 import Header from "../../src/components/header";
 import ListingDetailsSheet from "../../src/components/ListingDetailsSheet";
 import { normalizeVisibleInput } from "../../src/components/modal";
@@ -74,7 +75,7 @@ import { getStationLiveTimelineState } from "../../src/utils/radioTimeline";
 import {
   getGroqModelInfo,
 } from "../../src/services/groqModelRouter";
-import { screenUploadsWithAi } from "../../src/services/uploadSafetyScreen";
+import { isUploadSafetyRetryableFailure, screenUploadsWithAi } from "../../src/services/uploadSafetyScreen";
 import { logLoadTime, usePageLoadLogger } from "../../src/utils/loadTimeLogger";
 import { bottomSheetSpringConfig } from "../../src/utils/motion";
 import { setSmoothTab } from "../../src/utils/smoothTabs";
@@ -5812,20 +5813,27 @@ export default function FeedScreen() {
 
       if (blockedReasons.length > 0) {
         const firstReason = blockedReasons[0] || "This media could not be attached.";
+        const screeningUnavailable = blockedReasons.every(isUploadSafetyRetryableFailure);
         const blockedLabel = blockedReasons.length === 1 ? "1 media item was blocked" : `${blockedReasons.length} media items were blocked`;
         setAlert({
-          type: prepared.length > 0 ? "warning" : "error",
-          title: prepared.length > 0 ? "Some media blocked" : "Media blocked",
-          message: prepared.length > 0
+          type: screeningUnavailable || prepared.length > 0 ? "warning" : "error",
+          title: screeningUnavailable
+            ? "Safety check unavailable"
+            : prepared.length > 0 ? "Some media blocked" : "Media blocked",
+          message: screeningUnavailable
+            ? `${blockedReasons.length} media item(s) were not classified as violations. Please try attaching them again. ${firstReason}`
+            : prepared.length > 0
             ? `${blockedLabel}. Approved media was attached. ${firstReason}`
             : firstReason,
         });
       }
     } catch (error: any) {
+      const message = error?.message || "This media could not be attached.";
+      const screeningUnavailable = isUploadSafetyRetryableFailure(message);
       setAlert({
-        type: "error",
-        title: "Media blocked",
-        message: error?.message || "This media could not be attached.",
+        type: screeningUnavailable ? "warning" : "error",
+        title: screeningUnavailable ? "Safety check unavailable" : "Media blocked",
+        message,
       });
     } finally {
       setMediaBusy(false);
@@ -7322,7 +7330,7 @@ export default function FeedScreen() {
                 testID="mobile-feed-post-submit-button"
               >
                 {creating ? (
-                  <ActivityIndicator color="#fff" size="small" />
+                  <LoadingButtonContent message={editingPost ? "Saving post..." : "Publishing post..."} />
                 ) : (
                   <Text style={[styles.postBtnText, { color: composerCanSubmit ? "#fff" : colors.textSecondary }]}>
                     {editingPost ? "Save" : "Post"}

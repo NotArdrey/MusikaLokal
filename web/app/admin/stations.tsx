@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import Header from '../../src/components/header';
+import LoadingState from '../../src/components/LoadingState';
 import CustomAlert from '../../src/components/CustomAlert';
 import GigPresetDropdown, { GIG_GENRE_OPTIONS } from '../../src/components/GigPresetDropdown';
 import { useAuth } from '../../src/context/AuthContext';
@@ -469,7 +470,7 @@ export default function AdminStationsPage() {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Header title="Admin" hideBackButton />
-        <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
+        <LoadingState message="Checking admin access..." style={{ flex: 1 }} />
       </View>
     );
   }
@@ -579,7 +580,7 @@ export default function AdminStationsPage() {
         ) : null}
 
         {loadingData ? (
-          <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
+          <LoadingState message="Loading stations..." />
         ) : (
           <>
             {dataError ? (

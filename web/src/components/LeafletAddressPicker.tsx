@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { WebView } from "react-native-webview";
 import { useTheme } from "../context/ThemeContext";
+import LoadingState from "./LoadingState";
 
 const LOCATION_UNAVAILABLE_MESSAGE =
     "Current location is unavailable. Turn on Location Services or search/tap the map to choose the address.";
@@ -342,7 +343,7 @@ export default function LeafletAddressPicker({
                             startInLoadingState
                             renderLoading={() => (
                                 <View style={styles.loadingOverlay}>
-                                    <ActivityIndicator size="large" color={colors.primary} />
+                                    <LoadingState message="Loading map..." />
                                 </View>
                             )}
                         />

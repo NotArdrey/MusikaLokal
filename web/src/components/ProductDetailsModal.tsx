@@ -19,6 +19,7 @@ import { useTheme } from "../context/ThemeContext";
 import { emitToast } from "../events/toastBus";
 import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
+import { LoadingButtonContent } from "./LoadingState";
 import ReportModal from "./ReportModal";
 
 type Props = {
@@ -247,7 +248,7 @@ export default function ProductDetailsModal({ productId, visible, onClose }: Pro
                     onPress={handleBuyNow}
                     disabled={ordering}
                   >
-                    {ordering ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: "#fff", fontFamily: "Poppins_700Bold", fontSize: 15 }}>Buy Now</Text>}
+                    {ordering ? <LoadingButtonContent message="Preparing checkout..." /> : <Text style={{ color: "#fff", fontFamily: "Poppins_700Bold", fontSize: 15 }}>Buy Now</Text>}
                   </TouchableOpacity>
                 </View>
               </>

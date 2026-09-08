@@ -18,6 +18,7 @@ import BottomModal from "../src/components/BottomModal";
 import GroupInviteSection from "../src/components/GroupInviteSection";
 import GroupLinkedPlaylistsSection from "../src/components/GroupLinkedPlaylistsSection";
 import Header from "../src/components/header";
+import LoadingState from "../src/components/LoadingState";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import ProfileAvatar from "../src/components/ProfileAvatar";
@@ -1012,16 +1013,7 @@ export default function GroupDetailsScreen() {
           { backgroundColor: colors.background },
         ]}
       >
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text
-          style={{
-            marginTop: 16,
-            color: colors.textSecondary,
-            fontFamily: "Poppins_400Regular",
-          }}
-        >
-          Loading group details...
-        </Text>
+        <LoadingState message="Loading group management..." />
       </View>
     );
   }
@@ -1056,7 +1048,7 @@ export default function GroupDetailsScreen() {
             </View>
 
             <Text style={[styles.headerTitle, { color: colors.text }]}>
-              {group?.name || "Loading..."}
+              {group?.name || "Loading group..."}
             </Text>
             <Text
               style={[styles.headerLocation, { color: colors.textSecondary }]}

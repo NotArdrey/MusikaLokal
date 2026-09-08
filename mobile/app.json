@@ -8,7 +8,6 @@
     "scheme": "musikalokal",
     "userInterfaceStyle": "automatic",
     "backgroundColor": "#0F172A",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.musikalokal",
@@ -29,7 +28,15 @@
     },
     "plugins": [
       "expo-router",
+      "expo-asset",
       "expo-notifications",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow MusikaLokal to access your microphone for video verification.",
+          "enableBackgroundPlayback": true
+        }
+      ],
       [
         "expo-location",
         {
@@ -67,7 +74,6 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.musikalokal",
       "permissions": [

@@ -54,7 +54,6 @@ const SafeBottomSheetFlatList = <T,>({
     nestedScrollEnabled,
     onEndReached,
     onEndReachedThreshold = 0.5,
-    scrollEventThrottle = 16,
 }: SafeBottomSheetFlatListProps<T>) => {
     const endReachedContentHeightRef = React.useRef(0);
 
@@ -94,7 +93,6 @@ const SafeBottomSheetFlatList = <T,>({
             keyboardShouldPersistTaps={keyboardShouldPersistTaps}
             nestedScrollEnabled={nestedScrollEnabled}
             onScroll={handleScroll}
-            scrollEventThrottle={scrollEventThrottle}
         >
             {renderProp(ListHeaderComponent)}
 

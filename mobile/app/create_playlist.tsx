@@ -18,6 +18,7 @@ import Navbar from "../src/components/navbar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import GigPresetDropdown, { GIG_GENRE_OPTIONS } from "../src/components/GigPresetDropdown";
 import ImageUploader from "../src/components/ImageUploader";
+import LoadingState, { LoadingButtonContent } from "../src/components/LoadingState";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
@@ -722,7 +723,7 @@ export default function CreatePlaylistScreen() {
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Header title={screenTitle} onBackPress={() => router.back()} />
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <LoadingState message={isEditing ? "Loading playlist..." : "Preparing playlist editor..."} />
         </View>
         <Navbar />
       </View>
@@ -990,7 +991,7 @@ export default function CreatePlaylistScreen() {
           disabled={isSaveDisabled}
         >
           {saving ? (
-            <ActivityIndicator color="#fff" />
+            <LoadingButtonContent message={isEditing ? "Updating playlist..." : "Creating playlist..."} />
           ) : (
             <Text style={[styles.saveBtnText, { color: isSaveReady ? "#FFFFFF" : colors.textSecondary }]}>
               {isEditing ? "Update Playlist" : isGroupPlaylistCreate ? "Create Group Playlist" : "Create Playlist"}

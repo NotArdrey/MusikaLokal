@@ -16,6 +16,7 @@ import {
 import AudioPreviewPlayer from '../../src/components/AudioPreviewPlayer';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
+import LoadingState from '../../src/components/LoadingState';
 import InAppMediaViewer from '../../src/components/InAppMediaViewer';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -1322,8 +1323,7 @@ export default function AdminIdentityReviewsPage() {
   if (loading || !roleResolved || initializingReviews) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading identity reviews...</Text>
+        <LoadingState message={initializingReviews ? "Loading identity reviews..." : "Checking admin access..."} />
       </View>
     );
   }

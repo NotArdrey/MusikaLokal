@@ -3478,7 +3478,7 @@ const styles = StyleSheet.create({
     height: "100%",
   },
   heroGradient: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.3)", // Base darken
   },
   heroContent: {
@@ -3623,7 +3623,7 @@ const styles = StyleSheet.create({
     borderRadius: 24, // Re-apply for safety
   },
   bentoOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: "flex-end",
     padding: 12,
     borderRadius: 24, // Re-apply for safety
@@ -3696,7 +3696,7 @@ const styles = StyleSheet.create({
     borderRadius: 32, // Match parent
   },
   featuredGradient: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     padding: 24,
     justifyContent: "space-between",
     borderRadius: 32, // Match parent

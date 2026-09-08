@@ -14,6 +14,7 @@ import type { DateData } from 'react-native-calendars';
 import { WebView } from 'react-native-webview';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
+import { LoadingButtonContent } from '../src/components/LoadingState';
 import AuthMusicHero from '../src/components/AuthMusicHero';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
@@ -2506,7 +2507,7 @@ export default function SignupScreen() {
                     !isDetailsStepReady ? styles.nextButtonDisabled : null,
                 ]}
             >
-                {loading ? <ActivityIndicator color="white" /> : <Text style={[styles.nextButtonText, { color: isDetailsStepReady ? "white" : colors.textSecondary }]}>Next</Text>}
+                {loading ? <LoadingButtonContent message="Saving your details..." /> : <Text style={[styles.nextButtonText, { color: isDetailsStepReady ? "white" : colors.textSecondary }]}>Next</Text>}
             </TouchableOpacity>
 
             <View style={[styles.authFooterLinkContainer, isWebDesktop ? styles.webAuthFooterLinkContainer : null]}>
@@ -2890,7 +2891,7 @@ export default function SignupScreen() {
                                 !isManualReviewReady ? styles.nextButtonDisabled : null,
                             ]}
                         >
-                            {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={[styles.nextButtonText, { color: isManualReviewReady ? "white" : colors.textSecondary }]}>Submit for Manual Review</Text>}
+                            {loading ? <LoadingButtonContent message="Submitting for review..." /> : <Text style={[styles.nextButtonText, { color: isManualReviewReady ? "white" : colors.textSecondary }]}>Submit for Manual Review</Text>}
                         </TouchableOpacity>
                     </ScrollView>
 

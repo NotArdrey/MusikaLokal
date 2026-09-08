@@ -16,6 +16,7 @@ import {
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
+import LoadingState from "../src/components/LoadingState";
 import Navbar from "../src/components/navbar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
@@ -295,7 +296,7 @@ export default function PostDetailsScreen() {
       <View style={[styles.container, { backgroundColor: subtleBg }]}>
         {!isWebDesktop && <Header title="Post" onBackPress={handleClose} />}
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <LoadingState message="Loading post..." />
         </View>
         {!isWebDesktop && <Navbar />}
       </View>

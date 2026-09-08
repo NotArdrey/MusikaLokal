@@ -22,6 +22,7 @@ import {
 } from 'react-native';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
+import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
@@ -1849,8 +1850,7 @@ export default function AdminDashboardPage() {
   if (loading || !roleResolved || initializingDashboard) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading admin dashboard...</Text>
+        <LoadingState message={initializingDashboard ? "Loading dashboard..." : "Checking admin access..."} />
       </View>
     );
   }

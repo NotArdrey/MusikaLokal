@@ -20,12 +20,9 @@ const corsHeaders = {
 // ─── Configuration ────────────────────────────────────────────────────────────
 
 const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")?.trim() || "";
-const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")?.trim() || "";
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY")?.trim() || "";
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GEMINI_API_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 const OPENAI_CHAT_API_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_MODERATION_API_URL = "https://api.openai.com/v1/moderations";
 const ACRCLOUD_HOST = Deno.env.get("ACRCLOUD_HOST")?.trim() || "";
@@ -158,6 +155,7 @@ type ScreeningResult = {
   id: string;
   allowed: boolean;
   reason?: string;
+  retryable?: boolean;
   requiresAdminReview?: boolean;
   publiclyAvailable?: boolean;
   copyrightStatus?: "not_required" | "pending_review" | "approved" | "declined";
@@ -1414,38 +1412,63 @@ async function callGroqVisualReview(
     imageBytesApprox: estimateBase64Bytes(dataUrl.split(",")[1] || ""),
   });
 
-  const response = await fetch(GROQ_API_URL, {
+  const requestBody = {
+    model: GROQ_VISION_MODEL,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: dataUrl } },
+        ],
+      },
+    ],
+    response_format: { type: "json_object" },
+    reasoning_effort: "none",
+    reasoning_format: "hidden",
+    temperature: 0.2,
+    max_completion_tokens: 500,
+    stream: false,
+  };
+  let response = await fetch(GROQ_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${GROQ_API_KEY}`,
     },
-    body: JSON.stringify({
-      model: GROQ_VISION_MODEL,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: prompt },
-            { type: "image_url", image_url: { url: dataUrl } },
-          ],
-        },
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0,
-      max_completion_tokens: 300,
-      stream: false,
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
-    const errorBody = await response.text().catch(() => "");
-    console.error("[upload-safety-screen] groq_visual_review_failed", {
-      status: response.status,
-      statusText: response.statusText,
-      body: errorBody.slice(0, 1000),
-    });
-    throw new Error(`Groq visual review error: ${response.status}${errorBody ? ` ${errorBody}` : ""}`);
+    let errorBody = await response.text().catch(() => "");
+    if (response.status === 400 && /json_validate_failed/i.test(errorBody)) {
+      console.warn("[upload-safety-screen] groq_json_mode_retry", {
+        model: GROQ_VISION_MODEL,
+      });
+      const plainJsonRequestBody: Record<string, unknown> = { ...requestBody };
+      delete plainJsonRequestBody.response_format;
+      response = await fetch(GROQ_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${GROQ_API_KEY}`,
+        },
+        body: JSON.stringify(plainJsonRequestBody),
+      });
+      if (response.ok) {
+        errorBody = "";
+      } else {
+        errorBody = await response.text().catch(() => "");
+      }
+    }
+    if (!response.ok) {
+      console.error("[upload-safety-screen] groq_visual_review_failed", {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorBody.slice(0, 1000),
+      });
+      throw new Error(`Groq visual review error: ${response.status}${errorBody ? ` ${errorBody}` : ""}`);
+    }
   }
 
   const data = await response.json();
@@ -1458,36 +1481,6 @@ async function callGroqVisualReview(
     rawPreview: decision ? undefined : String(rawContent).slice(0, 500),
   });
   return decision;
-}
-
-async function callGeminiVisualReview(
-  prompt: string,
-  mimeType: string,
-  base64: string,
-): Promise<VisualDecision | null> {
-  const url = `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            { text: prompt },
-            { inline_data: { mime_type: mimeType, data: base64 } },
-          ],
-        },
-      ],
-      generationConfig: { temperature: 0, maxOutputTokens: 300 },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gemini visual review error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return parseVisualReviewDecision(data?.candidates?.[0]?.content?.parts?.[0]?.text || null);
 }
 
 async function screenVisualContent(
@@ -1551,30 +1544,6 @@ async function screenVisualContent(
     }
   }
 
-  if (GEMINI_API_KEY) {
-    try {
-      const visualDecision = await callGeminiVisualReview(
-        prompt,
-        parsedImage.mimeType,
-        parsedImage.base64,
-      );
-      if (visualDecision) {
-        reviewed = true;
-        if (!visualDecision.allowed) {
-          return { ...visualDecision, provider: 'gemini-vision' };
-        }
-      } else {
-        providerFailures.push("Gemini: no valid JSON decision returned");
-      }
-    } catch (error) {
-      providerFailures.push(`Gemini: ${error instanceof Error ? error.message : String(error)}`);
-      console.error("[upload-safety-screen] gemini_visual_review_exception_fallback", {
-        message: error instanceof Error ? error.message : String(error),
-      });
-      // Fall through to fail-closed response below.
-    }
-  }
-
   if (reviewed) {
     return { allowed: true };
   }
@@ -1585,7 +1554,6 @@ async function screenVisualContent(
     providerFailures,
     hasOpenAi: Boolean(OPENAI_API_KEY),
     hasGroq: Boolean(GROQ_API_KEY),
-    hasGemini: Boolean(GEMINI_API_KEY),
   });
 
   throw new Error("Visual safety screening is temporarily unavailable. Please try again.");
@@ -1658,25 +1626,6 @@ async function callGroq(prompt: string): Promise<string> {
   return data?.choices?.[0]?.message?.content || "";
 }
 
-async function callGemini(prompt: string): Promise<string> {
-  const url = `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.1, maxOutputTokens: 512 },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Gemini API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-}
-
 async function callOpenAi(prompt: string): Promise<string> {
   const response = await fetch(OPENAI_CHAT_API_URL, {
     method: "POST",
@@ -1704,14 +1653,6 @@ async function callAi(prompt: string): Promise<string | null> {
   if (GROQ_API_KEY) {
     try {
       return await callGroq(prompt);
-    } catch {
-      // fall through
-    }
-  }
-
-  if (GEMINI_API_KEY) {
-    try {
-      return await callGemini(prompt);
     } catch {
       // fall through
     }
@@ -1967,6 +1908,7 @@ serve(async (req: Request) => {
           results.push({
             id: fileId,
             allowed: false,
+            retryable: true,
             reason:
               mediaError instanceof Error
                 ? mediaError.message

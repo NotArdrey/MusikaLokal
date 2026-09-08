@@ -38,6 +38,7 @@ import {
 } from "../context/RadioPlayerContext";
 import { emitToast } from "../events/toastBus";
 import { useTheme } from "../context/ThemeContext";
+import LoadingState from "./LoadingState";
 import { useSearchResultsQuery } from "../data/hooks";
 import { useGigApplicantCounts } from "../hooks/useGigApplicantCounts";
 import {
@@ -1057,7 +1058,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
         {loading ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={colors.primary} />
+            <LoadingState message="Searching Musika Lokal..." />
           </View>
         ) : (
           <SafeBottomSheetFlatList

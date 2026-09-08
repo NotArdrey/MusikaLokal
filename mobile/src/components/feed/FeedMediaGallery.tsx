@@ -111,7 +111,7 @@ const styles = StyleSheet.create({
   cell: { flex: 1, overflow: "hidden", backgroundColor: "#CBD5E1" },
   image: { width: "100%", height: "100%" },
   moreOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(15,23,42,0.56)",

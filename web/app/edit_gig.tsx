@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import LoadingState from "../src/components/LoadingState";
 import GigReapplicationCooldownField, {
   formatGigReapplicationCooldown,
 } from "../src/components/GigReapplicationCooldownField";
@@ -1498,16 +1499,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           { backgroundColor: colors.background },
         ]}
       >
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text
-          style={{
-            marginTop: 16,
-            color: colors.textSecondary,
-            fontFamily: "Poppins_400Regular",
-          }}
-        >
-          Loading gig details...
-        </Text>
+        <LoadingState message="Loading gig details..." />
       </View>
     );
   }

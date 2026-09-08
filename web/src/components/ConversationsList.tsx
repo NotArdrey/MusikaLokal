@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    ActivityIndicator,
     FlatList,
     StyleSheet,
     Text,
@@ -11,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
+import LoadingState from './LoadingState';
 import { emitToast } from '../events/toastBus';
 import { Conversation, isConversationMuted, useConversations } from '../hooks/useChat';
 import ProfileAvatar from './ProfileAvatar';
@@ -273,7 +273,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
             {/* Content */}
             {loading ? (
                 <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={colors.primary} />
+                    <LoadingState message="Loading conversations..." />
                 </View>
             ) : conversations.length === 0 ? (
                 <View style={styles.emptyContainer}>

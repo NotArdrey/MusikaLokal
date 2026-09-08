@@ -20,6 +20,7 @@ import CachedImage from "../src/components/CachedImage";
 import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import LoadingState from "../src/components/LoadingState";
 
 type ListingType = "Studio" | "Gig" | "Group" | "Artist" | "Production";
 type FilterChip = "All" | "Studios" | "Gigs" | "Groups" | "Artists" | "Production Teams";
@@ -685,7 +686,7 @@ export default function DiscoverScreen() {
 
 				{loading ? (
 					<View style={{ paddingTop: 40, alignItems: "center" }}>
-						<ActivityIndicator size="large" color={colors.primary} />
+						<LoadingState message="Finding listings..." />
 					</View>
 				) : filteredListings.length === 0 ? (
 					<View

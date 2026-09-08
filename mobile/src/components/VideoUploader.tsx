@@ -1,6 +1,6 @@
 import { screenVisualUpload } from "../services/visualUploadScreen";
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system/src/legacy';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import React, { useState } from 'react';
@@ -838,11 +838,17 @@ export default function VideoUploader({
 
       <Modal visible={uploading} transparent animationType="fade" statusBarTranslucent>
         <View style={styles.loadingOverlay}>
-          <View style={[styles.loadingCard, { backgroundColor: colors.surface }]}>
+          <View
+            accessible
+            accessibilityLabel={`${uploadMessage} Keep this screen open while your video is checked and uploaded.`}
+            accessibilityLiveRegion="polite"
+            accessibilityRole="progressbar"
+            style={[styles.loadingCard, { backgroundColor: colors.surface }]}
+          >
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={[styles.loadingTitle, { color: colors.text }]}>{uploadMessage}</Text>
             <Text style={[styles.loadingSubtitle, { color: colors.textSecondary }]}>
-              Please wait while your video is uploaded.
+              Keep this screen open while your video is checked and uploaded.
             </Text>
           </View>
         </View>

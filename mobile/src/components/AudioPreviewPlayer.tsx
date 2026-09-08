@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Audio, type AVPlaybackStatus } from "expo-av";
+import { AudioSound, type PlaybackStatus } from "../audio/AudioSound";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -131,7 +131,7 @@ export default function AudioPreviewPlayer({
   emptyMessage = "No MP3 is attached yet.",
 }: AudioPreviewPlayerProps) {
   const { colors } = useTheme();
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const soundRef = useRef<AudioSound | null>(null);
   const soundSourceRef = useRef<string>("");
   const [positionMillis, setPositionMillis] = useState(0);
   const [durationMillis, setDurationMillis] = useState(() => durationSecondsToMillis(durationSeconds));
@@ -144,7 +144,7 @@ export default function AudioPreviewPlayer({
     typeof sourceUrl === "string" ? sourceUrl.trim() : ""
   ), [sourceUrl]);
 
-  const updateStatus = useCallback((status: AVPlaybackStatus) => {
+  const updateStatus = useCallback((status: PlaybackStatus) => {
     if (!status.isLoaded) {
       setIsLoading(false);
       setIsPlaying(false);
@@ -201,7 +201,7 @@ export default function AudioPreviewPlayer({
     setErrorMessage(null);
 
     const playbackUrl = await resolveAudioPlaybackUrl(normalizedSource);
-    const { sound, status } = await Audio.Sound.createAsync(
+    const { sound, status } = await AudioSound.createAsync(
       { uri: playbackUrl },
       { shouldPlay, progressUpdateIntervalMillis: 250 },
       updateStatus,

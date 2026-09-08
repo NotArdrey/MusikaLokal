@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { ResizeMode, Video } from "expo-av";
+import { useVideoPlayer, VideoView } from "expo-video";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -96,6 +96,11 @@ interface InAppMediaViewerProps {
   onClose: () => void;
 }
 
+const MediaVideo = ({ uri }: { uri: string }) => {
+  const player = useVideoPlayer(uri, (videoPlayer) => videoPlayer.play());
+  return <VideoView player={player} style={styles.media} nativeControls contentFit="contain" />;
+};
+
 const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProps) => {
   const [loading, setLoading] = useState(false);
   const mediaType = useMemo(() => getInAppMediaType(uri), [uri]);
@@ -139,7 +144,7 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
-        <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
 
         <View style={styles.header}>
           <Text style={styles.title} numberOfLines={1}>
@@ -158,13 +163,7 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
           )}
 
           {uri && mediaType === "video" ? (
-            <Video
-              source={{ uri }}
-              style={styles.media}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay
-            />
+            <MediaVideo key={uri} uri={uri} />
           ) : uri && mediaType === "image" ? (
             <Image
               source={{ uri }}

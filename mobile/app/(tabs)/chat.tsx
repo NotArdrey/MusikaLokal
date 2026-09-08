@@ -1,10 +1,11 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import ChatScreen from '../../src/components/ChatScreen';
 import ConversationsList from '../../src/components/ConversationsList';
 import GuestSignInGate from '../../src/components/GuestSignInGate';
+import LoadingState from '../../src/components/LoadingState';
 import Navbar from '../../src/components/navbar';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -242,8 +243,8 @@ export default function ChatPage() {
 
     if (authLoading || loading) {
         return (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
-                <ActivityIndicator size="large" color={colors.primary} />
+            <View style={{ flex: 1, backgroundColor: colors.background }}>
+                <LoadingState message={authLoading ? "Restoring your session..." : "Loading conversations..."} style={{ flex: 1 }} />
             </View>
         );
     }

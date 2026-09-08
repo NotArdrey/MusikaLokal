@@ -25,6 +25,7 @@ import GigPresetDropdown from "../src/components/GigPresetDropdown";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
+import LoadingState from "../src/components/LoadingState";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
@@ -4317,16 +4318,7 @@ export default function EditStudioScreen() {
           { backgroundColor: colors.background },
         ]}
       >
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text
-          style={{
-            marginTop: 16,
-            color: colors.textSecondary,
-            fontFamily: "Poppins_400Regular",
-          }}
-        >
-          Loading studio details...
-        </Text>
+        <LoadingState message="Loading studio details..." />
       </View>
     );
   }

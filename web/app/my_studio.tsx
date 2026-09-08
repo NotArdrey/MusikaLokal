@@ -650,6 +650,8 @@ export default function MyStudioScreen() {
                 onInputChange={setDeleteConfirmationText}
                 requiredInputValue={selectedName}
                 confirmDisabled={!isDeleteConfirmed || deleting}
+                loading={deleting}
+                loadingMessage="Deleting studio..."
             />
             <ConflictResolutionModal
                 visible={deleteConflictModalVisible}

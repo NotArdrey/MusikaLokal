@@ -1,5 +1,5 @@
-import { Audio } from "expo-av";
-import * as FileSystem from "expo-file-system/src/legacy";
+import { AudioSound } from "../audio/AudioSound";
+import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../../lib/supabase";
 import {
   screenUploadsWithAiDecisions,
@@ -214,7 +214,7 @@ export const probePlaylistAudioDuration = async (
   uri: string,
   traceId = createPlaylistAudioTraceId(),
 ) => {
-  let sound: Audio.Sound | null = null;
+  let sound: AudioSound | null = null;
   const startedAt = Date.now();
 
   logPlaylistAudio("duration_probe_start", traceId, {
@@ -222,7 +222,7 @@ export const probePlaylistAudioDuration = async (
   });
 
   try {
-    const created = await Audio.Sound.createAsync(
+    const created = await AudioSound.createAsync(
       { uri },
       { shouldPlay: false, progressUpdateIntervalMillis: 0 },
     );

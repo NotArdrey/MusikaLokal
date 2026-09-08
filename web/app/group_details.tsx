@@ -4,7 +4,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
     Dimensions,
     Image,
     ScrollView,
@@ -19,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Modal from '../src/components/modal';
+import LoadingState from '../src/components/LoadingState';
 import ProfileAvatar from '../src/components/ProfileAvatar';
 import ReportModal from '../src/components/ReportModal';
 import { useAuth } from '../src/context/AuthContext';
@@ -306,7 +306,7 @@ export default function GroupDetailsScreen() {
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <LoadingState message="Loading group details..." />
       </View>
     );
   }

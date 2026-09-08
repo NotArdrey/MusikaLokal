@@ -1,9 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router";
 import { router } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
-  ActivityIndicator,
   Dimensions,
   InteractionManager,
   RefreshControl,
@@ -24,6 +23,7 @@ import Skeleton from "../src/components/Skeleton";
 import SlidingTabBar from "../src/components/SlidingTabBar";
 import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import { LoadingButtonContent } from "../src/components/LoadingState";
 import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
@@ -398,7 +398,7 @@ export default function SellerHubScreen() {
             onPress={handleAddProduct}
             disabled={adding || !isProductFormReady}
           >
-            {adding ? <ActivityIndicator color="#fff" /> : <Text style={[styles.submitBtnText, { color: isProductFormReady ? "#FFFFFF" : colors.textSecondary }]}>Create Product</Text>}
+            {adding ? <LoadingButtonContent message="Creating product..." /> : <Text style={[styles.submitBtnText, { color: isProductFormReady ? "#FFFFFF" : colors.textSecondary }]}>Create Product</Text>}
           </TouchableOpacity>
           </View>
       </BottomModal>

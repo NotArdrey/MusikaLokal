@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
+import { LoadingButtonContent } from '../src/components/LoadingState';
 import Header from '../src/components/header';
 import ImageUploader from '../src/components/ImageUploader';
 import Navbar from '../src/components/navbar';
@@ -322,7 +323,7 @@ export default function EditProductionScreen() {
                 onPress={handleSubmit}
                 disabled={saving || hasIncompleteRequiredFields}
               >
-                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Save Changes</Text>}
+                {saving ? <LoadingButtonContent message="Saving changes..." /> : <Text style={styles.submitBtnText}>Save Changes</Text>}
               </TouchableOpacity>
             </View>
           </>

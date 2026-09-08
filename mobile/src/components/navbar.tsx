@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import type { BottomTabBarProps } from 'expo-router/tabs';
 import { useQueryClient } from '@tanstack/react-query';
 import { router, usePathname } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';

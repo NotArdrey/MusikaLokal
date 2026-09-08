@@ -1,7 +1,9 @@
 # Gig history, upload moderation, and profile loading
 
-The mobile and web apps now show Gig History under Bookings → History and on
-the Manage dashboards for gig owners and musicians. Each card lists every
+The mobile and web apps show Gig History under Bookings → History for gig owners
+and musicians. It is not appended to the My Gig or My Group management screens.
+My Gig shows upcoming and ongoing gigs, with an empty message specific to those
+gigs instead of implying the owner has never posted. Each history card lists every
 application and its status, including declined, cancelled, and pending entries.
 Posted gigs with no applicants are included. History uses existing gig and
 application records; records already permanently deleted cannot be reconstructed.

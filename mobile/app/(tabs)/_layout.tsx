@@ -1,11 +1,35 @@
-import { Tabs } from 'expo-router';
+import { Redirect, Tabs } from 'expo-router';
+import { View } from 'react-native';
+import LoadingState from '../../src/components/LoadingState';
 import { GlobalNavbar } from '../../src/components/navbar';
+import { useAuth } from '../../src/context/AuthContext';
+import { useTheme } from '../../src/context/ThemeContext';
 
 const HIDDEN_TAB_OPTIONS = {
   href: null,
 } as const;
 
 export default function TabsLayout() {
+  const { session, loading, isGuest } = useAuth();
+  const { colors } = useTheme();
+
+  // Wait for persisted auth before mounting the feed on launch or reload.
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <LoadingState
+          message="Getting Musika Lokal ready..."
+          detail="Restoring your session and preferences."
+          style={{ flex: 1 }}
+        />
+      </View>
+    );
+  }
+
+  if (!session && !isGuest) {
+    return <Redirect href="/" />;
+  }
+
   return (
     <Tabs
       screenOptions={{

@@ -1,4 +1,5 @@
 import { screenVisualUpload } from "../src/services/visualUploadScreen";
+import { isUploadSafetyRetryableFailure } from "../src/services/uploadSafetyScreen";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
@@ -33,6 +34,7 @@ import { useGigApplicantCounts } from "../src/hooks/useGigApplicantCounts";
 import { useGigFeaturedPerformers } from "../src/hooks/useGigFeaturedPerformers";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
+import LoadingState, { LoadingButtonContent } from "../src/components/LoadingState";
 import { useRadioPlayer } from "../src/context/RadioPlayerContext";
 import { getStationLiveTimelineState } from "../src/utils/radioTimeline";
 
@@ -2598,7 +2600,13 @@ export default function FeedScreen() {
 
       setAlert({ type: "error", title: "Error", message: data?.error || "Failed to create post." });
     } catch (e: any) {
-      setAlert({ type: "error", title: "Error", message: e?.message || "Failed to create post." });
+      const message = e?.message || "Failed to create post.";
+      const screeningUnavailable = isUploadSafetyRetryableFailure(message);
+      setAlert({
+        type: screeningUnavailable ? "warning" : "error",
+        title: screeningUnavailable ? "Safety check unavailable" : "Error",
+        message,
+      });
     } finally {
       setCreating(false);
     }
@@ -3263,7 +3271,7 @@ export default function FeedScreen() {
               }
               ListEmptyComponent={
                 loading ? (
-                  <ActivityIndicator size="large" color={feedColors.primary} style={styles.loading} />
+                  <LoadingState message="Loading your feed..." style={styles.loading} />
                 ) : (
                   <View
                     style={[
@@ -3378,7 +3386,7 @@ export default function FeedScreen() {
                 disabled={!canCreatePost || creating}
               >
                 {creating ? (
-                  <ActivityIndicator size="small" color="#fff" />
+                  <LoadingButtonContent message="Publishing post..." />
                 ) : (
                   <Text style={[styles.createModalPostText, { color: canCreatePost ? "#FFFFFF" : colors.textSecondary }]}>
                     Post

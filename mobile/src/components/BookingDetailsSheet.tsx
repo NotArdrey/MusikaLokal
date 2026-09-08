@@ -6,7 +6,6 @@ import {
 } from "@gorhom/bottom-sheet";
 import React, { forwardRef, useCallback, useEffect, useMemo, useState } from "react";
 import {
-    ActivityIndicator,
     Alert,
     Dimensions,
     Linking,
@@ -17,6 +16,7 @@ import {
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../context/ThemeContext";
+import LoadingState from "./LoadingState";
 import { formatFriendlyDateTime } from "../utils/friendlyDateTime";
 import {
   formatRecordingHours,
@@ -855,7 +855,7 @@ const BookingDetailsSheet = forwardRef<
 
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={colors.primary} />
+              <LoadingState message="Loading booking details..." />
             </View>
           ) : (
             <>

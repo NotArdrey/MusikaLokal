@@ -32,6 +32,18 @@ npm --prefix web install
 npm --prefix web run dev
 ```
 
+The mobile app uses Expo SDK 57 (React Native 0.86.3 and React 19.2.3).
+To restart Metro after upgrading, run `cd mobile` followed by
+`npx expo start --clear`. Use an SDK 57 compatible Expo Go installation, or
+rebuild your native development app after the upgrade. See the
+[Expo upgrade guide](https://docs.expo.dev/workflow/upgrading-expo-sdk-walkthrough/).
+
+Mobile audio previews and the Expo Go radio fallback use `expo-audio`; video
+previews use `expo-video`. The existing `react-native-track-player` integration
+for native builds still triggers Expo Doctor's New Architecture compatibility
+warning and needs device validation. Run the audio lifecycle regression checks
+from the repository root with `node --test scripts/test-expo-audio.mjs`.
+
 The root package contains the end-to-end test dependencies and commands:
 
 ```powershell

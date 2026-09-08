@@ -20,6 +20,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import GigPresetDropdown, { GIG_GENRE_OPTIONS } from "../src/components/GigPresetDropdown";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
+import LoadingState from "../src/components/LoadingState";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import ProfileAvatar from "../src/components/ProfileAvatar";
@@ -666,16 +667,7 @@ export default function GroupDetailsScreen() {
           { backgroundColor: pageBackground },
         ]}
       >
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text
-          style={{
-            marginTop: 16,
-            color: colors.textSecondary,
-            fontFamily: "Poppins_400Regular",
-          }}
-        >
-          Loading group details...
-        </Text>
+        <LoadingState message="Loading group management..." />
       </View>
     );
   }
@@ -714,7 +706,7 @@ export default function GroupDetailsScreen() {
             </View>
 
             <Text style={[styles.headerTitle, { color: colors.text }]}>
-              {group?.name || "Loading..."}
+              {group?.name || "Loading group..."}
             </Text>
             <Text
               style={[styles.headerLocation, { color: colors.textSecondary }]}

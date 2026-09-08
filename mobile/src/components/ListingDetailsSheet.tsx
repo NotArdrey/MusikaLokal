@@ -33,6 +33,7 @@ import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
 import { useBottomOverlayVisibility } from "../context/BottomOverlayContext";
 import { useTheme } from "../context/ThemeContext";
+import LoadingState from "./LoadingState";
 import { useApplicationSubmissionAction } from "../hooks/useApplicationSubmissionAction";
 import { useBottomBarClearance } from "../hooks/useBottomBarClearance";
 import { useBookingRequestAction } from "../hooks/useBookingRequestAction";
@@ -4564,7 +4565,7 @@ const ListingDetailsSheet = forwardRef<
               { backgroundColor: colors.background },
             ]}
           >
-            <ActivityIndicator size="large" color={colors.primary} />
+            <LoadingState message="Loading group details..." />
           </View>
         ) : group ? (
           <ScrollView

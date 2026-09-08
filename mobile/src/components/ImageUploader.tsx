@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system/src/legacy';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
-import { screenUploadsWithAiDecisions } from '../services/uploadSafetyScreen';
+import { isUploadSafetyRetryableFailure, screenUploadsWithAiDecisions } from '../services/uploadSafetyScreen';
 import { createE2EImageFixtureUrls, isE2EFixtureMode } from '../utils/e2eFixtures';
 import { uploadStorageObject } from '../utils/storageUpload';
 import CustomAlert, { AlertType } from './CustomAlert';
@@ -98,6 +98,7 @@ interface PreparedImageUpload {
 interface SkippedImageFeedback {
   name: string;
   reason: string;
+  retryable?: boolean;
 }
 
 const getAssetDisplayName = (asset: ImagePicker.ImagePickerAsset, index: number): string => {
@@ -105,7 +106,10 @@ const getAssetDisplayName = (asset: ImagePicker.ImagePickerAsset, index: number)
   return typeof (asset as any)?.fileName === 'string' ? (asset as any).fileName : fallbackName;
 };
 
-const formatSkippedImageFeedback = (skippedItems: SkippedImageFeedback[]): string => {
+const formatSkippedImageFeedback = (
+  skippedItems: SkippedImageFeedback[],
+  heading = 'Blocked/skipped',
+): string => {
   if (skippedItems.length === 0) {
     return '';
   }
@@ -118,7 +122,7 @@ const formatSkippedImageFeedback = (skippedItems: SkippedImageFeedback[]): strin
   const remainingText =
     remainingCount > 0 ? `\n+ ${remainingCount} more image(s) skipped.` : '';
 
-  return `\n\nBlocked/skipped:\n${details}${remainingText}`;
+  return `\n\n${heading}:\n${details}${remainingText}`;
 };
 
 const prepareImageForUpload = async (
@@ -334,15 +338,17 @@ export default function ImageUploader({
         skippedImages.push({
           name: item.originalName,
           reason: decision?.reason || 'This image did not pass safety screening.',
+          retryable: Boolean(decision?.retryable) || isUploadSafetyRetryableFailure(decision?.reason),
         });
         return false;
       });
 
       if (approvedUploads.length === 0) {
+        const screeningUnavailable = skippedImages.length > 0 && skippedImages.every((item) => item.retryable);
         showAlert(
-          'error',
-          'Upload Blocked',
-          `No images were uploaded.${formatSkippedImageFeedback(skippedImages)}`,
+          screeningUnavailable ? 'warning' : 'error',
+          screeningUnavailable ? 'Safety Check Unavailable' : 'Upload Blocked',
+          `${screeningUnavailable ? 'The images were not classified as violations. Please try the upload again.' : 'No images were uploaded.'}${formatSkippedImageFeedback(skippedImages, screeningUnavailable ? 'Not uploaded' : 'Blocked/skipped')}`,
         );
         return;
       }
@@ -470,11 +476,17 @@ export default function ImageUploader({
     <View style={styles.container}>
       <Modal visible={uploading} transparent animationType="fade" statusBarTranslucent>
         <View style={styles.loadingOverlay}>
-          <View style={[styles.loadingCard, { backgroundColor: colors.surface }]}>
+          <View
+            accessible
+            accessibilityLabel={`${uploadMessage} Keep this screen open while your photos are checked and uploaded.`}
+            accessibilityLiveRegion="polite"
+            accessibilityRole="progressbar"
+            style={[styles.loadingCard, { backgroundColor: colors.surface }]}
+          >
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={[styles.loadingTitle, { color: colors.text }]}>{uploadMessage}</Text>
             <Text style={[styles.loadingSubtitle, { color: colors.textSecondary }]}>
-              Please wait while your media is uploaded.
+              Keep this screen open while your photos are checked and uploaded.
             </Text>
           </View>
         </View>

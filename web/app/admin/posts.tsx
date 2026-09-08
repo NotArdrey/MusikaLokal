@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import Header from '../../src/components/header';
+import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
@@ -157,7 +158,7 @@ export default function AdminPostsPage() {
     }
   };
 
-  if (loading || !roleResolved) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /></View>;
+  if (loading || !roleResolved) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><LoadingState message="Checking admin access..." style={{ flex: 1 }} /></View>;
   if (!isAdmin) return <View style={[styles.container, { backgroundColor: colors.background }]}><Header title="Admin" onBackPress={() => router.back()} /><View style={styles.centered}><Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>Access denied</Text></View></View>;
 
   return (
@@ -203,7 +204,7 @@ export default function AdminPostsPage() {
           ))}
         </ScrollView>
       </View>
-      {loadingPosts ? <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} /> : (
+      {loadingPosts ? <LoadingState message="Loading posts..." style={{ flex: 1 }} /> : (
         <FlatList
           data={posts}
           keyExtractor={(i) => i.id}

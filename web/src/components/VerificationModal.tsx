@@ -1,8 +1,9 @@
 ﻿import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect } from 'react';
-import { ActivityIndicator, Modal, PermissionsAndroid, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, PermissionsAndroid, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../context/ThemeContext';
+import LoadingState from './LoadingState';
 
 const debugLog = (..._args: unknown[]) => {};
 
@@ -75,7 +76,7 @@ export default function VerificationModal({ visible, url, onClose, onSuccess }: 
                         startInLoadingState={true}
                         renderLoading={() => (
                             <View style={styles.loadingContainer}>
-                                <ActivityIndicator size="large" color={colors.primary} />
+                                <LoadingState message="Loading secure verification..." />
                             </View>
                         )}
                         onNavigationStateChange={handleNavigationStateChange}

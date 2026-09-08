@@ -24,6 +24,7 @@ import GigPresetDropdown, {
 } from "../src/components/GigPresetDropdown";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
+import LoadingState from "../src/components/LoadingState";
 import LocationPicker from "../src/components/LocationPicker";
 import Modal, { normalizeVisibleInput } from "../src/components/modal";
 import Navbar from "../src/components/navbar";
@@ -1428,16 +1429,7 @@ export default function EditGroupScreen() {
           { backgroundColor: colors.background },
         ]}
       >
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text
-          style={{
-            marginTop: 16,
-            color: colors.textSecondary,
-            fontFamily: "Poppins_400Regular",
-          }}
-        >
-          Loading group details...
-        </Text>
+        <LoadingState message="Loading group details..." />
       </View>
     );
   }

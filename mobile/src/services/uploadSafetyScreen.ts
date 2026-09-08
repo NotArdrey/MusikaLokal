@@ -31,6 +31,7 @@ export interface UploadSafetyFileDecision {
   input: UploadSafetyFileInput;
   allowed: boolean;
   reason?: string;
+  retryable?: boolean;
   requiresAdminReview?: boolean;
   publiclyAvailable?: boolean;
   copyrightStatus?: UploadSafetyCopyrightStatus;
@@ -44,6 +45,7 @@ interface CachedUploadSafetyDecision {
   moderationStatus?: string;
   allowed: boolean;
   reason?: string;
+  retryable?: boolean;
   requiresAdminReview?: boolean;
   publiclyAvailable?: boolean;
   copyrightStatus?: UploadSafetyCopyrightStatus;
@@ -62,6 +64,7 @@ interface RemoteUploadSafetyResult {
   fingerprint?: string;
   allowed?: boolean;
   reason?: string;
+  retryable?: boolean;
   requiresAdminReview?: boolean;
   publiclyAvailable?: boolean;
   copyrightStatus?: UploadSafetyCopyrightStatus;
@@ -70,9 +73,9 @@ interface RemoteUploadSafetyResult {
   copyrightMetadata?: Record<string, unknown>;
 }
 
-const SAFETY_CACHE_PREFIX = "upload_safety_screen:v13:";
+const SAFETY_CACHE_PREFIX = "upload_safety_screen:v14:";
 const SAFETY_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const SAFETY_UNAVAILABLE_CACHE_TTL_MS = 5 * 60 * 1000;
+const SAFETY_UNAVAILABLE_CACHE_TTL_MS = 5 * 1000;
 const SAFETY_OWNERSHIP_REVIEW_CACHE_TTL_MS = 30 * 1000;
 const SCREENING_FUNCTION_NAME = "upload-safety-screen";
 const MAX_CANDIDATES_PER_REQUEST = 10;
@@ -91,6 +94,9 @@ const PROVIDER_ERROR_PATTERN =
   /\b(groq|openai|gemini|api error|visual review error|image safety screening failed|rate_limit|rate limit|429|tokens per minute|tpm|organization|service tier|billing|console\.groq\.com|internal server error)\b/i;
 const TEMPORARY_BLOCK_REASON_PATTERN =
   /\b(temporarily unavailable|unavailable|busy|too long|timed out|timeout|try again|could not verify|failed|not configured|incomplete|did not return)\b/i;
+
+export const isUploadSafetyRetryableFailure = (reason?: string): boolean =>
+  TEMPORARY_BLOCK_REASON_PATTERN.test(reason || "");
 const OWNERSHIP_REVIEW_REASON_PATTERN =
   /\b(ownership request|ownership review|identity review|admin approval)\b/i;
 const AUDIO_COPYRIGHT_REASON_PATTERN =
@@ -407,6 +413,7 @@ const screenChunkWithRemoteAi = async (
         false,
         "Safety screening response was incomplete. Upload blocked.",
         SAFETY_UNAVAILABLE_CACHE_TTL_MS,
+        { retryable: true },
       );
       await setCachedDecision(item.cacheKey, unavailableDecision);
       continue;
@@ -425,6 +432,7 @@ const screenChunkWithRemoteAi = async (
       getDecisionCacheTtlMs(allowed, reason, requiresAdminReview),
       {
         requiresAdminReview,
+        retryable: Boolean(remote.retryable) || (!remote.moderationCaseId && isUploadSafetyRetryableFailure(reason)),
         moderationCaseId: remote.moderationCaseId || null,
         moderationStatus: remote.moderationStatus,
         publiclyAvailable: typeof remote.publiclyAvailable === "boolean"
@@ -595,6 +603,7 @@ export const screenUploadsWithAiDecisions = async (
           false,
           `${item.input.name} was blocked by safety screening.`,
           SAFETY_UNAVAILABLE_CACHE_TTL_MS,
+          { retryable: true },
         ),
       );
     }
@@ -615,6 +624,7 @@ export const screenUploadsWithAiDecisions = async (
           : decision
             ? undefined
             : SCREENING_UNAVAILABLE_BLOCK_MESSAGE,
+      retryable: Boolean(decision?.retryable) || (!decision?.moderationCaseId && isUploadSafetyRetryableFailure(decision?.reason)),
       moderationCaseId: decision?.moderationCaseId || null,
       moderationStatus: decision?.moderationStatus,
       requiresAdminReview: Boolean(decision?.requiresAdminReview),

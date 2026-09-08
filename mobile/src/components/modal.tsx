@@ -75,7 +75,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
   contractName,
   summaryItems = [],
   loading = false,
-  loadingMessage = 'Please wait...',
+  loadingMessage = 'Completing your request...',
   showCancelButton = true
 }) => {
   const { colors } = useTheme();
@@ -270,10 +270,15 @@ const CustomModal: React.FC<CustomModalProps> = ({
           ]}
         >
           {loading ? (
-            <>
+            <View
+              accessible
+              accessibilityLabel={loadingMessage}
+              accessibilityLiveRegion="polite"
+              accessibilityRole="progressbar"
+            >
               <ActivityIndicator size="large" color={colors.primary} style={{ marginBottom: 16 }} />
               <Text style={[styles.message, { color: colors.textSecondary, marginBottom: 0 }]}>{loadingMessage}</Text>
-            </>
+            </View>
           ) : (
             <ScrollView
               keyboardShouldPersistTaps="handled"

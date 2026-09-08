@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
+import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
@@ -2333,8 +2334,7 @@ export default function AdminReportsPage() {
   if (loading || !roleResolved || initializingReports) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading reports...</Text>
+        <LoadingState message={initializingReports ? "Loading reports..." : "Checking admin access..."} />
       </View>
     );
   }

@@ -10,6 +10,7 @@ import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { LoadingButtonContent } from '../src/components/LoadingState';
 import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
 
 type IdentityProfile = {
@@ -315,7 +316,7 @@ export default function IdentityVerificationScreen() {
               ]}
             >
               {startingVerification ? (
-                <ActivityIndicator color="#FFFFFF" />
+                <LoadingButtonContent message="Preparing verification..." />
               ) : (
                 <Text style={styles.actionButtonText}>
                   {normalizedStatus === 'PENDING_REVIEW'

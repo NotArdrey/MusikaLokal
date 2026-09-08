@@ -1,7 +1,7 @@
 import GigHistorySection from '../../src/components/GigHistorySection';
 import { Ionicons } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ExpoLinking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
@@ -9361,7 +9361,7 @@ export default function BookingsScreen() {
       >
         <View style={{ flex: 1, backgroundColor: "black" }}>
           <CameraView
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             facing="back"
             onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
           />
@@ -9915,7 +9915,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   scannerOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: "center",
     alignItems: "center",
   },

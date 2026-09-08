@@ -15,17 +15,13 @@ require("dotenv").config({
   quiet: true,
 });
 
-const appJson = require("./app.json");
-
-const expoConfig = appJson.expo || {};
-
 const sanitize = (value) => (typeof value === "string" ? value.trim() : "");
 
 const readEnv = (name, fallback = "") => sanitize(process.env[name]) || fallback;
 const readPublicOrE2EEnv = (publicName, e2eName, fallback = "") =>
   readEnv(publicName, readEnv(e2eName, fallback));
 
-module.exports = () => {
+module.exports = ({ config: expoConfig }) => {
   const existingExtra = expoConfig.extra || {};
 
   return {

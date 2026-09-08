@@ -7,7 +7,7 @@ import {
   useBottomSheetSpringConfigs,
 } from "@gorhom/bottom-sheet";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system/src/legacy";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -5466,16 +5466,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   gridVideoFallback: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
   },
   gridVideoScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.16)",
   },
   gridVideoPlayBadgeWrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -5720,7 +5720,7 @@ const styles = StyleSheet.create({
   },
   // Drawer styles
   drawerOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "transparent",
     zIndex: 20000,
     elevation: 20000,
@@ -5736,16 +5736,16 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   drawerScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.42)",
     zIndex: 1,
   },
   drawerBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 2,
   },
   drawerBackdropTouchTarget: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   drawerContent: {
     width: DRAWER_WIDTH,
