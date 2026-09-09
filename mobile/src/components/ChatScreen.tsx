@@ -38,7 +38,11 @@ import {
     useChat,
     useGroupParticipants,
 } from '../hooks/useChat';
-import { sanitizeStorageFileName, uploadStorageObject } from '../utils/storageUpload';
+import {
+    DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
+    sanitizeStorageFileName,
+    uploadStorageObject,
+} from '../utils/storageUpload';
 import { resolveSupabaseMediaUrl } from '../utils/supabaseMedia';
 import BottomModal from './BottomModal';
 import CustomAlert, { AlertType } from './CustomAlert';
@@ -484,7 +488,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         try {
             const result = await DocumentPicker.getDocumentAsync({
                 type: '*/*',
-                copyToCacheDirectory: true,
+                copyToCacheDirectory: DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
             });
 
             if (result.canceled || !result.assets || result.assets.length === 0) return;

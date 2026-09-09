@@ -35,7 +35,11 @@ import Navbar from "../src/components/navbar";
 import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
 import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../src/utils/e2eFixtures";
-import { sanitizeStorageFileName, uploadStorageObject } from "../src/utils/storageUpload";
+import {
+  DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
+  sanitizeStorageFileName,
+  uploadStorageObject,
+} from "../src/utils/storageUpload";
 
 // Helper function to format time input
 const formatTimeInput = (text: string): string => {
@@ -1004,7 +1008,7 @@ export default function AddGigScreen() {
       documentPickerInProgressRef.current = true;
       const result = await DocumentPicker.getDocumentAsync({
         type: "application/pdf",
-        copyToCacheDirectory: true,
+        copyToCacheDirectory: DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
       });
       documentPickerInProgressRef.current = false;
 
@@ -1085,7 +1089,7 @@ export default function AddGigScreen() {
       documentPickerInProgressRef.current = true;
       const result = await DocumentPicker.getDocumentAsync({
         type: ["application/pdf", "image/*"],
-        copyToCacheDirectory: true,
+        copyToCacheDirectory: DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
       });
       documentPickerInProgressRef.current = false;
 

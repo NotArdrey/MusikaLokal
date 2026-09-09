@@ -1,10 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { createE2EDocumentFixture, isE2EFixtureMode } from '../utils/e2eFixtures';
-import { persistUploadAsset, removePersistedUploadAsset } from '../utils/storageUpload';
+import {
+    DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
+    persistUploadAsset,
+    removePersistedUploadAsset,
+} from '../utils/storageUpload';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 interface DocumentUploaderProps {
@@ -35,6 +39,11 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
         setAlertVisible(true);
     };
 
+    useEffect(() => () => {
+        void removePersistedUploadAsset(persistedAssetRef.current);
+        persistedAssetRef.current = null;
+    }, []);
+
     const pickDocument = async () => {
         try {
             setChecking(true);
@@ -47,7 +56,7 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
 
             const result = await DocumentPicker.getDocumentAsync({
                 type: 'application/pdf', // Limit to PDFs for now, or '*/*'
-                copyToCacheDirectory: true,
+                copyToCacheDirectory: DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
             });
 
             if (result.canceled) return;

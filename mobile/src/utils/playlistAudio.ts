@@ -6,6 +6,11 @@ import {
   type UploadSafetyCopyrightStatus,
   type UploadSafetyFileDecision,
 } from "../services/uploadSafetyScreen";
+import {
+  DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
+  persistUploadAsset,
+  removePersistedUploadAsset,
+} from "./storageUpload";
 
 export const MAX_PLAYLIST_AUDIO_DURATION_SECONDS = 300;
 
@@ -296,7 +301,7 @@ export const pickPlaylistAudioFile = async (): Promise<PlaylistAudioFile | null>
   const DocumentPicker = await import("expo-document-picker");
   const result = await DocumentPicker.getDocumentAsync({
     type: ["audio/mpeg", "audio/mp3"],
-    copyToCacheDirectory: true,
+    copyToCacheDirectory: DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
     multiple: false,
   });
 
@@ -332,7 +337,14 @@ export const pickPlaylistAudioFile = async (): Promise<PlaylistAudioFile | null>
   }
 
   const mimeType = inferMimeType(fileName, pickerMimeType);
-  const durationSeconds = await probePlaylistAudioDuration(asset.uri, traceId);
+  const persistedAsset = await persistUploadAsset({ ...asset, name: fileName });
+  let durationSeconds: number;
+  try {
+    durationSeconds = await probePlaylistAudioDuration(persistedAsset.uri, traceId);
+  } catch (error) {
+    await removePersistedUploadAsset(persistedAsset);
+    throw error;
+  }
 
   logPlaylistAudio("picker_ready", traceId, {
     name: fileName,
@@ -343,7 +355,7 @@ export const pickPlaylistAudioFile = async (): Promise<PlaylistAudioFile | null>
 
   return {
     name: fileName,
-    uri: asset.uri,
+    uri: persistedAsset.uri,
     mimeType,
     sizeBytes: typeof asset.size === "number" ? asset.size : null,
     durationSeconds,

@@ -28,6 +28,7 @@ import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
 import { isE2EFixtureMode } from '../src/utils/e2eFixtures';
 import { bottomSheetSpringConfig } from '../src/utils/motion';
+import { createTemporaryUploadFile, type TemporaryUploadFile } from '../src/utils/storageUpload';
 
 type OnboardingStep = 'details' | 'verification' | 'email_verification';
 type SignupRole = 'fan' | 'musician';
@@ -254,20 +255,25 @@ const uploadMusicianVideoToSignedUrl = async (
         return;
     }
 
-    const uploadResult = await FileSystem.uploadAsync(buildSignedVideoUploadUrl(upload), asset.uri, {
-        httpMethod: 'PUT',
-        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-        headers: {
-            apikey: supabaseAnonKey,
-            Authorization: `Bearer ${supabaseAnonKey}`,
-            'Content-Type': mimeType,
-            'cache-control': 'max-age=3600',
-            'x-upsert': 'false',
-        },
-    });
+    const temporaryFile = await createTemporaryUploadFile(asset.uri, getVideoOriginalName(asset));
+    try {
+        const uploadResult = await FileSystem.uploadAsync(buildSignedVideoUploadUrl(upload), temporaryFile.uri, {
+            httpMethod: 'PUT',
+            uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+            headers: {
+                apikey: supabaseAnonKey,
+                Authorization: `Bearer ${supabaseAnonKey}`,
+                'Content-Type': mimeType,
+                'cache-control': 'max-age=3600',
+                'x-upsert': 'false',
+            },
+        });
 
-    if (uploadResult.status < 200 || uploadResult.status >= 300) {
-        throw new Error(readSignedVideoUploadError(uploadResult.status, uploadResult.body));
+        if (uploadResult.status < 200 || uploadResult.status >= 300) {
+            throw new Error(readSignedVideoUploadError(uploadResult.status, uploadResult.body));
+        }
+    } finally {
+        await temporaryFile.remove();
     }
 };
 
@@ -2031,6 +2037,7 @@ export default function SignupScreen() {
             return;
         }
 
+        let selectedVideoFile: TemporaryUploadFile | null = null;
         try {
             if (Platform.OS !== 'web') {
                 const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -2050,7 +2057,14 @@ export default function SignupScreen() {
                 return;
             }
 
-            const asset = result.assets[0];
+            const pickedAsset = result.assets[0];
+            const pickedName = getVideoOriginalName(pickedAsset);
+            selectedVideoFile = Platform.OS === 'web'
+                ? null
+                : await createTemporaryUploadFile(pickedAsset.uri, pickedName);
+            const asset = selectedVideoFile
+                ? { ...pickedAsset, uri: selectedVideoFile.uri }
+                : pickedAsset;
             const originalName = getVideoOriginalName(asset);
             const mimeType = resolveVideoMimeType(asset, originalName);
             const sizeBytes = await getVideoAssetSizeBytes(asset);
@@ -2102,6 +2116,7 @@ export default function SignupScreen() {
             console.error('Musician video proof upload failed:', err);
             Alert.alert('Upload Failed', err?.message || 'Unable to upload your music video proof.');
         } finally {
+            await selectedVideoFile?.remove();
             setMusicianVideoUploading(false);
         }
     };

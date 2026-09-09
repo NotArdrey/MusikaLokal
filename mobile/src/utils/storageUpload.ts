@@ -1,4 +1,3 @@
-import { File as ExpoFile, UploadType } from "expo-file-system";
 import * as FileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
 import { supabase, supabaseAnonKey, supabaseUrl } from "../../lib/supabase";
@@ -44,15 +43,24 @@ const STALE_PENDING_UPLOAD_AGE_SECONDS = 24 * 60 * 60;
 const FILE_READ_RETRY_DELAY_MS = 75;
 const FILE_READ_ATTEMPTS = 3;
 
+// Expo Go 56+ isolates FileSystem paths per experience, but Android's
+// DocumentPicker cache URI can still point at the host-level cache. Keeping the
+// provider URI lets us copy it directly into the experience-owned directory.
+// iOS keeps the picker copy so security-scoped Files/iCloud URLs remain usable.
+export const DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY = Platform.OS !== "android";
+
 const createLocalUploadUri = (directory: string, fileName?: string | null) => {
   const safeName = sanitizeStorageFileName(fileName || "upload", "upload");
   const nonce = Math.random().toString(36).slice(2, 10);
   return `${directory}${Date.now()}_${nonce}_${safeName}`;
 };
 
+const isAppOwnedUploadUri = (uri: string) =>
+  Boolean(NATIVE_UPLOAD_DIRECTORY && uri.startsWith(NATIVE_UPLOAD_DIRECTORY));
+
 const assertReadableFile = async (uri: string) => {
-  const file = new ExpoFile(uri);
-  if (!file.exists) {
+  const info = await FileSystem.getInfoAsync(uri);
+  if (!info.exists || info.isDirectory) {
     throw new Error("The selected file is no longer available. Please select it again.");
   }
 };
@@ -119,9 +127,10 @@ export const sanitizeStorageFileName = (name: string, fallback = "upload") => {
 };
 
 /**
- * DocumentPicker returns a cache URI whose lifetime is not guaranteed. Copy it
- * while it is fresh so forms can safely upload after the user finishes filling
- * in the remaining fields.
+ * Android DocumentPicker callers intentionally keep `copyToCacheDirectory`
+ * disabled. In Expo Go, the picker cache can resolve outside the experience's
+ * FileSystem scope and be rejected as unreadable. Copy the granted content URI
+ * immediately into app-owned storage instead.
  */
 export const persistUploadAsset = async <T extends UploadFileAsset>(asset: T): Promise<T> => {
   if (Platform.OS === "web" || !PENDING_UPLOAD_DIRECTORY) {
@@ -133,13 +142,20 @@ export const persistUploadAsset = async <T extends UploadFileAsset>(asset: T): P
     return asset;
   }
 
-  await assertReadableFile(asset.uri);
   await FileSystem.makeDirectoryAsync(PENDING_UPLOAD_DIRECTORY, { intermediates: true });
   await removeStalePendingUploads();
 
   const persistedUri = createLocalUploadUri(PENDING_UPLOAD_DIRECTORY, asset.name);
-  await new ExpoFile(asset.uri).copy(new ExpoFile(persistedUri));
-  await assertReadableFile(persistedUri);
+  try {
+    // Do not probe the picker URI with File.exists first. Android content
+    // providers can return false for a valid URI even though copyAsync can
+    // consume the one-time read grant successfully.
+    await FileSystem.copyAsync({ from: asset.uri, to: persistedUri });
+    await assertReadableFile(persistedUri);
+  } catch (error) {
+    await removeLocalFile(persistedUri);
+    throw error;
+  }
 
   return { ...asset, uri: persistedUri };
 };
@@ -165,11 +181,20 @@ export const createTemporaryUploadFile = async (
     return { uri, remove: async () => undefined };
   }
 
-  await assertReadableFile(uri);
+  if (isAppOwnedUploadUri(uri)) {
+    await assertReadableFile(uri);
+    return { uri, remove: async () => undefined };
+  }
+
   await FileSystem.makeDirectoryAsync(WORKING_UPLOAD_DIRECTORY, { intermediates: true });
   const temporaryUri = createLocalUploadUri(WORKING_UPLOAD_DIRECTORY, fileName);
-  await new ExpoFile(uri).copy(new ExpoFile(temporaryUri));
-  await assertReadableFile(temporaryUri);
+  try {
+    await FileSystem.copyAsync({ from: uri, to: temporaryUri });
+    await assertReadableFile(temporaryUri);
+  } catch (error) {
+    await removeLocalFile(temporaryUri);
+    throw error;
+  }
 
   return {
     uri: temporaryUri,
@@ -178,29 +203,33 @@ export const createTemporaryUploadFile = async (
 };
 
 export const readLocalFileAsBase64 = async (uri: string, fileName?: string | null) => {
-  let lastReadError: unknown;
-  for (let attempt = 0; attempt < FILE_READ_ATTEMPTS; attempt += 1) {
-    try {
-      return await new ExpoFile(uri).base64();
-    } catch (error) {
-      lastReadError = error;
-      if (attempt < FILE_READ_ATTEMPTS - 1) {
-        await delay(FILE_READ_RETRY_DELAY_MS);
-      }
-    }
-  }
-
   let temporaryFile: TemporaryUploadFile;
   try {
     temporaryFile = await createTemporaryUploadFile(uri, fileName);
-  } catch {
-    throw lastReadError instanceof Error
-      ? lastReadError
+  } catch (error) {
+    throw error instanceof Error
+      ? error
       : new Error("The selected file could not be read. Please select it again.");
   }
 
+  let lastReadError: unknown;
   try {
-    return await new ExpoFile(temporaryFile.uri).base64();
+    for (let attempt = 0; attempt < FILE_READ_ATTEMPTS; attempt += 1) {
+      try {
+        return await FileSystem.readAsStringAsync(temporaryFile.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      } catch (error) {
+        lastReadError = error;
+        if (attempt < FILE_READ_ATTEMPTS - 1) {
+          await delay(FILE_READ_RETRY_DELAY_MS);
+        }
+      }
+    }
+
+    throw lastReadError instanceof Error
+      ? lastReadError
+      : new Error("The selected file could not be read. Please select it again.");
   } finally {
     await temporaryFile.remove();
   }
@@ -230,17 +259,14 @@ export const uploadStorageObject = async ({
       // Android's DocumentPicker cache can be readable to FileSystem.copyAsync
       // but rejected by uploadAsync. Uploading an app-owned copy avoids that
       // provider/cache permission edge case.
-      const shouldCopyForUpload = !PENDING_UPLOAD_DIRECTORY || !uri.startsWith(PENDING_UPLOAD_DIRECTORY);
-      temporaryFile = shouldCopyForUpload
-        ? await createTemporaryUploadFile(uri, path.split("/").pop())
-        : { uri, remove: async () => undefined };
+      temporaryFile = await createTemporaryUploadFile(uri, path.split("/").pop());
       await assertReadableFile(temporaryFile.uri);
 
       const baseUrl = supabaseUrl.replace(/\/+$/, "");
       const uploadUrl = `${baseUrl}/storage/v1/object/${encodeURIComponent(bucket)}/${encodeStoragePath(path)}`;
-      const result = await new ExpoFile(temporaryFile.uri).upload(uploadUrl, {
+      const result = await FileSystem.uploadAsync(uploadUrl, temporaryFile.uri, {
         httpMethod: "POST",
-        uploadType: UploadType.BINARY_CONTENT,
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
         headers: {
           Authorization: `Bearer ${session.access_token}`,
           apikey: supabaseAnonKey,

@@ -80,6 +80,10 @@ import { isUploadSafetyRetryableFailure, screenUploadsWithAi } from "../../src/s
 import { logLoadTime, usePageLoadLogger } from "../../src/utils/loadTimeLogger";
 import { bottomSheetSpringConfig } from "../../src/utils/motion";
 import { setSmoothTab } from "../../src/utils/smoothTabs";
+import {
+  persistUploadAsset,
+  removePersistedUploadAsset,
+} from "../../src/utils/storageUpload";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -5636,7 +5640,12 @@ export default function FeedScreen() {
     setEditingPost(null);
     setPostBody("");
     setPostVisibility("public");
-    setPostMedia([]);
+    setPostMedia((current) => {
+      current.forEach((item) => {
+        if (!item.existing) void removePersistedUploadAsset(item);
+      });
+      return [];
+    });
     setComposerMediaDirty(false);
     setMediaStatus("");
   }, []);
@@ -5792,9 +5801,15 @@ export default function FeedScreen() {
       const prepared: PostComposerMedia[] = [];
       const blockedReasons: string[] = [];
       for (const asset of assets) {
+        let persistedAsset: any = null;
         try {
-          prepared.push(await preparePostComposerMedia(asset));
+          persistedAsset = await persistUploadAsset({
+            ...asset,
+            name: getAssetFileName(asset, resolvePostMediaExtension(asset)),
+          });
+          prepared.push(await preparePostComposerMedia(persistedAsset));
         } catch (error: any) {
+          await removePersistedUploadAsset(persistedAsset);
           const reason = typeof error?.message === "string" && error.message.trim().length > 0
             ? error.message.trim()
             : "This media could not be attached.";
@@ -5843,6 +5858,8 @@ export default function FeedScreen() {
 
   const removeComposerMedia = useCallback((mediaId: string) => {
     setPostMedia((current) => {
+      const removed = current.find((item) => item.id === mediaId);
+      if (removed && !removed.existing) void removePersistedUploadAsset(removed);
       const next = current.filter((item) => item.id !== mediaId);
       const hasCover = next.some((item) => item.is_cover);
       return next.map((item, index) => ({ ...item, is_cover: hasCover ? item.is_cover : index === 0 }));
@@ -6232,7 +6249,12 @@ export default function FeedScreen() {
     setEditingPost(editablePost);
     setPostBody(editablePost.body || editablePost.content || "");
     setPostVisibility(editablePost.visibility === "followers" ? "followers" : "public");
-    setPostMedia(normalizeExistingPostMediaForComposer(editablePost));
+    setPostMedia((current) => {
+      current.forEach((item) => {
+        if (!item.existing) void removePersistedUploadAsset(item);
+      });
+      return normalizeExistingPostMediaForComposer(editablePost);
+    });
     setComposerMediaDirty(false);
     setMediaStatus("");
     presentComposerSheet();

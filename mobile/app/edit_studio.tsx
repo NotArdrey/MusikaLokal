@@ -37,7 +37,11 @@ import {
     getStudioDateOverrideLeadTimeError,
     isStudioDateOverrideDateSelectable,
 } from "../src/utils/studioAvailabilityLeadTime";
-import { sanitizeStorageFileName, uploadStorageObject } from "../src/utils/storageUpload";
+import {
+  DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
+  sanitizeStorageFileName,
+  uploadStorageObject,
+} from "../src/utils/storageUpload";
 
 import { useLocalSearchParams } from "expo-router";
 import { supabase } from "../lib/supabase";
@@ -3655,7 +3659,7 @@ export default function EditStudioScreen() {
       const DocumentPicker = await import("expo-document-picker");
       const result = await DocumentPicker.getDocumentAsync({
         type: "application/pdf",
-        copyToCacheDirectory: true,
+        copyToCacheDirectory: DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
       });
 
       if (result.canceled) {
@@ -3729,7 +3733,7 @@ export default function EditStudioScreen() {
       const DocumentPicker = await import("expo-document-picker");
       const result = await DocumentPicker.getDocumentAsync({
         type: ["application/pdf", "image/*"],
-        copyToCacheDirectory: true,
+        copyToCacheDirectory: DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
       });
 
       if (result.canceled) {

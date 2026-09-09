@@ -21,6 +21,7 @@ import {
   Image,
   InteractionManager,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -75,7 +76,13 @@ import { getSmoothTabIndex, setSmoothTab } from "../../src/utils/smoothTabs";
 import { bottomSheetSpringConfig, motion } from "../../src/utils/motion";
 import { isFanUserRole } from "../../src/utils/roleRouting";
 import { isStaffRole } from "../../src/utils/staffAccess";
-import { uploadStorageObject } from "../../src/utils/storageUpload";
+import {
+  createTemporaryUploadFile,
+  DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
+  readLocalFileAsBase64,
+  uploadStorageObject,
+  type TemporaryUploadFile,
+} from "../../src/utils/storageUpload";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const PROFILE_CONTENT_HORIZONTAL_PADDING = 24;
@@ -2621,15 +2628,23 @@ export default function ProfileScreen() {
 
       for (const [index, file] of selectedAssets.entries()) {
         const displayName = getPortfolioAssetDisplayName(file, index);
+        let nativeUploadFile: TemporaryUploadFile | null = null;
 
         try {
           setUploadMessage(`Preparing media ${index + 1}/${selectedAssets.length}...`);
 
-      const fileExt = resolvePortfolioFileExtension(file);
+      nativeUploadFile = Platform.OS === "web"
+        ? null
+        : await createTemporaryUploadFile(file.uri, displayName);
+      const readableFile: PortfolioUploadAsset = nativeUploadFile
+        ? { ...file, uri: nativeUploadFile.uri }
+        : file;
+
+      const fileExt = resolvePortfolioFileExtension(readableFile);
       const fileName = `${userId}/portfolio/${Date.now()}_${index}.${fileExt}`;
-      const mimeType = resolvePortfolioMimeType(file, fileExt);
-      const uploadKind = resolvePortfolioUploadKind(file, mimeType, fileExt);
-      const fileSize = await getPortfolioFileSize(file);
+      const mimeType = resolvePortfolioMimeType(readableFile, fileExt);
+      const uploadKind = resolvePortfolioUploadKind(readableFile, mimeType, fileExt);
+      const fileSize = await getPortfolioFileSize(readableFile);
 
       logProfileMedia("file_selected", {
         uri: file.uri,
@@ -2645,7 +2660,7 @@ export default function ProfileScreen() {
 
       let base64: string | undefined;
       if (uploadKind === "photo") {
-        base64 = await FileSystem.readAsStringAsync(file.uri, { encoding: "base64" });
+        base64 = await readLocalFileAsBase64(readableFile.uri, displayName);
       }
 
       logProfileMedia("file_prepared", {
@@ -2659,7 +2674,7 @@ export default function ProfileScreen() {
         mimeType,
         byteLength: fileSize,
       });
-      await withSafetyTimeout(screenProfilePortfolioMedia(file, {
+      await withSafetyTimeout(screenProfilePortfolioMedia(readableFile, {
         fileExt,
         mimeType,
         uploadKind,
@@ -2674,7 +2689,7 @@ export default function ProfileScreen() {
         fileName,
         contentType: mimeType,
       });
-      const { data: uploadData, error: uploadError } = await uploadPortfolioMediaFile(file, {
+      const { data: uploadData, error: uploadError } = await uploadPortfolioMediaFile(readableFile, {
         fileName,
         mimeType,
       });
@@ -2732,6 +2747,8 @@ export default function ProfileScreen() {
               String(itemError?.message || itemError || "Failed to upload media."),
             ),
           });
+        } finally {
+          await nativeUploadFile?.remove();
         }
       }
 
@@ -2825,7 +2842,7 @@ export default function ProfileScreen() {
       logProfileMedia("picker_opening", { source: "document_picker" });
       const result = await DocumentPicker.getDocumentAsync({
         type: PORTFOLIO_DOCUMENT_PICKER_MIME_TYPES,
-        copyToCacheDirectory: true,
+        copyToCacheDirectory: DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
         multiple: true,
       });
 

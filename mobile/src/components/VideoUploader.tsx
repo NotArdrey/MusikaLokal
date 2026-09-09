@@ -1,6 +1,5 @@
 import { screenVisualUpload } from "../services/visualUploadScreen";
 import { Ionicons } from '@expo/vector-icons';
-import { File as ExpoFile, UploadType } from 'expo-file-system';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
@@ -332,23 +331,27 @@ const uploadVideoFile = async (input: {
     const uploadUrl = `${baseUrl}/storage/v1/object/${encodeURIComponent(input.bucketName)}/${encodeStoragePath(input.fileName)}`;
 
     try {
-      const uploadTask = new ExpoFile(input.assetUri).createUploadTask(uploadUrl, {
-        httpMethod: 'POST',
-        uploadType: UploadType.BINARY_CONTENT,
-        headers: {
-          Authorization: `Bearer ${input.accessToken}`,
-          apikey: supabaseAnonKey,
-          'Content-Type': input.mimeType,
-          'x-upsert': 'false',
+      const uploadTask = FileSystem.createUploadTask(
+        uploadUrl,
+        input.assetUri,
+        {
+          httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+          headers: {
+            Authorization: `Bearer ${input.accessToken}`,
+            apikey: supabaseAnonKey,
+            'Content-Type': input.mimeType,
+            'x-upsert': 'false',
+          },
         },
-        onProgress: ({ totalBytes, bytesSent }) => {
-          if (totalBytes > 0) {
+        ({ totalBytesExpectedToSend, totalBytesSent }) => {
+          if (totalBytesExpectedToSend > 0) {
             input.onProgress?.(
-              Math.min(99, Math.max(1, Math.round((bytesSent / totalBytes) * 100))),
+              Math.min(99, Math.max(1, Math.round((totalBytesSent / totalBytesExpectedToSend) * 100))),
             );
           }
         },
-      });
+      );
 
       const uploadResponse = await uploadTask.uploadAsync();
 
