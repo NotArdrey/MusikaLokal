@@ -8,6 +8,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
+import { createRealtimeChannelTopic } from '../utils/realtimeChannel';
 import { fetchActiveStaffAssignment, isStaffRole, normalizeStaffAccessLevel } from '../utils/staffAccess';
 
 const AnimatedIcon = Animated.createAnimatedComponent(Ionicons);
@@ -306,7 +307,7 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
         }
 
         const channel = supabase
-            .channel(`header-notifications:${userId}`)
+            .channel(createRealtimeChannelTopic(`header-notifications:${userId}`))
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
@@ -319,7 +320,7 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
         const messagesChannel = isFan
             ? null
             : supabase
-                .channel(`header-messages:${userId}`)
+                .channel(createRealtimeChannelTopic(`header-messages:${userId}`))
                 .on(
                     'postgres_changes',
                     { event: '*', schema: 'public', table: 'messages' },

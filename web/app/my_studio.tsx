@@ -15,6 +15,7 @@ import Navbar from '../src/components/navbar';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { StaffAssignment, fetchActiveStaffAssignment, getStaffPermissions } from '../src/utils/staffAccess';
+import { createRealtimeChannelTopic } from '../src/utils/realtimeChannel';
 
 const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
@@ -193,7 +194,7 @@ export default function MyStudioScreen() {
             : `owner_id=eq.${userId}`;
 
         const channel = supabase
-            .channel(`my-studio-listings:${userId}`)
+            .channel(createRealtimeChannelTopic(`my-studio-listings:${userId}`))
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'studios', filter: realtimeFilter },

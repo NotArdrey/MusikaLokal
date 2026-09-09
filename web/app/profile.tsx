@@ -2430,9 +2430,12 @@ export default function ProfileScreen() {
   const showUploadFeedbackAlert = (error: any) => {
     const rawMessage = String(error?.message || error || "Failed to upload media").trim();
     if (rawMessage.includes("Skipped media:")) {
+      const isPendingModerationReview =
+        /safety screening (?:flagged|detected)|blocked by safety screening/i.test(rawMessage) &&
+        /administrator reviews|unpublished/i.test(rawMessage);
       showAlert(
         "warning",
-        "Upload failed",
+        isPendingModerationReview ? "Content flagged for review" : "Upload failed",
         rawMessage,
         [{ text: "OK", style: "default" }],
         true,

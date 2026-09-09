@@ -10,6 +10,7 @@ function createScreeningHarness() {
   let handler,
     providerCalls = 0,
     providerFailure = false,
+    primaryVisionFailure = false,
     providerAllows = false,
     jsonModeFailure = false,
     storageFailure = false,
@@ -123,6 +124,12 @@ function createScreeningHarness() {
         const requestBody = JSON.parse(init?.body || "{}");
         providerRequestBodies.push(requestBody);
         if (providerFailure) return new Response("Unavailable", { status: 503 });
+        if (primaryVisionFailure && requestBody.model === "qwen/qwen3.6-27b") {
+          return Response.json(
+            { error: { code: "rate_limit_exceeded", message: "Rate limit reached" } },
+            { status: 429 },
+          );
+        }
         if (jsonModeFailure && requestBody.response_format) {
           return Response.json(
             { error: { code: "json_validate_failed", message: "Failed to validate JSON" } },
@@ -182,6 +189,9 @@ function createScreeningHarness() {
     failProvider() {
       providerFailure = true;
     },
+    failPrimaryVisionModel() {
+      primaryVisionFailure = true;
+    },
     allowProvider() {
       providerAllows = true;
     },
@@ -225,6 +235,8 @@ test("AI block stores private evidence and returns a pending case, with category
   assert.equal(h.cases[0].confidence, 0.93);
   assert.equal(h.cases[0].categories[0], "violence");
   assert.equal(h.cases[0].provider, "groq-vision");
+  assert.match(body.results[0].reason, /possible violence/i);
+  assert.match(body.results[0].reason, /administrator reviews/i);
 });
 test("retries reuse the case; admin approval applies only to exact evidence and uploader", async () => {
   const h = createScreeningHarness();
@@ -235,6 +247,7 @@ test("retries reuse the case; admin approval applies only to exact evidence and 
     first.body.results[0].moderationCaseId,
     retry.body.results[0].moderationCaseId,
   );
+  assert.match(retry.body.results[0].reason, /possible violence/i);
   assert.equal(h.providerCalls, 1);
   assert.equal(h.cases.length, 1);
   h.cases[0].status = "approved";
@@ -296,8 +309,21 @@ test("Groq visual review disables reasoning and retries JSON-mode validation fai
   assert.equal(h.providerCalls, 2);
   assert.equal(h.providerRequestBodies[0].reasoning_effort, "none");
   assert.equal(h.providerRequestBodies[0].reasoning_format, "hidden");
+  assert.equal(h.providerRequestBodies[0].max_completion_tokens, 160);
   assert.deepEqual(h.providerRequestBodies[0].response_format, { type: "json_object" });
   assert.equal(h.providerRequestBodies[1].response_format, undefined);
+});
+test("visual screening falls back to a separate Groq model after a primary rate limit", async () => {
+  const h = createScreeningHarness();
+  h.allowProvider();
+  h.failPrimaryVisionModel();
+  const result = await h.screen([file("image-one")]);
+  assert.equal(result.body.results[0].allowed, true);
+  assert.deepEqual(
+    h.providerRequestBodies.map((request) => request.model),
+    ["qwen/qwen3.6-27b", "qwen/qwen3.8-27b"],
+  );
+  assert.ok(h.providerRequestBodies.every((request) => request.max_completion_tokens === 160));
 });
 test("ordinary image, video, avatar, feed, portfolio, and metadata uploads pass through Groq", async () => {
   const contexts = [

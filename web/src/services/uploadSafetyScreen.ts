@@ -80,6 +80,8 @@ const SAFETY_OWNERSHIP_REVIEW_CACHE_TTL_MS = 30 * 1000;
 const SCREENING_FUNCTION_NAME = "upload-safety-screen";
 const MAX_CANDIDATES_PER_REQUEST = 10;
 const MAX_CONCURRENT_INLINE_SCREENINGS = 2;
+const MAX_REMOTE_SCREENING_ATTEMPTS = 3;
+const REMOTE_SCREENING_RETRY_DELAY_MS = 750;
 const SCREENING_UNAVAILABLE_BLOCK_MESSAGE =
   "Safety check is temporarily unavailable. Please try again in a moment.";
 const SAFETY_RATE_LIMIT_MESSAGE =
@@ -212,6 +214,20 @@ const setCachedDecision = async (
     // Cache write failures should not block uploads.
   }
 };
+
+const clearCachedDecision = async (cacheKey: string): Promise<void> => {
+  memoryDecisionCache.delete(cacheKey);
+  try {
+    await AsyncStorage.removeItem(cacheKey);
+  } catch {
+    // A stale transient cache entry expires quickly even if removal fails.
+  }
+};
+
+const waitForRetry = (attempt: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, REMOTE_SCREENING_RETRY_DELAY_MS * attempt);
+  });
 
 const buildRemoteDecision = (
   allowed: boolean,
@@ -482,7 +498,10 @@ const resolveDecisionForKey = async (
 ): Promise<CachedUploadSafetyDecision> => {
   const cached = await getCachedDecision(cacheKey);
   if (cached && !cached.moderationCaseId) {
-    return cached;
+    if (!cached.retryable && !isUploadSafetyRetryableFailure(cached.reason)) {
+      return cached;
+    }
+    await clearCachedDecision(cacheKey);
   }
 
   const existing = inFlightDecisionCache.get(cacheKey);
@@ -491,21 +510,51 @@ const resolveDecisionForKey = async (
   }
 
   const promise = (async () => {
-    await screenChunkWithRemoteAi([{ cacheKey, input }], contextTag);
-    const resolved = await getCachedDecision(cacheKey);
+    let lastError: unknown;
+    let lastDecision: CachedUploadSafetyDecision | null = null;
 
-    if (!resolved) {
-      const fallbackDecision = buildRemoteDecision(
-        false,
-        "Safety screening did not return a valid decision.",
-        SAFETY_UNAVAILABLE_CACHE_TTL_MS,
-      );
+    for (let attempt = 1; attempt <= MAX_REMOTE_SCREENING_ATTEMPTS; attempt += 1) {
+      if (attempt > 1) {
+        await waitForRetry(attempt - 1);
+      }
 
-      await setCachedDecision(cacheKey, fallbackDecision);
-      return fallbackDecision;
+      try {
+        await screenChunkWithRemoteAi([{ cacheKey, input }], contextTag);
+        const resolved = await getCachedDecision(cacheKey);
+        lastDecision = resolved;
+
+        if (
+          resolved &&
+          (resolved.allowed ||
+            resolved.moderationCaseId ||
+            (!resolved.retryable && !isUploadSafetyRetryableFailure(resolved.reason)))
+        ) {
+          return resolved;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+
+      if (attempt < MAX_REMOTE_SCREENING_ATTEMPTS) {
+        await clearCachedDecision(cacheKey);
+      }
     }
 
-    return resolved;
+    if (lastDecision) {
+      return lastDecision;
+    }
+    if (lastError) {
+      throw lastError;
+    }
+
+    const fallbackDecision = buildRemoteDecision(
+      false,
+      "Safety screening did not return a valid decision.",
+      SAFETY_UNAVAILABLE_CACHE_TTL_MS,
+      { retryable: true },
+    );
+    await setCachedDecision(cacheKey, fallbackDecision);
+    return fallbackDecision;
   })();
 
   inFlightDecisionCache.set(cacheKey, promise);

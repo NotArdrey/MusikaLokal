@@ -2091,7 +2091,6 @@ export default function AdminReportsPage() {
 
   const renderReportsManagementSection = () => (
     <View style={styles.sectionGap}>
-      <UploadModerationPanel />
       <TextInput
         testID="admin-reports-search-input"
         accessibilityLabel="admin-reports-search-input"
@@ -2135,6 +2134,19 @@ export default function AdminReportsPage() {
           })}
         </View>
       </View>
+
+      {reportFilter !== 'dismissed' ? (
+        <UploadModerationPanel
+          filterStatus={
+            reportFilter === 'pending'
+              ? 'pending_review'
+              : reportFilter === 'resolved'
+                ? 'reviewed'
+                : 'all'
+          }
+          searchQuery={reportSearch}
+        />
+      ) : null}
 
       {reportsLoading ? (
         <View style={styles.inlineLoader}>

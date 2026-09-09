@@ -65,6 +65,7 @@ import { useGigApplicantCounts } from "../../src/hooks/useGigApplicantCounts";
 import { useGigFeaturedPerformers } from "../../src/hooks/useGigFeaturedPerformers";
 import { useTheme } from "../../src/context/ThemeContext";
 import { resolveRadioMediaUrl } from "../../src/audio/radioTrackPlayer";
+import { buildPostShareMessage } from "../../src/utils/postShare";
 import {
   buildSocialFollowKey,
   getListingSocialFollowTarget,
@@ -108,7 +109,6 @@ type FeedRefreshReason =
 const isForYouFeedTab = (feedTab: FeedTab) => feedTab === "for_you";
 const FEED_TABS = [
   { key: "for_you", label: "For You" },
-  { key: "latest", label: "Latest" },
   { key: "talent", label: "Talent" },
   { key: "following", label: "Following" },
 ] as const;
@@ -6450,10 +6450,14 @@ export default function FeedScreen() {
     if (!post?.id) return;
     try {
       const shareResult = await Share.share({
-        message: `${post.body || post.content || "Check out this post on MusikaLokal."}\n\nMusikaLokal post: ${post.id}`,
+        message: buildPostShareMessage(post),
+        title: "Share MusikaLokal post",
       });
 
-      if (shareResult.action === Share.dismissedAction) return;
+      // React Native always reports sharedAction on Android as soon as it opens
+      // the chooser, including when the user dismisses it. Only update the count
+      // on platforms that can confirm a completed share.
+      if (Platform.OS === "android" || shareResult.action === Share.dismissedAction) return;
 
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
         body: { action: "share_post", post_id: post.id },

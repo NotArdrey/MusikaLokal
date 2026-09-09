@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
 import { prepareRealtimeAuth, supabase } from "../../lib/supabase";
+import { createRealtimeChannelTopic } from "../utils/realtimeChannel";
 import { queryKeys } from "./queryKeys";
 
 const INVALIDATION_DEBOUNCE_MS = 600;
@@ -164,7 +165,9 @@ export const useGlobalRealtimeInvalidation = (
         return;
       }
 
-      channel = supabase.channel(`mobile-query-invalidation:${userId}`);
+      channel = supabase.channel(
+        createRealtimeChannelTopic(`mobile-query-invalidation:${userId}`),
+      );
 
       Object.keys(tableScopes).forEach((table) => {
         channel?.on(

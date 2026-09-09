@@ -13,6 +13,7 @@ import { useAuth } from '../src/context/AuthContext';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
 import { formatDashedNumericDate } from '../src/utils/friendlyDateTime';
+import { createRealtimeChannelTopic } from '../src/utils/realtimeChannel';
 
 // Payout Method Type
 interface PayoutMethod {
@@ -410,7 +411,7 @@ export default function WalletScreen() {
         if (!isActive || !user) return;
 
         walletChannel = supabase
-          .channel(`wallet-realtime-${user.id}`)
+          .channel(createRealtimeChannelTopic(`wallet-realtime:${user.id}`))
           .on(
             'postgres_changes',
             {

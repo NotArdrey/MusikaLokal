@@ -35,6 +35,14 @@ const ACRCLOUD_CUSTOM_ACCESS_SECRET = Deno.env.get("ACRCLOUD_CUSTOM_ACCESS_SECRE
 
 const MAX_FILES_PER_REQUEST = 10;
 const GROQ_VISION_MODEL = Deno.env.get("GROQ_VISION_MODEL")?.trim() || "qwen/qwen3.6-27b";
+const GROQ_VISION_FALLBACK_MODEL =
+  Deno.env.get("GROQ_VISION_FALLBACK_MODEL")?.trim() || "qwen/qwen3.8-27b";
+const GROQ_VISION_MODELS = Array.from(
+  new Set([GROQ_VISION_MODEL, GROQ_VISION_FALLBACK_MODEL].filter(Boolean)),
+);
+// The response is a tiny JSON object. A large reservation needlessly consumes
+// Groq's output-token allowance and makes multi-frame videos hit 429s.
+const GROQ_VISION_MAX_COMPLETION_TOKENS = 160;
 const GROQ_SAFETY_TEXT_MODEL = "openai/gpt-oss-safeguard-20b";
 const MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024;
 const MAX_ACRCLOUD_AUDIO_SAMPLE_BYTES = 4 * 1024 * 1024;
@@ -1406,14 +1414,15 @@ async function callOpenAiVisualReview(
 async function callGroqVisualReview(
   prompt: string,
   dataUrl: string,
+  model: string,
 ): Promise<VisualDecision | null> {
   console.log("[upload-safety-screen] groq_visual_review_start", {
-    model: GROQ_VISION_MODEL,
+    model,
     imageBytesApprox: estimateBase64Bytes(dataUrl.split(",")[1] || ""),
   });
 
   const requestBody = {
-    model: GROQ_VISION_MODEL,
+    model,
     messages: [
       {
         role: "user",
@@ -1427,7 +1436,7 @@ async function callGroqVisualReview(
     reasoning_effort: "none",
     reasoning_format: "hidden",
     temperature: 0.2,
-    max_completion_tokens: 500,
+    max_completion_tokens: GROQ_VISION_MAX_COMPLETION_TOKENS,
     stream: false,
   };
   let response = await fetch(GROQ_API_URL, {
@@ -1443,7 +1452,7 @@ async function callGroqVisualReview(
     let errorBody = await response.text().catch(() => "");
     if (response.status === 400 && /json_validate_failed/i.test(errorBody)) {
       console.warn("[upload-safety-screen] groq_json_mode_retry", {
-        model: GROQ_VISION_MODEL,
+        model,
       });
       const plainJsonRequestBody: Record<string, unknown> = { ...requestBody };
       delete plainJsonRequestBody.response_format;
@@ -1463,6 +1472,7 @@ async function callGroqVisualReview(
     }
     if (!response.ok) {
       console.error("[upload-safety-screen] groq_visual_review_failed", {
+        model,
         status: response.status,
         statusText: response.statusText,
         body: errorBody.slice(0, 1000),
@@ -1475,6 +1485,7 @@ async function callGroqVisualReview(
   const rawContent = data?.choices?.[0]?.message?.content || "";
   const decision = parseVisualReviewDecision(rawContent);
   console.log("[upload-safety-screen] groq_visual_review_done", {
+    model,
     hasDecision: Boolean(decision),
     allowed: decision?.allowed,
     reason: decision?.reason,
@@ -1525,22 +1536,26 @@ async function screenVisualContent(
   }
 
   if (GROQ_API_KEY) {
-    try {
-      const visualDecision = await callGroqVisualReview(prompt, parsedImage.dataUrl);
-      if (visualDecision) {
-        reviewed = true;
-        if (!visualDecision.allowed) {
-          return { ...visualDecision, provider: 'groq-vision' };
+    for (const model of GROQ_VISION_MODELS) {
+      try {
+        const visualDecision = await callGroqVisualReview(prompt, parsedImage.dataUrl, model);
+        if (visualDecision) {
+          reviewed = true;
+          if (!visualDecision.allowed) {
+            return { ...visualDecision, provider: 'groq-vision' };
+          }
+          break;
+        } else {
+          providerFailures.push(`Groq (${model}): no valid JSON decision returned`);
         }
-      } else {
-        providerFailures.push("Groq: no valid JSON decision returned");
+      } catch (error) {
+        providerFailures.push(`Groq (${model}): ${error instanceof Error ? error.message : String(error)}`);
+        console.error("[upload-safety-screen] groq_visual_review_exception_fallback", {
+          model,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        // Try the next vision model before blocking the upload.
       }
-    } catch (error) {
-      providerFailures.push(`Groq: ${error instanceof Error ? error.message : String(error)}`);
-      console.error("[upload-safety-screen] groq_visual_review_exception_fallback", {
-        message: error instanceof Error ? error.message : String(error),
-      });
-      // Try the next image-capable provider before blocking.
     }
   }
 

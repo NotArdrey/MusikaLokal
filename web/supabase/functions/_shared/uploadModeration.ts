@@ -9,6 +9,60 @@ const BUCKET = "moderation-quarantine";
 const pendingReason =
   "This media is unpublished while an administrator reviews it. You will be notified of the decision.";
 
+const MODERATION_CATEGORY_LABELS: Record<string, string> = {
+  sexual: "sexual content",
+  "sexual/minors": "sexual content involving minors",
+  nudity: "nudity",
+  violence: "violence",
+  "violence/graphic": "graphic violence or gore",
+  gore: "graphic violence or gore",
+  hate: "hate or extremist content",
+  "hate/threatening": "threatening hate content",
+  hate_symbols: "hate symbols or extremist imagery",
+  illicit: "illegal content",
+  "illicit/violent": "violent illegal content",
+  illegal: "illegal content",
+};
+
+function formatDetectedCategories(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+
+  const categories = new Set(
+    value
+      .filter((category): category is string => typeof category === "string")
+      .map((category) => category.trim().toLowerCase()),
+  );
+  if (categories.has("sexual/minors")) categories.delete("sexual");
+  if (categories.has("violence/graphic")) categories.delete("violence");
+  if (categories.has("hate/threatening")) categories.delete("hate");
+  if (categories.has("illicit/violent")) categories.delete("illicit");
+
+  const labels = Array.from(new Set(
+    Array.from(categories)
+      .map((category) => MODERATION_CATEGORY_LABELS[category])
+      .filter((label): label is string => Boolean(label)),
+  ));
+
+  if (labels.length === 0) return null;
+  if (labels.length === 1) return labels[0];
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(", ")}, and ${labels.at(-1)}`;
+}
+
+function buildModerationStatusReason(entry: any): string {
+  const detectedCategories = formatDetectedCategories(entry.categories);
+
+  if (entry.status === "rejected") {
+    return detectedCategories
+      ? `This media was rejected after review for ${detectedCategories}. It remains unpublished.`
+      : "An administrator rejected this media. It remains unpublished.";
+  }
+
+  return detectedCategories
+    ? `Safety screening flagged this media for possible ${detectedCategories} under Musika Lokal's safety guidelines. ${pendingReason}`
+    : `Safety screening flagged this media under Musika Lokal's safety guidelines. ${pendingReason}`;
+}
+
 export async function findUploadModerationCase(
   client: any,
   userId: string,
@@ -27,7 +81,7 @@ export async function findUploadModerationCase(
     .join("");
   const { data, error } = await client
     .from("upload_moderation_cases")
-    .select("id,status,media_path")
+    .select("id,status,media_path,categories,reason")
     .eq("user_id", userId)
     .eq("content_hash", hash)
     .eq("context", context)
@@ -45,11 +99,7 @@ export function moderationCaseDecision(entry: any) {
     moderationCaseId: entry.id,
     moderationStatus: entry.status,
     moderationEvidenceAttached: Boolean(entry.media_path),
-    reason: approved
-      ? undefined
-      : entry.status === "rejected"
-        ? "An administrator rejected this media. It remains unpublished."
-        : pendingReason,
+    reason: approved ? undefined : buildModerationStatusReason(entry),
   };
 }
 
@@ -112,7 +162,7 @@ export async function createUploadModerationCase(
   const { data, error } = await client
     .from("upload_moderation_cases")
     .insert(payload)
-    .select("id,status")
+    .select("id,status,media_path,categories,reason")
     .single();
   if (error) {
     if (previewPath) await client.storage.from(BUCKET).remove([previewPath]);
@@ -171,7 +221,9 @@ export async function handleUploadModerationAdmin(
       .order("created_at", { ascending: false })
       .order("id")
       .range(offset, offset + 20);
-    if (["pending_review", "approved", "rejected"].includes(params.status))
+    if (params.status === "reviewed")
+      query = query.in("status", ["approved", "rejected"]);
+    else if (["pending_review", "approved", "rejected"].includes(params.status))
       query = query.eq("status", params.status);
     const { data, error } = await query;
     if (error) throw error;

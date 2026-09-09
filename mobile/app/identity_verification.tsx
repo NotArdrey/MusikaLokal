@@ -12,6 +12,7 @@ import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { LoadingButtonContent } from '../src/components/LoadingState';
 import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
+import { createRealtimeChannelTopic } from '../src/utils/realtimeChannel';
 
 type IdentityProfile = {
   is_verified: boolean | null;
@@ -165,7 +166,7 @@ export default function IdentityVerificationScreen() {
     if (!userId || !session || isGuest) return;
 
     const channel = supabase
-      .channel(`identity-status:${userId}`)
+      .channel(createRealtimeChannelTopic(`identity-status:${userId}`))
       .on(
         'postgres_changes',
         {

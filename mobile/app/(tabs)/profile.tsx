@@ -8,7 +8,9 @@ import {
 } from "@gorhom/bottom-sheet";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
+import { createVideoPlayer, type VideoThumbnail } from "expo-video";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -832,44 +834,95 @@ const buildVideoSafetyFrameTimes = (duration?: number | null): number[] => {
   return times;
 };
 
+const normalizeVideoSourceUriForNativeFileAccess = (uri: string): string => {
+  // Expo Go can return local picker URIs whose scoped experience directory is
+  // encoded twice (for example, `%2540anonymous%252F...`). On Android,
+  // expo-video passes a file URL's path directly to MediaMetadataRetriever, so
+  // the extra encoding layer makes an existing picker file look missing.
+  if (!/^file:\/\//i.test(uri) || !/%25[0-9a-f]{2}/i.test(uri)) {
+    return uri;
+  }
+
+  try {
+    return decodeURI(uri);
+  } catch {
+    return uri;
+  }
+};
+
 const buildPortfolioVideoFrameDataUrls = async (
   file: PortfolioUploadAsset,
 ): Promise<string[]> => {
   const frameTimes = buildVideoSafetyFrameTimes((file as any)?.duration);
-  const attempts = await Promise.allSettled(
-    frameTimes.map(async (time) => {
-      const thumbnail = await VideoThumbnails.getThumbnailAsync(file.uri, {
-        time,
-        quality: 0.55,
-      });
-      const base64 = await FileSystem.readAsStringAsync(thumbnail.uri, {
-        encoding: "base64",
-      });
-      return ensureScreenableDataUrl(
-        `data:image/jpeg;base64,${base64}`,
-        "Could not create a small enough video preview for safety screening.",
-      );
-    }),
-  );
+  const frameDataUrls: string[] = [];
+  const failures: unknown[] = [];
+  const videoSourceUri = normalizeVideoSourceUriForNativeFileAccess(file.uri);
+  const player = createVideoPlayer(videoSourceUri);
 
-  const frameDataUrls = Array.from(
-    new Set(
-      attempts
-        .filter((result): result is PromiseFulfilledResult<string> => result.status === "fulfilled")
-        .map((result) => result.value),
-    ),
-  );
+  if (videoSourceUri !== file.uri) {
+    logProfileMedia("video_source_uri_normalized", {
+      reason: "nested_file_uri_encoding",
+    });
+  }
 
-  if (frameDataUrls.length === 0) {
-    const firstFailure = attempts.find(
-      (result): result is PromiseRejectedResult => result.status === "rejected",
-    );
-    throw firstFailure?.reason instanceof Error
-      ? firstFailure.reason
+  const encodeThumbnail = async (thumbnail: VideoThumbnail): Promise<string> => {
+    const context = ImageManipulator.manipulate(thumbnail);
+    try {
+      const renderedImage = await context.renderAsync();
+      try {
+        const result = await renderedImage.saveAsync({
+          base64: true,
+          compress: 0.55,
+          format: SaveFormat.JPEG,
+        });
+        if (!result.base64) {
+          throw new Error("Video preview encoding returned no image data.");
+        }
+        return ensureScreenableDataUrl(
+          `data:image/jpeg;base64,${result.base64}`,
+          "Could not create a small enough video preview for safety screening.",
+        );
+      } finally {
+        renderedImage.release();
+      }
+    } finally {
+      context.release();
+      thumbnail.release();
+    }
+  };
+
+  try {
+    // Generate one frame at a time. The legacy thumbnail module writes outside
+    // Expo Go's scoped cache on Android, so FileSystem cannot read its output.
+    // expo-video keeps each frame as a native image reference instead.
+    for (const time of frameTimes) {
+      try {
+        const [thumbnail] = await player.generateThumbnailsAsync(
+          [time / 1000],
+          { maxWidth: 768, maxHeight: 768 },
+        );
+        if (!thumbnail) {
+          throw new Error(`No video preview was generated at ${time} ms.`);
+        }
+        frameDataUrls.push(await encodeThumbnail(thumbnail));
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+  } finally {
+    player.release();
+  }
+
+  const uniqueFrameDataUrls = Array.from(new Set(frameDataUrls));
+
+  if (uniqueFrameDataUrls.length === 0) {
+    const firstFailure = failures[0];
+    throw firstFailure instanceof Error
+      ? firstFailure
       : new Error("Could not create a video preview for safety screening.");
   }
 
-  return frameDataUrls;
+  return uniqueFrameDataUrls;
 };
 
 const screenProfilePortfolioMedia = async (
@@ -983,6 +1036,15 @@ const sanitizeUploadFeedbackMessage = (message: string): string => {
   }
 
   const lower = raw.toLowerCase();
+  if (
+    lower.includes("exponentfilesystem.readasstringasync") ||
+    lower.includes("isn't readable") ||
+    lower.includes("is not readable") ||
+    lower.includes("video preview encoding") ||
+    (lower.includes("generatethumbnailsasync") && lower.includes("does not exist"))
+  ) {
+    return "Could not read a preview from this video. Please select the video again.";
+  }
   if (
     lower.includes("rate_limit") ||
     lower.includes("rate limit") ||
@@ -2295,9 +2357,12 @@ export default function ProfileScreen() {
   const showUploadFeedbackAlert = (error: any) => {
     const rawMessage = String(error?.message || error || "Failed to upload media").trim();
     if (rawMessage.includes("Skipped media:")) {
+      const isPendingModerationReview =
+        /safety screening (?:flagged|detected)|blocked by safety screening/i.test(rawMessage) &&
+        /administrator reviews|unpublished/i.test(rawMessage);
       showAlert(
         "warning",
-        "Upload failed",
+        isPendingModerationReview ? "Content flagged for review" : "Upload failed",
         rawMessage,
         [{ text: "OK", style: "default" }],
         true,

@@ -42,6 +42,7 @@ import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
 import { logLoadTime } from "../src/utils/loadTimeLogger";
 import { isFanUserRole } from "../src/utils/roleRouting";
 import { isE2EFixtureMode } from "../src/utils/e2eFixtures";
+import { createRealtimeChannelTopic } from "../src/utils/realtimeChannel";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -630,7 +631,7 @@ function RootContent() {
       const channelGeneration = ++activeChannelGeneration;
 
       activeChannel = supabase
-        .channel(`root-notification-toast:${activeUserId}`)
+        .channel(createRealtimeChannelTopic(`root-notification-toast:${activeUserId}`))
         .on(
           "postgres_changes",
           {

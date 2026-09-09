@@ -39,6 +39,7 @@ import {
   uploadPlaylistAudioFile,
   type PlaylistAudioFile,
 } from "../src/utils/playlistAudio";
+import { createRealtimeChannelTopic } from "../src/utils/realtimeChannel";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -473,7 +474,7 @@ export default function PlaylistDetailsScreen() {
     if (!playlistId) return undefined;
 
     const channel = supabase
-      .channel(`playlist-details:${playlistId}`)
+      .channel(createRealtimeChannelTopic(`playlist-details:${playlistId}`))
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "playlists", filter: `id=eq.${playlistId}` },

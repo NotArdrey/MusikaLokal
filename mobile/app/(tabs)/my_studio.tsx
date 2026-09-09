@@ -22,6 +22,7 @@ import { getActionErrorMessage, getResultErrorMessage, logActionError } from '..
 import { isE2EFixtureMode } from '../../src/utils/e2eFixtures';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
 import { clearListingDetailsCache } from '../../src/utils/listingDetailsCache';
+import { createRealtimeChannelTopic } from '../../src/utils/realtimeChannel';
 
 const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
@@ -204,7 +205,7 @@ export default function MyStudioScreen() {
             : `owner_id=eq.${userId}`;
 
         const channel = supabase
-            .channel(`my-studio-listings:${userId}`)
+            .channel(createRealtimeChannelTopic(`my-studio-listings:${userId}`))
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'studios', filter: realtimeFilter },

@@ -24,6 +24,7 @@ import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import LoadingState from "./LoadingState";
 import { emitToast } from "../events/toastBus";
+import { buildPostShareMessage } from "../utils/postShare";
 import BottomModal from "./BottomModal";
 import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
@@ -704,9 +705,12 @@ export default function PostDetailsModal({
     if (!post) return;
     try {
       const shareResult = await Share.share({
-        message: `${post.body || "Check out this post on MusikaLokal."}\n\nMusikaLokal post: ${post.id}`,
+        message: buildPostShareMessage(post),
+        title: "Share MusikaLokal post",
       });
-      if (shareResult.action === Share.dismissedAction) return;
+      // Android's native share API reports success when the chooser opens, even
+      // if it is dismissed. Do not record an unverified share.
+      if (Platform.OS === "android" || shareResult.action === Share.dismissedAction) return;
 
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
         body: { action: "share_post", post_id: post.id },

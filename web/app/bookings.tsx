@@ -1,4 +1,3 @@
-import GigHistorySection from '../src/components/GigHistorySection';
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -38,6 +37,7 @@ import {
   getRecordingRequiredHours,
   resolveRecordingRule,
 } from "../src/utils/recordingRule";
+import { createRealtimeChannelTopic } from "../src/utils/realtimeChannel";
 
 const debugLog = (...args: unknown[]) => {
   if (typeof console !== "undefined" && console.warn) {
@@ -1300,7 +1300,7 @@ export default function BookingsScreen() {
       const role = profileData?.role || "";
 
       let liveChannel = supabase
-        .channel(`bookings-live-${userId}`)
+        .channel(createRealtimeChannelTopic(`bookings-live:${userId}`))
         .on(
           "postgres_changes",
           {
@@ -4777,7 +4777,6 @@ export default function BookingsScreen() {
               </View>
             )}
 
-          {activeTab === "History" && <GigHistorySection />}
           {loading ? (
             <View style={styles.centerContainer}>
               <Text

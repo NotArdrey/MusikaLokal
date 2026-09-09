@@ -3,7 +3,10 @@ import { handleUploadModerationAdmin } from "../_shared/uploadModeration.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
+import {
+  scheduleCoreActionEmailForNotification,
+  sendCoreActionEmailForNotification,
+} from "../_shared/coreActionEmail.ts";
 
 declare const Deno: {
   env: {
@@ -694,7 +697,49 @@ serve(async (req: Request) => {
 
     if (['fetch_upload_moderation_cases', 'fetch_upload_moderation_details', 'review_upload_moderation_case'].includes(action)) {
       try {
-        return jsonResponse(await handleUploadModerationAdmin(client, userId, action, params));
+        const result: any = await handleUploadModerationAdmin(client, userId, action, params);
+
+        if (action === 'review_upload_moderation_case' && result?.case?.user_id) {
+          const { data: notification, error: notificationError } = await client
+            .from('notifications')
+            .select('user_id,type,title,message,image,meta')
+            .eq('user_id', result.case.user_id)
+            .contains('meta', {
+              moderation_case_id: params.caseId,
+              action: params.decision,
+            })
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (notificationError) {
+            console.error('upload_moderation_notification_lookup_failed', {
+              caseId: params.caseId,
+              message: notificationError.message,
+            });
+          }
+
+          if (notification) {
+            try {
+              const emailDelivery = await sendCoreActionEmailForNotification(
+                client,
+                notification,
+                {
+                  source: 'admin-upload-moderation',
+                  templateType: `upload_moderation_${String(params.decision || 'review')}`,
+                },
+              );
+              return jsonResponse({ ...result, emailDelivery });
+            } catch (emailError) {
+              console.error('upload_moderation_email_failed', {
+                caseId: params.caseId,
+                message: emailError instanceof Error ? emailError.message : String(emailError),
+              });
+            }
+          }
+        }
+
+        return jsonResponse(result);
       } catch (error) {
         return jsonResponse({ error: error instanceof Error ? error.message : (error as any)?.message || 'Moderation request failed.' }, 400);
       }

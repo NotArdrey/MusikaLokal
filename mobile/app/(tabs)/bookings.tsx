@@ -1,4 +1,3 @@
-import GigHistorySection from '../../src/components/GigHistorySection';
 import { Ionicons } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect } from "expo-router";
@@ -5757,7 +5756,6 @@ export default function BookingsScreen() {
           ListHeaderComponent={
             <>
               {bookingsControlsHeader}
-              {renderActiveTab === "History" && <GigHistorySection />}
               {!loading &&
               ((userRole === "studio-owner" && renderActiveTab === "Pending") ||
                 (userRole === "venue-owner" && renderActiveTab === "Applicants")) &&

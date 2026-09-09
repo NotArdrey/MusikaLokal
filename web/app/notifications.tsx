@@ -23,6 +23,7 @@ import {
     resolveNotificationNavigationTarget,
 } from '../src/utils/notificationNavigation';
 import { formatDashedNumericDate } from '../src/utils/friendlyDateTime';
+import { createRealtimeChannelTopic } from '../src/utils/realtimeChannel';
 
 
 const DEFAULT_NOTIFICATION_IMAGE = 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop';
@@ -226,7 +227,7 @@ export default function NotificationsScreen() {
             if (!user || !isActive) return;
 
             activeChannel = supabase
-                .channel(`screen-notifications:${user.id}`)
+                .channel(createRealtimeChannelTopic(`screen-notifications:${user.id}`))
                 .on(
                     'postgres_changes',
                     { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },

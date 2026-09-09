@@ -12,6 +12,7 @@ import React, {
 } from "react";
 import { AppState, AppStateStatus } from "react-native";
 import { clearSupabaseAuthStorage, supabase } from "../../lib/supabase";
+import { createRealtimeChannelTopic } from "../utils/realtimeChannel";
 
 type UnpaidBooking = {
   id: string;
@@ -608,7 +609,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
 
     const channel = supabase
-      .channel(`auth-profile:${activeUserId}`)
+      .channel(createRealtimeChannelTopic(`auth-profile:${activeUserId}`))
       .on(
         "postgres_changes",
         {

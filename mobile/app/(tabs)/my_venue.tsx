@@ -18,6 +18,7 @@ import { getActionErrorMessage, getResultErrorMessage, logActionError } from '..
 import { formatFriendlyDateTime } from '../../src/utils/friendlyDateTime';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
 import { StaffAssignment, fetchActiveStaffAssignment, getStaffPermissions } from '../../src/utils/staffAccess';
+import { createRealtimeChannelTopic } from '../../src/utils/realtimeChannel';
 
 const DEFAULT_GIG_IMAGE = 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop';
 const JOINED_GIG_APPLICATION_STATUSES = ['accepted', 'approved'];
@@ -426,7 +427,7 @@ export default function MyVenueScreen() {
             : `organizer_id=eq.${userId}`;
 
         const channel = supabase
-            .channel(`my-venue-listings:${userId}`)
+            .channel(createRealtimeChannelTopic(`my-venue-listings:${userId}`))
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'gigs', filter: realtimeFilter },

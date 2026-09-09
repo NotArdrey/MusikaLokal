@@ -28,6 +28,7 @@ import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
 import { TopToastProvider } from "../src/context/TopToastContext";
 import { emitToast, toastBus, type ToastType } from "../src/events/toastBus";
 import { isFanUserRole } from "../src/utils/roleRouting";
+import { createRealtimeChannelTopic } from "../src/utils/realtimeChannel";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -322,7 +323,7 @@ function RootContent() {
       const channelGeneration = ++activeChannelGeneration;
 
       activeChannel = supabase
-        .channel(`web-notification-toast:${activeUserId}`)
+        .channel(createRealtimeChannelTopic(`web-notification-toast:${activeUserId}`))
         .on(
           "postgres_changes",
           {

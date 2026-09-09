@@ -10,6 +10,7 @@ import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 import { formatDashedNumericDate } from '../utils/friendlyDateTime';
 import { resolveNotificationNavigationTarget } from '../utils/notificationNavigation';
+import { createRealtimeChannelTopic } from '../utils/realtimeChannel';
 import ThemeModeToggle from './ThemeModeToggle';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -315,7 +316,7 @@ export default function SidebarNav() {
 
         const userId = session.user.id;
         const channel = supabase
-            .channel(`topbar-notifications:${userId}`)
+            .channel(createRealtimeChannelTopic(`topbar-notifications:${userId}`))
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { emitToast } from '../events/toastBus';
+import { createRealtimeChannelTopic } from '../utils/realtimeChannel';
 
 const createUuidV4 = () =>
     'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
@@ -639,7 +640,7 @@ export function useConversations(currentUserId: string | null) {
         if (!currentUserId) return;
 
         const channel = supabase
-            .channel('conversation_list_updates')
+            .channel(createRealtimeChannelTopic(`conversation-list-updates:${currentUserId}`))
             .on(
                 'postgres_changes',
                 {
@@ -828,7 +829,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
         if (!conversationId) return;
 
         const channel: RealtimeChannel = supabase
-            .channel(`messages:${conversationId}`)
+            .channel(createRealtimeChannelTopic(`messages:${conversationId}`))
             .on(
                 'postgres_changes',
                 {
