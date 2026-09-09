@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { createFile, MP4BoxBuffer, type Movie } from 'mp4box';
+import { readLocalFileAsBase64 } from './storageUpload';
 
 const COPYRIGHT_CLIP_SECONDS = 12;
 const MAX_ACRCLOUD_SAMPLE_BYTES = 4 * 1024 * 1024;
@@ -139,7 +140,7 @@ const extractAudioFragment = (source: ArrayBuffer): Promise<ArrayBuffer> =>
   });
 
 const readNativeFile = async (uri: string): Promise<ArrayBuffer> => {
-  const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+  const base64 = await readLocalFileAsBase64(uri, 'copyright-video-source');
   const bytes = base64ToUint8Array(base64);
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 };

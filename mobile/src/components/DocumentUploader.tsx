@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { createE2EDocumentFixture, isE2EFixtureMode } from '../utils/e2eFixtures';
+import { persistUploadAsset, removePersistedUploadAsset } from '../utils/storageUpload';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 interface DocumentUploaderProps {
@@ -16,6 +17,7 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
     const { colors, isDark } = useTheme();
     const [fileName, setFileName] = useState<string | null>(existingUrl ? 'Current document' : null);
     const [checking, setChecking] = useState(false);
+    const persistedAssetRef = useRef<{ uri: string } | null>(null);
     const [alertVisible, setAlertVisible] = useState(false);
     const [alertConfig, setAlertConfig] = useState<{
         type: AlertType;
@@ -50,9 +52,12 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
 
             if (result.canceled) return;
 
-            const file = result.assets[0];
+            const file = await persistUploadAsset(result.assets[0]);
+            const previousAsset = persistedAssetRef.current;
+            persistedAssetRef.current = file;
             setFileName(file.name);
             onFileSelect(file);
+            void removePersistedUploadAsset(previousAsset);
         } catch (error: any) {
             console.error('Error picking document:', error);
             const message = error?.message || 'Error picking document';
@@ -63,8 +68,11 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
     };
 
     const clearDocument = () => {
+        const persistedAsset = persistedAssetRef.current;
+        persistedAssetRef.current = null;
         setFileName(null);
         onFileSelect(null);
+        void removePersistedUploadAsset(persistedAsset);
     };
 
     return (

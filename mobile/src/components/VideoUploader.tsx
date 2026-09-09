@@ -1,5 +1,6 @@
 import { screenVisualUpload } from "../services/visualUploadScreen";
 import { Ionicons } from '@expo/vector-icons';
+import { File as ExpoFile, UploadType } from 'expo-file-system';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
@@ -13,6 +14,11 @@ import {
   removeCopyrightVideoTemporaryFile,
   type CopyrightVideoSample,
 } from '../utils/videoCopyrightSample';
+import {
+  createTemporaryUploadFile,
+  readLocalFileAsBase64,
+  type TemporaryUploadFile,
+} from '../utils/storageUpload';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
@@ -250,7 +256,13 @@ const uploadReviewFrame = async (input: {
       time: input.timeMs,
       quality: 0.82,
     });
-    body = base64ToUint8Array(await FileSystem.readAsStringAsync(thumbnail.uri, { encoding: 'base64' }));
+    try {
+      body = base64ToUint8Array(
+        await readLocalFileAsBase64(thumbnail.uri, `ai-review-frame-${input.frameIndex}.jpg`),
+      );
+    } finally {
+      await FileSystem.deleteAsync(thumbnail.uri, { idempotent: true }).catch(() => undefined);
+    }
   }
 
   const path = `${input.userId}/${input.folder}/${Date.now()}_ai-review-frame-${input.frameIndex}.jpg`;
@@ -283,9 +295,7 @@ const uploadVideoWithSupabaseClient = async (input: {
     Platform.OS === 'web'
       ? await (await fetch(input.assetUri)).arrayBuffer()
       : base64ToUint8Array(
-        await FileSystem.readAsStringAsync(input.assetUri, {
-          encoding: 'base64',
-        }),
+        await readLocalFileAsBase64(input.assetUri, input.fileName.split('/').pop()),
       )
   );
 
@@ -322,27 +332,23 @@ const uploadVideoFile = async (input: {
     const uploadUrl = `${baseUrl}/storage/v1/object/${encodeURIComponent(input.bucketName)}/${encodeStoragePath(input.fileName)}`;
 
     try {
-      const uploadTask = FileSystem.createUploadTask(
-        uploadUrl,
-        input.assetUri,
-        {
-          httpMethod: 'POST',
-          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-          headers: {
-            Authorization: `Bearer ${input.accessToken}`,
-            apikey: supabaseAnonKey,
-            'Content-Type': input.mimeType,
-            'x-upsert': 'false',
-          },
+      const uploadTask = new ExpoFile(input.assetUri).createUploadTask(uploadUrl, {
+        httpMethod: 'POST',
+        uploadType: UploadType.BINARY_CONTENT,
+        headers: {
+          Authorization: `Bearer ${input.accessToken}`,
+          apikey: supabaseAnonKey,
+          'Content-Type': input.mimeType,
+          'x-upsert': 'false',
         },
-        ({ totalBytesExpectedToSend, totalBytesSent }) => {
-          if (totalBytesExpectedToSend > 0) {
+        onProgress: ({ totalBytes, bytesSent }) => {
+          if (totalBytes > 0) {
             input.onProgress?.(
-              Math.min(99, Math.max(1, Math.round((totalBytesSent / totalBytesExpectedToSend) * 100))),
+              Math.min(99, Math.max(1, Math.round((bytesSent / totalBytes) * 100))),
             );
           }
         },
-      );
+      });
 
       const uploadResponse = await uploadTask.uploadAsync();
 
@@ -642,19 +648,24 @@ export default function VideoUploader({
       setUploadMessage('Preparing video...');
       setUploadProgress(0);
       let copyrightSample: CopyrightVideoSample | null = null;
+      let nativeVideoFile: TemporaryUploadFile | null = null;
 
       try {
         const originalName = getVideoOriginalName(asset);
         const fileExt = resolveVideoExtension(asset, originalName);
         const mimeType = resolveVideoMimeType(asset, fileExt);
         const fileName = `${userId}/${folder}/${Date.now()}_video.${fileExt}`;
+        nativeVideoFile = Platform.OS === 'web'
+          ? null
+          : await createTemporaryUploadFile(asset.uri, originalName);
+        const readableAssetUri = nativeVideoFile?.uri || asset.uri;
 
         setUploadMessage('Checking video content...');
-        await screenVisualUpload({ uri: asset.uri, name: originalName, mimeType, size: fileSizeBytes || undefined, kind: 'video', durationMs: asset.duration || undefined }, 'gig_video_content');
+        await screenVisualUpload({ uri: readableAssetUri, name: originalName, mimeType, size: fileSizeBytes || undefined, kind: 'video', durationMs: asset.duration || undefined }, 'gig_video_content');
         let copyrightDecision: UploadSafetyFileDecision | null = null;
         if (enableCopyrightScreening) {
           const screened = await screenCopyrightVideo({
-            uri: asset.uri,
+            uri: readableAssetUri,
             fileName: originalName,
             mimeType,
             fileSize: fileSizeBytes,
@@ -675,7 +686,7 @@ export default function VideoUploader({
 
         const data = await uploadVideoFile({
           accessToken: session.access_token,
-          assetUri: asset.uri,
+          assetUri: readableAssetUri,
           bucketName,
           fileName,
           mimeType,
@@ -700,7 +711,7 @@ export default function VideoUploader({
             const frameResults = await Promise.allSettled(
               getReviewFrameTimes(asset).map((timeMs, frameIndex) =>
                 uploadReviewFrame({
-                  assetUri: asset.uri,
+                  assetUri: readableAssetUri,
                   userId,
                   bucketName,
                   folder,
@@ -746,6 +757,7 @@ export default function VideoUploader({
         showAlert('error', 'Upload failed', message);
       } finally {
         await removeCopyrightVideoTemporaryFile(copyrightSample);
+        await nativeVideoFile?.remove();
         setUploading(false);
         setUploadProgress(0);
       }
