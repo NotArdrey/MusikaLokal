@@ -63,7 +63,7 @@ export default function TermsAndConditionsScreen() {
             3. Limitation of Liability
           </Text>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            Musika Lokal is provided "as-is." We are NOT liable for:{"\n"}
+            Musika Lokal is provided &quot;as-is.&quot; We are NOT liable for:{"\n"}
             - Personal injury or property damage during a session/event.{"\n"}
             - Technical failures of the GCash, Maya, or banking systems.{"\n"}
             - Loss of income due to app downtime.
@@ -83,7 +83,7 @@ export default function TermsAndConditionsScreen() {
           </Text>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
             Users are strictly prohibited from:{"\n"}
-            - Circumventing the platform to pay "under the table."{"\n"}
+            - Circumventing the platform to pay &quot;under the table.&quot;{"\n"}
             - Harassing other users or posting defamatory content.{"\n"}
             - Creating multiple accounts for fraudulent reviews.{"\n"}
             - Submitting repetitive, duplicate, misleading, or abusive applications, booking requests, production-team requests, gig applications, or studio bookings. Musika Lokal may block duplicate active requests, restrict repeated cancellations or reapplications, reject invalid or overlapping studio bookings, and require unpaid bookings to be settled before new bookings are made.

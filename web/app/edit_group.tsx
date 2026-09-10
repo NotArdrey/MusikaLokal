@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router , useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -42,7 +42,7 @@ import {
     isGroupLeaderMember,
 } from "../src/utils/groupMembers";
 
-import { useLocalSearchParams } from "expo-router";
+
 import { supabase } from "../lib/supabase";
 
 const GENRES = [

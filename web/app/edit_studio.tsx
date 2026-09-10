@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/src/legacy";
 import * as ImagePicker from "expo-image-picker";
-import { router } from "expo-router";
+import { router , useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
@@ -39,6 +39,10 @@ import {
 } from "../src/utils/studioAvailabilityLeadTime";
 import { uploadStorageObject } from "../src/utils/storageUpload";
 
+
+import { supabase } from "../lib/supabase";
+import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
+
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
 const base64ToUint8Array = (base64: string): Uint8Array => {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -59,10 +63,6 @@ const base64ToUint8Array = (base64: string): Uint8Array => {
   }
   return bytes;
 };
-
-import { useLocalSearchParams } from "expo-router";
-import { supabase } from "../lib/supabase";
-import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 
 // Helper function to format time input
 const formatTimeInput = (text: string): string => {
@@ -287,7 +287,7 @@ const buildPromotionDescription = (
 
 const getAllowedPromotionTargets = (
   type: "Rehearsal" | "Recording" | "Both",
-): Array<"rehearsal" | "recording" | "both"> => {
+): ("rehearsal" | "recording" | "both")[] => {
   if (type === "Rehearsal") return ["rehearsal"];
   if (type === "Recording") return ["recording"];
   return ["both", "rehearsal", "recording"];

@@ -1,4 +1,4 @@
-﻿
+
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -22,8 +22,8 @@ import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
-import { getAdminPageCacheKey, invalidateAdminPageCache, readAdminPageCache, writeAdminPageCache } from './_cache';
-import { getFriendlyDetailEntries, getFriendlyDetailImage } from './_formatters';
+import { getAdminPageCacheKey, invalidateAdminPageCache, readAdminPageCache, writeAdminPageCache } from '../../src/admin/cache';
+import { getFriendlyDetailEntries, getFriendlyDetailImage } from '../../src/admin/formatters';
 import {
   STAFF_ACCESS_LEVEL_LABELS,
   STAFF_ENTITY_LABELS,

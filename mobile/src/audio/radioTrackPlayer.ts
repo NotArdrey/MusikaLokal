@@ -481,7 +481,7 @@ export const buildStationQueue = async (
       ? [{ entry: queueEntries[onlyQueueIndex], queueIndex: onlyQueueIndex }]
       : [];
 
-  const tracks: Array<RadioQueueTrack | null> = await Promise.all(entriesToResolve.map(async ({ entry, queueIndex }) => {
+  const tracks: (RadioQueueTrack | null)[] = await Promise.all(entriesToResolve.map(async ({ entry, queueIndex }) => {
     const url = await resolveAudioUri(entry.item);
     if (!url) {
       return null;

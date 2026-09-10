@@ -460,10 +460,7 @@ const styles = StyleSheet.create({
         height: '100%',
         borderLeftWidth: 1,
         paddingTop: 56,
-        shadowColor: '#000',
-        shadowOffset: { width: -4, height: 0 },
-        shadowOpacity: 0.16,
-        shadowRadius: 18,
+        boxShadow: '-4px 0px 18px rgba(0, 0, 0, 0.16)',
         elevation: 18,
     },
     guestMenuHeader: {

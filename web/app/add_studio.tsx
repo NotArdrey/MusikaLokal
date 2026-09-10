@@ -233,7 +233,7 @@ const buildPromotionDescription = (
 
 const getAllowedPromotionTargets = (
   type: "Rehearsal" | "Recording" | "Both",
-): Array<"rehearsal" | "recording" | "both"> => {
+): ("rehearsal" | "recording" | "both")[] => {
   if (type === "Rehearsal") return ["rehearsal"];
   if (type === "Recording") return ["recording"];
   return ["both", "rehearsal", "recording"];

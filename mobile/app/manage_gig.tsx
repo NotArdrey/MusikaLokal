@@ -1,5 +1,5 @@
-﻿import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { router , useLocalSearchParams } from "expo-router";
 import {
     BottomSheetBackdrop,
     BottomSheetModal,
@@ -68,7 +68,7 @@ const formatApplicantSlot = (value: unknown, hasGroup: boolean) => {
   return slot.replace(/\b\w/g, (letter) => letter.toUpperCase());
 };
 
-import { useLocalSearchParams } from "expo-router";
+
 
 export default function GigDetailsScreen() {
   const { colors, isDark } = useTheme();

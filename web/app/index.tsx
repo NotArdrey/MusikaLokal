@@ -976,13 +976,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
   },
   shadow: {
-    shadowColor: "#4F46E5", // shadow-primary
-    shadowOffset: {
-      width: 0,
-      height: 10,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
+    boxShadow: "0px 10px 10px rgba(79, 70, 229, 0.3)",
     elevation: 10,
   },
   signupLinkContainer: {

@@ -113,7 +113,7 @@ const GroupConnectTab = ({
                 ]}
               >
                 <Text style={[styles.infoText, { color: "#B91C1C" }]}>
-                  You don't have any gigs listed. Please create a gig to send invites.
+                  You don&apos;t have any gigs listed. Please create a gig to send invites.
                 </Text>
               </View>
             )}

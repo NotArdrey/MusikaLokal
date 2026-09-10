@@ -232,10 +232,7 @@ const styles = StyleSheet.create({
     borderRadius: IS_WEB ? 18 : 24,
     padding: IS_WEB ? 22 : 26,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.22,
-    shadowRadius: 16,
+    boxShadow: '0px 10px 16px rgba(0, 0, 0, 0.22)',
     elevation: 12,
   },
   iconCircle: {

@@ -1,4 +1,4 @@
-﻿import { Dimensions, StyleSheet } from "react-native";
+import { Dimensions, StyleSheet } from "react-native";
 
 export const { width, height } = Dimensions.get("window");
 export const IMG_HEIGHT = height < 700 ? height * 0.3 : height * 0.35;

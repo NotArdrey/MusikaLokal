@@ -4,7 +4,7 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import 'react-native-url-polyfill/auto';
 
-const readEnv = (...candidates: Array<string | undefined>): string => {
+const readEnv = (...candidates: (string | undefined)[]): string => {
     for (const candidate of candidates) {
         if (typeof candidate === 'string' && candidate.trim().length > 0) {
             return candidate.trim();

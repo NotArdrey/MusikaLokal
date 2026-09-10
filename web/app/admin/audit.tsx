@@ -19,11 +19,11 @@ import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
-import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from './_cache';
+import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from '../../src/admin/cache';
 import {
   fetchAdminPaymentTransactions,
   normalizePaymentActionLabel,
-} from './_payments';
+} from '../../src/admin/payments';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;

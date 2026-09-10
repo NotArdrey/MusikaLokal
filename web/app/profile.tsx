@@ -1244,7 +1244,7 @@ export default function ProfileScreen() {
       toValue: isMenuOpen ? 1 : 0,
       duration: isMenuOpen ? DRAWER_OPEN_ANIMATION_MS : DRAWER_CLOSE_ANIMATION_MS,
       easing: RNEasing.out(RNEasing.cubic),
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== "web",
     });
 
     animation.start(({ finished }) => {
@@ -4275,12 +4275,11 @@ export default function ProfileScreen() {
         <Navbar />
         </View>
         {isMenuMounted ? (
-          <View style={styles.drawerOverlay} pointerEvents="box-none">
+          <View style={[styles.drawerOverlay, { pointerEvents: "box-none" }]}>
             <Animated.View
-              pointerEvents="none"
-              style={[styles.drawerScrim, { opacity: drawerBackdropOpacity }]}
+              style={[styles.drawerScrim, { opacity: drawerBackdropOpacity, pointerEvents: "none" }]}
             />
-            <View pointerEvents={isMenuTouchable ? "auto" : "none"} style={styles.drawerBackdrop}>
+            <View style={[styles.drawerBackdrop, { pointerEvents: isMenuTouchable ? "auto" : "none" }]}>
               <TouchableOpacity
                 activeOpacity={1}
                 style={styles.drawerBackdropTouchTarget}

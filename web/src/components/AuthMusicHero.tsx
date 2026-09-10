@@ -1,4 +1,4 @@
-import { Animated, ImageBackground, StyleSheet, Text, View } from 'react-native';
+import { Animated, ImageBackground, Platform, StyleSheet, Text, View } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
 
 const HERO_IMAGES = [
@@ -39,7 +39,7 @@ export default function AuthMusicHero({ title, subtitle }: AuthMusicHeroProps) {
       Animated.timing(fadeOpacity, {
         toValue: 1,
         duration: FADE_DURATION_MS,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== "web",
       }).start(({ finished }) => {
         if (!mounted || !finished) return;
 
@@ -65,7 +65,7 @@ export default function AuthMusicHero({ title, subtitle }: AuthMusicHeroProps) {
       />
 
       {HERO_IMAGES.length > 1 && (
-        <Animated.View pointerEvents="none" style={[styles.fullSurface, { opacity: fadeOpacity }]}>
+        <Animated.View style={[styles.fullSurface, { opacity: fadeOpacity, pointerEvents: "none" }]}>
           <ImageBackground
             source={{ uri: HERO_IMAGES[nextIndex] }}
             style={styles.fullSurface}

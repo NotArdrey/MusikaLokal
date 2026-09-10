@@ -169,8 +169,8 @@ export function TopToastProvider({ children }: { children: React.ReactNode }) {
       {children}
 
       <Portal name="top-toast">
-        <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
-          <View pointerEvents="box-none" style={[styles.toastStack, { top: topOffset }]}>
+        <View style={[StyleSheet.absoluteFillObject, { pointerEvents: "box-none" }]}>
+          <View style={[styles.toastStack, { top: topOffset, pointerEvents: "box-none" }]}>
             {toasts.map((toast, index) => (
               <ToastCard
                 colors={colors}
@@ -223,17 +223,17 @@ function ToastCard({
         Animated.timing(opacity, {
           toValue: 0,
           duration: 170,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== "web",
         }),
         Animated.timing(translateY, {
           toValue: -16,
           duration: 170,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== "web",
         }),
         Animated.timing(dragX, {
           toValue: direction === 0 ? 0 : direction * OFFSCREEN_DISTANCE,
           duration: 190,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== "web",
         }),
       ]).start(() => onDismiss(toast.id));
     },
@@ -259,7 +259,7 @@ function ToastCard({
             toValue: 0,
             tension: 120,
             friction: 14,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== "web",
           }).start();
         },
         onPanResponderTerminate: () => {
@@ -267,7 +267,7 @@ function ToastCard({
             toValue: 0,
             tension: 120,
             friction: 14,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== "web",
           }).start();
         },
       }),
@@ -280,12 +280,12 @@ function ToastCard({
         toValue: 0,
         tension: 130,
         friction: 16,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== "web",
       }),
       Animated.timing(opacity, {
         toValue: 1,
         duration: 180,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== "web",
       }),
       Animated.timing(progress, {
         toValue: 0,
@@ -310,9 +310,9 @@ function ToastCard({
 
   return (
     <Animated.View
-      pointerEvents="box-none"
       style={[
         styles.toast,
+        { pointerEvents: "box-none" },
         {
           opacity,
           zIndex: 99999 - index,

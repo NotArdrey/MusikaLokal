@@ -339,9 +339,9 @@ export default function PostDetailsModal({
   if (!visible) return null;
 
   return (
-    <View style={styles.overlayWrap} pointerEvents="box-none">
+    <View style={[styles.overlayWrap, { pointerEvents: "box-none" }]}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.shell, { maxHeight: modalMaxHeight }]} pointerEvents="box-none">
+      <View style={[styles.shell, { maxHeight: modalMaxHeight, pointerEvents: "box-none" }]}>
         <View
           style={[
             styles.card,

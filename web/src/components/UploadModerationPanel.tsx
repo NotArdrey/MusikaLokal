@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { ResizeMode, Video } from "expo-av";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -506,14 +505,20 @@ export default function UploadModerationPanel({
 
                   {details.case.media_kind === "video" && details.mediaUrl && evidenceView === "original" ? (
                     <View style={[styles.mediaFrame, { borderColor: colors.border }]}>
-                      <Video
-                        accessibilityLabel="Original flagged video"
-                        source={{ uri: details.mediaUrl }}
-                        style={[styles.media, { height: isCompact ? 300 : 440 }]}
-                        resizeMode={ResizeMode.CONTAIN}
-                        useNativeControls
-                        shouldPlay={false}
-                      />
+                      {React.createElement("video", {
+                        "aria-label": "Original flagged video",
+                        src: details.mediaUrl,
+                        controls: true,
+                        autoPlay: false,
+                        playsInline: true,
+                        preload: "metadata",
+                        style: {
+                          width: "100%",
+                          height: isCompact ? 300 : 440,
+                          backgroundColor: "#09090B",
+                          objectFit: "contain",
+                        },
+                      })}
                     </View>
                   ) : null}
 

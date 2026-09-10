@@ -19,10 +19,10 @@ import {
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
-
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
 import Modal from "../src/components/modal";
 import { useTheme } from "../src/context/ThemeContext";
+
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 export default function ForgetPasswordScreen() {
   const { colors, isDark } = useTheme();
@@ -207,7 +207,7 @@ export default function ForgetPasswordScreen() {
                     />
                   </View>
                   <Text style={[styles.helperText, { color: colors.textSecondary }]}>
-                    We'll send a password reset link to this email.
+                    We&apos;ll send a password reset link to this email.
                   </Text>
                 </View>
 

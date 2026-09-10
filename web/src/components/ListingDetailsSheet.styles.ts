@@ -1,4 +1,4 @@
-﻿import { Dimensions, StyleSheet } from "react-native";
+import { Dimensions, StyleSheet } from "react-native";
 
 export const { width, height } = Dimensions.get("window");
 export const IMG_HEIGHT = height < 700 ? height * 0.3 : height * 0.35;
@@ -84,9 +84,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
     fontSize: height < 700 ? moderateScale(24) : moderateScale(28),
     color: "#FFF",
-    textShadowColor: "rgba(0,0,0,0.5)",
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
+    ...({ textShadow: "0px 2px 4px rgba(0,0,0,0.5)" } as any),
   },
   heroLocation: {
     color: "#FFF",

@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router , useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -35,7 +35,7 @@ import {
 } from "../src/utils/navigation";
 import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 
-import { useLocalSearchParams } from "expo-router";
+
 
 const GROUP_TABS = ["About", "Applications", "Review"];
 const PLAYLIST_COVER_BUCKET = "post-media";

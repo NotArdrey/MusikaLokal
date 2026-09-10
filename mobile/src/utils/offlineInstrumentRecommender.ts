@@ -474,7 +474,7 @@ const STARTER_BUDGET_ESTIMATES: Record<string, StarterBudgetEstimate> = {
   },
 };
 
-const ROLE_CATEGORY_COMPLEMENTS: Array<{ keywords: string[]; categories: InstrumentCategory[] }> = [
+const ROLE_CATEGORY_COMPLEMENTS: { keywords: string[]; categories: InstrumentCategory[] }[] = [
   { keywords: ["guitar", "guitarist"], categories: ["percussion", "keyboards", "recording"] },
   { keywords: ["drum", "drummer"], categories: ["strings", "keyboards", "recording"] },
   { keywords: ["bass", "bassist"], categories: ["percussion", "keyboards", "recording"] },

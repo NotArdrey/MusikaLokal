@@ -147,7 +147,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             toValue: 1,
             friction: 5,
             tension: 130,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== "web",
         }).start();
     };
 
@@ -600,7 +600,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                     <Text style={[
                                         styles.messageTime,
                                         { color: isMe ? 'rgba(255,255,255,0.7)' : colors.textSecondary },
-                                        item.message_type === 'image' && { color: '#FFF', textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 2 },
+                                        item.message_type === 'image' && { color: '#FFF', ...({ textShadow: '0px 0px 2px rgba(0,0,0,0.5)' } as any) },
                                     ]}>
                                         {getMessageFooterText(item)}
                                     </Text>

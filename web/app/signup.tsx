@@ -2460,7 +2460,7 @@ export default function SignupScreen() {
                     </View>
                     <Text style={[styles.documentSectionTitle, authTextStyle]}>Choose verification method</Text>
                     <Text style={[styles.documentSectionSubtitle, authSecondaryTextStyle]}>
-                        Auto verification supports National ID card, Passport, and Driver's license. Other government IDs go to manual review.
+                        Auto verification supports National ID card, Passport, and Driver&apos;s license. Other government IDs go to manual review.
                     </Text>
 
                     <TouchableOpacity

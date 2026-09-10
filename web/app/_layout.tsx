@@ -12,7 +12,7 @@ import * as Linking from "expo-linking";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useCallback, useEffect, useRef } from "react";
-import { AppState, Platform, View, useWindowDimensions } from "react-native";
+import { AppState, LogBox, Platform, View, useWindowDimensions } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import { prepareRealtimeAuth, supabase } from "../lib/supabase";
@@ -31,6 +31,13 @@ import { isFanUserRole } from "../src/utils/roleRouting";
 import { createRealtimeChannelTopic } from "../src/utils/realtimeChannel";
 
 SplashScreen.preventAutoHideAsync();
+
+// React Native Web still emits these for legacy cross-platform shadows and
+// pointerEvents used internally by React Navigation. Keep all other warnings visible.
+LogBox.ignoreLogs([
+  '"shadow*" style props are deprecated. Use "boxShadow".',
+  "props.pointerEvents is deprecated. Use style.pointerEvents",
+]);
 
 const NOTIFICATION_TOAST_BACKFILL_LIMIT = 12;
 const NOTIFICATION_TOAST_BACKFILL_SKEW_MS = 15000;

@@ -26,12 +26,12 @@ import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
-import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from './_cache';
+import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from '../../src/admin/cache';
 import type {
   AdminPaymentStatusFilter,
   AdminPaymentTransaction,
   AdminPaymentTotals,
-} from './_payments';
+} from '../../src/admin/payments';
 import {
   downloadPaymentTransactionsExcel,
   downloadPaymentTransactionsPdf,
@@ -39,7 +39,7 @@ import {
   getPaymentStatusColor,
   normalizePaymentActionLabel,
   PAYMENT_STATUS_FILTERS,
-} from './_payments';
+} from '../../src/admin/payments';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -1225,7 +1225,7 @@ export default function AdminDashboardPage() {
       toValue: dashboardRefreshing ? 0.72 : 1,
       duration: dashboardRefreshing ? 120 : 260,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
   }, [dashboardContentOpacity, dashboardRefreshing]);
 

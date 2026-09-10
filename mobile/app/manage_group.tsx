@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router , useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
@@ -40,7 +40,7 @@ import {
 } from "../src/utils/groupMemberInvites";
 import { getSmoothTabIndex, setSmoothTab, useStagedTabRows } from "../src/utils/smoothTabs";
 
-import { useLocalSearchParams } from "expo-router";
+
 
 const GROUP_TABS = ["About", "Applications", "Review"];
 

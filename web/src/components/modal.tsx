@@ -120,7 +120,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
         toValue: 1,
         duration: 140,
         easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }).start();
       return;
     }
@@ -134,7 +134,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
       toValue: 0,
       duration: 110,
       easing: Easing.in(Easing.cubic),
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start(({ finished }) => {
       if (finished) {
         setRendered(false);
@@ -248,10 +248,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
             styles.modalContainer,
             {
               backgroundColor: colors.card,
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.25,
-              shadowRadius: 10,
+              boxShadow: '0px 4px 10px rgba(0, 0, 0, 0.25)',
               elevation: 10
             },
             {

@@ -420,7 +420,7 @@ const BookingDetailsSheet = forwardRef<
             url: booking.request_video_url,
           }
         : null,
-    ].filter(Boolean) as Array<{ label: string; url: string }>;
+    ].filter(Boolean) as { label: string; url: string }[];
 
     return (
       <>

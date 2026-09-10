@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import {
     BottomSheetBackdrop,
     BottomSheetModal,
@@ -4625,9 +4625,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
     fontSize: height < 700 ? moderateScale(24) : moderateScale(28),
     color: "#FFF",
-    textShadowColor: "rgba(0,0,0,0.5)",
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
+    ...({ textShadow: "0px 2px 4px rgba(0,0,0,0.5)" } as any),
   },
   heroLocation: {
     color: "#FFF",

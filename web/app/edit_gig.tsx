@@ -1,7 +1,7 @@
 import { cleanupRemovedStorageObjects } from "../src/utils/storageCleanup";
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/src/legacy";
-import { router } from "expo-router";
+import { router , useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
@@ -39,6 +39,10 @@ import Navbar from "../src/components/navbar";
 import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
 
+
+import { supabase, supabaseUrl } from "../lib/supabase";
+import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
+
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
 const base64ToUint8Array = (base64: string): Uint8Array => {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -59,10 +63,6 @@ const base64ToUint8Array = (base64: string): Uint8Array => {
   }
   return bytes;
 };
-
-import { useLocalSearchParams } from "expo-router";
-import { supabase, supabaseUrl } from "../lib/supabase";
-import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 
 // Helper function to format time input
 const formatTimeInput = (text: string): string => {

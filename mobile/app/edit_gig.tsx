@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router , useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
@@ -41,7 +41,7 @@ import {
   uploadStorageObject,
 } from "../src/utils/storageUpload";
 
-import { useLocalSearchParams } from "expo-router";
+
 import { supabase, supabaseUrl } from "../lib/supabase";
 import { cleanupRemovedStorageObjects } from "../src/utils/storageCleanup";
 import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";

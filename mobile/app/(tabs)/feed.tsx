@@ -1,9 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { BottomSheetBackdrop, BottomSheetView, useBottomSheetSpringConfigs } from "@gorhom/bottom-sheet";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect , router, useLocalSearchParams } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { router, useLocalSearchParams } from "expo-router";
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -1125,7 +1125,7 @@ const getFeedPostEngagementScore = (item: any) =>
 const dedupeFeedItems = (items: any[]) => {
   const seen = new Set<string>();
   const uniqueItems: any[] = [];
-  const semanticPosts = new Map<string, Array<{ index: number; timestamp: number }>>();
+  const semanticPosts = new Map<string, { index: number; timestamp: number }[]>();
 
   for (const item of items) {
     const key = getFeedItemStableKey(item);

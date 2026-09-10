@@ -128,7 +128,7 @@ const getRosterMemberName = (member: any, index: number): string => {
 };
 
 const buildRosterInviteTargets = (
-  members: Array<{ name?: string; instrument?: string; user_id?: string; avatar_url?: string }>,
+  members: { name?: string; instrument?: string; user_id?: string; avatar_url?: string }[],
   ownerUserId: string,
 ): GroupInviteTarget[] => {
   const seen = new Set<string>();

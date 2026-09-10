@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -282,8 +282,8 @@ export default function StudioDetailsScreen() {
   const processPartialSlotApproval = async (
     bookingId: string,
     userId: string,
-    acceptedSlots: Array<{ start: string; end: string }>,
-    declinedSlots: Array<{ start: string; end: string }>,
+    acceptedSlots: { start: string; end: string }[],
+    declinedSlots: { start: string; end: string }[],
     cancellationReason?: string,
   ) => {
     const { data, error } = await supabase.functions.invoke("manage-bookings", {

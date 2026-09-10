@@ -223,8 +223,8 @@ export default function StudioDetailsScreen() {
   const processPartialSlotApproval = async (
     bookingId: string,
     userId: string,
-    acceptedSlots: Array<{ start: string; end: string }>,
-    declinedSlots: Array<{ start: string; end: string }>,
+    acceptedSlots: { start: string; end: string }[],
+    declinedSlots: { start: string; end: string }[],
     cancellationReason?: string,
   ) => {
     const { data, error } = await supabase.functions.invoke("manage-bookings", {

@@ -1,4 +1,4 @@
-﻿import { supabase } from "../../lib/supabase";
+import { supabase } from "../../lib/supabase";
 
 type EntityType = "musician" | "group" | "venue" | "production_team";
 

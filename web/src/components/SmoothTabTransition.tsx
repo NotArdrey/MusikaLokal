@@ -2,6 +2,7 @@ import React, { useLayoutEffect, useRef } from "react";
 import {
   Animated,
   Easing,
+  Platform,
   StyleProp,
   ViewStyle,
 } from "react-native";
@@ -27,7 +28,7 @@ const SmoothTabTransition = ({
       toValue: 0,
       duration: 150,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== "web",
     }).start();
   }, [activeKey, translateX]);
 

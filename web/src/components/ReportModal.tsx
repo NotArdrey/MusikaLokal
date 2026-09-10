@@ -389,7 +389,7 @@ export default function ReportModal({
         if (!visible && !feedbackVisible) return null;
 
         const webModal = (
-            <View style={styles.webModalRoot} pointerEvents="box-none">
+            <View style={[styles.webModalRoot, { pointerEvents: "box-none" }]}>
                 {visible ? modalContent : null}
                 {feedbackAlert}
             </View>

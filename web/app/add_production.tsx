@@ -2,8 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
-
-const IS_WEB = Platform.OS === 'web';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import { LoadingButtonContent } from '../src/components/LoadingState';
@@ -16,6 +14,8 @@ import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
 import { ProductionInviteTarget, sendProductionTeamInvites } from '../src/utils/productionTeamInvites';
+
+const IS_WEB = Platform.OS === 'web';
 
 const readFunctionErrorBody = async (error: any) => {
   const response = error?.context;

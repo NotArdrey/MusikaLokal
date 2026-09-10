@@ -3,13 +3,13 @@ import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import ProfileAvatar from "./ProfileAvatar";
 import { isActiveApplication } from "../utils/gigApplicantFilters";
 

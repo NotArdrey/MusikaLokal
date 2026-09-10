@@ -51,6 +51,9 @@ LogBox.ignoreLogs([
   "Network request failed",
   "TypeError: Network request failed",
   "SafeAreaView has been deprecated and will be removed in a future release.",
+  '"shadow*" style props are deprecated. Use "boxShadow".',
+  '"textShadow*" style props are deprecated. Use "textShadow".',
+  "props.pointerEvents is deprecated. Use style.pointerEvents",
   "setLayoutAnimationEnabledExperimental is currently a no-op in the New Architecture.",
   "Unable to activate keep awake",
 ]);

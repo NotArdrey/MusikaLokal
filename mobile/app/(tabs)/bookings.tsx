@@ -1,9 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect , router, useLocalSearchParams } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ExpoLinking from "expo-linking";
-import { router, useLocalSearchParams } from "expo-router";
+
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Calendar } from "react-native-calendars";
 import {

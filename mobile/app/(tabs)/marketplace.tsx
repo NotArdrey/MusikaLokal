@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect , router } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { router } from "expo-router";
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,

@@ -358,7 +358,6 @@ export const downloadPaymentTransactionsExcel = (
   });
   return downloadWebBlob(blob, fileName);
 };
-
 const PDF_PAGE_WIDTH = 842;
 const PDF_PAGE_HEIGHT = 595;
 const PDF_MARGIN = 36;
