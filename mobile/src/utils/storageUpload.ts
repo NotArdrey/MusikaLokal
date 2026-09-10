@@ -154,7 +154,9 @@ export const persistUploadAsset = async <T extends UploadFileAsset>(asset: T): P
     await assertReadableFile(persistedUri);
   } catch (error) {
     await removeLocalFile(persistedUri);
-    throw error;
+    throw new Error("The selected file could not be read. Please select it again.", {
+      cause: error,
+    });
   }
 
   return { ...asset, uri: persistedUri };
@@ -193,7 +195,9 @@ export const createTemporaryUploadFile = async (
     await assertReadableFile(temporaryUri);
   } catch (error) {
     await removeLocalFile(temporaryUri);
-    throw error;
+    throw new Error("The selected file could not be read. Please select it again.", {
+      cause: error,
+    });
   }
 
   return {

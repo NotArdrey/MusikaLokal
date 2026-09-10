@@ -1,7 +1,6 @@
-import * as FileSystem from "expo-file-system/legacy";
-import * as VideoThumbnails from "expo-video-thumbnails";
 import { Platform } from "react-native";
 import { readLocalFileAsBase64 } from "../utils/storageUpload";
+import { generateNativeVideoFrame } from "../utils/videoFrames";
 import {
   screenUploadsWithAi,
   type UploadSafetyFileInput,
@@ -103,19 +102,12 @@ export async function screenVisualUpload(
       ];
       frames = [];
       for (const time of times) {
-        const thumbnail = await VideoThumbnails.getThumbnailAsync(input.uri, {
-          time,
-          quality: 0.8,
+        const frame = await generateNativeVideoFrame(input.uri, time, {
+          compress: 0.8,
+          maxWidth: 1024,
+          maxHeight: 1024,
         });
-        try {
-          frames.push(
-            `data:image/jpeg;base64,${await readLocalFileAsBase64(thumbnail.uri, `safety-frame-${time}.jpg`)}`,
-          );
-        } finally {
-          await FileSystem.deleteAsync(thumbnail.uri, {
-            idempotent: true,
-          }).catch(() => undefined);
-        }
+        frames.push(frame.dataUrl);
       }
     }
   } else if (Platform.OS === "web") {

@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { InteractionManager, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
+import { runAfterUIIdle } from '../../src/utils/idleTask';
 import CachedImage from '../../src/components/CachedImage';
 import ConflictResolutionModal, {
     ConflictingBooking,
@@ -182,7 +183,7 @@ export default function MyStudioScreen() {
             };
 
             startFetch();
-            const focusTask = InteractionManager.runAfterInteractions(startFetch);
+            const focusTask = runAfterUIIdle(startFetch);
             const fallbackTimer = setTimeout(startFetch, 800);
             const refreshInterval = setInterval(() => {
                 void fetchStudios();

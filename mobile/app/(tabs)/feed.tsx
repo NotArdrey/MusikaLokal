@@ -11,7 +11,6 @@ import {
   Dimensions,
   FlatList,
   Image,
-  InteractionManager,
   Keyboard,
   Platform,
   Share,
@@ -25,7 +24,6 @@ import {
 } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
-import * as VideoThumbnails from "expo-video-thumbnails";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase, supabaseAnonKey, supabaseUrl } from "../../lib/supabase";
 import CachedImage from "../../src/components/CachedImage";
@@ -42,7 +40,7 @@ import BottomNavbar, {
   NAVBAR_CLEARANCE,
   NAVBAR_HEIGHT,
 } from "../../src/components/navbar";
-import PostDetailsModal, { prefetchPostDetails } from "../../src/components/PostDetailsModal";
+import { PostDetailsModalHost, type PostDetailsModalHandle, prefetchPostDetails } from "../../src/components/PostDetailsModal";
 import ProductionTeamDetailsSheet from "../../src/components/ProductionTeamDetailsSheet";
 import ReportModal from "../../src/components/ReportModal";
 import SearchBottomSheet from "../../src/components/SearchBottomSheet";
@@ -52,7 +50,7 @@ import TrackedBottomSheetModal from "../../src/components/TrackedBottomSheetModa
 import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
 import { useAuth } from "../../src/context/AuthContext";
 import { formatDashedNumericDate } from "../../src/utils/friendlyDateTime";
-import { useBottomOverlay } from "../../src/context/BottomOverlayContext";
+import { useBottomOverlayActions } from "../../src/context/BottomOverlayContext";
 import {
   RADIO_MINI_PLAYER_HEIGHT,
   RADIO_MINI_PLAYER_STACK_GAP,
@@ -84,6 +82,8 @@ import {
   persistUploadAsset,
   removePersistedUploadAsset,
 } from "../../src/utils/storageUpload";
+import { generateNativeVideoFrame } from "../../src/utils/videoFrames";
+import { runAfterUIIdle } from "../../src/utils/idleTask";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -599,17 +599,20 @@ const buildVideoThumbnailTimes = (durationMs?: number | null) => {
 const buildVideoThumbnailChoices = async (asset: any): Promise<PostComposerThumbnail[]> => {
   const attempts = await Promise.allSettled(
     buildVideoThumbnailTimes(asset?.duration).map(async (time) => {
-      const thumbnail = await VideoThumbnails.getThumbnailAsync(asset.uri, {
-        time,
-        quality: 0.72,
+      const frame = await generateNativeVideoFrame(asset.uri, time, {
+        compress: 0.72,
+        maxWidth: 1024,
+        maxHeight: 1024,
       });
-      const base64 = await FileSystem.readAsStringAsync(thumbnail.uri, { encoding: "base64" });
+      const dataUrl = ensureScreenableDataUrl(
+        frame.dataUrl,
+        "Could not create a small enough video preview for safety screening.",
+      );
       return {
-        uri: thumbnail.uri,
-        dataUrl: ensureScreenableDataUrl(
-          `data:image/jpeg;base64,${base64}`,
-          "Could not create a small enough video preview for safety screening.",
-        ),
+        // A data URI remains valid for the composer preview and avoids retaining
+        // another short-lived native cache URI.
+        uri: dataUrl,
+        dataUrl,
       };
     }),
   );
@@ -1857,6 +1860,19 @@ const getFeedCommentTargetPostId = (item: any) => {
   return typeof item?.id === "string" ? item.id : "";
 };
 
+const COMMENTABLE_SUGGESTION_TYPES = new Set([
+  "artist",
+  "duo",
+  "gig",
+  "group",
+  "musician",
+  "production",
+  "production_team",
+  "profile",
+  "studio",
+  "venue",
+]);
+
 const getStationSlots = (station: any) => {
   if (Array.isArray(station?.live_slots) && station.live_slots.length > 0) {
     return station.live_slots;
@@ -2815,12 +2831,11 @@ type SocialFeedCardProps = {
   onOpenProfile: (profileId: string) => void;
   onOpenProductionTeam: (teamId: string) => void;
   onOpenPlaylist: (playlistId: string) => void;
-  onOpenGigComments?: (card: any) => Promise<void> | void;
+  onOpenSuggestionComments?: (card: any) => Promise<void> | void;
   onShareCard?: (card: any) => void;
   onSharePost?: (post: any) => void;
   onToggleCardFavorite?: (card: any) => void;
   onToggleReaction?: (post: any) => void;
-  enableGigComments?: boolean;
   showAuthorFollow: boolean;
   timeAgo: (value: string) => string;
 };
@@ -2843,12 +2858,11 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   onOpenProfile,
   onOpenProductionTeam,
   onOpenPlaylist,
-  onOpenGigComments,
+  onOpenSuggestionComments,
   onShareCard,
   onSharePost,
   onToggleCardFavorite,
   onToggleReaction,
-  enableGigComments,
   showAuthorFollow,
   timeAgo,
 }: SocialFeedCardProps) {
@@ -2971,13 +2985,12 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   ) || 0);
   const actionTargetLabel = isSuggestion ? getFeedReportTypeLabel(item).toLowerCase() : "post";
   const commentTargetPostId = getFeedCommentTargetPostId(item);
-  const canCommentOnGigSuggestion =
-    enableGigComments === true &&
+  const canCommentOnSuggestion =
     isSuggestion &&
-    suggestionType === "gig" &&
+    COMMENTABLE_SUGGESTION_TYPES.has(suggestionType) &&
     typeof item?.id === "string" &&
     item.id.length > 0;
-  const showCommentAction = Boolean(commentTargetPostId || canCommentOnGigSuggestion);
+  const showCommentAction = Boolean(commentTargetPostId || canCommentOnSuggestion);
   const commentCount = Math.max(0, Number(item?.comment_count || 0) || 0);
   const visibleCommentCount = showCommentAction ? commentCount : 0;
   const shareCount = Math.max(0, Number(item?.share_count || 0) || 0);
@@ -2995,10 +3008,10 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
       return;
     }
 
-    if (canCommentOnGigSuggestion && onOpenGigComments) {
+    if (canCommentOnSuggestion && onOpenSuggestionComments) {
       setCommentBusy(true);
       try {
-        await onOpenGigComments(item);
+        await onOpenSuggestionComments(item);
       } finally {
         setCommentBusy(false);
       }
@@ -3010,7 +3023,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
       title: "Comments unavailable",
       message: "This card is not a feed post yet.",
     });
-  }, [canCommentOnGigSuggestion, commentTargetPostId, item, onOpenGigComments, onOpenPost]);
+  }, [canCommentOnSuggestion, commentTargetPostId, item, onOpenPost, onOpenSuggestionComments]);
   const handleSharePress = useCallback(() => {
     if (isSuggestion) {
       onShareCard?.(item);
@@ -3198,7 +3211,6 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
             primaryColor={colors.primary}
             textColor={colors.text}
             mutedTextColor={colors.textSecondary}
-            borderColor={borderColor}
             isDark={isDark}
           />
 
@@ -3296,7 +3308,7 @@ export default function FeedScreen() {
   const resolvedUserId = session?.user?.id ?? userId ?? null;
   const canUseSocialActions = Boolean(session?.access_token && resolvedUserId && !isGuest);
   const params = useLocalSearchParams<{ reopenListingId?: string }>();
-  const { clearBottomOverlays } = useBottomOverlay();
+  const { clearBottomOverlays } = useBottomOverlayActions();
   const { activeStation } = useRadioPlayerPresence();
   const insets = useSafeAreaInsets();
   const groqModelLabel = getGroqModelInfo().modelLabel;
@@ -3357,6 +3369,7 @@ export default function FeedScreen() {
   const searchSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const bottomSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const productionTeamSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
+  const postDetailsModalRef = React.useRef<PostDetailsModalHandle>(null);
   const activeTabRef = React.useRef<FeedTab>(tab);
   const visibleFeedTabRef = React.useRef<FeedTab>(tab);
   const feedCacheRef = React.useRef<Record<FeedTab, FeedCacheEntry>>(feedScreenCache);
@@ -3385,8 +3398,6 @@ export default function FeedScreen() {
   const previousTabRef = React.useRef<FeedTab>(tab);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
   const [selectedListingPreview, setSelectedListingPreview] = useState<any | null>(null);
-  const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
-  const [selectedPostPreview, setSelectedPostPreview] = useState<any | null>(null);
   const [selectedProductionTeamId, setSelectedProductionTeamId] = useState<string | null>(null);
   const [pendingReopenListingId, setPendingReopenListingId] = useState<string | null>(null);
   const markFeedFetching = useCallback((feedTab: FeedTab, isFetching: boolean) => {
@@ -3807,8 +3818,10 @@ export default function FeedScreen() {
   }, []);
 
   const openSearchSheet = useCallback(() => {
-    trackFeedActivity("feed_search_opened", null);
     presentModalWithRetry(searchSheetRef as any);
+    requestIdleCallback(() => {
+      trackFeedActivity("feed_search_opened", null);
+    }, { timeout: 500 });
   }, [presentModalWithRetry, trackFeedActivity]);
 
   const openProductionTeamSheet = useCallback(() => {
@@ -3879,7 +3892,7 @@ export default function FeedScreen() {
       }
     };
 
-    const interactionTask = InteractionManager.runAfterInteractions(() => {
+    const interactionTask = runAfterUIIdle(() => {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           presentWhenReady();
@@ -5305,7 +5318,7 @@ export default function FeedScreen() {
     }
 
     let isActive = true;
-    let focusRefreshTask: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+    let focusRefreshTask: ReturnType<typeof runAfterUIIdle> | null = null;
     let refreshFallbackTimer: ReturnType<typeof setTimeout> | null = null;
     let refreshStarted = false;
 
@@ -5319,7 +5332,7 @@ export default function FeedScreen() {
       if (!hydrated || isHydratedEmptyBlockingTab) {
         startRefresh();
       } else {
-        focusRefreshTask = InteractionManager.runAfterInteractions(startRefresh);
+        focusRefreshTask = runAfterUIIdle(startRefresh);
         refreshFallbackTimer = setTimeout(startRefresh, 800);
       }
     }
@@ -5441,7 +5454,7 @@ export default function FeedScreen() {
       refreshStarted = true;
       void ensureFeedFresh({ feedTab: tab, reason: "tab-state-change" });
     };
-    const tabSwitchTask = InteractionManager.runAfterInteractions(startTabRefresh);
+    const tabSwitchTask = runAfterUIIdle(startTabRefresh);
     const tabRefreshFallbackTimer = setTimeout(startTabRefresh, 800);
 
     return () => {
@@ -6073,23 +6086,20 @@ export default function FeedScreen() {
 
   const openPostDetails = useCallback((postId: string, initialPost?: any | null) => {
     if (!postId) return;
+    postDetailsModalRef.current?.open(postId, initialPost);
     if (initialPost && initialPost.__feedKind !== "ai_card") {
-      trackFeedActivity("feed_post_opened", initialPost);
+      requestIdleCallback(() => {
+        trackFeedActivity("feed_post_opened", initialPost);
+      }, { timeout: 500 });
     }
-    setSelectedPostPreview(initialPost || null);
-    setSelectedPostId(postId);
-    void prefetchPostDetails(postId, initialPost).catch(() => {
-      // The modal owns user-visible error handling if the request fails.
-    });
   }, [trackFeedActivity]);
 
-  const patchTalentGigCommentPost = useCallback((gigId: string, postId: string, commentCount?: number) => {
-    if (!gigId || !postId) return;
+  const patchSuggestionCommentPost = useCallback((listingId: string, postId: string, commentCount?: number) => {
+    if (!listingId || !postId) return;
 
     const updateCards = (cards: any[]) =>
       cards.map((card) => {
-        const type = String(card?.type || "").toLowerCase();
-        if (card?.__feedKind === "ai_card" && type === "gig" && card?.id === gigId) {
+        if (card?.__feedKind === "ai_card" && card?.id === listingId) {
           return {
             ...card,
             linked_post_id: postId,
@@ -6112,48 +6122,63 @@ export default function FeedScreen() {
         ...feedCacheRef.current.talent,
         aiCards: updateCards(feedCacheRef.current.talent.aiCards),
       },
+      following: {
+        ...feedCacheRef.current.following,
+        aiCards: updateCards(feedCacheRef.current.following.aiCards),
+      },
     };
   }, []);
 
-  const openGigCommentThread = useCallback(async (card: any) => {
-    const gigId = typeof card?.id === "string" ? card.id : "";
-    if (!gigId) return;
+  const openSuggestionCommentThread = useCallback(async (card: any) => {
+    const listingId = typeof card?.id === "string" ? card.id : "";
+    const rawType = String(card?.type || "").trim().toLowerCase();
+    const listingType = rawType === "artist" || rawType === "musician" || rawType === "profile"
+      ? "profile"
+      : rawType === "duo"
+        ? "group"
+        : rawType === "venue"
+          ? "studio"
+          : rawType === "production"
+            ? "production_team"
+            : rawType;
+    if (!listingId || !COMMENTABLE_SUGGESTION_TYPES.has(rawType)) return;
 
     if (!canUseSocialActions) {
       emitToast({
         type: "info",
         title: "Sign in to comment",
-        message: "Create an account or sign in to join gig comments.",
+        message: "Create an account or sign in to join the comments.",
       });
       return;
     }
 
     try {
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
-        body: { action: "get_or_create_gig_comment_post", gig_id: gigId },
+        body: rawType === "gig"
+          ? { action: "get_or_create_gig_comment_post", gig_id: listingId }
+          : {
+              action: "get_or_create_listing_comment_post",
+              listing_id: listingId,
+              listing_type: listingType,
+            },
       });
 
       if (error) throw error;
       if (data?.error) throw new Error(String(data.error));
 
       const postId = data?.data?.post_id || data?.post_id;
-      if (!postId) throw new Error("Gig comment thread was not returned.");
+      if (!postId) throw new Error("Comment thread was not returned.");
 
-      patchTalentGigCommentPost(gigId, postId, data?.data?.comment_count);
+      patchSuggestionCommentPost(listingId, postId, data?.data?.comment_count);
       openPostDetails(postId);
     } catch (e: any) {
       emitToast({
         type: "error",
         title: "Comments unavailable",
-        message: e?.message || "Could not open gig comments.",
+        message: e?.message || "Could not open comments.",
       });
     }
-  }, [canUseSocialActions, openPostDetails, patchTalentGigCommentPost]);
-
-  const closePostDetails = useCallback(() => {
-    setSelectedPostId(null);
-    setSelectedPostPreview(null);
-  }, []);
+  }, [canUseSocialActions, openPostDetails, patchSuggestionCommentPost]);
 
   const patchPostEverywhere = useCallback((postId: string, updater: (post: any) => any) => {
     if (!postId) return;
@@ -6195,19 +6220,32 @@ export default function FeedScreen() {
   );
 
   const handleModalCommentChanged = useCallback((postId: string, commentCount: number) => {
+    const updateCards = (cards: any[]) =>
+      cards.map((card) =>
+        card.linked_post_id === postId ? { ...card, comment_count: commentCount } : card,
+      );
+
     setPosts((current) =>
       current.map((post) => (post.id === postId ? { ...post, comment_count: commentCount } : post)),
     );
-    setAiCards((current) =>
-      current.map((card) => (card.linked_post_id === postId ? { ...card, comment_count: commentCount } : card)),
-    );
+    setAiCards(updateCards);
     feedCacheRef.current = {
       ...feedCacheRef.current,
+      for_you: {
+        ...feedCacheRef.current.for_you,
+        aiCards: updateCards(feedCacheRef.current.for_you.aiCards),
+      },
+      latest: {
+        ...feedCacheRef.current.latest,
+        aiCards: updateCards(feedCacheRef.current.latest.aiCards),
+      },
       talent: {
         ...feedCacheRef.current.talent,
-        aiCards: feedCacheRef.current.talent.aiCards.map((card) =>
-          card.linked_post_id === postId ? { ...card, comment_count: commentCount } : card,
-        ),
+        aiCards: updateCards(feedCacheRef.current.talent.aiCards),
+      },
+      following: {
+        ...feedCacheRef.current.following,
+        aiCards: updateCards(feedCacheRef.current.following.aiCards),
       },
     };
   }, []);
@@ -6741,15 +6779,14 @@ export default function FeedScreen() {
             trackFeedActivity("feed_card_opened", post);
             openPlaylistDetails(playlistId);
           }}
-          onOpenGigComments={(card) => {
+          onOpenSuggestionComments={(card) => {
             trackFeedActivity("feed_card_opened", card || post, { source: "comments" });
-            return openGigCommentThread(card);
+            return openSuggestionCommentThread(card);
           }}
           onShareCard={handleShareCard}
           onSharePost={handleSharePost}
           onToggleCardFavorite={handleToggleCardFavorite}
           onToggleReaction={handleTogglePostReaction}
-          enableGigComments={tab === "talent" || tab === "for_you"}
           showAuthorFollow={false}
           timeAgo={timeAgo}
         />
@@ -6788,12 +6825,11 @@ export default function FeedScreen() {
         onOpenProfile={openProfileDetails}
         onOpenProductionTeam={openProductionTeamDetails}
         onOpenPlaylist={openPlaylistDetails}
-        onOpenGigComments={openGigCommentThread}
+        onOpenSuggestionComments={openSuggestionCommentThread}
         onShareCard={handleShareCard}
         onSharePost={handleSharePost}
         onToggleCardFavorite={handleToggleCardFavorite}
         onToggleReaction={handleTogglePostReaction}
-        enableGigComments={false}
         showAuthorFollow={Boolean(authorFollowTarget)}
         timeAgo={timeAgo}
       />
@@ -6810,7 +6846,7 @@ export default function FeedScreen() {
     handleTogglePostReaction,
     isDark,
     openListingDetails,
-    openGigCommentThread,
+    openSuggestionCommentThread,
     openPlaylistDetails,
     openPostOptions,
     openPostDetails,
@@ -6818,7 +6854,6 @@ export default function FeedScreen() {
     openProfileDetails,
     openProductionTeamDetails,
     resolvedUserId,
-    tab,
     trackFeedActivity,
     timeAgo,
   ]);
@@ -7493,7 +7528,7 @@ export default function FeedScreen() {
         ref={searchSheetRef}
         onClose={handleSearchSheetClose}
         onSearchCommitted={handleSearchCommitted}
-        onItemPress={(id) => openListingDetails(id)}
+        onItemPress={(id, initialListing) => openListingDetails(id, initialListing)}
         onProductionTeamPress={(teamId) => openProductionTeamDetails(teamId)}
         onFollowChanged={() => {
           invalidateFeedCache("following");
@@ -7514,11 +7549,8 @@ export default function FeedScreen() {
         onDismiss={handleDetailsSheetDismiss}
       />
 
-      <PostDetailsModal
-        initialPost={selectedPostPreview}
-        postId={selectedPostId}
-        visible={Boolean(selectedPostId)}
-        onClose={closePostDetails}
+      <PostDetailsModalHost
+        ref={postDetailsModalRef}
         onReactionChanged={handleModalReactionChanged}
         onCommentChanged={handleModalCommentChanged}
         onShareChanged={handleModalShareChanged}
@@ -7965,13 +7997,19 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 10,
+    paddingVertical: 0,
+    flexDirection: "row",
     alignItems: "center",
     alignSelf: "flex-start",
     justifyContent: "center",
   },
   socialFollowText: {
     fontSize: moderateScale(10),
+    lineHeight: 14,
     fontFamily: "Poppins_700Bold",
+    includeFontPadding: false,
+    textAlign: "center",
+    textAlignVertical: "center",
   },
   socialMenuButton: {
     width: 28,

@@ -8,7 +8,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
-  InteractionManager,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -22,10 +21,14 @@ import { supabase } from "../../lib/supabase";
 import CachedImage from "../../src/components/CachedImage";
 import CustomAlert from "../../src/components/CustomAlert";
 import Header from "../../src/components/header";
-import ListingDetailsSheet from "../../src/components/ListingDetailsSheet";
+import {
+  ListingDetailsSheetHost,
+  type ListingDetailsSheetHostHandle,
+  ProductionTeamDetailsSheetHost,
+  type ProductionTeamDetailsSheetHostHandle,
+} from "../../src/components/HomeDetailsSheetHosts";
 import Navbar from "../../src/components/navbar";
 import { ProfileCompletionBanner } from "../../src/components/ProfileCompletionBanner";
-import ProductionTeamDetailsSheet from "../../src/components/ProductionTeamDetailsSheet";
 import RecentlyViewedSheet from "../../src/components/RecentlyViewedSheet";
 import SearchBottomSheet from "../../src/components/SearchBottomSheet";
 import Skeleton from "../../src/components/Skeleton";
@@ -40,6 +43,7 @@ import {
 import { getRecentlyViewedStorageKey } from "../../src/utils/recentlyViewed";
 import { getScreenCacheKey, peekScreenCache, readScreenCache, writeScreenCache } from "../../src/utils/screenCache";
 import { usePageLoadLogger } from "../../src/utils/loadTimeLogger";
+import { runAfterUIIdle } from "../../src/utils/idleTask";
 
 const { width, height } = Dimensions.get("window");
 
@@ -63,6 +67,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 const debugLog = (..._args: unknown[]) => { };
 const HOME_HORIZONTAL_FLASHLIST_OVERRIDE_PROPS = { initialDrawBatchSize: 4 };
+const HOME_CARD_POST_OPEN_WORK_DELAY_MS = 350;
 const PENDING_REOPEN_LISTING_STORAGE_KEY = "pending_reopen_listing_id";
 const PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY = "pending_reopen_listing_type";
 const PROFILE_SKILL_DISPLAY_EXCLUSIONS = new Set(["producer"]);
@@ -500,10 +505,9 @@ export default function HomeScreen() {
   ]);
 
   // ... refs ...
-  const bottomSheetRef =
-    React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
-  const productionTeamSheetRef =
-    React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
+  const listingDetailsHostRef = React.useRef<ListingDetailsSheetHostHandle>(null);
+  const productionTeamDetailsHostRef =
+    React.useRef<ProductionTeamDetailsSheetHostHandle>(null);
   const searchSheetRef =
     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const recentlyViewedSheetRef =
@@ -518,18 +522,6 @@ export default function HomeScreen() {
   const lastHomeRefreshAtRef = React.useRef(initialHomeFeedSnapshot?.fetchedAt || 0);
   const lastProfileRefreshAtRef = React.useRef(initialHomeProfileSnapshot?.fetchedAt || 0);
   const viewedNewArrivalsLoadedRef = React.useRef(false);
-  const [selectedListingId, setSelectedListingId] = useState<string | null>(
-    null,
-  );
-  const [selectedListingPreview, setSelectedListingPreview] = useState<any | null>(
-    null,
-  );
-  const [selectedProductionTeamId, setSelectedProductionTeamId] = useState<string | null>(
-    null,
-  );
-  const [pendingReopenListingId, setPendingReopenListingId] = useState<
-    string | null
-  >(null);
 
   // Alert State
   const [alertVisible, setAlertVisible] = useState(false);
@@ -597,15 +589,6 @@ export default function HomeScreen() {
     presentModalWithRetry(searchSheetRef as any);
   }, [presentModalWithRetry]);
 
-  // Safe handler for opening details sheet
-  const openDetailsSheet = useCallback(() => {
-    presentModalWithRetry(bottomSheetRef as any);
-  }, [presentModalWithRetry]);
-
-  const openProductionTeamSheet = useCallback(() => {
-    presentModalWithRetry(productionTeamSheetRef as any);
-  }, [presentModalWithRetry]);
-
   const openListingDetails = useCallback(
     (
       listingId: string,
@@ -616,16 +599,15 @@ export default function HomeScreen() {
     ) => {
       restoreSearchAfterDetailsCloseRef.current =
         options?.restoreSearchOnClose === true;
-      setSelectedListingPreview(options?.initialListing || null);
-      setSelectedListingId(listingId);
-      openDetailsSheet();
+      listingDetailsHostRef.current?.open(
+        listingId,
+        options?.initialListing ?? null,
+      );
     },
-    [openDetailsSheet],
+    [],
   );
 
   const handleListingDetailsDismiss = useCallback(() => {
-    setSelectedListingPreview(null);
-
     if (!restoreSearchAfterDetailsCloseRef.current) {
       return;
     }
@@ -650,17 +632,15 @@ export default function HomeScreen() {
 
       restoreSearchAfterProductionCloseRef.current =
         options?.restoreSearchOnClose === true;
-      setSelectedProductionTeamId(teamId);
-      openProductionTeamSheet();
+      productionTeamDetailsHostRef.current?.open(teamId);
     },
-    [openProductionTeamSheet],
+    [],
   );
 
   const handleProductionTeamDetailsDismiss = useCallback(() => {
     const shouldRestoreSearch = restoreSearchAfterProductionCloseRef.current;
 
     restoreSearchAfterProductionCloseRef.current = false;
-    setSelectedProductionTeamId(null);
 
     if (!shouldRestoreSearch) {
       return;
@@ -672,41 +652,6 @@ export default function HomeScreen() {
       });
     });
   }, [openSearchSheet]);
-
-  useEffect(() => {
-    if (!pendingReopenListingId) return;
-    if (selectedListingId !== pendingReopenListingId) return;
-
-    let attempts = 0;
-    const maxAttempts = 10;
-
-    const presentWhenReady = () => {
-      if (bottomSheetRef.current) {
-        bottomSheetRef.current.present();
-        setPendingReopenListingId(null);
-        return;
-      }
-
-      attempts += 1;
-      if (attempts < maxAttempts) {
-        setTimeout(presentWhenReady, 60);
-      } else {
-        setPendingReopenListingId(null);
-      }
-    };
-
-    const interactionTask = InteractionManager.runAfterInteractions(() => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          presentWhenReady();
-        });
-      });
-    });
-
-    return () => {
-      interactionTask.cancel();
-    };
-  }, [pendingReopenListingId, selectedListingId]);
 
   // Safe handler for opening recently viewed sheet
   const openRecentlyViewedSheet = useCallback(() => {
@@ -867,7 +812,7 @@ export default function HomeScreen() {
         );
 
       let isActive = true;
-      const focusTask = InteractionManager.runAfterInteractions(() => {
+      const focusTask = runAfterUIIdle(() => {
         if (!isActive) {
           return;
         }
@@ -914,8 +859,7 @@ export default function HomeScreen() {
             });
           }, 250);
         } else if (reopenListingId && reopenListingId.length > 0) {
-          setSelectedListingId(reopenListingId);
-          setPendingReopenListingId(reopenListingId);
+          openListingDetails(reopenListingId);
           void AsyncStorage.multiRemove([
             PENDING_REOPEN_LISTING_STORAGE_KEY,
             PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY,
@@ -945,8 +889,7 @@ export default function HomeScreen() {
             if (isProductionTeamListingType(storedListingType)) {
               openProductionTeamDetails(storedListingId);
             } else {
-              setSelectedListingId(storedListingId);
-              setPendingReopenListingId(storedListingId);
+              openListingDetails(storedListingId);
             }
             await AsyncStorage.multiRemove([
               PENDING_REOPEN_LISTING_STORAGE_KEY,
@@ -968,6 +911,7 @@ export default function HomeScreen() {
       homeDataQuery.refetch,
       isGuest,
       loadViewedNewArrivals,
+      openListingDetails,
       openProductionTeamDetails,
       params.listingType,
       params.listing_type,
@@ -1729,36 +1673,34 @@ export default function HomeScreen() {
     }
   };
 
-  const handleCardPress = async (item: any) => {
+  const handleCardPress = (item: any) => {
     debugLog("=== handleCardPress called ===");
     debugLog("Item:", item);
     debugLog("Item ID:", item.id);
 
     if (item?.type === "Production") {
       openProductionTeamDetails(item.id);
-      debugLog("selectedProductionTeamId set to:", item.id);
-      debugLog("openProductionTeamSheet called");
     } else {
       openListingDetails(item.id, { initialListing: item });
-      debugLog("selectedListingId set to:", item.id);
-      debugLog("openDetailsSheet called");
     }
 
-    // Mark this item as viewed in the New Arrivals set
+    // Keep Home state and storage work outside the sheet's opening animation.
     const isNewArrival = newArrivals.some((n: any) => n.id === item.id);
-    if (isNewArrival) {
-      setViewedNewArrivals(prev => {
-        const next = new Set(prev);
-        next.add(item.id);
-        AsyncStorage.setItem(VIEWED_NEW_ARRIVALS_STORAGE_KEY, JSON.stringify([...next])).catch(() => { });
-        return next;
-      });
-    }
+    setTimeout(() => {
+      if (isNewArrival) {
+        setViewedNewArrivals(prev => {
+          const next = new Set(prev);
+          next.add(item.id);
+          AsyncStorage.setItem(
+            VIEWED_NEW_ARRIVALS_STORAGE_KEY,
+            JSON.stringify([...next]),
+          ).catch(() => { });
+          return next;
+        });
+      }
 
-    // Defer storage work so sheet animation stays smooth
-    InteractionManager.runAfterInteractions(() => {
       void saveToRecentlyViewed(item);
-    });
+    }, HOME_CARD_POST_OPEN_WORK_DELAY_MS);
   };
 
   // Handle chat action - navigate to chat screen with recipient
@@ -3397,24 +3339,24 @@ export default function HomeScreen() {
 
       <Navbar />
 
-      <ListingDetailsSheet
-        ref={bottomSheetRef}
-        initialListing={selectedListingPreview}
-        listingId={selectedListingId}
+      <ListingDetailsSheetHost
+        ref={listingDetailsHostRef}
         onDismiss={handleListingDetailsDismiss}
       />
-      <ProductionTeamDetailsSheet
-        ref={productionTeamSheetRef}
-        teamId={selectedProductionTeamId}
+      <ProductionTeamDetailsSheetHost
+        ref={productionTeamDetailsHostRef}
         onDismiss={handleProductionTeamDetailsDismiss}
       />
       <SearchBottomSheet
         ref={searchSheetRef}
         onClose={() => { }}
-        onItemPress={(id) => {
+        onItemPress={(id, initialListing) => {
           debugLog("=== SearchBottomSheet onItemPress ===");
           debugLog("Item ID from search:", id);
-          openListingDetails(id, { restoreSearchOnClose: true });
+          openListingDetails(id, {
+            initialListing,
+            restoreSearchOnClose: true,
+          });
           debugLog("openDetailsSheet called from search");
         }}
         onProductionTeamPress={(teamId) => {

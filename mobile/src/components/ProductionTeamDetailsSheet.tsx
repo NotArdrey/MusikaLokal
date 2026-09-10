@@ -3,7 +3,7 @@ import {
   BottomSheetBackdrop,
   BottomSheetModal,
   BottomSheetScrollView,
-  useBottomSheetSpringConfigs,
+  useBottomSheetTimingConfigs,
 } from "@gorhom/bottom-sheet";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
@@ -11,7 +11,6 @@ import React, { forwardRef, useCallback, useEffect, useMemo, useRef, useState } 
 import {
   Alert,
   ActivityIndicator,
-  InteractionManager,
   Share,
   StyleSheet,
   Text,
@@ -24,10 +23,11 @@ import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { useBottomBarClearance } from "../hooks/useBottomBarClearance";
 import { submitListingRequest, uploadListingRequestDocument } from "../utils/listingRequests";
-import { bottomSheetSpringConfig } from "../utils/motion";
+import { detailSheetTimingConfig } from "../utils/motion";
 import { isFanUserRole } from "../utils/roleRouting";
 import { getSmoothTabIndex, setSmoothTab } from "../utils/smoothTabs";
 import { formatDashedNumericDate } from "../utils/friendlyDateTime";
+import { runAfterUIIdle } from "../utils/idleTask";
 import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
@@ -78,6 +78,8 @@ type ReviewRecord = {
 
 interface ProductionTeamDetailsSheetProps {
   teamId: string | null;
+  opening?: boolean;
+  onOpened?: () => void;
   onDismiss?: () => void;
 }
 
@@ -211,13 +213,13 @@ const loadProductionTeamFavoriteMetadata = async (
 const ProductionTeamDetailsSheet = forwardRef<
   BottomSheetModal,
   ProductionTeamDetailsSheetProps
->(function ProductionTeamDetailsSheet({ teamId, onDismiss }, ref) {
+>(function ProductionTeamDetailsSheet({ teamId, opening = false, onOpened, onDismiss }, ref) {
   const { colors, isDark } = useTheme();
   const { userId, userRole } = useAuth();
   const isFan = isFanUserRole(userRole);
   const { contentBottomPadding } = useBottomBarClearance(24);
   const snapPoints = useMemo(() => ["86%"], []);
-  const animationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
+  const animationConfigs = useBottomSheetTimingConfigs(detailSheetTimingConfig);
 
   const [loading, setLoading] = useState(false);
   const [team, setTeam] = useState<ProductionTeamRecord | null>(null);
@@ -239,6 +241,7 @@ const ProductionTeamDetailsSheet = forwardRef<
   const [requestVideoUrl, setRequestVideoUrl] = useState("");
   const [isSendingRequest, setIsSendingRequest] = useState(false);
   const requestInFlightRef = useRef(false);
+  const previousSheetIndexRef = useRef(-1);
   const [isFavorited, setIsFavorited] = useState(false);
   const [favoriteCount, setFavoriteCount] = useState(0);
   const [alertVisible, setAlertVisible] = useState(false);
@@ -271,6 +274,15 @@ const ProductionTeamDetailsSheet = forwardRef<
   const handleDismiss = useCallback(() => {
     onDismiss?.();
   }, [onDismiss]);
+
+  const handleSheetChange = useCallback((index: number) => {
+    const wasHidden = previousSheetIndexRef.current < 0;
+    previousSheetIndexRef.current = index;
+
+    if (wasHidden && index >= 0) {
+      onOpened?.();
+    }
+  }, [onOpened]);
 
   useEffect(() => {
     let active = true;
@@ -676,7 +688,7 @@ const ProductionTeamDetailsSheet = forwardRef<
 
     closeSheet();
 
-    InteractionManager.runAfterInteractions(() => {
+    runAfterUIIdle(() => {
       requestAnimationFrame(() => {
         router.push({ pathname: "/production_team", params: { teamId: team.id } });
       });
@@ -709,7 +721,7 @@ const ProductionTeamDetailsSheet = forwardRef<
 
     closeSheet();
 
-    InteractionManager.runAfterInteractions(() => {
+    runAfterUIIdle(() => {
       requestAnimationFrame(() => {
         router.push({
           pathname: "/chat",
@@ -1211,6 +1223,7 @@ const ProductionTeamDetailsSheet = forwardRef<
         enableOverDrag={false}
         enablePanDownToClose={true}
         backdropComponent={renderBackdrop}
+        onChange={handleSheetChange}
         onDismiss={handleDismiss}
         backgroundStyle={{ backgroundColor: colors.background, borderRadius: 32 }}
         handleIndicatorStyle={{
@@ -1219,7 +1232,7 @@ const ProductionTeamDetailsSheet = forwardRef<
           marginTop: 10,
         }}
       >
-        {loading ? (
+        {opening || loading || (Boolean(teamId) && !team && !errorMessage) ? (
           <View style={styles.stateContainer}>
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={[styles.stateTitle, { color: colors.text }]}>Loading team details</Text>
@@ -1807,4 +1820,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default ProductionTeamDetailsSheet;
+export default React.memo(ProductionTeamDetailsSheet);

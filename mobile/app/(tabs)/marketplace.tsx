@@ -27,7 +27,7 @@ import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
 import { LoadingButtonContent } from "../../src/components/LoadingState";
 import { useBottomBarClearance } from "../../src/hooks/useBottomBarClearance";
 import { useAuth } from "../../src/context/AuthContext";
-import { useBottomOverlay } from "../../src/context/BottomOverlayContext";
+import { useBottomOverlayActions } from "../../src/context/BottomOverlayContext";
 import { emitToast } from "../../src/events/toastBus";
 import { useTheme } from "../../src/context/ThemeContext";
 import {
@@ -71,7 +71,7 @@ export default function MarketplaceScreen() {
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { session, isGuest, userId, userRole, roleResolved, loading: authLoading } = useAuth();
-  const { clearBottomOverlays } = useBottomOverlay();
+  const { clearBottomOverlays } = useBottomOverlayActions();
   const queryClient = useQueryClient();
   const e2eProductSubmitInFlightRef = useRef(false);
   const resolvedUserId = session?.user?.id ?? userId ?? null;

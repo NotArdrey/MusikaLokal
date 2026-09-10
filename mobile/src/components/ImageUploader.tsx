@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -7,7 +6,12 @@ import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 import { isUploadSafetyRetryableFailure, screenUploadsWithAiDecisions } from '../services/uploadSafetyScreen';
 import { createE2EImageFixtureUrls, isE2EFixtureMode } from '../utils/e2eFixtures';
-import { uploadStorageObject } from '../utils/storageUpload';
+import {
+  persistUploadAsset,
+  readLocalFileAsBase64,
+  removePersistedUploadAsset,
+  uploadStorageObject,
+} from '../utils/storageUpload';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
@@ -145,9 +149,7 @@ const prepareImageForUpload = async (
     size = webFile.size || estimateBase64Bytes(base64);
     uploadBody = webFile;
   } else {
-    base64 = await FileSystem.readAsStringAsync(asset.uri, {
-      encoding: 'base64',
-    });
+    base64 = await readLocalFileAsBase64(asset.uri, originalName);
     size = size || estimateBase64Bytes(base64);
     contentDataUrl = `data:${mimeType};base64,${base64}`;
   }
@@ -240,6 +242,7 @@ export default function ImageUploader({
   }, [pendingAlert, uploading]);
 
   const pickAndUploadImages = async () => {
+    const stagedAssets: ImagePicker.ImagePickerAsset[] = [];
     try {
       // Check authentication first
       const { data: { session }, error: authError } = await supabase.auth.getSession();
@@ -287,7 +290,14 @@ export default function ImageUploader({
       setUploadMessage('Preparing photos...');
 
       const preparedResults = await Promise.allSettled(
-        result.assets.map((asset) => prepareImageForUpload(asset)),
+        result.assets.map(async (asset, index) => {
+          const stagedAsset = await persistUploadAsset({
+            ...asset,
+            name: getAssetDisplayName(asset, index),
+          });
+          stagedAssets.push(stagedAsset);
+          return prepareImageForUpload(stagedAsset);
+        }),
       );
       const preparedUploads = preparedResults
         .filter((result): result is PromiseFulfilledResult<PreparedImageUpload> => result.status === 'fulfilled')
@@ -446,6 +456,7 @@ export default function ImageUploader({
       const message = e.message || 'Failed to upload images';
       showAlert('error', 'Upload failed', message);
     } finally {
+      await Promise.all(stagedAssets.map((asset) => removePersistedUploadAsset(asset)));
       uploadingRef.current = false;
       setUploading(false);
     }

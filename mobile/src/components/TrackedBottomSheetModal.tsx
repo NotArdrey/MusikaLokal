@@ -273,6 +273,7 @@ const TrackedBottomSheetModal = forwardRef<BottomSheetModal, TrackedBottomSheetM
       <BottomSheetModal
         ref={modalRef}
         {...props}
+        animateOnMount={props.animateOnMount ?? true}
         onAnimate={handleAnimate}
         onChange={handleChange}
         onDismiss={handleDismiss}

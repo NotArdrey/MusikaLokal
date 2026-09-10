@@ -2,7 +2,6 @@ import { screenVisualUpload } from "../services/visualUploadScreen";
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import * as VideoThumbnails from 'expo-video-thumbnails';
 import React, { useState } from 'react';
 import { ActivityIndicator, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../../lib/supabase';
@@ -18,6 +17,7 @@ import {
   readLocalFileAsBase64,
   type TemporaryUploadFile,
 } from '../utils/storageUpload';
+import { generateNativeVideoFrame } from '../utils/videoFrames';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
@@ -251,17 +251,12 @@ const uploadReviewFrame = async (input: {
   if (Platform.OS === 'web') {
     body = await createWebReviewFrame(input.assetUri, input.timeMs);
   } else {
-    const thumbnail = await VideoThumbnails.getThumbnailAsync(input.assetUri, {
-      time: input.timeMs,
-      quality: 0.82,
+    const frame = await generateNativeVideoFrame(input.assetUri, input.timeMs, {
+      compress: 0.82,
+      maxWidth: 1280,
+      maxHeight: 1280,
     });
-    try {
-      body = base64ToUint8Array(
-        await readLocalFileAsBase64(thumbnail.uri, `ai-review-frame-${input.frameIndex}.jpg`),
-      );
-    } finally {
-      await FileSystem.deleteAsync(thumbnail.uri, { idempotent: true }).catch(() => undefined);
-    }
+    body = base64ToUint8Array(frame.base64);
   }
 
   const path = `${input.userId}/${input.folder}/${Date.now()}_ai-review-frame-${input.frameIndex}.jpg`;

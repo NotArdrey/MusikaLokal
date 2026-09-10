@@ -11,7 +11,6 @@ import {
     AppState,
     Dimensions,
     FlatList,
-    InteractionManager,
     Linking,
     Modal as RNModal,
     ScrollView,
@@ -43,6 +42,7 @@ import { buildNotificationRouteMeta } from "../../src/utils/notificationNavigati
 import { formatFriendlyDateTime } from "../../src/utils/friendlyDateTime";
 import { isE2EFixtureMode } from "../../src/utils/e2eFixtures";
 import { usePageLoadLogger } from "../../src/utils/loadTimeLogger";
+import { runAfterUIIdle } from "../../src/utils/idleTask";
 import { setSmoothTab } from "../../src/utils/smoothTabs";
 import { resolveSupabaseMediaUrl } from "../../src/utils/supabaseMedia";
 import {
@@ -1868,7 +1868,7 @@ export default function BookingsScreen() {
     useCallback(() => {
       let isActive = true;
       let intervalId: ReturnType<typeof setInterval> | null = null;
-      let focusRefreshTask: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+      let focusRefreshTask: ReturnType<typeof runAfterUIIdle> | null = null;
       let focusRefreshFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
       if (isAuthenticated && userId) {
@@ -1893,7 +1893,7 @@ export default function BookingsScreen() {
             void refetchBookingsSummary();
           };
 
-          focusRefreshTask = InteractionManager.runAfterInteractions(startFocusRefresh);
+          focusRefreshTask = runAfterUIIdle(startFocusRefresh);
           focusRefreshFallbackTimer = setTimeout(startFocusRefresh, 800);
         } else if (!cached) {
           setLoading(true);

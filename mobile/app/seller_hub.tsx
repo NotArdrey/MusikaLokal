@@ -4,7 +4,6 @@ import { router } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   Dimensions,
-  InteractionManager,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -29,6 +28,7 @@ import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
+import { runAfterUIIdle } from "../src/utils/idleTask";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -87,7 +87,7 @@ export default function SellerHubScreen() {
 
   useFocusEffect(useCallback(() => {
     let isActive = true;
-    const focusTask = InteractionManager.runAfterInteractions(() => {
+    const focusTask = runAfterUIIdle(() => {
       if (isActive) {
         void fetchData();
       }

@@ -3,7 +3,7 @@ import type { BottomTabBarProps } from 'expo-router/tabs';
 import { useQueryClient } from '@tanstack/react-query';
 import { router, usePathname } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated as RNAnimated, Easing, InteractionManager, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Animated as RNAnimated, Easing, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useBottomOverlay } from '../context/BottomOverlayContext';
@@ -21,6 +21,8 @@ export const NAVBAR_MAX_WIDTH = 400;
 
 const NAVBAR_DEBUG_LOGS = false;
 const NAVBAR_MOTION_MS = 150;
+const NAVBAR_ROUTE_PRELOAD_DELAY_MS = 1400;
+const NAVBAR_ROUTE_PRELOAD_GAP_MS = 650;
 const NAVBAR_LAYER = 50;
 const NAVBAR_SURFACE_ELEVATION = 16;
 const NAVBAR_DARK_SURFACE = '#121218';
@@ -250,6 +252,10 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
     const queryClient = useQueryClient();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
+    const [pendingTab, setPendingTab] = useState<string | null>(null);
+    const navigationFrameRef = useRef<number | null>(null);
+    const pendingTabResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const preloadedRouteNamesRef = useRef<Set<string>>(new Set());
     const tabPressTimingRef = useRef<{ startedAt: number; targetTab: string } | null>(null);
     const isFan = isFanUserRole(userRole);
     const hideForE2EForm = isE2EFixtureMode() && E2E_NAVBAR_HIDDEN_ROUTES.has(pathname);
@@ -303,34 +309,68 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
     const useIconOnlyNavbar = useNarrowMainNavbar && windowWidth < 390;
 
     const handleNavPress = useCallback((item: NavItem) => {
+        const targetRoute = navigation && state
+            ? state.routes.find((route) => route.name === item.routeName)
+            : null;
+
+        if (navigation && targetRoute) {
+            const event = navigation.emit({
+                type: 'tabPress',
+                target: targetRoute.key,
+                canPreventDefault: true,
+            });
+
+            if (event.defaultPrevented || activeTab === item.id) {
+                return;
+            }
+        } else if (activeTab === item.id) {
+            return;
+        }
+
+        if (navigationFrameRef.current !== null) {
+            cancelAnimationFrame(navigationFrameRef.current);
+        }
+        if (pendingTabResetTimerRef.current) {
+            clearTimeout(pendingTabResetTimerRef.current);
+        }
+
+        // Paint the selected tab before mounting a potentially expensive screen.
+        setPendingTab(item.id);
+        tabPressTimingRef.current = {
+            startedAt: Date.now(),
+            targetTab: item.id,
+        };
+
+        const resetPendingTab = () => {
+            pendingTabResetTimerRef.current = setTimeout(() => {
+                setPendingTab(null);
+                pendingTabResetTimerRef.current = null;
+            }, 1200);
+        };
+
         if (!navigation || !state) {
-            router.replace(item.route as any);
+            navigationFrameRef.current = requestAnimationFrame(() => {
+                navigationFrameRef.current = null;
+                router.replace(item.route as any);
+                resetPendingTab();
+            });
             return;
         }
 
-        const targetRoute = state.routes.find((route) => route.name === item.routeName);
         if (!targetRoute) {
-            router.replace(item.route as any);
+            navigationFrameRef.current = requestAnimationFrame(() => {
+                navigationFrameRef.current = null;
+                router.replace(item.route as any);
+                resetPendingTab();
+            });
             return;
         }
 
-        const event = navigation.emit({
-            type: 'tabPress',
-            target: targetRoute.key,
-            canPreventDefault: true,
-        });
-
-        if (event.defaultPrevented) {
-            return;
-        }
-
-        if (activeTab !== item.id) {
-            tabPressTimingRef.current = {
-                startedAt: Date.now(),
-                targetTab: item.id,
-            };
+        navigationFrameRef.current = requestAnimationFrame(() => {
+            navigationFrameRef.current = null;
             navigation.navigate(targetRoute.name, targetRoute.params);
-        }
+            resetPendingTab();
+        });
     }, [activeTab, navigation, state]);
 
     useEffect(() => {
@@ -343,8 +383,28 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
             durationMs: Date.now() - timing.startedAt,
             tab: activeTab,
         });
+        setPendingTab(null);
+        if (pendingTabResetTimerRef.current) {
+            clearTimeout(pendingTabResetTimerRef.current);
+            pendingTabResetTimerRef.current = null;
+        }
         tabPressTimingRef.current = null;
     }, [activeTab]);
+
+    useEffect(() => () => {
+        if (navigationFrameRef.current !== null) {
+            cancelAnimationFrame(navigationFrameRef.current);
+        }
+        if (pendingTabResetTimerRef.current) {
+            clearTimeout(pendingTabResetTimerRef.current);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (focusedRoute?.name) {
+            preloadedRouteNamesRef.current.add(focusedRoute.name);
+        }
+    }, [focusedRoute?.name]);
 
     useEffect(() => {
         logNavbarDebug('state', {
@@ -367,7 +427,7 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
         }
 
         let warmupTimer: ReturnType<typeof setTimeout> | null = null;
-        const interactionTask = InteractionManager.runAfterInteractions(() => {
+        const idleCallbackId = requestIdleCallback(() => {
             warmupTimer = setTimeout(() => {
                 prefetchNavbarColdBootQueries(queryClient, {
                     isGuest,
@@ -379,10 +439,38 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
         });
 
         return () => {
-            interactionTask.cancel();
+            cancelIdleCallback(idleCallbackId);
             if (warmupTimer) clearTimeout(warmupTimer);
         };
     }, [isGuest, queryClient, roleResolved, session?.user?.id, shouldRenderGlobalNavbar]);
+
+    useEffect(() => {
+        if (!shouldRenderGlobalNavbar || !navigation || !state || !roleResolved) {
+            return;
+        }
+
+        const timers: ReturnType<typeof setTimeout>[] = [];
+        const idleCallbackId = requestIdleCallback(() => {
+            const routesToPreload = navItems
+                .filter((item) => item.id !== activeTab)
+                .map((item) => state.routes.find((route) => route.name === item.routeName))
+                .filter((route): route is NonNullable<typeof route> => Boolean(route))
+                .filter((route) => !preloadedRouteNamesRef.current.has(route.name));
+
+            routesToPreload.forEach((route, index) => {
+                const timer = setTimeout(() => {
+                    preloadedRouteNamesRef.current.add(route.name);
+                    navigation.preload(route.name, route.params);
+                }, NAVBAR_ROUTE_PRELOAD_DELAY_MS + index * NAVBAR_ROUTE_PRELOAD_GAP_MS);
+                timers.push(timer);
+            });
+        }, { timeout: 1200 });
+
+        return () => {
+            cancelIdleCallback(idleCallbackId);
+            timers.forEach(clearTimeout);
+        };
+    }, [activeTab, navItems, navigation, roleResolved, shouldRenderGlobalNavbar, state]);
 
     if (!shouldRenderGlobalNavbar) {
         return null;
@@ -422,7 +510,7 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
                         ]}
                     >
                         {navItems.map((item) => {
-                            const isActive = activeTab === item.id;
+                            const isActive = (pendingTab ?? activeTab) === item.id;
                             return (
                                 <NavTab
                                     active={isActive}

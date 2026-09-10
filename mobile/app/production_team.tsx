@@ -3,7 +3,6 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  InteractionManager,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -30,6 +29,7 @@ import { useTheme } from "../src/context/ThemeContext";
 import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
 import { ProductionInviteTarget, sendProductionTeamInvites } from "../src/utils/productionTeamInvites";
 import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
+import { runAfterUIIdle } from "../src/utils/idleTask";
 import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 
 interface Team {
@@ -297,7 +297,7 @@ export default function ProductionTeamScreen() {
     useCallback(() => {
       if (!authLoading && isAuthenticated) {
         let isActive = true;
-        const focusTask = InteractionManager.runAfterInteractions(() => {
+        const focusTask = runAfterUIIdle(() => {
           if (!isActive) {
             return;
           }

@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Image,
-    InteractionManager,
     Linking,
     ScrollView,
     StyleSheet,
@@ -30,6 +29,7 @@ import {
 } from "../src/utils/navigation";
 import { formatDashedNumericDate, formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import { getSmoothTabIndex, setSmoothTab, useStagedTabRows } from "../src/utils/smoothTabs";
+import { runAfterUIIdle } from "../src/utils/idleTask";
 import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 
 const CUSTOM_DATE_PREVIEW_LIMIT = 5;
@@ -305,7 +305,7 @@ export default function StudioDetailsScreen() {
   useFocusEffect(
     React.useCallback(() => {
       let isActive = true;
-      const focusTask = InteractionManager.runAfterInteractions(() => {
+      const focusTask = runAfterUIIdle(() => {
         if (isActive) {
           void checkAuthorization();
         }

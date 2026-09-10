@@ -21,7 +21,7 @@ import { clearSupabaseAuthStorage, prepareRealtimeAuth, supabase } from "../lib/
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
 import CustomAlert from "../src/components/CustomAlert";
 import LoadingState from "../src/components/LoadingState";
-import { BottomOverlayProvider, useBottomOverlay } from "../src/context/BottomOverlayContext";
+import { BottomOverlayProvider, useBottomOverlayActions } from "../src/context/BottomOverlayContext";
 import { usePushNotifications } from "../src/hooks/usePushNotifications";
 import {
   GlobalRadioMiniPlayer,
@@ -1009,7 +1009,7 @@ function RootContent() {
 }
 
 function BottomOverlayRouteReset({ routeName }: { routeName: string }) {
-  const { clearBottomOverlays } = useBottomOverlay();
+  const { clearBottomOverlays } = useBottomOverlayActions();
   const previousRouteNameRef = useRef(routeName);
 
   useEffect(() => {

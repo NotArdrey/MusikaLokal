@@ -2,7 +2,7 @@
 import {
     BottomSheetBackdrop,
     BottomSheetModal,
-    useBottomSheetSpringConfigs,
+    useBottomSheetTimingConfigs,
 } from "@gorhom/bottom-sheet";
 import * as ExpoLinking from "expo-linking";
 import { router, useFocusEffect } from "expo-router";
@@ -18,7 +18,6 @@ import {
     ActivityIndicator,
     BackHandler,
     Dimensions,
-    InteractionManager,
     Linking,
     Modal as RNModal,
     ScrollView,
@@ -45,6 +44,7 @@ import { useProfileCompletion } from "../hooks/useProfileCompletion";
 import type { UploadSafetyFileDecision } from "../services/uploadSafetyScreen";
 import { emitFavoriteChanged } from "../utils/favoriteEvents";
 import { getGigReapplicationCooldownInfo } from "../utils/gigReapplicationCooldown";
+import { runAfterUIIdle } from "../utils/idleTask";
 import { submitListingRequest, uploadListingRequestDocument } from "../utils/listingRequests";
 import {
   clearListingDetailsRequestInFlight,
@@ -55,7 +55,7 @@ import {
   setListingDetailsCacheEntry,
 } from "../utils/listingDetailsCache";
 import { usePageLoadLogger } from "../utils/loadTimeLogger";
-import { bottomSheetSpringConfig } from "../utils/motion";
+import { detailSheetTimingConfig } from "../utils/motion";
 import { isFanUserRole } from "../utils/roleRouting";
 import { getSmoothTabIndex, setSmoothTab } from "../utils/smoothTabs";
 import { fetchActiveStaffAssignment, getStaffPermissions } from "../utils/staffAccess";
@@ -105,6 +105,8 @@ const moderateScale = (size: number, factor = 0.3) => {
 interface ListingDetailsSheetProps {
   initialListing?: any | null;
   listingId: string | null;
+  opening?: boolean;
+  onOpened?: () => void;
   onDismiss?: () => void;
 }
 
@@ -411,6 +413,49 @@ const getInitialListingKind = (listing: any, listingId: string | null) => {
   return normalizeListingKind(listing.type);
 };
 
+const buildInitialListingPreview = (listing: any, listingId: string | null) => {
+  const type = getInitialListingKind(listing, listingId);
+  if (!type) return null;
+
+  const primaryImage =
+    listing?.image || listing?.avatar_url || listing?.logo_url || null;
+  const images = Array.isArray(listing?.images) && listing.images.length > 0
+    ? listing.images
+    : primaryImage
+      ? [primaryImage]
+      : [];
+  const ownerId = type === "Artist"
+    ? listingId
+    : listing?.owner_id || listing?.organizer_id || null;
+
+  return {
+    ...listing,
+    id: listingId,
+    type,
+    name: listing?.name || listing?.full_name || "MusikaLokal listing",
+    description: listing?.description || listing?.bio || "",
+    image: primaryImage,
+    images,
+    location: listing?.location || listing?.address || "",
+    genre: listing?.genre || (Array.isArray(listing?.genres) ? listing.genres.join(", ") : ""),
+    owner_id: listing?.owner_id || ownerId,
+    organizer_id: listing?.organizer_id || null,
+    owner_name: listing?.owner_name || listing?.name || listing?.full_name || "MusikaLokal",
+    owner_avatar: listing?.owner_avatar || listing?.avatar_url || primaryImage,
+    rate:
+      listing?.hourly_rate?.toString?.() ||
+      listing?.budget?.toString?.() ||
+      listing?.rate?.toString?.() ||
+      "0",
+    review_count: Number(listing?.review_count || 0),
+    rating: Number(listing?.rating || 0),
+    settings:
+      type === "Studio" || type === "Venue"
+        ? withDefaultStudioSettings(listing?.settings)
+        : listing?.settings,
+  };
+};
+
 const fetchListingBaseByKind = async (listingId: string, kind: string | null) => {
   if (kind === "Group") {
     const { data } = await supabase
@@ -459,13 +504,17 @@ const fetchListingBaseByKind = async (listingId: string, kind: string | null) =>
 const ListingDetailsSheet = forwardRef<
   BottomSheetModal,
   ListingDetailsSheetProps
->(function ListingDetailsSheet({ initialListing = null, listingId, onDismiss }, ref) {
+>(function ListingDetailsSheet({ initialListing = null, listingId, opening = false, onOpened, onDismiss }, ref) {
   const { colors, isDark } = useTheme();
   const { userId, userRole, isGuest, isSystemLocked, showLockAlert } = useAuth();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { isProfileComplete } = useProfileCompletion();
   const initialListingKind = useMemo(
     () => getInitialListingKind(initialListing, listingId),
+    [initialListing, listingId],
+  );
+  const initialListingPreview = useMemo(
+    () => buildInitialListingPreview(initialListing, listingId),
     [initialListing, listingId],
   );
   const [loading, setLoading] = useState(false);
@@ -817,6 +866,7 @@ const ListingDetailsSheet = forwardRef<
       setSheetIndex(index);
 
       if (wasHidden && isNowVisible) {
+        onOpened?.();
         const resolvedUserRole = userRole || currentUserRole;
         if (resolvedUserRole === "producer" && activeUserId) {
           void fetchProductionTeams();
@@ -955,7 +1005,7 @@ const ListingDetailsSheet = forwardRef<
         }
       }
     },
-    [activeUserId, bookings, currentUserRole, group, listingId, userRole],
+    [activeUserId, bookings, currentUserRole, group, listingId, onOpened, userRole],
   );
 
   useEffect(() => {
@@ -1988,7 +2038,7 @@ const ListingDetailsSheet = forwardRef<
 
   // Fixed sheet height
   const snapPoints = useMemo(() => ["90%"], []);
-  const animationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
+  const animationConfigs = useBottomSheetTimingConfigs(detailSheetTimingConfig);
   const scrollContentStyle = useMemo(
     () => [styles.scrollContent, { paddingBottom: contentBottomPadding }],
     [contentBottomPadding],
@@ -2002,11 +2052,11 @@ const ListingDetailsSheet = forwardRef<
     debugLog("=== ListingDetailsSheet useEffect triggered ===");
     debugLog("listingId:", listingId);
     if (listingId) {
-      setGroup(null);
+      setGroup(initialListingPreview);
       setExistingBookings([]);
       setLoading(true);
       debugLog("Fetching group details for:", listingId);
-      const interactionTask = InteractionManager.runAfterInteractions(() => {
+      const interactionTask = runAfterUIIdle(() => {
         fetchGroupDetails();
       });
       setActiveTab("About");
@@ -2062,7 +2112,7 @@ const ListingDetailsSheet = forwardRef<
     setGroup(null);
     setExistingBookings([]);
     setLoading(false);
-  }, [listingId, resetReapplicationCooldown]);
+  }, [initialListingPreview, listingId, resetReapplicationCooldown]);
 
   // Check for existing application when group data is loaded
   useEffect(() => {
@@ -2170,7 +2220,7 @@ const ListingDetailsSheet = forwardRef<
       const resolvedUserRole = userRole || currentUserRole;
       if (listingId && group && resolvedUserRole === "producer" && activeUserId) {
         let isActive = true;
-        const focusTask = InteractionManager.runAfterInteractions(() => {
+        const focusTask = runAfterUIIdle(() => {
           if (isActive) {
             void fetchProductionTeams();
           }
@@ -2298,10 +2348,9 @@ const ListingDetailsSheet = forwardRef<
     markListingDetailsRequestInFlight(activeListingId);
     setLoading(!cachedDetails);
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      debugLog("User:", user?.id);
+      // AuthContext already resolved this session. Avoid another auth network
+      // validation on every details-sheet tap.
+      debugLog("User:", userId);
 
       let data: any = null;
       let type = "Group";
@@ -2717,7 +2766,7 @@ const ListingDetailsSheet = forwardRef<
           await syncFavoriteMetadata(
             getFavoriteTargetType(type),
             data.id,
-            user?.id,
+            userId,
           );
         } catch (favoriteMetaError) {
           debugLog("Failed to sync favorite metadata:", favoriteMetaError);
@@ -4535,6 +4584,9 @@ const ListingDetailsSheet = forwardRef<
         : 1;
   const paymentModalTotalAmount = Number(paymentBookingData?.totalAmount || 0);
   const paymentModalHalfAmount = Math.round(paymentModalTotalAmount / 2);
+  const isListingSwitchPending = Boolean(
+    listingId && latestListingIdRef.current !== listingId,
+  );
 
   return (
     <>
@@ -4558,7 +4610,7 @@ const ListingDetailsSheet = forwardRef<
         onChange={handleSheetChanges}
         onDismiss={onDismiss}
       >
-        {loading && !group ? (
+        {opening || isListingSwitchPending || (loading && !group) ? (
           <View
             style={[
               styles.loadingContainer,
@@ -5713,7 +5765,7 @@ const styles = StyleSheet.create({
   },
 });
 
-export default ListingDetailsSheet;
+export default React.memo(ListingDetailsSheet);
 
 
 

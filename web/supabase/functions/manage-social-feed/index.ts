@@ -101,6 +101,35 @@ function buildGigCommentThreadContent(gig: any) {
   return lines.join("\n").slice(0, 5000);
 }
 
+type ListingCommentEntityType = "profile" | "group" | "studio" | "production_team";
+
+function normalizeListingCommentEntityType(value: unknown): ListingCommentEntityType | null {
+  const normalized = normalizeContent(value).toLowerCase();
+  if (normalized === "artist" || normalized === "musician") return "profile";
+  if (normalized === "duo") return "group";
+  if (normalized === "venue") return "studio";
+  if (normalized === "production") return "production_team";
+  return ["profile", "group", "studio", "production_team"].includes(normalized)
+    ? normalized as ListingCommentEntityType
+    : null;
+}
+
+function buildListingCommentThreadContent(type: ListingCommentEntityType, listing: any) {
+  const label = type === "profile"
+    ? "Artist"
+    : type === "production_team"
+      ? "Production team"
+      : type.charAt(0).toUpperCase() + type.slice(1);
+  const name = listing?.name || listing?.full_name || `Untitled ${label}`;
+  const lines = [`${label} comments: ${name}`];
+  const location = normalizeContent(listing?.location || listing?.address);
+  const description = normalizeContent(listing?.description || listing?.bio);
+
+  if (location) lines.push(`Location: ${location}`);
+  if (description) lines.push(description);
+  return lines.join("\n").slice(0, 5000);
+}
+
 function normalizeStoragePath(value: unknown, ownerId: string) {
   if (typeof value !== "string") return "";
   const trimmed = value.trim().replace(/^\/+/, "");
@@ -1091,6 +1120,126 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    if (action === "get_or_create_listing_comment_post") {
+      const listingId = normalizeContent(params?.listing_id);
+      const listingType = normalizeListingCommentEntityType(params?.listing_type);
+      if (!listingId || !listingType) {
+        return jsonResponse({ error: "A supported listing_id and listing_type are required" }, 400);
+      }
+
+      const requesterRole = await getRequesterRole();
+      const requesterIsAdmin = requesterRole === "admin";
+      let listing: any = null;
+      let listingError: any = null;
+
+      if (listingType === "profile") {
+        const result = await supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, bio, location, address, role, is_verified, verification_status")
+          .eq("id", listingId)
+          .maybeSingle();
+        listing = result.data;
+        listingError = result.error;
+        const canAccessProfile = listing?.id === uid || requesterIsAdmin ||
+          (listing?.role === "musician" && isApprovedProfile(listing));
+        if (!canAccessProfile) listing = null;
+      } else if (listingType === "group") {
+        const result = await supabaseAdmin
+          .from("groups")
+          .select("id, owner_id, name, description, location")
+          .eq("id", listingId)
+          .maybeSingle();
+        listing = result.data;
+        listingError = result.error;
+      } else if (listingType === "studio") {
+        const result = await supabaseAdmin
+          .from("studios")
+          .select("id, owner_id, name, description, address, permit_status")
+          .eq("id", listingId)
+          .maybeSingle();
+        listing = result.data;
+        listingError = result.error;
+        const permitStatus = normalizeContent(listing?.permit_status).toLowerCase();
+        const canAccessStudio = listing?.owner_id === uid || requesterIsAdmin || permitStatus === "approved";
+        if (!canAccessStudio) listing = null;
+      } else {
+        const result = await supabaseAdmin
+          .from("production_teams")
+          .select("id, owner_id, name, description")
+          .eq("id", listingId)
+          .maybeSingle();
+        listing = result.data;
+        listingError = result.error;
+      }
+
+      if (listingError || !listing) return jsonResponse({ error: "Listing not found" }, 404);
+
+      const authorId = listingType === "profile" ? listing.id : listing.owner_id;
+      if (!authorId) return jsonResponse({ error: "Listing owner not found" }, 404);
+
+      const existingResult = await supabaseAdmin
+        .from("feed_posts")
+        .select("id, comment_count, reaction_count, share_count")
+        .eq("linked_entity_type", listingType)
+        .eq("linked_entity_id", listing.id)
+        .maybeSingle();
+
+      if (existingResult.error) return jsonResponse({ error: existingResult.error.message }, 500);
+      if (existingResult.data?.id) {
+        return jsonResponse({
+          success: true,
+          data: {
+            post_id: existingResult.data.id,
+            comment_count: existingResult.data.comment_count || 0,
+            reaction_count: existingResult.data.reaction_count || 0,
+            share_count: existingResult.data.share_count || 0,
+          },
+        });
+      }
+
+      const { data: createdThread, error: createThreadError } = await supabaseAdmin
+        .from("feed_posts")
+        .insert({
+          author_id: authorId,
+          content: buildListingCommentThreadContent(listingType, listing),
+          post_type: "announcement",
+          visibility: "public",
+          linked_entity_type: listingType,
+          linked_entity_id: listing.id,
+        })
+        .select("id, comment_count, reaction_count, share_count")
+        .single();
+
+      if (createThreadError) {
+        const retryResult = await supabaseAdmin
+          .from("feed_posts")
+          .select("id, comment_count, reaction_count, share_count")
+          .eq("linked_entity_type", listingType)
+          .eq("linked_entity_id", listing.id)
+          .maybeSingle();
+        if (!retryResult.data?.id) return jsonResponse({ error: createThreadError.message }, 500);
+        return jsonResponse({
+          success: true,
+          data: {
+            post_id: retryResult.data.id,
+            comment_count: retryResult.data.comment_count || 0,
+            reaction_count: retryResult.data.reaction_count || 0,
+            share_count: retryResult.data.share_count || 0,
+          },
+        });
+      }
+
+      return jsonResponse({
+        success: true,
+        data: {
+          post_id: createdThread.id,
+          comment_count: createdThread.comment_count || 0,
+          reaction_count: createdThread.reaction_count || 0,
+          share_count: createdThread.share_count || 0,
+        },
+      });
+    }
+
     if (action === "update_post") {
       const { post_id, content, visibility, is_pinned, media } = params;
       if (!post_id) return jsonResponse({ error: "post_id is required" }, 400);
@@ -1221,6 +1370,7 @@ Deno.serve(async (req: Request) => {
           .in("author_id", followedIds)
           .eq("is_hidden", false)
           .is("linked_gig_id", null)
+          .is("linked_entity_id", null)
           .or(`visibility.in.(public,followers),author_id.eq.${uid}`)
           .order("created_at", { ascending: false });
       } else {
@@ -1231,6 +1381,7 @@ Deno.serve(async (req: Request) => {
               .select(feedPostSelect)
               .eq("is_hidden", false)
               .is("linked_gig_id", null)
+              .is("linked_entity_id", null)
               .or(`visibility.eq.public,author_id.eq.${uid}`)
               .order("created_at", { ascending: false })
           : supabaseAdmin
@@ -1239,6 +1390,7 @@ Deno.serve(async (req: Request) => {
               .eq("visibility", "public")
               .eq("is_hidden", false)
               .is("linked_gig_id", null)
+              .is("linked_entity_id", null)
               .order("created_at", { ascending: false });
       }
 

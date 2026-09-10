@@ -11,7 +11,6 @@ import * as FileSystem from "expo-file-system/legacy";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { createVideoPlayer, type VideoThumbnail } from "expo-video";
-import * as VideoThumbnails from "expo-video-thumbnails";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -19,7 +18,6 @@ import {
   BackHandler,
   Dimensions,
   Image,
-  InteractionManager,
   Modal,
   Platform,
   ScrollView,
@@ -73,6 +71,7 @@ import { useTheme } from "../../src/context/ThemeContext";
 import { screenUploadsWithAi } from "../../src/services/uploadSafetyScreen";
 import { buildSocialFollowKey } from "../../src/utils/socialFollow";
 import { getSmoothTabIndex, setSmoothTab } from "../../src/utils/smoothTabs";
+import { runAfterUIIdle } from "../../src/utils/idleTask";
 import { bottomSheetSpringConfig, motion } from "../../src/utils/motion";
 import { isFanUserRole } from "../../src/utils/roleRouting";
 import { isStaffRole } from "../../src/utils/staffAccess";
@@ -83,6 +82,7 @@ import {
   uploadStorageObject,
   type TemporaryUploadFile,
 } from "../../src/utils/storageUpload";
+import { generateNativeVideoFrame } from "../../src/utils/videoFrames";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const PROFILE_CONTENT_HORIZONTAL_PADDING = 24;
@@ -260,13 +260,14 @@ const ProfileVideoThumbnail = ({
       };
     }
 
-    VideoThumbnails.getThumbnailAsync(sourceUri, {
-      time: 1000,
-      quality: 0.68,
+    generateNativeVideoFrame(sourceUri, 1000, {
+      compress: 0.68,
+      maxWidth: 640,
+      maxHeight: 640,
     })
-      .then((thumbnail) => {
+      .then((frame) => {
         if (isMounted) {
-          setThumbnailUri(thumbnail.uri);
+          setThumbnailUri(frame.dataUrl);
         }
       })
       .catch((error) => {
@@ -2182,7 +2183,7 @@ export default function ProfileScreen() {
           if (!cached) {
             startProfileRefresh();
           } else {
-            const focusTask = InteractionManager.runAfterInteractions(startProfileRefresh);
+            const focusTask = runAfterUIIdle(startProfileRefresh);
             focusFallbackTimer = setTimeout(startProfileRefresh, 800);
 
             return () => {

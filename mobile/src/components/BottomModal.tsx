@@ -41,8 +41,10 @@ type BottomModalProps = {
   statusBarTranslucent?: boolean;
 };
 
-const CLOSED_TRANSLATE_Y = 54;
 const ANDROID_NAVIGATION_AREA_FALLBACK = 180;
+const OPEN_DURATION_MS = 220;
+const CLOSE_DURATION_MS = 160;
+const DISMISS_FALLBACK_MS = 240;
 
 export default function BottomModal({
   visible,
@@ -63,11 +65,12 @@ export default function BottomModal({
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const [rendered, setRendered] = useState(visible);
-  const progress = useSharedValue(visible ? 1 : 0);
+  const progress = useSharedValue(0);
   const dismissFallbackRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const dismissTokenRef = React.useRef(0);
-  const wasVisibleRef = React.useRef(visible);
-  const visibleRequestedAtRef = React.useRef<number | null>(visible ? Date.now() : null);
+  const openFrameRef = React.useRef<number | null>(null);
+  const wasVisibleRef = React.useRef(false);
+  const visibleRequestedAtRef = React.useRef<number | null>(null);
   const visibleFrameRef = React.useRef<number | null>(null);
   const { registerOverlay, unregisterOverlay } = useBottomOverlayRegistration(overlayLabel);
 
@@ -78,6 +81,15 @@ export default function BottomModal({
 
     clearTimeout(dismissFallbackRef.current);
     dismissFallbackRef.current = null;
+  }, []);
+
+  const clearOpenFrame = useCallback(() => {
+    if (openFrameRef.current === null) {
+      return;
+    }
+
+    cancelAnimationFrame(openFrameRef.current);
+    openFrameRef.current = null;
   }, []);
 
   React.useLayoutEffect(() => {
@@ -120,8 +132,11 @@ export default function BottomModal({
   }, [navigationBarStyleWhileVisible, visible]);
 
   useEffect(() => {
-    return clearDismissFallback;
-  }, [clearDismissFallback]);
+    return () => {
+      clearDismissFallback();
+      clearOpenFrame();
+    };
+  }, [clearDismissFallback, clearOpenFrame]);
 
   const finishDismiss = useCallback((dismissToken: number) => {
     if (dismissTokenRef.current !== dismissToken) {
@@ -140,18 +155,24 @@ export default function BottomModal({
 
     if (visible) {
       if (!rendered) {
-        setRendered(true);
         progress.value = 0;
       }
 
       if (!wasVisible) {
-        progress.value = withTiming(1, {
-          duration: 160,
-          easing: motion.easing.standard,
+        clearOpenFrame();
+        openFrameRef.current = requestAnimationFrame(() => {
+          openFrameRef.current = null;
+          setRendered(true);
+          progress.value = withTiming(1, {
+            duration: OPEN_DURATION_MS,
+            easing: motion.easing.standard,
+          });
         });
       }
       return;
     }
+
+    clearOpenFrame();
 
     if (!rendered) {
       unregisterOverlay(`bottom-modal-hidden:${overlayLabel}`);
@@ -162,7 +183,7 @@ export default function BottomModal({
     dismissTokenRef.current = dismissToken;
     clearDismissFallback();
     progress.value = withTiming(0, {
-      duration: 120,
+      duration: CLOSE_DURATION_MS,
       easing: motion.easing.exit,
     }, (finished) => {
       if (finished) {
@@ -172,8 +193,8 @@ export default function BottomModal({
 
     dismissFallbackRef.current = setTimeout(() => {
       finishDismiss(dismissToken);
-    }, 180);
-  }, [clearDismissFallback, finishDismiss, overlayLabel, progress, rendered, unregisterOverlay, visible]);
+    }, DISMISS_FALLBACK_MS);
+  }, [clearDismissFallback, clearOpenFrame, finishDismiss, overlayLabel, progress, rendered, unregisterOverlay, visible]);
 
   const backdropAnimatedStyle = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [0, 1], [0, 1]),
@@ -181,11 +202,17 @@ export default function BottomModal({
 
   const sheetAnimatedStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateY: interpolate(progress.value, [0, 1], [CLOSED_TRANSLATE_Y, 0]) },
+      {
+        translateY: interpolate(
+          progress.value,
+          [0, 1],
+          [Math.min(140, Math.max(80, windowHeight * 0.14)), 0],
+        ),
+      },
     ],
   }));
 
-  if (!rendered) {
+  if (!visible && !rendered) {
     return null;
   }
 

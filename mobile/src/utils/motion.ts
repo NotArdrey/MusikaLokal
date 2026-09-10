@@ -55,3 +55,8 @@ export const motion = {
 };
 
 export const bottomSheetSpringConfig = motion.spring.bottomSheet;
+
+export const detailSheetTimingConfig = {
+  duration: 300,
+  easing: motion.easing.emphasized,
+};

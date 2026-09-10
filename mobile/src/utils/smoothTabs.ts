@@ -1,6 +1,6 @@
 import { startTransition, useEffect, useState } from "react";
-import { InteractionManager } from "react-native";
 import type { Dispatch, SetStateAction } from "react";
+import { runAfterUIIdle } from "./idleTask";
 
 type NoInferValue<T> = [T][T extends unknown ? 0 : never];
 
@@ -67,7 +67,7 @@ export const useStagedTabRows = <T,>(
       timer = setTimeout(revealNextChunk, 80);
     };
 
-    const task = InteractionManager.runAfterInteractions(startReveal);
+    const task = runAfterUIIdle(startReveal);
     const fallback = setTimeout(startReveal, 650);
 
     return () => {

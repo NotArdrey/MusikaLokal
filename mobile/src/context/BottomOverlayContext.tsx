@@ -33,10 +33,19 @@ type BottomOverlayContextValue = {
 type BottomOverlayId = symbol;
 
 const BottomOverlayContext = createContext<BottomOverlayContextValue | undefined>(undefined);
+type BottomOverlayActionsContextValue = Pick<
+  BottomOverlayContextValue,
+  | "clearBottomOverlays"
+  | "overlayResetSignal"
+  | "registerBottomOverlay"
+  | "reportLingeringBottomOverlays"
+  | "unregisterBottomOverlay"
+>;
+const BottomOverlayActionsContext = createContext<BottomOverlayActionsContextValue | undefined>(undefined);
 
 let nextOverlayId = 0;
 const BOTTOM_OVERLAY_DEBUG_LOGS = false;
-const BOTTOM_OVERLAY_VISIBILITY_LOGS = __DEV__;
+const BOTTOM_OVERLAY_VISIBILITY_LOGS = false;
 const BOTTOM_OVERLAY_ANIMATION_SETTLE_MS = 320;
 const BOTTOM_OVERLAY_EXIT_DURATION_MS = 180;
 const BOTTOM_OVERLAY_LINGERING_REPORT_MS = 650;
@@ -282,11 +291,26 @@ export function BottomOverlayProvider({ children }: { children: ReactNode }) {
     reportLingeringBottomOverlays,
     unregisterBottomOverlay,
   ]);
+  const actionsValue = useMemo<BottomOverlayActionsContextValue>(() => ({
+    clearBottomOverlays,
+    overlayResetSignal,
+    registerBottomOverlay,
+    reportLingeringBottomOverlays,
+    unregisterBottomOverlay,
+  }), [
+    clearBottomOverlays,
+    overlayResetSignal,
+    registerBottomOverlay,
+    reportLingeringBottomOverlays,
+    unregisterBottomOverlay,
+  ]);
 
   return (
-    <BottomOverlayContext.Provider value={value}>
-      {children}
-    </BottomOverlayContext.Provider>
+    <BottomOverlayActionsContext.Provider value={actionsValue}>
+      <BottomOverlayContext.Provider value={value}>
+        {children}
+      </BottomOverlayContext.Provider>
+    </BottomOverlayActionsContext.Provider>
   );
 }
 
@@ -299,13 +323,22 @@ export function useBottomOverlay() {
   return context;
 }
 
+export function useBottomOverlayActions() {
+  const context = useContext(BottomOverlayActionsContext);
+  if (!context) {
+    throw new Error("useBottomOverlayActions must be used within a BottomOverlayProvider");
+  }
+
+  return context;
+}
+
 export function useBottomOverlayRegistration(label?: string) {
   const {
     overlayResetSignal,
     registerBottomOverlay,
     reportLingeringBottomOverlays,
     unregisterBottomOverlay,
-  } = useBottomOverlay();
+  } = useBottomOverlayActions();
   const overlayIdRef = useRef<BottomOverlayId | undefined>(undefined);
   const isRegisteredRef = useRef(false);
   const labelRef = useRef(normalizeOverlayLabel(label));

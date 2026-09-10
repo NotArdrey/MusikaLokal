@@ -296,6 +296,21 @@ type Props = {
   onShareChanged?: (postId: string, shareCount: number) => void;
 };
 
+const getInitialPostSnapshot = (postId: string | null, initialPost?: any | null) => {
+  const cached = postId ? postDetailsCache.get(postId) : undefined;
+  const post = cached?.post || normalizePostPreviewPayload(initialPost);
+  const cacheIsFresh = Boolean(
+    cached?.post && Date.now() - cached.cachedAt < POST_DETAILS_CACHE_TTL_MS,
+  );
+
+  return {
+    post,
+    comments: cached?.comments || [],
+    loading: !post,
+    commentsLoading: !cacheIsFresh,
+  };
+};
+
 export default function PostDetailsModal({
   initialPost,
   postId,
@@ -311,11 +326,12 @@ export default function PostDetailsModal({
   const { session, userId } = useAuth();
   const { height, width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const [initialSnapshot] = useState(() => getInitialPostSnapshot(postId, initialPost));
 
-  const [post, setPost] = useState<any>(null);
-  const [comments, setComments] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [post, setPost] = useState<any>(initialSnapshot.post);
+  const [comments, setComments] = useState<any[]>(initialSnapshot.comments);
+  const [loading, setLoading] = useState(initialSnapshot.loading);
+  const [commentsLoading, setCommentsLoading] = useState(initialSnapshot.commentsLoading);
   const [commentText, setCommentText] = useState("");
   const [commentNotice, setCommentNotice] = useState<{ title: string; message: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -437,22 +453,12 @@ export default function PostDetailsModal({
 
   useEffect(() => {
     if (!visible || !postId) return;
-    const cached = postDetailsCache.get(postId);
-    const seedPost = cached?.post || normalizePostPreviewPayload(initialPost);
-    const cacheIsFresh =
-      cached?.post && Date.now() - cached.cachedAt < POST_DETAILS_CACHE_TTL_MS;
-    setPost(seedPost || null);
-    setComments(cached?.comments || []);
-    setLoading(!seedPost);
-    setCommentsLoading(!cacheIsFresh);
-    setCommentText("");
-    setCommentNotice(null);
-    setAlert(null);
-    setPostOptionsVisible(false);
-    setReportModalVisible(false);
-    setDeleteConfirmVisible(false);
-    void fetchPost(false);
-  }, [fetchPost, initialPost, postId, visible]);
+    const idleCallbackId = requestIdleCallback(() => {
+      void fetchPost(false);
+    }, { timeout: 300 });
+
+    return () => cancelIdleCallback(idleCallbackId);
+  }, [fetchPost, postId, visible]);
 
   useEffect(() => {
     if (!visible) {
@@ -1122,6 +1128,66 @@ export default function PostDetailsModal({
     </BottomModal>
   );
 }
+
+export type PostDetailsModalHandle = {
+  close: () => void;
+  open: (postId: string, initialPost?: any | null) => void;
+};
+
+type PostDetailsModalHostProps = Omit<Props, "initialPost" | "onClose" | "postId" | "visible"> & {
+  onClose?: () => void;
+};
+
+export const PostDetailsModalHost = React.memo(React.forwardRef<
+  PostDetailsModalHandle,
+  PostDetailsModalHostProps
+>(function PostDetailsModalHost({ onClose, ...props }, ref) {
+  const [target, setTarget] = useState<{ postId: string; initialPost?: any | null } | null>(null);
+  const [visible, setVisible] = useState(false);
+  const cleanupTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearCleanupTimer = useCallback(() => {
+    if (cleanupTimerRef.current) {
+      clearTimeout(cleanupTimerRef.current);
+      cleanupTimerRef.current = null;
+    }
+  }, []);
+
+  const close = useCallback(() => {
+    setVisible(false);
+    onClose?.();
+    clearCleanupTimer();
+    cleanupTimerRef.current = setTimeout(() => {
+      cleanupTimerRef.current = null;
+      setTarget(null);
+    }, 220);
+  }, [clearCleanupTimer, onClose]);
+
+  React.useImperativeHandle(ref, () => ({
+    close,
+    open: (postId: string, initialPost?: any | null) => {
+      if (!postId) return;
+      clearCleanupTimer();
+      setTarget({ postId, initialPost });
+      setVisible(true);
+    },
+  }), [clearCleanupTimer, close]);
+
+  useEffect(() => clearCleanupTimer, [clearCleanupTimer]);
+
+  if (!target) return null;
+
+  return (
+    <PostDetailsModal
+      key={target.postId}
+      {...props}
+      initialPost={target.initialPost}
+      postId={target.postId}
+      visible={visible}
+      onClose={close}
+    />
+  );
+}));
 
 const styles = StyleSheet.create({
   sheet: {

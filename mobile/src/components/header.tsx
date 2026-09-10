@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname, useSegments } from "expo-router";
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { InteractionManager, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { interpolateColor, useAnimatedProps, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { runAfterUIIdle } from '../utils/idleTask';
 import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 import { createRealtimeChannelTopic } from '../utils/realtimeChannel';
@@ -274,7 +275,7 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
     useFocusEffect(
         useCallback(() => {
             let isActive = true;
-            const focusTask = InteractionManager.runAfterInteractions(() => {
+            const focusTask = runAfterUIIdle(() => {
                 if (!isActive) {
                     return;
                 }

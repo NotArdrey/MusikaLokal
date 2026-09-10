@@ -168,3 +168,48 @@ test("every mobile document picker uses the platform-safe cache policy", () => {
     );
   }
 });
+
+test("upload thumbnail flows avoid expo-video-thumbnails host-cache files", () => {
+  const uploadFrameFiles = [
+    "mobile/src/services/visualUploadScreen.ts",
+    "mobile/src/components/VideoUploader.tsx",
+    "mobile/app/(tabs)/feed.tsx",
+  ];
+
+  for (const file of uploadFrameFiles) {
+    const fileSource = readFileSync(file, "utf8");
+    assert.doesNotMatch(
+      fileSource,
+      /expo-video-thumbnails|getThumbnailAsync/,
+      `${file}: upload frames must not rely on host-cache thumbnail URIs`,
+    );
+    assert.match(
+      fileSource,
+      /generateNativeVideoFrame/,
+      `${file}: upload frames must use native image references`,
+    );
+  }
+
+  const helperSource = readFileSync("mobile/src/utils/videoFrames.ts", "utf8");
+  assert.match(helperSource, /generateThumbnailsAsync/);
+  assert.match(helperSource, /base64:\s*true/);
+  assert.doesNotMatch(helperSource, /expo-file-system|copyAsync|readAsStringAsync/);
+
+  const mobileFiles = [...sourceFilesUnder("mobile/app"), ...sourceFilesUnder("mobile/src")];
+  for (const file of mobileFiles) {
+    const fileSource = readFileSync(file, "utf8");
+    assert.doesNotMatch(
+      fileSource,
+      /from\s+["']expo-video-thumbnails["']|VideoThumbnails\.getThumbnailAsync/,
+      `${file}: mobile video frames must not expose host-cache thumbnail paths`,
+    );
+  }
+});
+
+test("the shared image uploader reads picker files through the safe-copy helper", () => {
+  const imageUploaderSource = readFileSync("mobile/src/components/ImageUploader.tsx", "utf8");
+  assert.match(imageUploaderSource, /persistUploadAsset\(/);
+  assert.match(imageUploaderSource, /readLocalFileAsBase64\(asset\.uri, originalName\)/);
+  assert.match(imageUploaderSource, /removePersistedUploadAsset\(asset\)/);
+  assert.doesNotMatch(imageUploaderSource, /FileSystem\.readAsStringAsync/);
+});

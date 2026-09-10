@@ -852,8 +852,8 @@ const GigApplyTab = ({
             <Text style={[gigApplyStyles.termsText, { color: colors.text, fontFamily: "Poppins_600SemiBold" }]}>AI portfolio review (optional)</Text>
             <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 3 }}>
               {aiReviewCoversGroup
-                ? "For this group application, I confirm I am authorized by every currently listed group member to send their profile photo, redacted CV text, video audio, up to three representative video frames, and portfolio images to Groq for separate advisory face-similarity signals. This is not identity verification and cannot decide or change our score."
-                : "I consent, or confirm I am authorized, to send redacted CV text, video audio, up to three representative video frames, portfolio images, and my profile photo to Groq for an advisory face-similarity signal. This is not identity verification and cannot decide or change my score."} Groq may temporarily log inference data for up to 30 days unless Zero Data Retention is enabled.
+                ? "I confirm every listed group member allows Groq AI to review their redacted CV, portfolio, profile photo, and performance video. This optional review offers guidance only. It does not verify identity or decide our score."
+                : "Allow Groq AI to review my redacted CV, portfolio, profile photo, and performance video. This optional review offers guidance only. It does not verify my identity or decide my score."}
             </Text>
           </View>
         </TouchableOpacity>
@@ -863,22 +863,6 @@ const GigApplyTab = ({
         label="Upload CV/Resume"
         onFileSelect={(file) => setCvFile(file)}
         existingUrl={cvUrl || undefined}
-      />
-
-      <VideoUploader
-        videoUrl={videoUrl}
-        onVideoChange={(url) => setVideoUrl(url || "")}
-        userId={userId || ""}
-        bucketName="documents"
-        folder="performance-videos"
-        maxSizeMB={50}
-        enableReviewFrame={aiPortfolioReviewConsent}
-        onReviewFrameChange={(url) => setVideoReviewFrameUrl(url || "")}
-        onReviewFramesChange={setVideoReviewFrameUrls}
-        enableCopyrightScreening={!isGroupApplicationFlow}
-        allowPortfolioSelection={!isGroupApplicationFlow}
-        copyrightAcknowledged={videoCopyrightAcknowledged}
-        onCopyrightDecisionChange={setVideoCopyrightDecision}
       />
 
       {!isGroupApplicationFlow && (
@@ -913,16 +897,32 @@ const GigApplyTab = ({
           <View style={{ flex: 1 }}>
             <Text style={[gigApplyStyles.termsText, { color: colors.text, fontFamily: "Poppins_600SemiBold" }]}>Performance video rights *</Text>
             <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 3 }}>
-              I confirm that I created this performance or have the rights, license, or permission needed to submit it. A released-recording fingerprint match may be sent to Identity Review; this is a screening signal, not a legal ownership decision.
+              I created this performance or have permission to submit it. Its audio may be compared with released recordings for review, but this does not determine legal ownership.
             </Text>
           </View>
         </TouchableOpacity>
       )}
 
+      <VideoUploader
+        videoUrl={videoUrl}
+        onVideoChange={(url) => setVideoUrl(url || "")}
+        userId={userId || ""}
+        bucketName="documents"
+        folder="performance-videos"
+        maxSizeMB={50}
+        enableReviewFrame={aiPortfolioReviewConsent}
+        onReviewFrameChange={(url) => setVideoReviewFrameUrl(url || "")}
+        onReviewFramesChange={setVideoReviewFrameUrls}
+        enableCopyrightScreening={!isGroupApplicationFlow}
+        allowPortfolioSelection={!isGroupApplicationFlow}
+        copyrightAcknowledged={videoCopyrightAcknowledged}
+        onCopyrightDecisionChange={setVideoCopyrightDecision}
+      />
+
       {!isGroupApplicationFlow && videoCopyrightDecision?.requiresAdminReview && (
         <View style={[styles.infoBox, { backgroundColor: "#F59E0B20", borderColor: "#F59E0B", marginBottom: 16 }]}>
           <Ionicons name="shield-checkmark-outline" size={22} color="#F59E0B" />
-          <Text style={[styles.infoText, { color: colors.text }]}>Released-recording match found. Your application is allowed, with ownership or permission review pending.</Text>
+          <Text style={[styles.infoText, { color: colors.text }]}>Possible released-recording match. You can still apply while we review your permission.</Text>
         </View>
       )}
 

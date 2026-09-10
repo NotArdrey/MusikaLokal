@@ -15,7 +15,6 @@ import React, {
 } from "react";
 import {
     ActivityIndicator,
-  InteractionManager,
     Keyboard,
     LayoutAnimation,
     Platform,
@@ -140,7 +139,7 @@ const dedupeSearchResults = (items: any[]) => {
 
 interface SearchBottomSheetProps {
   onClose?: () => void;
-  onItemPress?: (listingId: string) => void;
+  onItemPress?: (listingId: string, initialListing?: any | null) => void;
   onProductionTeamPress?: (teamId: string) => void;
   onChat?: (item: any) => void;
   onFollowChanged?: () => void;
@@ -350,22 +349,21 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
         dismissSheet();
 
-        InteractionManager.runAfterInteractions(() => {
-          requestAnimationFrame(() => {
-            setTimeout(() => {
-              if (item?.type === "Production") {
-                if (onProductionTeamPress) {
-                  onProductionTeamPress(listingId);
-                  return;
-                }
+        // Let the close animation start, then open details with the result we
+        // already have. Waiting for an idle callback made taps feel stalled on
+        // busy Android devices and forced the details sheet to start empty.
+        requestAnimationFrame(() => {
+          if (item?.type === "Production") {
+            if (onProductionTeamPress) {
+              onProductionTeamPress(listingId);
+              return;
+            }
 
-                router.push({ pathname: "/production_team", params: { teamId: listingId } });
-                return;
-              }
+            router.push({ pathname: "/production_team", params: { teamId: listingId } });
+            return;
+          }
 
-              onItemPress?.(listingId);
-            }, 220);
-          });
+          onItemPress?.(listingId, item);
         });
       },
       [dismissSheet, onItemPress, onProductionTeamPress],
@@ -409,7 +407,11 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
     useEffect(() => {
       if (!isSheetOpen) return;
-      loadFollowingKeys();
+      const idleCallbackId = requestIdleCallback(() => {
+        void loadFollowingKeys();
+      }, { timeout: 500 });
+
+      return () => cancelIdleCallback(idleCallbackId);
     }, [isSheetOpen, loadFollowingKeys]);
 
     const handleChatPress = useCallback(
@@ -1056,7 +1058,9 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       >
         {renderHeader}
 
-        {loading ? (
+        {!isSheetOpen ? (
+          <View style={styles.openingContent} />
+        ) : loading ? (
           <View style={styles.loadingContainer}>
             <LoadingState message="Searching Musika Lokal..." />
           </View>
@@ -1090,6 +1094,9 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 );
 
 const styles = StyleSheet.create({
+  openingContent: {
+    flex: 1,
+  },
   headerContainer: {
     paddingTop: 8,
     paddingBottom: 16,

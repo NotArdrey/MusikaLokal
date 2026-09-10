@@ -1210,6 +1210,19 @@ const getFeedCommentTargetPostId = (item: any) => {
   return typeof item?.id === "string" ? item.id : "";
 };
 
+const COMMENTABLE_SUGGESTION_TYPES = new Set([
+  "artist",
+  "duo",
+  "gig",
+  "group",
+  "musician",
+  "production",
+  "production_team",
+  "profile",
+  "studio",
+  "venue",
+]);
+
 const getSocialPrimaryCtaLabel = (item: any, listingId: string) => {
   if (item?.__feedKind === "ai_card") {
     const type = String(item?.type || "").toLowerCase();
@@ -1384,7 +1397,7 @@ type SocialPostCardProps = {
   width: number;
   currentUserId: string | null;
   onOpenPost: (postId: string) => void;
-  onOpenGigComments?: (card: any) => Promise<void> | void;
+  onOpenSuggestionComments?: (card: any) => Promise<void> | void;
   onOpenProfile: (profileId: string) => void;
   onOpenProductionTeam: (teamId: string) => void;
   onOpenStudio: (studioId: string) => void;
@@ -1393,7 +1406,6 @@ type SocialPostCardProps = {
   onShareCard: (card: any) => void;
   onSharePost: (post: any) => void;
   onRequestDelete: (postId: string) => void;
-  enableGigComments?: boolean;
 };
 
 const SocialPostCard = React.memo(function SocialPostCard({
@@ -1406,7 +1418,7 @@ const SocialPostCard = React.memo(function SocialPostCard({
   width,
   currentUserId,
   onOpenPost,
-  onOpenGigComments,
+  onOpenSuggestionComments,
   onOpenProfile,
   onOpenProductionTeam,
   onOpenStudio,
@@ -1415,7 +1427,6 @@ const SocialPostCard = React.memo(function SocialPostCard({
   onShareCard,
   onSharePost,
   onRequestDelete,
-  enableGigComments,
 }: SocialPostCardProps) {
   const isSuggestion = item?.__feedKind === "ai_card";
   const suggestionType = String(item?.type || "").toLowerCase();
@@ -1452,13 +1463,12 @@ const SocialPostCard = React.memo(function SocialPostCard({
     : Boolean(item?.my_reaction || item?.user_reaction);
   const actionTargetLabel = isSuggestion ? String(item?.type || "card").toLowerCase() : "post";
   const commentTargetPostId = getFeedCommentTargetPostId(item);
-  const canCommentOnGigSuggestion =
-    enableGigComments === true &&
+  const canCommentOnSuggestion =
     isSuggestion &&
-    suggestionType === "gig" &&
+    COMMENTABLE_SUGGESTION_TYPES.has(suggestionType) &&
     typeof item?.id === "string" &&
     item.id.length > 0;
-  const showCommentAction = Boolean(commentTargetPostId || canCommentOnGigSuggestion);
+  const showCommentAction = Boolean(commentTargetPostId || canCommentOnSuggestion);
   const commentCount = getPositiveInteger(item?.comment_count || item?.comments);
   const visibleCommentCount = showCommentAction ? commentCount : 0;
   const shareCount = getPositiveInteger(item?.share_count || item?.shares);
@@ -1523,10 +1533,10 @@ const SocialPostCard = React.memo(function SocialPostCard({
         return;
       }
 
-      if (canCommentOnGigSuggestion && onOpenGigComments) {
+      if (canCommentOnSuggestion && onOpenSuggestionComments) {
         setCommentBusy(true);
         try {
-          await onOpenGigComments(item);
+          await onOpenSuggestionComments(item);
         } finally {
           setCommentBusy(false);
         }
@@ -1539,7 +1549,7 @@ const SocialPostCard = React.memo(function SocialPostCard({
         message: "This card is not a feed post yet.",
       });
     },
-    [canCommentOnGigSuggestion, commentTargetPostId, item, onOpenGigComments, onOpenPost],
+    [canCommentOnSuggestion, commentTargetPostId, item, onOpenPost, onOpenSuggestionComments],
   );
 
   const handleShare = useCallback(
@@ -2656,13 +2666,12 @@ export default function FeedScreen() {
     setOpenPostId(postId);
   }, []);
 
-  const patchTalentGigCommentPost = useCallback((gigId: string, postId: string, commentCount?: number) => {
-    if (!gigId || !postId) return;
+  const patchSuggestionCommentPost = useCallback((listingId: string, postId: string, commentCount?: number) => {
+    if (!listingId || !postId) return;
 
     setListingCards((current) =>
       current.map((card) => {
-        const type = String(card?.type || "").toLowerCase();
-        if (card?.__feedKind === "ai_card" && type === "gig" && card?.id === gigId) {
+        if (card?.__feedKind === "ai_card" && card?.id === listingId) {
           return {
             ...card,
             linked_post_id: postId,
@@ -2676,40 +2685,56 @@ export default function FeedScreen() {
     );
   }, []);
 
-  const openGigCommentThread = useCallback(async (card: any) => {
-    const gigId = typeof card?.id === "string" ? card.id : "";
-    if (!gigId) return;
+  const openSuggestionCommentThread = useCallback(async (card: any) => {
+    const listingId = typeof card?.id === "string" ? card.id : "";
+    const rawType = String(card?.type || "").trim().toLowerCase();
+    const listingType = rawType === "artist" || rawType === "musician" || rawType === "profile"
+      ? "profile"
+      : rawType === "duo"
+        ? "group"
+        : rawType === "venue"
+          ? "studio"
+          : rawType === "production"
+            ? "production_team"
+            : rawType;
+    if (!listingId || !COMMENTABLE_SUGGESTION_TYPES.has(rawType)) return;
 
     if (!session || isGuest) {
       emitToast({
         type: "info",
         title: "Sign in to comment",
-        message: "Create an account or sign in to join gig comments.",
+        message: "Create an account or sign in to join the comments.",
       });
       return;
     }
 
     try {
       const { data, error } = await supabase.functions.invoke("manage-social-feed", {
-        body: { action: "get_or_create_gig_comment_post", gig_id: gigId },
+        body: rawType === "gig"
+          ? { action: "get_or_create_gig_comment_post", gig_id: listingId }
+          : {
+              action: "get_or_create_listing_comment_post",
+              listing_id: listingId,
+              listing_type: listingType,
+            },
       });
 
       if (error) throw error;
       if (data?.error) throw new Error(String(data.error));
 
       const postId = data?.data?.post_id || data?.post_id;
-      if (!postId) throw new Error("Gig comment thread was not returned.");
+      if (!postId) throw new Error("Comment thread was not returned.");
 
-      patchTalentGigCommentPost(gigId, postId, data?.data?.comment_count);
+      patchSuggestionCommentPost(listingId, postId, data?.data?.comment_count);
       openPostDetails(postId);
     } catch (e: any) {
       emitToast({
         type: "error",
         title: "Comments unavailable",
-        message: e?.message || "Could not open gig comments.",
+        message: e?.message || "Could not open comments.",
       });
     }
-  }, [isGuest, openPostDetails, patchTalentGigCommentPost, session]);
+  }, [isGuest, openPostDetails, patchSuggestionCommentPost, session]);
 
   const closePostDetails = useCallback(() => setOpenPostId(null), []);
 
@@ -3062,9 +3087,9 @@ export default function FeedScreen() {
           }
           openPostDetails(postId);
         }}
-        onOpenGigComments={(card) => {
+        onOpenSuggestionComments={(card) => {
           trackFeedActivity("feed_card_opened", card || item, { source: "comments" });
-          return openGigCommentThread(card);
+          return openSuggestionCommentThread(card);
         }}
         onOpenProfile={(profileId) => {
           if (item?.__feedKind === "ai_card") {
@@ -3089,11 +3114,10 @@ export default function FeedScreen() {
         onShareCard={handleShareCard}
         onSharePost={handleSharePost}
         onRequestDelete={requestDeletePost}
-        enableGigComments={tab === "talent" || tab === "for_you"}
         width={contentWidth}
       />
     ),
-    [borderCol, cardBg, feedColors, contentWidth, handleShareCard, handleSharePost, handleToggleCardFavorite, handleTogglePostReaction, isDark, mediaWidth, openGigCommentThread, openPostDetails, openProductionTeamDetails, openProfileDetails, openStudioDetails, requestDeletePost, session?.user?.id, tab, trackFeedActivity],
+    [borderCol, cardBg, feedColors, contentWidth, handleShareCard, handleSharePost, handleToggleCardFavorite, handleTogglePostReaction, isDark, mediaWidth, openPostDetails, openProductionTeamDetails, openProfileDetails, openStudioDetails, openSuggestionCommentThread, requestDeletePost, session?.user?.id, trackFeedActivity],
   );
 
   return (
