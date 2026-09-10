@@ -97,21 +97,32 @@ interface InAppMediaViewerProps {
 }
 
 const MediaVideo = ({ uri }: { uri: string }) => {
-  const player = useVideoPlayer(uri, (videoPlayer) => videoPlayer.play());
+  const player = useVideoPlayer(uri);
+
+  useEffect(() => {
+    // Media previews must always wait for an explicit tap on the native controls.
+    // Pause again during cleanup so audio cannot survive a modal close/navigation.
+    player.pause();
+
+    return () => {
+      player.pause();
+    };
+  }, [player]);
+
   return <VideoView player={player} style={styles.media} nativeControls contentFit="contain" />;
 };
 
 const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProps) => {
-  const [loading, setLoading] = useState(false);
+  const [loadedUri, setLoadedUri] = useState<string | null>(null);
   const mediaType = useMemo(() => getInAppMediaType(uri), [uri]);
   const canPreviewDocument = useMemo(() => isPreviewableDocumentUrl(uri, mediaType), [mediaType, uri]);
   const previewUri = useMemo(() => (uri ? getPreviewUri(uri, mediaType) : null), [mediaType, uri]);
-
-  useEffect(() => {
-    if (visible) {
-      setLoading(mediaType === "image" || (mediaType === "document" && canPreviewDocument) || mediaType === "web");
-    }
-  }, [canPreviewDocument, mediaType, visible, uri]);
+  const loading = Boolean(
+    visible &&
+    uri &&
+    loadedUri !== uri &&
+    (mediaType === "image" || (mediaType === "document" && canPreviewDocument) || mediaType === "web"),
+  );
 
   useEffect(() => {
     if (!visible || mediaType !== "video") {
@@ -169,8 +180,8 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
               source={{ uri }}
               style={styles.media}
               resizeMode="contain"
-              onLoadEnd={() => setLoading(false)}
-              onError={() => setLoading(false)}
+              onLoadEnd={() => setLoadedUri(uri)}
+              onError={() => setLoadedUri(uri)}
             />
           ) : previewUri && mediaType === "document" && canPreviewDocument ? (
             <View style={styles.documentFrame}>
@@ -182,11 +193,10 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
                 domStorageEnabled
                 nestedScrollEnabled
                 setSupportMultipleWindows={false}
-                onFileDownload={() => setLoading(false)}
+                onFileDownload={() => setLoadedUri(uri)}
                 onShouldStartLoadWithRequest={(request) => /^https?:\/\//i.test(request.url)}
-                onLoadStart={() => setLoading(true)}
-                onLoadEnd={() => setLoading(false)}
-                onError={() => setLoading(false)}
+                onLoadEnd={() => setLoadedUri(uri)}
+                onError={() => setLoadedUri(uri)}
               />
             </View>
           ) : uri && mediaType === "document" ? (
@@ -203,10 +213,9 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
                 domStorageEnabled
                 nestedScrollEnabled
                 setSupportMultipleWindows={false}
-                onFileDownload={() => setLoading(false)}
-                onLoadStart={() => setLoading(true)}
-                onLoadEnd={() => setLoading(false)}
-                onError={() => setLoading(false)}
+                onFileDownload={() => setLoadedUri(uri)}
+                onLoadEnd={() => setLoadedUri(uri)}
+                onError={() => setLoadedUri(uri)}
               />
             </View>
           ) : (

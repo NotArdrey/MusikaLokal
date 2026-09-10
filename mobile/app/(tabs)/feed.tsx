@@ -177,7 +177,9 @@ const logFeedInvokeError = (
   const rawStatus = Number(error?.status || error?.context?.status || 0);
   const status = Number.isFinite(rawStatus) && rawStatus > 0 ? rawStatus : null;
 
-  console.error(`[FeedInvokeError] ${scope}`, {
+  // Feed requests recover with cached/empty fallback content below. Keep the
+  // diagnostic without triggering Expo's full-screen console error overlay.
+  console.warn(`[FeedInvokeError] ${scope}`, {
     message: error?.message || "Unknown function invoke error",
     status,
     code: error?.code ?? error?.context?.code ?? null,

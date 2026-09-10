@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -103,17 +103,59 @@ const centeredMediaElementStyle: React.CSSProperties = {
   display: "block",
 };
 
+const WebVideo = ({
+  uri,
+  title,
+  onReady,
+}: {
+  uri: string;
+  title?: string;
+  onReady: () => void;
+}) => {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    video?.pause();
+
+    return () => {
+      if (!video) return;
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+    };
+  }, [uri]);
+
+  return React.createElement("video", {
+    ref: videoRef,
+    src: uri,
+    controls: true,
+    autoPlay: false,
+    playsInline: true,
+    preload: "metadata",
+    style: centeredMediaElementStyle,
+    "aria-label": title || "Video preview",
+    onLoadedData: onReady,
+    onCanPlay: onReady,
+    onError: onReady,
+  });
+};
+
 const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProps) => {
-  const [loading, setLoading] = useState(false);
+  const [loadedUri, setLoadedUri] = useState<string | null>(null);
   const mediaType = useMemo(() => getInAppMediaType(uri), [uri]);
   const canPreviewDocument = useMemo(() => isPreviewableDocumentUrl(uri), [uri]);
   const previewUri = useMemo(() => (uri ? getPreviewUri(uri, mediaType) : null), [mediaType, uri]);
+  const loading = Boolean(
+    visible &&
+    uri &&
+    loadedUri !== uri &&
+    (mediaType === "image" || (mediaType === "document" && canPreviewDocument) || mediaType === "web"),
+  );
 
-  useEffect(() => {
-    if (visible) {
-      setLoading(mediaType === "image" || (mediaType === "document" && canPreviewDocument) || mediaType === "web");
-    }
-  }, [canPreviewDocument, mediaType, visible, uri]);
+  if (!visible || !uri) {
+    return null;
+  }
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -138,18 +180,11 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
 
           {uri && mediaType === "video" ? (
             <View style={styles.mediaSurface}>
-              {React.createElement("video", {
-                src: uri,
-                controls: true,
-                autoPlay: true,
-                playsInline: true,
-                preload: "auto",
-                style: centeredMediaElementStyle,
-                "aria-label": title || "Video preview",
-                onLoadedData: () => setLoading(false),
-                onCanPlay: () => setLoading(false),
-                onError: () => setLoading(false),
-              })}
+              <WebVideo
+                uri={uri}
+                title={title}
+                onReady={() => setLoadedUri(uri)}
+              />
             </View>
           ) : uri && mediaType === "image" ? (
             <View style={styles.mediaSurface}>
@@ -157,18 +192,18 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
                 src: uri,
                 alt: title || "Image preview",
                 style: centeredMediaElementStyle,
-                onLoad: () => setLoading(false),
-                onError: () => setLoading(false),
+                onLoad: () => setLoadedUri(uri),
+                onError: () => setLoadedUri(uri),
               })}
             </View>
           ) : previewUri && mediaType === "document" && canPreviewDocument ? (
-            <WebFrame uri={previewUri} onLoad={() => setLoading(false)} />
+            <WebFrame uri={previewUri} onLoad={() => setLoadedUri(uri)} />
           ) : uri && mediaType === "document" ? (
             <Text style={styles.unsupportedText}>
               This document type cannot be previewed in-app.
             </Text>
           ) : uri && mediaType === "web" ? (
-            <WebFrame uri={uri} onLoad={() => setLoading(false)} />
+            <WebFrame uri={uri} onLoad={() => setLoadedUri(uri)} />
           ) : (
             <Text style={styles.unsupportedText}>This file cannot be previewed in-app.</Text>
           )}
