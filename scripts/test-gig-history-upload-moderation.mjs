@@ -24,6 +24,7 @@ await db.exec(`
   grant usage on schema public, auth, storage to anon, authenticated, service_role;
   create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
   create table public.profiles(id uuid primary key, role text, full_name text, email text, avatar_url text);
+  grant select on public.profiles to authenticated, service_role;
   create table public.groups(id uuid primary key, owner_id uuid, name text);
   create table public.group_members(group_id uuid,user_id uuid);
   create table public.production_team_roster(id uuid primary key, profile_id uuid, group_id uuid);
@@ -31,6 +32,12 @@ await db.exec(`
   create table public.gig_applications(id uuid primary key, gig_id uuid, applicant_id uuid, submitted_by_user_id uuid, group_id uuid, production_team_id uuid, production_roster_id uuid, status text, created_at timestamptz default now(), cv_url text, pitch_message text);
   create function public.staff_can_edit_gig(uuid,uuid) returns boolean language sql stable as $$ select false $$;
   create table public.notifications(id uuid primary key default gen_random_uuid(),user_id uuid,type text,title text,message text,meta jsonb);
+  create table public.feed_posts(id uuid primary key default gen_random_uuid(),author_id uuid,content text);
+  alter table public.feed_posts enable row level security;
+  grant select,insert,update,delete on public.feed_posts to authenticated,service_role;
+  create policy feed_posts_select on public.feed_posts for select to authenticated using(true);
+  create policy feed_posts_insert on public.feed_posts for insert to authenticated with check(author_id=auth.uid());
+  create policy feed_posts_update on public.feed_posts for update to authenticated using(author_id=auth.uid()) with check(author_id=auth.uid());
   create table storage.buckets(id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
   create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text);
   alter table storage.objects enable row level security;
@@ -72,6 +79,24 @@ assert.equal(
   ).replace(/\r\n/g, "\n"),
 );
 await db.exec(migration);
+const scopedRestrictionsMigration = readFileSync(
+  new URL(
+    "../mobile/supabase/migrations/20260911120000_add_scoped_content_restrictions.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+assert.equal(
+  scopedRestrictionsMigration.replace(/\r\n/g, "\n"),
+  readFileSync(
+    new URL(
+      "../web/supabase/migrations/20260911120000_add_scoped_content_restrictions.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  ).replace(/\r\n/g, "\n"),
+);
+await db.exec(scopedRestrictionsMigration);
 
 async function asUser(user, sql, params = [], role = "authenticated") {
   await db.exec("begin");
@@ -249,12 +274,26 @@ test("approval and rejection are audited, notify the uploader, and resist stale 
     /notes are required/,
   );
 });
-test("warnings keep media blocked; restriction and lift actions affect storage and have audit records", async () => {
+test("admins can scope upload and social-posting restrictions independently", async () => {
   assert.equal(
     (await review(caseC, "warn", 0)).rows[0].status,
     "pending_review",
   );
   await review(caseC, "restrict_7_days", 1);
+  assert.deepEqual(
+    (
+      await db.query(
+        "select restriction_scopes from public.upload_moderation_restrictions where user_id=$1",
+        [applicant],
+      )
+    ).rows[0].restriction_scopes,
+    ["media_upload"],
+  );
+  await asUser(
+    applicant,
+    "insert into public.feed_posts(author_id,content) values($1,'upload-only restriction permits text posts')",
+    [applicant],
+  );
   assert.equal(
     (
       await asUser(
@@ -271,7 +310,55 @@ test("warnings keep media blocked; restriction and lift actions affect storage a
     ),
     /row-level security/,
   );
-  await review(caseC, "lift_restriction", 2);
+  await review(caseC, "restrict_content_7_days", 2);
+  assert.deepEqual(
+    (
+      await db.query(
+        "select restriction_scopes from public.upload_moderation_restrictions where user_id=$1",
+        [applicant],
+      )
+    ).rows[0].restriction_scopes,
+    ["media_upload", "social_posting"],
+  );
+  await assert.rejects(
+    asUser(
+      applicant,
+      "insert into public.feed_posts(author_id,content) values($1,'must be blocked')",
+      [applicant],
+    ),
+    /row-level security/,
+  );
+  const existingPost = uid(40);
+  await db.query(
+    "insert into public.feed_posts(id,author_id,content) values($1,$2,'existing')",
+    [existingPost, applicant],
+  );
+  assert.equal(
+    (
+      await asUser(
+        applicant,
+        "update public.feed_posts set content='must stay unchanged' where id=$1 returning id",
+        [existingPost],
+      )
+    ).rows.length,
+    0,
+  );
+  await review(caseC, "lift_posting_restriction", 3);
+  assert.deepEqual(
+    (
+      await db.query(
+        "select restriction_scopes from public.upload_moderation_restrictions where user_id=$1",
+        [applicant],
+      )
+    ).rows[0].restriction_scopes,
+    ["media_upload"],
+  );
+  await asUser(
+    applicant,
+    "insert into public.feed_posts(author_id,content) values($1,'posting restored')",
+    [applicant],
+  );
+  await review(caseC, "lift_restriction", 4);
   assert.equal(
     (
       await asUser(
@@ -292,20 +379,20 @@ test("warnings keep media blocked; restriction and lift actions affect storage a
         [caseC],
       )
     ).rows[0].n,
-    4,
+    6,
   );
 });
 test("a notification failure rolls back the moderation decision and audit together", async () => {
   await db.exec(`create function public.fail_test_notification() returns trigger language plpgsql as $$ begin raise exception 'test notification failure'; end; $$;
     create trigger fail_test_notification before insert on public.notifications for each row execute function public.fail_test_notification();`);
-  await assert.rejects(review(caseC, "reject", 3), /test notification failure/);
+  await assert.rejects(review(caseC, "reject", 5), /test notification failure/);
   const entry = (
     await db.query(
       "select status,version from public.upload_moderation_cases where id=$1",
       [caseC],
     )
   ).rows[0];
-  assert.deepEqual(entry, { status: "pending_review", version: 3 });
+  assert.deepEqual(entry, { status: "pending_review", version: 5 });
   assert.equal(
     (
       await db.query(
@@ -313,7 +400,7 @@ test("a notification failure rolls back the moderation decision and audit togeth
         [caseC],
       )
     ).rows[0].n,
-    4,
+    6,
   );
 });
 

@@ -801,6 +801,47 @@ Deno.serve(async (req: Request) => {
       return requesterProfile;
     };
     const getRequesterRole = async () => normalizeRole((await getRequesterProfile())?.role);
+    let socialPostingRestriction: { restricted_until: string } | null | undefined;
+    const getSocialPostingRestriction = async () => {
+      if (!uid) return null;
+      if (socialPostingRestriction !== undefined) return socialPostingRestriction;
+
+      const { data, error } = await supabaseAdmin
+        .from("upload_moderation_restrictions")
+        .select("restricted_until")
+        .eq("user_id", uid)
+        .contains("restriction_scopes", ["social_posting"])
+        .gt("restricted_until", new Date().toISOString())
+        .maybeSingle();
+
+      if (error) throw error;
+      socialPostingRestriction = data || null;
+      return socialPostingRestriction;
+    };
+
+    if (action === "get_posting_status") {
+      const restriction = await getSocialPostingRestriction();
+      return jsonResponse({
+        success: true,
+        allowed: !restriction,
+        restriction: restriction
+          ? { scope: "social_posting", restricted_until: restriction.restricted_until }
+          : null,
+      });
+    }
+
+    if (action === "create_post" || action === "update_post") {
+      const restriction = await getSocialPostingRestriction();
+      if (restriction) {
+        return jsonResponse({
+          success: false,
+          allowed: false,
+          code: "SOCIAL_POSTING_RESTRICTED",
+          error: `Social posting is restricted until ${restriction.restricted_until}.`,
+          restricted_until: restriction.restricted_until,
+        }, 403);
+      }
+    }
 
     // ── follow ──────────────────────────────────────────────────────
     if (action === "follow") {

@@ -1880,6 +1880,9 @@ const readFunctionErrorMessage = async (error: any, fallback: string) => {
   if (context && typeof context.clone === "function") {
     try {
       const payload = await context.clone().json();
+      if (payload?.code === "SOCIAL_POSTING_RESTRICTED" && payload?.restricted_until) {
+        return `You cannot create or edit posts until ${new Date(payload.restricted_until).toLocaleString()}.`;
+      }
       const message = payload?.error || payload?.message;
       if (typeof message === "string" && message.trim()) {
         return message.trim();
@@ -2612,9 +2615,14 @@ export default function FeedScreen() {
     } catch (e: any) {
       const message = e?.message || "Failed to create post.";
       const screeningUnavailable = isUploadSafetyRetryableFailure(message);
+      const postingRestricted = /cannot create or edit posts|social posting is restricted/i.test(message);
       setAlert({
-        type: screeningUnavailable ? "warning" : "error",
-        title: screeningUnavailable ? "Safety check unavailable" : "Error",
+        type: screeningUnavailable || postingRestricted ? "warning" : "error",
+        title: screeningUnavailable
+          ? "Safety check unavailable"
+          : postingRestricted
+            ? "Posting restricted"
+            : "Error",
         message,
       });
     } finally {

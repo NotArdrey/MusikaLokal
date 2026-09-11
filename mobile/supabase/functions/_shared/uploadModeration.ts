@@ -265,8 +265,9 @@ export async function handleUploadModerationAdmin(
         .eq("status", "rejected"),
       client
         .from("upload_moderation_restrictions")
-        .select("restricted_until")
+        .select("restricted_until,restriction_scopes")
         .eq("user_id", entry.user_id)
+        .gt("restricted_until", new Date().toISOString())
         .maybeSingle(),
     ]);
     for (const result of [historyResult, previousResult, restrictionResult])
@@ -278,6 +279,9 @@ export async function handleUploadModerationAdmin(
       history: historyResult.data,
       previousRejections: previousResult.count,
       restrictedUntil: restrictionResult.data?.restricted_until || null,
+      restrictionScopes: Array.isArray(restrictionResult.data?.restriction_scopes)
+        ? restrictionResult.data.restriction_scopes
+        : [],
     };
   }
   if (action === "review_upload_moderation_case") {

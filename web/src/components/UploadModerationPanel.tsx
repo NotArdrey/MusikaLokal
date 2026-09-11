@@ -42,6 +42,7 @@ type Details = {
   mediaUrl: string | null;
   previousRejections: number;
   restrictedUntil: string | null;
+  restrictionScopes: string[];
   history: {
     id: string;
     action: string;
@@ -537,9 +538,16 @@ export default function UploadModerationPanel({
                   <View style={styles.reviewMeta}>
                     <Text style={{ color: colors.textSecondary }}>Previous rejected uploads: {details.previousRejections}</Text>
                     {details.restrictedUntil ? (
-                      <Text style={{ color: colors.text }}>
-                        Uploads restricted until {new Date(details.restrictedUntil).toLocaleString()}
-                      </Text>
+                      <View style={styles.restrictionSummary}>
+                        <Text style={{ color: colors.text }}>
+                          Restricted until {new Date(details.restrictedUntil).toLocaleString()}
+                        </Text>
+                        <Text style={{ color: colors.textSecondary }}>
+                          Scope: {details.restrictionScopes.includes("social_posting")
+                            ? "Media uploads and social posts"
+                            : "Media uploads only"}
+                        </Text>
+                      </View>
                     ) : null}
                   </View>
 
@@ -573,9 +581,13 @@ export default function UploadModerationPanel({
                       </>
                     ) : null}
                     {button("Warn user", () => setDecision("warn"), saving, "default", decision === "warn")}
-                    {button("Restrict for 7 days", () => setDecision("restrict_7_days"), saving, "danger", decision === "restrict_7_days")}
+                    {button("Restrict uploads for 7 days", () => setDecision("restrict_uploads_7_days"), saving, "danger", decision === "restrict_uploads_7_days")}
+                    {button("Restrict uploads + posts for 7 days", () => setDecision("restrict_content_7_days"), saving, "danger", decision === "restrict_content_7_days")}
+                    {details.restrictionScopes.includes("social_posting")
+                      ? button("Allow social posting", () => setDecision("lift_posting_restriction"), saving, "default", decision === "lift_posting_restriction")
+                      : null}
                     {details.restrictedUntil
-                      ? button("Lift restriction", () => setDecision("lift_restriction"), saving, "default", decision === "lift_restriction")
+                      ? button("Lift all restrictions", () => setDecision("lift_restriction"), saving, "default", decision === "lift_restriction")
                       : null}
                   </View>
 
@@ -688,6 +700,7 @@ const styles = StyleSheet.create({
   heading: { fontSize: 22, fontWeight: "700" },
   title: { fontSize: 15, fontWeight: "600" },
   supportingText: { fontSize: 14, lineHeight: 21 },
+  restrictionSummary: { gap: 2 },
   listHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 16 },
   listHeaderCompact: { flexDirection: "column", alignItems: "stretch" },
   listHeadingCopy: { flex: 1, gap: 4 },

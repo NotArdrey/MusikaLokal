@@ -28,11 +28,21 @@ produce multiple cases, each with the original video attached.
 
 Admin → Reports → **AI-blocked uploads** provides private previews, original
 video playback, prior rejection counts, and decision history. Reviewers can
-approve, reject, warn, restrict uploads for seven days, or lift a restriction.
-Notes are required and sent to the uploader. Approval and rejection are final
-for that case. Warnings and restrictions leave pending media unpublished until
-an explicit approval/rejection. Restriction enforcement covers the screening
-endpoint and authenticated Storage inserts/updates.
+approve, reject, warn, restrict uploads for seven days, restrict both uploads
+and social posting for seven days, restore social posting only, or lift every
+restriction. The case shows the active deadline and scope. Notes are required
+and sent to the uploader. Approval and rejection are final for that case.
+Warnings and restrictions leave pending media unpublished until an explicit
+approval/rejection.
+
+Restrictions are capability-scoped. Existing records migrate as
+`media_upload` only; an administrator must explicitly select the broader
+uploads-and-posts action to add `social_posting`. Media restrictions are
+enforced by the screening endpoint and authenticated Storage inserts/updates.
+Social posting restrictions are enforced by `manage-social-feed` for create
+and edit operations and by `feed_posts` insert/update RLS, so a client cannot
+bypass the Edge Function with a direct database write. Blocked clients receive
+a clear posting-restricted message with the expiry time.
 
 Approval permits the uploader to select the same media again and finish the
 original form. It does not automatically publish an incomplete draft. Matching
@@ -69,22 +79,28 @@ requests ignore stale results after changing profiles.
 ## Deployment and verification
 
 Apply `20260907180546_gig_history_and_upload_moderation.sql` once to the shared
-MusikaLokal database. Identical copies are kept in both apps' migration folders.
-It depends on the existing participant visibility and `staff_can_edit_gig`
-functions. Deploy the updated `upload-safety-screen` function with its shared
-`_shared/uploadModeration.ts`, and `admin-reports-management` from `web/supabase`.
-Then release the mobile/web clients together. Existing AI provider secrets are
-used; there are no new external services or secrets to configure.
+MusikaLokal database, followed by
+`20260911120000_add_scoped_content_restrictions.sql`. Identical copies are kept
+in both apps' migration folders. The first migration depends on the existing
+participant visibility and `staff_can_edit_gig` functions. After the scoped
+restriction migration, deploy `manage-social-feed` and deploy
+`admin-reports-management` with its shared `_shared/uploadModeration.ts` from
+`web/supabase`. Then release the mobile/web clients together. Existing AI
+provider secrets are used; there are no new external services or secrets to
+configure.
 
 Run `npm run test:workflows` from the repository root. The tests use an isolated
 PGlite database for migrations, role access, history grouping, restriction
 enforcement, review versioning, and transactional audit/notification rollback.
 The Edge Function tests mock AI, authentication, and Storage and exercise the
 actual screening handler, evidence hashing, retries, provider failures, and
-private evidence capture. They do not call the live database or AI providers.
+private evidence capture. The database suite also verifies upload-only versus
+upload-and-post scopes, direct `feed_posts` RLS enforcement, partial lifting,
+full lifting, and audit rollback. The tests do not call the live database or AI
+providers.
 
 Local verification also includes TypeScript checks for both apps and the changed
-Edge Functions, targeted lint, and an Expo production web export. All 17 workflow
+Edge Functions, targeted lint, and an Expo production web export. All 21 workflow
 tests pass.
 
 On September 8, 2026 (Asia/Manila), the migration was applied to MusikaLokal
@@ -104,3 +120,12 @@ Deployment scope is Supabase only, as requested. The updated web and mobile
 clients remain in the workspace; no Vercel deployment or app release was made.
 Signed-in browser testing remains unverified because no browser connection is
 available in this session.
+
+On September 11, 2026, the scoped-content migration was applied to MusikaLokal
+using the project-scoped credentials in the repository `.env`. Live checks
+confirmed the non-null `restriction_scopes` column, the
+`social_posting_allowed()` function, updated `feed_posts` insert/update RLS,
+and migration-history entry. `manage-social-feed` version 60 and
+`admin-reports-management` version 54 are ACTIVE. Both endpoints return HTTP
+401 without user authentication. Existing active restrictions were preserved
+as upload-only and must be explicitly broadened by an administrator.

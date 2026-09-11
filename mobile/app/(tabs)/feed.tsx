@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import { BottomSheetBackdrop, BottomSheetView, useBottomSheetSpringConfigs } from "@gorhom/bottom-sheet";
 import { useFocusEffect } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
@@ -27,6 +26,7 @@ import * as ImagePicker from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase, supabaseAnonKey, supabaseUrl } from "../../lib/supabase";
 import CachedImage from "../../src/components/CachedImage";
+import BottomModal from "../../src/components/BottomModal";
 import { FeaturedGigPerformers } from "../../src/components/FeaturedGigPerformers";
 import { FeedList } from "../../src/components/feed/FeedList";
 import { FeedMediaGallery } from "../../src/components/feed/FeedMediaGallery";
@@ -46,7 +46,6 @@ import ReportModal from "../../src/components/ReportModal";
 import SearchBottomSheet from "../../src/components/SearchBottomSheet";
 import Skeleton from "../../src/components/Skeleton";
 import SlidingTabBar from "../../src/components/SlidingTabBar";
-import TrackedBottomSheetModal from "../../src/components/TrackedBottomSheetModal";
 import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
 import { useAuth } from "../../src/context/AuthContext";
 import { formatDashedNumericDate } from "../../src/utils/friendlyDateTime";
@@ -76,7 +75,6 @@ import {
 } from "../../src/services/groqModelRouter";
 import { isUploadSafetyRetryableFailure, screenUploadsWithAi } from "../../src/services/uploadSafetyScreen";
 import { logLoadTime, usePageLoadLogger } from "../../src/utils/loadTimeLogger";
-import { bottomSheetSpringConfig } from "../../src/utils/motion";
 import { setSmoothTab } from "../../src/utils/smoothTabs";
 import {
   persistUploadAsset,
@@ -188,6 +186,25 @@ const logFeedInvokeError = (
     context: error?.context ?? null,
     ...extra,
   });
+};
+
+const readFunctionErrorMessage = async (error: any, fallback: string) => {
+  const context = error?.context;
+  if (context && typeof context.clone === "function") {
+    try {
+      const payload = await context.clone().json();
+      if (payload?.code === "SOCIAL_POSTING_RESTRICTED" && payload?.restricted_until) {
+        return `You cannot create or edit posts until ${new Date(payload.restricted_until).toLocaleString()}.`;
+      }
+      const message = payload?.error || payload?.message;
+      if (typeof message === "string" && message.trim()) return message.trim();
+    } catch {
+      // Fall through to the generic client error.
+    }
+  }
+
+  const message = error?.message;
+  return typeof message === "string" && message.trim() ? message.trim() : fallback;
 };
 
 const FEED_PAGE_SIZE = 12;
@@ -3367,7 +3384,6 @@ export default function FeedScreen() {
   const composerInputRef = React.useRef<TextInput>(null);
   const composerFocusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const postMutationInFlightRef = React.useRef(false);
-  const createPostSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const searchSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const bottomSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const productionTeamSheetRef = React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
@@ -3509,37 +3525,6 @@ export default function FeedScreen() {
     postMedia.length > 0 ||
     (editingPost && !mediaBusy),
   );
-  const composerSheetSnapPoints = useMemo(() => ["88%"], []);
-  const composerSheetAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
-  const composerSheetBackgroundStyle = useMemo(
-    () => ({
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 28,
-      borderTopRightRadius: 28,
-    }),
-    [colors.surface],
-  );
-  const composerSheetHandleIndicatorStyle = useMemo(
-    () => ({
-      backgroundColor: isDark ? "#4B5563" : "#E5E7EB",
-      width: 40,
-    }),
-    [isDark],
-  );
-  const renderComposerBackdrop = useCallback(
-    (props: any) => (
-      <BottomSheetBackdrop
-        {...props}
-        disappearsOnIndex={-1}
-        appearsOnIndex={0}
-        opacity={0.5}
-        pressBehavior={creating || mediaBusy ? "none" : "close"}
-        onPress={Keyboard.dismiss}
-      />
-    ),
-    [creating, mediaBusy],
-  );
-
   const forYouFeedQuery = useFeedQuery({
     enabled: false,
     feedTab: "for_you",
@@ -5682,21 +5667,6 @@ export default function FeedScreen() {
     resetComposer();
   }, [clearComposerFocusTimer, creating, mediaBusy, resetComposer]);
 
-  const handleComposerSheetDismiss = useCallback(() => {
-    clearComposerFocusTimer();
-    Keyboard.dismiss();
-    setShowCreate(false);
-    resetComposer();
-  }, [clearComposerFocusTimer, resetComposer]);
-
-  useEffect(() => {
-    if (showCreate) {
-      createPostSheetRef.current?.present();
-    } else {
-      createPostSheetRef.current?.dismiss();
-    }
-  }, [showCreate]);
-
   useEffect(() => clearComposerFocusTimer, [clearComposerFocusTimer]);
 
   const openCreateComposer = useCallback(() => {
@@ -5933,7 +5903,7 @@ export default function FeedScreen() {
       });
 
       if (error) {
-        throw error;
+        throw new Error(await readFunctionErrorMessage(error, "Failed to create post."));
       }
 
       if (data?.success) {
@@ -5996,7 +5966,13 @@ export default function FeedScreen() {
         setAlert({ type: "error", title: "Error", message: data?.error || "Failed to create post" });
       }
     } catch (e: any) {
-      setAlert({ type: "error", title: "Error", message: e.message });
+      const message = e?.message || "Failed to create post.";
+      const postingRestricted = /cannot create or edit posts|social posting is restricted/i.test(message);
+      setAlert({
+        type: postingRestricted ? "warning" : "error",
+        title: postingRestricted ? "Posting restricted" : "Error",
+        message,
+      });
     } finally {
       postMutationInFlightRef.current = false;
       setCreating(false);
@@ -7332,26 +7308,17 @@ export default function FeedScreen() {
       )}
 
       {/* Create Post Modal */}
-      <TrackedBottomSheetModal
-        ref={createPostSheetRef}
+      <BottomModal
+        visible={showCreate}
         overlayLabel="FeedCreatePostModal"
-        index={0}
-        snapPoints={composerSheetSnapPoints}
-        animationConfigs={composerSheetAnimationConfigs}
-        animateOnMount={true}
-        enableDynamicSizing={false}
-        enableContentPanningGesture={false}
-        enableOverDrag={false}
-        backdropComponent={renderComposerBackdrop}
-        backgroundStyle={composerSheetBackgroundStyle}
-        handleIndicatorStyle={composerSheetHandleIndicatorStyle}
-        enablePanDownToClose={!creating && !mediaBusy}
-        keyboardBehavior="interactive"
-        keyboardBlurBehavior="restore"
-        android_keyboardInputMode="adjustResize"
-        onDismiss={handleComposerSheetDismiss}
+        onClose={handleComposerClose}
+        closeOnBackdropPress={!creating && !mediaBusy}
+        keyboardAvoiding
+        bottomInsetBackgroundColor={colors.surface}
+        navigationBarStyleWhileVisible={isDark ? "dark" : "light"}
+        contentContainerStyle={styles.composerModalContainer}
       >
-        <BottomSheetView
+        <View
           testID="mobile-feed-create-post-modal"
           style={[
             styles.modalBox,
@@ -7360,6 +7327,7 @@ export default function FeedScreen() {
             },
           ]}
         >
+          <View style={[styles.modalHandle, { backgroundColor: isDark ? "#4B5563" : "#E5E7EB" }]} />
           <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
             <View style={styles.modalHeaderSide}>
               <TouchableOpacity
@@ -7523,8 +7491,8 @@ export default function FeedScreen() {
             </TouchableOpacity>
             {mediaStatus ? <Text style={[styles.composerMediaStatus, { color: colors.textSecondary }]}>{mediaStatus}</Text> : null}
           </View>
-        </BottomSheetView>
-      </TrackedBottomSheetModal>
+        </View>
+      </BottomModal>
 
       <SearchBottomSheet
         ref={searchSheetRef}
@@ -8175,7 +8143,14 @@ const styles = StyleSheet.create({
     textAlignVertical: "center",
   },
   /* Create-post modal */
+  composerModalContainer: {
+    height: "88%",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    overflow: "hidden",
+  },
   modalBox: { flex: 1, overflow: "hidden" },
+  modalHandle: { alignSelf: "center", width: 40, height: 4, borderRadius: 999, marginTop: 10, marginBottom: 4 },
   modalHeader: { minHeight: 58, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth },
   modalHeaderSide: { width: 86, alignItems: "flex-start", justifyContent: "center" },
   modalHeaderSideRight: { alignItems: "flex-end" },
