@@ -15,6 +15,7 @@ import {
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import BottomModal from "../src/components/BottomModal";
+import ConnectionApplicantReview from "../src/components/ConnectionApplicantReview";
 import GroupInviteSection from "../src/components/GroupInviteSection";
 import GroupLinkedPlaylistsSection from "../src/components/GroupLinkedPlaylistsSection";
 import Header from "../src/components/header";
@@ -39,6 +40,10 @@ import {
     sendGroupMemberInvites,
 } from "../src/utils/groupMemberInvites";
 import { getSmoothTabIndex, setSmoothTab, useStagedTabRows } from "../src/utils/smoothTabs";
+import {
+  attachConnectionApplicantRecommendation,
+  sortConnectionApplicationsByRecommendation,
+} from "../src/utils/connectionApplicantRecommendations";
 
 import { useLocalSearchParams } from "expo-router";
 
@@ -104,6 +109,9 @@ export default function GroupDetailsScreen() {
   const [group, setGroup] = useState<any>(null);
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
   const [groupMemberApplications, setGroupMemberApplications] = useState<any[]>([]);
+  const [memberApplicationFilter, setMemberApplicationFilter] = useState<
+    "All" | "Recommended" | "Pending" | "Accepted" | "Declined"
+  >("All");
   const [respondingGroupApplicationId, setRespondingGroupApplicationId] = useState<string | null>(null);
   const [applications, setApplications] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
@@ -517,10 +525,15 @@ export default function GroupDetailsScreen() {
 
         if (groupApplicationError) throw groupApplicationError;
 
+        const applicationRows = Array.isArray(groupApplicationData?.applications)
+          ? groupApplicationData.applications
+          : [];
         setGroupMemberApplications(
-          Array.isArray(groupApplicationData?.applications)
-            ? groupApplicationData.applications
-            : [],
+          sortConnectionApplicationsByRecommendation(
+            applicationRows.map((application: any) =>
+              attachConnectionApplicantRecommendation(application, groupData),
+            ),
+          ),
         );
       } catch (groupApplicationErr) {
         setGroupMemberApplications([]);
@@ -963,7 +976,18 @@ export default function GroupDetailsScreen() {
     10,
   );
   const renderedGroupMemberApplications = useStagedTabRows(
-    groupMemberApplications,
+    useMemo(() => groupMemberApplications.filter((application) => {
+      const status = String(application?.status || "pending").trim().toLowerCase();
+      if (memberApplicationFilter === "All") return true;
+      if (memberApplicationFilter === "Recommended") {
+        return application?.ai_recommendation?.recommendation_status === "recommended";
+      }
+      if (memberApplicationFilter === "Pending") return status === "pending";
+      if (memberApplicationFilter === "Accepted") {
+        return ["accepted", "approved", "connected"].includes(status);
+      }
+      return ["declined", "rejected", "cancelled"].includes(status);
+    }), [groupMemberApplications, memberApplicationFilter]),
     activeTab === "Applications",
     6,
   );
@@ -1445,6 +1469,45 @@ export default function GroupDetailsScreen() {
                     </TouchableOpacity>
                   </View>
 
+                  {groupMemberApplications.length > 0 ? (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.applicationFilters}
+                    >
+                      {(["All", "Recommended", "Pending", "Accepted", "Declined"] as const).map((filter) => {
+                        const selected = memberApplicationFilter === filter;
+                        const count = groupMemberApplications.filter((application) => {
+                          const status = String(application?.status || "pending").toLowerCase();
+                          if (filter === "All") return true;
+                          if (filter === "Recommended") return application?.ai_recommendation?.recommendation_status === "recommended";
+                          if (filter === "Pending") return status === "pending";
+                          if (filter === "Accepted") return ["accepted", "approved", "connected"].includes(status);
+                          return ["declined", "rejected", "cancelled"].includes(status);
+                        }).length;
+                        return (
+                          <TouchableOpacity
+                            key={filter}
+                            testID={`group-applicant-filter-${filter.toLowerCase()}`}
+                            onPress={() => setMemberApplicationFilter(filter)}
+                            style={[
+                              styles.applicationFilterChip,
+                              {
+                                borderColor: selected ? colors.primary : colors.border,
+                                backgroundColor: selected ? colors.primary + "18" : colors.surface,
+                              },
+                            ]}
+                          >
+                            {filter === "Recommended" ? <Ionicons name="sparkles" size={13} color={selected ? colors.primary : colors.textSecondary} /> : null}
+                            <Text style={{ color: selected ? colors.primary : colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
+                              {filter} ({count})
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  ) : null}
+
                   {groupMemberApplications.length === 0 ? (
                     <Text style={{ color: colors.textSecondary, marginTop: 8 }}>
                       No member applications yet.
@@ -1505,6 +1568,8 @@ export default function GroupDetailsScreen() {
                               ? formatFriendlyDateTime(app.created_at)
                               : "N/A"}
                           </Text>
+
+                          <ConnectionApplicantReview application={app} colors={colors} compact />
 
                           {isPending && (
                             <View style={styles.actionButtons}>
@@ -2453,6 +2518,20 @@ const styles = StyleSheet.create({
   actionButtons: {
     flexDirection: "row",
     gap: 12,
+  },
+  applicationFilters: {
+    gap: 8,
+    paddingVertical: 10,
+    paddingRight: 12,
+  },
+  applicationFilterChip: {
+    minHeight: 34,
+    paddingHorizontal: 12,
+    borderRadius: 17,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
   },
   declineButton: {
     flex: 1,

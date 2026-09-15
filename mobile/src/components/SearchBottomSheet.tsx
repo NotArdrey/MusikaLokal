@@ -137,6 +137,30 @@ const dedupeSearchResults = (items: any[]) => {
   });
 };
 
+const isOpenSearchResult = (item: any) => {
+  const type = String(item?.type || "").trim().toLowerCase();
+  if (type === "group" || type === "duo") return item?.open_group_applications === true;
+  if (type === "production" || type === "production team") {
+    return item?.open_production_applications === true;
+  }
+  if (type === "studio" || type === "venue") {
+    const weeklyOpen = Array.isArray(item?.availability) && item.availability.some(
+      (slot: any) => slot && slot.is_open !== false,
+    );
+    const todayKey = new Date().toISOString().split("T")[0];
+    const futureDateOpen = Array.isArray(item?.open_dates) && item.open_dates.some(
+      (value: unknown) => typeof value === "string" && value.slice(0, 10) >= todayKey,
+    );
+    return weeklyOpen || futureDateOpen;
+  }
+  if (type === "gig") {
+    const statusOpen = String(item?.status || "").trim().toLowerCase() === "open";
+    const eventTime = item?.event_date ? new Date(item.event_date).getTime() : Number.POSITIVE_INFINITY;
+    return statusOpen && (!Number.isFinite(eventTime) || eventTime >= Date.now());
+  }
+  return true;
+};
+
 interface SearchBottomSheetProps {
   onClose?: () => void;
   onItemPress?: (listingId: string, initialListing?: any | null) => void;
@@ -225,10 +249,12 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           Array.isArray(page?.items) ? page.items : Array.isArray(page?.data) ? page.data : [],
         );
 
-        return dedupeSearchResults(items).map((item) => ({
-          ...item,
-          skills: filterVisibleProfileSkills(item?.skills),
-        }));
+        return dedupeSearchResults(items)
+          .filter(isOpenSearchResult)
+          .map((item) => ({
+            ...item,
+            skills: filterVisibleProfileSkills(item?.skills),
+          }));
       },
       [searchResultsQuery.data],
     );

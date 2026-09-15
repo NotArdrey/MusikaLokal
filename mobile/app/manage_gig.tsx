@@ -265,7 +265,31 @@ export default function GigDetailsScreen() {
   const fetchApplicationsFallback = async (gigId: string) => {
     const { data, error } = await supabase
       .from("gig_applications")
-      .select("id, status, created_at, group_id, applicant_id")
+      .select(`
+        id,
+        gig_id,
+        applicant_id,
+        group_id,
+        production_team_id,
+        production_roster_id,
+        status,
+        slot_type,
+        created_at,
+        performer_snapshot,
+        cv_url,
+        video_url,
+        applicant:profiles!applicant_id(id, full_name, avatar_url, location, latitude, longitude, is_verified, verification_status),
+        group:groups!group_id(id, name, genre, location, latitude, longitude, group_type),
+        production_team:production_team_id(id, name, logo_url),
+        production_roster:production_roster_id(
+          id,
+          entity_kind,
+          profile_id,
+          group_id,
+          roster_profile:profile_id(id, full_name, avatar_url, location, latitude, longitude, is_verified, verification_status),
+          roster_group:group_id(id, name, genre, location, latitude, longitude, group_type)
+        )
+      `)
       .eq("gig_id", gigId)
       .or("leader_approval_status.is.null,leader_approval_status.eq.approved")
       .order("created_at", { ascending: false });
@@ -493,14 +517,39 @@ export default function GigDetailsScreen() {
                 Authorization: `Bearer ${session.access_token}`,
               },
             });
-          if (appError) {
-            const fallbackApps = await fetchApplicationsFallback(gigId);
-            setApplications(fallbackApps);
+
+          let directApps: any[] | null = null;
+          try {
+            directApps = await fetchApplicationsFallback(gigId);
+          } catch (directReadError) {
+            console.warn("Direct gig application read failed; using edge response.", directReadError);
+          }
+
+          if (directApps) {
+            const edgeApps = Array.isArray(appData) ? appData : [];
+            const edgeAppById = new Map(edgeApps.map((application: any) => [application.id, application]));
+
+            // The direct list is authoritative for membership and status. Edge
+            // data only enriches those same rows with recommendations/history.
+            setApplications(directApps.map((application: any) => ({
+              ...application,
+              ...(edgeAppById.get(application.id) || {}),
+              id: application.id,
+              status: application.status,
+              created_at: application.created_at,
+            })));
+          } else if (!appError && Array.isArray(appData)) {
+            setApplications(appData);
           } else {
-            setApplications(appData || []);
+            setApplications([]);
           }
         } catch (appErr) {
-          setApplications([]);
+          try {
+            setApplications(await fetchApplicationsFallback(gigId));
+          } catch (fallbackError) {
+            console.warn("Unable to load gig applications.", fallbackError || appErr);
+            setApplications([]);
+          }
         }
       } else {
         setApplications([]);

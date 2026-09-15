@@ -97,17 +97,9 @@ interface InAppMediaViewerProps {
 }
 
 const MediaVideo = ({ uri }: { uri: string }) => {
-  const player = useVideoPlayer(uri);
-
-  useEffect(() => {
-    // Media previews must always wait for an explicit tap on the native controls.
-    // Pause again during cleanup so audio cannot survive a modal close/navigation.
-    player.pause();
-
-    return () => {
-      player.pause();
-    };
-  }, [player]);
+  // Media previews must always wait for an explicit tap on the native controls.
+  // useVideoPlayer releases (and stops) the player automatically on unmount.
+  const player = useVideoPlayer(uri, (videoPlayer) => videoPlayer.pause());
 
   return <VideoView player={player} style={styles.media} nativeControls contentFit="contain" />;
 };

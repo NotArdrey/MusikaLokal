@@ -272,13 +272,38 @@ const POST_MIME_BY_EXTENSION: Record<string, string> = {
 const FEED_GROUP_CARD_SELECT =
   "id, owner_id, name, genre, description, members, location, images, latitude, longitude, rate, created_at, group_type, rating, review_count, completion_rate";
 const FEED_STUDIO_CARD_SELECT =
-  "id, owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude, created_at, rate, type, types, rehearsal_rate, recording_rate, rating, review_count, permit_status, location";
+  "id, owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude, created_at, rate, type, types, rehearsal_rate, recording_rate, rating, review_count, permit_status, location, availability, open_dates";
 const FEED_GIG_CARD_SELECT =
   "id, organizer_id, name, location, budget, description, event_date, requirements, images, status, latitude, longitude, created_at, rate, rating, review_count, permit_status";
 const FEED_PROFILE_CARD_SELECT =
   "id, full_name, avatar_url, address, location, role, bio, created_at";
 const FEED_PRODUCTION_TEAM_CARD_SELECT =
   "id, owner_id, name, description, logo_url, created_at, updated_at, open_production_applications";
+
+const isFeedStudioAcceptingBookings = (item: any, today = new Date()) => {
+  const hasWeeklyHours = Array.isArray(item?.availability) && item.availability.some(
+    (slot: any) => slot && slot.is_open !== false,
+  );
+  const todayKey = today.toISOString().split("T")[0];
+  const hasFutureOpenDate = Array.isArray(item?.open_dates) && item.open_dates.some(
+    (value: unknown) => typeof value === "string" && value.slice(0, 10) >= todayKey,
+  );
+  return hasWeeklyHours || hasFutureOpenDate;
+};
+
+const isOpenFeedRecommendation = (item: any) => {
+  if (!item || item.__feedKind && item.__feedKind !== "ai_card" && item.__feedKind !== "following_entity") return true;
+  const type = String(item?.type || "").trim().toLowerCase();
+  if (type === "group" || type === "duo") return item?.open_group_applications === true;
+  if (type === "production" || type === "production team") return item?.open_production_applications === true;
+  if (type === "studio" || type === "venue") return isFeedStudioAcceptingBookings(item);
+  if (type === "gig") {
+    const statusOpen = String(item?.status || "").trim().toLowerCase() === "open";
+    const eventTime = item?.event_date ? new Date(item.event_date).getTime() : Number.POSITIVE_INFINITY;
+    return statusOpen && (!Number.isFinite(eventTime) || eventTime >= Date.now());
+  }
+  return true;
+};
 
 type PostComposerThumbnail = {
   uri: string;
@@ -1572,7 +1597,12 @@ const normalizeFeedAiRecommendationCard = (item: any) => {
     avatar_url: item?.avatar_url || null,
     skills: Array.isArray(item?.skills) ? item.skills : [],
     genres: Array.isArray(item?.genres) ? item.genres : [],
+    open_group_applications: item?.open_group_applications === true,
     open_production_applications: item?.open_production_applications === true,
+    availability: Array.isArray(item?.availability) ? item.availability : [],
+    open_dates: Array.isArray(item?.open_dates) ? item.open_dates : [],
+    status: item?.status || null,
+    event_date: item?.event_date || null,
     rate: item?.rate?.toString?.() || null,
     hourly_rate: item?.hourly_rate?.toString?.() || null,
     budget: item?.budget?.toString?.() || null,
@@ -3942,6 +3972,7 @@ export default function FeedScreen() {
         return targetId !== resolvedUserId;
       })
       .map((item: any) => ({ ...ensureFeedCardImage(item), __feedKind: "ai_card" }))
+      .filter(isOpenFeedRecommendation)
       .slice(0, TALENT_CARD_LIMIT);
 
     return {
@@ -3982,6 +4013,7 @@ export default function FeedScreen() {
       const cards = rows
         .map(normalizeFeedAiRecommendationCard)
         .filter((item: any) => item?.id && !isOwnFeedAiRecommendationCard(item, resolvedUserId))
+        .filter(isOpenFeedRecommendation)
         .slice(0, limit);
 
       return {
@@ -4024,8 +4056,9 @@ export default function FeedScreen() {
         supabase
           .from("gigs_with_stats")
           .select(FEED_GIG_CARD_SELECT)
-          .neq("status", "cancelled")
+          .eq("status", "open")
           .eq("permit_status", "approved")
+          .or(`event_date.is.null,event_date.gte.${new Date().toISOString()}`)
           .order("created_at", { ascending: false })
           .limit(TALENT_CARD_LIMIT),
         supabase
@@ -4040,6 +4073,7 @@ export default function FeedScreen() {
         supabase
           .from("production_teams")
           .select(FEED_PRODUCTION_TEAM_CARD_SELECT)
+          .eq("open_production_applications", true)
           .order("created_at", { ascending: false })
           .limit(TALENT_CARD_LIMIT),
         supabase
@@ -4054,19 +4088,13 @@ export default function FeedScreen() {
           .limit(1000),
       ]);
 
-      let relaxedStudios: any[] = [];
-
-      if ((studiosResult.data || []).length === 0) {
-        const relaxedStudiosResult = await supabase
-          .from("studios_with_stats")
-          .select(FEED_STUDIO_CARD_SELECT)
-          .order("created_at", { ascending: false })
-          .limit(TALENT_CARD_LIMIT);
-        relaxedStudios = relaxedStudiosResult.data || [];
-      }
-
-      const finalGroups = groupsResult.data || [];
-      const finalStudios = (studiosResult.data || []).length > 0 ? studiosResult.data! : relaxedStudios;
+      const candidateGroupIds = (groupsResult.data || []).map((item: any) => item.id).filter(Boolean);
+      const openGroupsResult = candidateGroupIds.length > 0
+        ? await supabase.from("groups").select("id").in("id", candidateGroupIds).eq("open_group_applications", true)
+        : { data: [], error: null } as any;
+      const openGroupIds = new Set((openGroupsResult.data || []).map((item: any) => item.id));
+      const finalGroups = (groupsResult.data || []).filter((item: any) => openGroupIds.has(item.id));
+      const finalStudios = (studiosResult.data || []).filter((item: any) => isFeedStudioAcceptingBookings(item));
       const finalVenueStudios = finalStudios.filter(isFeedVenueLikeStudio);
       const finalGigs = gigsResult.data || [];
       const finalArtists = artistsResult.data || [];
@@ -4193,6 +4221,7 @@ export default function FeedScreen() {
           owner_avatar: owner?.avatar_url || null,
           social_follow_target_id: item.id,
           social_follow_target_type: "group",
+          open_group_applications: true,
         }, "group", item.id);
       });
 
@@ -4232,6 +4261,8 @@ export default function FeedScreen() {
           rehearsal_rate: item.rehearsal_rate?.toString() || null,
           recording_rate: item.recording_rate?.toString() || null,
           studio_type: item.type || null,
+          availability: Array.isArray(item.availability) ? item.availability : [],
+          open_dates: Array.isArray(item.open_dates) ? item.open_dates : [],
           social_follow_target_id: item.owner_id || null,
           social_follow_target_type: "profile",
         }, "studio", item.id);
@@ -4271,6 +4302,8 @@ export default function FeedScreen() {
           budget: item.budget?.toString() || null,
           rate: item.rate?.toString() || null,
           requirements: item.requirements || null,
+          status: item.status || null,
+          event_date: item.event_date || null,
           social_follow_target_id: item.organizer_id || null,
           social_follow_target_type: "profile",
         }, "gig", item.id);
@@ -4506,8 +4539,9 @@ export default function FeedScreen() {
         ? supabase
             .from("gigs_with_stats")
             .select(FEED_GIG_CARD_SELECT)
-            .neq("status", "cancelled")
+            .eq("status", "open")
             .eq("permit_status", "approved")
+            .or(`event_date.is.null,event_date.gte.${new Date().toISOString()}`)
             .in("organizer_id", followedProfileIds)
             .order("created_at", { ascending: false })
             .limit(AI_CARD_LIMIT)
@@ -4516,11 +4550,20 @@ export default function FeedScreen() {
         ? supabase
             .from("production_teams")
             .select(FEED_PRODUCTION_TEAM_CARD_SELECT)
+            .eq("open_production_applications", true)
             .in("owner_id", followedProfileIds)
             .order("created_at", { ascending: false })
             .limit(AI_CARD_LIMIT)
         : Promise.resolve(emptyQueryResult),
     ]);
+
+    const candidateGroupIds = [
+      ...(followedGroupsResult.data || []),
+      ...(ownedGroupsResult.data || []),
+    ].map((item: any) => item.id).filter(Boolean);
+    const openGroupsResult = candidateGroupIds.length > 0
+      ? await supabase.from("groups").select("id").in("id", candidateGroupIds).eq("open_group_applications", true)
+      : { data: [], error: null } as any;
 
     const partialErrors = [
       followedProfilesResult,
@@ -4529,6 +4572,7 @@ export default function FeedScreen() {
       studiosResult,
       gigsResult,
       teamsResult,
+      openGroupsResult,
     ]
       .map((result: any) => result?.error?.message)
       .filter((message: any): message is string => typeof message === "string" && message.length > 0);
@@ -4628,6 +4672,7 @@ export default function FeedScreen() {
         owner_avatar: owner?.avatar_url || null,
         social_follow_target_id: item.id,
         social_follow_target_type: "group",
+        open_group_applications: true,
         is_following: keys.has(buildSocialFollowKey("group", item.id)),
       });
     };
@@ -4668,6 +4713,8 @@ export default function FeedScreen() {
         rehearsal_rate: item.rehearsal_rate?.toString() || null,
         recording_rate: item.recording_rate?.toString() || null,
         studio_type: item.type || null,
+        availability: Array.isArray(item.availability) ? item.availability : [],
+        open_dates: Array.isArray(item.open_dates) ? item.open_dates : [],
         social_follow_target_id: item.owner_id || null,
         social_follow_target_type: "profile",
         is_following: keys.has(buildSocialFollowKey("profile", item.owner_id)),
@@ -4708,6 +4755,8 @@ export default function FeedScreen() {
         budget: item.budget?.toString() || null,
         rate: item.rate?.toString() || null,
         requirements: item.requirements || null,
+        status: item.status || null,
+        event_date: item.event_date || null,
         social_follow_target_id: item.organizer_id || null,
         social_follow_target_type: "profile",
         is_following: keys.has(buildSocialFollowKey("profile", item.organizer_id)),
@@ -4752,16 +4801,17 @@ export default function FeedScreen() {
       });
     };
 
+    const openGroupIds = new Set((openGroupsResult.data || []).map((item: any) => item.id));
     const latestEntityCandidates = [
       ...followedProfiles
         .filter((profile: any) => normalizeFeedUserRole(profile?.role) === "musician")
         .map(toProfileCard),
-      ...(followedGroupsResult.data || []).map(toGroupCard),
+      ...(followedGroupsResult.data || []).filter((item: any) => openGroupIds.has(item.id)).map(toGroupCard),
       ...(ownedGroupsResult.data || [])
-        .filter((item: any) => visibleFollowedProfileIds.has(item?.owner_id))
+        .filter((item: any) => visibleFollowedProfileIds.has(item?.owner_id) && openGroupIds.has(item.id))
         .map(toGroupCard),
       ...(studiosResult.data || [])
-        .filter((item: any) => visibleFollowedProfileIds.has(item?.owner_id))
+        .filter((item: any) => visibleFollowedProfileIds.has(item?.owner_id) && isFeedStudioAcceptingBookings(item))
         .map(toStudioCard),
       ...(gigsResult.data || [])
         .filter((item: any) => visibleFollowedProfileIds.has(item?.organizer_id))
@@ -4776,7 +4826,8 @@ export default function FeedScreen() {
     const latestEntityCards = dedupeFeedItems(
       sortFeedItemsNewestFirst(fanScopedEntityCandidates),
     ).slice(0, AI_CARD_LIMIT);
-    const visibleFallbackEntities = isFan ? filterFanVisibleFeedItems(fallbackEntities) : fallbackEntities;
+    const openFallbackEntities = fallbackEntities.filter(isOpenFeedRecommendation);
+    const visibleFallbackEntities = isFan ? filterFanVisibleFeedItems(openFallbackEntities) : openFallbackEntities;
     const entities = latestEntityCards.length > 0 ? latestEntityCards : visibleFallbackEntities;
 
     followingKeysRef.current = keys;
@@ -7049,7 +7100,7 @@ export default function FeedScreen() {
   const baseFeedItems = useMemo(() => {
     if (loading) return [];
     if (tab === "for_you") {
-      const rankedCards = aiCards.filter((item) => item?.__feedKind === "ai_card");
+      const rankedCards = aiCards.filter((item) => item?.__feedKind === "ai_card" && isOpenFeedRecommendation(item));
       const socialPosts = sortFeedItemsNewestFirst(posts.filter((item) => item?.__feedKind !== "ai_card"));
       const visibleRecommendationCards = isFan
         ? sortFanRecommendationCards(filterFanVisibleFeedItems(rankedCards))
@@ -7076,17 +7127,17 @@ export default function FeedScreen() {
       ]);
     }
     if (tab === "talent") {
-      return dedupeFeedItems(aiCards);
+      return dedupeFeedItems(aiCards.filter(isOpenFeedRecommendation));
     }
     if (tab === "following") {
       if (isFan) {
         const socialPosts = sortFeedItemsNewestFirst(posts.filter((item) => item?.__feedKind !== "ai_card"));
         return dedupeFeedItems([
           ...socialPosts,
-          ...sortFanRecommendationCards(filterFanVisibleFeedItems(followingEntities)),
+          ...sortFanRecommendationCards(filterFanVisibleFeedItems(followingEntities.filter(isOpenFeedRecommendation))),
         ]);
       }
-      const followingItems = dedupeFeedItems([...posts, ...followingEntities]);
+      const followingItems = dedupeFeedItems([...posts, ...followingEntities.filter(isOpenFeedRecommendation)]);
       return sortFeedItemsNewestFirst(followingItems);
     }
     return sortFeedItemsNewestFirst(dedupeFeedItems(posts));

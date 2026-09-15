@@ -243,21 +243,16 @@ const isJwtExpiredOrNearExpiry = (
     return expMs - Date.now() <= Math.max(0, safetyWindowMs);
 };
 
-// In-memory token cache so we don't call refreshSession() on every invoke.
-// Token is considered stale after TOKEN_CACHE_TTL_MS and re-refreshed.
-const TOKEN_CACHE_TTL_MS = 4 * 60 * 1000; // 4 minutes
+// Refresh state is shared so concurrent invokes do not rotate the refresh token
+// independently. The access token itself always comes from the current session.
 const TOKEN_REFRESH_SAFETY_WINDOW_MS = 60 * 1000; // 1 minute
 const REFRESH_FAILURE_COOLDOWN_MS = 30 * 1000; // 30 seconds
 const REFRESH_RATE_LIMIT_COOLDOWN_MS = 60 * 1000; // 1 minute
-let _cachedToken: string | null = null;
-let _cachedTokenAt = 0;
 let _refreshCooldownUntil = 0;
 let _refreshInFlight: Promise<string | null> | null = null;
 
-// Invalidate the cache (e.g. on sign-out or auth change)
+// Reset pending refresh state on sign-out or any auth identity change.
 export const invalidateTokenCache = () => {
-    _cachedToken = null;
-    _cachedTokenAt = 0;
     _refreshCooldownUntil = 0;
     _refreshInFlight = null;
 };
@@ -335,10 +330,8 @@ const refreshAccessToken = async (): Promise<string | null> => {
                 isJwtLike(refreshedSession.access_token) &&
                 !isJwtExpiredOrNearExpiry(refreshedSession.access_token, 0)
             ) {
-                _cachedToken = refreshedSession.access_token;
-                _cachedTokenAt = Date.now();
                 _refreshCooldownUntil = 0;
-                return _cachedToken;
+                return refreshedSession.access_token;
             }
 
             const refreshStatus = Number((refreshError as any)?.status || 0);
@@ -374,28 +367,14 @@ const refreshAccessToken = async (): Promise<string | null> => {
 
 /**
  * Resolve an access token safely for Edge Function auth.
- * Strategy: cache -> current session token -> refresh -> fallback session token.
- * This minimizes refresh-token rotation races while still recovering from
- * stale or near-expiry tokens.
+ * Strategy: current session token -> refresh -> fallback session token.
+ * Reading the current session before every invoke prevents a token cached for
+ * a previous account from being attached after an auth identity change.
  */
 const getFreshAccessToken = async (): Promise<string | null> => {
-    // 1. Return in-memory cached token if it's still young
     const now = Date.now();
-    if (
-        _cachedToken &&
-        isJwtLike(_cachedToken) &&
-        now - _cachedTokenAt < TOKEN_CACHE_TTL_MS &&
-        !isJwtExpiredOrNearExpiry(_cachedToken, TOKEN_REFRESH_SAFETY_WINDOW_MS)
-    ) {
-        return _cachedToken;
-    }
 
-    if (_cachedToken && isJwtExpiredOrNearExpiry(_cachedToken, TOKEN_REFRESH_SAFETY_WINDOW_MS)) {
-        _cachedToken = null;
-        _cachedTokenAt = 0;
-    }
-
-    // 2. Prefer currently persisted session token first to avoid unnecessary
+    // 1. Prefer the currently persisted session token to avoid unnecessary
     // refresh-token rotation races across concurrent callers.
     try {
         const {
@@ -412,22 +391,20 @@ const getFreshAccessToken = async (): Promise<string | null> => {
             const isNearExpiry = expiresAtMs > 0 && expiresAtMs - now <= TOKEN_REFRESH_SAFETY_WINDOW_MS;
 
             if (!isNearExpiry && !tokenIsNearExpiry) {
-                _cachedToken = currentSession.access_token;
-                _cachedTokenAt = now;
-                return _cachedToken;
+                return currentSession.access_token;
             }
         }
     } catch {
         // ignore and continue with refresh path
     }
 
-    // 3. If token is missing/near expiry, refresh once.
+    // 2. If token is missing/near expiry, refresh once.
     const refreshedToken = await refreshAccessToken();
     if (refreshedToken) {
         return refreshedToken;
     }
 
-    // 4. Fallback to any persisted session token if refresh failed transiently.
+    // 3. Fallback to the persisted session token if refresh failed transiently.
     try {
         const {
             data: { session: fallbackSession },
@@ -438,9 +415,7 @@ const getFreshAccessToken = async (): Promise<string | null> => {
             isJwtLike(fallbackSession.access_token) &&
             !isJwtExpiredOrNearExpiry(fallbackSession.access_token, 0)
         ) {
-            _cachedToken = fallbackSession.access_token;
-            _cachedTokenAt = Date.now();
-            return _cachedToken;
+            return fallbackSession.access_token;
         }
     } catch {
         // ignore
@@ -846,16 +821,13 @@ const unregisterCurrentPushDevice = async () => {
     return originalSignOut(...args);
 };
 
-// Bust token cache on auth changes so subsequent invokes hydrate from
-// the latest persisted session state.
+// Reset refresh state on auth changes so subsequent invokes hydrate from the
+// latest persisted session state.
 supabase.auth.onAuthStateChange((_event, session) => {
     invalidateTokenCache();
 
     const token = session?.access_token;
     if (token && isJwtLike(token) && !isJwtExpiredOrNearExpiry(token, 0)) {
-        _cachedToken = token;
-        _cachedTokenAt = Date.now();
-
         try {
             supabase.realtime.setAuth(token);
         } catch {

@@ -25,7 +25,9 @@ import {
   resolveRecordingRule,
 } from "../utils/recordingRule";
 import CachedImage from "./CachedImage";
+import ConnectionApplicantReview from "./ConnectionApplicantReview";
 import InAppMediaViewer, { isInAppMediaUrl } from "./InAppMediaViewer";
+import ProfileAvatar from "./ProfileAvatar";
 import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
 
 const debugLog = (..._args: unknown[]) => { };
@@ -396,6 +398,13 @@ const BookingDetailsSheet = forwardRef<
     const listingTypeLabel = booking?.listing_type
       ? toStartCase(String(booking.listing_type).replace(/_/g, " "))
       : null;
+    const applicantProfile = booking?.applicant || booking?.counterparty_profile || null;
+    const applicantSkills = Array.isArray(applicantProfile?.skills) ? applicantProfile.skills : [];
+    const applicantGenres = Array.isArray(applicantProfile?.genres) ? applicantProfile.genres : [];
+    const applicantPortfolio = Array.isArray(applicantProfile?.portfolio_urls)
+      ? applicantProfile.portfolio_urls
+      : [];
+    const isApplication = String(booking?.request_kind || "").toLowerCase() === "application";
 
     const openRequestAttachment = async (url: string, label: string) => {
       await openMediaOrExternal(url, label);
@@ -420,7 +429,7 @@ const BookingDetailsSheet = forwardRef<
             url: booking.request_video_url,
           }
         : null,
-    ].filter(Boolean) as Array<{ label: string; url: string }>;
+    ].filter(Boolean) as { label: string; url: string }[];
 
     return (
       <>
@@ -497,6 +506,29 @@ const BookingDetailsSheet = forwardRef<
               </View>
 
               <View style={styles.detailsGrid}>
+                {isApplication && applicantProfile ? (
+                  <View style={styles.requestApplicantRow}>
+                    <ProfileAvatar
+                      uri={applicantProfile.avatar_url || booking.counterparty_avatar}
+                      size={58}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.studioName, { color: colors.text }]}>
+                        {applicantProfile.full_name || booking.counterparty_name || "Applicant"}
+                      </Text>
+                      <Text style={[styles.notesText, { color: colors.textSecondary }]}>
+                        {applicantProfile.location || applicantProfile.address || "Location not provided"}
+                      </Text>
+                      {applicantProfile.is_verified === true &&
+                      String(applicantProfile.verification_status || "").toUpperCase() === "APPROVED" ? (
+                        <View style={styles.requestVerifiedRow}>
+                          <Ionicons name="shield-checkmark" size={14} color="#10B981" />
+                          <Text style={[styles.detailLabel, { color: "#10B981" }]}>Verified applicant</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                ) : null}
                 <View style={styles.detailItem}>
                   <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Type</Text>
                   <Text style={[styles.detailValue, { color: colors.text }]}>
@@ -562,6 +594,27 @@ const BookingDetailsSheet = forwardRef<
                   </View>
                 ) : null}
 
+                {isApplication && applicantSkills.length > 0 ? (
+                  <View style={styles.detailItem}>
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Skills / Instruments</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>{applicantSkills.join(", ")}</Text>
+                  </View>
+                ) : null}
+
+                {isApplication && applicantGenres.length > 0 ? (
+                  <View style={styles.detailItem}>
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Genres</Text>
+                    <Text style={[styles.detailValue, { color: colors.text }]}>{applicantGenres.join(", ")}</Text>
+                  </View>
+                ) : null}
+
+                {isApplication && applicantProfile?.bio ? (
+                  <View style={styles.detailItem}>
+                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Profile Summary</Text>
+                    <Text style={[styles.notesText, { color: colors.text }]}>{applicantProfile.bio}</Text>
+                  </View>
+                ) : null}
+
                 {createdLabel ? (
                   <View style={styles.detailItem}>
                     <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Created</Text>
@@ -570,6 +623,10 @@ const BookingDetailsSheet = forwardRef<
                 ) : null}
               </View>
             </View>
+
+            {isApplication && booking?.ai_recommendation ? (
+              <ConnectionApplicantReview application={booking} colors={colors} />
+            ) : null}
 
             <View
               style={[
@@ -608,6 +665,21 @@ const BookingDetailsSheet = forwardRef<
                   ))}
                 </View>
               )}
+
+              {isApplication && applicantPortfolio.length > 0 ? (
+                <View style={[styles.actions, { marginTop: 10 }]}>
+                  {applicantPortfolio.slice(0, 4).map((url: string, index: number) => (
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      key={`${url}-${index}`}
+                      style={[styles.actionBtn, styles.viewStudioBtn, { borderColor: colors.border }]}
+                      onPress={() => openRequestAttachment(url, `Portfolio ${index + 1}`)}
+                    >
+                      <Text style={[styles.viewStudioBtnText, { color: colors.primary }]}>Open Portfolio {index + 1}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
             </View>
 
             <View style={styles.actions}>
@@ -1938,6 +2010,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: scale(8),
+  },
+  requestApplicantRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(12),
+  },
+  requestVerifiedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(5),
+    marginTop: moderateScale(4),
   },
   ownerAvatar: {
     width: moderateScale(32),

@@ -100,6 +100,17 @@ const getResultTimestamp = (item: any) => {
   return Number.isFinite(timestamp) ? timestamp : 0;
 };
 
+const isStudioAcceptingBookings = (item: any, today = new Date()) => {
+  const hasWeeklyHours = Array.isArray(item?.availability) && item.availability.some(
+    (slot: any) => slot && slot.is_open !== false,
+  );
+  const todayKey = today.toISOString().split("T")[0];
+  const hasFutureOpenDate = Array.isArray(item?.open_dates) && item.open_dates.some(
+    (value: unknown) => typeof value === "string" && value.slice(0, 10) >= todayKey,
+  );
+  return hasWeeklyHours || hasFutureOpenDate;
+};
+
 const normalizeResult = (
   table: SearchTable,
   item: any,
@@ -200,11 +211,18 @@ serve(async (req: Request) => {
       }
 
       if (table === "gigs_with_stats") {
-        query = query.eq("status", "open").eq("permit_status", "approved");
+        query = query
+          .eq("status", "open")
+          .eq("permit_status", "approved")
+          .or(`event_date.is.null,event_date.gte.${new Date().toISOString()}`);
       }
 
       if (table === "studios_with_stats") {
         query = query.eq("permit_status", "approved");
+      }
+
+      if (table === "production_teams") {
+        query = query.eq("open_production_applications", true);
       }
 
       if (selectedGenre !== "All" && (table === "groups_with_stats" || table === "gigs_with_stats")) {
@@ -325,6 +343,13 @@ serve(async (req: Request) => {
           : item,
       );
     }
+
+    results = results.filter((item) => {
+      if (item.type === "Group") return item.open_group_applications === true;
+      if (item.type === "Production") return item.open_production_applications === true;
+      if (item.type === "Studio") return isStudioAcceptingBookings(item);
+      return true;
+    });
 
     const studioIds = results.filter((item) => item.type === "Studio" && item.id).map((item) => item.id);
     if (studioIds.length > 0) {

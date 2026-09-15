@@ -1128,6 +1128,138 @@ function getProductionTeamIdFromRequest(request: any) {
   return null;
 }
 
+const PRODUCTION_APPLICATION_STATUSES = [
+  "pending",
+  "accepted",
+  "approved",
+  "connected",
+  "rejected",
+  "declined",
+  "cancelled",
+];
+
+async function getProductionTeamApplications(
+  supabaseAdmin: any,
+  teamId: string,
+  userId: string,
+) {
+  const editorAccess = await getProductionEditorAccess(supabaseAdmin, teamId, userId);
+  if (!editorAccess) {
+    const permissionError: any = new Error("Only production team managers can view applications");
+    permissionError.status = 403;
+    throw permissionError;
+  }
+
+  const { data: team, error: teamError } = await supabaseAdmin
+    .from("production_teams")
+    .select("id, owner_id, name, description")
+    .eq("id", teamId)
+    .maybeSingle();
+
+  if (teamError) throw teamError;
+  if (!team) {
+    const notFoundError: any = new Error("Production team not found");
+    notFoundError.status = 404;
+    throw notFoundError;
+  }
+
+  const { data: requestRows, error: requestError } = await supabaseAdmin
+    .from("booking_requests")
+    .select("id, created_at, sender_id, receiver_id, group_id, studio_id, status, message, attachment_url, event_details")
+    .eq("receiver_id", team.owner_id)
+    .in("status", PRODUCTION_APPLICATION_STATUSES)
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  if (requestError) throw requestError;
+
+  const applications = (requestRows || []).filter(
+    (request: any) =>
+      isProductionTeamApplicationRequest(request) &&
+      getProductionTeamIdFromRequest(request) === teamId,
+  );
+  const applicantIds = Array.from(
+    new Set(
+      applications
+        .map((request: any) => toNonEmptyString(request.sender_id))
+        .filter((id: string | null): id is string => Boolean(id)),
+    ),
+  );
+  const applicantProfilesById = new Map<string, any>();
+
+  if (applicantIds.length > 0) {
+    const [{ data: profiles, error: profilesError }, { data: projections, error: projectionsError }] =
+      await Promise.all([
+        supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, avatar_url, email, location, address, bio, is_verified, verification_status")
+          .in("id", applicantIds),
+        supabaseAdmin
+          .from("profiles_legacy_projection")
+          .select("id, skills, genres, portfolio_urls")
+          .in("id", applicantIds),
+      ]);
+
+    if (profilesError) throw profilesError;
+    if (projectionsError) throw projectionsError;
+
+    const projectionsById = new Map(
+      (projections || []).map((row: any) => [row.id, row]),
+    );
+    (profiles || []).forEach((profile: any) => {
+      const projection: any = projectionsById.get(profile.id) || {};
+      applicantProfilesById.set(profile.id, {
+        ...profile,
+        skills: Array.isArray(projection.skills) ? projection.skills : [],
+        genres: Array.isArray(projection.genres) ? projection.genres : [],
+        portfolio_urls: Array.isArray(projection.portfolio_urls) ? projection.portfolio_urls : [],
+      });
+    });
+  }
+
+  const groupIds = Array.from(
+    new Set(
+      applications
+        .map((request: any) => toNonEmptyString(request.group_id))
+        .filter((id: string | null): id is string => Boolean(id)),
+    ),
+  );
+  const groupsById = new Map<string, any>();
+
+  if (groupIds.length > 0) {
+    const [{ data: groups, error: groupsError }, { data: projections, error: projectionsError }] =
+      await Promise.all([
+        supabaseAdmin
+          .from("groups")
+          .select("id, name, group_type, genre, description, location, owner_id")
+          .in("id", groupIds),
+        supabaseAdmin
+          .from("groups_legacy_projection")
+          .select("id, images")
+          .in("id", groupIds),
+      ]);
+
+    if (groupsError) throw groupsError;
+    if (projectionsError) throw projectionsError;
+
+    const imagesById = new Map(
+      (projections || []).map((row: any) => [row.id, Array.isArray(row.images) ? row.images : []]),
+    );
+    (groups || []).forEach((group: any) => {
+      groupsById.set(group.id, { ...group, images: imagesById.get(group.id) || [] });
+    });
+  }
+
+  return {
+    team,
+    applications: applications.map((request: any) => ({
+      ...request,
+      applicant: applicantProfilesById.get(request.sender_id) || null,
+      sender_group: groupsById.get(request.group_id) || null,
+    })),
+  };
+}
+
 async function addProductionTeamMember(
   supabaseAdmin: any,
   teamId: string,
@@ -1314,6 +1446,27 @@ serve(async (req: Request) => {
 
     const { action, ...params } = await req.json();
     actionForLog = typeof action === "string" && action.trim() ? action.trim() : "unknown";
+
+    if (action === "fetch_team_applications") {
+      const teamId = toNonEmptyString(params.team_id ?? params.teamId);
+      if (!teamId) {
+        return jsonResponse({ error: "team_id is required" }, 400);
+      }
+
+      try {
+        const result = await getProductionTeamApplications(
+          supabaseAdmin,
+          teamId,
+          authUser.id,
+        );
+        return jsonResponse({ success: true, ...result });
+      } catch (applicationError: any) {
+        return jsonResponse(
+          { error: applicationError?.message || "Failed to fetch production applications" },
+          Number(applicationError?.status) || 500,
+        );
+      }
+    }
 
     if (action === "create_listing_request") {
       const receiverUserId =
@@ -1502,7 +1655,7 @@ serve(async (req: Request) => {
       }
 
       const productionTeamManager = productionTeamApplicationId
-        ? await getTeamManagerMembership(supabaseAdmin, productionTeamApplicationId, authUser.id)
+        ? await getProductionEditorAccess(supabaseAdmin, productionTeamApplicationId, authUser.id)
         : null;
       const canRespond = productionTeamApplicationId
         ? requestRow.receiver_id === authUser.id || !!productionTeamManager

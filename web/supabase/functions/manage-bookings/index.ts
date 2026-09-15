@@ -1234,26 +1234,20 @@ serve(async (req: Request) => {
 
     // 1. FETCH BOOKINGS & APPLICATIONS
     if (action === "fetch") {
-      const { userId } = params;
-
-      if (userId && userId !== authUser.id) {
-        return new Response(JSON.stringify({ error: "Forbidden" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          status: 403,
-        });
-      }
+      // Fetch is always scoped to the verified JWT identity. Ignore any legacy
+      // userId in the payload so a stale client cannot cause an identity mismatch.
+      const requesterId = authUser.id;
 
       // First, get user role to determine what to fetch
       const { data: profile, error: profileError } = await supabaseClient
         .from("profiles")
         .select("role")
-        .eq("id", userId || authUser.id)
+        .eq("id", requesterId)
         .single();
 
       if (profileError) throw profileError;
 
       const userRole = profile?.role;
-      const requesterId = userId || authUser.id;
       let activityRole = userRole;
       let staffAssignment: StaffAssignment | null = null;
       let staffContext: ReturnType<typeof buildStaffContext> = null;
@@ -1265,7 +1259,7 @@ serve(async (req: Request) => {
       }
 
       if (userRole === "musician" || userRole === "studio-owner") {
-        await autoStartBookingsAndNotify(supabaseAdmin, userId, userRole);
+        await autoStartBookingsAndNotify(supabaseAdmin, requesterId, userRole);
       }
 
       const categorized = {
@@ -1282,7 +1276,7 @@ serve(async (req: Request) => {
         const { data: bookings, error: bookingError } = await supabaseClient
           .from("studio_bookings")
           .select("*, studio:studios(name, owner_id, studio_media(media_url, sort_order))")
-          .eq("user_id", userId)
+          .eq("user_id", requesterId)
           .order("booking_date", { ascending: false });
 
         if (bookingError) throw bookingError;
@@ -1650,7 +1644,7 @@ serve(async (req: Request) => {
         try {
           gigApps = await fetchGigApplicationsVisibleToMusician(
             supabaseAdmin,
-            userId,
+            requesterId,
           );
         } catch (gigError) {
           console.error("Failed to fetch visible gig applications:", gigError);
@@ -1666,7 +1660,7 @@ serve(async (req: Request) => {
             !!g.reconfirmation_due_at;
           const gig = g.gig;
           const viewer: GigApplicationAudienceMember = g.__viewer || {
-            user_id: userId,
+            user_id: requesterId,
             viewer_access: "applicant",
             viewer_can_act: true,
             viewer_read_only_reason: null,
@@ -1741,8 +1735,13 @@ serve(async (req: Request) => {
           };
 
           if (normalizedStatus === "pending") {
-            // @ts-ignore
-            categorized.Pending.push(item);
+            if (eventDate && now > eventDate) {
+              // @ts-ignore
+              categorized.Review.push({ ...item, raw_status: "cancelled", status: "Expired", isCancelled: true });
+            } else {
+              // @ts-ignore
+              categorized.Pending.push(item);
+            }
           } else if (normalizedStatus === "accepted" || normalizedStatus === "approved") {
             // Time-based categorization for accepted gigs
             if (eventDate) {
@@ -1754,9 +1753,8 @@ serve(async (req: Request) => {
                 // @ts-ignore
                 categorized.Ongoing.push({ ...item, status: "Happening Now" });
               } else if (now > eventDate) {
-                // Keep completed accepted gigs visible for My Gig and history.
                 // @ts-ignore
-                categorized.Review.push({ ...item, status: "Completed" });
+                categorized.Review.push({ ...item, raw_status: "completed", status: "Completed" });
               } else {
                 // Gig is in the future
                 // @ts-ignore
@@ -1796,7 +1794,7 @@ serve(async (req: Request) => {
           )
           .eq("status", "pending")
           .eq("leader_approval_status", "pending")
-          .neq("submitted_by_user_id", userId)
+          .neq("submitted_by_user_id", requesterId)
           .order("created_at", { ascending: false });
 
         if (leaderPendingError) {
@@ -1804,7 +1802,7 @@ serve(async (req: Request) => {
 
         // @ts-ignore
         leaderPendingApps?.forEach((app: any) => {
-          if (app.group?.owner_id !== userId) return;
+          if (app.group?.owner_id !== requesterId) return;
 
           const gig = app.gig;
           const dateStr = gig?.event_date || app.created_at?.split("T")[0] || "TBA";
@@ -1972,8 +1970,13 @@ serve(async (req: Request) => {
             };
 
             if (normalizedStatus === "pending") {
-              // @ts-ignore
-              categorized.Pending.push(item);
+              if (eventDate && now > eventDate) {
+                // @ts-ignore
+                categorized.Review.push({ ...item, raw_status: "cancelled", status: "Expired", isCancelled: true });
+              } else {
+                // @ts-ignore
+                categorized.Pending.push(item);
+              }
             } else if (normalizedStatus === "accepted" || normalizedStatus === "approved") {
               if (eventDate) {
                 const eventStart = new Date(gig.event_date);
@@ -1983,9 +1986,8 @@ serve(async (req: Request) => {
                   // @ts-ignore
                   categorized.Ongoing.push({ ...item, status: "Happening Now" });
                 } else if (now > eventDate) {
-                  // Keep completed accepted gigs visible for My Gig and history.
                   // @ts-ignore
-                  categorized.Review.push({ ...item, status: "Completed" });
+                  categorized.Review.push({ ...item, raw_status: "completed", status: "Completed" });
                 } else {
                   // @ts-ignore
                   categorized.Upcoming.push(item);
@@ -2019,11 +2021,11 @@ serve(async (req: Request) => {
         const { data: gigs } = staffAssignment?.entity_type === "venue" && staffAssignment.gig_id
           ? await supabaseClient
             .from("gigs")
-            .select("id, name, event_date, location")
+            .select("id, name, event_date, location, gig_media(media_url, sort_order)")
             .eq("id", staffAssignment.gig_id)
           : await supabaseClient
             .from("gigs")
-            .select("id, name, event_date, location")
+            .select("id, name, event_date, location, gig_media(media_url, sort_order)")
             .eq("organizer_id", requesterId);
 
         const gigIds = gigs?.map((g: any) => g.id) || [];
@@ -2101,6 +2103,11 @@ serve(async (req: Request) => {
               submitted_by_name: app.submitter?.full_name || null,
               raw_date: dateStr,
               name: `${gig?.name || "Gig"} - ${performerName}`,
+              gig_name: gig?.name || "Gig",
+              gig_image:
+                [...(gig?.gig_media || [])]
+                  .sort((a: any, b: any) => Number(a?.sort_order || 0) - Number(b?.sort_order || 0))[0]
+                  ?.media_url || null,
               date: dateStr,
               image:
                 app.group?.images?.[0] ||
@@ -2136,8 +2143,13 @@ serve(async (req: Request) => {
             };
 
             if (app.status === "pending") {
-              // @ts-ignore
-              categorized.Pending.push(item);
+              if (eventDate && now > eventDate) {
+                // @ts-ignore
+                categorized.Review.push({ ...item, raw_status: "cancelled", status: "Expired", isCancelled: true });
+              } else {
+                // @ts-ignore
+                categorized.Pending.push(item);
+              }
             } else if (app.status === "accepted" || app.status === "approved") {
               if (eventDate) {
                 const eventStart = new Date(gig.event_date);
@@ -2151,11 +2163,10 @@ serve(async (req: Request) => {
                     status: "Happening Now",
                   });
                 } else if (now > eventDate) {
-                  // Past accepted contracts pause in Review before moving to History.
+                  // The gig window is over, so it closes for the owner and linked performers together.
                   // @ts-ignore
-                  categorized.Review.push({ ...item, status: "Completed" });
+                  categorized.Review.push({ ...item, raw_status: "completed", status: "Completed" });
                 } else {
-                  // Future accepted musicians stay active.
                   // @ts-ignore
                   categorized.Upcoming.push(item);
                 }
@@ -2305,7 +2316,7 @@ serve(async (req: Request) => {
           connectionProfileIds.length > 0
             ? supabaseClient
                 .from("profiles")
-                .select("id, full_name, avatar_url")
+                .select("id, full_name, avatar_url, location, address, bio, is_verified, verification_status")
                 .in("id", connectionProfileIds)
             : Promise.resolve({ data: [], error: null }),
           studioBookingIds.length > 0

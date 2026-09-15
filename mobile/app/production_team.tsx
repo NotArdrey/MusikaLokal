@@ -3,6 +3,7 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
+  Linking,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -15,6 +16,7 @@ import {
 import { supabase } from "../lib/supabase";
 import BottomModal from "../src/components/BottomModal";
 import CachedImage from "../src/components/CachedImage";
+import ConnectionApplicantReview from "../src/components/ConnectionApplicantReview";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal, { normalizeVisibleInput } from "../src/components/modal";
@@ -31,6 +33,10 @@ import { ProductionInviteTarget, sendProductionTeamInvites } from "../src/utils/
 import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 import { runAfterUIIdle } from "../src/utils/idleTask";
 import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
+import {
+  attachConnectionApplicantRecommendation,
+  sortConnectionApplicationsByRecommendation,
+} from "../src/utils/connectionApplicantRecommendations";
 
 interface Team {
   id: string;
@@ -65,7 +71,10 @@ interface TeamRosterEntry {
   group?: any;
 }
 
-const PRODUCTION_TABS: ("About" | "Members" | "Reviews")[] = ["About", "Members", "Reviews"];
+type ProductionTab = "About" | "Members" | "Applications" | "Reviews";
+type ApplicationFilter = "All" | "Recommended" | "Pending" | "Accepted" | "Declined";
+
+const PRODUCTION_TABS: ProductionTab[] = ["About", "Members", "Applications", "Reviews"];
 
 export default function ProductionTeamScreen() {
   const { colors, isDark } = useTheme();
@@ -76,7 +85,7 @@ export default function ProductionTeamScreen() {
   const routeTeamId = Array.isArray(params.teamId) ? params.teamId[0] : params.teamId;
   const routeTab = Array.isArray(params.tab) ? params.tab[0] : params.tab;
   const requestedTab = PRODUCTION_TABS.includes(routeTab as any)
-    ? routeTab as "About" | "Members" | "Reviews"
+    ? routeTab as ProductionTab
     : "About";
   const isProducer = userRole === "producer";
 
@@ -92,7 +101,7 @@ export default function ProductionTeamScreen() {
 
   // Team detail view
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
-  const [activeTab, setActiveTab] = useState<"About" | "Members" | "Reviews">(requestedTab);
+  const [activeTab, setActiveTab] = useState<ProductionTab>(requestedTab);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamRoster, setTeamRoster] = useState<TeamRosterEntry[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
@@ -106,6 +115,10 @@ export default function ProductionTeamScreen() {
   const [selectedInviteTargets, setSelectedInviteTargets] = useState<ProductionInviteTarget[]>([]);
   const [sendingInvites, setSendingInvites] = useState(false);
   const [updatingApplications, setUpdatingApplications] = useState(false);
+  const [teamApplications, setTeamApplications] = useState<any[]>([]);
+  const [loadingApplications, setLoadingApplications] = useState(false);
+  const [respondingApplicationId, setRespondingApplicationId] = useState<string | null>(null);
+  const [applicationFilter, setApplicationFilter] = useState<ApplicationFilter>("All");
 
   // Alert
   const [alertVisible, setAlertVisible] = useState(false);
@@ -237,6 +250,31 @@ export default function ProductionTeamScreen() {
     }
   }, []);
 
+  const fetchTeamApplications = useCallback(async (team: Pick<Team, "id" | "name" | "description">) => {
+    setLoadingApplications(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-production", {
+        body: { action: "fetch_team_applications", team_id: team.id },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const applications = Array.isArray(data?.applications) ? data.applications : [];
+      setTeamApplications(
+        sortConnectionApplicationsByRecommendation(
+          applications.map((application: any) =>
+            attachConnectionApplicantRecommendation(application, team),
+          ),
+        ),
+      );
+    } catch (e: any) {
+      setTeamApplications([]);
+      showAlert("error", "Applications", e.message || "Failed to fetch applications");
+    } finally {
+      setLoadingApplications(false);
+    }
+  }, []);
+
   const fetchTeamById = useCallback(async (teamId: string) => {
     try {
       const { data, error } = await supabase
@@ -270,11 +308,12 @@ export default function ProductionTeamScreen() {
         ? getStaffPermissions(staffAssignment?.access_level)
         : null;
 
-      setSelectedTeam({
+      const resolvedMemberRole = data.owner_id === userId
+        ? "owner"
+        : membershipData?.role || (isAssignedStaff ? `staff-level-${staffAssignment?.access_level}` : "viewer");
+      const selectedTeamData: Team = {
         ...data,
-        member_role: data.owner_id === userId
-          ? "owner"
-          : membershipData?.role || (isAssignedStaff ? `staff-level-${staffAssignment?.access_level}` : "viewer"),
+        member_role: resolvedMemberRole,
         staff_access_level: isAssignedStaff ? staffAssignment?.access_level || null : null,
         staff_can_edit: Boolean(staffPermissions?.canEditListing),
         staff_can_manage_bookings: Boolean(staffPermissions?.canManageBookings),
@@ -282,16 +321,23 @@ export default function ProductionTeamScreen() {
           typeof data.open_production_applications === "boolean"
             ? data.open_production_applications
             : undefined,
-      });
-      setActiveTab(requestedTab);
-      await fetchTeamMembers(teamId);
+      };
+      setSelectedTeam(selectedTeamData);
+      const mayManageApplications =
+        ["owner", "manager"].includes(resolvedMemberRole) ||
+        Boolean(staffPermissions?.canEditListing);
+      setActiveTab(requestedTab === "Applications" && !mayManageApplications ? "About" : requestedTab);
+      await Promise.all([
+        fetchTeamMembers(teamId),
+        mayManageApplications ? fetchTeamApplications(selectedTeamData) : Promise.resolve(),
+      ]);
     } catch (e: any) {
       showAlert("error", "Error", e.message || "Failed to fetch team");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [fetchTeamMembers, requestedTab, userId, userRole]);
+  }, [fetchTeamApplications, fetchTeamMembers, requestedTab, userId, userRole]);
 
   useFocusEffect(
     useCallback(() => {
@@ -566,10 +612,46 @@ export default function ProductionTeamScreen() {
     }
   };
 
+  const handleApplicationDecision = async (application: any, decision: "accepted" | "declined") => {
+    if (!selectedTeam || respondingApplicationId) return;
+    setRespondingApplicationId(application.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-production", {
+        body: {
+          action: "respond_to_listing_request",
+          request_id: application.id,
+          decision,
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      invalidateListingCaches(userId, ["bookings", "details", "home", "notifications"]);
+      await Promise.all([
+        fetchTeamApplications(selectedTeam),
+        decision === "accepted" ? fetchTeamMembers(selectedTeam.id) : Promise.resolve(),
+      ]);
+      showAlert(
+        "success",
+        decision === "accepted" ? "Application Accepted" : "Application Declined",
+        decision === "accepted"
+          ? "The applicant was added to the production roster."
+          : "The applicant has been notified.",
+      );
+    } catch (e: any) {
+      showAlert("error", "Update Failed", e.message || "Could not update this application");
+    } finally {
+      setRespondingApplicationId(null);
+    }
+  };
+
   const openTeamDetail = (team: Team) => {
     setActiveTab("About");
     setSelectedTeam(team);
     fetchTeamMembers(team.id);
+    if (["owner", "manager"].includes(team.member_role) || team.staff_can_edit) {
+      fetchTeamApplications(team);
+    }
   };
 
   const closeTeamDetail = () => {
@@ -582,6 +664,8 @@ export default function ProductionTeamScreen() {
     setSelectedTeam(null);
     setTeamMembers([]);
     setTeamRoster([]);
+    setTeamApplications([]);
+    setApplicationFilter("All");
     setFireModalVisible(false);
     setMemberToFire(null);
     setFireReason("");
@@ -600,7 +684,6 @@ export default function ProductionTeamScreen() {
 
   // Team detail view
   if (selectedTeam) {
-    const tabs = PRODUCTION_TABS;
     const selectedStaffPermissions = selectedTeam.staff_access_level
       ? getStaffPermissions(selectedTeam.staff_access_level)
       : null;
@@ -608,6 +691,21 @@ export default function ProductionTeamScreen() {
       selectedTeam.member_role === "owner" ||
       selectedTeam.member_role === "manager" ||
       Boolean(selectedStaffPermissions?.canEditListing);
+    const tabs = canManage
+      ? PRODUCTION_TABS
+      : PRODUCTION_TABS.filter((tab) => tab !== "Applications");
+    const filteredApplications = teamApplications.filter((application) => {
+      const status = String(application?.status || "pending").trim().toLowerCase();
+      if (applicationFilter === "All") return true;
+      if (applicationFilter === "Recommended") {
+        return application?.ai_recommendation?.recommendation_status === "recommended";
+      }
+      if (applicationFilter === "Pending") return status === "pending";
+      if (applicationFilter === "Accepted") {
+        return ["accepted", "approved", "connected"].includes(status);
+      }
+      return ["declined", "rejected", "cancelled"].includes(status);
+    });
 
     return (
       <>
@@ -841,6 +939,133 @@ export default function ProductionTeamScreen() {
                   </>
                 )}
               </>
+            )}
+
+            {activeTab === "Applications" && canManage && (
+              <View>
+                <View style={styles.sectionHeader}>
+                  <View>
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Production Applicants</Text>
+                    <Text style={[styles.applicationHelper, { color: colors.textSecondary }]}>AI scores are advisory; review every profile and attachment.</Text>
+                  </View>
+                  <Text style={[styles.subsectionCount, { color: colors.textSecondary }]}>{teamApplications.length}</Text>
+                </View>
+
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.applicationFilters}
+                >
+                  {(["All", "Recommended", "Pending", "Accepted", "Declined"] as ApplicationFilter[]).map((filter) => {
+                    const selected = applicationFilter === filter;
+                    return (
+                      <TouchableOpacity
+                        key={filter}
+                        testID={`production-applicant-filter-${filter.toLowerCase()}`}
+                        onPress={() => setApplicationFilter(filter)}
+                        style={[
+                          styles.applicationFilterChip,
+                          {
+                            borderColor: selected ? colors.primary : colors.border,
+                            backgroundColor: selected ? colors.primary + "18" : colors.surface,
+                          },
+                        ]}
+                      >
+                        {filter === "Recommended" ? <Ionicons name="sparkles" size={13} color={selected ? colors.primary : colors.textSecondary} /> : null}
+                        <Text style={[styles.applicationFilterText, { color: selected ? colors.primary : colors.textSecondary }]}>{filter}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+
+                {loadingApplications ? (
+                  <View style={styles.loadingContainer}>
+                    <Skeleton width="100%" height={180} borderRadius={14} />
+                    <Skeleton width="100%" height={180} borderRadius={14} style={{ marginTop: 10 }} />
+                  </View>
+                ) : filteredApplications.length === 0 ? (
+                  <Text style={[styles.emptyInlineText, { color: colors.textSecondary }]}>No applications match this filter.</Text>
+                ) : (
+                  filteredApplications.map((application) => {
+                    const details = application?.event_details?.request_details || {};
+                    const applicant = application?.applicant || {};
+                    const senderGroup = application?.sender_group;
+                    const name = senderGroup?.name || applicant?.full_name || "Applicant";
+                    const avatarUrl = senderGroup?.images?.[0] || applicant?.avatar_url || null;
+                    const status = String(application?.status || "pending").toLowerCase();
+                    const isPending = status === "pending";
+                    const isBusy = respondingApplicationId === application.id;
+                    const cvUrl = details?.cv_url || application?.attachment_url;
+                    const videoUrl = details?.video_url;
+
+                    return (
+                      <View key={application.id} style={[styles.applicationCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                        <View style={styles.memberRow}>
+                          {avatarUrl ? (
+                            <CachedImage uri={avatarUrl} style={styles.applicationAvatar} />
+                          ) : (
+                            <View style={[styles.applicationAvatar, styles.avatarPlaceholder, { backgroundColor: colors.border }]}>
+                              <Ionicons name={senderGroup ? "people" : "person"} size={20} color={colors.textSecondary} />
+                            </View>
+                          )}
+                          <View style={styles.memberInfo}>
+                            <Text style={[styles.applicationName, { color: colors.text }]}>{name}</Text>
+                            <Text style={[styles.memberRole, { color: colors.primary }]}>{senderGroup?.group_type || applicant?.location || "Musician"}</Text>
+                          </View>
+                          <View style={[styles.applicationStatus, { backgroundColor: status === "accepted" ? "#10B98120" : status === "pending" ? colors.primary + "18" : "#EF444420" }]}>
+                            <Text style={[styles.applicationStatusText, { color: status === "accepted" ? "#10B981" : status === "pending" ? colors.primary : "#EF4444" }]}>{status}</Text>
+                          </View>
+                        </View>
+
+                        {details?.pitch || application?.message ? (
+                          <Text style={[styles.applicationPitch, { color: colors.textSecondary }]}>{details?.pitch || application?.message}</Text>
+                        ) : null}
+                        {details?.application_context ? (
+                          <Text style={[styles.applicationContext, { color: colors.textSecondary }]}>{details.application_context}</Text>
+                        ) : null}
+
+                        <ConnectionApplicantReview application={application} colors={colors} compact />
+
+                        {cvUrl || videoUrl ? (
+                          <View style={styles.attachmentRow}>
+                            {cvUrl ? (
+                              <TouchableOpacity onPress={() => Linking.openURL(cvUrl)} style={[styles.attachmentButton, { borderColor: colors.border }]}>
+                                <Ionicons name="document-text-outline" size={15} color={colors.primary} />
+                                <Text style={[styles.attachmentText, { color: colors.primary }]}>CV</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                            {videoUrl ? (
+                              <TouchableOpacity onPress={() => Linking.openURL(videoUrl)} style={[styles.attachmentButton, { borderColor: colors.border }]}>
+                                <Ionicons name="videocam-outline" size={15} color={colors.primary} />
+                                <Text style={[styles.attachmentText, { color: colors.primary }]}>Video</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        ) : null}
+
+                        {isPending ? (
+                          <View style={styles.applicationActions}>
+                            <TouchableOpacity
+                              disabled={Boolean(respondingApplicationId)}
+                              onPress={() => handleApplicationDecision(application, "declined")}
+                              style={[styles.applicationDecision, { borderColor: "#EF4444", opacity: respondingApplicationId && !isBusy ? 0.5 : 1 }]}
+                            >
+                              <Text style={[styles.applicationDecisionText, { color: "#EF4444" }]}>Decline</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              disabled={Boolean(respondingApplicationId)}
+                              onPress={() => handleApplicationDecision(application, "accepted")}
+                              style={[styles.applicationDecision, { backgroundColor: colors.primary, borderColor: colors.primary, opacity: respondingApplicationId && !isBusy ? 0.5 : 1 }]}
+                            >
+                              {isBusy ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={[styles.applicationDecisionText, { color: "#FFFFFF" }]}>Accept</Text>}
+                            </TouchableOpacity>
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                  })
+                )}
+              </View>
             )}
 
             {activeTab === "Reviews" && (
@@ -1228,6 +1453,25 @@ const styles = StyleSheet.create({
   memberName: { fontFamily: "Poppins_500Medium", fontSize: 14 },
   memberRole: { fontFamily: "Poppins_400Regular", fontSize: 12, textTransform: "capitalize" },
   removeBtn: { padding: 4 },
+
+  // Applications
+  applicationHelper: { fontFamily: "Poppins_400Regular", fontSize: 12, lineHeight: 18, marginTop: 2, maxWidth: 270 },
+  applicationFilters: { gap: 8, paddingVertical: 10, paddingRight: 12 },
+  applicationFilterChip: { minHeight: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, flexDirection: "row", alignItems: "center", gap: 5 },
+  applicationFilterText: { fontFamily: "Poppins_500Medium", fontSize: 11 },
+  applicationCard: { borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 12 },
+  applicationAvatar: { width: 44, height: 44, borderRadius: 22 },
+  applicationName: { fontFamily: "Poppins_600SemiBold", fontSize: 15 },
+  applicationStatus: { borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4 },
+  applicationStatusText: { fontFamily: "Poppins_600SemiBold", fontSize: 10, textTransform: "capitalize" },
+  applicationPitch: { fontFamily: "Poppins_400Regular", fontSize: 13, lineHeight: 19, marginTop: 12 },
+  applicationContext: { fontFamily: "Poppins_400Regular", fontSize: 12, lineHeight: 18, marginTop: 6, fontStyle: "italic" },
+  attachmentRow: { flexDirection: "row", gap: 8, marginTop: 10 },
+  attachmentButton: { flexDirection: "row", alignItems: "center", gap: 5, borderWidth: 1, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 7 },
+  attachmentText: { fontFamily: "Poppins_500Medium", fontSize: 12 },
+  applicationActions: { flexDirection: "row", gap: 10, marginTop: 12 },
+  applicationDecision: { flex: 1, minHeight: 42, borderWidth: 1, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  applicationDecisionText: { fontFamily: "Poppins_600SemiBold", fontSize: 13 },
 
   // Buttons
   reviewCard: {

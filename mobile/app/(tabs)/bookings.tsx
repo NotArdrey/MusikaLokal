@@ -37,6 +37,13 @@ import { emitToast } from "../../src/events/toastBus";
 import { useTheme } from "../../src/context/ThemeContext";
 import { useBookingsSummaryQuery } from "../../src/data/hooks";
 import { queryKeys } from "../../src/data/queryKeys";
+import {
+  ACTIVITY_PREVIEW_ENABLED,
+  type ActivityPreviewEntity,
+  type ActivityPreviewStatus,
+  type ActivityPreviewStatusMap,
+  withActivityPreviewData,
+} from "../../src/data/activityPreviewFixtures";
 import { createBookingCheckout } from "../../src/services/paymongo";
 import { buildNotificationRouteMeta } from "../../src/utils/notificationNavigation";
 import { formatFriendlyDateTime } from "../../src/utils/friendlyDateTime";
@@ -45,6 +52,7 @@ import { usePageLoadLogger } from "../../src/utils/loadTimeLogger";
 import { runAfterUIIdle } from "../../src/utils/idleTask";
 import { setSmoothTab } from "../../src/utils/smoothTabs";
 import { resolveSupabaseMediaUrl } from "../../src/utils/supabaseMedia";
+import { attachConnectionApplicantRecommendation } from "../../src/utils/connectionApplicantRecommendations";
 import {
   formatRecordingHours,
   getRecordingRequiredBlocks,
@@ -745,6 +753,24 @@ const getActivityDayWindow = (dateValue: unknown) => {
   return { start, end };
 };
 
+const getGigActivityWindow = (
+  dateValue: unknown,
+  startTime?: unknown,
+  endTime?: unknown,
+) => {
+  const dayWindow = getActivityDayWindow(dateValue);
+  if (!dayWindow) return null;
+
+  const start = parseActivityDateTime(dateValue, startTime) || dayWindow.start;
+  const end = parseActivityDateTime(dateValue, endTime) || dayWindow.end;
+
+  if (end.getTime() < start.getTime()) {
+    end.setDate(end.getDate() + 1);
+  }
+
+  return { start, end };
+};
+
 const getStudioBookingWindow = (item: any) => {
   if (!item?.raw_date || !item?.start_time) return null;
 
@@ -1187,8 +1213,11 @@ const buildActivityItemSearchText = (item: any) =>
     item?.display_name,
     item?.title,
     item?.gig_title,
+    item?.gig_name,
     item?.studio_name,
     item?.venue_name,
+    item?.production_team_name,
+    item?.group_name,
     item?.type,
     item?.status,
     item?.display_status,
@@ -1209,6 +1238,136 @@ const buildActivityItemSearchText = (item: any) =>
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+
+const getGigTitleFromActivityItem = (item: any) => {
+  const explicitTitle =
+    toNonEmptyString(item?.gig_name) ||
+    toNonEmptyString(item?.gig_title);
+
+  if (explicitTitle) return explicitTitle;
+
+  const activityName = toNonEmptyString(item?.name);
+  if (!activityName) return "Untitled Gig";
+
+  return activityName.split(" - ")[0] || "Untitled Gig";
+};
+
+type ApplicationActivityGroupKind = "gig" | "production" | "group";
+
+type ApplicationActivityGroupDescriptor = {
+  kind: ApplicationActivityGroupKind;
+  entityId: string;
+  title: string;
+  image: string | null;
+  date?: string | null;
+  location?: string | null;
+};
+
+const APPLICATION_GROUP_PRESENTATION = {
+  gig: {
+    eyebrow: "YOUR GIG",
+    icon: "musical-notes" as const,
+    actionLabel: "View Gig",
+    testPrefix: "gig",
+  },
+  production: {
+    eyebrow: "YOUR PRODUCTION TEAM",
+    icon: "people" as const,
+    actionLabel: "Manage Team",
+    testPrefix: "production",
+  },
+  group: {
+    eyebrow: "YOUR GROUP",
+    icon: "people-circle" as const,
+    actionLabel: "Manage Group",
+    testPrefix: "group",
+  },
+} satisfies Record<ApplicationActivityGroupKind, {
+  eyebrow: string;
+  icon: "musical-notes" | "people" | "people-circle";
+  actionLabel: string;
+  testPrefix: string;
+}>;
+
+const isProductionTeamApplicationRequest = (item: any) =>
+  item?.type_id === "booking_request" &&
+  item?.request_kind === "application" &&
+  normalizeConnectionEntityType(item?.receiver_entity_type) === "production_team" &&
+  item?.request_direction === "incoming" &&
+  Boolean(item?.production_team_id);
+
+const getApplicationActivityGroup = (
+  item: any,
+  role: unknown,
+): ApplicationActivityGroupDescriptor | null => {
+  if (
+    normalizeActivityRole(role) === "venue-owner" &&
+    item?.type_id === "gig_application" &&
+    item?.gig_id
+  ) {
+    return {
+      kind: "gig",
+      entityId: String(item.gig_id),
+      title: getGigTitleFromActivityItem(item),
+      image: toNonEmptyString(item?.gig_image),
+      date: toNonEmptyString(item?.raw_date || item?.date || item?.start_time),
+      location: toNonEmptyString(item?.location),
+    };
+  }
+
+  if (isProducerActivityRole(role) && isProductionTeamApplicationRequest(item)) {
+    return {
+      kind: "production",
+      entityId: String(item.production_team_id),
+      title:
+        toNonEmptyString(item?.production_team_name) ||
+        toNonEmptyString(item?.receiver_entity_name) ||
+        "Production Team",
+      image: toNonEmptyString(item?.production_team_image),
+    };
+  }
+
+  if (
+    normalizeActivityRole(role) === "musician" &&
+    item?.viewer_is_group_owner === true &&
+    isGroupMemberApplicationRequest(item) &&
+    item?.group_id
+  ) {
+    return {
+      kind: "group",
+      entityId: String(item.group_id),
+      title:
+        toNonEmptyString(item?.group_name) ||
+        toNonEmptyString(item?.receiver_entity_name) ||
+        "Group",
+      image: toNonEmptyString(item?.group_image),
+    };
+  }
+
+  return null;
+};
+
+const getApplicationGroupCountLabel = (
+  kind: ApplicationActivityGroupKind,
+  tab: Tab,
+  count: number,
+) => {
+  const noun = count === 1 ? "applicant" : "applicants";
+
+  if (kind === "gig" && tab === "Active Musicians") {
+    return `${count} active ${count === 1 ? "musician" : "musicians"}`;
+  }
+
+  if (kind === "gig" && tab === "Review") {
+    return `${count} awaiting review`;
+  }
+
+  if (tab === "History") {
+    return `${count} past ${noun}`;
+  }
+
+  return `${count} ${noun}`;
+};
 
 const normalizeBookingTestId = (value: unknown) =>
   String(value ?? "")
@@ -1549,6 +1708,11 @@ export default function BookingsScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState("All");
   const [showActivityFilters, setShowActivityFilters] = useState(false);
+  const [expandedActivityGroups, setExpandedActivityGroups] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [activityPreviewEntity, setActivityPreviewEntity] = useState<ActivityPreviewEntity | null>(null);
+  const [activityPreviewStatuses, setActivityPreviewStatuses] = useState<ActivityPreviewStatusMap>({});
   const deferredActiveTab = React.useDeferredValue(activeTab);
   const deferredActiveAppTab = React.useDeferredValue(activeAppTab);
   const deferredSearchQuery = React.useDeferredValue(searchQuery);
@@ -1570,13 +1734,121 @@ export default function BookingsScreen() {
   const bookingsSummaryQuery = useBookingsSummaryQuery(userId, {
     enabled: isAuthenticated && Boolean(userId),
   });
+  useEffect(() => {
+    if (!ACTIVITY_PREVIEW_ENABLED || !userId || !userRole) return;
+
+    let isActive = true;
+
+    const loadOwnedPreviewEntity = async () => {
+      let nextEntity: ActivityPreviewEntity | null = null;
+
+      try {
+        if (userRole === "venue-owner") {
+          const { data: gigRows, error: gigError } = await supabase
+            .from("gigs")
+            .select("id, name, event_date, location, status, gig_media(media_url, sort_order)")
+            .eq("organizer_id", userId)
+            .order("event_date", { ascending: true });
+
+          if (gigError) throw gigError;
+
+          const now = new Date();
+          const activeGig = (gigRows || []).find((gig: any) => {
+            const status = normalizeActivityStatus(gig?.status);
+            if (["cancelled", "canceled", "completed", "done"].includes(status)) return false;
+            const window = getActivityDayWindow(gig?.event_date);
+            return !window || window.end.getTime() >= now.getTime();
+          });
+
+          if (activeGig?.id) {
+            const gigImage = [...(activeGig.gig_media || [])]
+              .sort((a: any, b: any) => Number(a?.sort_order || 0) - Number(b?.sort_order || 0))[0]
+              ?.media_url;
+            nextEntity = {
+              kind: "gig",
+              id: activeGig.id,
+              name: activeGig.name || "Your Gig",
+              image: gigImage || null,
+              date: activeGig.event_date || null,
+              location: activeGig.location || null,
+            };
+          }
+        } else if (isProducerActivityRole(userRole)) {
+          const { data, error } = await supabase.functions.invoke("manage-production", {
+            body: { action: "list_my_teams" },
+          });
+
+          if (error) throw error;
+          const teams = Array.isArray(data?.teams) ? data.teams : [];
+          const team =
+            teams.find((item: any) => item?.member_role === "owner") ||
+            teams.find((item: any) => item?.member_role === "manager");
+
+          if (team?.id) {
+            nextEntity = {
+              kind: "production",
+              id: team.id,
+              name: team.name || "Your Production Team",
+              image: team.logo_url || null,
+            };
+          }
+        } else if (userRole === "musician") {
+          const { data: groupRows, error: groupError } = await supabase
+            .from("groups")
+            .select("id, name, created_at")
+            .eq("owner_id", userId)
+            .order("created_at", { ascending: false })
+            .limit(1);
+
+          if (groupError) throw groupError;
+          const group = groupRows?.[0];
+
+          if (group?.id) {
+            const { data: mediaRows } = await supabase
+              .from("group_media")
+              .select("media_url, sort_order")
+              .eq("group_id", group.id)
+              .eq("media_type", "image")
+              .order("sort_order", { ascending: true })
+              .limit(1);
+
+            nextEntity = {
+              kind: "group",
+              id: group.id,
+              name: group.name || "Your Group",
+              image: mediaRows?.[0]?.media_url || null,
+            };
+          }
+        }
+      } catch (error) {
+        debugLog("Could not load the owned entity for activity sample data:", error);
+      }
+
+      if (isActive) setActivityPreviewEntity(nextEntity);
+    };
+
+    void loadOwnedPreviewEntity();
+    return () => {
+      isActive = false;
+    };
+  }, [userId, userRole]);
+  const bookingsDataWithPreview = React.useMemo(
+    () => withActivityPreviewData(data, userRole, {
+      entity: activityPreviewEntity,
+      statuses: activityPreviewStatuses,
+      userId,
+    }),
+    [activityPreviewEntity, activityPreviewStatuses, data, userId, userRole],
+  );
   const dynamicBookingsData = React.useMemo(
-    () => buildDynamicBookingsData(data, currentTime),
-    [currentTime, data],
+    () => userRole === "venue-owner"
+      ? bookingsDataWithPreview
+      : buildDynamicBookingsData(bookingsDataWithPreview, currentTime),
+    [bookingsDataWithPreview, currentTime, userRole],
   );
   const shouldRunDynamicBookingsClock = React.useMemo(
-    () => hasDynamicActivityCandidates(data),
-    [data],
+    () => userRole !== "venue-owner" && hasDynamicActivityCandidates(data),
+    [data, userRole],
   );
   const startActionLoading = useCallback((itemId: unknown, message: string) => {
     const normalizedItemId = String(itemId || "").trim();
@@ -1590,6 +1862,14 @@ export default function BookingsScreen() {
       if (normalizedItemId && current.itemId !== normalizedItemId) return current;
       return null;
     });
+  }, []);
+  const updateActivityPreviewStatus = useCallback((itemId: unknown, status: ActivityPreviewStatus) => {
+    const normalizedItemId = String(itemId || "").trim();
+    if (!normalizedItemId) return;
+    setActivityPreviewStatuses((current) => ({
+      ...current,
+      [normalizedItemId]: status,
+    }));
   }, []);
   const isActionLoadingFor = useCallback(
     (itemOrId: any) => {
@@ -2311,11 +2591,12 @@ export default function BookingsScreen() {
       Upcoming: [] as any[],
       Ongoing: [] as any[],
       Review: [] as any[],
+      isAuthoritative: false,
     };
 
     const { data: gigs, error: gigsError } = await supabase
       .from("gigs")
-      .select("id, name, event_date, location")
+      .select("id, name, event_date, location, gig_media(media_url, sort_order)")
       .eq("organizer_id", targetUserId);
 
     if (gigsError) {
@@ -2326,9 +2607,24 @@ export default function BookingsScreen() {
     const gigRows = gigs || [];
     const gigIds = gigRows.map((gig: any) => gig?.id).filter(Boolean);
 
-    if (gigIds.length === 0) return fallback;
+    if (gigIds.length === 0) {
+      fallback.isAuthoritative = true;
+      return fallback;
+    }
 
     const gigById = new Map(gigRows.map((gig: any) => [gig.id, gig]));
+    const { data: requirementRows } = await supabase
+      .from("gig_requirements")
+      .select("gig_id, requirement_key, requirement_value")
+      .in("gig_id", gigIds)
+      .in("requirement_key", ["event_start_time", "event_end_time"]);
+    const requirementsByGigId = new Map<string, Record<string, unknown>>();
+    (requirementRows || []).forEach((row: any) => {
+      if (!row?.gig_id || !row?.requirement_key) return;
+      const existing = requirementsByGigId.get(row.gig_id) || {};
+      existing[row.requirement_key] = row.requirement_value;
+      requirementsByGigId.set(row.gig_id, existing);
+    });
     const { data: venueApps, error: venueAppsError } = await supabase
       .from("gig_applications")
       .select(
@@ -2355,6 +2651,10 @@ export default function BookingsScreen() {
       return fallback;
     }
 
+    // This direct read is the canonical snapshot. It prevents a cached edge
+    // response from keeping removed or already-updated applications in Pending.
+    fallback.isAuthoritative = true;
+
     const now = new Date();
 
     (venueApps || []).forEach((app: any) => {
@@ -2377,11 +2677,12 @@ export default function BookingsScreen() {
         app.applicant?.full_name ||
         "Performer";
 
-      let eventDate: Date | null = null;
-      if (gig?.event_date) {
-        eventDate = new Date(gig.event_date);
-        eventDate.setHours(23, 59, 59, 999);
-      }
+      const gigRequirements = requirementsByGigId.get(app.gig_id) || {};
+      const eventWindow = getGigActivityWindow(
+        gig?.event_date,
+        gigRequirements.event_start_time,
+        gigRequirements.event_end_time,
+      );
 
       const item = {
         id: app.id,
@@ -2398,6 +2699,11 @@ export default function BookingsScreen() {
         raw_date: dateStr,
         start_time: gig?.event_date,
         name: `${gig?.name || "Gig"} - ${performerName}`,
+        gig_name: gig?.name || "Gig",
+        gig_image:
+          [...(gig?.gig_media || [])]
+            .sort((a: any, b: any) => Number(a?.sort_order || 0) - Number(b?.sort_order || 0))[0]
+            ?.media_url || null,
         date: dateStr,
         image:
           app.group?.images?.[0] ||
@@ -2447,16 +2753,26 @@ export default function BookingsScreen() {
       };
 
       if (normalizedStatus === "pending") {
-        fallback.Pending.push(item);
+        if (eventWindow && now.getTime() > eventWindow.end.getTime()) {
+          fallback.Review.push({
+            ...item,
+            raw_status: "cancelled",
+            status: "Expired",
+            isCancelled: true,
+          });
+        } else {
+          fallback.Pending.push(item);
+        }
       } else if (normalizedStatus === "accepted" || normalizedStatus === "approved") {
-        if (eventDate) {
-          const eventStart = new Date(gig.event_date);
-          eventStart.setHours(0, 0, 0, 0);
-
-          if (now >= eventStart && now <= eventDate) {
+        if (eventWindow) {
+          if (now.getTime() > eventWindow.end.getTime()) {
+            fallback.Review.push({
+              ...item,
+              raw_status: "completed",
+              status: "Completed",
+            });
+          } else if (now.getTime() >= eventWindow.start.getTime()) {
             fallback.Ongoing.push({ ...item, status: "Happening Now" });
-          } else if (now > eventDate) {
-            fallback.Review.push({ ...item, status: "Completed" });
           } else {
             fallback.Upcoming.push(item);
           }
@@ -2508,12 +2824,12 @@ export default function BookingsScreen() {
         }
       }
 
-      if (Array.isArray(screenPayload?.pendingPermitListings)) {
+      if (role === "studio-owner" && Array.isArray(screenPayload?.pendingPermitListings)) {
         nextPendingPermitStudios = screenPayload.pendingPermitListings;
         setPendingPermitStudios(nextPendingPermitStudios);
-      } else if (role === "studio-owner" || role === "venue-owner") {
-        const permitTable = role === "studio-owner" ? "studios" : "gigs";
-        const permitOwnerField = role === "studio-owner" ? "owner_id" : "organizer_id";
+      } else if (role === "studio-owner") {
+        const permitTable = "studios";
+        const permitOwnerField = "owner_id";
 
         const { data: permitRows, error: permitError } = await supabase
           .from(permitTable)
@@ -2528,7 +2844,7 @@ export default function BookingsScreen() {
         } else {
           nextPendingPermitStudios = (permitRows || []).map((row: any) => ({
               ...row,
-              entity_type: role === "studio-owner" ? "studio" : "gig",
+              entity_type: "studio",
           }));
           setPendingPermitStudios(nextPendingPermitStudios);
         }
@@ -2541,7 +2857,7 @@ export default function BookingsScreen() {
         : await supabase.functions.invoke(
             "manage-bookings",
             {
-              body: { action: "fetch", includeScreenPayload: true, userId: targetUserId },
+              body: { action: "fetch", includeScreenPayload: true },
             },
           );
       const { data: bookings, error } = functionResult;
@@ -2573,22 +2889,30 @@ export default function BookingsScreen() {
         const venueFallbackBookings = await buildLocalVenueOwnerGigApplicationsFallback(targetUserId);
         effectiveBookings = {
           ...effectiveBookings,
-          Pending: mergeUniqueActivityItems(
-            venueFallbackBookings.Pending,
-            effectiveBookings?.Pending || [],
-          ),
-          Upcoming: mergeUniqueActivityItems(
-            venueFallbackBookings.Upcoming,
-            effectiveBookings?.Upcoming || [],
-          ),
-          Ongoing: mergeUniqueActivityItems(
-            venueFallbackBookings.Ongoing,
-            effectiveBookings?.Ongoing || [],
-          ),
-          Review: mergeUniqueActivityItems(
-            venueFallbackBookings.Review,
-            effectiveBookings?.Review || [],
-          ),
+          Pending: venueFallbackBookings.isAuthoritative
+            ? venueFallbackBookings.Pending
+            : mergeUniqueActivityItems(
+                venueFallbackBookings.Pending,
+                effectiveBookings?.Pending || [],
+              ),
+          Upcoming: venueFallbackBookings.isAuthoritative
+            ? venueFallbackBookings.Upcoming
+            : mergeUniqueActivityItems(
+                venueFallbackBookings.Upcoming,
+                effectiveBookings?.Upcoming || [],
+              ),
+          Ongoing: venueFallbackBookings.isAuthoritative
+            ? venueFallbackBookings.Ongoing
+            : mergeUniqueActivityItems(
+                venueFallbackBookings.Ongoing,
+                effectiveBookings?.Ongoing || [],
+              ),
+          Review: venueFallbackBookings.isAuthoritative
+            ? venueFallbackBookings.Review
+            : mergeUniqueActivityItems(
+                venueFallbackBookings.Review,
+                effectiveBookings?.Review || [],
+              ),
         };
         effectiveBookings = await attachManagerPendingRecommendations(effectiveBookings);
       }
@@ -2702,7 +3026,7 @@ export default function BookingsScreen() {
           } else if (profileIds.length > 0) {
             const { data: profileRows, error: profileError } = await supabase
               .from("profiles")
-              .select("id, full_name, avatar_url")
+              .select("id, full_name, avatar_url, location, address, bio, is_verified, verification_status")
               .in("id", profileIds);
 
             if (profileError) {
@@ -2716,10 +3040,39 @@ export default function BookingsScreen() {
             }
           }
 
+          if (profileIds.length > 0) {
+            const { data: legacyProfileRows } = await supabase
+              .from("profiles_legacy_projection")
+              .select("id, skills, genres, portfolio_urls")
+              .in("id", profileIds);
+
+            (legacyProfileRows || []).forEach((legacyProfile: any) => {
+              const existing = profileMap.get(legacyProfile.id);
+              if (!existing) return;
+              profileMap.set(legacyProfile.id, {
+                ...existing,
+                skills: Array.isArray(legacyProfile.skills) ? legacyProfile.skills : [],
+                genres: Array.isArray(legacyProfile.genres) ? legacyProfile.genres : [],
+                portfolio_urls: Array.isArray(legacyProfile.portfolio_urls)
+                  ? legacyProfile.portfolio_urls
+                  : [],
+              });
+            });
+          }
+
           const mediaMaps = await loadConnectionRequestMediaMaps(requestRows);
 
           connectionRequestItems = requestRows.map((request: any) => {
             const eventDetails = getEventObject(request.event_details);
+            const senderEntityType = normalizeConnectionEntityType(eventDetails.sender_entity_type);
+            const receiverEntityType = normalizeConnectionEntityType(eventDetails.receiver_entity_type);
+            const senderEntityId = getEventString(eventDetails, "sender_entity_id");
+            const receiverEntityId = getEventString(eventDetails, "receiver_entity_id");
+            const productionTeamId = getConnectionRequestProductionTeamId(eventDetails);
+            const targetGroupId =
+              receiverEntityType === "group"
+                ? toNonEmptyString(request.group_id) || receiverEntityId
+                : null;
             const requestDetails = extractConnectionRequestDetails(
               eventDetails,
               request.attachment_url,
@@ -2739,13 +3092,14 @@ export default function BookingsScreen() {
             const isIncoming =
               request.receiver_id === targetUserId ||
               Boolean(
-                request.group_id &&
-                  ownedGroupIdSet.has(request.group_id) &&
+                targetGroupId &&
+                  ownedGroupIdSet.has(targetGroupId) &&
                   request.sender_id !== targetUserId &&
                   !isGroupMemberInvite,
               );
             const counterpartyId = isIncoming ? request.sender_id : request.receiver_id;
             const counterpartyProfile = counterpartyId ? profileMap.get(counterpartyId) : null;
+            const applicantProfile = request.sender_id ? profileMap.get(request.sender_id) : null;
             const counterpartyName = isIncoming ? senderEntityName : receiverEntityName;
             const cardImage = getConnectionRequestCardImage(
               request,
@@ -2754,7 +3108,7 @@ export default function BookingsScreen() {
               mediaMaps,
             );
 
-            return {
+            const mappedRequest = {
               id: request.id,
               type_id: "booking_request",
               created_at: request.created_at,
@@ -2772,15 +3126,41 @@ export default function BookingsScreen() {
               counterparty_id: counterpartyId || null,
               counterparty_name: counterpartyProfile?.full_name || counterpartyName,
               counterparty_avatar: counterpartyProfile?.avatar_url || null,
+              counterparty_profile: counterpartyProfile || null,
+              applicant: requestDetails.requestKind === "application"
+                ? applicantProfile || null
+                : null,
               request_direction: isIncoming ? "incoming" : "outgoing",
               request_context_label: isIncoming ? "From" : "To",
               sender_entity_name: senderEntityName,
-              sender_entity_type: eventDetails.sender_entity_type || null,
+              sender_entity_type: senderEntityType || null,
+              sender_entity_id: senderEntityId,
               receiver_entity_name: receiverEntityName,
-              receiver_entity_type: eventDetails.receiver_entity_type || null,
-              group_id: request.group_id || null,
+              receiver_entity_type: receiverEntityType || null,
+              receiver_entity_id: receiverEntityId,
+              group_id: targetGroupId || request.group_id || null,
+              group_name:
+                receiverEntityType === "group"
+                  ? receiverEntityName
+                  : senderEntityType === "group"
+                    ? senderEntityName
+                    : null,
+              group_image:
+                targetGroupId
+                  ? mediaMaps.groupImages.get(targetGroupId) || null
+                  : null,
               studio_id: request.studio_id || null,
-              production_team_id: eventDetails.production_team_id || null,
+              production_team_id: productionTeamId,
+              production_team_name:
+                receiverEntityType === "production_team"
+                  ? receiverEntityName
+                  : senderEntityType === "production_team"
+                    ? senderEntityName
+                    : null,
+              production_team_image:
+                productionTeamId
+                  ? mediaMaps.productionTeamLogos.get(productionTeamId) || null
+                  : null,
               listing_id: eventDetails.listing_id || null,
               listing_type: eventDetails.listing_type || null,
               request_kind: requestDetails.requestKind,
@@ -2797,8 +3177,13 @@ export default function BookingsScreen() {
               route_path: eventDetails.route || null,
               route_params: eventDetails.route_params || null,
               viewer_is_group_owner:
-                Boolean(request.group_id && ownedGroupIdSet.has(request.group_id)),
+                Boolean(targetGroupId && ownedGroupIdSet.has(targetGroupId)),
             };
+
+            return attachConnectionApplicantRecommendation(mappedRequest, {
+              name: receiverEntityName,
+              description: requestDetails.applicationContext,
+            });
           });
         }
       } catch (requestFetchError) {
@@ -2976,7 +3361,7 @@ export default function BookingsScreen() {
 
       const applicants =
         role === "venue-owner"
-          ? [...pendingGigApplications, ...pendingConnectionRequests]
+          ? pendingGigApplications
           : [];
 
       const studioPending = rawPending.filter(
@@ -3018,13 +3403,17 @@ export default function BookingsScreen() {
       const nowMs = Date.now();
       const expiredPendingStudioItems: any[] = [];
       const activePendingItems = pendingItems.filter((item: any) => {
-        const endDate = getPendingStudioBookingEndDate(item);
+        const endDate = item?.type_id === "gig_application"
+          ? getActivityDayWindow(item?.raw_date || item?.date)?.end || null
+          : getPendingStudioBookingEndDate(item);
         const isExpired = !!endDate && endDate.getTime() < nowMs;
 
         if (isExpired) {
           expiredPendingStudioItems.push({
             ...item,
             status: "Expired",
+            raw_status: item?.type_id === "gig_application" ? "cancelled" : item?.raw_status,
+            isCancelled: item?.type_id === "gig_application" ? true : item?.isCancelled,
             action: "Details",
           });
           return false;
@@ -3036,13 +3425,26 @@ export default function BookingsScreen() {
       // 2. Active Musicians (Confirmed Gig items from Upcoming & Ongoing)
       const rawUpcoming = attachLateReportMeta(effectiveBookings?.Upcoming || []);
       const rawOngoing = attachLateReportMeta(effectiveBookings?.Ongoing || []);
+      const rawReview = attachLateReportMeta(effectiveBookings?.Review || []);
 
-      const activeGigMusicians = [
-        ...rawUpcoming.filter(
-          (item: any) => item.type_id === "gig_application",
-        ),
-        ...rawOngoing.filter((item: any) => item.type_id === "gig_application"),
-      ];
+      const activeGigMusicians = dedupeActivityTabItems([
+        ...rawUpcoming,
+        ...rawOngoing,
+        ...rawReview,
+      ])
+        .filter((item: any) => {
+          if (item.type_id !== "gig_application") return false;
+          const status = normalizeStatus(item.raw_status || item.status);
+          if (normalizeStatus(item.status) === "completed") return false;
+          return ["accepted", "approved", "confirmed"].includes(status);
+        })
+        .map((item: any) => ({
+          ...item,
+          status:
+            normalizeStatus(item.status) === "happening-now"
+              ? "Happening Now"
+              : "Confirmed",
+        }));
 
       // 3. Upcoming/Ongoing - Include ALL items (both studio bookings and approved gig applications)
       // Musicians should see their approved gig applications in Upcoming
@@ -3053,19 +3455,14 @@ export default function BookingsScreen() {
       const allOngoing = rawOngoing;
 
       // 4. History - terminal items and completed/fired items already reviewed by the current viewer
-      const rawReview = attachLateReportMeta(effectiveBookings?.Review || []);
       const cancelledFromUpcoming = rawUpcoming.filter(
         (item: any) => item.isCancelled || item.status === "Declined"
       );
       const getGigApplicationReviewStatus = (item: any) => {
         const rawStatus = normalizeStatus(item.raw_status);
         const displayStatus = normalizeStatus(item.status);
-        if (
-          (rawStatus === "accepted" || rawStatus === "approved") &&
-          displayStatus === "completed"
-        ) {
-          return "completed";
-        }
+        if (displayStatus === "completed") return "completed";
+        if (displayStatus === "expired") return "cancelled";
         return rawStatus || displayStatus;
       };
       const isReviewRequiredGigApplication = (item: any) =>
@@ -3146,7 +3543,6 @@ export default function BookingsScreen() {
           // Default/musician flow
           return item.reviewed_by_customer !== true;
         }),
-        ...(role === "venue-owner" ? resolvedConnectionRequests : []),
       ].filter(
         (item: any, index: number, arr: any[]) =>
           arr.findIndex((candidate: any) => candidate.id === item.id && candidate.type_id === item.type_id) === index,
@@ -3275,6 +3671,26 @@ export default function BookingsScreen() {
     reason?: string,
   ): Promise<boolean> {
     try {
+      if (selectedItem?.is_preview === true && selectedItem?.id === bookingId) {
+        const previewStatus: ActivityPreviewStatus =
+          newStatus === "accepted" || newStatus === "approved"
+            ? "accepted"
+            : newStatus === "completed"
+              ? "completed"
+              : "declined";
+        updateActivityPreviewStatus(bookingId, previewStatus);
+        setModalVisible(false);
+        setCancellationReason("");
+        showAlert(
+          "success",
+          previewStatus === "accepted" ? "Application accepted" : "Application updated",
+          previewStatus === "accepted"
+            ? "The sample applicant was moved to Active."
+            : "The sample applicant was removed from the active list.",
+        );
+        return true;
+      }
+
       if (
         typeId === "gig_application" &&
         selectedItem?.id === bookingId &&
@@ -3501,6 +3917,10 @@ export default function BookingsScreen() {
   };
 
   const isReadOnlyBookingItem = (item: any) => {
+    if (item?.is_preview === true && item?.type_id === "booking_request") {
+      return true;
+    }
+
     if (staffBookingContext?.view_only === true) {
       return true;
     }
@@ -3537,6 +3957,7 @@ export default function BookingsScreen() {
     if (item?.type_id !== "booking_request") return false;
     if (!userId) return false;
     if (item?.request_direction !== "incoming") return false;
+    if (item?.is_preview === true) return true;
 
     if (isGroupMemberInviteRequest(item)) {
       return item?.receiver_id === userId;
@@ -3559,6 +3980,21 @@ export default function BookingsScreen() {
         "warning",
         "Action unavailable",
         "Only the request recipient can respond to this connection request.",
+      );
+      return;
+    }
+
+    if (item?.is_preview === true) {
+      updateActivityPreviewStatus(
+        item.id,
+        nextStatus === "accepted" ? "accepted" : "declined",
+      );
+      showAlert(
+        "success",
+        nextStatus === "accepted" ? "Application accepted" : "Application declined",
+        nextStatus === "accepted"
+          ? `${item.counterparty_name || item.name || "The sample applicant"} was accepted.`
+          : `${item.counterparty_name || item.name || "The sample applicant"} was declined.`,
       );
       return;
     }
@@ -5378,15 +5814,18 @@ export default function BookingsScreen() {
   };
 
   // Determine items to show based on view mode without rebuilding the list during the tab press.
-  const currentItems = React.useMemo(
-    () =>
+  const currentItems = React.useMemo(() => {
+    const items =
       userRole === "musician" && viewMode === "applications"
         ? applicationData[deferredActiveAppTab as keyof typeof applicationData] || []
         : deferredActiveTab === "Active Musicians"
           ? dynamicBookingsData.ActiveMusicians
-          : dynamicBookingsData[deferredActiveTab as keyof typeof dynamicBookingsData] || [],
-    [applicationData, deferredActiveAppTab, deferredActiveTab, dynamicBookingsData, userRole, viewMode],
-  );
+          : dynamicBookingsData[deferredActiveTab as keyof typeof dynamicBookingsData] || [];
+
+    return userRole === "venue-owner"
+      ? items.filter((item: any) => item?.type_id === "gig_application")
+      : items;
+  }, [applicationData, deferredActiveAppTab, deferredActiveTab, dynamicBookingsData, userRole, viewMode]);
 
   useEffect(() => {
     if (!isAuthenticated || isGuest) return;
@@ -5480,17 +5919,116 @@ export default function BookingsScreen() {
     currentItems.length === 0 &&
     !hasSearchOrFilter;
   const bookingListData = React.useMemo(
-    () =>
-      isInitialActivityLoading || filteredItems.length === 0
-        ? EMPTY_ACTIVITY_ITEMS
-        : filteredItems.map((booking, index) => ({
-            kind: "booking" as const,
-            booking,
-            index,
-          })),
-    [filteredItems, isInitialActivityLoading],
+    () => {
+      if (isInitialActivityLoading || filteredItems.length === 0) {
+        return EMPTY_ACTIVITY_ITEMS;
+      }
+
+      type GroupedApplications = {
+        descriptor: ApplicationActivityGroupDescriptor;
+        applications: any[];
+        seenApplicationRows: Set<string>;
+      };
+      type ActivityLayoutToken =
+        | { kind: "booking"; booking: any; index: number }
+        | { kind: "application-group"; groupKey: string };
+
+      const applicationGroups = new Map<string, GroupedApplications>();
+      const layout: ActivityLayoutToken[] = [];
+
+      filteredItems.forEach((item: any, index) => {
+        const descriptor = getApplicationActivityGroup(item, userRole);
+
+        if (!descriptor) {
+          layout.push({ kind: "booking", booking: item, index });
+          return;
+        }
+
+        const groupKey = `${descriptor.kind}:${descriptor.entityId}`;
+        let group = applicationGroups.get(groupKey);
+
+        if (!group) {
+          group = {
+            descriptor,
+            applications: [],
+            seenApplicationRows: new Set<string>(),
+          };
+          applicationGroups.set(groupKey, group);
+          layout.push({ kind: "application-group", groupKey });
+        }
+
+        const applicantKey =
+          toNonEmptyString(item.id) ||
+          toNonEmptyString(item.application_id) ||
+          toNonEmptyString(item.request_id) ||
+          [
+            toNonEmptyString(item.applicant_id),
+            toNonEmptyString(item.production_roster_id),
+            toNonEmptyString(item.group_id),
+            toNonEmptyString(item.customer_name),
+            normalizeActivityStatus(item.raw_status || item.status),
+            toNonEmptyString(item.created_at) || toNonEmptyString(item.received_at),
+          ]
+            .filter(Boolean)
+            .join(":");
+
+        if (applicantKey && group.seenApplicationRows.has(applicantKey)) return;
+        if (applicantKey) group.seenApplicationRows.add(applicantKey);
+        group.applications.push(item);
+      });
+
+      const rows: any[] = [];
+
+      layout.forEach((token) => {
+        if (token.kind === "booking") {
+          rows.push(token);
+          return;
+        }
+
+        const group = applicationGroups.get(token.groupKey);
+        if (!group || group.applications.length === 0) return;
+
+        const { descriptor, applications } = group;
+        const expansionKey = `${renderActiveTab}:${token.groupKey}`;
+        const isExpanded =
+          hasSearchOrFilter || expandedActivityGroups.has(expansionKey);
+
+        rows.push({
+          kind: "application-group-header" as const,
+          groupKind: descriptor.kind,
+          entityId: descriptor.entityId,
+          expansionKey,
+          isExpanded,
+          title: descriptor.title,
+          date: descriptor.date,
+          location: descriptor.location,
+          image: descriptor.image,
+          count: applications.length,
+        });
+
+        if (isExpanded) {
+          applications.forEach((booking, index) => {
+            rows.push({
+              kind: "booking" as const,
+              booking,
+              index,
+              groupedUnderApplicationEntity: true,
+              applicationGroupKind: descriptor.kind,
+              isLastInApplicationGroup: index === applications.length - 1,
+            });
+          });
+        }
+      });
+
+      return rows;
+    },
+    [expandedActivityGroups, filteredItems, hasSearchOrFilter, isInitialActivityLoading, renderActiveTab, userRole],
   );
   const bookingKeyExtractor = useCallback((item: any, index: number) => {
+    if (item?.kind === "application-group-header") {
+      return `application-group:${renderActiveTab}:${item.groupKind}:${item.entityId}`;
+    }
+
     const booking = item?.booking ?? item;
     const id =
       booking?.id ??
@@ -5757,8 +6295,8 @@ export default function BookingsScreen() {
             <>
               {bookingsControlsHeader}
               {!loading &&
-              ((userRole === "studio-owner" && renderActiveTab === "Pending") ||
-                (userRole === "venue-owner" && renderActiveTab === "Applicants")) &&
+              userRole === "studio-owner" &&
+              renderActiveTab === "Pending" &&
               pendingPermitStudios.length > 0 ? (
                 <View style={styles.permitReviewList}>
                 {pendingPermitStudios.map((listing: any) => {
@@ -6033,14 +6571,173 @@ export default function BookingsScreen() {
                   <Text
                     style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
                   >
-                    New gig applications and direct connection requests will appear in Pending.
+                    New applications to your gigs will appear in Pending.
                   </Text>
                 )}
               </View>
             ) : null
           }
           renderItem={({ item: row }: { item: any }) => {
+              if (row?.kind === "application-group-header") {
+                const groupKind = row.groupKind as ApplicationActivityGroupKind;
+                const groupLabel = getApplicationGroupCountLabel(
+                  groupKind,
+                  renderActiveTab,
+                  row.count,
+                );
+                const groupPresentation = APPLICATION_GROUP_PRESENTATION[groupKind];
+
+                const openApplicationGroup = () => {
+                  if (groupKind === "gig") {
+                    router.push({
+                      pathname: "/manage_gig",
+                      params: { id: row.entityId, tab: "Applicants" },
+                    });
+                    return;
+                  }
+
+                  if (groupKind === "production") {
+                    router.push({
+                      pathname: "/production_team",
+                      params: { teamId: row.entityId },
+                    });
+                    return;
+                  }
+
+                  router.push({
+                    pathname: "/manage_group",
+                    params: { id: row.entityId, tab: "Applications" },
+                  });
+                };
+
+                return (
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: row.isExpanded }}
+                    accessibilityLabel={`${row.title}, ${groupLabel}. ${row.isExpanded ? "Collapse" : "Expand"} applicants.`}
+                    testID={`mobile-bookings-${groupPresentation.testPrefix}-group-${row.entityId}`}
+                    onPress={() => {
+                      setExpandedActivityGroups((current) => {
+                        const next = new Set(current);
+                        if (next.has(row.expansionKey)) {
+                          next.delete(row.expansionKey);
+                        } else {
+                          next.add(row.expansionKey);
+                        }
+                        return next;
+                      });
+                    }}
+                    style={[
+                      styles.gigGroupHeader,
+                      {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    {row.image ? (
+                      <CachedImage
+                        uri={row.image}
+                        style={styles.gigGroupImage}
+                        width={BOOKING_CARD_IMAGE_WIDTH}
+                        height={BOOKING_CARD_IMAGE_HEIGHT}
+                        quality={72}
+                        cacheVersion={row.entityId}
+                      />
+                    ) : null}
+
+                    <View style={styles.gigGroupContent}>
+                      <View style={styles.gigGroupTopRow}>
+                        <View
+                          style={[
+                            styles.gigGroupIcon,
+                            { backgroundColor: `${colors.primary}16` },
+                          ]}
+                        >
+                          <Ionicons name={groupPresentation.icon} size={20} color={colors.primary} />
+                        </View>
+                        <View style={styles.gigGroupTitleContainer}>
+                          <Text style={[styles.gigGroupEyebrow, { color: colors.primary }]}>
+                            {groupPresentation.eyebrow}
+                          </Text>
+                          <Text style={[styles.gigGroupTitle, { color: colors.text }]} numberOfLines={2}>
+                            {row.title}
+                          </Text>
+                        </View>
+                        <Ionicons
+                          name={row.isExpanded ? "chevron-up" : "chevron-down"}
+                          size={20}
+                          color={colors.textSecondary}
+                        />
+                      </View>
+
+                      <View style={styles.gigGroupMeta}>
+                        {row.date && row.date !== "TBA" ? (
+                          <View style={styles.gigGroupMetaRow}>
+                            <Ionicons name="calendar-outline" size={14} color={colors.textSecondary} />
+                            <Text style={[styles.gigGroupMetaText, { color: colors.textSecondary }]} numberOfLines={1}>
+                              {formatBookingCardDateTime(row.date)}
+                            </Text>
+                          </View>
+                        ) : null}
+                        {row.location ? (
+                          <View style={styles.gigGroupMetaRow}>
+                            <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
+                            <Text style={[styles.gigGroupMetaText, { color: colors.textSecondary }]} numberOfLines={1}>
+                              {row.location}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+
+                      <View style={[styles.gigGroupApplicantsRow, { borderTopColor: colors.border }]}>
+                        <View style={styles.gigGroupApplicantsLabel}>
+                          <Ionicons name="people-outline" size={17} color={colors.primary} />
+                          <Text style={[styles.gigGroupApplicantsText, { color: colors.text }]}>Applicants</Text>
+                        </View>
+                        <View style={[styles.gigGroupCountBadge, { backgroundColor: `${colors.primary}16` }]}>
+                          <Text style={[styles.gigGroupCountText, { color: colors.primary }]}>{groupLabel}</Text>
+                        </View>
+                      </View>
+
+                      <TouchableOpacity
+                        activeOpacity={0.78}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${groupPresentation.actionLabel} ${row.title}`}
+                        testID={
+                          groupKind === "gig"
+                            ? `mobile-bookings-view-gig-${row.entityId}`
+                            : `mobile-bookings-${groupPresentation.testPrefix}-group-action-${row.entityId}`
+                        }
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          openApplicationGroup();
+                        }}
+                        style={[
+                          styles.gigGroupViewButton,
+                          {
+                            backgroundColor: `${colors.primary}10`,
+                            borderColor: `${colors.primary}38`,
+                          },
+                        ]}
+                      >
+                        <Ionicons name="open-outline" size={18} color={colors.primary} />
+                        <Text style={[styles.gigGroupViewButtonText, { color: colors.primary }]}>
+                          {groupPresentation.actionLabel}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </TouchableOpacity>
+                );
+              }
+
               const item = row?.booking ?? row;
+              const isGroupedOwnerApplication =
+                row?.groupedUnderApplicationEntity === true &&
+                row?.applicationGroupKind === "gig" &&
+                userRole === "venue-owner" &&
+                item?.type_id === "gig_application";
               // ==========================================
               // 0.75. CONNECTION REQUEST CARD
               // ==========================================
@@ -6070,6 +6767,10 @@ export default function BookingsScreen() {
                     onPress={() => handleDetailsPress(item)}
                     style={[
                       styles.cardContainer,
+                      row?.groupedUnderApplicationEntity === true &&
+                        styles.groupedApplicationCard,
+                      row?.isLastInApplicationGroup === true &&
+                        styles.groupedApplicationCardLast,
                       {
                         backgroundColor: colors.card,
                         borderColor: colors.border,
@@ -6323,7 +7024,9 @@ export default function BookingsScreen() {
                               </View>
                             </TouchableOpacity>
 
-                            {item.viewer_is_group_owner && isGroupMemberApplicationRequest(item) ? (
+                            {item.viewer_is_group_owner &&
+                            isGroupMemberApplicationRequest(item) &&
+                            row?.groupedUnderApplicationEntity !== true ? (
                               <TouchableOpacity
                                 activeOpacity={1}
                                 onPress={(e) => {
@@ -6439,6 +7142,226 @@ export default function BookingsScreen() {
                           </View>
                         )}
                       </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              }
+
+              if (isGroupedOwnerApplication) {
+                const applicationLabel = getApplicationDisplayLabel(item);
+                const applicationReceivedAt = formatApplicationReceivedDateTime(item);
+                const normalizedApplicationStatus = normalizeActivityStatus(
+                  item.raw_status || item.status,
+                );
+                const isPositiveStatus = [
+                  "accepted",
+                  "approved",
+                  "confirmed",
+                  "completed",
+                  "happening-now",
+                ].includes(normalizedApplicationStatus);
+                const isNegativeStatus = [
+                  "cancelled",
+                  "declined",
+                  "fired",
+                  "rejected",
+                  "resigned",
+                  "withdrawn",
+                ].includes(normalizedApplicationStatus);
+                const statusColor = isPositiveStatus
+                  ? "#10B981"
+                  : isNegativeStatus
+                    ? "#EF4444"
+                    : "#D97706";
+                const statusBackground = isPositiveStatus
+                  ? isDark ? "rgba(16, 185, 129, 0.16)" : "#ECFDF5"
+                  : isNegativeStatus
+                    ? isDark ? "rgba(239, 68, 68, 0.16)" : "#FEF2F2"
+                    : isDark ? "rgba(245, 158, 11, 0.16)" : "#FFFBEB";
+                const isReadOnlyApplication = isReadOnlyBookingItem(item);
+                const canCompleteActiveGig = isGigApplicationEventFinished(item);
+
+                return (
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    testID={`mobile-bookings-gig-application-card-${item.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${item.customer_name || "Applicant"}, ${applicationLabel}, ${item.status}`}
+                    onPress={() => handleDetailsPress(item)}
+                    style={[
+                      styles.ownerApplicantCard,
+                      row?.isLastInApplicationGroup && styles.ownerApplicantCardLast,
+                      {
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.ownerApplicantSummaryRow}>
+                      <CachedImage
+                        uri={item.customer_avatar || item.image}
+                        fallbackUri={REQUEST_PLACEHOLDER_IMAGE}
+                        style={styles.ownerApplicantAvatar}
+                        width={BOOKING_AVATAR_IMAGE_SIZE}
+                        height={BOOKING_AVATAR_IMAGE_SIZE}
+                        quality={72}
+                        cacheVersion={item.updated_at || item.created_at || item.id}
+                      />
+
+                      <View style={styles.ownerApplicantMain}>
+                        <Text style={[styles.ownerApplicantName, { color: colors.text }]} numberOfLines={1}>
+                          {item.customer_name || "Applicant"}
+                        </Text>
+                        <Text style={[styles.ownerApplicantType, { color: colors.textSecondary }]} numberOfLines={1}>
+                          {applicationLabel}
+                          {item.slot_type ? ` · ${toStartCase(String(item.slot_type).replace(/_/g, " "))}` : ""}
+                        </Text>
+                        {applicationReceivedAt ? (
+                          <View style={styles.ownerApplicantReceivedRow}>
+                            <Ionicons name="time-outline" size={13} color={colors.textSecondary} />
+                            <Text style={[styles.ownerApplicantReceivedText, { color: colors.textSecondary }]} numberOfLines={1}>
+                              Received {applicationReceivedAt}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+
+                      {!isHistoryTabView && shouldShowMessageForItem(item) ? (
+                        <TouchableOpacity
+                          activeOpacity={0.78}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Message ${item.customer_name || "applicant"}`}
+                          onPress={(event) => {
+                            event.stopPropagation();
+                            handleMessagePress(item);
+                          }}
+                          style={[styles.ownerApplicantIconButton, { borderColor: colors.border }]}
+                        >
+                          <Ionicons name="chatbubble-ellipses-outline" size={17} color={colors.primary} />
+                        </TouchableOpacity>
+                      ) : (
+                        <Ionicons name="chevron-forward" size={19} color={colors.textSecondary} />
+                      )}
+                    </View>
+
+                    <View style={styles.ownerApplicantMetaRow}>
+                      <View style={[styles.ownerApplicantStatusChip, { backgroundColor: statusBackground }]}>
+                        <View style={[styles.ownerApplicantStatusDot, { backgroundColor: statusColor }]} />
+                        <Text style={[styles.ownerApplicantStatusText, { color: statusColor }]} numberOfLines={1}>
+                          {item.status}
+                        </Text>
+                      </View>
+
+                      {item?.ai_recommendation?.recommendation_status === "recommended" ? (
+                        <View style={[styles.ownerApplicantRecommendationChip, { backgroundColor: `${colors.primary}12` }]}>
+                          <Ionicons name="sparkles" size={12} color={colors.primary} />
+                          <Text style={[styles.ownerApplicantRecommendationText, { color: colors.primary }]}>Recommended</Text>
+                        </View>
+                      ) : null}
+
+                      {!isHistoryTabView && (item.video_url || item.cv_url) ? (
+                        <Text style={[styles.ownerApplicantAttachmentText, { color: colors.textSecondary }]}>
+                          {[item.video_url ? "Audition" : null, item.cv_url ? "CV" : null].filter(Boolean).join(" · ")}
+                        </Text>
+                      ) : null}
+                    </View>
+
+                    {renderActionLoadingIndicator(item)}
+
+                    <View style={[styles.ownerApplicantActions, { borderTopColor: colors.border }]}>
+                      <TouchableOpacity
+                        activeOpacity={0.78}
+                        accessibilityRole="button"
+                        testID={bookingActionTestId(item, "view-details")}
+                        accessibilityLabel={bookingActionTestId(item, "view-details")}
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          handleDetailsPress(item);
+                        }}
+                        style={[styles.ownerApplicantSecondaryButton, { borderColor: colors.border }]}
+                      >
+                        <Text style={[styles.ownerApplicantSecondaryButtonText, { color: colors.textSecondary }]}>Details</Text>
+                      </TouchableOpacity>
+
+                      {!isReadOnlyApplication && renderActiveTab === "Applicants" ? (
+                        <>
+                          <TouchableOpacity
+                            activeOpacity={0.78}
+                            accessibilityRole="button"
+                            testID={bookingActionTestId(item, "decline")}
+                            accessibilityLabel={bookingActionTestId(item, "decline")}
+                            onPress={(event) => {
+                              event.stopPropagation();
+                              handleDeclineBooking(item);
+                            }}
+                            style={[styles.ownerApplicantSecondaryButton, { borderColor: "#FCA5A5" }]}
+                          >
+                            <Text style={[styles.ownerApplicantSecondaryButtonText, { color: "#EF4444" }]}>Decline</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            activeOpacity={0.78}
+                            accessibilityRole="button"
+                            testID={bookingActionTestId(item, "accept")}
+                            accessibilityLabel={bookingActionTestId(item, "accept")}
+                            onPress={(event) => {
+                              event.stopPropagation();
+                              setSelectedItem(item);
+                              setModalMode("confirm");
+                              setModalVisible(true);
+                            }}
+                            style={[styles.ownerApplicantPrimaryButton, { backgroundColor: "#10B981" }]}
+                          >
+                            <Text style={styles.ownerApplicantPrimaryButtonText}>Accept</Text>
+                          </TouchableOpacity>
+                        </>
+                      ) : !isReadOnlyApplication && renderActiveTab === "Active Musicians" ? (
+                        <>
+                          <TouchableOpacity
+                            activeOpacity={0.78}
+                            accessibilityRole="button"
+                            onPress={(event) => {
+                              event.stopPropagation();
+                              setSelectedItem(item);
+                              setModalMode("fire");
+                              setCancellationReason("");
+                              setModalVisible(true);
+                            }}
+                            style={[styles.ownerApplicantSecondaryButton, { borderColor: "#FCA5A5" }]}
+                          >
+                            <Text style={[styles.ownerApplicantSecondaryButtonText, { color: "#EF4444" }]}>Fire</Text>
+                          </TouchableOpacity>
+                          {canCompleteActiveGig ? (
+                            <TouchableOpacity
+                              activeOpacity={0.78}
+                              accessibilityRole="button"
+                              onPress={(event) => {
+                                event.stopPropagation();
+                                setSelectedItem(item);
+                                setModalMode("complete");
+                                setModalVisible(true);
+                              }}
+                              style={[styles.ownerApplicantPrimaryButton, { backgroundColor: "#10B981" }]}
+                            >
+                              <Text style={styles.ownerApplicantPrimaryButtonText}>Complete</Text>
+                            </TouchableOpacity>
+                          ) : null}
+                        </>
+                      ) : !isReadOnlyApplication && renderActiveTab === "Review" ? (
+                        <TouchableOpacity
+                          activeOpacity={0.78}
+                          accessibilityRole="button"
+                          testID={bookingActionTestId(item, "leave-review")}
+                          accessibilityLabel={bookingActionTestId(item, "leave-review")}
+                          onPress={(event) => {
+                            event.stopPropagation();
+                            handleLeaveReview(item);
+                          }}
+                          style={[styles.ownerApplicantPrimaryButton, { backgroundColor: colors.primary }]}
+                        >
+                          <Ionicons name="star-outline" size={14} color="#FFFFFF" />
+                          <Text style={styles.ownerApplicantPrimaryButtonText}>Review</Text>
+                        </TouchableOpacity>
+                      ) : null}
                     </View>
                   </TouchableOpacity>
                 );
@@ -9530,6 +10453,268 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(12),
     fontFamily: "Poppins_400Regular",
     opacity: 0.7,
+  },
+  gigGroupHeader: {
+    borderRadius: moderateScale(14),
+    borderWidth: 1,
+    marginBottom: moderateScale(8),
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  gigGroupImage: {
+    width: "100%",
+    height: SCREEN_HEIGHT < 700 ? verticalScale(82) : verticalScale(96),
+  },
+  gigGroupContent: {
+    paddingHorizontal: scale(14),
+    paddingTop: moderateScale(12),
+    paddingBottom: moderateScale(12),
+  },
+  gigGroupTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(10),
+  },
+  gigGroupIcon: {
+    width: moderateScale(38),
+    height: moderateScale(38),
+    borderRadius: moderateScale(12),
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  gigGroupTitleContainer: {
+    flex: 1,
+  },
+  gigGroupEyebrow: {
+    fontSize: moderateScale(9),
+    lineHeight: moderateScale(12),
+    fontFamily: "Poppins_700Bold",
+    letterSpacing: 0.8,
+  },
+  gigGroupTitle: {
+    marginTop: moderateScale(1),
+    fontSize: moderateScale(15),
+    lineHeight: moderateScale(20),
+    fontFamily: "Poppins_700Bold",
+  },
+  gigGroupMeta: {
+    marginTop: moderateScale(10),
+    gap: moderateScale(5),
+  },
+  gigGroupMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(7),
+  },
+  gigGroupMetaText: {
+    flex: 1,
+    fontSize: moderateScale(11),
+    lineHeight: moderateScale(16),
+    fontFamily: "Poppins_400Regular",
+  },
+  gigGroupApplicantsRow: {
+    marginTop: moderateScale(11),
+    paddingVertical: moderateScale(10),
+    borderTopWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: scale(8),
+  },
+  gigGroupApplicantsLabel: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(7),
+  },
+  gigGroupApplicantsText: {
+    fontSize: moderateScale(12),
+    fontFamily: "Poppins_600SemiBold",
+  },
+  gigGroupCountBadge: {
+    borderRadius: moderateScale(999),
+    paddingHorizontal: scale(10),
+    paddingVertical: moderateScale(4),
+  },
+  gigGroupCountText: {
+    fontSize: moderateScale(10),
+    fontFamily: "Poppins_600SemiBold",
+  },
+  gigGroupViewButton: {
+    minHeight: moderateScale(44),
+    borderWidth: 1.5,
+    borderRadius: moderateScale(100),
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: scale(8),
+    paddingHorizontal: scale(12),
+    marginTop: moderateScale(2),
+  },
+  gigGroupViewButtonText: {
+    fontSize: moderateScale(12),
+    lineHeight: moderateScale(16),
+    fontFamily: "Poppins_500Medium",
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
+  groupedApplicationCard: {
+    marginHorizontal: scale(12),
+    marginBottom: moderateScale(10),
+  },
+  groupedApplicationCardLast: {
+    marginBottom: moderateScale(18),
+  },
+  ownerApplicantCard: {
+    marginHorizontal: scale(12),
+    marginBottom: moderateScale(10),
+    borderWidth: 1,
+    borderRadius: moderateScale(14),
+    padding: moderateScale(12),
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  ownerApplicantCardLast: {
+    marginBottom: moderateScale(18),
+  },
+  ownerApplicantSummaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(10),
+  },
+  ownerApplicantAvatar: {
+    width: moderateScale(52),
+    height: moderateScale(52),
+    borderRadius: moderateScale(14),
+  },
+  ownerApplicantMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+  ownerApplicantName: {
+    fontSize: moderateScale(14),
+    lineHeight: moderateScale(19),
+    fontFamily: "Poppins_700Bold",
+  },
+  ownerApplicantType: {
+    marginTop: moderateScale(1),
+    fontSize: moderateScale(11),
+    lineHeight: moderateScale(15),
+    fontFamily: "Poppins_400Regular",
+  },
+  ownerApplicantReceivedRow: {
+    marginTop: moderateScale(3),
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(4),
+  },
+  ownerApplicantReceivedText: {
+    flex: 1,
+    fontSize: moderateScale(10),
+    lineHeight: moderateScale(14),
+    fontFamily: "Poppins_400Regular",
+  },
+  ownerApplicantIconButton: {
+    width: moderateScale(34),
+    height: moderateScale(34),
+    borderRadius: moderateScale(17),
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ownerApplicantMetaRow: {
+    marginTop: moderateScale(10),
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: scale(6),
+  },
+  ownerApplicantStatusChip: {
+    maxWidth: "58%",
+    minHeight: moderateScale(25),
+    borderRadius: moderateScale(999),
+    paddingHorizontal: scale(9),
+    paddingVertical: moderateScale(4),
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(5),
+  },
+  ownerApplicantStatusDot: {
+    width: moderateScale(6),
+    height: moderateScale(6),
+    borderRadius: moderateScale(3),
+  },
+  ownerApplicantStatusText: {
+    flexShrink: 1,
+    fontSize: moderateScale(10),
+    lineHeight: moderateScale(13),
+    fontFamily: "Poppins_600SemiBold",
+  },
+  ownerApplicantRecommendationChip: {
+    minHeight: moderateScale(25),
+    borderRadius: moderateScale(999),
+    paddingHorizontal: scale(8),
+    paddingVertical: moderateScale(4),
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(4),
+  },
+  ownerApplicantRecommendationText: {
+    fontSize: moderateScale(9),
+    lineHeight: moderateScale(12),
+    fontFamily: "Poppins_600SemiBold",
+  },
+  ownerApplicantAttachmentText: {
+    marginLeft: "auto",
+    fontSize: moderateScale(9),
+    lineHeight: moderateScale(12),
+    fontFamily: "Poppins_500Medium",
+  },
+  ownerApplicantActions: {
+    marginTop: moderateScale(10),
+    paddingTop: moderateScale(10),
+    borderTopWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(7),
+  },
+  ownerApplicantSecondaryButton: {
+    flex: 1,
+    minHeight: moderateScale(34),
+    borderWidth: 1,
+    borderRadius: moderateScale(999),
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: scale(8),
+    paddingVertical: moderateScale(7),
+  },
+  ownerApplicantSecondaryButtonText: {
+    fontSize: moderateScale(10),
+    lineHeight: moderateScale(13),
+    fontFamily: "Poppins_600SemiBold",
+  },
+  ownerApplicantPrimaryButton: {
+    flex: 1,
+    minHeight: moderateScale(34),
+    borderRadius: moderateScale(999),
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: scale(5),
+    paddingHorizontal: scale(8),
+    paddingVertical: moderateScale(7),
+  },
+  ownerApplicantPrimaryButtonText: {
+    color: "#FFFFFF",
+    fontSize: moderateScale(10),
+    lineHeight: moderateScale(13),
+    fontFamily: "Poppins_600SemiBold",
   },
   cardContainer: {
     marginBottom: SCREEN_HEIGHT < 700 ? moderateScale(8) : moderateScale(12),

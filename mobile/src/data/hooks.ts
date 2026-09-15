@@ -132,7 +132,7 @@ export const useBookingsSummaryQuery = <TData = any>(
     placeholderData: keepPreviousData,
     queryFn: () =>
       invokeEdgeFunction<TData>("manage-bookings", {
-        body: { action: "fetch", includeScreenPayload: true, userId },
+        body: { action: "fetch", includeScreenPayload: true },
       }),
     queryKey: queryKeys.bookings.summary(userId),
     staleTime: 30_000,

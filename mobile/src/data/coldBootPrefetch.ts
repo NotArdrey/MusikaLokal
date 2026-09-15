@@ -132,7 +132,7 @@ const prefetchBookings = (queryClient: QueryClient, userId: string | null) => {
   return queryClient.prefetchQuery({
     queryFn: () =>
       invokeEdgeFunction("manage-bookings", {
-        body: { action: "fetch", includeScreenPayload: true, userId },
+        body: { action: "fetch", includeScreenPayload: true },
       }),
     queryKey,
     staleTime: 30_000,

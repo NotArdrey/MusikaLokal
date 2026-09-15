@@ -195,7 +195,7 @@ export default function MyVenueScreen() {
 
             if (isMusicianView) {
                 const { data: bookingPayload, error: bookingPayloadError } = await supabase.functions.invoke('manage-bookings', {
-                    body: { action: 'fetch', userId },
+                    body: { action: 'fetch' },
                 });
 
                 if (bookingPayloadError) {

@@ -58,7 +58,7 @@ async function loadProfileLegacyById(supabaseClient: any, profileIds: string[]) 
 
     const { data, error } = await supabaseClient
         .from('profiles_legacy_projection')
-        .select('id, skills, genres')
+        .select('id, skills, genres, portfolio_urls')
         .in('id', ids);
 
     if (error) throw error;
@@ -75,6 +75,7 @@ function mergeProfileLegacy(profile: any, legacyById: Map<string, any>) {
         ...profile,
         skills: Array.isArray(legacy?.skills) ? legacy.skills : [],
         genres: Array.isArray(legacy?.genres) ? legacy.genres : [],
+        portfolio_urls: Array.isArray(legacy?.portfolio_urls) ? legacy.portfolio_urls : [],
     };
 }
 
@@ -278,7 +279,7 @@ Deno.serve(async (req: Request) => {
             if (applicantIds.length > 0) {
                 const { data: profiles, error: profileError } = await supabaseClient
                     .from('profiles')
-                    .select('id, full_name, avatar_url, email')
+                    .select('id, full_name, avatar_url, email, location, address, bio, is_verified, verification_status')
                     .in('id', applicantIds);
 
                 if (profileError) throw profileError;

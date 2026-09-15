@@ -116,7 +116,10 @@ interface RecommendationItem {
     studio_type?: string | null;
     genres?: string[];
     skills?: string[];
+    open_group_applications?: boolean;
     open_production_applications?: boolean;
+    availability?: any[];
+    open_dates?: string[];
     similarity: number;
     aiReason: string;
     aiScore: number;
@@ -173,6 +176,17 @@ const splitGenres = (raw: string | null | undefined): string[] => {
             .map((part) => part.trim())
             .filter(Boolean),
     );
+};
+
+const isStudioAcceptingBookings = (item: any, today = new Date()) => {
+    const hasWeeklyHours = Array.isArray(item?.availability) && item.availability.some(
+        (slot: any) => slot && slot.is_open !== false,
+    );
+    const todayKey = today.toISOString().split("T")[0];
+    const hasFutureOpenDate = Array.isArray(item?.open_dates) && item.open_dates.some(
+        (value: unknown) => typeof value === "string" && value.slice(0, 10) >= todayKey,
+    );
+    return hasWeeklyHours || hasFutureOpenDate;
 };
 
 const HOME_FEED_CANDIDATE_SOURCE_LIMIT = 48;
@@ -809,14 +823,15 @@ const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> =>
             .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
         supabaseClient
             .from("studios_with_stats")
-            .select("id, name, description, amenities, images, address, location, type, types, hourly_rate, rehearsal_rate, recording_rate, rating, review_count, owner_id, created_at, permit_status")
+            .select("id, name, description, amenities, images, address, location, type, types, hourly_rate, rehearsal_rate, recording_rate, rating, review_count, owner_id, created_at, permit_status, availability, open_dates")
             .eq("permit_status", "approved")
             .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
         supabaseClient
             .from("gigs_with_stats")
-            .select("id, name, description, images, location, budget, rate, requirements, rating, review_count, organizer_id, created_at, status, permit_status")
-            .neq("status", "cancelled")
+            .select("id, name, description, images, location, budget, rate, requirements, rating, review_count, organizer_id, created_at, event_date, status, permit_status")
+            .eq("status", "open")
             .eq("permit_status", "approved")
+            .or(`event_date.is.null,event_date.gte.${new Date().toISOString()}`)
             .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
         supabaseClient
             .from("profiles")
@@ -828,6 +843,7 @@ const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> =>
         supabaseClient
             .from("production_teams")
             .select("id, owner_id, name, description, logo_url, created_at, updated_at, open_production_applications")
+            .eq("open_production_applications", true)
             .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
     ]);
 
@@ -883,7 +899,17 @@ const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> =>
         }
     }
 
-    const groupItems: CandidateItem[] = (groupsResult.data || []).map((item: any) => {
+    const groupCandidateIds = (groupsResult.data || []).map((item: any) => item.id).filter(Boolean);
+    const { data: openGroupRows, error: openGroupsError } = groupCandidateIds.length > 0
+        ? await supabaseClient
+            .from("groups")
+            .select("id")
+            .in("id", groupCandidateIds)
+            .eq("open_group_applications", true)
+        : { data: [], error: null };
+    if (openGroupsError) console.error("home-feed group visibility query error:", openGroupsError);
+    const openGroupIds = new Set((openGroupRows || []).map((item: any) => item.id));
+    const groupItems: CandidateItem[] = (groupsResult.data || []).filter((item: any) => openGroupIds.has(item.id)).map((item: any) => {
         const genres = splitGenres(item.genre);
         const groupType = String(item.group_type || "").toLowerCase();
         const type: RecommendationItemType = groupType.includes("duo") ? "Duo" : "Group";
@@ -906,12 +932,13 @@ const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> =>
             updated_at: item.updated_at || null,
             owner_id: item.owner_id || null,
             organizer_id: null,
+            open_group_applications: true,
             searchableText: `${item.name || ""} ${item.description || ""} ${item.genre || ""} ${item.location || ""} ${item.group_type || ""}`,
             extractedGenres: genres,
         };
     });
 
-    const studioItems: CandidateItem[] = (studiosResult.data || []).map((item: any) => {
+    const studioItems: CandidateItem[] = (studiosResult.data || []).filter((item: any) => isStudioAcceptingBookings(item)).map((item: any) => {
         const studioType = String(item.type || item.studio_type || "").trim();
         const isVenue = studioType.toLowerCase().includes("venue") ||
             (Array.isArray(item.amenities) && item.amenities.some((amenity: unknown) => String(amenity || "").toLowerCase().includes("stage")));
@@ -936,6 +963,8 @@ const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> =>
             updated_at: item.updated_at || null,
             owner_id: item.owner_id || null,
             organizer_id: null,
+            availability: Array.isArray(item.availability) ? item.availability : [],
+            open_dates: Array.isArray(item.open_dates) ? item.open_dates : [],
             searchableText: `${item.name || ""} ${item.description || ""} ${studioType} ${item.address || ""} ${item.location || ""}`,
             extractedGenres: splitGenres(studioType || ""),
         };
@@ -1131,8 +1160,9 @@ const getFeaturedPayload = async (supabaseClient: any) => {
         supabaseClient
             .from("gigs_with_stats")
             .select("*")
-            .neq("status", "cancelled")
+            .eq("status", "open")
             .eq("permit_status", "approved")
+            .or(`event_date.is.null,event_date.gte.${new Date().toISOString()}`)
             .order("created_at", { ascending: false })
             .limit(5),
         supabaseClient
@@ -1145,7 +1175,7 @@ const getFeaturedPayload = async (supabaseClient: any) => {
             .from("groups_with_stats")
             .select("*")
             .order("created_at", { ascending: false })
-            .limit(5),
+            .limit(20),
     ]);
 
     if (gigsError || studiosError || groupsError) {
@@ -1157,8 +1187,14 @@ const getFeaturedPayload = async (supabaseClient: any) => {
     }
 
     const safeFeaturedGigs = Array.isArray(featuredGigs) ? featuredGigs : [];
-    const safeFeaturedStudios = Array.isArray(featuredStudios) ? featuredStudios : [];
-    const safeNewArrivals = Array.isArray(newArrivals) ? newArrivals : [];
+    const safeFeaturedStudios = (Array.isArray(featuredStudios) ? featuredStudios : []).filter((item: any) => isStudioAcceptingBookings(item));
+    const newArrivalIds = (Array.isArray(newArrivals) ? newArrivals : []).map((group: any) => group.id).filter(Boolean);
+    const { data: openGroups, error: openGroupsError } = newArrivalIds.length > 0
+        ? await supabaseClient.from("groups").select("id").in("id", newArrivalIds).eq("open_group_applications", true)
+        : { data: [], error: null };
+    if (openGroupsError) console.error("home-feed featured group visibility error:", openGroupsError);
+    const openGroupIds = new Set((openGroups || []).map((group: any) => group.id));
+    const safeNewArrivals = (Array.isArray(newArrivals) ? newArrivals : []).filter((group: any) => openGroupIds.has(group.id)).slice(0, 5);
 
     const studioIds = safeFeaturedStudios.map((s: any) => s.id);
     let studioDateOverridesMap: Record<string, boolean> = {};
