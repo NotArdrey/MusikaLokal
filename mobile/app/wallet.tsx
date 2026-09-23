@@ -1,15 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView, BottomSheetView, useBottomSheetSpringConfigs } from '@gorhom/bottom-sheet';
 import * as ExpoLinking from 'expo-linking';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, Linking, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import BottomModal from '../src/components/BottomModal';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import CustomModal from '../src/components/modal';
-import TrackedBottomSheetModal from '../src/components/TrackedBottomSheetModal';
 import AppNavbar from '../src/components/navbar';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { emitToast } from '../src/events/toastBus';
@@ -19,7 +18,6 @@ import { useWalletSummaryQuery } from '../src/data/hooks';
 import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
 import { isE2EFixtureMode } from '../src/utils/e2eFixtures';
 import { usePageLoadLogger } from '../src/utils/loadTimeLogger';
-import { bottomSheetSpringConfig } from '../src/utils/motion';
 
 // Payout Method Type
 interface PayoutMethod {
@@ -102,10 +100,6 @@ export default function WalletScreen() {
   const { contentBottomPadding } = useBottomBarClearance(24);
   const params = useLocalSearchParams<{ refresh?: string }>();
   const walletRefreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
-  const withdrawSheetRef = useRef<BottomSheetModal>(null);
-  const addPayoutSheetRef = useRef<BottomSheetModal>(null);
-  const walletSheetSnapPoints = useMemo(() => ['90%'], []);
-  const walletSheetAnimationConfigs = useBottomSheetSpringConfigs(bottomSheetSpringConfig);
 
   // Withdrawal modal states
   const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
@@ -215,45 +209,6 @@ export default function WalletScreen() {
     (newPayoutType !== 'bank' || newBankName.trim().length > 0);
   const isWithdrawSubmitDisabled = withdrawing || !isWithdrawReady;
   const isPayoutMethodSubmitDisabled = addingPayoutMethod || !isPayoutMethodReady;
-  const walletSheetBackgroundStyle = useMemo(
-    () => ({ backgroundColor: colors.background }),
-    [colors.background],
-  );
-  const walletSheetHandleIndicatorStyle = useMemo(
-    () => ({
-      backgroundColor: isDark ? '#4B5563' : '#E5E7EB',
-      width: 40,
-    }),
-    [isDark],
-  );
-  const renderWalletSheetBackdrop = useCallback(
-    (props: any) => (
-      <BottomSheetBackdrop
-        {...props}
-        disappearsOnIndex={-1}
-        appearsOnIndex={0}
-        opacity={0.5}
-      />
-    ),
-    [],
-  );
-
-  useEffect(() => {
-    if (withdrawModalVisible) {
-      withdrawSheetRef.current?.present();
-    } else {
-      withdrawSheetRef.current?.dismiss();
-    }
-  }, [withdrawModalVisible]);
-
-  useEffect(() => {
-    if (addPayoutModalVisible) {
-      addPayoutSheetRef.current?.present();
-    } else {
-      addPayoutSheetRef.current?.dismiss();
-    }
-  }, [addPayoutModalVisible]);
-
   const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
     setAlertConfig({ type, title, message, buttons });
     setAlertVisible(true);
@@ -1010,28 +965,16 @@ export default function WalletScreen() {
       </View>
 
       {/* Withdraw Modal */}
-      <TrackedBottomSheetModal
-        ref={withdrawSheetRef}
+      <BottomModal
+        visible={withdrawModalVisible}
         overlayLabel="WalletWithdrawModal"
-        index={0}
-        snapPoints={walletSheetSnapPoints}
-        animationConfigs={walletSheetAnimationConfigs}
-        animateOnMount={true}
-        enableDynamicSizing={false}
-        enableContentPanningGesture={false}
-        enableOverDrag={false}
-        backdropComponent={renderWalletSheetBackdrop}
-        backgroundStyle={walletSheetBackgroundStyle}
-        handleIndicatorStyle={walletSheetHandleIndicatorStyle}
-        enablePanDownToClose={true}
-        keyboardBehavior="interactive"
-        keyboardBlurBehavior="restore"
-        onDismiss={() => setWithdrawModalVisible(false)}
+        onClose={() => setWithdrawModalVisible(false)}
+        keyboardAvoiding
       >
           <View
             testID="mobile-wallet-withdraw-modal"
             accessibilityLabel="mobile-wallet-withdraw-modal"
-            style={styles.walletSheetContent}
+            style={[styles.withdrawModal, { backgroundColor: colors.background }]}
           >
             {/* Header */}
             <View style={styles.withdrawModalHeader}>
@@ -1052,7 +995,7 @@ export default function WalletScreen() {
               </TouchableOpacity>
             </View>
 
-            <BottomSheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
               {/* Amount Input */}
               <View style={styles.inputSection}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Amount to Withdraw</Text>
@@ -1192,7 +1135,7 @@ export default function WalletScreen() {
                   Simulated withdrawals complete immediately and deduct from your real in-app wallet balance. No external money is sent.
                 </Text>
               </View>
-            </BottomSheetScrollView>
+            </ScrollView>
 
             {/* Submit Button */}
             <TouchableOpacity
@@ -1221,31 +1164,19 @@ export default function WalletScreen() {
               )}
             </TouchableOpacity>
           </View>
-      </TrackedBottomSheetModal>
+      </BottomModal>
 
       {/* Add Payout Method Modal */}
-      <TrackedBottomSheetModal
-        ref={addPayoutSheetRef}
+      <BottomModal
+        visible={addPayoutModalVisible}
         overlayLabel="WalletAddPayoutModal"
-        index={0}
-        snapPoints={walletSheetSnapPoints}
-        animationConfigs={walletSheetAnimationConfigs}
-        animateOnMount={true}
-        enableDynamicSizing={false}
-        enableContentPanningGesture={false}
-        enableOverDrag={false}
-        backdropComponent={renderWalletSheetBackdrop}
-        backgroundStyle={walletSheetBackgroundStyle}
-        handleIndicatorStyle={walletSheetHandleIndicatorStyle}
-        enablePanDownToClose={true}
-        keyboardBehavior="interactive"
-        keyboardBlurBehavior="restore"
-        onDismiss={() => setAddPayoutModalVisible(false)}
+        onClose={() => setAddPayoutModalVisible(false)}
+        keyboardAvoiding
       >
           <View
             testID="mobile-wallet-add-payout-modal"
             accessibilityLabel="mobile-wallet-add-payout-modal"
-            style={styles.walletSheetContent}
+            style={[styles.addPayoutModal, { backgroundColor: colors.background }]}
           >
             <View style={styles.withdrawModalHeader}>
               <Text style={[styles.withdrawModalTitle, { color: colors.text }]}>Add Payout Method</Text>
@@ -1260,7 +1191,7 @@ export default function WalletScreen() {
               </TouchableOpacity>
             </View>
 
-            <BottomSheetScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false}>
               {/* Payout Type Selection */}
               <View style={styles.inputSection}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Payout Type</Text>
@@ -1344,7 +1275,7 @@ export default function WalletScreen() {
                   onChangeText={setNewAccountNumber}
                 />
               </View>
-            </BottomSheetScrollView>
+            </ScrollView>
 
             {/* Add Button */}
             <TouchableOpacity
@@ -1365,7 +1296,7 @@ export default function WalletScreen() {
               )}
             </TouchableOpacity>
           </View>
-      </TrackedBottomSheetModal>
+      </BottomModal>
 
       <CustomModal
         visible={withdrawing}

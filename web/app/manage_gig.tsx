@@ -32,6 +32,7 @@ import { formatDashedNumericDate } from "../src/utils/friendlyDateTime";
 import { ProductionInviteTarget } from "../src/utils/productionTeamInvites";
 import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 import { sendVenueGigInvites } from "../src/utils/venueGigInvites";
+import { getSharedSlotRequirements, getSpecificSlotRequirementLines } from "../src/utils/gigSlotRequirements";
 
 import {
   APPLICATION_FILTERS, ApplicationFilter, filterAndSortApplications,
@@ -43,6 +44,26 @@ const PORTFOLIO_ITEM_SIZE = (screenWidth - 48 - 8) / 3; // 3 columns with gaps
 const OWNER_GIG_TABS = ["About", "Applicants", "Review"];
 const VIEWER_GIG_TABS = ["About", "Review"];
 const ACCEPTED_GIG_STATUSES = ["accepted", "approved", "confirmed", "happening now", "completed"];
+
+const getSlotGroups = (requirements?: any) => {
+  const slots = requirements?.slots || {};
+  return [
+    { key: "solo", label: "Solo", data: slots.solo },
+    { key: "duo", label: "Duo", data: slots.duo },
+    { key: "band", label: "Group", data: slots.band },
+  ].map((group) => {
+    const shared = getSharedSlotRequirements(group.data);
+    return {
+      ...group,
+      needed: Math.max(0, Number(group.data?.needed || 0)),
+      roles: shared.roles,
+      genres: shared.preferred_genres,
+      instruments: shared.preferred_instruments,
+      groupTypes: Array.isArray(group.data?.preferred_group_types) ? group.data.preferred_group_types : [],
+      specificRequirements: getSpecificSlotRequirementLines(group.data),
+    };
+  }).filter((group) => group.needed > 0);
+};
 
 export default function GigDetailsScreen() {
   const { colors, isDark } = useTheme();
@@ -596,6 +617,7 @@ export default function GigDetailsScreen() {
     () => filterAndSortApplications(applications, applicationFilter),
     [applications, applicationFilter],
   );
+  const slotGroups = useMemo(() => getSlotGroups(gig?.requirements), [gig?.requirements]);
   const formatMusicianType = (requirements?: any) => {
     const slots = requirements?.slots || {};
     const soloNeeded = Number(slots?.solo?.needed || 0);
@@ -943,6 +965,49 @@ export default function GigDetailsScreen() {
                   </View>
                 </View>
 
+                <View>
+                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12 }]}>Slot Details</Text>
+                  {slotGroups.length > 0 ? (
+                    <View style={{ gap: 10 }}>
+                      {slotGroups.map((slotGroup) => (
+                        <View
+                          key={slotGroup.key}
+                          style={{
+                            borderWidth: 1,
+                            borderColor: colors.border,
+                            borderRadius: 12,
+                            backgroundColor: colors.surface,
+                            padding: 12,
+                            gap: 4,
+                          }}
+                        >
+                          <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+                            <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold" }}>{slotGroup.label}</Text>
+                            <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold" }}>{slotGroup.needed} needed</Text>
+                          </View>
+                          {slotGroup.specificRequirements.map((requirement) => (
+                            <Text key={requirement} style={{ color: colors.text }}>{requirement}</Text>
+                          ))}
+                          {slotGroup.roles.length > 0 ? (
+                            <Text style={{ color: colors.textSecondary }}>Shared roles: {slotGroup.roles.join(", ")}</Text>
+                          ) : null}
+                          {slotGroup.groupTypes.length > 0 ? (
+                            <Text style={{ color: colors.textSecondary }}>Preferred group types: {slotGroup.groupTypes.join(", ")}</Text>
+                          ) : null}
+                          {slotGroup.genres.length > 0 ? (
+                            <Text style={{ color: colors.textSecondary }}>Shared genres: {slotGroup.genres.join(", ")}</Text>
+                          ) : null}
+                          {slotGroup.instruments.length > 0 ? (
+                            <Text style={{ color: colors.textSecondary }}>Shared instruments: {slotGroup.instruments.join(", ")}</Text>
+                          ) : null}
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={{ color: colors.textSecondary }}>No slot details configured.</Text>
+                  )}
+                </View>
+
                 {/* The Offer Card */}
                 <View
                   style={[
@@ -1183,7 +1248,7 @@ export default function GigDetailsScreen() {
                         style={[styles.inviteBtn, { backgroundColor: colors.inputBackground }]}
                       >
                         <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
-                        <Text style={[styles.inviteBtnText, { color: colors.primary }]}>AI Filter</Text>
+                        <Text style={[styles.inviteBtnText, { color: colors.primary }]}>AI Match Review</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         activeOpacity={1}
@@ -1421,7 +1486,7 @@ export default function GigDetailsScreen() {
                           <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
                             <Ionicons name="sparkles" size={17} color={aiRecommendation.recommendation_status === "recommended" ? "#10B981" : colors.primary} />
                             <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 13, flex: 1 }}>
-                              AI Filter Review
+                              AI Match Review
                             </Text>
                             <Text style={{ color: aiRecommendation.recommendation_status === "recommended" ? "#10B981" : colors.primary, fontFamily: "Poppins_700Bold", fontSize: 14 }}>
                               {aiRecommendation.score == null ? "—" : `${Math.round(Number(aiRecommendation.score))}%`}

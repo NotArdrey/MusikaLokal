@@ -794,7 +794,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
           }}
         >
           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
-            AI Filter is temporarily unavailable. Open Review Applicant to refresh it.
+            AI Match Review is temporarily unavailable. Open Review Applicant to refresh it.
           </Text>
         </View>
       );
@@ -814,7 +814,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
           }}
         >
           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
-            AI Filter is not enabled for this gig. Open Review Applicant to configure it.
+            AI Match Review is not enabled for this gig. Open Review Applicant to configure it.
           </Text>
         </View>
       );
@@ -863,7 +863,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
           <Ionicons name="sparkles" size={16} color={isRecommended ? "#10B981" : colors.primary} />
           <Text style={{ color: isRecommended ? "#10B981" : colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
-            AI Filter Review
+            AI Match Review
           </Text>
           {recommendation.is_verified === true ? (
             <Ionicons name="shield-checkmark" size={15} color="#10B981" />

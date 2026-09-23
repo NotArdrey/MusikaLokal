@@ -856,7 +856,7 @@ function evaluateGigApplication(
             : recommendationStatus === 'possible_match'
             ? `${score}% advisory fit; review the unmatched preferences before deciding.`
             : recommendationStatus === 'insufficient_data'
-            ? 'No applicable AI filter criteria are configured for this gig.'
+            ? 'No applicable AI Match Review criteria are configured for this gig.'
             : 'Not recommended because a required gig criterion is missing.'
 
     return {
@@ -1146,7 +1146,7 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
                 : recommendationStatus === 'possible_match'
                 ? 'This applicant may be a match. Please review the items below.'
                 : recommendationStatus === 'insufficient_data'
-                ? 'No applicable AI filter criteria are configured for this gig.'
+                ? 'No applicable AI Match Review criteria are configured for this gig.'
                 : requiredMismatchExplanation
         return {
             ...item,

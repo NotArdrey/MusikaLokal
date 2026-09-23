@@ -3784,7 +3784,6 @@ const ListingDetailsSheet = forwardRef<
       videoUrl={videoUrl}
       setVideoUrl={setVideoUrl}
       aiPortfolioReviewConsent={aiPortfolioReviewConsent}
-      setAiPortfolioReviewConsent={setAiPortfolioReviewConsent}
       setVideoReviewFrameUrl={setVideoReviewFrameUrl}
       setVideoReviewFrameUrls={setVideoReviewFrameUrls}
       videoCopyrightDecision={videoCopyrightDecision}
@@ -3833,7 +3832,6 @@ const ListingDetailsSheet = forwardRef<
       videoUrl={videoUrl}
       setVideoUrl={setVideoUrl}
       aiPortfolioReviewConsent={false}
-      setAiPortfolioReviewConsent={() => {}}
       setVideoReviewFrameUrl={() => {}}
       setVideoReviewFrameUrls={() => {}}
       videoCopyrightDecision={null}

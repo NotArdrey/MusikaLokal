@@ -1,4 +1,4 @@
--- Enable the existing gig-applicant AI filter for the role-accurate demo gigs.
+-- Enable the existing gig-applicant AI Match Review for the role-accurate demo gigs.
 --
 -- Portfolio and distance are intentionally ignored for this fixture because
 -- those fields are incomplete on several real QA profiles. The saved scores

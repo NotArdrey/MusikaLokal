@@ -21,6 +21,7 @@ import { supabase } from "../../lib/supabase";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
 import { addFavoriteChangedListener, emitFavoriteChanged } from "../utils/favoriteEvents";
 import { isFanUserRole } from "../utils/roleRouting";
+import { getSpecificSlotRequirementLines } from "../utils/gigSlotRequirements";
 import CachedImage from "./CachedImage";
 import PagerView from "./PagerView";
 import { palette, radius, typography } from "../theme/tokens";
@@ -352,6 +353,11 @@ const ListingCard: React.FC<ListingCardProps> = ({
       return count > 1 ? `${label} (${count})` : label;
     });
   }, [item?.requirements?.slots?.band?.preferred_group_types]);
+
+  const specificSlotRequirementBadges = [
+    ...getSpecificSlotRequirementLines(item?.requirements?.slots?.solo),
+    ...getSpecificSlotRequirementLines(item?.requirements?.slots?.duo),
+  ];
 
   // Determine "Subtitle" (Location or Genre)
   const subtitle = useMemo(() => {
@@ -1064,22 +1070,27 @@ const ListingCard: React.FC<ListingCardProps> = ({
                         <Text style={styles.tagText}>{label}</Text>
                       </View>
                     ))}
-                    {getPreferenceTagText("Solo Genre", item.requirements.slots.solo?.preferred_genres) && (
+                    {specificSlotRequirementBadges.slice(0, 3).map((label, index) => (
+                      <View key={`specific-slot-${index}`} style={[styles.tagBadge, { backgroundColor: "#7C3AED" }]}>
+                        <Text style={styles.tagText}>{label}</Text>
+                      </View>
+                    ))}
+                    {specificSlotRequirementBadges.length === 0 && getPreferenceTagText("Solo Genre", item.requirements.slots.solo?.preferred_genres) && (
                       <View style={[styles.tagBadge, { backgroundColor: "#BE185D" }]}>
                         <Text style={styles.tagText}>{getPreferenceTagText("Solo Genre", item.requirements.slots.solo?.preferred_genres)}</Text>
                       </View>
                     )}
-                    {getPreferenceTagText("Solo Inst", item.requirements.slots.solo?.preferred_instruments) && (
+                    {specificSlotRequirementBadges.length === 0 && getPreferenceTagText("Solo Inst", item.requirements.slots.solo?.preferred_instruments) && (
                       <View style={[styles.tagBadge, { backgroundColor: "#9D174D" }]}>
                         <Text style={styles.tagText}>{getPreferenceTagText("Solo Inst", item.requirements.slots.solo?.preferred_instruments)}</Text>
                       </View>
                     )}
-                    {getPreferenceTagText("Duo Genre", item.requirements.slots.duo?.preferred_genres) && (
+                    {specificSlotRequirementBadges.length === 0 && getPreferenceTagText("Duo Genre", item.requirements.slots.duo?.preferred_genres) && (
                       <View style={[styles.tagBadge, { backgroundColor: "#6D28D9" }]}>
                         <Text style={styles.tagText}>{getPreferenceTagText("Duo Genre", item.requirements.slots.duo?.preferred_genres)}</Text>
                       </View>
                     )}
-                    {getPreferenceTagText("Duo Inst", item.requirements.slots.duo?.preferred_instruments) && (
+                    {specificSlotRequirementBadges.length === 0 && getPreferenceTagText("Duo Inst", item.requirements.slots.duo?.preferred_instruments) && (
                       <View style={[styles.tagBadge, { backgroundColor: "#5B21B6" }]}>
                         <Text style={styles.tagText}>{getPreferenceTagText("Duo Inst", item.requirements.slots.duo?.preferred_instruments)}</Text>
                       </View>
@@ -1717,22 +1728,27 @@ const ListingCard: React.FC<ListingCardProps> = ({
                       <Text style={[styles.tagText, { fontSize: 10 }]}>{label}</Text>
                     </View>
                   ))}
-                  {getPreferenceTagText("Solo Genre", item.requirements.slots.solo?.preferred_genres) && (
+                  {specificSlotRequirementBadges.slice(0, 3).map((label, index) => (
+                    <View key={`specific-slot-${index}`} style={[styles.tagBadge, styles.tagBadgeSmall, { backgroundColor: "#7C3AED" }]}>
+                      <Text style={[styles.tagText, { fontSize: 10 }]}>{label}</Text>
+                    </View>
+                  ))}
+                  {specificSlotRequirementBadges.length === 0 && getPreferenceTagText("Solo Genre", item.requirements.slots.solo?.preferred_genres) && (
                     <View style={[styles.tagBadge, styles.tagBadgeSmall, { backgroundColor: "#BE185D" }]}>
                       <Text style={[styles.tagText, { fontSize: 10 }]}>{getPreferenceTagText("Solo Genre", item.requirements.slots.solo?.preferred_genres)}</Text>
                     </View>
                   )}
-                  {getPreferenceTagText("Solo Inst", item.requirements.slots.solo?.preferred_instruments) && (
+                  {specificSlotRequirementBadges.length === 0 && getPreferenceTagText("Solo Inst", item.requirements.slots.solo?.preferred_instruments) && (
                     <View style={[styles.tagBadge, styles.tagBadgeSmall, { backgroundColor: "#9D174D" }]}>
                       <Text style={[styles.tagText, { fontSize: 10 }]}>{getPreferenceTagText("Solo Inst", item.requirements.slots.solo?.preferred_instruments)}</Text>
                     </View>
                   )}
-                  {getPreferenceTagText("Duo Genre", item.requirements.slots.duo?.preferred_genres) && (
+                  {specificSlotRequirementBadges.length === 0 && getPreferenceTagText("Duo Genre", item.requirements.slots.duo?.preferred_genres) && (
                     <View style={[styles.tagBadge, styles.tagBadgeSmall, { backgroundColor: "#6D28D9" }]}>
                       <Text style={[styles.tagText, { fontSize: 10 }]}>{getPreferenceTagText("Duo Genre", item.requirements.slots.duo?.preferred_genres)}</Text>
                     </View>
                   )}
-                  {getPreferenceTagText("Duo Inst", item.requirements.slots.duo?.preferred_instruments) && (
+                  {specificSlotRequirementBadges.length === 0 && getPreferenceTagText("Duo Inst", item.requirements.slots.duo?.preferred_instruments) && (
                     <View style={[styles.tagBadge, styles.tagBadgeSmall, { backgroundColor: "#5B21B6" }]}>
                       <Text style={[styles.tagText, { fontSize: 10 }]}>{getPreferenceTagText("Duo Inst", item.requirements.slots.duo?.preferred_instruments)}</Text>
                     </View>

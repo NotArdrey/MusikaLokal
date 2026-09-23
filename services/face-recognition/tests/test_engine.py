@@ -74,6 +74,37 @@ class FaceMatcherTests(unittest.TestCase):
         self.assertEqual(result["multiple_people_frames"], 1)
         self.assertEqual(result["frames"][0]["distance"], 0.1)
 
+    def test_one_clear_frame_returns_limited_advisory_result(self):
+        matcher = self.matcher({
+            "profile": [[0.0]],
+            "frame-1": [[0.10]],
+            "frame-2": NoFaceError("no face"),
+            "frame-3": [[0.49]],
+        })
+        result = matcher.match_batch(
+            [{"id": "solo", "reference_image_url": "profile"}],
+            ["frame-1", "frame-2", "frame-3"],
+            loader,
+        )["results"][0]
+        self.assertEqual(result["status"], "likely_same_person")
+        self.assertEqual(result["usable_frames"], 1)
+        self.assertIn("limited evidence", result["limitation"])
+
+    def test_one_clear_non_match_remains_inconclusive(self):
+        matcher = self.matcher({
+            "profile": [[0.0]],
+            "frame-1": [[0.90]],
+            "frame-2": NoFaceError("no face"),
+        })
+        result = matcher.match_batch(
+            [{"id": "solo", "reference_image_url": "profile"}],
+            ["frame-1", "frame-2"],
+            loader,
+        )["results"][0]
+        self.assertEqual(result["status"], "unclear")
+        self.assertEqual(result["usable_frames"], 1)
+        self.assertIn("at least 2", result["summary"])
+
     def test_near_threshold_and_no_face_frames_remain_unclear(self):
         matcher = self.matcher({
             "profile": [[0.0]],

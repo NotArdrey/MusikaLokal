@@ -39,6 +39,7 @@ import {
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import { ProductionInviteTarget } from "../src/utils/productionTeamInvites";
 import { sendVenueGigInvites } from "../src/utils/venueGigInvites";
+import { getSharedSlotRequirements, getSpecificSlotRequirementLines } from "../src/utils/gigSlotRequirements";
 import { getSmoothTabIndex, setSmoothTab, useStagedTabRows } from "../src/utils/smoothTabs";
 import { bottomSheetSpringConfig } from "../src/utils/motion";
 import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
@@ -815,20 +816,20 @@ export default function GigDetailsScreen() {
     ];
 
     return groups
-      .map((group) => ({
-        ...group,
-        needed: Number(group.data?.needed || 0),
-        roles: Array.isArray(group.data?.roles) ? group.data.roles : [],
-        genres: Array.isArray(group.data?.preferred_genres)
-          ? group.data.preferred_genres
-          : [],
-        instruments: Array.isArray(group.data?.preferred_instruments)
-          ? group.data.preferred_instruments
-          : [],
-        groupTypes: Array.isArray(group.data?.preferred_group_types)
-          ? group.data.preferred_group_types
-          : [],
-      }))
+      .map((group) => {
+        const shared = getSharedSlotRequirements(group.data);
+        return {
+          ...group,
+          needed: Number(group.data?.needed || 0),
+          roles: shared.roles,
+          genres: shared.preferred_genres,
+          instruments: shared.preferred_instruments,
+          groupTypes: Array.isArray(group.data?.preferred_group_types)
+            ? group.data.preferred_group_types
+            : [],
+          specificRequirements: getSpecificSlotRequirementLines(group.data),
+        };
+      })
       .filter((group) => group.needed > 0);
   };
 
@@ -1151,9 +1152,17 @@ export default function GigDetailsScreen() {
                               {slotGroup.needed} needed
                             </Text>
                           </View>
+                          {slotGroup.specificRequirements.map((requirement) => (
+                            <Text
+                              key={requirement}
+                              style={[styles.detailCardText, { color: colors.text }]}
+                            >
+                              {requirement}
+                            </Text>
+                          ))}
                           {slotGroup.roles.length > 0 ? (
                             <Text style={[styles.detailCardText, { color: colors.textSecondary }]}>
-                              Roles: {slotGroup.roles.join(", ")}
+                              Shared roles: {slotGroup.roles.join(", ")}
                             </Text>
                           ) : null}
                           {slotGroup.groupTypes.length > 0 ? (
@@ -1163,12 +1172,12 @@ export default function GigDetailsScreen() {
                           ) : null}
                           {slotGroup.genres.length > 0 ? (
                             <Text style={[styles.detailCardText, { color: colors.textSecondary }]}>
-                              Preferred genres: {slotGroup.genres.join(", ")}
+                              Shared genres: {slotGroup.genres.join(", ")}
                             </Text>
                           ) : null}
                           {slotGroup.instruments.length > 0 ? (
                             <Text style={[styles.detailCardText, { color: colors.textSecondary }]}>
-                              Preferred instruments: {slotGroup.instruments.join(", ")}
+                              Shared instruments: {slotGroup.instruments.join(", ")}
                             </Text>
                           ) : null}
                         </View>
@@ -1456,7 +1465,7 @@ export default function GigDetailsScreen() {
                         style={[styles.inviteBtn, { backgroundColor: colors.inputBackground }]}
                       >
                         <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
-                        <Text style={[styles.inviteBtnText, { color: colors.primary }]}>AI Filter</Text>
+                        <Text style={[styles.inviteBtnText, { color: colors.primary }]}>AI Match Review</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         activeOpacity={1}
@@ -1592,7 +1601,7 @@ export default function GigDetailsScreen() {
                             <View
                               testID={`prior-application-counts-${app.id}`}
                               style={[
-                                styles.aiFilterScoreRow,
+                                styles.aiMatchReviewScoreRow,
                                 {
                                   backgroundColor: colors.primary + "14",
                                   borderWidth: 1,
@@ -1601,20 +1610,20 @@ export default function GigDetailsScreen() {
                               ]}
                             >
                               <Ionicons name="repeat-outline" size={17} color={colors.primary} />
-                              <Text style={[styles.aiFilterScoreLabel, { color: colors.text, flex: 1 }]}>
+                              <Text style={[styles.aiMatchReviewScoreLabel, { color: colors.text, flex: 1 }]}>
                                 Applied {priorApplicationCounts.owner_gigs + 1}{" "}
                                 {priorApplicationCounts.owner_gigs === 0 ? "time" : "times"} to your gigs
                               </Text>
-                              <Text style={[styles.aiFilterScoreValue, { color: colors.primary }]}>
+                              <Text style={[styles.aiMatchReviewScoreValue, { color: colors.primary }]}>
                                 {priorApplicationCounts.this_gig + 1}× here
                               </Text>
                             </View>
                           ) : null}
                           {aiRecommendation?.score !== null && aiRecommendation?.score !== undefined ? (
-                            <View style={[styles.aiFilterScoreRow, { backgroundColor: colors.inputBackground }]}>
+                            <View style={[styles.aiMatchReviewScoreRow, { backgroundColor: colors.inputBackground }]}>
                               <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
-                              <Text style={[styles.aiFilterScoreLabel, { color: colors.text }]}>AI Filter Score</Text>
-                              <Text style={[styles.aiFilterScoreValue, { color: colors.primary }]}>
+                              <Text style={[styles.aiMatchReviewScoreLabel, { color: colors.text }]}>AI Match Review Score</Text>
+                              <Text style={[styles.aiMatchReviewScoreValue, { color: colors.primary }]}>
                                 {aiRecommendation.score == null ? "—" : `${Math.round(Number(aiRecommendation.score))}%`}
                               </Text>
                             </View>
@@ -2167,7 +2176,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
-  aiFilterScoreRow: {
+  aiMatchReviewScoreRow: {
     minHeight: 36,
     borderRadius: 10,
     paddingHorizontal: 10,
@@ -2176,12 +2185,12 @@ const styles = StyleSheet.create({
     gap: 7,
     marginTop: 2,
   },
-  aiFilterScoreLabel: {
+  aiMatchReviewScoreLabel: {
     flex: 1,
     fontFamily: "Poppins_500Medium",
     fontSize: 11,
   },
-  aiFilterScoreValue: {
+  aiMatchReviewScoreValue: {
     fontFamily: "Poppins_700Bold",
     fontSize: 13,
   },

@@ -81,8 +81,10 @@ import {
   persistUploadAsset,
   removePersistedUploadAsset,
 } from "../../src/utils/storageUpload";
+import { cleanupRemovedStorageObjects } from "../../src/utils/storageCleanup";
 import { generateNativeVideoFrame } from "../../src/utils/videoFrames";
 import { runAfterUIIdle } from "../../src/utils/idleTask";
+import { getGigSlotCardBadges } from "../../src/utils/gigSlotRequirements";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -1481,10 +1483,29 @@ const getFeedPriceChips = (item: any) => {
   return chips.slice(0, 2);
 };
 
+const getAiRecommendationLabel = (item: any) => {
+  if (item?.ai_recommended !== true) return "";
+
+  const type = String(item?.type || "").trim().toLowerCase();
+  if (item?.__feedKind !== "ai_card" || type === "post") return "AI recommends this post for you";
+  if (type === "gig" || type === "venue") return "AI recommends this gig for you";
+  if (type === "artist" || type === "profile" || type === "musician") return "AI recommends this artist for you";
+  if (type === "production" || type === "production_team") return "AI recommends this production team for you";
+  if (type === "duo") return "AI recommends this duo for you";
+  if (type === "group") return "AI recommends this group for you";
+  if (type === "studio") return "AI recommends this studio for you";
+  return "AI recommends this for you";
+};
+
 const getFeedServiceBadges = (item: any) => {
   const badges: string[] = [];
   const type = item?.type;
   const studioType = typeof item?.studio_type === "string" ? item.studio_type : "";
+
+  const aiRecommendationLabel = getAiRecommendationLabel(item);
+  if (aiRecommendationLabel) {
+    badges.push(aiRecommendationLabel);
+  }
 
   if (type === "Studio" || type === "Venue") {
     badges.push(type === "Venue" ? "Gig" : "Live Room");
@@ -1528,6 +1549,14 @@ const normalizeFeedAiRecommendationCard = (item: any) => {
   const rawType = typeof item?.type === "string" && item.type.trim().length > 0
     ? item.type.trim()
     : "Group";
+  if (rawType.toLowerCase() === "post") {
+    return normalizeFeedPost({
+      ...item,
+      type: "Post",
+      body: item?.content || item?.body || "",
+    });
+  }
+
   const type = rawType === "Studio" && isFeedVenueLikeStudio(item) ? "Venue" : rawType;
   const displayType = type === "Venue" ? "Gig" : type;
   const normalizedType = type.toLowerCase();
@@ -1615,6 +1644,7 @@ const isOwnFeedAiRecommendationCard = (item: any, userId?: string | null) => {
     item?.owner_id,
     item?.organizer_id,
     item?.uploader_id,
+    item?.author_id,
     profileTargetId,
     type === "artist" || type === "profile" || type === "musician" ? item?.id : null,
   ];
@@ -2748,6 +2778,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
       }
 
       logFeedRadioDebug("tap-tune-in-start", tapDebugDetails);
+      setFeaturedStation(displayStation);
       await tuneIn({
         ...displayStation,
         __queueReady: displayStation.__queueReady === true,
@@ -2919,6 +2950,9 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   const badges = useMemo(() => getFeedServiceBadges(item), [item]);
   const priceChips = useMemo(() => getFeedPriceChips(item), [item]);
   const quickInfoItems = useMemo(() => getFeedQuickInfoItems(item), [item]);
+  const slotBadges = ["gig", "venue"].includes(suggestionType)
+    ? getGigSlotCardBadges(item?.requirements)
+    : [];
   const featuredPerformers = useMemo(
     () =>
       isSuggestion && ["gig", "venue"].includes(suggestionType) && Array.isArray(item?.featured_performers)
@@ -2940,7 +2974,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   const showHeaderFollow = Boolean(followTarget && (showAuthorFollow || isSuggestion));
   const showSuggestionDetails =
     isSuggestion &&
-    (bodyBadges.length > 0 || priceChips.length > 0 || quickInfoItems.length > 0 || featuredPerformers.length > 0);
+    (bodyBadges.length > 0 || priceChips.length > 0 || slotBadges.length > 0 || quickInfoItems.length > 0 || featuredPerformers.length > 0);
 
   const handleOpenPrimary = useCallback(() => {
     if (isSuggestion) {
@@ -3251,6 +3285,18 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
             </View>
           ) : null}
 
+          {slotBadges.length > 0 ? (
+            <View style={styles.socialEntityChipRow}>
+              {slotBadges.map((badge) => (
+                <View key={`slot-${badge}`} style={[styles.socialBadgeChip, { backgroundColor: colors.primary + "12" }]}>
+                  <Text style={[styles.socialBadgeText, { color: colors.primary }]} numberOfLines={2}>
+                    {badge}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
           <FeaturedGigPerformers
             performers={featuredPerformers}
             primaryColor={colors.primary}
@@ -3407,6 +3453,7 @@ export default function FeedScreen() {
   const [postOptionsTarget, setPostOptionsTarget] = useState<any | null>(null);
   const [reportTarget, setReportTarget] = useState<any | null>(null);
   const [deletePostTarget, setDeletePostTarget] = useState<any | null>(null);
+  const [deleteGigTarget, setDeleteGigTarget] = useState<any | null>(null);
   const composerInputRef = React.useRef<TextInput>(null);
   const composerFocusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const postMutationInFlightRef = React.useRef(false);
@@ -3503,7 +3550,7 @@ export default function FeedScreen() {
   const onFeedViewableItemsChanged = React.useRef(({ changed }: { changed?: any[] }) => {
     for (const token of changed || []) {
       const item = token?.item;
-      if (!item || item.__feedKind !== "ai_card") continue;
+      if (!item || (item.__feedKind !== "ai_card" && item?.ai_recommended !== true)) continue;
 
       const stableKey = getFeedItemStableKey(item);
       if (!stableKey) continue;
@@ -4000,7 +4047,10 @@ export default function FeedScreen() {
 
       const rows = Array.isArray(data?.recommendations) ? data.recommendations : [];
       const cards = rows
-        .map(normalizeFeedAiRecommendationCard)
+        .map((item: any) => normalizeFeedAiRecommendationCard({
+          ...item,
+          ai_recommended: data?.aiPowered === true,
+        }))
         .filter((item: any) => item?.id && !isOwnFeedAiRecommendationCard(item, resolvedUserId))
         .filter(isOpenFeedRecommendation)
         .slice(0, limit);
@@ -5315,6 +5365,7 @@ export default function FeedScreen() {
       return markFeedBlurred;
     }
 
+    const isReturningToFeed = hasFocusedFeedRef.current;
     hasFocusedFeedRef.current = true;
     clearBottomOverlays();
     const hydrated = hydrateCachedFeed(currentTab);
@@ -5323,6 +5374,7 @@ export default function FeedScreen() {
       hydrated &&
       isEmptyBlockingFeedSnapshot(currentTab, hydratedSnapshot);
     const shouldRefreshFeed =
+      isReturningToFeed ||
       !hydrated ||
       isHydratedEmptyBlockingTab ||
       Date.now() - feedLastFetchAt[currentTab] >= FEED_FOCUS_REFRESH_COOLDOWN_MS;
@@ -5352,7 +5404,7 @@ export default function FeedScreen() {
     const startRefresh = () => {
       if (!isActive || refreshStarted || !shouldRefreshFeed) return;
       refreshStarted = true;
-      void ensureFeedFresh({ feedTab: currentTab, reason: "focus" });
+      void ensureFeedFresh({ feedTab: currentTab, force: isReturningToFeed, reason: "focus" });
     };
 
     if (shouldRefreshFeed) {
@@ -5725,6 +5777,12 @@ export default function FeedScreen() {
   const closeComposer = useCallback(() => {
     handleComposerClose();
   }, [handleComposerClose]);
+
+  useFocusEffect(useCallback(() => () => {
+    clearComposerFocusTimer();
+    Keyboard.dismiss();
+    setShowCreate(false);
+  }, [clearComposerFocusTimer]));
 
   const uploadComposerMedia = useCallback(async () => {
     if (!userId) throw new Error("Your session expired. Please log in again before uploading media.");
@@ -6205,10 +6263,12 @@ export default function FeedScreen() {
       items.map((item) => (item?.id === postId ? updater(item) : item));
 
     setPosts(updatePosts);
+    setAiCards(updatePosts);
     feedCacheRef.current = {
       for_you: {
         ...feedCacheRef.current.for_you,
         posts: updatePosts(feedCacheRef.current.for_you.posts),
+        aiCards: updatePosts(feedCacheRef.current.for_you.aiCards),
       },
       latest: {
         ...feedCacheRef.current.latest,
@@ -6217,10 +6277,12 @@ export default function FeedScreen() {
       talent: {
         ...feedCacheRef.current.talent,
         posts: updatePosts(feedCacheRef.current.talent.posts),
+        aiCards: updatePosts(feedCacheRef.current.talent.aiCards),
       },
       following: {
         ...feedCacheRef.current.following,
         posts: updatePosts(feedCacheRef.current.following.posts),
+        aiCards: updatePosts(feedCacheRef.current.following.aiCards),
       },
     };
   }, []);
@@ -6339,6 +6401,84 @@ export default function FeedScreen() {
       setAlert({ type: "error", title: "Delete failed", message: error?.message || "Please try again." });
     }
   }, [deletePostTarget, invalidateFeedCache, userId]);
+
+  const removeGigCardEverywhere = useCallback((gigId: string) => {
+    const withoutGig = (items: any[]) =>
+      items.filter((item) => !(
+        item?.id === gigId && String(item?.type || "").trim().toLowerCase() === "gig"
+      ));
+
+    setPosts(withoutGig);
+    setAiCards(withoutGig);
+    feedCacheRef.current = {
+      for_you: {
+        ...feedCacheRef.current.for_you,
+        posts: withoutGig(feedCacheRef.current.for_you.posts),
+        aiCards: withoutGig(feedCacheRef.current.for_you.aiCards),
+      },
+      latest: {
+        ...feedCacheRef.current.latest,
+        posts: withoutGig(feedCacheRef.current.latest.posts),
+        aiCards: withoutGig(feedCacheRef.current.latest.aiCards),
+      },
+      talent: {
+        ...feedCacheRef.current.talent,
+        posts: withoutGig(feedCacheRef.current.talent.posts),
+        aiCards: withoutGig(feedCacheRef.current.talent.aiCards),
+      },
+      following: {
+        ...feedCacheRef.current.following,
+        posts: withoutGig(feedCacheRef.current.following.posts),
+        aiCards: withoutGig(feedCacheRef.current.following.aiCards),
+      },
+    };
+
+    (["for_you", "latest", "talent", "following"] as FeedTab[]).forEach((feedTab) => {
+      invalidateFeedCache(feedTab);
+      feedLastFetchAt[feedTab] = 0;
+    });
+  }, [invalidateFeedCache]);
+
+  const confirmDeleteGig = useCallback(async () => {
+    const gig = deleteGigTarget;
+    if (!gig?.id || !isOwnFeedReportTarget(gig, resolvedUserId)) return;
+
+    try {
+      const { data, error } = await supabase.rpc("delete_gig_safely", {
+        p_gig_id: gig.id,
+        p_reason: "Deleted by the gig owner from the feed",
+      });
+      if (error) throw error;
+
+      const result: any = data;
+      if (!result?.success) {
+        if (result?.code === "ACTIVE_ACCEPTED_APPLICATIONS_EXIST") {
+          throw new Error("Resolve accepted or approved applicants before deleting this gig.");
+        }
+        throw new Error(result?.message || "The gig could not be deleted.");
+      }
+
+      const storageCleanup = await cleanupRemovedStorageObjects(
+        supabase,
+        supabaseUrl,
+        result?.storage_cleanup?.removed_urls || [],
+      );
+      if (storageCleanup.errors.length > 0) {
+        console.warn("Gig deleted with storage cleanup warnings", storageCleanup.errors);
+      }
+
+      removeGigCardEverywhere(gig.id);
+      setDeleteGigTarget(null);
+      emitToast({ type: "success", title: "Gig deleted", message: "The gig was removed from the feed." });
+    } catch (error: any) {
+      setDeleteGigTarget(null);
+      setAlert({
+        type: "error",
+        title: "Delete failed",
+        message: error?.message || "Please try again.",
+      });
+    }
+  }, [deleteGigTarget, removeGigCardEverywhere, resolvedUserId]);
 
   const handleTogglePostReaction = useCallback(async (post: any) => {
     if (!session || !post?.id) {
@@ -7096,8 +7236,16 @@ export default function FeedScreen() {
   const baseFeedItems = useMemo(() => {
     if (loading) return [];
     if (tab === "for_you") {
-      const rankedCards = aiCards.filter((item) => item?.__feedKind === "ai_card" && isOpenFeedRecommendation(item));
-      const socialPosts = sortFeedItemsNewestFirst(posts.filter((item) => item?.__feedKind !== "ai_card"));
+      const rankedCards = aiCards.filter(isOpenFeedRecommendation);
+      const recommendedPostIds = new Set(
+        rankedCards
+          .filter((item) => item?.__feedKind !== "ai_card")
+          .map((item) => item?.id)
+          .filter(Boolean),
+      );
+      const socialPosts = sortFeedItemsNewestFirst(
+        posts.filter((item) => item?.__feedKind !== "ai_card" && !recommendedPostIds.has(item?.id)),
+      );
       const visibleRecommendationCards = isFan
         ? sortFanRecommendationCards(filterFanVisibleFeedItems(rankedCards))
         : rankedCards;
@@ -7163,6 +7311,7 @@ export default function FeedScreen() {
   );
   const liveRadioInsertionIndex = useMemo(() => {
     if (feedItems.length === 0) return -1;
+    if (tab === "talent") return 0;
 
     let regularPostCount = 0;
     for (let index = 0; index < feedItems.length; index += 1) {
@@ -7172,9 +7321,8 @@ export default function FeedScreen() {
         if (regularPostCount === 3) return index;
       }
     }
-
     return feedItems.length - 1;
-  }, [feedItems]);
+  }, [feedItems, tab]);
   const liveRadioCard = useMemo(
     () => (
       <LiveRadioCard
@@ -7316,6 +7464,9 @@ export default function FeedScreen() {
   const optionsTargetIsPost = postOptionsTarget ? postOptionsTarget.__feedKind !== "ai_card" : false;
   const optionsTargetIsOwn = postOptionsTarget ? isOwnFeedReportTarget(postOptionsTarget, resolvedUserId) : false;
   const optionsTargetLabel = postOptionsTarget ? getFeedReportTypeLabel(postOptionsTarget) : "Post";
+  const optionsTargetIsGig = postOptionsTarget
+    ? String(postOptionsTarget.type || "").trim().toLowerCase() === "gig"
+    : false;
   const optionsTargetTitle = optionsTargetIsPost ? "Post options" : `${optionsTargetLabel} options`;
   const optionsTargetMessage = optionsTargetIsOwn
     ? (optionsTargetIsPost ? "Manage this post." : `This is your ${optionsTargetLabel.toLowerCase()}.`)
@@ -7333,7 +7484,21 @@ export default function FeedScreen() {
             { text: "Cancel", style: "cancel" as const },
           ]
       : optionsTargetIsOwn
-        ? [
+        ? optionsTargetIsGig
+          ? [
+              { text: getFeedOptionViewLabel(postOptionsTarget), onPress: () => openFeedOptionTarget(postOptionsTarget) },
+              {
+                text: "Edit Gig",
+                onPress: () => router.push({ pathname: "/edit_gig", params: { id: postOptionsTarget.id } }),
+              },
+              {
+                text: "Delete Gig",
+                style: "destructive" as const,
+                onPress: () => setDeleteGigTarget(postOptionsTarget),
+              },
+              { text: "Cancel", style: "cancel" as const },
+            ]
+          : [
             { text: getFeedOptionViewLabel(postOptionsTarget), onPress: () => openFeedOptionTarget(postOptionsTarget) },
             { text: "Cancel", style: "cancel" as const },
           ]
@@ -7451,7 +7616,10 @@ export default function FeedScreen() {
                 testID="mobile-feed-post-submit-button"
               >
                 {creating ? (
-                  <LoadingButtonContent message={editingPost ? "Saving post..." : "Publishing post..."} />
+                  <LoadingButtonContent
+                    compact
+                    message={editingPost ? "Saving post..." : "Publishing post..."}
+                  />
                 ) : (
                   <Text style={[styles.postBtnText, { color: composerCanSubmit ? "#fff" : colors.textSecondary }]}>
                     {editingPost ? "Save" : "Post"}
@@ -7653,6 +7821,21 @@ export default function FeedScreen() {
             { text: "Delete", style: "destructive", onPress: confirmDeletePost },
           ]}
           onClose={() => setDeletePostTarget(null)}
+        />
+      )}
+
+      {deleteGigTarget && (
+        <CustomAlert
+          visible
+          forceModal
+          type="warning"
+          title="Delete gig"
+          message={`Delete “${deleteGigTarget.name || "this gig"}”? This cannot be undone.`}
+          buttons={[
+            { text: "Cancel", style: "cancel" },
+            { text: "Delete", style: "destructive", onPress: confirmDeleteGig },
+          ]}
+          onClose={() => setDeleteGigTarget(null)}
         />
       )}
 
@@ -8277,7 +8460,7 @@ const styles = StyleSheet.create({
   modalHeaderSideRight: { alignItems: "flex-end" },
   modalIconButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   modalTitle: { flex: 1, textAlign: "center", fontSize: moderateScale(17), fontFamily: "Poppins_700Bold", includeFontPadding: false, lineHeight: 24 },
-  postBtn: { minWidth: 70, minHeight: 38, borderRadius: 10, paddingHorizontal: 16, alignItems: "center", justifyContent: "center" },
+  postBtn: { width: "100%", minHeight: 38, borderRadius: 10, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" },
   postBtnText: { color: "#fff", fontSize: moderateScale(13), fontFamily: "Poppins_700Bold", includeFontPadding: false, lineHeight: 18 },
   composerAuthorRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 18, paddingTop: 16, paddingBottom: 8 },
   composerAuthorText: { flex: 1, minWidth: 0 },

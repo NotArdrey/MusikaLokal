@@ -37,6 +37,7 @@ import { useTheme } from "../src/context/ThemeContext";
 import LoadingState, { LoadingButtonContent } from "../src/components/LoadingState";
 import { useRadioPlayer } from "../src/context/RadioPlayerContext";
 import { getStationLiveTimelineState } from "../src/utils/radioTimeline";
+import { getGigSlotCardBadges } from "../src/utils/gigSlotRequirements";
 
 type FeedTab = "for_you" | "talent" | "following";
 
@@ -716,6 +717,14 @@ const getDistinctFeedCardImages = (
 
 const normalizeAiRecommendationCard = (item: any) => {
   const type = typeof item?.type === "string" && item.type.trim().length > 0 ? item.type.trim() : "Group";
+  if (type.toLowerCase() === "post") {
+    return normalizeFeedPost({
+      ...item,
+      type: "Post",
+      body: item?.content || item?.body || "",
+    });
+  }
+
   const displayType = type === "Venue" ? "Gig" : type;
   const normalizedType = type.toLowerCase();
   const isGroup = normalizedType === "group" || normalizedType === "duo";
@@ -1141,10 +1150,28 @@ const getTimestampLabel = (value: unknown) => {
   return new Date(value).toLocaleDateString();
 };
 
+const getAiRecommendationLabel = (item: any) => {
+  if (item?.ai_recommended !== true) return "";
+
+  const type = String(item?.type || "").trim().toLowerCase();
+  if (item?.__feedKind !== "ai_card" || type === "post") return "AI recommends this post for you";
+  if (type === "gig" || type === "venue") return "AI recommends this gig for you";
+  if (type === "artist" || type === "profile" || type === "musician") return "AI recommends this artist for you";
+  if (type === "production" || type === "production_team") return "AI recommends this production team for you";
+  if (type === "duo") return "AI recommends this duo for you";
+  if (type === "group") return "AI recommends this group for you";
+  if (type === "studio") return "AI recommends this studio for you";
+  return "AI recommends this for you";
+};
+
 const getSocialServiceBadges = (item: any) => {
+  const aiRecommendationLabel = getAiRecommendationLabel(item);
   if (item?.__feedKind === "ai_card") {
     const type = typeof item?.type === "string" ? item.type : "Recommended";
-    const badges = [type === "Gig" || type === "Venue" ? "Live Gig" : type === "Artist" ? "Solo Artist" : type];
+    const badges = [
+      ...(aiRecommendationLabel ? [aiRecommendationLabel] : []),
+      type === "Gig" || type === "Venue" ? "Live Gig" : type === "Artist" ? "Solo Artist" : type,
+    ];
     const score = Number(item?.similarity || 0);
     if (score > 0) badges.push(`${Math.round(score * 100)}% match`);
     return Array.from(new Set(badges.filter(Boolean))).slice(0, 3);
@@ -1152,7 +1179,7 @@ const getSocialServiceBadges = (item: any) => {
 
   const source = item?.linked_studio || item?.studio || item;
   const studioType = typeof source?.studio_type === "string" ? source.studio_type : typeof source?.type === "string" ? source.type : "";
-  const badges: string[] = [];
+  const badges: string[] = aiRecommendationLabel ? [aiRecommendationLabel] : [];
 
   if (/live|studio|rehearsal|recording/i.test(studioType)) badges.push("Live Room");
   if (/rehearsal/i.test(studioType) || getPositiveInteger(source?.rehearsal_rate) > 0) badges.push("Rehearsal");
@@ -1406,6 +1433,8 @@ type SocialPostCardProps = {
   onShareCard: (card: any) => void;
   onSharePost: (post: any) => void;
   onRequestDelete: (postId: string) => void;
+  onEditGig: (gigId: string) => void;
+  onRequestDeleteGig: (gig: any) => void;
 };
 
 const SocialPostCard = React.memo(function SocialPostCard({
@@ -1427,6 +1456,8 @@ const SocialPostCard = React.memo(function SocialPostCard({
   onShareCard,
   onSharePost,
   onRequestDelete,
+  onEditGig,
+  onRequestDeleteGig,
 }: SocialPostCardProps) {
   const isSuggestion = item?.__feedKind === "ai_card";
   const suggestionType = String(item?.type || "").toLowerCase();
@@ -1446,6 +1477,12 @@ const SocialPostCard = React.memo(function SocialPostCard({
     [headerBadge, serviceBadges],
   );
   const suggestionQuickInfo = useMemo(() => getSocialSuggestionQuickInfo(item), [item]);
+  const slotBadges = useMemo(
+    () => ["gig", "venue"].includes(suggestionType)
+      ? getGigSlotCardBadges(item?.requirements)
+      : [],
+    [item?.requirements, suggestionType],
+  );
   const featuredPerformers = useMemo(
     () =>
       isSuggestion && ["gig", "venue"].includes(suggestionType) && Array.isArray(item?.featured_performers)
@@ -1565,18 +1602,20 @@ const SocialPostCard = React.memo(function SocialPostCard({
   );
 
   const isOwner = !isSuggestion && !!currentUserId && item?.author_id === currentUserId;
+  const isOwnedGig = isSuggestion && suggestionType === "gig" && !!currentUserId && item?.organizer_id === currentUserId;
+  const canManageItem = isOwner || isOwnedGig;
   const [menuOpen, setMenuOpen] = useState(false);
 
   const handleMenuPress = useCallback(
     (event?: any) => {
       event?.stopPropagation?.();
-      if (!isOwner) {
+      if (!canManageItem) {
         emitToast({ type: "info", title: "No actions", message: "You can only manage your own posts." });
         return;
       }
       setMenuOpen((open) => !open);
     },
-    [isOwner],
+    [canManageItem],
   );
 
   const handleSelectDelete = useCallback(
@@ -1587,6 +1626,18 @@ const SocialPostCard = React.memo(function SocialPostCard({
     },
     [item?.id, onRequestDelete],
   );
+
+  const handleSelectEditGig = useCallback((event?: any) => {
+    event?.stopPropagation?.();
+    setMenuOpen(false);
+    onEditGig(item.id);
+  }, [item?.id, onEditGig]);
+
+  const handleSelectDeleteGig = useCallback((event?: any) => {
+    event?.stopPropagation?.();
+    setMenuOpen(false);
+    onRequestDeleteGig(item);
+  }, [item, onRequestDeleteGig]);
 
   return (
     <TouchableOpacity
@@ -1639,7 +1690,7 @@ const SocialPostCard = React.memo(function SocialPostCard({
         </View>
 
         <View style={styles.socialHeaderActions}>
-          {!isSuggestion ? (
+          {canManageItem ? (
             <View style={styles.socialMenuWrap}>
               <TouchableOpacity
                 activeOpacity={0.78}
@@ -1650,7 +1701,7 @@ const SocialPostCard = React.memo(function SocialPostCard({
               >
                 <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
-              {menuOpen && isOwner && (
+              {menuOpen && canManageItem && (
                 <>
                   <Pressable
                     style={styles.socialMenuBackdrop}
@@ -1669,14 +1720,23 @@ const SocialPostCard = React.memo(function SocialPostCard({
                       },
                     ]}
                   >
-                    <TouchableOpacity
-                      activeOpacity={0.7}
-                      onPress={handleSelectDelete}
-                      style={styles.socialMenuItem}
-                    >
-                      <Ionicons name="trash-outline" size={16} color="#ef4444" />
-                      <Text style={[styles.socialMenuItemText, { color: "#ef4444" }]}>Delete</Text>
-                    </TouchableOpacity>
+                    {isOwnedGig ? (
+                      <>
+                        <TouchableOpacity activeOpacity={0.7} onPress={handleSelectEditGig} style={styles.socialMenuItem}>
+                          <Ionicons name="create-outline" size={16} color={colors.text} />
+                          <Text style={[styles.socialMenuItemText, { color: colors.text }]}>Edit Gig</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity activeOpacity={0.7} onPress={handleSelectDeleteGig} style={styles.socialMenuItem}>
+                          <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                          <Text style={[styles.socialMenuItemText, { color: "#ef4444" }]}>Delete Gig</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : (
+                      <TouchableOpacity activeOpacity={0.7} onPress={handleSelectDelete} style={styles.socialMenuItem}>
+                        <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                        <Text style={[styles.socialMenuItemText, { color: "#ef4444" }]}>Delete</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </>
               )}
@@ -1735,6 +1795,18 @@ const SocialPostCard = React.memo(function SocialPostCard({
                 <View key={`entity-price-${price}`} style={[styles.socialPriceChip, { borderColor: colors.primary + "55" }]}>
                   <Text style={[styles.socialPriceText, { color: colors.primary }]} numberOfLines={1}>
                     {price}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          {slotBadges.length > 0 ? (
+            <View style={styles.socialEntityChipRow}>
+              {slotBadges.map((badge) => (
+                <View key={`slot-${badge}`} style={[styles.socialBadgeChip, { backgroundColor: colors.primary + "12" }]}>
+                  <Text style={[styles.socialBadgeText, { color: colors.primary }]} numberOfLines={2}>
+                    {badge}
                   </Text>
                 </View>
               ))}
@@ -2013,7 +2085,7 @@ export default function FeedScreen() {
   const onFeedViewableItemsChanged = useRef(({ changed }: { changed?: any[] }) => {
     for (const token of changed || []) {
       const item = token?.item;
-      if (!item || item.__feedKind !== "ai_card") continue;
+      if (!item || (item.__feedKind !== "ai_card" && item?.ai_recommended !== true)) continue;
 
       const stableKey = getFeedItemStableKey(item);
       if (!stableKey) continue;
@@ -2069,7 +2141,10 @@ export default function FeedScreen() {
 
       const rows = Array.isArray(data?.recommendations) ? data.recommendations : [];
       return rows
-        .map(normalizeAiRecommendationCard)
+        .map((item: any) => normalizeAiRecommendationCard({
+          ...item,
+          ai_recommended: data?.aiPowered === true,
+        }))
         .filter((item: any) => {
           if (!item?.id) return false;
           const type = String(item?.type || "").trim().toLowerCase();
@@ -2077,6 +2152,7 @@ export default function FeedScreen() {
           return ![
             item?.owner_id,
             item?.organizer_id,
+            item?.author_id,
             profileTargetId,
             type === "artist" || type === "profile" || type === "musician" ? item?.id : null,
           ].includes(session.user.id);
@@ -2746,27 +2822,34 @@ export default function FeedScreen() {
 
   const closePostDetails = useCallback(() => setOpenPostId(null), []);
 
+  const patchFeedPost = useCallback((postId: string, updater: (post: any) => any) => {
+    const updatePosts = (items: any[]) =>
+      items.map((item) =>
+        item?.id === postId && item?.__feedKind !== "ai_card" ? updater(item) : item,
+      );
+
+    setPosts(updatePosts);
+    setListingCards(updatePosts);
+  }, []);
+
   const handleModalReactionChanged = useCallback(
     (postId: string, hasReaction: boolean, reactionCount: number) => {
-      setPosts((current) =>
-        current.map((p) =>
-          p.id === postId
-            ? { ...p, my_reaction: hasReaction ? "like" : null, reaction_count: reactionCount }
-            : p,
-        ),
-      );
+      patchFeedPost(postId, (post) => ({
+        ...post,
+        my_reaction: hasReaction ? "like" : null,
+        user_reaction: hasReaction ? "like" : null,
+        reaction_count: reactionCount,
+      }));
     },
-    [],
+    [patchFeedPost],
   );
 
   const handleModalCommentChanged = useCallback((postId: string, commentCount: number) => {
-    setPosts((current) =>
-      current.map((p) => (p.id === postId ? { ...p, comment_count: commentCount } : p)),
-    );
+    patchFeedPost(postId, (post) => ({ ...post, comment_count: commentCount }));
     setListingCards((current) =>
       current.map((card) => (card.linked_post_id === postId ? { ...card, comment_count: commentCount } : card)),
     );
-  }, []);
+  }, [patchFeedPost]);
 
   const handleModalPostDeleted = useCallback((postId: string) => {
     setPosts((current) => current.filter((p) => p.id !== postId));
@@ -2786,19 +2869,13 @@ export default function FeedScreen() {
       const nextCount = hadReaction ? Math.max(currentCount - 1, 0) : currentCount + 1;
       const nextReaction = hadReaction ? null : "like";
 
-      setPosts((current) =>
-        current.map((p) =>
-          p.id === postId
-            ? {
-                ...p,
-                my_reaction: nextReaction,
-                user_reaction: nextReaction,
-                reaction_count: nextCount,
-                like_count: nextCount,
-              }
-            : p,
-        ),
-      );
+      patchFeedPost(postId, (item) => ({
+        ...item,
+        my_reaction: nextReaction,
+        user_reaction: nextReaction,
+        reaction_count: nextCount,
+        like_count: nextCount,
+      }));
 
       try {
         const { data, error } = await supabase.functions.invoke("manage-social-feed", {
@@ -2809,23 +2886,17 @@ export default function FeedScreen() {
         if (error) throw error;
         if (!data?.success) throw new Error(data?.error || "Could not update reaction.");
       } catch (e: any) {
-        setPosts((current) =>
-          current.map((p) =>
-            p.id === postId
-              ? {
-                  ...p,
-                  my_reaction: hadReaction ? "like" : null,
-                  user_reaction: hadReaction ? "like" : null,
-                  reaction_count: currentCount,
-                  like_count: currentCount,
-                }
-              : p,
-          ),
-        );
+        patchFeedPost(postId, (item) => ({
+          ...item,
+          my_reaction: hadReaction ? "like" : null,
+          user_reaction: hadReaction ? "like" : null,
+          reaction_count: currentCount,
+          like_count: currentCount,
+        }));
         emitToast({ type: "error", title: "Like failed", message: e?.message || "Could not update this post." });
       }
     },
-    [isGuest, session],
+    [isGuest, patchFeedPost, session],
   );
 
   const handleSharePost = useCallback(
@@ -2864,18 +2935,15 @@ export default function FeedScreen() {
         });
         if (error) throw error;
         const shareCount = getPositiveInteger(data?.data?.share_count);
-        setPosts((current) =>
-          current.map((p) =>
-            p.id === postId
-              ? { ...p, share_count: shareCount || getPositiveInteger(p?.share_count || p?.shares) + 1 }
-              : p,
-          ),
-        );
+        patchFeedPost(postId, (item) => ({
+          ...item,
+          share_count: shareCount || getPositiveInteger(item?.share_count || item?.shares) + 1,
+        }));
       } catch (e: any) {
         console.error("Share count update failed:", e);
       }
     },
-    [isGuest, session],
+    [isGuest, patchFeedPost, session],
   );
 
   const patchListingCard = useCallback((card: any, updater: (item: any) => any) => {
@@ -2992,6 +3060,8 @@ export default function FeedScreen() {
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [pendingDeleteGig, setPendingDeleteGig] = useState<any | null>(null);
+  const [deletingGig, setDeletingGig] = useState(false);
 
   const requestDeletePost = useCallback((postId: string) => {
     if (!postId) return;
@@ -3024,6 +3094,45 @@ export default function FeedScreen() {
     }
   }, [pendingDeleteId]);
 
+  const editGigFromFeed = useCallback((gigId: string) => {
+    if (!gigId) return;
+    router.push({ pathname: "/edit_gig", params: { id: gigId } } as any);
+  }, []);
+
+  const requestDeleteGig = useCallback((gig: any) => {
+    if (!gig?.id || gig?.organizer_id !== session?.user?.id) return;
+    setPendingDeleteGig(gig);
+  }, [session?.user?.id]);
+
+  const confirmDeleteGig = useCallback(async () => {
+    const gig = pendingDeleteGig;
+    if (!gig?.id || gig?.organizer_id !== session?.user?.id) return;
+    setDeletingGig(true);
+    try {
+      const { data, error } = await supabase.rpc("delete_gig_safely", {
+        p_gig_id: gig.id,
+        p_reason: "Deleted by the gig owner from the feed",
+      });
+      if (error) throw error;
+      if (!data?.success) {
+        if (data?.code === "ACTIVE_ACCEPTED_APPLICATIONS_EXIST") {
+          throw new Error("Resolve accepted or approved applicants before deleting this gig.");
+        }
+        throw new Error(data?.message || "The gig could not be deleted.");
+      }
+
+      setListingCards((current) => current.filter((item) => !(item?.id === gig.id && String(item?.type || "").toLowerCase() === "gig")));
+      setPosts((current) => current.filter((item) => !(item?.id === gig.id && item?.__feedKind === "ai_card")));
+      setPendingDeleteGig(null);
+      emitToast({ type: "success", title: "Gig deleted", message: "The gig was removed from the feed." });
+    } catch (error: any) {
+      setPendingDeleteGig(null);
+      setAlert({ type: "error", title: "Delete failed", message: error?.message || "Please try again." });
+    } finally {
+      setDeletingGig(false);
+    }
+  }, [pendingDeleteGig, session?.user?.id]);
+
   const openStudioDetails = useCallback((studioId: string) => {
     if (!studioId) return;
     openListingDetails(studioId);
@@ -3047,8 +3156,16 @@ export default function FeedScreen() {
       if (tab === "following") {
         return sortFeedItemsNewestFirst(dedupeFeedItems(posts));
       }
-      const rankedCards = listingCards.filter((item) => item?.__feedKind === "ai_card");
-      const socialPosts = sortFeedItemsNewestFirst(posts.filter((item) => item?.__feedKind !== "ai_card"));
+      const rankedCards = listingCards;
+      const recommendedPostIds = new Set(
+        rankedCards
+          .filter((item) => item?.__feedKind !== "ai_card")
+          .map((item) => item?.id)
+          .filter(Boolean),
+      );
+      const socialPosts = sortFeedItemsNewestFirst(
+        posts.filter((item) => item?.__feedKind !== "ai_card" && !recommendedPostIds.has(item?.id)),
+      );
       return dedupeFeedItems(interleaveFeedRecommendations(socialPosts, rankedCards));
     },
     [listingCards, posts, tab],
@@ -3122,10 +3239,12 @@ export default function FeedScreen() {
         onShareCard={handleShareCard}
         onSharePost={handleSharePost}
         onRequestDelete={requestDeletePost}
+        onEditGig={editGigFromFeed}
+        onRequestDeleteGig={requestDeleteGig}
         width={contentWidth}
       />
     ),
-    [borderCol, cardBg, feedColors, contentWidth, handleShareCard, handleSharePost, handleToggleCardFavorite, handleTogglePostReaction, isDark, mediaWidth, openPostDetails, openProductionTeamDetails, openProfileDetails, openStudioDetails, openSuggestionCommentThread, requestDeletePost, session?.user?.id, trackFeedActivity],
+    [borderCol, cardBg, editGigFromFeed, feedColors, contentWidth, handleShareCard, handleSharePost, handleToggleCardFavorite, handleTogglePostReaction, isDark, mediaWidth, openPostDetails, openProductionTeamDetails, openProfileDetails, openStudioDetails, openSuggestionCommentThread, requestDeleteGig, requestDeletePost, session?.user?.id, trackFeedActivity],
   );
 
   return (
@@ -3384,6 +3503,21 @@ export default function FeedScreen() {
           ]}
         />
       )}
+      {pendingDeleteGig && (
+        <CustomAlert
+          visible
+          type="warning"
+          title="Delete gig?"
+          message={`Delete “${pendingDeleteGig.name || "this gig"}”? This cannot be undone.`}
+          onClose={() => {
+            if (!deletingGig) setPendingDeleteGig(null);
+          }}
+          buttons={[
+            { text: "Cancel", style: "cancel", onPress: () => setPendingDeleteGig(null) },
+            { text: deletingGig ? "Deleting..." : "Delete", style: "destructive", onPress: confirmDeleteGig },
+          ]}
+        />
+      )}
       <PostDetailsModal
         postId={openPostId}
         visible={!!openPostId}
@@ -3418,7 +3552,7 @@ export default function FeedScreen() {
                 disabled={!canCreatePost || creating}
               >
                 {creating ? (
-                  <LoadingButtonContent message="Publishing post..." />
+                  <LoadingButtonContent compact message="Publishing post..." />
                 ) : (
                   <Text style={[styles.createModalPostText, { color: canCreatePost ? "#FFFFFF" : colors.textSecondary }]}>
                     Post

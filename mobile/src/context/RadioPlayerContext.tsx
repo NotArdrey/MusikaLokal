@@ -2383,12 +2383,25 @@ export function GlobalRadioMiniPlayer() {
         </Text>
       </TouchableOpacity>
 
-      <TouchableOpacity activeOpacity={1} onPress={() => void toggleMute()} style={styles.radioPlayerBtn}>
+      <TouchableOpacity
+        accessibilityLabel={isMuted ? "Unmute radio" : "Mute radio"}
+        accessibilityRole="button"
+        activeOpacity={1}
+        onPress={() => void toggleMute()}
+        style={styles.radioPlayerBtn}
+      >
         <Ionicons name={isMuted ? "volume-mute" : "volume-high"} size={18} color={isMuted ? "#ef4444" : colors.text} />
       </TouchableOpacity>
 
-      <TouchableOpacity activeOpacity={1} onPress={() => void stop()} style={styles.radioPlayerBtn}>
-        <Ionicons name="close" size={18} color={colors.textSecondary} />
+      <TouchableOpacity
+        accessibilityHint="Stops playback and returns the station to the Talent feed"
+        accessibilityLabel="Stop radio"
+        accessibilityRole="button"
+        activeOpacity={1}
+        onPress={() => void stop()}
+        style={styles.radioPlayerBtn}
+      >
+        <Ionicons name="stop-circle-outline" size={19} color={colors.textSecondary} />
       </TouchableOpacity>
     </View>
   );

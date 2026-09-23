@@ -82,7 +82,7 @@ class ImageRepresentations:
 
 
 class FaceMatcher:
-    AGGREGATION_STRATEGY = "at_least_2_usable_frames_and_2_verified_matches"
+    AGGREGATION_STRATEGY = "two_frame_consensus_or_single_clear_frame"
     FRAME_CONFIGURATION = "existing_client_representative_jpegs; maximum_3_frames"
 
     def __init__(
@@ -224,16 +224,23 @@ class FaceMatcher:
         matched = [frame for frame in usable if frame["verified"]]
         distances = [float(frame["distance"]) for frame in usable]
         enough_evidence = len(usable) >= self.config.min_usable_frames
-        likely_same = enough_evidence and len(matched) >= self.config.required_matches
+        single_clear_frame = len(usable) == 1
+        single_clear_match = single_clear_frame and len(matched) == 1
+        likely_same = (
+            enough_evidence and len(matched) >= self.config.required_matches
+        ) or single_clear_match
         status = (
-            "unclear"
-            if not enough_evidence
-            else "likely_same_person"
+            "likely_same_person"
             if likely_same
             else "likely_different_person"
+            if enough_evidence
+            else "unclear"
         )
         match_rate = len(matched) / len(usable) if usable else 0.0
-        if status == "likely_same_person":
+        if single_clear_match:
+            summary = "ArcFace found a match in the only clear representative video frame."
+            limitation = "Only one clear frame was available, so this result has limited evidence and must be checked against the original profile photo and video."
+        elif status == "likely_same_person":
             summary = f"ArcFace matched {len(matched)} of {len(usable)} usable representative video frames."
             limitation = ""
         elif status == "likely_different_person":

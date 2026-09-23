@@ -112,7 +112,7 @@ export function unavailableFaceMatch(summary: string, limitation = '', error: st
         detector_backend: '',
         distance_metric: 'cosine',
         alignment: true,
-        aggregation_strategy: 'at_least_2_usable_frames_and_2_verified_matches',
+        aggregation_strategy: 'two_frame_consensus_or_single_clear_frame',
         service_version: '',
         deepface_version: '',
         frames: [],
@@ -171,7 +171,7 @@ function normalizeResult(value: any): FaceMatchResult {
         distance_metric: cleanText(value?.distance_metric, 40) || 'cosine',
         alignment: value?.alignment !== false,
         aggregation_strategy: cleanText(value?.aggregation_strategy, 160)
-            || 'at_least_2_usable_frames_and_2_verified_matches',
+            || 'two_frame_consensus_or_single_clear_frame',
         service_version: cleanText(value?.service_version, 80),
         deepface_version: cleanText(value?.deepface_version, 80),
         frames,

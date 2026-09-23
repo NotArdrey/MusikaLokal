@@ -503,6 +503,7 @@ export default function MyVenueScreen() {
                 if (result?.code === 'GIG_NOT_FOUND') {
                     showAlert('warning', 'Not Found', 'Gig was not found. It may have already been removed.');
                     setGigs(prev => prev.filter(g => g.id !== selectedId));
+                    invalidateListingCaches(userId, ['bookings', 'details', 'feed', 'home', 'search']);
                     closeDeleteModal();
                     return;
                 }
@@ -511,7 +512,7 @@ export default function MyVenueScreen() {
             }
 
             setGigs(prev => prev.filter(g => g.id !== selectedId));
-            invalidateListingCaches(userId, ['bookings', 'details', 'home', 'search', 'notifications']);
+            invalidateListingCaches(userId, ['bookings', 'details', 'feed', 'home', 'search', 'notifications']);
             closeDeleteModal();
             const cancelledApplications = Number(result?.cancelled_applications || 0);
             const successMessage = cancelledApplications > 0

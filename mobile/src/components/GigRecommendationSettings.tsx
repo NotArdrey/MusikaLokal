@@ -98,23 +98,22 @@ const CRITERIA: {
   {
     key: "instruments",
     label: "Performer instruments and roles",
-    description: "Uses only the selected slot's roles and instruments. Equipment supplied by the organizer is never used.",
+    description: "Checks the roles and instruments selected for this slot.",
   },
   {
     key: "genres",
     label: "Genres",
-    description: "Uses genres for the selected slot, falling back to the gig's default genres when that slot has none.",
+    description: "Checks the genres selected for this slot or gig.",
   },
   {
     key: "location",
     label: "Location",
-    description:
-      "Rewards applicants whose listed location matches the gig area.",
+    description: "Checks whether the applicant is near the gig.",
   },
   {
     key: "portfolio",
     label: "Portfolio or media",
-    description: "Awards completeness points when a portfolio link, video, or CV is provided. Content and identity checks stay separate.",
+    description: "Checks whether the applicant provided a portfolio, video, or CV.",
   },
 ];
 
@@ -162,7 +161,7 @@ export default function GigRecommendationSettings({ value, onChange }: Props) {
           <View style={styles.titleRow}>
             <Ionicons name="sparkles" size={19} color={colors.primary} />
             <Text style={[styles.title, { color: colors.text }]}>
-              AI Filter Settings
+              AI Match Review Settings
             </Text>
           </View>
           <Text style={[styles.description, { color: colors.textSecondary }]}>
@@ -318,8 +317,7 @@ export default function GigRecommendationSettings({ value, onChange }: Props) {
             How each criterion is used
           </Text>
           <Text style={[styles.smallCopy, { color: colors.textSecondary }]}>
-            Required can disqualify a mismatch. Ignored criteria are not used,
-            and criteria with no saved values are skipped.
+            Required criteria must match. Ignored criteria are not checked.
           </Text>
           {CRITERIA.map((criterion) => (
             <View

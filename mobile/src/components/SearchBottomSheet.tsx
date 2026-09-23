@@ -46,7 +46,7 @@ import {
 } from "../utils/socialFollow";
 import { usePageLoadLogger } from "../utils/loadTimeLogger";
 import { bottomSheetSpringConfig } from "../utils/motion";
-import { palette, radius, typography } from "../theme/tokens";
+import { radius, typography } from "../theme/tokens";
 import { NAVBAR_BOTTOM_OFFSET } from "./navbar";
 import ListingCard from "./ListingCard";
 import SafeBottomSheetFlatList from "./SafeBottomSheetFlatList";
@@ -176,7 +176,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     { onClose, onItemPress, onProductionTeamPress, onChat, onFollowChanged, onSearchCommitted },
     ref,
   ) {
-    const { colors, isDark } = useTheme();
+    const { colors } = useTheme();
     const { userRole, isGuest, userId } = useAuth();
     const insets = useSafeAreaInsets();
     const { height: windowHeight } = useWindowDimensions();
@@ -554,8 +554,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     style={[
                       styles.followBadgeBtn,
                       {
-                        backgroundColor: isFollowing ? (isDark ? "#111827" : "#FFFFFF") : colors.primary,
-                        borderColor: isFollowing ? (isDark ? "#374151" : "#CBD5E1") : colors.primary,
+                        backgroundColor: isFollowing ? colors.surface : colors.primary,
+                        borderColor: isFollowing ? colors.border : colors.primary,
                         opacity: isFollowBusy ? 0.7 : 1,
                       },
                     ]}
@@ -581,6 +581,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       },
       [
         colors.primary,
+        colors.surface,
+        colors.border,
         colors.textSecondary,
         followBusyByKey,
         followingKeys,
@@ -588,7 +590,6 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         handleChatPress,
         handleFollowToggle,
         handleItemPress,
-        isDark,
         isGuest,
         onChat,
       ],
@@ -646,8 +647,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           style={[
             styles.filterPanel,
             {
-              backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
-              borderColor: isDark ? "#374151" : "#E5E7EB",
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
             },
             { maxHeight: filterPanelMaxHeight },
           ]}
@@ -671,7 +672,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                         styles.filterChip,
                         activeFilter === filter
                           ? { backgroundColor: colors.primary }
-                          : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                          : { backgroundColor: colors.inputBackground },
                       ]}
                       onPress={() => setActiveFilter(filter)}
                     >
@@ -680,7 +681,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                           styles.filterChipText,
                           activeFilter === filter
                             ? { color: "#FFF" }
-                            : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                            : { color: colors.textSecondary },
                         ]}
                       >
                         {filter}
@@ -708,7 +709,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                       styles.filterChip,
                       selectedGenre === genre
                         ? { backgroundColor: colors.primary }
-                        : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                        : { backgroundColor: colors.inputBackground },
                     ]}
                     onPress={() => setSelectedGenre(genre)}
                   >
@@ -717,7 +718,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                         styles.filterChipText,
                         selectedGenre === genre
                           ? { color: "#FFF" }
-                          : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                          : { color: colors.textSecondary },
                       ]}
                     >
                       {genre}
@@ -740,7 +741,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                       styles.filterChip,
                       minRating === option.value
                         ? { backgroundColor: colors.primary }
-                        : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                        : { backgroundColor: colors.inputBackground },
                     ]}
                     onPress={() => setMinRating(option.value)}
                   >
@@ -757,7 +758,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                         styles.filterChipText,
                         minRating === option.value
                           ? { color: "#FFF" }
-                          : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                          : { color: colors.textSecondary },
                       ]}
                     >
                       {option.label}
@@ -780,7 +781,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                       styles.filterChip,
                       priceRange === option.value
                         ? { backgroundColor: colors.primary }
-                        : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                        : { backgroundColor: colors.inputBackground },
                     ]}
                     onPress={() => setPriceRange(option.value as any)}
                   >
@@ -789,7 +790,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                         styles.filterChipText,
                         priceRange === option.value
                           ? { color: "#FFF" }
-                          : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                          : { color: colors.textSecondary },
                       ]}
                     >
                       {option.label}
@@ -812,7 +813,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                       styles.filterChip,
                       sortBy === option.value
                         ? { backgroundColor: colors.primary }
-                        : { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                        : { backgroundColor: colors.inputBackground },
                     ]}
                     onPress={() => setSortBy(option.value as any)}
                   >
@@ -822,9 +823,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                       color={
                         sortBy === option.value
                           ? "#FFF"
-                          : isDark
-                            ? "#D1D5DB"
-                            : "#4B5563"
+                          : colors.textSecondary
                       }
                       style={{ marginRight: 4 }}
                     />
@@ -833,7 +832,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                         styles.filterChipText,
                         sortBy === option.value
                           ? { color: "#FFF" }
-                          : { color: isDark ? "#D1D5DB" : "#4B5563" },
+                          : { color: colors.textSecondary },
                       ]}
                     >
                       {option.label}
@@ -866,7 +865,6 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       showFilters,
       activeFilter,
       colors,
-      isDark,
       isOwner,
       TYPE_FILTERS,
       selectedGenre,
@@ -885,7 +883,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           <View style={styles.headerContainer}>
             <View style={styles.headerIntro}>
               <View style={styles.headerEyebrowRow}>
-                <View style={styles.headerRule} />
+                <View style={[styles.headerRule, { backgroundColor: colors.primary }]} />
                 <Text style={[styles.headerEyebrow, { color: colors.textSecondary }]}>MUSIKALOKAL / DISCOVER</Text>
               </View>
               <Text style={[styles.headerTitle, { color: colors.text }]}>Search the scene</Text>
@@ -900,8 +898,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     styles.searchContainer,
                     {
                       flex: 1,
-                      backgroundColor: isDark ? palette.nightRaised : palette.surface,
-                      borderColor: colors.border,
+                      backgroundColor: colors.inputBackground,
+                      borderColor: colors.inputBorder,
                     },
                   ]}
                 >
@@ -946,9 +944,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                       backgroundColor:
                         showFilters || activeFilterCount > 0
                           ? colors.primary
-                          : isDark
-                            ? palette.nightRaised
-                            : palette.mango,
+                          : colors.inputBackground,
                     },
                   ]}
                   onPress={toggleFilters}
@@ -962,7 +958,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     color={
                       showFilters || activeFilterCount > 0
                         ? "#FFF"
-                        : isDark ? colors.textSecondary : palette.ink
+                        : colors.text
                     }
                   />
                   {activeFilterCount > 0 && (
@@ -1011,7 +1007,6 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       ),
       [
         colors,
-        isDark,
         searchQuery,
         activeFilter,
         isOwner,
@@ -1030,7 +1025,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           <View
             style={[
               styles.emptyIconContainer,
-              { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+              { backgroundColor: colors.inputBackground },
             ]}
           >
             <Ionicons
@@ -1060,7 +1055,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           )}
         </View>
       ),
-      [colors, isDark, searchQuery, activeFilterCount, resetFilters],
+      [colors, searchQuery, activeFilterCount, resetFilters],
     );
 
     return (
@@ -1082,7 +1077,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           borderRadius: radius.media,
         }}
         handleIndicatorStyle={{
-          backgroundColor: isDark ? "#4B5563" : "#E5E7EB",
+          backgroundColor: colors.border,
           width: 40,
           marginTop: 10,
         }}
@@ -1101,7 +1096,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           </View>
         ) : (
           <SafeBottomSheetFlatList
-            style={styles.resultsList}
+            style={[styles.resultsList, { backgroundColor: colors.background }]}
             data={visibleData}
             renderItem={renderItem}
             keyExtractor={keyExtractor}
@@ -1149,7 +1144,6 @@ const styles = StyleSheet.create({
   headerRule: {
     width: 24,
     height: 3,
-    backgroundColor: palette.mango,
   },
   headerEyebrow: {
     fontFamily: typography.bold,

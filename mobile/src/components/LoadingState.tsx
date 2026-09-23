@@ -19,13 +19,33 @@ type LoadingStateProps = {
 type LoadingButtonContentProps = {
   message: string;
   color?: string;
+  compact?: boolean;
 };
 
-export function LoadingButtonContent({ message, color = "#FFFFFF" }: LoadingButtonContentProps) {
+export function LoadingButtonContent({
+  message,
+  color = "#FFFFFF",
+  compact = false,
+}: LoadingButtonContentProps) {
   return (
-    <View style={styles.buttonContent}>
+    <View
+      accessible={compact}
+      accessibilityLabel={compact ? message : undefined}
+      accessibilityLiveRegion="polite"
+      accessibilityRole={compact ? "progressbar" : undefined}
+      style={styles.buttonContent}
+    >
       <ActivityIndicator size="small" color={color} />
-      <Text accessibilityLiveRegion="polite" style={[styles.buttonMessage, { color }]}>{message}</Text>
+      {!compact ? (
+        <Text
+          accessibilityLiveRegion="polite"
+          ellipsizeMode="tail"
+          numberOfLines={1}
+          style={[styles.buttonMessage, { color }]}
+        >
+          {message}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -93,11 +113,16 @@ const styles = StyleSheet.create({
   buttonContent: {
     alignItems: "center",
     flexDirection: "row",
+    flexShrink: 1,
     gap: 8,
     justifyContent: "center",
+    maxWidth: "100%",
+    minWidth: 0,
   },
   buttonMessage: {
+    flexShrink: 1,
     fontFamily: "Poppins_600SemiBold",
     fontSize: 14,
+    minWidth: 0,
   },
 });

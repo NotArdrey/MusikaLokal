@@ -145,7 +145,7 @@ Operational Groq text defaults now use `openai/gpt-oss-120b`, then
 `GROQ_TEXT_MODEL`, `GROQ_REVIEW_MODEL`, `GROQ_VISION_MODEL`, and
 `GROQ_SPEECH_MODEL`.
 
-Server-side AI filtering can use a second Groq account by setting
+Server-side AI Match Review can use a second Groq account by setting
 `GROQ_FALLBACK_API_KEY` as a Supabase Edge Function secret. Keep this key
 server-only; do not expose it through an `EXPO_PUBLIC_*` variable.
 

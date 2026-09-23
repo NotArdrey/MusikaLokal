@@ -7,7 +7,11 @@ import React, { useState } from 'react';
 import { ActivityIndicator, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
-import { screenUploadsWithAiDecisions, UploadSafetyFileDecision } from '../services/uploadSafetyScreen';
+import {
+  isUploadSafetyRetryableFailure,
+  screenUploadsWithAiDecisions,
+  UploadSafetyFileDecision,
+} from '../services/uploadSafetyScreen';
 import {
   createCopyrightVideoSample,
   removeCopyrightVideoTemporaryFile,
@@ -279,15 +283,11 @@ const uploadVideoWithSupabaseClient = async (input: {
   mimeType: string;
   uploadBody?: Blob;
 }): Promise<{ path: string }> => {
-  const body = input.uploadBody || (
-    Platform.OS === 'web'
-      ? await (await fetch(input.assetUri)).arrayBuffer()
-      : base64ToUint8Array(
-        await FileSystem.readAsStringAsync(input.assetUri, {
-          encoding: 'base64',
-        }),
-      )
-  );
+  if (Platform.OS !== 'web') {
+    throw new Error('Native video uploads must use the streamed file uploader.');
+  }
+
+  const body = input.uploadBody || await (await fetch(input.assetUri)).arrayBuffer();
 
   const { data, error } = await supabase.storage
     .from(input.bucketName)
@@ -321,54 +321,65 @@ const uploadVideoFile = async (input: {
     const baseUrl = supabaseUrl.replace(/\/+$/, '');
     const uploadUrl = `${baseUrl}/storage/v1/object/${encodeURIComponent(input.bucketName)}/${encodeStoragePath(input.fileName)}`;
 
-    try {
-      const uploadTask = FileSystem.createUploadTask(
-        uploadUrl,
-        input.assetUri,
-        {
-          httpMethod: 'POST',
-          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-          headers: {
-            Authorization: `Bearer ${input.accessToken}`,
-            apikey: supabaseAnonKey,
-            'Content-Type': input.mimeType,
-            'x-upsert': 'false',
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const uploadTask = FileSystem.createUploadTask(
+          uploadUrl,
+          input.assetUri,
+          {
+            httpMethod: 'POST',
+            uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+            headers: {
+              Authorization: `Bearer ${input.accessToken}`,
+              apikey: supabaseAnonKey,
+              'Content-Type': input.mimeType,
+              'x-upsert': 'false',
+            },
           },
-        },
-        ({ totalBytesExpectedToSend, totalBytesSent }) => {
-          if (totalBytesExpectedToSend > 0) {
-            input.onProgress?.(
-              Math.min(99, Math.max(1, Math.round((totalBytesSent / totalBytesExpectedToSend) * 100))),
-            );
-          }
-        },
-      );
+          ({ totalBytesExpectedToSend, totalBytesSent }) => {
+            if (totalBytesExpectedToSend > 0) {
+              input.onProgress?.(
+                Math.min(99, Math.max(1, Math.round((totalBytesSent / totalBytesExpectedToSend) * 100))),
+              );
+            }
+          },
+        );
 
-      const uploadResponse = await uploadTask.uploadAsync();
+        const uploadResponse = await uploadTask.uploadAsync();
 
-      if (!uploadResponse) {
-        throw new Error('Video upload was cancelled.');
-      }
+        if (!uploadResponse) {
+          throw new Error('Video upload was cancelled.');
+        }
 
-      if (uploadResponse.status < 200 || uploadResponse.status >= 300) {
-        throw new Error(readStorageUploadError(uploadResponse.status, uploadResponse.body || ''));
-      }
+        if (uploadResponse.status < 200 || uploadResponse.status >= 300) {
+          throw new Error(readStorageUploadError(uploadResponse.status, uploadResponse.body || ''));
+        }
 
-      return { path: input.fileName };
-    } catch (error) {
-      if (!isTimeoutUploadError(error)) {
+        return { path: input.fileName };
+      } catch (error) {
+        if (isDuplicateStorageError(error) && await waitForStorageObject(input.bucketName, input.fileName)) {
+          return { path: input.fileName };
+        }
+        if (!isTimeoutUploadError(error)) {
+          throw error;
+        }
+
+        input.onMessage?.('Checking upload status...');
+        if (await waitForStorageObject(input.bucketName, input.fileName)) {
+          return { path: input.fileName };
+        }
+
+        if (attempt === 0) {
+          input.onMessage?.('Retrying streamed upload...');
+          input.onProgress?.(0);
+          continue;
+        }
+
         throw error;
       }
-
-      input.onMessage?.('Checking upload status...');
-      if (await waitForStorageObject(input.bucketName, input.fileName)) {
-        return { path: input.fileName };
-      }
-
-      input.onMessage?.('Retrying upload...');
-      input.onProgress?.(0);
-      return uploadVideoWithSupabaseClient(input);
     }
+
+    throw new Error('Video upload failed.');
   }
 
   return uploadVideoWithSupabaseClient(input);
@@ -776,10 +787,13 @@ export default function VideoUploader({
       } catch (e: any) {
         console.warn('Error uploading video:', e);
         const rawMessage = e.message || 'Failed to upload video';
-        const message = isTimeoutUploadError(e)
+        const safetyCheckUnavailable = isUploadSafetyRetryableFailure(rawMessage);
+        const message = safetyCheckUnavailable
+          ? 'Safety check is temporarily unavailable. Please try again in a moment.'
+          : isTimeoutUploadError(e)
           ? 'The upload took too long on this connection. Please try again with a stronger connection or a shorter video.'
           : rawMessage;
-        showAlert('error', 'Upload failed', message);
+        showAlert('error', safetyCheckUnavailable ? 'Safety check unavailable' : 'Upload failed', message);
       } finally {
         await removeCopyrightVideoTemporaryFile(copyrightSample);
         setUploading(false);

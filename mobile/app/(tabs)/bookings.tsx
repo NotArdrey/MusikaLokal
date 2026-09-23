@@ -22,6 +22,7 @@ import {
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import BookingDetailsSheet from "../../src/components/BookingDetailsSheet";
+import ApplicantDetailsModal from "../../src/components/ApplicantDetailsModal";
 import CachedImage from "../../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
 import GuestSignInGate from "../../src/components/GuestSignInGate";
@@ -29,6 +30,7 @@ import Header from "../../src/components/header";
 import InAppMediaViewer, { isInAppMediaUrl } from "../../src/components/InAppMediaViewer";
 import BookingActionModal, { normalizeVisibleInput } from "../../src/components/modal";
 import Navbar from "../../src/components/navbar";
+import ProfileAvatar from "../../src/components/ProfileAvatar";
 import Skeleton from "../../src/components/Skeleton";
 import SlidingTabBar from "../../src/components/SlidingTabBar";
 import { palette, radius, typography } from "../../src/theme/tokens";
@@ -1036,7 +1038,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
           }}
         >
           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
-            AI Filter is temporarily unavailable. Open Review Applicant to refresh it.
+            AI Match Review is temporarily unavailable. Open Review Applicant to refresh it.
           </Text>
         </View>
       );
@@ -1056,7 +1058,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
           }}
         >
           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
-            AI Filter is not enabled for this gig. Open Review Applicant to configure it.
+            AI Match Review is not enabled for this gig. Open Review Applicant to configure it.
           </Text>
         </View>
       );
@@ -1105,7 +1107,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
           <Ionicons name="sparkles" size={16} color={isRecommended ? "#10B981" : colors.primary} />
           <Text style={{ color: isRecommended ? "#10B981" : colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
-            AI Filter Review
+            AI Match Review
           </Text>
           {recommendation.is_verified === true ? (
             <Ionicons name="shield-checkmark" size={15} color="#10B981" />
@@ -1732,6 +1734,10 @@ export default function BookingsScreen() {
   });
   const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
   const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
+  const [selectedApplicantSummary, setSelectedApplicantSummary] = useState<any | null>(null);
+  const [selectedApplicantDetails, setSelectedApplicantDetails] = useState<any | null>(null);
+  const [applicantDetailsLoading, setApplicantDetailsLoading] = useState(false);
+  const [applicantDetailsError, setApplicantDetailsError] = useState<string | null>(null);
   const bookingsSummaryQuery = useBookingsSummaryQuery(userId, {
     enabled: isAuthenticated && Boolean(userId),
   });
@@ -3912,7 +3918,88 @@ export default function BookingsScreen() {
     );
   }
 
+  const loadApplicantDetails = async (application: any) => {
+    if (!application?.id) return;
+
+    setSelectedApplicantSummary(application);
+    setSelectedApplicantDetails(null);
+    setApplicantDetailsError(null);
+    setApplicantDetailsLoading(true);
+
+    try {
+      const { data: { session: activeSession } } = await supabase.auth.getSession();
+      if (!activeSession) {
+        throw new Error("Your session has expired. Please sign in again.");
+      }
+
+      const { data: applicantDetails, error: applicantDetailsRequestError } =
+        await supabase.functions.invoke("gig-applications", {
+          body: {
+            action: "fetch_gig_application_details",
+            applicationId: application.id,
+            userId,
+          },
+          headers: { Authorization: `Bearer ${activeSession.access_token}` },
+        });
+
+      if (applicantDetailsRequestError) {
+        let message =
+          applicantDetailsRequestError.message || "Applicant details could not be loaded.";
+        const context = (applicantDetailsRequestError as any)?.context;
+
+        if (context && typeof context.json === "function") {
+          try {
+            const responseBody = await context.json();
+            message = responseBody?.error || responseBody?.message || message;
+          } catch {
+            // Keep the function error when the response has no readable JSON body.
+          }
+        }
+
+        throw new Error(message);
+      }
+
+      if (applicantDetails?.error) throw new Error(applicantDetails.error);
+
+      setSelectedApplicantDetails({
+        ...application,
+        ...applicantDetails,
+        ai_recommendation:
+          applicantDetails?.ai_recommendation || application.ai_recommendation || null,
+      });
+    } catch (detailsError: any) {
+      setApplicantDetailsError(
+        detailsError?.message || "Applicant details could not be loaded.",
+      );
+    } finally {
+      setApplicantDetailsLoading(false);
+    }
+  };
+
+  const closeApplicantDetails = () => {
+    setSelectedApplicantSummary(null);
+    setSelectedApplicantDetails(null);
+    setApplicantDetailsError(null);
+    setApplicantDetailsLoading(false);
+  };
+
+  const openApplicantAction = (mode: "confirm" | "decline" | "fire") => {
+    const application = selectedApplicantDetails || selectedApplicantSummary;
+    if (!application) return;
+
+    closeApplicantDetails();
+    setSelectedItem(application);
+    setCancellationReason("");
+    setModalMode(mode);
+    setModalVisible(true);
+  };
+
   const handleDetailsPress = (item: any) => {
+    if (userRole === "venue-owner" && item?.type_id === "gig_application") {
+      void loadApplicantDetails(item);
+      return;
+    }
+
     setSelectedItem(item);
     bookingDetailsRef.current?.present();
   };
@@ -6640,14 +6727,25 @@ export default function BookingsScreen() {
                   >
                     <View style={styles.gigGroupContent}>
                       <View style={styles.gigGroupTopRow}>
-                        <View
-                          style={[
-                            styles.gigGroupIcon,
-                            { backgroundColor: `${colors.primary}16` },
-                          ]}
-                        >
-                          <Ionicons name={groupPresentation.icon} size={20} color={colors.primary} />
-                        </View>
+                        {row.image ? (
+                          <CachedImage
+                            uri={row.image}
+                            style={styles.gigGroupImage}
+                            width={96}
+                            height={96}
+                            quality={72}
+                            cacheVersion={row.entityId}
+                          />
+                        ) : (
+                          <View
+                            style={[
+                              styles.gigGroupIcon,
+                              { backgroundColor: `${colors.primary}16` },
+                            ]}
+                          >
+                            <Ionicons name={groupPresentation.icon} size={20} color={colors.primary} />
+                          </View>
+                        )}
                         <View style={styles.gigGroupTitleContainer}>
                           <Text style={[styles.gigGroupEyebrow, { color: colors.primary }]}>
                             {groupPresentation.eyebrow}
@@ -7162,6 +7260,13 @@ export default function BookingsScreen() {
                   : isNegativeStatus
                     ? isDark ? "rgba(239, 68, 68, 0.16)" : "#FEF2F2"
                     : isDark ? "rgba(245, 158, 11, 0.16)" : "#FFFBEB";
+                const recommendationScore = item?.ai_recommendation?.score;
+                const matchPercentage =
+                  recommendationScore !== null &&
+                  recommendationScore !== undefined &&
+                  Number.isFinite(Number(recommendationScore))
+                    ? Math.max(0, Math.min(100, Math.round(Number(recommendationScore))))
+                    : null;
                 const isReadOnlyApplication = isReadOnlyBookingItem(item);
                 const canCompleteActiveGig = isGigApplicationEventFinished(item);
 
@@ -7183,14 +7288,12 @@ export default function BookingsScreen() {
                     ]}
                   >
                     <View style={styles.ownerApplicantSummaryRow}>
-                      <CachedImage
+                      <ProfileAvatar
                         uri={item.customer_avatar || item.image}
-                        fallbackUri={REQUEST_PLACEHOLDER_IMAGE}
                         style={styles.ownerApplicantAvatar}
-                        width={BOOKING_AVATAR_IMAGE_SIZE}
-                        height={BOOKING_AVATAR_IMAGE_SIZE}
-                        quality={72}
-                        cacheVersion={item.updated_at || item.created_at || item.id}
+                        size={BOOKING_AVATAR_IMAGE_SIZE}
+                        backgroundColor={`${colors.primary}14`}
+                        iconColor={colors.primary}
                       />
 
                       <View style={styles.ownerApplicantMain}>
@@ -7237,10 +7340,12 @@ export default function BookingsScreen() {
                         </Text>
                       </View>
 
-                      {item?.ai_recommendation?.recommendation_status === "recommended" ? (
+                      {matchPercentage !== null ? (
                         <View style={[styles.ownerApplicantRecommendationChip, { backgroundColor: `${colors.primary}12` }]}>
                           <Ionicons name="sparkles" size={12} color={colors.primary} />
-                          <Text style={[styles.ownerApplicantRecommendationText, { color: colors.primary }]}>Recommended</Text>
+                          <Text style={[styles.ownerApplicantRecommendationText, { color: colors.primary }]}>
+                            {matchPercentage}% Match
+                          </Text>
                         </View>
                       ) : null}
 
@@ -10009,6 +10114,24 @@ export default function BookingsScreen() {
         />
       ) : null}
 
+      <ApplicantDetailsModal
+        visible={Boolean(selectedApplicantSummary)}
+        summary={selectedApplicantSummary}
+        details={selectedApplicantDetails}
+        loading={applicantDetailsLoading}
+        error={applicantDetailsError}
+        colors={colors}
+        readOnly={isReadOnlyBookingItem(selectedApplicantSummary)}
+        onClose={closeApplicantDetails}
+        onRetry={() => {
+          if (selectedApplicantSummary) void loadApplicantDetails(selectedApplicantSummary);
+        }}
+        onOpenMedia={openConnectionRequestLink}
+        onAccept={() => openApplicantAction("confirm")}
+        onDecline={() => openApplicantAction("decline")}
+        onFire={() => openApplicantAction("fire")}
+      />
+
       <BookingDetailsSheet
         ref={bookingDetailsRef}
         booking={selectedItem}
@@ -10412,6 +10535,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  gigGroupImage: {
+    width: moderateScale(44),
+    height: moderateScale(44),
+    borderRadius: moderateScale(22),
+  },
   gigGroupTitleContainer: {
     flex: 1,
   },
@@ -10533,7 +10661,7 @@ const styles = StyleSheet.create({
   ownerApplicantAvatar: {
     width: moderateScale(52),
     height: moderateScale(52),
-    borderRadius: moderateScale(14),
+    borderRadius: moderateScale(26),
   },
   ownerApplicantMain: {
     flex: 1,

@@ -13,6 +13,7 @@ import {
 import { PH_MUSIC_GROUP_TYPES } from "../../constants/groupTypes";
 import type { UploadSafetyFileDecision } from "../../services/uploadSafetyScreen";
 import { getGigApplicationDeadlineInfo } from "../../utils/gigApplication";
+import { getSharedSlotRequirements } from "../../utils/gigSlotRequirements";
 import DocumentUploader from "../DocumentUploader";
 import InAppMediaViewer from "../InAppMediaViewer";
 import styles from "../ListingDetailsSheet.styles";
@@ -36,7 +37,6 @@ interface GigApplyTabProps {
   videoUrl: string;
   setVideoUrl: (value: string) => void;
   aiPortfolioReviewConsent: boolean;
-  setAiPortfolioReviewConsent: (value: boolean) => void;
   setVideoReviewFrameUrl: (value: string) => void;
   setVideoReviewFrameUrls: (value: string[]) => void;
   videoCopyrightDecision: UploadSafetyFileDecision | null;
@@ -82,7 +82,6 @@ const GigApplyTab = ({
   videoUrl,
   setVideoUrl,
   aiPortfolioReviewConsent,
-  setAiPortfolioReviewConsent,
   setVideoReviewFrameUrl,
   setVideoReviewFrameUrls,
   videoCopyrightDecision,
@@ -161,13 +160,6 @@ const GigApplyTab = ({
     if (selectedSlotType === "band") return entryGroupType === "band";
     return true;
   });
-  const selectedProductionRoster = selectedProductionRosterId
-    ? productionRoster.find((entry) => entry.id === selectedProductionRosterId)
-    : null;
-  const aiReviewCoversGroup = Boolean(
-    selectedGroupId || (isProducerFlow && getProductionRosterGroupType(selectedProductionRoster)),
-  );
-
   const getEnabledSlotTypes = () => {
     if (requiredSlotTypes.length === 0) return [] as ("solo" | "duo" | "band")[];
 
@@ -189,11 +181,11 @@ const GigApplyTab = ({
   const selectedSlotRequirements = React.useMemo(() => {
     if (!selectedSlotType) return null;
     const slot = slots?.[selectedSlotType] || {};
-    const preferredGenres = Array.isArray(slot.preferred_genres)
-      ? slot.preferred_genres.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
-      : [];
-    const preferredInstruments = Array.isArray(slot.preferred_instruments)
-      ? slot.preferred_instruments.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
+    const shared = getSharedSlotRequirements(slot);
+    const preferredGenres = shared.preferred_genres;
+    const preferredInstruments = shared.preferred_instruments;
+    const specificRequirements = Array.isArray(slot.specific_requirements)
+      ? slot.specific_requirements.filter((item: unknown) => item && typeof item === "object")
       : [];
     const preferredGroupTypesRaw = selectedSlotType === "band" && Array.isArray(slot.preferred_group_types)
       ? slot.preferred_group_types.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
@@ -211,6 +203,7 @@ const GigApplyTab = ({
       preferredGenres,
       preferredInstruments,
       preferredGroupTypeLabels,
+      specificRequirements,
     };
   }, [selectedSlotType, slots]);
 
@@ -457,7 +450,8 @@ const GigApplyTab = ({
               {selectedSlotRequirements &&
                 (selectedSlotRequirements.preferredGenres.length > 0 ||
                   selectedSlotRequirements.preferredInstruments.length > 0 ||
-                  selectedSlotRequirements.preferredGroupTypeLabels.length > 0) && (
+                  selectedSlotRequirements.preferredGroupTypeLabels.length > 0 ||
+                  selectedSlotRequirements.specificRequirements.length > 0) && (
                   <View
                     style={[
                       styles.infoBox,
@@ -474,15 +468,28 @@ const GigApplyTab = ({
                         {selectedSlotRequirements.preferredGroupTypeLabels.join(", ")}
                       </Text>
                     )}
+                    {selectedSlotRequirements.specificRequirements.map((item: any, index: number) => {
+                      const details = [
+                        ...(Array.isArray(item.roles) ? item.roles : []),
+                        ...(Array.isArray(item.preferred_genres) ? item.preferred_genres.map((value: string) => `Genre: ${value}`) : []),
+                        ...(Array.isArray(item.preferred_instruments) ? item.preferred_instruments.map((value: string) => `Instrument: ${value}`) : []),
+                      ].filter(Boolean);
+                      return details.length > 0 ? (
+                        <Text key={item.slot_id || index} style={[styles.infoText, { color: colors.text }]}>
+                          <Text style={{ fontFamily: "Poppins_600SemiBold" }}>{item.label || `Slot ${index + 1}`}: </Text>
+                          {details.join(", ")}
+                        </Text>
+                      ) : null;
+                    })}
                     {selectedSlotRequirements.preferredGenres.length > 0 && (
                       <Text style={[styles.infoText, { color: colors.text }]}>
-                        <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Preferred genres: </Text>
+                        <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Shared genres: </Text>
                         {selectedSlotRequirements.preferredGenres.join(", ")}
                       </Text>
                     )}
                     {selectedSlotRequirements.preferredInstruments.length > 0 && (
                       <Text style={[styles.infoText, { color: colors.text }]}>
-                        <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Preferred instruments: </Text>
+                        <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Shared instruments: </Text>
                         {selectedSlotRequirements.preferredInstruments.join(", ")}
                       </Text>
                     )}
@@ -843,49 +850,6 @@ const GigApplyTab = ({
           />
         </View>
       </View>
-
-      {!isGroupApplicationFlow && (
-        <TouchableOpacity
-          activeOpacity={0.78}
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked: aiPortfolioReviewConsent }}
-          accessibilityLabel="Consent to optional AI portfolio review"
-          onPress={() => {
-            const nextValue = !aiPortfolioReviewConsent;
-            setAiPortfolioReviewConsent(nextValue);
-            if (!nextValue) {
-              setVideoReviewFrameUrl("");
-              setVideoReviewFrameUrls([]);
-            }
-          }}
-          style={[
-            gigApplyStyles.termsRow,
-            {
-              borderWidth: 1,
-              borderColor: aiPortfolioReviewConsent ? colors.primary : colors.border,
-              borderRadius: 12,
-              padding: 12,
-              marginBottom: 16,
-              backgroundColor: aiPortfolioReviewConsent ? `${colors.primary}10` : "transparent",
-            },
-          ]}
-        >
-          <View style={[gigApplyStyles.checkbox, {
-            borderColor: aiPortfolioReviewConsent ? colors.primary : colors.border,
-            backgroundColor: aiPortfolioReviewConsent ? colors.primary : "transparent",
-          }]}>
-            {aiPortfolioReviewConsent && <Text style={gigApplyStyles.checkboxTick}>✓</Text>}
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[gigApplyStyles.termsText, { color: colors.text, fontFamily: "Poppins_600SemiBold" }]}>AI portfolio review (optional)</Text>
-            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 3 }}>
-              {aiReviewCoversGroup
-                ? "I confirm every listed group member allows Groq AI to review their redacted CV, portfolio, profile photo, and performance video. This optional review offers guidance only. It does not verify identity or decide our score."
-                : "Allow Groq AI to review my redacted CV, portfolio, profile photo, and performance video. This optional review offers guidance only. It does not verify my identity or decide my score."}
-            </Text>
-          </View>
-        </TouchableOpacity>
-      )}
 
       <DocumentUploader
         label="Upload CV/Resume"

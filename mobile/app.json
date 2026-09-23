@@ -29,6 +29,8 @@
     "plugins": [
       "expo-router",
       "expo-asset",
+      "expo-image",
+      "expo-video",
       "expo-notifications",
       [
         "expo-audio",

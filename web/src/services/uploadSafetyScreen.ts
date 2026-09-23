@@ -312,6 +312,17 @@ const sanitizeUploadSafetyReason = (rawReason?: string): string => {
     return SAFETY_TIMEOUT_MESSAGE;
   }
 
+  if (
+    lower.includes("temporarily unavailable") ||
+    lower.includes("safety screening is unavailable") ||
+    lower.includes("safety check is unavailable") ||
+    lower.includes("screening response was incomplete") ||
+    lower.includes("screening did not return") ||
+    lower.includes("screening is not configured")
+  ) {
+    return SCREENING_UNAVAILABLE_BLOCK_MESSAGE;
+  }
+
   if (lower.includes("this audio appears to match")) {
     return formatAudioCopyrightReason(reason);
   }

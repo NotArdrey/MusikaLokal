@@ -49,7 +49,7 @@ export default function ConnectionApplicantReview({
       <View style={styles.header}>
         <View style={styles.titleWrap}>
           <Ionicons name="sparkles" size={16} color={accent} />
-          <Text style={[styles.title, { color: colors.text }]}>AI Filter Review</Text>
+          <Text style={[styles.title, { color: colors.text }]}>AI Match Review</Text>
         </View>
         <Text style={[styles.score, { color: accent }]}>
           {Math.round(Number(recommendation.score || 0))}%

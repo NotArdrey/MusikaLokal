@@ -90,7 +90,7 @@ interface UserProfile {
     genres: string[];
 }
 
-type RecommendationItemType = "Group" | "Duo" | "Studio" | "Venue" | "Gig" | "Artist" | "Production";
+type RecommendationItemType = "Group" | "Duo" | "Studio" | "Venue" | "Gig" | "Artist" | "Production" | "Post";
 
 interface RecommendationItem {
     id: string;
@@ -120,6 +120,16 @@ interface RecommendationItem {
     open_production_applications?: boolean;
     availability?: any[];
     open_dates?: string[];
+    requirements?: Record<string, unknown> | null;
+    author_id?: string | null;
+    post_type?: string | null;
+    content?: string | null;
+    visibility?: string | null;
+    reaction_count?: number;
+    comment_count?: number;
+    share_count?: number;
+    author?: Record<string, unknown> | null;
+    media?: any[];
     similarity: number;
     aiReason: string;
     aiScore: number;
@@ -561,7 +571,7 @@ const ensureRecommendationTypeCoverage = (
         const candidate = candidates.find((entry) => entry.item.type === type && !usedIds.has(entry.item.id));
         if (!candidate) continue;
 
-        const insertIndex = Math.min(out.length, type === "Gig" ? 4 : out.length);
+        const insertIndex = Math.min(out.length, type === "Post" ? 2 : type === "Gig" ? 4 : out.length);
         out.splice(insertIndex, 0, candidate);
         usedIds.add(candidate.item.id);
 
@@ -809,14 +819,26 @@ const fetchProfile = async (supabaseClient: any, userId: string): Promise<UserPr
     };
 };
 
-const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> => {
+const fetchCandidates = async (supabaseClient: any, includePosts = false): Promise<CandidateItem[]> => {
     const [
+        postsResult,
         groupsResult,
         studiosResult,
         gigsResult,
         artistsResult,
         productionTeamsResult,
     ] = await Promise.all([
+        includePosts
+            ? supabaseClient
+                .from("feed_posts")
+                .select("id, author_id, post_type, content, visibility, reaction_count, comment_count, share_count, created_at, updated_at, author:profiles!author_id(id, full_name, avatar_url, role, is_verified, verification_status), media:post_media(id, post_id, media_type, storage_path, thumbnail_path, is_cover, mime_type, width, height, duration_seconds, display_order, safety_status, safety_metadata)")
+                .eq("visibility", "public")
+                .eq("is_hidden", false)
+                .is("linked_gig_id", null)
+                .is("linked_entity_id", null)
+                .order("created_at", { ascending: false })
+                .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT)
+            : Promise.resolve({ data: [], error: null }),
         supabaseClient
             .from("groups_with_stats")
             .select("id, name, description, images, location, genre, group_type, rate, rating, review_count, owner_id, created_at")
@@ -848,6 +870,7 @@ const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> =>
     ]);
 
     const queryErrors = [
+        postsResult.error,
         groupsResult.error,
         studiosResult.error,
         gigsResult.error,
@@ -857,6 +880,49 @@ const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> =>
     if (queryErrors.length > 0) {
         console.error("home-feed candidate query errors:", queryErrors);
     }
+
+    const postItems: CandidateItem[] = (postsResult.data || []).filter((item: any) => {
+        const author = Array.isArray(item?.author) ? item.author[0] || null : item?.author || null;
+        return author?.is_verified === true && String(author?.verification_status || "").toUpperCase() === "APPROVED";
+    }).map((item: any) => {
+        const author = Array.isArray(item?.author) ? item.author[0] || null : item?.author || null;
+        const media = Array.isArray(item?.media) ? item.media : [];
+        const imageValues = media
+            .map((entry: any) => entry?.thumbnail_path || entry?.storage_path || null)
+            .filter((value: unknown): value is string => typeof value === "string" && value.length > 0);
+        const postType = typeof item?.post_type === "string" ? item.post_type : "Post";
+
+        return {
+            id: item.id,
+            type: "Post",
+            name: author?.full_name || "Post",
+            image: imageValues[0] || author?.avatar_url || null,
+            images: imageValues,
+            rating: 0,
+            review_count: 0,
+            rate: null,
+            hourly_rate: null,
+            budget: null,
+            location: "",
+            genre: postType,
+            description: item?.content || null,
+            created_at: item?.created_at || null,
+            updated_at: item?.updated_at || null,
+            owner_id: item?.author_id || null,
+            organizer_id: null,
+            author_id: item?.author_id || null,
+            post_type: postType,
+            content: item?.content || "",
+            visibility: item?.visibility || "public",
+            reaction_count: Number(item?.reaction_count || 0),
+            comment_count: Number(item?.comment_count || 0),
+            share_count: Number(item?.share_count || 0),
+            author,
+            media,
+            searchableText: `${item?.content || ""} ${postType} ${author?.full_name || ""}`,
+            extractedGenres: splitGenres(postType),
+        };
+    });
 
     const artists = Array.isArray(artistsResult.data) ? artistsResult.data : [];
     const artistIds = artists
@@ -995,6 +1061,7 @@ const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> =>
             updated_at: item.updated_at || null,
             owner_id: null,
             organizer_id: item.organizer_id || null,
+            requirements: item.requirements && typeof item.requirements === "object" ? item.requirements : null,
             searchableText: `${item.name || ""} ${item.description || ""} ${item.location || ""} ${JSON.stringify(item.requirements || {})}`,
             extractedGenres: genres,
         };
@@ -1054,7 +1121,7 @@ const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> =>
         extractedGenres: [],
     }));
 
-    return [...groupItems, ...studioItems, ...gigItems, ...artistItems, ...productionItems];
+    return [...postItems, ...groupItems, ...studioItems, ...gigItems, ...artistItems, ...productionItems];
 };
 
 const getRecommendations = async (
@@ -1063,6 +1130,7 @@ const getRecommendations = async (
     mode: RecommendationMode,
     groqApiKey: string,
     limit: number,
+    includePosts = false,
 ) => {
     const [profile, activity] = await Promise.all([
         fetchProfile(supabaseClient, userId),
@@ -1078,7 +1146,7 @@ const getRecommendations = async (
         };
     }
 
-    const candidates = await fetchCandidates(supabaseClient);
+    const candidates = await fetchCandidates(supabaseClient, includePosts && mode === "for-you");
     if (candidates.length === 0) {
         return {
             recommendations: [],
@@ -1099,7 +1167,9 @@ const getRecommendations = async (
         })
         .sort((a, b) => b.score - a.score)
         .slice(0, Math.max(20, limit));
-    const requiredTypes: RecommendationItemType[] = mode === "for-you" ? ["Gig"] : [];
+    const requiredTypes: RecommendationItemType[] = mode === "for-you"
+        ? includePosts ? ["Post", "Gig"] : ["Gig"]
+        : [];
 
     if (LOCAL_ONLY_MODE) {
         const fallbackRank = ensureRecommendationTypeCoverage(
@@ -1411,6 +1481,7 @@ serve(async (req: Request) => {
                 action === "for-you" ? "for-you" : "skill-suggestions",
                 groqApiKey,
                 limit,
+                action === "for-you",
             );
 
             return new Response(JSON.stringify({

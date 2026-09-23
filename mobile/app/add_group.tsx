@@ -23,7 +23,6 @@ import {
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import GigPresetDropdown, {
-  GIG_GENRE_OPTIONS,
   GIG_INSTRUMENT_OPTIONS,
   GIG_ROLE_OPTIONS,
 } from "../src/components/GigPresetDropdown";
@@ -1230,13 +1229,6 @@ export default function AddGroupScreen() {
                   >
                     Genre
                   </Text>
-                  <GigPresetDropdown options={GIG_GENRE_OPTIONS} selectedValues={selectedGenres} onSelect={(value) => setSelectedGenres((current) => [...current, value])} placeholder="Choose a genre" />
-                  <View style={{ flexDirection: "row", gap: 8, marginTop: 8, marginBottom: 12 }}>
-                    <TextInput value={customGenre} onChangeText={setCustomGenre} placeholder="Enter another genre..." placeholderTextColor={colors.textSecondary} style={[styles.textInput, { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.border }]} />
-                    <TouchableOpacity accessibilityLabel="Add custom genre" onPress={() => { const value = customGenre.trim(); if (!value || selectedGenres.some((genre) => genre.toLowerCase() === value.toLowerCase())) return; setSelectedGenres((current) => [...current, value]); setCustomGenre(""); }} style={{ width: 46, height: 46, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary }}>
-                      <Ionicons name="add" size={22} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
                   <View style={styles.genreChipsContainer}>
                     {(showAllGenres ? GENRES : GENRES.slice(0, 8)).map(
                       (genre) => {
@@ -1300,6 +1292,28 @@ export default function AddGroupScreen() {
                       color={colors.primary}
                     />
                   </TouchableOpacity>
+                  <Text style={[styles.genreHelperText, { color: colors.textSecondary }]}>Add a custom genre</Text>
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <TextInput value={customGenre} onChangeText={setCustomGenre} placeholder="Enter another genre..." placeholderTextColor={colors.textSecondary} style={[styles.textInput, { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.border }]} />
+                    <TouchableOpacity accessibilityLabel="Add custom genre" onPress={() => { const value = customGenre.trim(); if (!value || selectedGenres.some((genre) => genre.toLowerCase() === value.toLowerCase())) return; setSelectedGenres((current) => [...current, value]); setCustomGenre(""); }} style={{ width: 46, height: 46, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary }}>
+                      <Ionicons name="add" size={22} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                  {selectedGenres.some((genre) => !GENRES.includes(genre)) && (
+                    <View style={[styles.genreChipsContainer, { marginTop: 8 }]}>
+                      {selectedGenres.filter((genre) => !GENRES.includes(genre)).map((genre) => (
+                        <TouchableOpacity
+                          accessibilityLabel={`Remove custom genre ${genre}`}
+                          key={genre}
+                          onPress={() => setSelectedGenres((current) => current.filter((item) => item !== genre))}
+                          style={[styles.genreChip, { backgroundColor: colors.primary, borderColor: colors.primary, flexDirection: "row", alignItems: "center", gap: 6 }]}
+                        >
+                          <Text style={[styles.genreChipText, { color: "#FFFFFF" }]}>{genre}</Text>
+                          <Ionicons name="close" size={14} color="#FFFFFF" />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
                 </View>
                 {renderInput(
                   "Description",
@@ -2241,6 +2255,11 @@ const styles = StyleSheet.create({
   },
   genreChipText: {
     fontSize: 13,
+    fontFamily: "Poppins_500Medium",
+  },
+  genreHelperText: {
+    marginBottom: 6,
+    fontSize: 12,
     fontFamily: "Poppins_500Medium",
   },
   showMoreButton: {

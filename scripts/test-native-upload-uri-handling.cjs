@@ -213,3 +213,41 @@ test("the shared image uploader reads picker files through the safe-copy helper"
   assert.match(imageUploaderSource, /removePersistedUploadAsset\(asset\)/);
   assert.doesNotMatch(imageUploaderSource, /FileSystem\.readAsStringAsync/);
 });
+
+test("mobile and web video upload recovery never loads the full video as base64", () => {
+  for (const file of [
+    "mobile/src/components/VideoUploader.tsx",
+    "web/src/components/VideoUploader.tsx",
+  ]) {
+    const fileSource = readFileSync(file, "utf8");
+    const clientUpload = fileSource.match(
+      /const uploadVideoWithSupabaseClient[\s\S]+?\nconst uploadVideoFile/,
+    )?.[0];
+    const streamedUpload = fileSource.match(
+      /const uploadVideoFile[\s\S]+?\ninterface VideoUploaderProps/,
+    )?.[0];
+
+    assert(clientUpload, `${file}: expected the web-client upload helper`);
+    assert(streamedUpload, `${file}: expected the streamed upload helper`);
+    assert.match(clientUpload, /Platform\.OS !== ['"]web['"]/);
+    assert.doesNotMatch(clientUpload, /readAsStringAsync|readLocalFileAsBase64|base64ToUint8Array/);
+    assert.match(streamedUpload, /FileSystem\.createUploadTask/);
+    assert.match(streamedUpload, /Retrying streamed upload/);
+    assert.equal(
+      (streamedUpload.match(/uploadVideoWithSupabaseClient\(input\)/g) || []).length,
+      1,
+      `${file}: the Supabase client helper must only be the final web-platform path`,
+    );
+  }
+});
+
+test("mobile and web report temporary visual-screening outages as retryable service errors", () => {
+  for (const root of ["mobile", "web"]) {
+    const safetySource = readFileSync(`${root}/src/services/uploadSafetyScreen.ts`, "utf8");
+    const uploaderSource = readFileSync(`${root}/src/components/VideoUploader.tsx`, "utf8");
+
+    assert.match(safetySource, /lower\.includes\(["']temporarily unavailable["']\)/);
+    assert.match(uploaderSource, /isUploadSafetyRetryableFailure\(rawMessage\)/);
+    assert.match(uploaderSource, /Safety check unavailable/);
+  }
+});

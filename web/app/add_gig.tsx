@@ -29,6 +29,7 @@ import GigPresetDropdown, {
   GIG_INSTRUMENT_OPTIONS,
   GIG_ROLE_OPTIONS,
 } from "../src/components/GigPresetDropdown";
+import GigSpecificSlotRequirements from "../src/components/GigSpecificSlotRequirements";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
@@ -36,6 +37,12 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
+import {
+  aggregateSpecificSlotRequirements,
+  getSpecificSlotRequirementLines,
+  normalizeSpecificSlotRequirements,
+  type GigSpecificSlotRequirement,
+} from "../src/utils/gigSlotRequirements";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
 const base64ToUint8Array = (base64: string): Uint8Array => {
@@ -241,6 +248,8 @@ export default function AddGigScreen() {
   const [newDuoPreferredGenre, setNewDuoPreferredGenre] = useState("");
   const [duoPreferredInstruments, setDuoPreferredInstruments] = useState<string[]>([]);
   const [newDuoPreferredInstrument, setNewDuoPreferredInstrument] = useState("");
+  const [soloSpecificRequirements, setSoloSpecificRequirements] = useState<GigSpecificSlotRequirement[]>([]);
+  const [duoSpecificRequirements, setDuoSpecificRequirements] = useState<GigSpecificSlotRequirement[]>([]);
   const [bandRolesNeeded, setBandRolesNeeded] = useState<string[]>([]);
   const [newBandRole, setNewBandRole] = useState("");
   const [bandPreferredGenres, setBandPreferredGenres] = useState<string[]>([]);
@@ -360,10 +369,16 @@ export default function AddGigScreen() {
 
     if (alreadyExists) {
       showAlert("warning", "Already Added", "This event date and time condition is already in the list.");
+      setEventDate("");
+      setEventStartTime("06:00 PM");
+      setEventEndTime("11:00 PM");
       return;
     }
 
     setEventSchedules((prev) => [...prev, newCondition]);
+    setEventDate("");
+    setEventStartTime("06:00 PM");
+    setEventEndTime("11:00 PM");
   };
 
   const removeEventCondition = (indexToRemove: number) => {
@@ -392,11 +407,44 @@ export default function AddGigScreen() {
     setMusicianType("both");
   }, [soloSlotsNeeded, duoSlotsNeeded, bandSlotsNeeded]);
 
-  useEffect(() => {
-    if (bandSlotsNeeded !== preferredGroupTypes.length) {
-      setBandSlotsNeeded(preferredGroupTypes.length);
+  const updateSoloSlotCount = (next: number) => {
+    const count = Math.max(0, next);
+    setSoloSlotsNeeded(count);
+    setSoloSpecificRequirements((current) => normalizeSpecificSlotRequirements(current, count, "solo", {
+      roles: soloRolesNeeded, preferred_genres: soloPreferredGenres, preferred_instruments: soloPreferredInstruments,
+    }));
+  };
+
+  const updateDuoSlotCount = (next: number) => {
+    const count = Math.max(0, next);
+    setDuoSlotsNeeded(count);
+    setDuoSpecificRequirements((current) => normalizeSpecificSlotRequirements(current, count, "duo", {
+      roles: duoRolesNeeded, preferred_genres: duoPreferredGenres, preferred_instruments: duoPreferredInstruments,
+    }));
+  };
+
+  const addPreferredGroupType = (value: string) => {
+    if (preferredGroupTypes.length >= bandSlotsNeeded) {
+      showAlert("warning", "All Group Slots Assigned", "Add another group slot before choosing another group type.");
+      return;
     }
-  }, [preferredGroupTypes, bandSlotsNeeded]);
+    setPreferredGroupTypes((current) => [...current, value]);
+  };
+
+  const removePreferredGroupType = (value: string) => {
+    setPreferredGroupTypes((current) => {
+      const lastIndex = current.lastIndexOf(value);
+      return lastIndex < 0 ? current : current.filter((_, index) => index !== lastIndex);
+    });
+  };
+
+  const decrementGroupSlots = () => {
+    setBandSlotsNeeded((current) => {
+      const next = Math.max(0, current - 1);
+      setPreferredGroupTypes((types) => types.slice(0, next));
+      return next;
+    });
+  };
 
   const validateStep = (currentStep: number): boolean => {
     if (currentStep === 1) {
@@ -506,6 +554,18 @@ export default function AddGigScreen() {
         : images;
       const normalizedSchedules = getNormalizedEventSchedules();
       const primarySchedule = normalizedSchedules[0];
+      const normalizedSoloRequirements = normalizeSpecificSlotRequirements(soloSpecificRequirements, soloSlotsNeeded, "solo");
+      const normalizedDuoRequirements = normalizeSpecificSlotRequirements(duoSpecificRequirements, duoSlotsNeeded, "duo");
+      const soloAggregate = aggregateSpecificSlotRequirements(normalizedSoloRequirements, {
+        roles: soloRolesNeeded,
+        preferred_genres: soloPreferredGenres,
+        preferred_instruments: soloPreferredInstruments,
+      });
+      const duoAggregate = aggregateSpecificSlotRequirements(normalizedDuoRequirements, {
+        roles: duoRolesNeeded,
+        preferred_genres: duoPreferredGenres,
+        preferred_instruments: duoPreferredInstruments,
+      });
 
       const payload = {
         name: gigName,
@@ -531,15 +591,13 @@ export default function AddGigScreen() {
           slots: {
             solo: {
               needed: soloSlotsNeeded,
-              roles: soloRolesNeeded,
-              preferred_genres: soloPreferredGenres,
-              preferred_instruments: soloPreferredInstruments,
+              ...soloAggregate,
+              specific_requirements: normalizedSoloRequirements,
             },
             duo: {
               needed: duoSlotsNeeded,
-              roles: duoRolesNeeded,
-              preferred_genres: duoPreferredGenres,
-              preferred_instruments: duoPreferredInstruments,
+              ...duoAggregate,
+              specific_requirements: normalizedDuoRequirements,
             },
             band: {
               needed: bandSlotsNeeded,
@@ -1529,7 +1587,12 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       textDayFontSize: 14,
                       textMonthFontSize: 16,
                       textDayHeaderFontSize: 12,
-                    }}
+                      "stylesheet.day.basic": {
+                        base: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
+                        selected: { borderRadius: 16 },
+                        text: { marginTop: 0, includeFontPadding: false, textAlign: "center", textAlignVertical: "center" },
+                      },
+                    } as any}
                   />
                   {eventDate && (
                     <View
@@ -2102,14 +2165,14 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     </View>
                     <View style={styles.counterContainer}>
                       <TouchableOpacity activeOpacity={1}
-                        onPress={() => setSoloSlotsNeeded(Math.max(0, soloSlotsNeeded - 1))}
+                        onPress={() => updateSoloSlotCount(soloSlotsNeeded - 1)}
                         style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
                       >
                         <Ionicons name="remove" size={18} color={colors.text} />
                       </TouchableOpacity>
                       <Text style={[styles.counterValue, { color: colors.text }]}>{soloSlotsNeeded}</Text>
                       <TouchableOpacity activeOpacity={1}
-                        onPress={() => setSoloSlotsNeeded(soloSlotsNeeded + 1)}
+                        onPress={() => updateSoloSlotCount(soloSlotsNeeded + 1)}
                         style={[styles.counterBtn, { backgroundColor: colors.primary }]}
                       >
                         <Ionicons name="add" size={18} color="#fff" />
@@ -2117,9 +2180,16 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     </View>
                   </View>
                   {soloSlotsNeeded > 0 && (
+                    <GigSpecificSlotRequirements
+                      slotType="solo"
+                      value={soloSpecificRequirements}
+                      onChange={setSoloSpecificRequirements}
+                    />
+                  )}
+                  {soloSlotsNeeded > 0 && (
                     <View style={{ marginTop: 12 }}>
                       <Text style={[styles.slotSubLabel, { color: colors.textSecondary }]}>
-                        Specific roles/instruments needed (optional):
+                        Shared requirements for every solo slot (optional):
                       </Text>
                       <GigPresetDropdown options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS]} selectedValues={soloRolesNeeded} onSelect={(value) => setSoloRolesNeeded((current) => [...current, value])} placeholder="Choose a role or instrument" />
                       <View style={[styles.addMemberRow, { marginTop: 8 }]}>
@@ -2287,14 +2357,14 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     </View>
                     <View style={styles.counterContainer}>
                       <TouchableOpacity activeOpacity={1}
-                        onPress={() => setDuoSlotsNeeded(Math.max(0, duoSlotsNeeded - 1))}
+                        onPress={() => updateDuoSlotCount(duoSlotsNeeded - 1)}
                         style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
                       >
                         <Ionicons name="remove" size={18} color={colors.text} />
                       </TouchableOpacity>
                       <Text style={[styles.counterValue, { color: colors.text }]}>{duoSlotsNeeded}</Text>
                       <TouchableOpacity activeOpacity={1}
-                        onPress={() => setDuoSlotsNeeded(duoSlotsNeeded + 1)}
+                        onPress={() => updateDuoSlotCount(duoSlotsNeeded + 1)}
                         style={[styles.counterBtn, { backgroundColor: colors.primary }]}
                       >
                         <Ionicons name="add" size={18} color="#fff" />
@@ -2302,9 +2372,16 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     </View>
                   </View>
                   {duoSlotsNeeded > 0 && (
+                    <GigSpecificSlotRequirements
+                      slotType="duo"
+                      value={duoSpecificRequirements}
+                      onChange={setDuoSpecificRequirements}
+                    />
+                  )}
+                  {duoSlotsNeeded > 0 && (
                     <View style={{ marginTop: 12 }}>
                       <Text style={[styles.slotSubLabel, { color: colors.textSecondary }]}>
-                        Specific roles/instruments needed (optional):
+                        Shared requirements for every duo slot (optional):
                       </Text>
                       <GigPresetDropdown options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS]} selectedValues={duoRolesNeeded} onSelect={(value) => setDuoRolesNeeded((current) => [...current, value])} placeholder="Choose a role or instrument" />
                       <View style={[styles.addMemberRow, { marginTop: 8 }]}>
@@ -2470,21 +2547,40 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                       <Ionicons name="musical-notes" size={20} color="#3B82F6" />
                       <Text style={[styles.slotTitle, { color: colors.text }]}>Group Type</Text>
                     </View>
-                    <Text style={[styles.counterValue, { color: colors.text }]}>{bandSlotsNeeded}</Text>
+                    <View style={styles.counterContainer}>
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        accessibilityLabel="Remove group slot"
+                        disabled={bandSlotsNeeded === 0}
+                        onPress={decrementGroupSlots}
+                        style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB", opacity: bandSlotsNeeded === 0 ? 0.45 : 1 }]}
+                      >
+                        <Ionicons name="remove" size={20} color={colors.text} />
+                      </TouchableOpacity>
+                      <Text style={[styles.counterValue, { color: colors.text }]}>{bandSlotsNeeded}</Text>
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        accessibilityLabel="Add group slot"
+                        onPress={() => setBandSlotsNeeded((current) => current + 1)}
+                        style={[styles.counterBtn, { backgroundColor: colors.primary }]}
+                      >
+                        <Ionicons name="add" size={20} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                  <View style={{ marginTop: 12 }}>
+                  {bandSlotsNeeded > 0 && <View style={{ marginTop: 12 }}>
                     <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular", marginBottom: 12, textAlign: "center" }}>
-                      Tap a group type to add needed count.
+                      Choose a type for each group slot ({preferredGroupTypes.length}/{bandSlotsNeeded} assigned).
                     </Text>
                     <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: "Poppins_400Regular", marginBottom: 12, textAlign: "center" }}>
-                      Tap + to add. Use the remove icon on selected types to reduce by 1.
+                      Use + and − to set how many slots need each type.
                     </Text>
-                    <GigPresetDropdown options={PH_MUSIC_GROUP_TYPES.map((type) => ({ label: type.label, value: type.id }))} selectedValues={preferredGroupTypes} onSelect={(value) => setPreferredGroupTypes((current) => [...current, value])} placeholder="Choose a group type" allowDuplicates />
+                    <GigPresetDropdown options={PH_MUSIC_GROUP_TYPES.map((type) => ({ label: type.label, value: type.id }))} selectedValues={preferredGroupTypes} onSelect={addPreferredGroupType} placeholder="Choose a group type" allowDuplicates />
                     <View style={[styles.addMemberRow, { marginTop: 8, marginBottom: 12 }]}>
                       <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
                         <TextInput value={newGroupType} onChangeText={setNewGroupType} placeholder="Enter another group type..." placeholderTextColor={colors.textSecondary} style={[styles.textInput, { color: colors.text }]} />
                       </View>
-                      <TouchableOpacity onPress={() => { const trimmed = newGroupType.trim(); if (!trimmed) return; setPreferredGroupTypes((current) => [...current, trimmed]); setNewGroupType(""); }} style={[styles.addBtn, { backgroundColor: colors.primary }]}>
+                      <TouchableOpacity onPress={() => { const trimmed = newGroupType.trim(); if (!trimmed) return; addPreferredGroupType(trimmed); setNewGroupType(""); }} style={[styles.addBtn, { backgroundColor: colors.primary }]}>
                         <Ionicons name="add" size={20} color="#fff" />
                       </TouchableOpacity>
                     </View>
@@ -2512,9 +2608,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                           <TouchableOpacity
                             key={type.id}
                             activeOpacity={1}
-                            onPress={() => {
-                              setPreferredGroupTypes((prev) => [...prev, type.id]);
-                            }}
+                            onPress={() => addPreferredGroupType(type.id)}
                             style={[
                               styles.chip,
                               {
@@ -2551,11 +2645,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                                   activeOpacity={1}
                                   onPress={(event) => {
                                     event.stopPropagation();
-                                    setPreferredGroupTypes((prev) => {
-                                      const lastIndex = prev.lastIndexOf(type.id);
-                                      if (lastIndex === -1) return prev;
-                                      return prev.filter((_, index) => index !== lastIndex);
-                                    });
+                                    removePreferredGroupType(type.id);
                                   }}
                                   style={{
                                     width: 20,
@@ -2566,7 +2656,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                                     backgroundColor: isDark ? "#1F2937" : "#E5E7EB",
                                   }}
                                 >
-                                  <Ionicons name="trash-outline" size={12} color="#EF4444" />
+                                  <Ionicons name="remove" size={13} color="#EF4444" />
                                 </TouchableOpacity>
                               </View>
                             )}
@@ -2578,7 +2668,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                     {preferredGroupTypes
                       .filter((value, index, values) => !PH_MUSIC_GROUP_TYPES.some((type) => type.id === value) && values.indexOf(value) === index)
                       .map((value) => (
-                        <TouchableOpacity key={value} onPress={() => setPreferredGroupTypes((current) => { const index = current.lastIndexOf(value); return current.filter((_, itemIndex) => itemIndex !== index); })} style={[styles.chip, { alignSelf: "flex-start", backgroundColor: "rgba(59, 130, 246, 0.2)", marginBottom: 8 }]}>
+                        <TouchableOpacity key={value} onPress={() => removePreferredGroupType(value)} style={[styles.chip, { alignSelf: "flex-start", backgroundColor: "rgba(59, 130, 246, 0.2)", marginBottom: 8 }]}>
                           <Text style={[styles.chipText, { color: "#3B82F6" }]}>{value} ({preferredGroupTypes.filter((item) => item === value).length})</Text>
                           <Ionicons name="close-circle" size={16} color="#3B82F6" />
                         </TouchableOpacity>
@@ -2740,7 +2830,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                         ))}
                       </View>
                     )}
-                  </View>
+                  </View>}
                 </View>
 
                 {/* Total Summary */}
@@ -2927,9 +3017,14 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             </Text>
                           </View>
                         )}
+                        {getSpecificSlotRequirementLines({ specific_requirements: soloSpecificRequirements }).map((requirement) => (
+                          <Text key={requirement} style={{ color: colors.text, fontSize: 12, marginLeft: 24 }}>
+                            {requirement}
+                          </Text>
+                        ))}
                         {soloSlotsNeeded > 0 && (soloPreferredGenres.length > 0 || soloPreferredInstruments.length > 0) && (
                           <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
-                            {soloPreferredGenres.length > 0 ? `Genres: ${soloPreferredGenres.join(", ")}` : ""}
+                            Shared: {soloPreferredGenres.length > 0 ? `Genres: ${soloPreferredGenres.join(", ")}` : ""}
                             {soloPreferredGenres.length > 0 && soloPreferredInstruments.length > 0 ? " � " : ""}
                             {soloPreferredInstruments.length > 0 ? `Instruments: ${soloPreferredInstruments.join(", ")}` : ""}
                           </Text>
@@ -2943,9 +3038,14 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
                             </Text>
                           </View>
                         )}
+                        {getSpecificSlotRequirementLines({ specific_requirements: duoSpecificRequirements }).map((requirement) => (
+                          <Text key={requirement} style={{ color: colors.text, fontSize: 12, marginLeft: 24 }}>
+                            {requirement}
+                          </Text>
+                        ))}
                         {duoSlotsNeeded > 0 && (duoPreferredGenres.length > 0 || duoPreferredInstruments.length > 0) && (
                           <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
-                            {duoPreferredGenres.length > 0 ? `Genres: ${duoPreferredGenres.join(", ")}` : ""}
+                            Shared: {duoPreferredGenres.length > 0 ? `Genres: ${duoPreferredGenres.join(", ")}` : ""}
                             {duoPreferredGenres.length > 0 && duoPreferredInstruments.length > 0 ? " � " : ""}
                             {duoPreferredInstruments.length > 0 ? `Instruments: ${duoPreferredInstruments.join(", ")}` : ""}
                           </Text>
