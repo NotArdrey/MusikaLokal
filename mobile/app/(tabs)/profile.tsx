@@ -73,6 +73,7 @@ import { buildSocialFollowKey } from "../../src/utils/socialFollow";
 import { getSmoothTabIndex, setSmoothTab } from "../../src/utils/smoothTabs";
 import { runAfterUIIdle } from "../../src/utils/idleTask";
 import { bottomSheetSpringConfig, motion } from "../../src/utils/motion";
+import { palette, radius, typography } from "../../src/theme/tokens";
 import { isFanUserRole } from "../../src/utils/roleRouting";
 import { isStaffRole } from "../../src/utils/staffAccess";
 import {
@@ -3464,7 +3465,7 @@ export default function ProfileScreen() {
   if (isGuest && !normalizedParamUserId) {
     return (
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Profile" />
+        <Header title="Profile" overline="MusikaLokal" showTitle={false} />
         <GuestSignInGate message="Sign in to view and manage your MusikaLokal profile." />
         <Navbar />
       </View>
@@ -3474,7 +3475,7 @@ export default function ProfileScreen() {
   if (loading) {
     return (
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Profile" />
+        <Header title="Profile" overline="MusikaLokal" showTitle={false} />
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.profileSkeletonScrollContent}
@@ -3522,6 +3523,8 @@ export default function ProfileScreen() {
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header
           title={isOwner ? "My Profile" : "User Profile"}
+          overline="MusikaLokal"
+          showTitle={false}
           {...(!isOwner ? { onBackPress: handleHeaderBack } : {})}
           rightComponent={isOwner ? (
             <TouchableOpacity
@@ -4875,7 +4878,7 @@ const styles = StyleSheet.create({
   },
   headerProfile: {
     paddingHorizontal: PROFILE_CONTENT_HORIZONTAL_PADDING,
-    paddingTop: 8,
+    paddingTop: 16,
     paddingBottom: 24,
     alignItems: "center",
   },
@@ -4885,15 +4888,10 @@ const styles = StyleSheet.create({
   avatarContainer: {
     width: 120,
     height: 120,
-    borderRadius: 60,
+    borderRadius: 20,
     overflow: "hidden",
     marginBottom: 16,
-    borderWidth: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 8,
+    borderWidth: 1,
   },
   avatarImage: {
     width: "100%",
@@ -4911,29 +4909,27 @@ const styles = StyleSheet.create({
     bottom: 16,
     right: 0,
     padding: 8,
-    borderRadius: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    borderRadius: radius.control,
   },
   nameText: {
-    fontSize: 24,
+    fontSize: 29,
     marginBottom: 4,
+    maxWidth: "100%",
     textAlign: "center",
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.title,
+    letterSpacing: -0.8,
   },
   roleText: {
     fontSize: 14,
     marginBottom: 16,
-    textAlign: "center",
-    fontFamily: "Poppins_400Regular",
+    alignSelf: "stretch",
+    textAlign: "left",
+    fontFamily: typography.body,
   },
   profileFollowBtn: {
     minWidth: 132,
     minHeight: 42,
-    borderRadius: 999,
+    borderRadius: radius.button,
     borderWidth: 1,
     paddingHorizontal: 20,
     paddingVertical: 10,
@@ -4942,7 +4938,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   profileFollowBtnText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 13,
   },
   genreRow: {
@@ -4964,8 +4960,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   profileTagLabel: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.bold,
     fontSize: 11,
+    textAlign: "center",
     textTransform: "uppercase",
   },
   profileTagRow: {
@@ -4977,13 +4974,13 @@ const styles = StyleSheet.create({
   genreTag: {
     paddingHorizontal: 16,
     paddingVertical: 6,
-    borderRadius: 24,
+    borderRadius: radius.control,
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.05)",
   },
   genreText: {
     fontSize: 13,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   gigVisibilityCard: {
     width: "100%",
@@ -5012,6 +5009,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginBottom: 16,
     gap: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: palette.line,
   },
   statItem: {
     alignItems: "center",
@@ -5019,11 +5019,11 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   statValue: {
-    fontFamily: "Poppins_700Bold",
-    fontSize: 18,
+    fontFamily: typography.title,
+    fontSize: 20,
   },
   statLabel: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
     marginTop: 2,
     textAlign: "center",
@@ -5144,14 +5144,15 @@ const styles = StyleSheet.create({
     display: "none",
   },
   bioContainer: {
-    paddingHorizontal: 32,
+    width: "100%",
+    paddingHorizontal: 0,
     marginBottom: 20,
-    alignItems: "center",
+    alignItems: "flex-start",
   },
   bioText: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
-    textAlign: "center",
+    textAlign: "left",
     lineHeight: 20,
   },
   tabContainer: {
@@ -5786,16 +5787,16 @@ const styles = StyleSheet.create({
   },
   // Header button styles
   headerMenuBtn: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: 14,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   headerReportBtn: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: 14,
     borderWidth: 1,
     alignItems: "center",

@@ -39,8 +39,6 @@ interface GigApplyTabProps {
   setAiPortfolioReviewConsent: (value: boolean) => void;
   setVideoReviewFrameUrl: (value: string) => void;
   setVideoReviewFrameUrls: (value: string[]) => void;
-  videoCopyrightAcknowledged: boolean;
-  setVideoCopyrightAcknowledged: (value: boolean) => void;
   videoCopyrightDecision: UploadSafetyFileDecision | null;
   setVideoCopyrightDecision: (value: UploadSafetyFileDecision | null) => void;
   isSubmittingApplication: boolean;
@@ -88,8 +86,6 @@ const GigApplyTab = ({
   setAiPortfolioReviewConsent,
   setVideoReviewFrameUrl,
   setVideoReviewFrameUrls,
-  videoCopyrightAcknowledged,
-  setVideoCopyrightAcknowledged,
   videoCopyrightDecision,
   setVideoCopyrightDecision,
   isSubmittingApplication,
@@ -270,9 +266,13 @@ const GigApplyTab = ({
   const isPitchMissing = !pitchMessage.trim();
   const isCvMissing = !cvFile && !cvUrl;
   const isVideoMissing = !(videoUrl || "").trim();
+  const recognizedAudioGenres = Array.isArray(videoCopyrightDecision?.copyrightMetadata?.recognized_audio_genres)
+    ? videoCopyrightDecision.copyrightMetadata.recognized_audio_genres
+        .map((genre) => String(genre).trim())
+        .filter(Boolean)
+    : [];
   const isTermsIncomplete = !isGroupApplicationFlow && (
     !isSystemTermsAccepted ||
-    !videoCopyrightAcknowledged ||
     (hasCustomContract && !isCustomContractAccepted)
   );
   const isFormIncomplete =
@@ -865,44 +865,6 @@ const GigApplyTab = ({
         existingUrl={cvUrl || undefined}
       />
 
-      {!isGroupApplicationFlow && (
-        <TouchableOpacity
-          activeOpacity={0.78}
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked: videoCopyrightAcknowledged }}
-          accessibilityLabel="Confirm performance video ownership, license, or permission"
-          onPress={() => {
-            const nextValue = !videoCopyrightAcknowledged;
-            setVideoCopyrightAcknowledged(nextValue);
-            if (!nextValue) {
-              setVideoCopyrightDecision(null);
-              if (videoUrl) setVideoUrl("");
-            }
-          }}
-          style={[gigApplyStyles.termsRow, {
-            borderWidth: 1,
-            borderColor: videoCopyrightAcknowledged ? colors.primary : colors.border,
-            borderRadius: 12,
-            padding: 12,
-            marginBottom: 16,
-            backgroundColor: videoCopyrightAcknowledged ? `${colors.primary}10` : "transparent",
-          }]}
-        >
-          <View style={[gigApplyStyles.checkbox, {
-            borderColor: videoCopyrightAcknowledged ? colors.primary : colors.border,
-            backgroundColor: videoCopyrightAcknowledged ? colors.primary : "transparent",
-          }]}>
-            {videoCopyrightAcknowledged && <Text style={gigApplyStyles.checkboxTick}>✓</Text>}
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[gigApplyStyles.termsText, { color: colors.text, fontFamily: "Poppins_600SemiBold" }]}>Performance video rights *</Text>
-            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 3 }}>
-              I created this performance or have permission to submit it. Its audio may be compared with released recordings for review, but this does not determine legal ownership.
-            </Text>
-          </View>
-        </TouchableOpacity>
-      )}
-
       <VideoUploader
         videoUrl={videoUrl}
         onVideoChange={(url) => setVideoUrl(url || "")}
@@ -915,14 +877,13 @@ const GigApplyTab = ({
         onReviewFramesChange={setVideoReviewFrameUrls}
         enableCopyrightScreening={!isGroupApplicationFlow}
         allowPortfolioSelection={!isGroupApplicationFlow}
-        copyrightAcknowledged={videoCopyrightAcknowledged}
         onCopyrightDecisionChange={setVideoCopyrightDecision}
       />
 
-      {!isGroupApplicationFlow && videoCopyrightDecision?.requiresAdminReview && (
-        <View style={[styles.infoBox, { backgroundColor: "#F59E0B20", borderColor: "#F59E0B", marginBottom: 16 }]}>
-          <Ionicons name="shield-checkmark-outline" size={22} color="#F59E0B" />
-          <Text style={[styles.infoText, { color: colors.text }]}>Possible released-recording match. You can still apply while we review your permission.</Text>
+      {!isGroupApplicationFlow && recognizedAudioGenres.length > 0 && (
+        <View style={[styles.infoBox, { backgroundColor: `${colors.primary}14`, borderColor: colors.primary, marginBottom: 16 }]}>
+          <Ionicons name="musical-notes-outline" size={22} color={colors.primary} />
+          <Text style={[styles.infoText, { color: colors.text }]}>Recognized genres: {recognizedAudioGenres.join(", ")}. This is advisory and does not block your application.</Text>
         </View>
       )}
 

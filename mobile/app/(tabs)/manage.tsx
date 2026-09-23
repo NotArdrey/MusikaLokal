@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import GuestSignInGate from '../../src/components/GuestSignInGate';
@@ -11,6 +12,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { resolveRoleManageRoute } from '../../src/utils/roleRouting';
 import { fetchActiveStaffAssignment } from '../../src/utils/staffAccess';
+import { radius, spacing, typography } from '../../src/theme/tokens';
 
 export default function ManageScreen() {
     const { colors } = useTheme();
@@ -113,7 +115,7 @@ export default function ManageScreen() {
     if (loading) {
         return (
             <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header title="Manage" />
+                <Header title="Manage" overline="MusikaLokal" showTitle={false} />
                 <View style={styles.manageSkeletonContainer}>
                     <Skeleton width="72%" height={26} borderRadius={8} />
                     <Skeleton width="100%" height={84} borderRadius={14} style={{ marginTop: 16 }} />
@@ -128,7 +130,7 @@ export default function ManageScreen() {
     if (isGuest) {
         return (
             <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header title="Manage" />
+                <Header title="Manage" overline="MusikaLokal" showTitle={false} />
                 <GuestSignInGate message="Sign in to access your management dashboard." />
                 <Navbar />
             </View>
@@ -137,16 +139,17 @@ export default function ManageScreen() {
 
     return (
         <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-            <Header title="Manage" />
+            <Header title="Manage" overline="MusikaLokal" showTitle={false} />
 
             <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}>
                 <View style={styles.dashboardContainer}>
-                    <Text style={[styles.title, { color: colors.text }]}>
-                        Management Dashboard
-                    </Text>
+                    <View style={[styles.fallbackIcon, { backgroundColor: colors.primary + '14' }]}>
+                        <Ionicons name="briefcase-outline" size={24} color={colors.primary} />
+                    </View>
+                    <Text style={[styles.eyebrow, { color: colors.primary }]}>Workspace unavailable</Text>
+                    <Text style={[styles.title, { color: colors.text }]}>We couldn&apos;t open your role workspace.</Text>
                     <Text style={[styles.description, { color: colors.textSecondary }]}>
-                        It seems we couldn&apos;t automatically direct you to your specific dashboard.
-                        Please ensure your account has the correct role assigned or contact support for assistance.
+                        Check that your account has the correct role assigned, or contact support for assistance.
                     </Text>
 
 
@@ -177,25 +180,42 @@ const styles = StyleSheet.create({
         paddingTop: 32,
     },
     scrollContent: {
-        paddingBottom: 180,
+        flexGrow: 1,
     },
     dashboardContainer: {
         flex: 1,
-        paddingHorizontal: 24,
-        paddingTop: 32,
+        paddingHorizontal: 20,
+        paddingTop: spacing.lg,
+    },
+    fallbackIcon: {
+        width: 48,
+        height: 48,
+        borderRadius: radius.card,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: spacing.md,
+    },
+    eyebrow: {
+        fontFamily: typography.bold,
+        fontSize: 11,
+        letterSpacing: 0.8,
+        textTransform: 'uppercase',
+        marginBottom: spacing.xs,
     },
     title: {
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: 24,
-        marginBottom: 8,
+        fontFamily: typography.heading,
+        fontSize: 20,
+        lineHeight: 26,
+        marginBottom: spacing.xs,
     },
     description: {
-        fontFamily: 'Poppins_400Regular',
-        marginBottom: 32,
+        fontFamily: typography.body,
+        fontSize: 14,
+        lineHeight: 21,
+        marginBottom: spacing.lg,
     },
     roleText: {
-        marginTop: 40,
-        fontFamily: 'Poppins_400Regular',
-        textAlign: 'center',
+        fontFamily: typography.medium,
+        fontSize: 12,
     },
 });

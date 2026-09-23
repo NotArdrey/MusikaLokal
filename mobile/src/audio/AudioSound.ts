@@ -1,4 +1,5 @@
 import { createAudioPlayer, type AudioPlayer, type AudioStatus } from "expo-audio";
+import Constants from "expo-constants";
 
 export type PlaybackStatus =
   | { isLoaded: false; error?: string }
@@ -102,6 +103,11 @@ export class AudioSound {
   }
 
   enableBackgroundPlayback(title: string) {
+    // Expo Go's native Android manifest does not include this project's
+    // AudioControlsService config. Calling this API there makes expo-audio log
+    // a red-screen service-binding error; custom development/release builds
+    // include the service through the expo-audio config plugin in app.json.
+    if (Constants.appOwnership === "expo") return;
     this.player.setActiveForLockScreen(true, { title });
   }
 

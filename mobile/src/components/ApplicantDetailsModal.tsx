@@ -45,6 +45,26 @@ const titleCase = (value: unknown) =>
 
 const list = (value: unknown): any[] => (Array.isArray(value) ? value : []);
 
+const faceMatchLabel = (value: unknown) => {
+  const status = String(value || "").toLowerCase();
+  if (status === "likely_same_person") return "Match";
+  if (status === "likely_different_person") return "No Match";
+  return status === "not_run" ? "Not Run" : "Unclear";
+};
+
+const faceMatchMetrics = (result: any) => {
+  const usable = Math.max(0, Number(result?.usable_frames ?? result?.frames_compared) || 0);
+  const matched = Math.max(0, Number(result?.matched_frames) || 0);
+  const sampled = Math.max(usable, Number(result?.sampled_frames) || 0);
+  const rate = Math.max(0, Math.min(1, Number(result?.match_rate) || 0));
+  const distance = Number(result?.distance);
+  const threshold = Number(result?.threshold);
+  const distanceDetail = result?.distance != null && result?.threshold != null && Number.isFinite(distance) && Number.isFinite(threshold)
+    ? ` | median distance ${distance.toFixed(3)} (threshold ${threshold.toFixed(3)})`
+    : "";
+  return `Match rate ${Math.round(rate * 100)}% | ${matched}/${usable} matched usable frames | ${sampled} sampled${distanceDetail}`;
+};
+
 const shortLocation = (value: unknown) => {
   const parts = String(value || "")
     .split(",")
@@ -152,7 +172,17 @@ export default function ApplicantDetailsModal({
   const cvEvidence = storedCvReview.length
     ? storedCvReview
     : evidence.filter((item) => list(item?.evidence).some((entry) => entry?.source === "cv"));
-  const screening = screeningMeta(application.video_copyright_status);
+  const recognizedAudioGenres = application.video_copyright_metadata?.genre_evidence_receipt
+    ? list(application.video_copyright_metadata?.recognized_audio_genres)
+    : [];
+  const hasRecognizedRecording = recognizedAudioGenres.length > 0;
+  const screening = hasRecognizedRecording
+    ? {
+        label: "Recording recognized for genre",
+        color: "#10B981",
+        message: "The catalog genres below are advisory evidence only and do not block this application.",
+      }
+    : screeningMeta(application.video_copyright_status);
   const portfolio = list(profile.portfolio_urls);
   const faceSimilarity = aiReview?.face_similarity || null;
   const groupFaceSimilarity = list(aiReview?.group_face_similarity);
@@ -273,36 +303,35 @@ export default function ApplicantDetailsModal({
               ) : <EmptyState colors={colors}>Missing source file: no performance video was uploaded.</EmptyState>}
             </Section>
 
-            <Section title="Performance Video Rights" icon="shield-checkmark-outline" colors={colors}>
-              <Text style={[styles.body, { color: colors.textSecondary }]}>{application.video_copyright_acknowledged ? "Applicant confirmed ownership, license, or permission." : "No current rights declaration is recorded."}</Text>
-            </Section>
-
-            <Section title="Released-Recording Screening" icon="radio-outline" colors={colors}>
+            <Section title="Recording & Genre Analysis" icon="radio-outline" colors={colors}>
               <View style={[styles.statusPill, { borderColor: screening.color }]}>
                 <Text style={[styles.statusPillText, { color: screening.color }]}>{screening.label}</Text>
               </View>
               <Text style={[styles.body, { color: colors.textSecondary }]}>{screening.message}</Text>
-              {application.video_copyright_metadata?.copyright_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Possible match: {application.video_copyright_metadata.copyright_title}{application.video_copyright_metadata.copyright_artist_label ? ` by ${application.video_copyright_metadata.copyright_artist_label}` : ""}</Text> : null}
+              {application.video_copyright_metadata?.copyright_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Recognized recording: {application.video_copyright_metadata.copyright_title}{application.video_copyright_metadata.copyright_artist_label ? ` by ${application.video_copyright_metadata.copyright_artist_label}` : ""}</Text> : null}
+              {recognizedAudioGenres.length > 0 ? <Text style={[styles.body, { color: colors.textSecondary }]}>Recognized recording genres: {recognizedAudioGenres.join(", ")}</Text> : null}
               {application.video_copyright_metadata?.internal_match_playlist_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Playlist recording: {application.video_copyright_metadata.internal_match_playlist_title}{application.video_copyright_metadata.internal_match_playlist_artist ? ` by ${application.video_copyright_metadata.internal_match_playlist_artist}` : ""} ({String(application.video_copyright_metadata.internal_match_similarity_score || "strong")} match)</Text> : null}
-              <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>Content-match screening is a review signal, not a legal copyright decision.</Text>
+              <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>Recording recognition and catalog genre matching are advisory signals, not legal copyright decisions.</Text>
             </Section>
 
-            <Section title="Optional Profile-Video Similarity" icon="person-circle-outline" colors={colors}>
+            <Section title="Optional Profile-Video Face Match" icon="person-circle-outline" colors={colors}>
               {!application.ai_portfolio_review_consent ? <EmptyState colors={colors}>Applicant consent for this optional review is not recorded.</EmptyState> : groupFaceSimilarity.length > 0 ? (
                 <View style={styles.stackMedium}>
                   {groupFaceSimilarity.map((member, index) => (
                     <View key={member?.profile_id || index} style={[styles.memberSignal, { borderColor: colors.border }]}>
                       <Text style={[styles.label, { color: colors.text }]}>{member?.display_name || `Group member ${index + 1}`}</Text>
-                      <Text style={[styles.body, { color: colors.textSecondary }]}>{titleCase(member?.status || "unclear")}</Text>
+                      <Text style={[styles.body, { color: member?.status === "likely_same_person" ? "#10B981" : member?.status === "likely_different_person" ? "#EF4444" : colors.textSecondary }]}>{faceMatchLabel(member?.status)}</Text>
                       <Text style={[styles.body, { color: colors.textSecondary }]}>{member?.summary || "No comparison explanation was stored."}</Text>
+                      {member?.provider === "deepface_arcface" ? <Text style={[styles.body, { color: colors.textSecondary }]}>{faceMatchMetrics(member)}</Text> : null}
                     </View>
                   ))}
                 </View>
               ) : !faceSimilarity?.status || faceSimilarity.status === "not_run" ? <EmptyState colors={colors}>{faceSimilarity?.summary || "Processing unavailable. Manually compare the original profile photo and video."}</EmptyState> : <>
-                <Text style={[styles.body, { color: colors.textSecondary }]}>{titleCase(faceSimilarity.status)}</Text>
+                <Text style={[styles.body, { color: faceSimilarity.status === "likely_same_person" ? "#10B981" : faceSimilarity.status === "likely_different_person" ? "#EF4444" : colors.textSecondary }]}>{faceMatchLabel(faceSimilarity.status)}</Text>
                 <Text style={[styles.body, { color: colors.textSecondary }]}>{faceSimilarity.summary || "No explanation was stored."}</Text>
+                {faceSimilarity?.provider === "deepface_arcface" ? <Text style={[styles.body, { color: colors.textSecondary }]}>{faceMatchMetrics(faceSimilarity)}</Text> : null}
               </>}
-              <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>Optional identity-consistency signal only. It is not identity verification and is excluded from the AI Filter score.</Text>
+              <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>DeepFace with ArcFace compares the reference profile against the existing representative video frames. This is not identity verification and is excluded from the AI Filter score.</Text>
             </Section>
 
             <Section title="AI Filter Review" icon="sparkles-outline" colors={colors}>

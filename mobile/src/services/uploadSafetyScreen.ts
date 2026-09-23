@@ -73,7 +73,7 @@ interface RemoteUploadSafetyResult {
   copyrightMetadata?: Record<string, unknown>;
 }
 
-const SAFETY_CACHE_PREFIX = "upload_safety_screen:v14:";
+const SAFETY_CACHE_PREFIX = "upload_safety_screen:v15:";
 const SAFETY_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SAFETY_UNAVAILABLE_CACHE_TTL_MS = 5 * 1000;
 const SAFETY_OWNERSHIP_REVIEW_CACHE_TTL_MS = 30 * 1000;

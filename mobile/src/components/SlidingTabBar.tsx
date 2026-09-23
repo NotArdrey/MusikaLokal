@@ -17,6 +17,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useTheme } from "../context/ThemeContext";
 import { motion } from "../utils/motion";
+import { typography } from "../theme/tokens";
 
 type SlidingTabKey = string | number;
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
@@ -43,6 +44,7 @@ type SlidingTabBarProps<T extends SlidingTabKey> = {
   deferOnChange?: boolean;
   optimisticPress?: boolean;
   iconSize?: number;
+  indicatorHeight?: number;
   indicatorWidthRatio?: number;
   showTopBorder?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -62,6 +64,7 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
   deferOnChange = false,
   optimisticPress = true,
   iconSize = 21,
+  indicatorHeight = 2.5,
   indicatorWidthRatio = 0.42,
   showTopBorder = false,
   style,
@@ -186,7 +189,7 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
         pointerEvents="none"
         style={[
           styles.indicator,
-          { backgroundColor: resolvedIndicatorColor },
+          { backgroundColor: resolvedIndicatorColor, height: indicatorHeight },
           indicatorAnimatedStyle,
         ]}
       />
@@ -210,13 +213,15 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
             {icon ? <Ionicons name={icon} size={iconSize} color={color} /> : null}
             {item.label ? (
               <Text
+                adjustsFontSizeToFit
+                minimumFontScale={0.82}
                 numberOfLines={1}
                 style={[
                   styles.label,
                   textStyle,
                   {
                     color,
-                    fontFamily: isActive ? "Poppins_600SemiBold" : "Poppins_500Medium",
+                    fontFamily: isActive ? typography.semibold : typography.medium,
                   },
                 ]}
               >
@@ -241,7 +246,7 @@ const styles = StyleSheet.create({
     left: 0,
     bottom: -StyleSheet.hairlineWidth,
     height: 2.5,
-    borderRadius: 999,
+    borderRadius: 0,
   },
   tab: {
     flex: 1,
@@ -254,7 +259,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   label: {
-    fontSize: 14,
+    fontSize: 13,
     lineHeight: 18,
     includeFontPadding: false,
     textAlignVertical: "center",

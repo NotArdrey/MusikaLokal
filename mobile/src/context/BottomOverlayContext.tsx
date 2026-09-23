@@ -350,7 +350,7 @@ export function useBottomOverlayRegistration(label?: string) {
     overlayIdRef.current = createOverlayId();
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (resetSignalRef.current === overlayResetSignal) {
       return;
     }
@@ -403,13 +403,14 @@ export function useBottomOverlayRegistration(label?: string) {
 
   return {
     overlayId: overlayIdRef.current,
+    overlayResetSignal,
     registerOverlay,
     unregisterOverlay,
   };
 }
 
 export function useBottomOverlayVisibility(visible: boolean, label?: string) {
-  const { registerOverlay, unregisterOverlay } = useBottomOverlayRegistration(label);
+  const { overlayResetSignal, registerOverlay, unregisterOverlay } = useBottomOverlayRegistration(label);
 
   useLayoutEffect(() => {
     if (visible) {
@@ -421,5 +422,5 @@ export function useBottomOverlayVisibility(visible: boolean, label?: string) {
 
     unregisterOverlay(`visibility-hidden:${normalizeOverlayLabel(label)}`);
     return undefined;
-  }, [label, registerOverlay, unregisterOverlay, visible]);
+  }, [label, overlayResetSignal, registerOverlay, unregisterOverlay, visible]);
 }

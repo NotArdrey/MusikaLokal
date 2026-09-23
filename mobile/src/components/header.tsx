@@ -11,6 +11,7 @@ import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 import { createRealtimeChannelTopic } from '../utils/realtimeChannel';
 import { fetchActiveStaffAssignment, isStaffRole, normalizeStaffAccessLevel } from '../utils/staffAccess';
+import { typography } from '../theme/tokens';
 
 const AnimatedIcon = Animated.createAnimatedComponent(Ionicons);
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -39,6 +40,9 @@ const normalizeHeaderPathname = (value: string, segments: readonly string[] = []
 interface HeaderProps {
     title: string;
     overline?: string;
+    compact?: boolean;
+    backgroundColor?: string;
+    showTitle?: boolean;
     transparent?: boolean;
     onBackPress?: () => void;
     showBack?: boolean;
@@ -49,8 +53,9 @@ interface HeaderProps {
     rightIconOnPress?: () => void;
 }
 
-function Header({ title, overline, transparent, onBackPress, showBack, showMainActions, leftComponent, rightComponent, rightIconName, rightIconOnPress }: HeaderProps) {
+function Header({ title, overline, compact = false, backgroundColor, showTitle = true, transparent, onBackPress, showBack, showMainActions, leftComponent, rightComponent, rightIconName, rightIconOnPress }: HeaderProps) {
     const { colors, isDark } = useTheme();
+    const surfaceColor = backgroundColor ?? colors.surface;
     const { isGuest, setGuestMode, userId, userRole } = useAuth();
     const insets = useSafeAreaInsets();
     const isFan = isFanUserRole(userRole);
@@ -58,6 +63,7 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
     const pathname = usePathname();
     const segments = useSegments();
     const routePathname = useMemo(() => normalizeHeaderPathname(pathname, segments), [pathname, segments]);
+    const isTaskFlow = routePathname.startsWith('/add_') || routePathname.startsWith('/edit_');
     const [hasUnread, setHasUnread] = useState(false);
     const [hasUnreadChats, setHasUnreadChats] = useState(false);
     const [guestMenuVisible, setGuestMenuVisible] = useState(false);
@@ -79,12 +85,11 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
         [routePathname],
     );
     const isMainActionHeader = Boolean(showMainActions);
-    const isRoundedMainHeader = isMainActionHeader || isMainNavPath || isSettingsOrProfile || isMyListingPath || isBrandMainHeader;
-
     const computedBackVisible = !!onBackPress || !(isMainActionHeader || isMainNavPath || isSettingsOrProfile || isMyListingPath || isBrandMainHeader);
     const backVisible = showBack === false ? false : showBack === true ? true : computedBackVisible;
+    const isCompactHeader = compact || (backVisible && showTitle);
     const useMainTitleStyle = !backVisible;
-    const useCompactMainTitleStyle = useMainTitleStyle && isRoundedMainHeader;
+    const useCompactMainTitleStyle = useMainTitleStyle && title.length > 16;
     const staffCanUseAddButton = !isStaff || staffAccessLevel === 1;
     const addbtnvisible = useMemo(() => {
         if (!isMyListingPath) return false;
@@ -349,12 +354,12 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
         backgroundColor: interpolateColor(
             isTransparent.value,
             [0, 1],
-            [isDark ? '#162033F2' : '#FFFFFFF0', 'rgba(10,16,28,0.18)']
+            [surfaceColor, 'rgba(10,16,28,0.18)']
         ),
         borderColor: interpolateColor(
             isTransparent.value,
             [0, 1],
-            [isDark ? '#47556999' : '#E5E7EBE0', 'rgba(255,255,255,0.18)']
+            [surfaceColor, 'rgba(255,255,255,0.18)']
         )
     }));
 
@@ -362,11 +367,9 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
         color: interpolateColor(
             isTransparent.value,
             [0, 1],
-            [isDark ? '#CBD5E1' : '#6B7280', '#FFFFFF']
+            [colors.text, '#FFFFFF']
         ),
-        textShadowColor: 'rgba(15,23,42,0.35)',
-        textShadowOffset: { width: 0, height: 2 },
-        textShadowRadius: isTransparent.value * 10,
+        textShadowRadius: 0,
     }));
 
     const overlineAnimatedStyle = useAnimatedStyle(() => ({
@@ -377,24 +380,16 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
         ),
     }));
 
-    const accentDotAnimatedStyle = useAnimatedStyle(() => ({
-        backgroundColor: interpolateColor(
-            isTransparent.value,
-            [0, 1],
-            [colors.primary, 'rgba(255,255,255,0.92)']
-        ),
-    }));
-
     const buttonAnimatedStyle = useAnimatedStyle(() => ({
         backgroundColor: interpolateColor(
             isTransparent.value,
             [0, 1],
-            [isDark ? '#0F172AB8' : '#FFFFFFD9', 'rgba(15,23,42,0.26)']
+            [surfaceColor, 'rgba(15,23,42,0.26)']
         ),
         borderColor: interpolateColor(
             isTransparent.value,
             [0, 1],
-            [isDark ? '#47556980' : '#E5E7EB', 'rgba(255,255,255,0.16)']
+            [surfaceColor, 'rgba(255,255,255,0.16)']
         )
     }));
 
@@ -406,22 +401,13 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
         ) as any
     }));
 
-    const surfaceShadowStyle = useMemo(() => ({
-        shadowColor: isDark ? '#020617' : '#0F172A',
-        shadowOffset: { width: 0, height: 12 },
-        shadowOpacity: transparent ? 0 : (isDark ? 0.32 : 0.1),
-        shadowRadius: transparent ? 0 : 24,
-        elevation: transparent ? 0 : 7,
-    }), [isDark, transparent]);
-
     return (
         <>
-            <View style={[styles.container, {
-                paddingTop: insets.top + 8
+            <View style={[styles.container, !showTitle && styles.brandContainer, isCompactHeader && styles.compactContainer, {
+                paddingTop: insets.top,
+                backgroundColor: transparent ? 'transparent' : surfaceColor,
             }]}>
-                <Animated.View style={[styles.surface, surfaceAnimatedStyle, surfaceShadowStyle]}>
-                    <Animated.View pointerEvents="none" style={[styles.surfaceGlowPrimary, accentDotAnimatedStyle]} />
-                    <View pointerEvents="none" style={[styles.surfaceGlowSecondary, { backgroundColor: transparent ? 'rgba(255,255,255,0.08)' : (isDark ? '#1E3A8A33' : colors.primary + '14') }]} />
+                <Animated.View style={[styles.surface, isTaskFlow && styles.taskSurface, isCompactHeader && styles.compactSurface, !showTitle && styles.brandSurface, surfaceAnimatedStyle]}>
 
                     {/* Left Container - Only for Back Button or leftComponent */}
                     {(backVisible || leftComponent) && (
@@ -431,9 +417,10 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
                             ) : (
                                 <AnimatedTouchableOpacity activeOpacity={1}
                                     onPress={handleBackPress}
+                                    hitSlop={8}
                                     style={[styles.backButton, buttonAnimatedStyle]}
                                 >
-                                    <AnimatedIcon name="chevron-back" size={20} animatedProps={iconAnimatedProps} />
+                                    <AnimatedIcon name="chevron-back" size={24} animatedProps={iconAnimatedProps} />
                                 </AnimatedTouchableOpacity>
                             )}
                         </View>
@@ -442,25 +429,30 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
                     {/* Title - Dynamic Alignment */}
                     <View style={[
                         styles.titleContainer,
-                        !(backVisible || leftComponent) && styles.mainTitleContainer
+                        !(backVisible || leftComponent) && styles.mainTitleContainer,
+                        isTaskFlow && styles.taskTitleContainer,
+                        isCompactHeader && styles.compactTitleContainer,
+                        !showTitle && styles.brandTitleContainer,
                     ]}>
-                        <View style={styles.overlineRow}>
+                        {!isTaskFlow && !isCompactHeader && <View style={[styles.overlineRow, !showTitle && styles.brandOverlineRow]}>
                             <Animated.Text style={[styles.overlineText, overlineAnimatedStyle]}>
                                 {titleOverline}
                             </Animated.Text>
-                        </View>
-                        <Animated.Text
+                        </View>}
+                        {showTitle && <Animated.Text
                             style={[
                                 styles.title,
                                 useMainTitleStyle && styles.mainTitle,
                                 useCompactMainTitleStyle && styles.compactMainTitle,
-                                titleAnimatedStyle,
+                                isTaskFlow && styles.taskTitle,
+                                isCompactHeader && styles.compactTitle,
+                                isCompactHeader ? overlineAnimatedStyle : titleAnimatedStyle,
                             ]}
-                            numberOfLines={1}
+                            numberOfLines={isCompactHeader ? 1 : 2}
                             ellipsizeMode="tail"
                         >
                             {title}
-                        </Animated.Text>
+                        </Animated.Text>}
                     </View>
 
                     {/* Action Buttons */}
@@ -488,7 +480,7 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
                             <View style={styles.iconRow}>
                                 {!isFan && (
                                     <AnimatedTouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, buttonAnimatedStyle]}>
-                                        <AnimatedIcon name="chatbubble-ellipses" size={20} animatedProps={iconAnimatedProps} />
+                                        <AnimatedIcon name="chatbubble-ellipses-outline" size={23} animatedProps={iconAnimatedProps} />
                                         {hasUnreadChats && (
                                             <View style={[styles.badge, transparent && { borderColor: 'rgba(0,0,0,0.3)' }]} />
                                         )}
@@ -496,7 +488,7 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
                                 )}
                                 {/* Notifications Button */}
                                 <AnimatedTouchableOpacity activeOpacity={1} onPress={() => router.push('/notifications')} style={[styles.iconButton, buttonAnimatedStyle]}>
-                                    <AnimatedIcon name="notifications" size={20} animatedProps={iconAnimatedProps} />
+                                    <AnimatedIcon name="notifications-outline" size={23} animatedProps={iconAnimatedProps} />
                                     {hasUnread && (
                                         <View style={[styles.badge, transparent && { borderColor: 'rgba(0,0,0,0.3)' }]} />
                                     )}
@@ -505,7 +497,11 @@ function Header({ title, overline, transparent, onBackPress, showBack, showMainA
                         ) : addbtnvisible ? (
                             <AnimatedTouchableOpacity activeOpacity={1}
                                 onPress={() => router.push(btn)}
-                                style={[styles.addButton, buttonAnimatedStyle]}
+                                style={[
+                                    styles.addButton,
+                                    buttonAnimatedStyle,
+                                    { backgroundColor: isDark ? '#111827' : '#F8FAFC', borderColor: colors.border },
+                                ]}
                             >
                                 <AnimatedIcon name="add" size={22} animatedProps={iconAnimatedProps} />
                             </AnimatedTouchableOpacity>
@@ -559,24 +555,44 @@ export default memo(Header);
 
 const styles = StyleSheet.create({
     container: {
-        paddingBottom: 14,
-        paddingHorizontal: 16,
+        paddingBottom: 8,
+        paddingHorizontal: 20,
+    },
+    brandContainer: {
+        paddingBottom: 4,
+    },
+    compactContainer: {
+        paddingBottom: 4,
     },
     surface: {
         minHeight: 72,
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'space-between',
-        paddingHorizontal: 12,
-        paddingVertical: 12,
-        borderRadius: 28,
-        borderWidth: 1,
-        overflow: 'hidden',
+        paddingHorizontal: 0,
+        paddingVertical: 4,
+        borderRadius: 0,
+        borderWidth: 0,
+        overflow: 'visible',
+    },
+    taskSurface: {
+        minHeight: 52,
+        alignItems: 'center',
+    },
+    compactSurface: {
+        minHeight: 44,
+        alignItems: 'center',
+        paddingVertical: 0,
+    },
+    brandSurface: {
+        minHeight: 44,
+        alignItems: 'center',
+        paddingVertical: 0,
     },
     leftContainer: {
-        width: 46,
+        width: 36,
         justifyContent: 'center',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         zIndex: 1,
     },
     rightContainer: {
@@ -587,7 +603,8 @@ const styles = StyleSheet.create({
         flexShrink: 0,
     },
     rightContainerEmpty: {
-        width: 46,
+        width: 0,
+        minWidth: 0,
     },
     rightContainerSingle: {
         width: 46,
@@ -603,57 +620,84 @@ const styles = StyleSheet.create({
     backButton: {
         width: 44,
         height: 44,
-        borderRadius: 22,
-        borderWidth: 1,
-        alignItems: 'center',
+        borderRadius: 10,
+        borderWidth: 0,
+        alignItems: 'flex-start',
         justifyContent: 'center',
     },
     titleContainer: {
         flex: 1,
         minWidth: 0,
         justifyContent: 'center',
-        alignItems: 'center',
-        paddingHorizontal: 10,
+        alignItems: 'flex-start',
+        paddingHorizontal: 8,
+        paddingTop: 12,
         zIndex: 1,
+    },
+    taskTitleContainer: {
+        paddingTop: 0,
+    },
+    compactTitleContainer: {
+        paddingTop: 0,
+    },
+    brandTitleContainer: {
+        paddingTop: 0,
     },
     mainTitleContainer: {
         alignItems: 'flex-start',
-        paddingLeft: 2,
+        paddingLeft: 0,
     },
     overlineRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 3,
+        marginBottom: 2,
+    },
+    brandOverlineRow: {
+        marginBottom: 0,
     },
     overlineText: {
-        fontSize: 11,
-        fontFamily: 'Poppins_600SemiBold',
-        letterSpacing: 1.2,
+        fontSize: 13,
+        lineHeight: 18,
+        fontFamily: typography.bold,
+        letterSpacing: 1.8,
         textTransform: 'uppercase',
     },
     title: {
         fontSize: 18,
-        fontWeight: '600',
-        fontFamily: 'Poppins_600SemiBold',
-        letterSpacing: -0.3,
+        fontFamily: typography.heading,
+        letterSpacing: -0.45,
+    },
+    taskTitle: {
+        fontSize: 13,
+        lineHeight: 18,
+        fontFamily: typography.bold,
+        letterSpacing: 1.8,
+        textTransform: 'uppercase',
+    },
+    compactTitle: {
+        fontSize: 13,
+        lineHeight: 18,
+        fontFamily: typography.bold,
+        letterSpacing: 1.8,
+        textTransform: 'uppercase',
     },
     mainTitle: {
-        fontSize: 28,
-        fontWeight: '700',
-        fontFamily: 'Poppins_700Bold',
-        letterSpacing: -0.9,
+        fontSize: 26,
+        lineHeight: 32,
+        fontFamily: typography.title,
+        letterSpacing: -0.8,
     },
     compactMainTitle: {
-        fontSize: 18,
-        lineHeight: 24,
-        letterSpacing: 0,
+        fontSize: 22,
+        lineHeight: 28,
+        letterSpacing: -0.5,
     },
     iconButton: {
         width: 44,
         height: 44,
         position: 'relative',
-        borderRadius: 22,
-        borderWidth: 1,
+        borderRadius: 10,
+        borderWidth: 0,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -679,28 +723,10 @@ const styles = StyleSheet.create({
     addButton: {
         width: 44,
         height: 44,
-        borderRadius: 22,
+        borderRadius: 10,
         borderWidth: 1,
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    surfaceGlowPrimary: {
-        position: 'absolute',
-        width: 116,
-        height: 116,
-        borderRadius: 58,
-        top: -58,
-        left: -18,
-        opacity: 0.12,
-    },
-    surfaceGlowSecondary: {
-        position: 'absolute',
-        width: 92,
-        height: 92,
-        borderRadius: 46,
-        bottom: -40,
-        right: 10,
-        opacity: 1,
     },
     guestMenuOverlay: {
         flex: 1,
@@ -733,12 +759,12 @@ const styles = StyleSheet.create({
     },
     guestMenuTitle: {
         fontSize: 18,
-        fontFamily: 'Poppins_700Bold',
+        fontFamily: typography.title,
     },
     guestMenuSubtitle: {
         marginTop: 2,
         fontSize: 12,
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: typography.medium,
     },
     guestMenuClose: {
         width: 36,
@@ -768,6 +794,6 @@ const styles = StyleSheet.create({
     guestMenuLabel: {
         flex: 1,
         fontSize: 15,
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: typography.semibold,
     },
 });

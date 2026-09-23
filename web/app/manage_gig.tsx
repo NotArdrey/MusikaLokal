@@ -1467,15 +1467,20 @@ export default function GigDetailsScreen() {
                               {faceSimilarity?.status && groupFaceSimilarities.length === 0 ? (() => {
                                 const faceStatus = String(faceSimilarity.status);
                                 const faceColor = faceStatus === "likely_same_person" ? "#10B981" : faceStatus === "likely_different_person" ? "#EF4444" : "#F59E0B";
-                                const faceLabel = faceStatus === "likely_same_person" ? "Likely visually consistent" : faceStatus === "likely_different_person" ? "Possible mismatch" : faceStatus === "unclear" ? "Unclear" : "Not run";
+                                const faceLabel = faceStatus === "likely_same_person" ? "Match" : faceStatus === "likely_different_person" ? "No Match" : faceStatus === "unclear" ? "Unclear" : "Not run";
                                 return (
                                   <View style={{ marginTop: 9, padding: 10, borderWidth: 1, borderColor: faceColor, borderRadius: 10 }}>
                                     <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
                                       <Ionicons name="person-circle-outline" size={16} color={faceColor} />
-                                      <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 11, flex: 1 }}>Advisory face similarity</Text>
+                                      <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 11, flex: 1 }}>ArcFace video match</Text>
                                       <Text style={{ color: faceColor, fontFamily: "Poppins_600SemiBold", fontSize: 9, textTransform: "uppercase" }}>{faceLabel}</Text>
                                     </View>
                                     <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 5 }}>{faceSimilarity.summary}</Text>
+                                    {faceSimilarity?.provider === "deepface_arcface" ? (
+                                      <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 9, lineHeight: 14, marginTop: 4 }}>
+                                        Match rate {Math.round(Number(faceSimilarity.match_rate || 0) * 100)}% | {Number(faceSimilarity.matched_frames || 0)}/{Number(faceSimilarity.usable_frames || faceSimilarity.frames_compared || 0)} matched usable frames | {Number(faceSimilarity.sampled_frames || 0)} sampled{faceSimilarity.distance != null && faceSimilarity.threshold != null && Number.isFinite(Number(faceSimilarity.distance)) && Number.isFinite(Number(faceSimilarity.threshold)) ? ` | median distance ${Number(faceSimilarity.distance).toFixed(3)} (threshold ${Number(faceSimilarity.threshold).toFixed(3)})` : ""}
+                                      </Text>
+                                    ) : null}
                                     <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 4 }}>Not identity verification. Compare the original profile photo and video yourself; never decide from this signal alone.</Text>
                                   </View>
                                 );
@@ -1483,7 +1488,7 @@ export default function GigDetailsScreen() {
                               {groupFaceSimilarities.map((memberResult: any) => {
                                 const faceStatus = String(memberResult?.status || "unclear");
                                 const faceColor = faceStatus === "likely_same_person" ? "#10B981" : faceStatus === "likely_different_person" ? "#EF4444" : "#F59E0B";
-                                const faceLabel = faceStatus === "likely_same_person" ? "Likely visually consistent" : faceStatus === "likely_different_person" ? "Possible mismatch" : faceStatus === "unclear" ? "Unclear" : "Not run";
+                                const faceLabel = faceStatus === "likely_same_person" ? "Match" : faceStatus === "likely_different_person" ? "No Match" : faceStatus === "unclear" ? "Unclear" : "Not run";
                                 return (
                                   <View key={String(memberResult?.profile_id || memberResult?.display_name)} style={{ marginTop: 9, padding: 10, borderWidth: 1, borderColor: faceColor, borderRadius: 10 }}>
                                     <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
@@ -1492,6 +1497,11 @@ export default function GigDetailsScreen() {
                                       <Text style={{ color: faceColor, fontFamily: "Poppins_600SemiBold", fontSize: 9, textTransform: "uppercase" }}>{faceLabel}</Text>
                                     </View>
                                     <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 5 }}>{memberResult?.summary || "No comparison explanation was available."}</Text>
+                                    {memberResult?.provider === "deepface_arcface" ? (
+                                      <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 9, lineHeight: 14, marginTop: 4 }}>
+                                        Match rate {Math.round(Number(memberResult.match_rate || 0) * 100)}% | {Number(memberResult.matched_frames || 0)}/{Number(memberResult.usable_frames || memberResult.frames_compared || 0)} matched usable frames | {Number(memberResult.sampled_frames || 0)} sampled{memberResult.distance != null && memberResult.threshold != null && Number.isFinite(Number(memberResult.distance)) && Number.isFinite(Number(memberResult.threshold)) ? ` | median distance ${Number(memberResult.distance).toFixed(3)} (threshold ${Number(memberResult.threshold).toFixed(3)})` : ""}
+                                      </Text>
+                                    ) : null}
                                     <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 4 }}>Advisory group-member similarity only. Inspect the member profile and original video yourself.</Text>
                                   </View>
                                 );

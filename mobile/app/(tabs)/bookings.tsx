@@ -31,6 +31,7 @@ import BookingActionModal, { normalizeVisibleInput } from "../../src/components/
 import Navbar from "../../src/components/navbar";
 import Skeleton from "../../src/components/Skeleton";
 import SlidingTabBar from "../../src/components/SlidingTabBar";
+import { palette, radius, typography } from "../../src/theme/tokens";
 import { useAuth } from "../../src/context/AuthContext";
 import { useBottomOverlay, useBottomOverlayVisibility } from "../../src/context/BottomOverlayContext";
 import { emitToast } from "../../src/events/toastBus";
@@ -4524,7 +4525,7 @@ export default function BookingsScreen() {
 
         recipientId = item.counterparty_id || null;
         recipientName = item.counterparty_name || item.name || "User";
-        recipientAvatar = item.counterparty_avatar || null;
+        recipientAvatar = item.production_team_image || item.counterparty_avatar || null;
       }
 
       if (!recipientId) {
@@ -6265,7 +6266,7 @@ export default function BookingsScreen() {
   if (!authLoading && (isGuest || !isAuthenticated)) {
     return (
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="My Activity" />
+        <Header title="Your Activity" overline="MusikaLokal" showTitle={false} />
         <GuestSignInGate message="Sign in to view your bookings and activity." />
         <Navbar />
       </View>
@@ -6279,7 +6280,7 @@ export default function BookingsScreen() {
         testID="mobile-bookings-page"
         accessibilityLabel="mobile-bookings-page"
       >
-        <Header title="My Activity" />
+        <Header title="Your Activity" overline="MusikaLokal" showTitle={false} />
 
         <FlatList
           data={bookingListData}
@@ -6630,23 +6631,13 @@ export default function BookingsScreen() {
                     }}
                     style={[
                       styles.gigGroupHeader,
+                      row.isExpanded && styles.gigGroupHeaderExpanded,
                       {
                         backgroundColor: colors.card,
                         borderColor: colors.border,
                       },
                     ]}
                   >
-                    {row.image ? (
-                      <CachedImage
-                        uri={row.image}
-                        style={styles.gigGroupImage}
-                        width={BOOKING_CARD_IMAGE_WIDTH}
-                        height={BOOKING_CARD_IMAGE_HEIGHT}
-                        quality={72}
-                        cacheVersion={row.entityId}
-                      />
-                    ) : null}
-
                     <View style={styles.gigGroupContent}>
                       <View style={styles.gigGroupTopRow}>
                         <View
@@ -6684,7 +6675,7 @@ export default function BookingsScreen() {
                         {row.location ? (
                           <View style={styles.gigGroupMetaRow}>
                             <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
-                            <Text style={[styles.gigGroupMetaText, { color: colors.textSecondary }]} numberOfLines={1}>
+                            <Text style={[styles.gigGroupMetaText, { color: colors.textSecondary }]} numberOfLines={2}>
                               {row.location}
                             </Text>
                           </View>
@@ -6781,7 +6772,10 @@ export default function BookingsScreen() {
                       <CachedImage
                         uri={item.image}
                         fallbackUri={REQUEST_PLACEHOLDER_IMAGE}
-                        style={styles.cardImage}
+                        style={[
+                          styles.cardImage,
+                          row?.groupedUnderApplicationEntity === true && styles.groupedApplicationCardImage,
+                        ]}
                         width={BOOKING_CARD_IMAGE_WIDTH}
                         height={BOOKING_CARD_IMAGE_HEIGHT}
                         quality={72}
@@ -6860,22 +6854,12 @@ export default function BookingsScreen() {
                       </View>
 
                       {item.message ? (
-                        <View
-                          style={[
-                            styles.cardSnippet,
-                            {
-                              backgroundColor: isDark ? "rgba(255,255,255,0.05)" : "#F9FAFB",
-                              borderLeftColor: colors.primary,
-                            },
-                          ]}
+                        <Text
+                          style={[styles.applicationMessageText, { color: colors.textSecondary }]}
+                          numberOfLines={2}
                         >
-                          <Text
-                            style={[styles.cardSnippetText, { color: colors.text }]}
-                            numberOfLines={1}
-                          >
-                            {`"${item.message}"`}
-                          </Text>
-                        </View>
+                          {item.message}
+                        </Text>
                       ) : null}
                       {item.request_application_context ? (
                         <Text
@@ -7190,6 +7174,7 @@ export default function BookingsScreen() {
                     onPress={() => handleDetailsPress(item)}
                     style={[
                       styles.ownerApplicantCard,
+                      row?.groupedUnderApplicationEntity === true && styles.groupedOwnerApplicantCard,
                       row?.isLastInApplicationGroup && styles.ownerApplicantCardLast,
                       {
                         backgroundColor: colors.card,
@@ -7375,7 +7360,7 @@ export default function BookingsScreen() {
                 const isMusicianView = userRole === "musician";
                 const isLeaderConfirmation = !!item.leader_approval_required;
                 const isReadOnlyApplication = isReadOnlyBookingItem(item);
-                const gigName = item.name ? item.name.split(" - ")[0] : "Gig";
+                const gigName = getGigTitleFromActivityItem(item);
                 const applicationLabel = getApplicationDisplayLabel(item);
                 const applicationIcon = applicationLabel === "Solo Artist" ? "person-outline" : "people-outline";
                 const applicationTypeBadge = `${applicationLabel} Application`;
@@ -7395,56 +7380,11 @@ export default function BookingsScreen() {
                       },
                     ]}
                   >
-                    {/* Banner Image */}
-                    <View>
-                      <CachedImage
-                        uri={item.image}
-                        fallbackUri={
-                          "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop"
-                        }
-                        style={[
-                          styles.cardImage,
-                          { opacity: item.isCancelled ? 0.6 : 1 },
-                        ]}
-                        width={BOOKING_CARD_IMAGE_WIDTH}
-                        height={BOOKING_CARD_IMAGE_HEIGHT}
-                        quality={72}
-                        cacheVersion={item.updated_at || item.created_at || item.id}
-                      />
-                      <View style={[styles.typeBadge, styles.topLeftImageBadge]}>
-                        <Text style={styles.typeBadgeText} numberOfLines={1}>
-                          {applicationTypeBadge}
-                        </Text>
-                      </View>
-                      <View style={styles.topRightBadgeStack}>
-                        <View
-                          style={[
-                            styles.typeBadge,
-                            styles.stackedImageBadge,
-                            {
-                              backgroundColor:
-                                item.status === "Accepted" ||
-                                  item.status === "Happening Now" ||
-                                  item.status === "Confirmed"
-                                  ? "rgba(16, 185, 129, 0.85)"
-                                  : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Withdrawn"
-                                    ? "rgba(239, 68, 68, 0.85)"
-                                    : "rgba(0,0,0,0.6)",
-                            },
-                          ]}
-                        >
-                          <Text style={styles.typeBadgeText} numberOfLines={1}>{item.status}</Text>
-                        </View>
-                        {item.status === "Happening Now" && (
-                          <View style={[styles.liveBadge, styles.stackedImageBadge]}>
-                            <View style={styles.liveDot} />
-                            <Text style={styles.liveText}>Live</Text>
-                          </View>
-                        )}
-                      </View>
-                    </View>
-
                     <View style={styles.cardContent}>
+                      <View style={styles.applicationCardLabelRow}>
+                        <Text style={[styles.applicationCardType, { color: colors.primary }]}>{applicationTypeBadge}</Text>
+                        <Text style={[styles.applicationCardStatus, { color: colors.textSecondary }]}>{item.status}</Text>
+                      </View>
                       <View style={styles.cardHeader}>
                         <View style={styles.cardTitleContainer}>
                           <TouchableOpacity activeOpacity={1}
@@ -7452,7 +7392,7 @@ export default function BookingsScreen() {
                           >
                             <Text
                               style={[styles.cardTitle, { color: colors.text }]}
-                              numberOfLines={1}
+                              numberOfLines={2}
                             >
                               {isMusicianView
                                 ? gigName
@@ -7489,7 +7429,7 @@ export default function BookingsScreen() {
                                 />
                                 <Text
                                   style={[styles.cardDetailText, { color: colors.textSecondary }]}
-                                  numberOfLines={1}
+                                  numberOfLines={2}
                                 >
                                   {item.location}
                                 </Text>
@@ -7506,7 +7446,7 @@ export default function BookingsScreen() {
                                 />
                                 <Text
                                   style={[styles.cardDetailText, { color: colors.textSecondary }]}
-                                  numberOfLines={1}
+                                  numberOfLines={2}
                                 >
                                   {`${applicationReceivedLabel} ${applicationReceivedAt}`}
                                 </Text>
@@ -7537,24 +7477,12 @@ export default function BookingsScreen() {
                       {!isMusicianView && (
                         <View style={{ marginBottom: moderateScale(8) }}>
                           {item.note && (
-                            <View
-                              style={[
-                                styles.cardSnippet,
-                                {
-                                  backgroundColor: isDark
-                                    ? "rgba(255,255,255,0.05)"
-                                    : "#F9FAFB",
-                                  borderLeftColor: colors.primary,
-                                },
-                              ]}
+                            <Text
+                              style={[styles.applicationMessageText, { color: colors.textSecondary }]}
+                              numberOfLines={2}
                             >
-                              <Text
-                                style={[styles.cardSnippetText, { color: colors.text }]}
-                                numberOfLines={1}
-                              >
-                                {`"${item.note}"`}
-                              </Text>
-                            </View>
+                              {item.note}
+                            </Text>
                           )}
 
                           {!isHistoryTabView && (item.video_url || item.cv_url) ? (
@@ -10308,14 +10236,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   tabContainer: {
-    paddingTop: moderateScale(16),
+    paddingTop: moderateScale(8),
     paddingBottom: moderateScale(8),
     paddingHorizontal: scale(16),
   },
   animatedTabs: {
-    borderBottomWidth: 0,
-    borderRadius: moderateScale(14),
-    overflow: "hidden",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRadius: 0,
   },
   animatedTab: {
     minHeight: moderateScale(44),
@@ -10323,7 +10250,7 @@ const styles = StyleSheet.create({
     paddingVertical: moderateScale(10),
   },
   animatedTabText: {
-    fontSize: moderateScale(11),
+    fontSize: moderateScale(10.5),
     lineHeight: moderateScale(15),
   },
   searchFilterContainer: {
@@ -10336,8 +10263,9 @@ const styles = StyleSheet.create({
     gap: scale(8),
   },
   searchInputContainer: {
-    borderWidth: 0,
-    borderRadius: moderateScale(16),
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: palette.line,
+    borderRadius: radius.input,
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
@@ -10358,7 +10286,7 @@ const styles = StyleSheet.create({
   activityFilterButton: {
     width: moderateScale(48),
     height: moderateScale(48),
-    borderRadius: moderateScale(16),
+    borderRadius: radius.input,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -10455,19 +10383,17 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   gigGroupHeader: {
-    borderRadius: moderateScale(14),
+    borderRadius: radius.card,
     borderWidth: 1,
-    marginBottom: moderateScale(8),
+    marginBottom: moderateScale(12),
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 5,
-    elevation: 2,
+    shadowOpacity: 0,
+    elevation: 0,
   },
-  gigGroupImage: {
-    width: "100%",
-    height: SCREEN_HEIGHT < 700 ? verticalScale(82) : verticalScale(96),
+  gigGroupHeaderExpanded: {
+    marginBottom: 0,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
   },
   gigGroupContent: {
     paddingHorizontal: scale(14),
@@ -10497,9 +10423,9 @@ const styles = StyleSheet.create({
   },
   gigGroupTitle: {
     marginTop: moderateScale(1),
-    fontSize: moderateScale(15),
-    lineHeight: moderateScale(20),
-    fontFamily: "Poppins_700Bold",
+    fontSize: moderateScale(18),
+    lineHeight: moderateScale(24),
+    fontFamily: typography.title,
   },
   gigGroupMeta: {
     marginTop: moderateScale(10),
@@ -10545,8 +10471,8 @@ const styles = StyleSheet.create({
   },
   gigGroupViewButton: {
     minHeight: moderateScale(44),
-    borderWidth: 1.5,
-    borderRadius: moderateScale(100),
+    borderWidth: 1,
+    borderRadius: radius.button,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -10562,11 +10488,25 @@ const styles = StyleSheet.create({
     textAlignVertical: "center",
   },
   groupedApplicationCard: {
-    marginHorizontal: scale(12),
-    marginBottom: moderateScale(10),
+    marginHorizontal: 0,
+    marginBottom: 0,
+    borderTopWidth: 0,
+    borderRadius: 0,
   },
   groupedApplicationCardLast: {
     marginBottom: moderateScale(18),
+    borderBottomLeftRadius: radius.card,
+    borderBottomRightRadius: radius.card,
+  },
+  groupedApplicationCardImage: {
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+  },
+  groupedOwnerApplicantCard: {
+    marginHorizontal: 0,
+    marginBottom: 0,
+    borderTopWidth: 0,
+    borderRadius: 0,
   },
   ownerApplicantCard: {
     marginHorizontal: scale(12),
@@ -10582,6 +10522,8 @@ const styles = StyleSheet.create({
   },
   ownerApplicantCardLast: {
     marginBottom: moderateScale(18),
+    borderBottomLeftRadius: radius.card,
+    borderBottomRightRadius: radius.card,
   },
   ownerApplicantSummaryRow: {
     flexDirection: "row",
@@ -10718,16 +10660,12 @@ const styles = StyleSheet.create({
   },
   cardContainer: {
     marginBottom: SCREEN_HEIGHT < 700 ? moderateScale(8) : moderateScale(12),
-    borderRadius: moderateScale(12),
+    borderRadius: radius.card,
     borderWidth: 1,
     overflow: "hidden",
     backgroundColor: "#FFFFFF",
-    // Tighter, crisp native mobile shadow
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   cardImage: {
     width: "100%",
@@ -10817,7 +10755,25 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   cardContent: {
-    padding: SCREEN_HEIGHT < 700 ? moderateScale(10) : moderateScale(12),
+    padding: moderateScale(16),
+  },
+  applicationCardLabelRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: scale(8),
+    marginBottom: moderateScale(10),
+  },
+  applicationCardType: {
+    flex: 1,
+    fontFamily: typography.bold,
+    fontSize: moderateScale(11),
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
+  applicationCardStatus: {
+    fontFamily: typography.semibold,
+    fontSize: moderateScale(12),
   },
   cardHeader: {
     flexDirection: "row",
@@ -10830,8 +10786,9 @@ const styles = StyleSheet.create({
     marginRight: scale(8),
   },
   cardTitle: {
-    fontSize: moderateScale(14),
-    fontFamily: "Poppins_700Bold",
+    fontSize: moderateScale(19),
+    lineHeight: moderateScale(25),
+    fontFamily: typography.title,
   },
   cardDate: {
     fontSize: moderateScale(12),
@@ -10853,7 +10810,7 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: moderateScale(12),
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.semibold,
     flexShrink: 1,
   },
   permitStatusChip: {
@@ -11345,18 +11302,11 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
     flex: 1,
   },
-  cardSnippet: {
-    paddingHorizontal: scale(10),
-    paddingVertical: moderateScale(7),
-    borderRadius: moderateScale(8),
-    borderLeftWidth: 3,
-    marginBottom: moderateScale(6),
-  },
-  cardSnippetText: {
-    fontSize: moderateScale(11),
-    lineHeight: moderateScale(15),
+  applicationMessageText: {
+    fontSize: moderateScale(10),
+    lineHeight: moderateScale(14),
     fontFamily: "Poppins_400Regular",
-    fontStyle: "italic",
+    marginBottom: moderateScale(6),
   },
   attachmentChipRow: {
     flexDirection: "row",

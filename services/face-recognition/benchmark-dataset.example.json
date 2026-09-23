@@ -1,0 +1,28 @@
+{
+  "name": "replace-with-labeled-consented-test-data",
+  "production": {
+    "provider": "deepface_arcface",
+    "service_version": "1.0.0",
+    "deepface_version": "0.0.101",
+    "model": "ArcFace",
+    "detector_backend": "retinaface",
+    "distance_metric": "cosine",
+    "threshold": 0.68,
+    "alignment": true,
+    "aggregation_strategy": "at_least_2_usable_frames_and_2_verified_matches",
+    "frame_configuration": "existing_client_representative_jpegs; maximum_3_frames"
+  },
+  "cases": [
+    {
+      "id": "consented-case-001",
+      "label": "same_person",
+      "clear_case": true,
+      "profile_image_url": "https://replace.invalid/profile.jpg",
+      "frame_urls": [
+        "https://replace.invalid/frame-1.jpg",
+        "https://replace.invalid/frame-2.jpg",
+        "https://replace.invalid/frame-3.jpg"
+      ]
+    }
+  ]
+}

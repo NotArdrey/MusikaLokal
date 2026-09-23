@@ -199,7 +199,7 @@ export default function ProductDetailsScreen() {
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Product" onBackPress={() => router.back()} />
+        <Header compact title="Product" onBackPress={() => router.back()} />
         <View style={{ padding: 16 }}>
           <Skeleton width={SCREEN_WIDTH - 32} height={300} style={{ borderRadius: 12, marginBottom: 16 }} />
           <Skeleton width={SCREEN_WIDTH * 0.7} height={28} style={{ borderRadius: 6, marginBottom: 12 }} />
@@ -213,7 +213,7 @@ export default function ProductDetailsScreen() {
   if (!product) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Product" onBackPress={() => router.back()} />
+        <Header compact title="Product" onBackPress={() => router.back()} />
         <View style={styles.centered}>
           <Text style={{ color: colors.textSecondary, fontSize: moderateScale(15) }}>Product not found</Text>
         </View>
@@ -249,7 +249,7 @@ export default function ProductDetailsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title={product.title} onBackPress={() => router.back()} rightComponent={reportHeaderAction} />
+      <Header compact title={product.title} onBackPress={() => router.back()} rightComponent={reportHeaderAction} />
 
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
         {/* Image gallery */}

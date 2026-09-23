@@ -1,6 +1,5 @@
-﻿import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
-import { router } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   Dimensions,
@@ -19,7 +18,9 @@ import Skeleton from "../src/components/Skeleton";
 import SlidingTabBar from "../src/components/SlidingTabBar";
 import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useAuth } from "../src/context/AuthContext";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useTheme } from "../src/context/ThemeContext";
+import { radius, typography } from "../src/theme/tokens";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 import { runAfterUIIdle } from "../src/utils/idleTask";
@@ -34,7 +35,8 @@ type OrderTab = "my_orders" | "seller_orders";
 
 export default function OrdersScreen() {
   const { colors, isDark } = useTheme();
-  const { session, userId, userRole, isGuest } = useAuth();
+  const { contentBottomPadding } = useBottomBarClearance(24);
+  const { session, userRole, isGuest } = useAuth();
   const isSeller = userRole === "producer" || userRole === "musician";
 
   const [tab, setTab] = useState<OrderTab>("my_orders");
@@ -105,7 +107,7 @@ export default function OrdersScreen() {
       <View style={styles.orderHeader}>
         <Text style={[styles.orderNumber, { color: colors.text }]}>#{order.order_number || "..."}</Text>
         <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) + "20" }]}>
-          <Text style={{ color: getStatusColor(order.status), fontSize: moderateScale(11), fontFamily: "Poppins_600SemiBold" }}>
+          <Text style={{ color: getStatusColor(order.status), fontSize: moderateScale(11), fontFamily: typography.semibold }}>
             {order.status}
           </Text>
         </View>
@@ -130,7 +132,7 @@ export default function OrdersScreen() {
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Header title="Orders" onBackPress={() => router.back()} />
         <GuestSignInGate message="Sign in to view your orders" />
-        
+        <Navbar />
       </View>
     );
   }
@@ -159,6 +161,7 @@ export default function OrdersScreen() {
 
       <ScrollView
         style={styles.content}
+        contentContainerStyle={{ paddingBottom: contentBottomPadding }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         <SmoothTabTransition
@@ -167,7 +170,7 @@ export default function OrdersScreen() {
           renderOutgoing={false}
         >
         {loading ? (
-          [1, 2, 3].map((i) => <Skeleton key={i} width={SCREEN_WIDTH - 32} height={100} style={{ marginBottom: 10, borderRadius: 12 }} />)
+          [1, 2, 3].map((i) => <Skeleton key={i} width={SCREEN_WIDTH - 40} height={100} style={{ marginBottom: 12, borderRadius: radius.card }} />)
         ) : (
           <>
             {tab === "my_orders" && (
@@ -190,10 +193,8 @@ export default function OrdersScreen() {
         )}
         </SmoothTabTransition>
 
-        <View style={{ height: 100 }} />
       </ScrollView>
-
-      
+      <Navbar />
     </View>
   );
 }
@@ -202,17 +203,17 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   tabRow: { flexDirection: "row" },
   tab: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 14 },
-  tabText: { fontSize: moderateScale(13), fontFamily: "Poppins_600SemiBold" },
-  content: { flex: 1, paddingHorizontal: 16, paddingTop: 12 },
-  orderCard: { borderRadius: 12, borderWidth: 1, padding: 14, marginBottom: 10 },
+  tabText: { fontSize: moderateScale(13), fontFamily: typography.semibold },
+  content: { flex: 1, paddingHorizontal: 20, paddingTop: 18 },
+  orderCard: { borderRadius: radius.card, borderWidth: 1, padding: 14, marginBottom: 12 },
   orderHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  orderNumber: { fontSize: moderateScale(15), fontFamily: "Poppins_700Bold" },
+  orderNumber: { fontSize: moderateScale(15), fontFamily: typography.heading },
   statusBadge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 8 },
-  orderDate: { fontSize: moderateScale(12), marginTop: 4 },
-  orderBuyer: { fontSize: moderateScale(12), marginTop: 2 },
+  orderDate: { fontSize: moderateScale(12), fontFamily: typography.body, marginTop: 4 },
+  orderBuyer: { fontSize: moderateScale(12), fontFamily: typography.body, marginTop: 2 },
   orderFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 10 },
-  orderItems: { fontSize: moderateScale(12) },
-  orderTotal: { fontSize: moderateScale(16), fontFamily: "Poppins_700Bold" },
-  emptyText: { textAlign: "center", marginTop: 12, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium" },
+  orderItems: { fontSize: moderateScale(12), fontFamily: typography.body },
+  orderTotal: { fontSize: moderateScale(16), fontFamily: typography.bold },
+  emptyText: { textAlign: "center", marginTop: 12, fontSize: moderateScale(15), fontFamily: typography.medium },
 });
 

@@ -28,9 +28,9 @@ const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/
 const GROQ_MODEL_CANDIDATES = [
     Deno.env.get('GROQ_TEXT_MODEL')?.trim(),
     'openai/gpt-oss-120b',
-    'qwen/qwen3.6-27b',
+    'qwen/qwen3.8-27b',
     'openai/gpt-oss-20b',
-].filter((model): model is string => Boolean(model));
+].filter((model, index, models): model is string => Boolean(model) && models.indexOf(model) === index);
 const GROQ_RETRYABLE_STATUS_CODES = new Set([403, 404, 408, 409, 429, 498, 500, 502, 503, 504]);
 
 interface AIProviderStatus {

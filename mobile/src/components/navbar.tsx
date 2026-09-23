@@ -3,7 +3,7 @@ import type { BottomTabBarProps } from 'expo-router/tabs';
 import { useQueryClient } from '@tanstack/react-query';
 import { router, usePathname } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated as RNAnimated, Easing, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Animated as RNAnimated, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useBottomOverlay } from '../context/BottomOverlayContext';
@@ -12,27 +12,21 @@ import { prefetchNavbarColdBootQueries } from '../data/coldBootPrefetch';
 import { isE2EFixtureMode } from '../utils/e2eFixtures';
 import { logLoadTime } from '../utils/loadTimeLogger';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
+import { typography } from '../theme/tokens';
 
-export const NAVBAR_BOTTOM_OFFSET = 24;
-export const NAVBAR_HEIGHT = 72;
+export const NAVBAR_BOTTOM_OFFSET = 0;
+export const NAVBAR_HEIGHT = 76;
 export const NAVBAR_CLEARANCE = NAVBAR_BOTTOM_OFFSET + NAVBAR_HEIGHT + 16;
-export const NAVBAR_WIDTH = '90%' as const;
-export const NAVBAR_MAX_WIDTH = 400;
+export const NAVBAR_WIDTH = '100%' as const;
+export const NAVBAR_MAX_WIDTH = 640;
 
 const NAVBAR_DEBUG_LOGS = false;
-const NAVBAR_MOTION_MS = 150;
 const NAVBAR_ROUTE_PRELOAD_DELAY_MS = 1400;
 const NAVBAR_ROUTE_PRELOAD_GAP_MS = 650;
 const NAVBAR_LAYER = 50;
-const NAVBAR_SURFACE_ELEVATION = 16;
 const NAVBAR_DARK_SURFACE = '#121218';
 const NAVBAR_DARK_BORDER = '#2A2A33';
 const NAVBAR_LIGHT_SURFACE = '#FFFFFF';
-const NAVBAR_DARK_ACTIVE_SURFACE = '#262245';
-const NAVBAR_DARK_ACTIVE_BORDER = '#3F3B72';
-const NAVBAR_LIGHT_ACTIVE_SURFACE = '#EEF2FF';
-const NAVBAR_LIGHT_ACTIVE_BORDER = '#C7D2FE';
-const AnimatedTouchableOpacity = RNAnimated.createAnimatedComponent(TouchableOpacity);
 
 const E2E_NAVBAR_HIDDEN_ROUTES = new Set([
     '/add_gig',
@@ -72,26 +66,13 @@ const TAB_BAR_HOSTED_PATHS = new Set([
 ]);
 
 type NavIconProps = {
-    active: boolean;
     color: string;
     icon: string;
-    progress: RNAnimated.Value;
 };
 
-function NavIcon({ active, color, icon, progress }: NavIconProps) {
-    const iconScale = progress.interpolate({
-        inputRange: [0, 1],
-        outputRange: [1, 1.06],
-    });
-
+function NavIcon({ color, icon }: NavIconProps) {
     return (
-        <RNAnimated.View style={{ transform: [{ scale: iconScale }] }}>
-            <Ionicons
-                name={active ? icon as any : `${icon}-outline` as any}
-                size={21}
-                color={color}
-            />
-        </RNAnimated.View>
+        <Ionicons name={`${icon}-outline` as any} size={23} color={color} />
     );
 }
 
@@ -108,32 +89,16 @@ type NavTabProps = {
     colors: ReturnType<typeof useTheme>['colors'];
     compact?: boolean;
     iconOnly?: boolean;
-    isDark: boolean;
     item: NavItem;
     onPress: (item: NavItem) => void;
 };
 
-function NavTab({ active, colors, compact = false, iconOnly = false, isDark, item, onPress }: NavTabProps) {
-    const progress = useRef(new RNAnimated.Value(active ? 1 : 0)).current;
-
-    useEffect(() => {
-        RNAnimated.timing(progress, {
-            toValue: active ? 1 : 0,
-            duration: NAVBAR_MOTION_MS,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-        }).start();
-    }, [active, progress]);
-
-    const tabScale = progress.interpolate({
-        inputRange: [0, 1],
-        outputRange: [0.98, 1],
-    });
+function NavTab({ active, colors, compact = false, iconOnly = false, item, onPress }: NavTabProps) {
     const iconColor = active ? colors.primary : colors.textSecondary;
-    const showActiveLabel = active && !iconOnly;
+    const showActiveLabel = !iconOnly;
 
     return (
-        <AnimatedTouchableOpacity
+        <TouchableOpacity
             activeOpacity={active ? 1 : 0.82}
             key={item.id}
             testID={`nav-${item.id}`}
@@ -144,33 +109,23 @@ function NavTab({ active, colors, compact = false, iconOnly = false, isDark, ite
                 styles.tabButton,
                 compact ? styles.compactTabButton : null,
                 iconOnly ? styles.iconOnlyTabButton : null,
-                { transform: [{ scale: tabScale }] },
-                active ? [
-                    iconOnly ? styles.iconOnlyActiveTabButton : styles.activeTabButton,
-                    compact ? styles.compactActiveTabButton : null,
-                    {
-                        backgroundColor: isDark ? NAVBAR_DARK_ACTIVE_SURFACE : NAVBAR_LIGHT_ACTIVE_SURFACE,
-                        borderColor: isDark ? NAVBAR_DARK_ACTIVE_BORDER : NAVBAR_LIGHT_ACTIVE_BORDER,
-                    },
-                ] : null,
             ]}
             onPress={() => onPress(item)}
         >
-            <NavIcon
-                active={active}
-                color={iconColor}
-                icon={item.icon}
-                progress={progress}
-            />
+            {active ? <View style={[styles.activeMarker, { backgroundColor: colors.primary }]} /> : null}
+            <NavIcon color={iconColor} icon={item.icon} />
             {showActiveLabel ? (
                 <Text
                     numberOfLines={1}
-                    style={[styles.activeLabel, { color: colors.primary }]}
+                    style={[styles.activeLabel, {
+                        color: active ? colors.primary : colors.textSecondary,
+                        fontFamily: active ? typography.semibold : typography.medium,
+                    }]}
                 >
                     {item.label}
                 </Text>
             ) : null}
-        </AnimatedTouchableOpacity>
+        </TouchableOpacity>
     );
 }
 
@@ -409,7 +364,7 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
     useEffect(() => {
         logNavbarDebug('state', {
             activeTab,
-            bottomOffset: NAVBAR_BOTTOM_OFFSET + insets.bottom,
+            bottomOffset: NAVBAR_BOTTOM_OFFSET,
             forceVisible,
             focusedRoute: focusedRoute?.name,
             global: true,
@@ -482,7 +437,11 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
             pointerEvents="auto"
             style={[
                 styles.globalNavbarHost,
-                { bottom: NAVBAR_BOTTOM_OFFSET + insets.bottom },
+                {
+                    bottom: NAVBAR_BOTTOM_OFFSET,
+                    paddingBottom: insets.bottom,
+                    backgroundColor: isDark ? NAVBAR_DARK_SURFACE : NAVBAR_LIGHT_SURFACE,
+                },
             ]}
         >
             <View
@@ -517,7 +476,6 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
                                     compact={useCompactFanNavbar}
                                     colors={colors}
                                     iconOnly={useIconOnlyNavbar}
-                                    isDark={isDark}
                                     item={item}
                                     key={item.id}
                                     onPress={handleNavPress}
@@ -538,46 +496,39 @@ const styles = StyleSheet.create({
         position: 'absolute',
         left: 0,
         right: 0,
-        bottom: 24,
+        bottom: 0,
         zIndex: NAVBAR_LAYER,
-        elevation: NAVBAR_LAYER,
+        elevation: 0,
         overflow: 'visible',
     },
     navbarSurface: {
         alignSelf: 'center',
         width: NAVBAR_WIDTH,
         maxWidth: NAVBAR_MAX_WIDTH,
-        borderRadius: 22,
-        shadowColor: "#000",
-        shadowOffset: {
-            width: 0,
-            height: 8,
-        },
-        shadowOpacity: 0.14,
-        shadowRadius: 18,
-        elevation: NAVBAR_SURFACE_ELEVATION,
+        borderRadius: 0,
         overflow: 'visible',
     },
     compactNavbarSurface: {
-        width: 216,
-        maxWidth: '62%',
+        width: NAVBAR_WIDTH,
+        maxWidth: NAVBAR_MAX_WIDTH,
     },
     narrowMainNavbarSurface: {
-        width: '94%',
-        maxWidth: 420,
+        width: NAVBAR_WIDTH,
+        maxWidth: NAVBAR_MAX_WIDTH,
     },
     blurContainer: {
-        borderRadius: 22,
+        borderRadius: 0,
         overflow: 'hidden',
-        borderWidth: 1,
+        borderWidth: 0,
+        borderTopWidth: StyleSheet.hairlineWidth,
     },
     container: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingVertical: 9,
+        paddingVertical: 7,
         paddingHorizontal: 8,
-        gap: 3,
+        gap: 2,
     },
     compactContainer: {
         justifyContent: 'center',
@@ -589,15 +540,16 @@ const styles = StyleSheet.create({
         paddingHorizontal: 6,
     },
     tabButton: {
-        minWidth: 40,
-        height: 48,
-        flexDirection: 'row',
+        flex: 1,
+        minWidth: 0,
+        height: 58,
+        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingHorizontal: 10,
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: 'transparent',
+        paddingHorizontal: 4,
+        borderRadius: 0,
+        borderWidth: 0,
+        gap: 3,
     },
     compactTabButton: {
         minWidth: 48,
@@ -608,28 +560,20 @@ const styles = StyleSheet.create({
         minWidth: 0,
         paddingHorizontal: 0,
     },
-    activeTabButton: {
-        minWidth: 84,
-        maxWidth: 108,
-        paddingHorizontal: 12,
-        gap: 6,
-    },
-    iconOnlyActiveTabButton: {
-        flex: 1,
-        minWidth: 0,
-        paddingHorizontal: 0,
-    },
-    compactActiveTabButton: {
-        minWidth: 96,
-        maxWidth: 116,
-    },
     activeLabel: {
         flexShrink: 1,
         fontSize: 11,
         lineHeight: 14,
-        fontFamily: 'Poppins_600SemiBold',
         includeFontPadding: false,
         textAlignVertical: 'center',
+    },
+    activeMarker: {
+        position: 'absolute',
+        top: -7,
+        width: 28,
+        height: 3,
+        borderBottomLeftRadius: 2,
+        borderBottomRightRadius: 2,
     },
 });
 

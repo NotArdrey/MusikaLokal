@@ -15,9 +15,10 @@ export function useBottomBarClearance(extraPadding = 0) {
 
   return useMemo(() => {
     if (isGuest) {
+      const bottomBarClearance = NAVBAR_CLEARANCE + insets.bottom;
       return {
-        bottomBarClearance: insets.bottom,
-        contentBottomPadding: insets.bottom + extraPadding,
+        bottomBarClearance,
+        contentBottomPadding: bottomBarClearance + extraPadding,
         hasActiveRadio: false,
       };
     }

@@ -9,24 +9,23 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Poppins_400Regular'],
-        medium: ['Poppins_500Medium'],
-        semibold: ['Poppins_600SemiBold'],
-        bold: ['Poppins_700Bold'],
+        sans: ['Manrope_400Regular'],
+        medium: ['Manrope_500Medium'],
+        semibold: ['Manrope_600SemiBold'],
+        bold: ['SpaceGrotesk_700Bold'],
       },
       colors: {
-        // Primary - Dark Spotify Green
         primary: {
-          50: '#D4F5E2',
-          100: '#A8EBC5',
-          200: '#7DE1A8',
-          300: '#52D78B',
-          400: '#27CD6E',
-          500: '#169C46',  // Darker Spotify Green
-          600: '#12833A',
-          700: '#0E6A2F',
-          800: '#0A5123',
-          900: '#063818',
+          50: '#F3F1FF',
+          100: '#E9E6FF',
+          200: '#D4CFFF',
+          300: '#B4AAFF',
+          400: '#8878FA',
+          500: '#5546F4',
+          600: '#493BDF',
+          700: '#4034C9',
+          800: '#352FA3',
+          900: '#2E2B81',
         },
         // Secondary - Spotify Dark
         secondary: {
@@ -41,18 +40,17 @@ module.exports = {
           800: '#0A0A0A',
           900: '#050505',
         },
-        // Accent - Dark Gray
         accent: {
-          50: '#E0E0E0',
-          100: '#C4C4C4',
-          200: '#A8A8A8',
-          300: '#808080',
-          400: '#606060',
-          500: '#404040',
-          600: '#333333',
-          700: '#262626',
-          800: '#1A1A1A',
-          900: '#0D0D0D',
+          50: '#FFF8E8',
+          100: '#FFF1CF',
+          200: '#FFDF9A',
+          300: '#FFCA5C',
+          400: '#FFB627',
+          500: '#EA9700',
+          600: '#C67300',
+          700: '#9E5200',
+          800: '#7C3E08',
+          900: '#66340C',
         },
         // Muted text/icons
         muted: '#808080',

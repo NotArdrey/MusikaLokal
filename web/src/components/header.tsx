@@ -263,7 +263,7 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
                             activeOpacity={1}
                             onPress={() => setGuestMenuVisible(true)}
                             style={[styles.iconButton, {
-                                backgroundColor: isDark ? colors.surface : '#F3F4F6',
+                                backgroundColor: 'transparent',
                                 padding: isWebDesktop ? 12 : 8,
                             }]}
                         >

@@ -28,6 +28,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useBottomOverlayVisibility } from '../context/BottomOverlayContext';
 import { useTheme } from '../context/ThemeContext';
+import { typography } from '../theme/tokens';
 import LoadingState from './LoadingState';
 import { emitToast } from '../events/toastBus';
 import {
@@ -933,7 +934,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         hitSlop={{ top: 10, left: 10, right: 10, bottom: 10 }}
                         activeOpacity={1}
                     >
-                        <Ionicons name="chevron-back" size={26} color={colors.text} />
+                        <Ionicons name="chevron-back" size={24} color={colors.text} />
                     </TouchableOpacity>
                 )}
                 <TouchableOpacity
@@ -1168,13 +1169,16 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 12,
+        paddingHorizontal: 20,
         paddingBottom: 10,
         borderBottomWidth: 1,
         gap: 4,
     },
     backButton: {
-        padding: 4,
+        width: 36,
+        height: 44,
+        alignItems: 'flex-start',
+        justifyContent: 'center',
     },
     headerMainTouchable: {
         flexDirection: 'row',
@@ -1212,8 +1216,10 @@ const styles = StyleSheet.create({
         marginLeft: 10,
     },
     headerName: {
-        fontSize: 16,
-        fontWeight: '700',
+        fontSize: 18,
+        lineHeight: 24,
+        fontFamily: typography.heading,
+        letterSpacing: -0.35,
     },
     headerStatus: {
         fontSize: 12,

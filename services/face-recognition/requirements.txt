@@ -1,0 +1,3 @@
+deepface[tensorflow]==0.0.101
+fastapi==0.141.1
+uvicorn[standard]==0.53.0

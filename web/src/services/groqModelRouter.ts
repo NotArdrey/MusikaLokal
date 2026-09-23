@@ -80,12 +80,12 @@ const GROQ_CHAT_COMPLETIONS_URL =
 const DEFAULT_GROQ_MODEL_ID = "openai/gpt-oss-120b";
 const GROQ_MODEL_FALLBACK_IDS = [
   DEFAULT_GROQ_MODEL_ID,
-  "qwen/qwen3.6-27b",
+  "qwen/qwen3.8-27b",
   "openai/gpt-oss-20b",
 ];
 const GROQ_MODEL_LABELS: Record<string, string> = {
   "openai/gpt-oss-120b": "openai/gpt-oss-120b",
-  "qwen/qwen3.6-27b": "qwen/qwen3.6-27b",
+  "qwen/qwen3.8-27b": "qwen/qwen3.8-27b",
   "openai/gpt-oss-20b": "openai/gpt-oss-20b",
 };
 const RETIRED_OR_RETIRING_GROQ_MODELS = new Set([
@@ -93,6 +93,7 @@ const RETIRED_OR_RETIRING_GROQ_MODELS = new Set([
   "llama-3.1-8b-instant",
   "meta-llama/llama-4-scout-17b-16e-instruct",
   "qwen/qwen3-32b",
+  "qwen/qwen3.6-27b",
 ]);
 
 export const GROQ_PRIMARY_MODEL_ID = DEFAULT_GROQ_MODEL_ID;

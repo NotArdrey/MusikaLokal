@@ -29,6 +29,7 @@ import LoadingState from "../src/components/LoadingState";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
+import { radius, typography } from "../src/theme/tokens";
 import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
 import { clearListingDetailsCache } from "../src/utils/listingDetailsCache";
 import {
@@ -7001,8 +7002,8 @@ const styles = StyleSheet.create({
     marginTop: 0,
   },
   sectionTitle: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 16,
+    fontFamily: typography.title,
+    fontSize: 19,
   },
   inputContainer: {
     marginBottom: 20,
@@ -7012,10 +7013,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.bold,
   },
   inputWrapper: {
-    borderRadius: 12,
+    borderRadius: radius.input,
     borderWidth: 1,
     overflow: "hidden",
   },
@@ -7026,7 +7027,7 @@ const styles = StyleSheet.create({
   },
   textInput: {
     padding: 16,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     textAlign: "left",
     textAlignVertical: "center",
   },

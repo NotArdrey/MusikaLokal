@@ -18,6 +18,7 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../../src/utils/actionError';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
 import { getStaffPermissions } from '../../src/utils/staffAccess';
+import { palette, radius, typography } from '../../src/theme/tokens';
 
 type TeamRecord = {
   id: string;
@@ -175,7 +176,7 @@ export default function MyProductionScreen() {
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="My Production" />
+        <Header title="Productions" overline="MusikaLokal" showTitle={false} />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -185,6 +186,8 @@ export default function MyProductionScreen() {
           {isMusicianView && (
             <MusicianWorkspaceTabs activeKey="producer" />
           )}
+
+          <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>PROJECTS & COLLABORATORS</Text>
 
           <InlineErrorBanner
             message={loadError}
@@ -271,10 +274,10 @@ export default function MyProductionScreen() {
                           testID={`mobile-production-manage-${team.id}`}
                           accessibilityLabel={`mobile-production-manage-${team.id}`}
                           onPress={() => router.push({ pathname: '/production_team', params: { teamId: team.id } })}
-                          style={[styles.manageBtn, { backgroundColor: colors.primary }]}
+                          style={[styles.manageBtn, { borderColor: colors.primary }]}
                         >
-                          <Ionicons name={showManageAsView ? 'eye-outline' : 'settings-outline'} size={18} color="#FFF" />
-                          <Text style={styles.manageBtnText}>{showManageAsView ? 'View' : 'Manage'}</Text>
+                          <Ionicons name={showManageAsView ? 'eye-outline' : 'arrow-forward-outline'} size={18} color={colors.primary} />
+                          <Text style={[styles.manageBtnText, { color: colors.primary }]}>{showManageAsView ? 'View' : 'Manage'}</Text>
                         </TouchableOpacity>
 
                         {canOnlyViewAndChat ? (
@@ -369,6 +372,12 @@ export default function MyProductionScreen() {
 const styles = StyleSheet.create({
   flex1: { flex: 1 },
   scrollContent: { paddingHorizontal: 24, paddingBottom: 180, paddingTop: 16 },
+  sectionHeading: {
+    fontFamily: typography.bold,
+    fontSize: 12,
+    letterSpacing: 1.4,
+    marginBottom: 16,
+  },
   pageTabsWrap: {
     borderWidth: 1,
     borderRadius: 14,
@@ -391,25 +400,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   skeletonList: { gap: 16 },
-  skeletonCard: { borderRadius: 24, borderWidth: 1, padding: 16 },
+  skeletonCard: { borderRadius: radius.card, borderWidth: 1, padding: 16 },
   skeletonActionRow: { marginTop: 16, flexDirection: 'row', gap: 10 },
   emptyState: { alignItems: 'center', paddingVertical: 48 },
   emptyTitle: { marginTop: 16, fontFamily: 'Poppins_600SemiBold', fontSize: 20 },
   emptyText: { marginTop: 10, fontFamily: 'Poppins_400Regular', textAlign: 'center' },
-  cardContainer: { marginBottom: 24, borderRadius: 24, overflow: 'hidden', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.1, shadowRadius: 16 },
-  imageWrapper: { height: 192, position: 'relative' },
+  cardContainer: { marginBottom: 16, borderRadius: radius.card, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: palette.line },
+  imageWrapper: { height: 160, position: 'relative' },
   cardImage: { width: '100%', height: '100%' },
   imagePlaceholder: { alignItems: 'center', justifyContent: 'center' },
-  roleBadge: { position: 'absolute', top: 16, right: 16, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 999 },
-  roleBadgeText: { fontSize: 12, fontFamily: 'Poppins_600SemiBold', textTransform: 'capitalize' },
+  roleBadge: { position: 'absolute', top: 16, right: 16, paddingHorizontal: 12, paddingVertical: 5, borderRadius: radius.status },
+  roleBadgeText: { fontSize: 12, fontFamily: typography.semibold, textTransform: 'capitalize' },
   cardContent: { padding: 16 },
-  cardTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 18, marginBottom: 4 },
-  cardDescription: { fontFamily: 'Poppins_400Regular', fontSize: 13, lineHeight: 20 },
+  cardTitle: { fontFamily: typography.title, fontSize: 20, letterSpacing: -0.4, marginBottom: 4 },
+  cardDescription: { fontFamily: typography.body, fontSize: 13, lineHeight: 20 },
   actionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, borderTopWidth: 1, paddingTop: 16 },
   actionLeft: { flexDirection: 'row', gap: 12 },
-  manageBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12 },
-  manageBtnText: { fontFamily: 'Poppins_500Medium', color: '#FFF' },
-  editBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1 },
+  manageBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 8, borderRadius: radius.button, borderWidth: 1 },
+  manageBtnText: { fontFamily: typography.semibold },
+  editBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: radius.control, borderWidth: 1 },
   editBtnIcon: { width: 20, height: 20, lineHeight: 20, includeFontPadding: false, textAlign: 'center', textAlignVertical: 'center' },
   deleteBtn: { padding: 8 },
 });

@@ -73,6 +73,7 @@ import { getStationLiveTimelineState } from "../../src/utils/radioTimeline";
 import {
   getGroqModelInfo,
 } from "../../src/services/groqModelRouter";
+import { palette, radius, typography } from "../../src/theme/tokens";
 import { isUploadSafetyRetryableFailure, screenUploadsWithAi } from "../../src/services/uploadSafetyScreen";
 import { logLoadTime, usePageLoadLogger } from "../../src/utils/loadTimeLogger";
 import { setSmoothTab } from "../../src/utils/smoothTabs";
@@ -214,7 +215,6 @@ const TALENT_CARD_LIMIT = 32;
 const FEED_FOCUS_REFRESH_COOLDOWN_MS = 15_000;
 const FEED_BACKGROUND_PREFETCH_DELAY_MS = 1_000;
 const FEED_BACKGROUND_PREFETCH_GAP_MS = 650;
-const MAX_FEED_HEADER_NAME_LENGTH = 26;
 const PESO_SIGN = "\u20B1";
 const POST_MEDIA_BUCKET = "post-media";
 const MAX_POST_MEDIA_ITEMS = 10;
@@ -333,13 +333,6 @@ type PostComposerMedia = {
 
 const feedScreenCache = createFeedCache(getGroqModelInfo().modelLabel);
 let feedScreenCacheIdentity = "guest";
-
-const formatFeedHeaderName = (value: string) => {
-  const normalized = value.trim().replace(/\s+/g, " ");
-  if (!normalized) return "there";
-  if (normalized.length <= MAX_FEED_HEADER_NAME_LENGTH) return normalized;
-  return `${normalized.slice(0, MAX_FEED_HEADER_NAME_LENGTH - 3).trimEnd()}...`;
-};
 
 const FEED_FALLBACK_IMAGES: Record<string, string[]> = {
   Artist: [
@@ -2013,7 +2006,7 @@ const getStationNowPlayingTitle = (station: any, slotIndex: number | null = null
     currentItem?.title ||
     slot?.playlist?.title ||
     slot?.label ||
-    "Local artist spotlight"
+    ""
   );
 };
 
@@ -2032,6 +2025,7 @@ const getStationNowPlayingArtworkUrl = (
     options.currentTrack?.artwork,
     currentItem?.cover_image_url,
     slot?.playlist?.cover_image_url,
+    station?.cover_image_url,
   ];
 
   for (const candidate of candidates) {
@@ -2046,6 +2040,7 @@ const getStationNowPlayingArtworkUrl = (
 
 const FEED_RADIO_CACHE_TTL_MS = 30_000;
 const FEED_RADIO_DEFER_MS = 80;
+const FEED_RADIO_DISCOVERY_LIMIT = 20;
 const FEED_RADIO_STATION_ROTATION_MS = 30_000;
 const FEED_RADIO_DEBUG_LOGS = __DEV__;
 type FeedLiveRadioRequest = {
@@ -2126,7 +2121,15 @@ const getFreshFeedRadioStationCache = (cacheKey = "guest") => {
     return null;
   }
 
-  if (!feedRadioStationCache.station && feedRadioStationCache.stations.length === 0) {
+  const hasPlayableCachedStation = Boolean(
+    feedRadioStationCache.station?.is_active !== false &&
+    isStationPlayable(feedRadioStationCache.station),
+  );
+  const hasPlayableCachedCandidate = feedRadioStationCache.stations.some(
+    (station) => station?.is_active !== false && isStationPlayable(station),
+  );
+
+  if (!hasPlayableCachedStation && !hasPlayableCachedCandidate) {
     logFeedRadioDebug("cache-miss-empty", { cacheKey });
     return null;
   }
@@ -2149,8 +2152,10 @@ const getFeedRadioCacheKeyHash = (cacheKey: string) => (
 );
 
 const selectFeedLiveRadioStation = (stations: any[], cacheKey: string) => {
-  const playableStations = stations.filter(isStationPlayable);
-  const candidates = playableStations.length > 0 ? playableStations : stations.filter(Boolean);
+  const playableStations = stations.filter(
+    (station) => station?.is_active !== false && isStationPlayable(station),
+  );
+  const candidates = playableStations;
 
   if (candidates.length === 0) {
     return null;
@@ -2227,7 +2232,7 @@ const fetchFeedLiveRadioStation = async (request?: FeedLiveRadioRequest) => {
     ) => {
       const useRecommendation = options.useRecommendation === true;
       const includeItems = options.includeItems ?? true;
-      const limit = options.limit ?? (useRecommendation ? 12 : 5);
+      const limit = options.limit ?? (useRecommendation ? 12 : FEED_RADIO_DISCOVERY_LIMIT);
       const startedAt = Date.now();
       logFeedRadioDebug("edge-request-start", {
         cacheKey,
@@ -2300,7 +2305,7 @@ const fetchFeedLiveRadioStation = async (request?: FeedLiveRadioRequest) => {
     });
 
     let stations = shouldUseRecommendation
-      ? await fetchStations(false, { limit: 1 })
+      ? await fetchStations(false, { limit: FEED_RADIO_DISCOVERY_LIMIT })
       : [];
     let source = shouldUseRecommendation ? "fast-all" : "";
 
@@ -2392,9 +2397,7 @@ const fetchFeedLiveRadioStation = async (request?: FeedLiveRadioRequest) => {
 };
 
 type LiveRadioCardProps = {
-  borderColor: string;
   cardColor: string;
-  isDark: boolean;
   primaryColor: string;
   recommendationEnabled: boolean;
   recommendationUserId: string | null;
@@ -2403,9 +2406,7 @@ type LiveRadioCardProps = {
 };
 
 const LiveRadioCard = React.memo(function LiveRadioCard({
-  borderColor,
   cardColor,
-  isDark,
   primaryColor,
   recommendationEnabled,
   recommendationUserId,
@@ -2549,7 +2550,9 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     setLoadingStation(false);
   }, [activeStation, radioCacheKey]);
 
-  const liveFeaturedStation = featuredStation && isStationPlayable(featuredStation)
+  const liveFeaturedStation = featuredStation &&
+    featuredStation?.is_active !== false &&
+    isStationPlayable(featuredStation)
     ? featuredStation
     : null;
   const displayStation = activeStation || liveFeaturedStation || null;
@@ -2580,25 +2583,13 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
   const stationName =
     typeof displayStation?.name === "string" && displayStation.name.trim().length > 0
       ? displayStation.name.trim()
-      : hasDisplayStation
-        ? "MusikaLokal Radio"
-        : loadingStation
-          ? "Loading radio"
-          : "No live station";
-  const nowPlayingTitle = hasDisplayStation
-    ? liveTimelineTitle || currentTrack?.title || getStationNowPlayingTitle(
-      displayStation,
-      isCurrentStation ? currentSlotIndex : null,
-    )
-    : loadingStation
-      ? "Checking live stations"
-      : "Check back for live stations";
+      : "MusikaLokal Live";
   const primaryTrackTitle = hasDisplayStation
     ? liveTimelineTitle || currentTrack?.title || getStationNowPlayingTitle(
       displayStation,
       isCurrentStation ? currentSlotIndex : null,
     )
-    : nowPlayingTitle;
+    : "";
   const stationRecommendationReason =
     displayStation?.ai_reason ||
     displayStation?.recommendation_reason ||
@@ -2609,7 +2600,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     getStationLiveCurrentItem(displayStation, isCurrentStation ? currentSlotIndex : null)?.artist_name ||
     displayStation?.managed_group?.name ||
     displayStation?.managed_profile?.full_name ||
-    "MusikaLokal artists";
+    "";
   const liveRadioSubtitle = Array.from(
     new Set(
       [primaryTrackTitle, primaryArtistName]
@@ -2622,14 +2613,11 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     liveTimelineState,
     slotIndex: isCurrentStation ? currentSlotIndex : null,
   }) || null;
-  const tapHintLabel = isTuneInLoading
-    ? "Starting radio..."
-    : isCurrentStation
-      ? isMuted ? "Tap to unmute" : "Tap to mute"
-      : canTuneIn
-        ? "Tap to listen"
-        : "";
-
+  const displayStationIsPlayable = Boolean(
+    displayStation?.id &&
+    displayStation?.is_active !== false &&
+    isStationPlayable(displayStation),
+  );
   useEffect(() => {
     const activeStationMatches = activeStationId === displayStationId;
     if (
@@ -2798,66 +2786,74 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
   ]);
   const handleTuneIn = handlePlayPress;
 
+  if ((loadingStation && !activeStation) || !displayStationIsPlayable) {
+    return null;
+  }
+
   return (
     <TouchableOpacity
       activeOpacity={isTuneInLoading ? 1 : 0.9}
       onPress={handleTuneIn}
       disabled={isTuneInLoading}
-      style={[styles.liveRadioCard, { backgroundColor: cardColor, borderColor }]}
+      style={[styles.liveRadioCard, { backgroundColor: cardColor }]}
       accessibilityRole="button"
       accessibilityLabel={isCurrentStation ? "Mute or unmute live radio" : "Tune in to live radio"}
       accessibilityState={{ busy: isTuneInLoading, disabled: isTuneInLoading }}
     >
-      <View style={[styles.liveRadioIcon, { backgroundColor: primaryColor + "18" }]}>
-        {stationArtworkUrl ? (
-          <CachedImage uri={stationArtworkUrl} style={styles.liveRadioArtwork} />
-        ) : (
-          <Ionicons
-            name={isCurrentStation ? (isMuted ? "volume-mute" : "volume-high") : "radio"}
-            size={26}
-            color={primaryColor}
-          />
-        )}
-      </View>
-      <View style={styles.liveRadioContent}>
+      <View style={styles.liveRadioHeader}>
         <View style={styles.liveRadioEyebrowRow}>
-          <View style={[styles.liveDot, { backgroundColor: isPlaying && isCurrentStation ? "#22C55E" : primaryColor }]} />
-          <Text style={[styles.liveRadioEyebrow, { color: primaryColor }]}>
-            {recommendationEnabled ? "For You Radio" : "Live Radio"}
-          </Text>
+          <View style={styles.liveDot} />
+          <Text style={styles.liveRadioEyebrow}>LIVE NOW</Text>
         </View>
-        <Text style={[styles.liveRadioTitle, { color: textColor }]} numberOfLines={1}>
-          {stationName}
+        <Text style={[styles.liveRadioBrand, { color: mutedTextColor }]}>
+          {isCurrentStation ? (isMuted ? "Live audio muted" : "You're listening") : "MusikaLokal Live"}
         </Text>
-        <Text style={[styles.liveRadioSubtitle, { color: mutedTextColor }]} numberOfLines={1}>
-          {liveRadioSubtitle}
-        </Text>
-        <Text style={[styles.liveRadioMeta, { color: mutedTextColor }]} numberOfLines={1}>
-          {loadingStation && !hasDisplayStation
-            ? "Updating station list"
-            : stationRecommendationReason
-            ? stationRecommendationReason
-            : `${stationSlotCount} ${stationSlotCount === 1 ? "slot" : "slots"} | ${stationPlayableTrackCount} playable tracks`}
-        </Text>
-        {tapHintLabel ? (
-          <Text style={[styles.liveRadioTapHint, { color: primaryColor }]} numberOfLines={1}>
-            {tapHintLabel}
-          </Text>
-        ) : null}
       </View>
-      {isTuneInLoading || (loadingStation && !hasDisplayStation) ? (
-        <View style={[styles.liveRadioStatusIcon, { backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "#FFFFFF" }]}>
-          <ActivityIndicator size="small" color={primaryColor} />
+      <View style={styles.liveRadioBody}>
+        <View style={[styles.liveRadioIcon, { backgroundColor: primaryColor + "14" }]}>
+          {stationArtworkUrl ? (
+            <CachedImage uri={stationArtworkUrl} style={styles.liveRadioArtwork} />
+          ) : (
+            <Ionicons name="radio" size={24} color={primaryColor} />
+          )}
         </View>
-      ) : isCurrentStation ? (
-        <View style={[styles.liveRadioStatusIcon, { backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "#FFFFFF" }]}>
-          <Ionicons
-            name={isMuted ? "volume-mute" : "volume-high"}
-            size={18}
-            color={primaryColor}
-          />
+        <View style={styles.liveRadioContent}>
+          <Text style={[styles.liveRadioTitle, { color: textColor }]} numberOfLines={2}>
+            {stationName}
+          </Text>
+          {liveRadioSubtitle ? (
+            <Text style={[styles.liveRadioSubtitle, { color: mutedTextColor }]} numberOfLines={2}>
+              {liveRadioSubtitle}
+            </Text>
+          ) : null}
+          {stationRecommendationReason ? (
+            <Text style={[styles.liveRadioMeta, { color: mutedTextColor }]} numberOfLines={2}>
+              {stationRecommendationReason}
+            </Text>
+          ) : null}
+          <View
+            style={[
+              styles.liveRadioCta,
+              { backgroundColor: isCurrentStation ? primaryColor + "14" : primaryColor },
+            ]}
+          >
+            {isTuneInLoading ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <>
+                <Ionicons
+                  name={isCurrentStation ? (isMuted ? "volume-high" : "volume-mute") : "play"}
+                  size={14}
+                  color={isCurrentStation ? primaryColor : "#FFFFFF"}
+                />
+                <Text style={[styles.liveRadioCtaText, isCurrentStation && { color: primaryColor }]}>
+                  {isCurrentStation ? (isMuted ? "Unmute" : "Listening Live") : "Listen Live"}
+                </Text>
+              </>
+            )}
+          </View>
         </View>
-      ) : null}
+      </View>
     </TouchableOpacity>
   );
 });
@@ -3538,13 +3534,6 @@ export default function FeedScreen() {
       query: trimmed.slice(0, 80),
     });
   }, [trackFeedActivity]);
-  const feedHeaderName = useMemo(() => {
-    if (isGuest) return "Guest";
-
-    const userMeta = (session?.user?.user_metadata || {}) as { full_name?: string; name?: string };
-    const displayName = userMeta.full_name || userMeta.name || session?.user?.email?.split("@")[0] || "there";
-    return formatFeedHeaderName(displayName);
-  }, [isGuest, session?.user?.email, session?.user?.user_metadata]);
   const shouldPersonalizeForYouFeed = Boolean(resolvedUserId && !isGuest);
   const openPostOptions = useCallback((post: any) => {
     if (!post?.id) return;
@@ -6891,34 +6880,36 @@ export default function FeedScreen() {
     const cardBg = isDark ? "#1E293B" : "#FFFFFF";
 
     return (
-      <>
-        {/* ── Search bar trigger ── */}
-        <View style={[styles.composerRow, { backgroundColor: cardBg }]}>
-          <TouchableOpacity
-            style={[
-              styles.composerInput,
-              { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
-            ]}
-            onPress={openSearchSheet}
-            activeOpacity={1}
-          >
-            <Ionicons name="search" size={20} color={colors.textSecondary} />
-            <Text style={[styles.composerSearchText, { color: colors.textSecondary }]} numberOfLines={1}>
-              {isFan ? "Search posts, gigs, artists, groups" : "Search musicians, studios, gigs"}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={1}
-            onPress={openSearchSheet}
-            style={[
-              styles.composerFilterButton,
-              { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Open search filters"
-          >
-            <Ionicons name="options-outline" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
+      <View style={[styles.feedTopSurface, { backgroundColor: cardBg }]}>
+        <View style={styles.discoveryIntro}>
+          {/* Search bar trigger */}
+          <View style={[styles.composerRow, styles.discoverySearchRow, { backgroundColor: isFan ? cardBg : "transparent" }]}>
+            <TouchableOpacity
+              style={[
+                styles.composerInput,
+                { backgroundColor: isFan ? (isDark ? "#374151" : "#F3F4F6") : colors.surface, borderColor: colors.border },
+              ]}
+              onPress={openSearchSheet}
+              activeOpacity={1}
+            >
+              <Ionicons name="search" size={20} color={colors.textSecondary} />
+              <Text style={[styles.composerSearchText, { color: colors.textSecondary }]} numberOfLines={1}>
+                {isFan ? "Search posts, gigs, artists, groups" : "Search musicians, studios, gigs"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={openSearchSheet}
+              style={[
+                styles.composerFilterButton,
+                { backgroundColor: isFan ? (isDark ? "#374151" : "#F3F4F6") : colors.primaryLight },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Open search filters"
+            >
+              <Ionicons name="options-outline" size={20} color={isFan ? colors.textSecondary : colors.primary} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {canCreatePosts ? (
@@ -6928,14 +6919,14 @@ export default function FeedScreen() {
             accessibilityRole="button"
             accessibilityLabel="Create post"
             testID="mobile-feed-create-post-button"
-            style={[styles.createPostPrompt, { backgroundColor: cardBg, borderColor: colors.border }]}
+            style={[styles.createPostPrompt, { backgroundColor: cardBg }]}
           >
             <View style={[styles.composerAvatar, { backgroundColor: colors.primary + "30" }]}>
               <Ionicons name="person" size={16} color={colors.primary} />
             </View>
             <View style={[styles.createPostInput, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
               <Text style={[styles.createPostInputText, { color: colors.textSecondary }]} numberOfLines={1}>
-                {"What's on your mind?"}
+                {"Share something with the scene..."}
               </Text>
             </View>
             <View style={[styles.createPostMediaButton, { backgroundColor: colors.primary + "14" }]}>
@@ -6944,34 +6935,29 @@ export default function FeedScreen() {
           </TouchableOpacity>
         ) : null}
 
-        <LiveRadioCard
-          borderColor={colors.border}
-          cardColor={isDark ? "#0F172A" : "#F8FAFC"}
-          isDark={isDark}
-          primaryColor={colors.primary}
-          recommendationEnabled={shouldPersonalizeForYouFeed && roleResolved}
-          recommendationUserId={resolvedUserId}
-          textColor={colors.text}
-          mutedTextColor={colors.textSecondary}
-        />
-
         {/* ── Feed tabs ── */}
         <SlidingTabBar
           activeKey={tab}
+          activeColor={colors.text}
           backgroundColor={cardBg}
           borderColor={isDark ? "#334155" : "#E2E8F0"}
-          indicatorWidthRatio={0.28}
+          inactiveColor={colors.textSecondary}
+          indicatorHeight={3}
+          indicatorWidthRatio={0.46}
           onChange={handleFeedTabChange}
+          showTopBorder
+          style={styles.feedTabs}
+          tabStyle={styles.homeFeedTab}
           tabs={visibleFeedTabs}
           textStyle={styles.tabText}
         />
-        <View style={[styles.feedTabBottomSpacer, { backgroundColor: cardBg }]} />
-
-      </>
+      </View>
     );
   }, [
     colors.border,
     colors.primary,
+    colors.primaryLight,
+    colors.surface,
     colors.text,
     colors.textSecondary,
     canCreatePosts,
@@ -6980,9 +6966,6 @@ export default function FeedScreen() {
     handleFeedTabChange,
     openCreateComposer,
     openSearchSheet,
-    resolvedUserId,
-    roleResolved,
-    shouldPersonalizeForYouFeed,
     tab,
     visibleFeedTabs,
   ]);
@@ -7032,29 +7015,42 @@ export default function FeedScreen() {
           { paddingBottom: feedBottomSpacer + 20 },
         ]}
       >
-        <View style={[styles.feedSkeletonSearchWrap, { backgroundColor: cardBg }]}>
-          <Skeleton width="100%" height={48} borderRadius={16} />
-        </View>
-
-        <View style={[styles.feedSkeletonLiveRadioWrap, { backgroundColor: cardBg }]}>
-          <View style={[styles.feedSkeletonLiveRadioCard, { backgroundColor: isDark ? "#0F172A" : "#F8FAFC", borderColor: skeletonBorder }]}>
-            <View style={{ flex: 1 }}>
-              <Skeleton width={92} height={14} style={{ marginBottom: 10 }} />
-              <Skeleton width="62%" height={18} style={{ marginBottom: 8 }} />
-              <Skeleton width="82%" height={12} />
+        <View style={[styles.feedTopSurface, { backgroundColor: cardBg }]}>
+          {!isFan ? (
+            <View style={styles.discoveryIntro}>
+              <Skeleton width="100%" height={50} borderRadius={radius.input} />
             </View>
-            <Skeleton width={86} height={40} borderRadius={999} />
+          ) : (
+            <View style={[styles.feedSkeletonSearchWrap, { backgroundColor: cardBg }]}>
+              <Skeleton width="100%" height={50} borderRadius={16} />
+            </View>
+          )}
+
+          {canCreatePosts ? (
+            <View style={styles.feedSkeletonComposerWrap}>
+              <Skeleton width="100%" height={56} borderRadius={radius.input} />
+            </View>
+          ) : null}
+
+          <View
+            style={[
+              styles.tabRow,
+              styles.feedTabs,
+              {
+                backgroundColor: cardBg,
+                borderBottomColor: skeletonBorder,
+                borderTopColor: skeletonBorder,
+                borderTopWidth: StyleSheet.hairlineWidth,
+              },
+            ]}
+          >
+            {visibleFeedTabs.map((item) => (
+              <View key={`feed-tab-skeleton-${item.key}`} style={styles.feedSkeletonTab}>
+                <Skeleton width={82} height={18} borderRadius={8} />
+              </View>
+            ))}
           </View>
         </View>
-
-        <View style={[styles.tabRow, { backgroundColor: cardBg, borderBottomColor: skeletonBorder }]}>
-          {visibleFeedTabs.map((item) => (
-            <View key={`feed-tab-skeleton-${item.key}`} style={styles.feedSkeletonTab}>
-              <Skeleton width={82} height={18} borderRadius={8} />
-            </View>
-          ))}
-        </View>
-        <View style={[styles.feedTabBottomSpacer, { backgroundColor: cardBg }]} />
 
         {[1, 2, 3].map((item) => (
           <View
@@ -7165,8 +7161,55 @@ export default function FeedScreen() {
       }),
     [baseFeedItems, gigApplicantCounts, gigFeaturedPerformers],
   );
+  const liveRadioInsertionIndex = useMemo(() => {
+    if (feedItems.length === 0) return -1;
 
-  const isShowingAiCards = tab === "talent" && aiCards.length > 0;
+    let regularPostCount = 0;
+    for (let index = 0; index < feedItems.length; index += 1) {
+      const item = feedItems[index];
+      if (item?.__feedKind !== "ai_card" && item?.__feedKind !== "following_entity") {
+        regularPostCount += 1;
+        if (regularPostCount === 3) return index;
+      }
+    }
+
+    return feedItems.length - 1;
+  }, [feedItems]);
+  const liveRadioCard = useMemo(
+    () => (
+      <LiveRadioCard
+        cardColor={colors.card}
+        primaryColor={colors.primary}
+        recommendationEnabled={shouldPersonalizeForYouFeed && roleResolved}
+        recommendationUserId={resolvedUserId}
+        textColor={colors.text}
+        mutedTextColor={colors.textSecondary}
+      />
+    ),
+    [
+      colors.card,
+      colors.primary,
+      colors.text,
+      colors.textSecondary,
+      resolvedUserId,
+      roleResolved,
+      shouldPersonalizeForYouFeed,
+    ],
+  );
+  const renderFeedItem = useCallback(
+    ({ item, index }: { item: any; index: number }) => (
+      <>
+        {renderPost({ item })}
+        {index === liveRadioInsertionIndex ? liveRadioCard : null}
+      </>
+    ),
+    [
+      liveRadioCard,
+      liveRadioInsertionIndex,
+      renderPost,
+    ],
+  );
+
   const showRecommendationLoadingState =
     (tab === "talent" || tab === "for_you") &&
     aiCards.length === 0 &&
@@ -7192,10 +7235,6 @@ export default function FeedScreen() {
   const feedKeyExtractor = useCallback(
     (item: any, index: number) => getFeedItemListKey(item, index),
     [],
-  );
-  const feedSeparator = useCallback(
-    () => <View style={{ height: isShowingAiCards ? 12 : 12 }} />,
-    [isShowingAiCards],
   );
   const feedFooter = useMemo(
     () => (
@@ -7312,7 +7351,7 @@ export default function FeedScreen() {
   if (isGuest) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title={feedHeaderName} overline="Welcome" showBack={false} showMainActions />
+        <Header title="Home" overline="MusikaLokal" showTitle={false} showBack={false} showMainActions />
         <GuestSignInGate message="Sign in to see your social feed" />
         <BottomNavbar />
       </View>
@@ -7320,8 +7359,8 @@ export default function FeedScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: isDark ? "#0F172A" : "#FFFFFF" }]}>
-      <Header title={feedHeaderName} overline="Welcome" showBack={false} showMainActions />
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Header title={isFan ? "From the Scene" : "Home"} overline="MusikaLokal" showTitle={false} showBack={false} showMainActions />
       {showInitialFeedSkeleton ? (
         renderFeedSkeleton()
       ) : feedItems.length === 0 ? (
@@ -7333,6 +7372,7 @@ export default function FeedScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         >
           {feedListHeader}
+          {liveRadioCard}
           {feedEmpty}
           {feedFooter}
         </ScrollView>
@@ -7341,7 +7381,7 @@ export default function FeedScreen() {
             style={styles.feedViewport}
             data={feedItems}
             keyExtractor={feedKeyExtractor}
-            renderItem={renderPost}
+            renderItem={renderFeedItem}
             ListHeaderComponent={feedListHeader}
             ListEmptyComponent={feedEmpty}
             ListFooterComponent={feedFooter}
@@ -7352,7 +7392,6 @@ export default function FeedScreen() {
             refreshing={refreshing}
             onRefresh={onRefresh}
             refreshTintColor={colors.primary}
-            ItemSeparatorComponent={feedSeparator}
             contentContainerStyle={feedContentContainerStyle}
             scrollIndicatorInsets={feedScrollIndicatorInsets}
           />
@@ -7627,6 +7666,19 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
 
+  feedTopSurface: {
+    width: "100%",
+  },
+  discoveryIntro: {
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    paddingBottom: 4,
+  },
+  discoverySearchRow: {
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+  },
   feedViewport: {
     flex: 1,
   },
@@ -7634,21 +7686,12 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   feedSkeletonSearchWrap: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 4,
   },
-  feedSkeletonLiveRadioWrap: {
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-  },
-  feedSkeletonLiveRadioCard: {
-    minHeight: 112,
-    borderRadius: 18,
-    borderWidth: 1,
-    padding: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
+  feedSkeletonComposerWrap: {
+    paddingHorizontal: 20,
+    paddingTop: 4,
   },
   feedSkeletonTab: {
     flex: 1,
@@ -7656,8 +7699,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 12,
   },
-  feedTabBottomSpacer: {
-    height: 5,
+  feedTabs: {
+    paddingTop: 10,
+  },
+  homeFeedTab: {
+    minHeight: 46,
+    paddingVertical: 11,
   },
   feedSkeletonPostCard: {
     marginHorizontal: 16,
@@ -7703,39 +7750,39 @@ const styles = StyleSheet.create({
   },
 
   /* Composer prompt */
-  composerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
-  composerAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  composerInput: { flex: 1, height: 48, borderRadius: 16, paddingHorizontal: 16, justifyContent: "center", flexDirection: "row", alignItems: "center", gap: 10 },
-  composerSearchText: { flex: 1, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium", marginTop: 2 },
-  composerFilterButton: { width: 48, height: 48, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  composerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingVertical: 4, gap: 12 },
+  composerAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  composerInput: { flex: 1, height: 50, borderRadius: radius.input, paddingHorizontal: 16, justifyContent: "center", flexDirection: "row", alignItems: "center", gap: 10, borderWidth: StyleSheet.hairlineWidth, borderColor: palette.line },
+  composerSearchText: { flex: 1, fontSize: moderateScale(14), fontFamily: typography.medium, marginTop: 1 },
+  composerFilterButton: { width: 50, height: 50, borderRadius: radius.input, alignItems: "center", justifyContent: "center", borderWidth: StyleSheet.hairlineWidth, borderColor: palette.line },
   composerMediaBtn: { padding: 4 },
   createPostPrompt: {
-    marginHorizontal: 14,
-    marginTop: 8,
-    marginBottom: 2,
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 10,
+    marginHorizontal: 20,
+    marginTop: 2,
+    height: 56,
+    borderRadius: 0,
+    borderWidth: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 4,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
   createPostInput: {
     flex: 1,
-    height: 40,
-    borderRadius: 20,
+    height: 36,
+    borderRadius: radius.input,
     justifyContent: "center",
     paddingHorizontal: 14,
   },
   createPostInputText: {
     fontSize: moderateScale(13),
-    fontFamily: "Poppins_500Medium",
-    marginTop: 4,
+    fontFamily: typography.medium,
   },
   createPostMediaButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: radius.control,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -7746,71 +7793,98 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
   },
   liveRadioCard: {
-    minHeight: 104,
-    marginHorizontal: 14,
-    marginTop: 10,
-    marginBottom: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 12,
+    marginHorizontal: 0,
+    marginTop: 0,
+    borderRadius: 0,
+    borderWidth: 0,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 16,
+  },
+  liveRadioHeader: {
+    minHeight: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  liveRadioBrand: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: moderateScale(11),
+    fontFamily: typography.medium,
+  },
+  liveRadioBody: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 5 },
-    shadowRadius: 12,
-    elevation: 2,
   },
   liveRadioIcon: {
-    width: 68,
-    height: 68,
+    width: 72,
+    height: 72,
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
   },
   liveRadioArtwork: {
-    width: 68,
-    height: 68,
+    width: 72,
+    height: 72,
     borderRadius: 14,
   },
   liveRadioEyebrowRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    minHeight: moderateScale(12),
-    marginBottom: 2,
+    minHeight: moderateScale(14),
   },
   liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: "#EF4444",
   },
   liveRadioEyebrow: {
-    fontSize: moderateScale(9),
-    lineHeight: moderateScale(12),
-    fontFamily: "Poppins_700Bold",
+    color: "#EF4444",
+    fontSize: moderateScale(10),
+    lineHeight: moderateScale(14),
+    fontFamily: typography.bold,
     textTransform: "uppercase",
-    letterSpacing: 0,
+    letterSpacing: 0.5,
     includeFontPadding: false,
     textAlignVertical: "center",
   },
   liveRadioTitle: {
     fontSize: moderateScale(15),
-    fontFamily: "Poppins_700Bold",
-    lineHeight: 20,
+    fontFamily: typography.title,
+    lineHeight: 19,
   },
   liveRadioSubtitle: {
     fontSize: moderateScale(11),
     fontFamily: "Poppins_400Regular",
-    lineHeight: 16,
+    lineHeight: 15,
     marginTop: 2,
   },
   liveRadioMeta: {
-    fontSize: moderateScale(9),
-    fontFamily: "Poppins_500Medium",
-    lineHeight: 13,
-    marginTop: 4,
+    fontSize: moderateScale(10),
+    fontFamily: typography.medium,
+    lineHeight: 14,
+    marginTop: 3,
+  },
+  liveRadioCta: {
+    minHeight: 34,
+    marginTop: 9,
+    paddingHorizontal: 13,
+    borderRadius: radius.control,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  liveRadioCtaText: {
+    color: "#FFFFFF",
+    fontSize: moderateScale(11),
+    fontFamily: typography.bold,
   },
   liveRadioTapHint: {
     marginTop: 3,
@@ -7917,21 +7991,17 @@ const styles = StyleSheet.create({
   },
 
   /* Tabs */
-  tabRow: { flexDirection: "row", borderBottomWidth: 1, marginTop: 6 },
+  tabRow: { flexDirection: "row", borderBottomWidth: 1 },
   tab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 12 },
   tabText: { fontSize: moderateScale(13), fontWeight: "600" },
 
   socialPostCard: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingTop: 12,
-    paddingBottom: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 12,
-    elevation: 2,
+    marginHorizontal: 0,
+    marginTop: 0,
+    borderRadius: 0,
+    borderWidth: 0,
+    paddingTop: 16,
+    paddingBottom: 16,
   },
   socialPostHeader: {
     flexDirection: "row",
@@ -7993,7 +8063,7 @@ const styles = StyleSheet.create({
   socialName: {
     flexShrink: 1,
     fontSize: moderateScale(15),
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.heading,
     lineHeight: 21,
   },
   socialMetaRow: {
@@ -8045,7 +8115,7 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     marginBottom: 10,
     fontSize: moderateScale(14),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     lineHeight: 20,
   },
   socialChipRow: {

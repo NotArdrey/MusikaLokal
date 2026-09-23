@@ -307,7 +307,7 @@ export default function PostDetailsScreen() {
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Post" onBackPress={() => router.back()} />
+        <Header compact title="Post" onBackPress={() => router.back()} />
         <View style={{ padding: 16 }}>
           <Skeleton width={SCREEN_WIDTH - 32} height={200} style={{ borderRadius: 12, marginBottom: 16 }} />
           <Skeleton width={SCREEN_WIDTH * 0.6} height={20} style={{ borderRadius: 6 }} />
@@ -319,7 +319,7 @@ export default function PostDetailsScreen() {
   if (!post) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Post" onBackPress={() => router.back()} />
+        <Header compact title="Post" onBackPress={() => router.back()} />
         <View style={styles.centered}>
           <Text style={{ color: colors.textSecondary, fontSize: moderateScale(15) }}>Post not found</Text>
         </View>
@@ -340,7 +340,7 @@ export default function PostDetailsScreen() {
       style={[styles.container, { backgroundColor: colors.background }]}
       behavior={keyboardAvoidingBehavior}
     >
-      <Header title="Post" onBackPress={() => router.back()} />
+      <Header compact title="Post" onBackPress={() => router.back()} />
 
       <ScrollView
         style={styles.content}

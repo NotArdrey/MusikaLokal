@@ -246,6 +246,8 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
             >
                 <Header
                     title="Messages"
+                    overline="MusikaLokal"
+                    showTitle={false}
                     rightIconName="create-outline"
                     rightIconOnPress={() => setShowNewMessageModal(true)}
                 />

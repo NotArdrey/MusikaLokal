@@ -907,7 +907,6 @@ export const useApplicationSubmissionAction = ({
     videoUrl,
     videoReviewFrameUrl,
     videoReviewFrameUrls,
-    videoCopyrightAcknowledged,
     videoCopyrightDecision,
     setVideoReviewFrameUrl,
     setVideoReviewFrameUrls,
@@ -1208,11 +1207,11 @@ export const useApplicationSubmissionAction = ({
       return;
     }
 
-    if (!videoCopyrightAcknowledged || videoCopyrightDecision?.allowed !== true) {
+    if (videoCopyrightDecision?.allowed !== true) {
       setAlertConfig({
         type: "warning",
-        title: "Video Rights Check Required",
-        message: "Confirm your rights and upload the performance video again so its released-recording fingerprint can be checked.",
+        title: "Video Audio Check Required",
+        message: "Upload the performance video again so its audio can be checked for advisory genre evidence.",
       });
       setAlertVisible(true);
       return;

@@ -1,7 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -12,6 +11,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
@@ -37,13 +37,16 @@ import {
 import { prefetchMarketplaceProductDetails } from "../../src/data/coldBootPrefetch";
 import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../../src/utils/e2eFixtures";
 import { getSmoothTabIndex, setSmoothTab } from "../../src/utils/smoothTabs";
+import { typography } from "../../src/theme/tokens";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
   const scaled = Math.max((SCREEN_WIDTH / 375) * size, size * 0.85);
   return size + (scaled - size) * factor;
 };
-const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
+const PAGE_HORIZONTAL_PADDING = 20;
+const PRODUCT_GRID_GAP = 12;
+const PRODUCT_IMAGE_HEIGHT_RATIO = 0.82;
 const MARKETPLACE_PAGE_SIZE = 20;
 const MARKETPLACE_CATEGORIES = [
   { value: "apparel", label: "Apparel" },
@@ -70,6 +73,7 @@ const getProductImage = (product: any) => product?.cover_image_url || product?.p
 export default function MarketplaceScreen() {
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
+  const { width: viewportWidth } = useWindowDimensions();
   const { session, isGuest, userId, userRole, roleResolved, loading: authLoading } = useAuth();
   const { clearBottomOverlays } = useBottomOverlayActions();
   const queryClient = useQueryClient();
@@ -79,6 +83,11 @@ export default function MarketplaceScreen() {
   const isFan = normalizedUserRole === "fan";
   const isMusician = normalizedUserRole === "musician";
   const canSell = Boolean(session && resolvedUserId) && roleResolved && !isMusician;
+  const productCardWidth = Math.max(
+    0,
+    (viewportWidth - (PAGE_HORIZONTAL_PADDING * 2) - PRODUCT_GRID_GAP) / 2,
+  );
+  const productImageHeight = Math.round(productCardWidth * PRODUCT_IMAGE_HEIGHT_RATIO);
 
   const [tab, setTab] = useState<MarketTab>("browse");
 
@@ -513,12 +522,13 @@ export default function MarketplaceScreen() {
           style={[
             styles.productCard,
             {
+              width: productCardWidth,
               backgroundColor: colors.surface,
               borderColor: isDark ? "#334155" : "#E2E8F0",
             },
           ]}
         >
-          <Skeleton width="100%" height={CARD_WIDTH} borderRadius={0} />
+          <Skeleton width="100%" height={productImageHeight} borderRadius={0} />
           <View style={styles.productInfo}>
             <Skeleton width="86%" height={16} style={{ marginBottom: 8 }} />
             <Skeleton width="62%" height={13} style={{ marginBottom: 8 }} />
@@ -535,34 +545,6 @@ export default function MarketplaceScreen() {
   // ==========================================
   const renderBrowse = () => (
     <>
-      <View style={[styles.introCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.introEyebrow, { color: colors.primary }]}>Marketplace</Text>
-          <Text style={[styles.introTitle, { color: colors.text }]}>Browse listings and message sellers directly.</Text>
-          <Text style={[styles.introSubtitle, { color: colors.textSecondary }]}> 
-            {canSell
-              ? "Post merch, gear, and digital drops. Buyers contact you through chat instead of checking out in-app."
-              : "Open any listing to ask questions, negotiate, and arrange the sale with the seller."}
-          </Text>
-        </View>
-
-        {canSell ? (
-          <TouchableOpacity
-            testID="mobile-marketplace-create-listing-hero-button"
-            accessibilityLabel="mobile-marketplace-create-listing-hero-button"
-            activeOpacity={1}
-            style={[styles.introAction, { backgroundColor: colors.primary }]}
-            onPress={() => {
-              setTab("sell");
-              openCreateListing();
-            }}
-          >
-            <Ionicons name="add" size={16} color="#fff" />
-            <Text style={styles.introActionText}>Create listing</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-
       {/* Search */}
       <View style={[styles.searchBar, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
         <Ionicons name="search" size={20} color={colors.textSecondary} />
@@ -587,7 +569,7 @@ export default function MarketplaceScreen() {
           }]}
           onPress={() => setCategory(null)}
         >
-          <Text style={{ color: !category ? colors.primary : colors.textSecondary, fontSize: moderateScale(12) }}>All</Text>
+          <Text style={{ color: !category ? colors.primary : colors.textSecondary, fontSize: moderateScale(12), fontFamily: typography.medium }}>All</Text>
         </TouchableOpacity>
         {MARKETPLACE_CATEGORIES.map((c) => (
           <TouchableOpacity activeOpacity={1}
@@ -598,7 +580,7 @@ export default function MarketplaceScreen() {
             }]}
             onPress={() => setCategory(category === c.value ? null : c.value)}
           >
-            <Text style={{ color: category === c.value ? colors.primary : colors.textSecondary, fontSize: moderateScale(12) }}>{c.label}</Text>
+            <Text style={{ color: category === c.value ? colors.primary : colors.textSecondary, fontSize: moderateScale(12), fontFamily: typography.medium }}>{c.label}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -622,6 +604,7 @@ export default function MarketplaceScreen() {
                   style={[
                     styles.productCard,
                     {
+                      width: productCardWidth,
                       backgroundColor: colors.surface,
                       borderColor: cardBorderColor,
                       opacity: isSold ? 0.78 : 1,
@@ -630,17 +613,17 @@ export default function MarketplaceScreen() {
                   onPressIn={() => warmProductDetails(product.id)}
                   onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}
                 >
-                  <View style={styles.productImageWrap}>
+                  <View style={[styles.productImageWrap, { height: productImageHeight }]}>
                     {getProductImage(product) ? (
                       <CachedImage
                         uri={getProductImage(product)}
-                        style={styles.productImage}
-                        width={Math.round(CARD_WIDTH)}
-                        height={Math.round(CARD_WIDTH)}
+                        style={[styles.productImage, { height: productImageHeight }]}
+                        width={Math.round(productCardWidth)}
+                        height={productImageHeight}
                         priority="high"
                       />
                     ) : (
-                      <View style={[styles.productImagePlaceholder, { backgroundColor: colors.primary + "10" }]}>
+                      <View style={[styles.productImagePlaceholder, { height: productImageHeight, backgroundColor: colors.primary + "10" }]}>
                         <Ionicons name="bag-outline" size={28} color={colors.primary} />
                       </View>
                     )}
@@ -786,7 +769,7 @@ export default function MarketplaceScreen() {
 
               <View style={{ alignItems: "flex-end", gap: 8 }}>
                 <View style={[styles.statusBadge, { backgroundColor: statusColor + "20" }]}> 
-                  <Text style={{ color: statusColor, fontSize: moderateScale(10), fontFamily: "Poppins_600SemiBold", textTransform: "capitalize" }}>
+                  <Text style={{ color: statusColor, fontSize: moderateScale(10), fontFamily: typography.semibold, textTransform: "capitalize" }}>
                     {statusLabel}
                   </Text>
                 </View>
@@ -798,7 +781,7 @@ export default function MarketplaceScreen() {
                     disabled={isBusy}
                     onPress={() => handlePublishProduct(product.id)}
                   >
-                    <Text style={{ color: colors.primary, fontSize: moderateScale(11), fontFamily: "Poppins_600SemiBold" }}>
+                    <Text style={{ color: colors.primary, fontSize: moderateScale(11), fontFamily: typography.semibold }}>
                       {isBusy ? "Updating..." : "Publish"}
                     </Text>
                   </TouchableOpacity>
@@ -811,7 +794,7 @@ export default function MarketplaceScreen() {
                     disabled={isBusy}
                     onPress={() => handleListingStatus(product.id, "mark_product_sold")}
                   >
-                    <Text style={{ color: "#F97316", fontSize: moderateScale(11), fontFamily: "Poppins_600SemiBold" }}>
+                    <Text style={{ color: "#F97316", fontSize: moderateScale(11), fontFamily: typography.semibold }}>
                       {isBusy ? "Updating..." : "Mark Sold"}
                     </Text>
                   </TouchableOpacity>
@@ -824,7 +807,7 @@ export default function MarketplaceScreen() {
                     disabled={isBusy}
                     onPress={() => handleListingStatus(product.id, "relist_product")}
                   >
-                    <Text style={{ color: colors.primary, fontSize: moderateScale(11), fontFamily: "Poppins_600SemiBold" }}>
+                    <Text style={{ color: colors.primary, fontSize: moderateScale(11), fontFamily: typography.semibold }}>
                       {isBusy ? "Updating..." : "Relist"}
                     </Text>
                   </TouchableOpacity>
@@ -870,7 +853,7 @@ export default function MarketplaceScreen() {
       accessibilityLabel="mobile-marketplace-page"
       style={[styles.container, { backgroundColor: colors.background }]}
     >
-      <Header title="Marketplace" />
+      <Header title="Marketplace" showTitle={false} />
 
       {/* Main Tabs */}
       {tabs.length > 1 && (
@@ -1025,7 +1008,7 @@ export default function MarketplaceScreen() {
                         style={{
                           color: isSelected ? colors.primary : colors.textSecondary,
                           fontSize: moderateScale(12),
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                         }}
                       >
                         {option.label}
@@ -1058,80 +1041,68 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   tabRow: { flexDirection: "row", borderBottomWidth: 1 },
   mainTab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 14 },
-  mainTabText: { fontSize: moderateScale(13), fontFamily: "Poppins_600SemiBold" },
-  content: { flex: 1, paddingHorizontal: 16, paddingTop: 12 },
-  introCard: { borderWidth: 1, borderRadius: 18, padding: 16, marginBottom: 12, gap: 14 },
-  introEyebrow: { fontSize: moderateScale(11), fontFamily: "Poppins_700Bold", textTransform: "uppercase", letterSpacing: 0.6 },
-  introTitle: { fontSize: moderateScale(18), fontFamily: "Poppins_700Bold", marginTop: 4 },
-  introSubtitle: { fontSize: moderateScale(13), lineHeight: 20, marginTop: 6 },
-  introAction: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999 },
-  introActionText: {
-    color: "#fff",
-    fontSize: moderateScale(13),
-    fontFamily: "Poppins_700Bold",
-    includeFontPadding: false,
-    textAlignVertical: "center",
-  },
-  searchBar: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, height: 48, borderRadius: 16, marginBottom: 8 },
-  searchInput: { flex: 1, height: 24, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium", lineHeight: 20, includeFontPadding: false, padding: 0, textAlignVertical: "center" },
-  categoryRow: { marginBottom: 12, maxHeight: 44 },
-  categoryPill: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6, marginRight: 8 },
+  mainTabText: { fontSize: moderateScale(13), fontFamily: typography.semibold },
+  content: { flex: 1, paddingHorizontal: PAGE_HORIZONTAL_PADDING, paddingTop: 18 },
+  searchBar: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, height: 54, borderRadius: 16, marginBottom: 12 },
+  searchInput: { flex: 1, height: 24, fontSize: moderateScale(15), fontFamily: typography.medium, lineHeight: 20, includeFontPadding: false, padding: 0, textAlignVertical: "center" },
+  categoryRow: { marginBottom: 16, maxHeight: 40 },
+  categoryPill: { minHeight: 38, justifyContent: "center", borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, marginRight: 8 },
   modalCategoryRow: { gap: 8, paddingVertical: 4, paddingRight: 16 },
   modalCategoryPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
-  grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
-  productCard: { width: CARD_WIDTH, borderRadius: 12, borderWidth: 1, marginBottom: 14, overflow: "hidden" },
-  productImageWrap: { position: "relative", width: "100%", height: CARD_WIDTH },
-  productImage: { width: "100%", height: CARD_WIDTH },
-  productImagePlaceholder: { width: "100%", height: CARD_WIDTH, alignItems: "center", justifyContent: "center" },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: PRODUCT_GRID_GAP },
+  productCard: { borderRadius: 12, borderWidth: 1, marginBottom: 2, overflow: "hidden" },
+  productImageWrap: { position: "relative", width: "100%" },
+  productImage: { width: "100%" },
+  productImagePlaceholder: { width: "100%", alignItems: "center", justifyContent: "center" },
   soldOverlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15, 23, 42, 0.42)" },
   soldBadge: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 999, backgroundColor: "#F97316", paddingHorizontal: 10, paddingVertical: 6 },
-  soldBadgeText: { color: "#fff", fontSize: moderateScale(11), fontFamily: "Poppins_700Bold" },
+  soldBadgeText: { color: "#fff", fontSize: moderateScale(11), fontFamily: typography.bold },
   productInfo: { padding: 10 },
-  productTitle: { fontSize: moderateScale(13), fontFamily: "Poppins_600SemiBold" },
-  productSeller: { fontSize: moderateScale(11), marginTop: 2 },
-  productPrice: { fontSize: moderateScale(14), fontFamily: "Poppins_700Bold", marginTop: 4 },
-  variantCount: { flex: 1, minWidth: 0, fontSize: moderateScale(10) },
+  productTitle: { fontSize: moderateScale(13), fontFamily: typography.semibold },
+  productSeller: { fontSize: moderateScale(11), fontFamily: typography.body, marginTop: 2 },
+  productPrice: { fontSize: moderateScale(14), fontFamily: typography.bold, marginTop: 4 },
+  variantCount: { flex: 1, minWidth: 0, fontSize: moderateScale(10), fontFamily: typography.medium },
   cardFooterRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6, gap: 6 },
   chatHint: { flexShrink: 0, flexDirection: "row", alignItems: "center", gap: 3, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
-  chatHintText: { fontSize: moderateScale(10), fontFamily: "Poppins_600SemiBold" },
+  chatHintText: { fontSize: moderateScale(10), fontFamily: typography.semibold },
   loadMoreButton: { minHeight: 46, borderWidth: 1, borderRadius: 14, marginTop: 4, marginBottom: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  loadMoreText: { fontSize: moderateScale(13), fontFamily: "Poppins_700Bold" },
+  loadMoreText: { fontSize: moderateScale(13), fontFamily: typography.bold },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
   sellStatsRow: { flexDirection: "row", justifyContent: "space-between", gap: 10, marginBottom: 14 },
   sellStatCard: { flex: 1, borderRadius: 14, borderWidth: 1, paddingVertical: 14, paddingHorizontal: 10, alignItems: "center" },
-  sellStatValue: { fontSize: moderateScale(18), fontFamily: "Poppins_700Bold", marginTop: 8 },
-  sellStatLabel: { fontSize: moderateScale(11), marginTop: 4 },
+  sellStatValue: { fontSize: moderateScale(18), fontFamily: typography.title, marginTop: 8 },
+  sellStatLabel: { fontSize: moderateScale(11), fontFamily: typography.medium, marginTop: 4 },
   addBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 12, marginBottom: 16, gap: 6 },
   addBtnText: {
     color: "#fff",
     fontSize: moderateScale(15),
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     includeFontPadding: false,
     textAlignVertical: "center",
   },
   sellerProductCard: { flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 12, borderWidth: 1, marginBottom: 10 },
   productThumb: { width: 56, height: 56, borderRadius: 8 },
   productThumbPlaceholder: { width: 56, height: 56, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-  sellerProductTitle: { fontSize: moderateScale(14), fontFamily: "Poppins_600SemiBold" },
-  sellerProductPrice: { fontSize: moderateScale(13), marginTop: 2, fontFamily: "Poppins_700Bold" },
-  sellerProductMeta: { fontSize: moderateScale(11), marginTop: 4 },
+  sellerProductTitle: { fontSize: moderateScale(14), fontFamily: typography.semibold },
+  sellerProductPrice: { fontSize: moderateScale(13), marginTop: 2, fontFamily: typography.bold },
+  sellerProductMeta: { fontSize: moderateScale(11), fontFamily: typography.body, marginTop: 4 },
   sellerActionButtons: { flexDirection: "row", gap: 8 },
   iconActionBtn: { width: 34, height: 34, borderRadius: 10, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   iconActionIcon: { width: 16, height: 16, lineHeight: 16, includeFontPadding: false, textAlign: "center", textAlignVertical: "center" },
   emptyContainer: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 400 },
-  emptyText: { textAlign: "center", marginTop: 12, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium" },
+  emptyText: { textAlign: "center", marginTop: 12, fontSize: moderateScale(15), fontFamily: typography.medium },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   modalBox: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: "80%" as any },
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
   sectionTitle: {
     fontSize: moderateScale(17),
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.heading,
     includeFontPadding: false,
     textAlignVertical: "center",
   },
-  inputLabel: { fontSize: moderateScale(13), fontFamily: "Poppins_600SemiBold", marginBottom: 6, marginTop: 12 },
-  input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14), textAlignVertical: "center" },
+  inputLabel: { fontSize: moderateScale(13), fontFamily: typography.semibold, marginBottom: 6, marginTop: 12 },
+  input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14), fontFamily: typography.body, textAlignVertical: "center" },
   textArea: { minHeight: 80, textAlignVertical: "top" },
   submitBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 12, marginTop: 20, marginBottom: 20 },
-  submitBtnText: { color: "#fff", fontSize: moderateScale(15), fontFamily: "Poppins_700Bold" },
+  submitBtnText: { color: "#fff", fontSize: moderateScale(15), fontFamily: typography.bold },
 });

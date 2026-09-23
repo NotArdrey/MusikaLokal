@@ -4,18 +4,20 @@ import { test } from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 
-function createScreeningHarness() {
+function createScreeningHarness({ fallbackGroqApiKey = "" } = {}) {
   const cases = [],
     objects = new Map();
   let handler,
     providerCalls = 0,
     providerFailure = false,
+    primaryAccountFailure = false,
     primaryVisionFailure = false,
     providerAllows = false,
     jsonModeFailure = false,
     storageFailure = false,
     currentUser = "00000000-0000-4000-8000-000000000001";
   const providerRequestBodies = [];
+  const providerAuthorizationHeaders = [];
   const query = (table) => {
     const filters = [];
     let inserted = null;
@@ -116,6 +118,8 @@ function createScreeningHarness() {
               SUPABASE_ANON_KEY: "anon-fixture",
               SUPABASE_SERVICE_ROLE_KEY: "service-fixture",
               GROQ_API_KEY: "groq-fixture",
+              GROQ_FALLBACK_API_KEY: fallbackGroqApiKey,
+              GROQ_VISION_MODEL: "retired/vision-model",
             })[key],
         },
       },
@@ -123,8 +127,16 @@ function createScreeningHarness() {
         providerCalls++;
         const requestBody = JSON.parse(init?.body || "{}");
         providerRequestBodies.push(requestBody);
+        const authorization = init?.headers?.Authorization || init?.headers?.authorization || "";
+        providerAuthorizationHeaders.push(authorization);
         if (providerFailure) return new Response("Unavailable", { status: 503 });
-        if (primaryVisionFailure && requestBody.model === "qwen/qwen3.6-27b") {
+        if (primaryAccountFailure && authorization === "Bearer groq-fixture") {
+          return Response.json(
+            { error: { code: "rate_limit_exceeded", message: "Account rate limit reached" } },
+            { status: 429 },
+          );
+        }
+        if (primaryVisionFailure && requestBody.model === "retired/vision-model") {
           return Response.json(
             { error: { code: "rate_limit_exceeded", message: "Rate limit reached" } },
             { status: 429 },
@@ -165,7 +177,7 @@ function createScreeningHarness() {
       throw new Error("Unexpected import");
     },
   );
-  compile(
+  const screeningModule = compile(
     "../mobile/supabase/functions/upload-safety-screen/index.ts",
     (path) => {
       if (path.includes("uploadModeration")) return shared;
@@ -186,11 +198,17 @@ function createScreeningHarness() {
       return providerCalls;
     },
     providerRequestBodies,
+    providerAuthorizationHeaders,
+    buildCopyrightMatchMetadata: screeningModule.buildCopyrightMatchMetadata,
+    buildPendingCopyrightReviewDecision: screeningModule.buildPendingCopyrightReviewDecision,
     failProvider() {
       providerFailure = true;
     },
     failPrimaryVisionModel() {
       primaryVisionFailure = true;
+    },
+    failPrimaryAccount() {
+      primaryAccountFailure = true;
     },
     allowProvider() {
       providerAllows = true;
@@ -321,9 +339,55 @@ test("visual screening falls back to a separate Groq model after a primary rate 
   assert.equal(result.body.results[0].allowed, true);
   assert.deepEqual(
     h.providerRequestBodies.map((request) => request.model),
-    ["qwen/qwen3.6-27b", "qwen/qwen3.8-27b"],
+    ["retired/vision-model", "qwen/qwen3.8-27b"],
   );
   assert.ok(h.providerRequestBodies.every((request) => request.max_completion_tokens === 160));
+});
+test("visual screening retries the same model with the secondary Groq account", async () => {
+  const h = createScreeningHarness({ fallbackGroqApiKey: "groq-fallback-fixture" });
+  h.allowProvider();
+  h.failPrimaryAccount();
+  const result = await h.screen([file("image-one")]);
+  assert.equal(result.body.results[0].allowed, true);
+  assert.deepEqual(
+    h.providerRequestBodies.map((request) => request.model),
+    ["retired/vision-model", "retired/vision-model"],
+  );
+  assert.deepEqual(h.providerAuthorizationHeaders, [
+    "Bearer groq-fixture",
+    "Bearer groq-fallback-fixture",
+  ]);
+});
+test("ACRCloud catalog genres are preserved in copyright metadata", () => {
+  const h = createScreeningHarness();
+  const metadata = h.buildCopyrightMatchMetadata({
+    title: "Fixture Song",
+    artists: [{ name: "Fixture Artist" }],
+    score: 96,
+    genres: [{ name: "Alternative Rock" }, "OPM", { title: "Alternative Rock" }],
+    external_ids: { isrc: "PH-ABC-26-00001" },
+  });
+
+  assert.deepEqual(Array.from(metadata.recognized_audio_genres), ["Alternative Rock", "OPM"]);
+  assert.equal(metadata.recognized_audio_genre_source, "acrcloud_catalog_metadata");
+  assert.equal(metadata.recognized_audio_genre_confidence, 0.96);
+});
+test("non-gig recording uploads can still use the ownership-review decision", () => {
+  const h = createScreeningHarness();
+  const decision = h.buildPendingCopyrightReviewDecision(
+    {
+      reviewId: "review-fixture",
+      trackKey: "isrc:PHABC2600001",
+      metadata: { copyright_title: "Fixture Song" },
+    },
+    "Ownership or permission review is pending.",
+  );
+
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.requiresAdminReview, true);
+  assert.equal(decision.publiclyAvailable, false);
+  assert.equal(decision.copyrightStatus, "pending_review");
+  assert.equal(decision.copyrightReviewId, "review-fixture");
 });
 test("ordinary image, video, avatar, feed, portfolio, and metadata uploads pass through Groq", async () => {
   const contexts = [

@@ -46,6 +46,7 @@ import {
 } from "../utils/socialFollow";
 import { usePageLoadLogger } from "../utils/loadTimeLogger";
 import { bottomSheetSpringConfig } from "../utils/motion";
+import { palette, radius, typography } from "../theme/tokens";
 import { NAVBAR_BOTTOM_OFFSET } from "./navbar";
 import ListingCard from "./ListingCard";
 import SafeBottomSheetFlatList from "./SafeBottomSheetFlatList";
@@ -882,9 +883,13 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       () => (
         <View style={{ backgroundColor: colors.background }}>
           <View style={styles.headerContainer}>
-            <Text style={[styles.headerTitle, { color: colors.text }]}>
-              Search
-            </Text>
+            <View style={styles.headerIntro}>
+              <View style={styles.headerEyebrowRow}>
+                <View style={styles.headerRule} />
+                <Text style={[styles.headerEyebrow, { color: colors.textSecondary }]}>MUSIKALOKAL / DISCOVER</Text>
+              </View>
+              <Text style={[styles.headerTitle, { color: colors.text }]}>Search the scene</Text>
+            </View>
 
             <View style={{ flexDirection: "column", gap: 8 }}>
               <View
@@ -895,8 +900,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     styles.searchContainer,
                     {
                       flex: 1,
-                      backgroundColor: isDark ? "#374151" : "#F3F4F6",
-                      borderColor: "transparent",
+                      backgroundColor: isDark ? palette.nightRaised : palette.surface,
+                      borderColor: colors.border,
                     },
                   ]}
                 >
@@ -907,6 +912,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                   />
                   <TextInput
                     style={[styles.searchInput, { color: colors.text }]}
+                    accessibilityLabel={isOwner ? "Search musicians and teams" : "Search artists, studios, gigs"}
                     placeholder={
                       isOwner
                         ? "Search musicians and teams"
@@ -941,11 +947,14 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                         showFilters || activeFilterCount > 0
                           ? colors.primary
                           : isDark
-                            ? "#374151"
-                            : "#F3F4F6",
+                            ? palette.nightRaised
+                            : palette.mango,
                     },
                   ]}
                   onPress={toggleFilters}
+                  accessibilityRole="button"
+                  accessibilityLabel="Search filters"
+                  accessibilityState={{ expanded: showFilters }}
                 >
                   <Ionicons
                     name="options-outline"
@@ -953,7 +962,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     color={
                       showFilters || activeFilterCount > 0
                         ? "#FFF"
-                        : colors.textSecondary
+                        : isDark ? colors.textSecondary : palette.ink
                     }
                   />
                   {activeFilterCount > 0 && (
@@ -972,7 +981,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     fontSize: 12,
                     color: colors.textSecondary,
                     marginLeft: 4,
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                   }}
                 >
                   {`${activeFilterCount} filter${activeFilterCount > 1 ? "s" : ""} applied`}
@@ -1070,7 +1079,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         onDismiss={handleClose}
         backgroundStyle={{
           backgroundColor: colors.background,
-          borderRadius: 32,
+          borderRadius: radius.media,
         }}
         handleIndicatorStyle={{
           backgroundColor: isDark ? "#4B5563" : "#E5E7EB",
@@ -1124,10 +1133,28 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerContainer: {
-    paddingTop: 8,
+    paddingTop: 12,
     paddingBottom: 16,
     paddingHorizontal: 24,
-    gap: 16,
+    gap: 18,
+  },
+  headerIntro: {
+    gap: 7,
+  },
+  headerEyebrowRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  headerRule: {
+    width: 24,
+    height: 3,
+    backgroundColor: palette.mango,
+  },
+  headerEyebrow: {
+    fontFamily: typography.bold,
+    fontSize: 10,
+    letterSpacing: 1.4,
   },
   resultListingCard: {
     width: "100%",
@@ -1136,21 +1163,22 @@ const styles = StyleSheet.create({
     height: 10,
   },
   headerTitle: {
-    fontSize: 24,
-    fontFamily: "Poppins_700Bold",
-    marginBottom: 4,
+    fontSize: 28,
+    fontFamily: typography.title,
+    letterSpacing: -0.9,
   },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderRadius: 16,
+    borderRadius: radius.input,
+    borderWidth: StyleSheet.hairlineWidth,
     gap: 10,
   },
   searchInput: {
     flex: 1,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 15,
     lineHeight: 20,
     height: 24,
@@ -1161,7 +1189,7 @@ const styles = StyleSheet.create({
   filterButton: {
     width: 48,
     height: 48,
-    borderRadius: 16,
+    borderRadius: radius.input,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1179,14 +1207,14 @@ const styles = StyleSheet.create({
   filterBadgeText: {
     color: "#FFF",
     fontSize: 10,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   filterPanel: {
     marginHorizontal: 16,
     marginBottom: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    borderRadius: 14,
+    borderRadius: radius.card,
     borderWidth: 1,
     overflow: "hidden",
   },
@@ -1197,7 +1225,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   filterLabel: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 12,
     marginBottom: 6,
   },
@@ -1213,13 +1241,13 @@ const styles = StyleSheet.create({
   filterChip: {
     flexDirection: "row",
     alignItems: "center",
-    minHeight: 32,
+    minHeight: 44,
     paddingHorizontal: 11,
     paddingVertical: 6,
-    borderRadius: 100,
+    borderRadius: radius.control,
   },
   filterChipText: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 12,
     lineHeight: 16,
   },
@@ -1227,6 +1255,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    minHeight: 44,
     paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 1,
@@ -1243,12 +1272,14 @@ const styles = StyleSheet.create({
     paddingTop: 0,
   },
   chip: {
+    minHeight: 44,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 100,
+    borderRadius: radius.control,
+    justifyContent: "center",
   },
   chipText: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 13,
   },
   divider: {
@@ -1263,8 +1294,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   followBadgeBtn: {
-    minHeight: 40,
-    borderRadius: 14,
+    minHeight: 44,
+    borderRadius: radius.button,
     borderWidth: 1,
     paddingHorizontal: 14,
     alignItems: "center",
@@ -1272,7 +1303,7 @@ const styles = StyleSheet.create({
     alignSelf: "stretch",
   },
   followBadgeText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 12,
     lineHeight: 16,
     includeFontPadding: false,
@@ -1296,36 +1327,37 @@ const styles = StyleSheet.create({
   emptyIconContainer: {
     width: 80,
     height: 80,
-    borderRadius: 40,
+    borderRadius: radius.media,
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 16,
   },
   emptyTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 18,
     marginBottom: 8,
     textAlign: "center",
   },
   emptySubtitle: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
     textAlign: "center",
     lineHeight: 22,
   },
   clearFiltersBtn: {
     marginTop: 20,
+    minHeight: 44,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 12,
   },
   clearFiltersBtnText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 14,
   },
   resultsLabel: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.bold,
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
@@ -1354,7 +1386,7 @@ const styles = StyleSheet.create({
     height: 12,
   },
   paginationText: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
   },
 });

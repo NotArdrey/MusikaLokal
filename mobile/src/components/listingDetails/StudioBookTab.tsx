@@ -1265,8 +1265,6 @@ const StudioBookTab = ({
         <View
           style={{
             backgroundColor: isDark ? "#1F2937" : "#FFF7ED",
-            borderLeftWidth: 4,
-            borderLeftColor: "#F59700",
             borderRadius: 8,
             marginBottom: 20,
             padding: 16,

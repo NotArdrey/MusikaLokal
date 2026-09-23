@@ -10,13 +10,17 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import CachedImage from "../src/components/CachedImage";
 import Header from "../src/components/header";
+import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import { useTheme } from "../src/context/ThemeContext";
 import { useMarketplaceProductsQuery } from "../src/data/hooks";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
+import { radius, typography } from "../src/theme/tokens";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -24,11 +28,17 @@ const moderateScale = (size: number, factor = 0.3) => {
   return size + (scaled - size) * factor;
 };
 
-const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
+const PAGE_HORIZONTAL_PADDING = 20;
+const PRODUCT_GRID_GAP = 12;
+const PRODUCT_IMAGE_HEIGHT_RATIO = 0.82;
 const SHOP_PAGE_SIZE = 20;
 
 export default function ShopScreen() {
   const { colors, isDark } = useTheme();
+  const { contentBottomPadding } = useBottomBarClearance(24);
+  const { width: viewportWidth } = useWindowDimensions();
+  const productCardWidth = Math.max(0, (viewportWidth - (PAGE_HORIZONTAL_PADDING * 2) - PRODUCT_GRID_GAP) / 2);
+  const productImageHeight = Math.round(productCardWidth * PRODUCT_IMAGE_HEIGHT_RATIO);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
@@ -83,12 +93,13 @@ export default function ShopScreen() {
           style={[
             styles.productCard,
             {
+              width: productCardWidth,
               backgroundColor: colors.surface,
               borderColor: isDark ? "#334155" : "#E2E8F0",
             },
           ]}
         >
-          <Skeleton width="100%" height={CARD_WIDTH} borderRadius={0} />
+          <Skeleton width="100%" height={productImageHeight} borderRadius={0} />
           <View style={styles.productInfo}>
             <Skeleton width="86%" height={16} style={{ marginBottom: 8 }} />
             <Skeleton width="62%" height={13} style={{ marginBottom: 8 }} />
@@ -101,25 +112,27 @@ export default function ShopScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title="Shop" onBackPress={() => router.back()} />
+      <Header title="Marketplace" showTitle={false} />
 
-      <View style={[styles.introCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.introEyebrow, { color: colors.primary }]}>Marketplace</Text>
-          <Text style={[styles.introTitle, { color: colors.text }]}>Browse listings or open Seller Hub to post your own.</Text>
-          <Text style={[styles.introSubtitle, { color: colors.textSecondary }]}>Every signed-in account can sell merch, gear, and digital drops.</Text>
+      <View style={[styles.modeTabs, { borderBottomColor: colors.border }]}>
+        <View style={styles.modeTab} accessible accessibilityRole="tab" accessibilityState={{ selected: true }}>
+          <Text style={[styles.modeTabText, { color: colors.primary }]}>Browse</Text>
+          <View style={[styles.modeIndicator, { backgroundColor: colors.primary }]} />
         </View>
-        <TouchableOpacity activeOpacity={1}
-          style={[styles.introAction, { backgroundColor: colors.primary }]}
+        <TouchableOpacity
+          activeOpacity={1}
+          style={styles.modeTab}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: false }}
+          accessibilityLabel="Sell"
           onPress={() => router.push("/seller_hub")}
         >
-          <Ionicons name="storefront-outline" size={16} color="#fff" />
-          <Text style={styles.introActionText}>Seller Hub</Text>
+          <Text style={[styles.modeTabText, { color: colors.textSecondary }]}>Sell</Text>
         </TouchableOpacity>
       </View>
 
       {/* Search */}
-      <View style={[styles.searchBar, { backgroundColor: isDark ? "#374151" : "#F3F4F6", marginHorizontal: 16, marginTop: 12 }]}>
+      <View style={[styles.searchBar, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
         <Ionicons name="search" size={20} color={colors.textSecondary} />
         <TextInput
           style={[styles.searchInput, { color: colors.text }]}
@@ -135,7 +148,7 @@ export default function ShopScreen() {
       </View>
 
       {/* Categories */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryRow} contentContainerStyle={{ paddingHorizontal: 16 }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryRow} contentContainerStyle={styles.categoryContent}>
         <TouchableOpacity activeOpacity={1}
           style={[styles.categoryPill, {
             borderColor: !category ? colors.primary : colors.border,
@@ -143,7 +156,7 @@ export default function ShopScreen() {
           }]}
           onPress={() => setCategory(null)}
         >
-          <Text style={{ color: !category ? colors.primary : colors.textSecondary, fontSize: moderateScale(12) }}>All</Text>
+          <Text style={{ color: !category ? colors.primary : colors.textSecondary, fontSize: moderateScale(12), fontFamily: typography.medium }}>All</Text>
         </TouchableOpacity>
         {categories.map((c) => (
           <TouchableOpacity activeOpacity={1}
@@ -154,13 +167,14 @@ export default function ShopScreen() {
             }]}
             onPress={() => setCategory(category === c ? null : c)}
           >
-            <Text style={{ color: category === c ? colors.primary : colors.textSecondary, fontSize: moderateScale(12) }}>{c}</Text>
+            <Text style={{ color: category === c ? colors.primary : colors.textSecondary, fontSize: moderateScale(12), fontFamily: typography.medium }}>{c}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
 
       <ScrollView
         style={styles.content}
+        contentContainerStyle={{ paddingBottom: contentBottomPadding }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         {loading ? (
@@ -171,13 +185,13 @@ export default function ShopScreen() {
               {visibleProducts.map((product) => (
                 <TouchableOpacity activeOpacity={1}
                   key={product.id}
-                  style={[styles.productCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
+                  style={[styles.productCard, { width: productCardWidth, backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
                   onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}
                 >
                   {product.cover_image_url ? (
-                    <CachedImage uri={product.cover_image_url } style={styles.productImage} />
+                    <CachedImage uri={product.cover_image_url } style={[styles.productImage, { height: productImageHeight }]} width={Math.round(productCardWidth)} height={productImageHeight} />
                   ) : (
-                    <View style={[styles.productImagePlaceholder, { backgroundColor: colors.primary + "10" }]}>
+                    <View style={[styles.productImagePlaceholder, { height: productImageHeight, backgroundColor: colors.primary + "10" }]}>
                       <Ionicons name="bag-outline" size={28} color={colors.primary} />
                     </View>
                   )}
@@ -221,37 +235,34 @@ export default function ShopScreen() {
      </View>
         )}
 
-        <View style={{ height: 100 }} />
       </ScrollView>
-
-      
+      <Navbar />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  introCard: { borderWidth: 1, borderRadius: 18, padding: 16, marginHorizontal: 16, marginTop: 12, marginBottom: 4, gap: 14 },
-  introEyebrow: { fontSize: moderateScale(11), fontFamily: "Poppins_700Bold", textTransform: "uppercase", letterSpacing: 0.6 },
-  introTitle: { fontSize: moderateScale(18), fontFamily: "Poppins_700Bold", marginTop: 4 },
-  introSubtitle: { fontSize: moderateScale(13), lineHeight: 20, marginTop: 6 },
-  introAction: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999 },
-  introActionText: { color: "#fff", fontSize: moderateScale(13), fontFamily: "Poppins_700Bold", includeFontPadding: false, textAlignVertical: "center" },
-  searchBar: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, height: 48, borderRadius: 16 },
-  searchInput: { flex: 1, height: 24, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium", lineHeight: 20, includeFontPadding: false, padding: 0, textAlignVertical: "center" },
-  categoryRow: { marginTop: 12, maxHeight: 44 },
-  categoryPill: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6, marginRight: 8 },
-  content: { flex: 1, paddingHorizontal: 16, paddingTop: 12 },
-  grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
-  productCard: { width: CARD_WIDTH, borderRadius: 12, borderWidth: 1, marginBottom: 14, overflow: "hidden" },
-  productImage: { width: "100%", height: CARD_WIDTH },
-  productImagePlaceholder: { width: "100%", height: CARD_WIDTH, alignItems: "center", justifyContent: "center" },
+  modeTabs: { flexDirection: "row", borderBottomWidth: 1 },
+  modeTab: { flex: 1, minHeight: 48, alignItems: "center", justifyContent: "center", position: "relative" },
+  modeTabText: { fontSize: moderateScale(13), fontFamily: typography.semibold },
+  modeIndicator: { position: "absolute", bottom: 0, width: "30%", height: 3, borderRadius: 999 },
+  searchBar: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: PAGE_HORIZONTAL_PADDING, marginTop: 18, marginBottom: 12, paddingHorizontal: 16, height: 54, borderRadius: radius.input },
+  searchInput: { flex: 1, height: 24, fontSize: moderateScale(15), fontFamily: typography.medium, lineHeight: 20, includeFontPadding: false, padding: 0, textAlignVertical: "center" },
+  categoryRow: { maxHeight: 40 },
+  categoryContent: { paddingHorizontal: PAGE_HORIZONTAL_PADDING },
+  categoryPill: { minHeight: 38, justifyContent: "center", borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, marginRight: 8 },
+  content: { flex: 1, paddingHorizontal: PAGE_HORIZONTAL_PADDING, paddingTop: 16 },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: PRODUCT_GRID_GAP },
+  productCard: { borderRadius: radius.card, borderWidth: 1, marginBottom: 2, overflow: "hidden" },
+  productImage: { width: "100%" },
+  productImagePlaceholder: { width: "100%", alignItems: "center", justifyContent: "center" },
   productInfo: { padding: 10 },
-  productTitle: { fontSize: moderateScale(13), fontFamily: "Poppins_600SemiBold" },
-  productSeller: { fontSize: moderateScale(11), marginTop: 2 },
-  productPrice: { fontSize: moderateScale(14), fontFamily: "Poppins_700Bold", marginTop: 4 },
-  variantCount: { fontSize: moderateScale(10), marginTop: 2 },
+  productTitle: { fontSize: moderateScale(13), fontFamily: typography.semibold },
+  productSeller: { fontSize: moderateScale(11), fontFamily: typography.body, marginTop: 2 },
+  productPrice: { fontSize: moderateScale(14), fontFamily: typography.bold, marginTop: 4 },
+  variantCount: { fontSize: moderateScale(10), fontFamily: typography.body, marginTop: 2 },
   loadMoreButton: { minHeight: 46, borderWidth: 1, borderRadius: 14, marginTop: 4, marginBottom: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  loadMoreText: { fontSize: moderateScale(13), fontFamily: "Poppins_700Bold" },
-  emptyText: { textAlign: "center", marginTop: 12, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium" },
+  loadMoreText: { fontSize: moderateScale(13), fontFamily: typography.bold },
+  emptyText: { textAlign: "center", marginTop: 12, fontSize: moderateScale(15), fontFamily: typography.medium },
 });

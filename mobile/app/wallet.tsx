@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView, BottomSheetView, useBottomSheetSpringConfigs } from '@gorhom/bottom-sheet';
 import * as ExpoLinking from 'expo-linking';
-import { useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Linking, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
@@ -482,11 +482,17 @@ export default function WalletScreen() {
     }
   };
 
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) return;
+      void refetchWalletSummary();
+    }, [refetchWalletSummary, userId]),
+  );
+
   useEffect(() => {
-    if (walletRefreshKey) {
-      void fetchWallet();
-    }
-  }, [fetchWallet, walletRefreshKey]);
+    if (!userId || !walletRefreshKey) return;
+    void refetchWalletSummary();
+  }, [refetchWalletSummary, userId, walletRefreshKey]);
 
   const onRefresh = () => {
     setRefreshing(true);

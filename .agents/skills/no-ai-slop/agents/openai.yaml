@@ -1,0 +1,4 @@
+interface:
+  display_name: "No AI Slop"
+  short_description: "Review and remove low-quality AI code patterns"
+  default_prompt: "Use $no-ai-slop to review the current diff, fix substantiated code-quality issues, and summarize what changed."

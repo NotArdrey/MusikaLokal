@@ -19,7 +19,10 @@ const corsHeaders = {
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
-const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY")?.trim() || "";
+const GROQ_API_KEYS = Array.from(new Set([
+  Deno.env.get("GROQ_API_KEY")?.trim(),
+  Deno.env.get("GROQ_FALLBACK_API_KEY")?.trim(),
+].filter((key): key is string => Boolean(key))));
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY")?.trim() || "";
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
@@ -34,11 +37,13 @@ const ACRCLOUD_CUSTOM_ACCESS_KEY = Deno.env.get("ACRCLOUD_CUSTOM_ACCESS_KEY")?.t
 const ACRCLOUD_CUSTOM_ACCESS_SECRET = Deno.env.get("ACRCLOUD_CUSTOM_ACCESS_SECRET")?.trim() || "";
 
 const MAX_FILES_PER_REQUEST = 10;
-const GROQ_VISION_MODEL = Deno.env.get("GROQ_VISION_MODEL")?.trim() || "qwen/qwen3.6-27b";
-const GROQ_VISION_FALLBACK_MODEL =
-  Deno.env.get("GROQ_VISION_FALLBACK_MODEL")?.trim() || "qwen/qwen3.8-27b";
+const DEFAULT_GROQ_VISION_MODEL = "qwen/qwen3.8-27b";
 const GROQ_VISION_MODELS = Array.from(
-  new Set([GROQ_VISION_MODEL, GROQ_VISION_FALLBACK_MODEL].filter(Boolean)),
+  new Set([
+    Deno.env.get("GROQ_VISION_MODEL")?.trim(),
+    Deno.env.get("GROQ_VISION_FALLBACK_MODEL")?.trim(),
+    DEFAULT_GROQ_VISION_MODEL,
+  ].filter((model): model is string => Boolean(model))),
 );
 // The response is a tiny JSON object. A large reservation needlessly consumes
 // Groq's output-token allowance and makes multi-frame videos hit 429s.
@@ -180,6 +185,22 @@ type CopyrightScreeningContext = {
   } | null;
   context?: string;
 };
+
+export function buildPendingCopyrightReviewDecision(
+  ownershipReview: { reviewId?: string | null; trackKey?: string | null; metadata?: Record<string, unknown> },
+  reason: string,
+): Omit<ScreeningResult, "id"> {
+  return {
+    allowed: true,
+    reason,
+    requiresAdminReview: true,
+    publiclyAvailable: false,
+    copyrightStatus: "pending_review",
+    copyrightReviewId: ownershipReview.reviewId || null,
+    copyrightTrackKey: ownershipReview.trackKey || null,
+    copyrightMetadata: ownershipReview.metadata || {},
+  };
+}
 
 // ─── Rule-based pre-screen ────────────────────────────────────────────────────
 
@@ -418,6 +439,51 @@ async function createAcrCloudSignature(
   return bytesToBase64(new Uint8Array(signature));
 }
 
+function buildGenreEvidenceReceiptPayload(userId: string, metadata: Record<string, unknown>): string {
+  const genres = Array.isArray(metadata.recognized_audio_genres)
+    ? metadata.recognized_audio_genres.map((genre) => String(genre).trim().toLowerCase()).filter(Boolean).sort()
+    : [];
+  const rawScore = Number(metadata.copyright_score);
+  return JSON.stringify({
+    version: 1,
+    user_id: userId,
+    track_key: String(metadata.copyright_track_key || ""),
+    score: Number.isFinite(rawScore) ? rawScore : null,
+    genres,
+  });
+}
+
+async function attachGenreEvidenceReceipt(
+  metadata: Record<string, unknown>,
+  userId: string,
+): Promise<Record<string, unknown>> {
+  const secret = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim() || "";
+  if (!secret || !userId || !Array.isArray(metadata.recognized_audio_genres) || metadata.recognized_audio_genres.length === 0) {
+    return metadata;
+  }
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(buildGenreEvidenceReceiptPayload(userId, metadata)),
+  );
+  const receipt = Array.from(new Uint8Array(signature))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return {
+    ...metadata,
+    genre_evidence_receipt_version: 1,
+    genre_evidence_user_id: userId,
+    genre_evidence_receipt: receipt,
+  };
+}
+
 function getAcrCloudIdentifyUrl(host: string): string {
   const trimmedHost = host.replace(/\/+$/, "");
   if (/^https?:\/\//i.test(trimmedHost)) {
@@ -455,6 +521,34 @@ function getAcrArtistNames(match: any): string[] {
     : [];
 }
 
+function collectAcrGenreNames(value: unknown, result: string[]): void {
+  if (typeof value === "string") {
+    const genre = value.trim();
+    if (genre) result.push(genre);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectAcrGenreNames(item, result));
+    return;
+  }
+
+  if (!value || typeof value !== "object") return;
+  const genre = value as Record<string, unknown>;
+  if (typeof genre.name === "string") collectAcrGenreNames(genre.name, result);
+  else if (typeof genre.title === "string") collectAcrGenreNames(genre.title, result);
+}
+
+export function getAcrGenreNames(match: any): string[] {
+  const genres: string[] = [];
+  collectAcrGenreNames(match?.genres, genres);
+  collectAcrGenreNames(match?.genre, genres);
+  collectAcrGenreNames(match?.external_metadata?.spotify?.track?.genres, genres);
+  collectAcrGenreNames(match?.external_metadata?.deezer?.track?.genres, genres);
+
+  return Array.from(new Set(genres.map((genre) => genre.trim()).filter(Boolean)));
+}
+
 function getAcrRightsOwner(match: any): string {
   return Array.isArray(match?.rights_claim)
     ? match.rights_claim
@@ -476,8 +570,9 @@ function buildCopyrightTrackKey(match: any): string {
   return `track:${hashText(`${title}|${artists}`)}`;
 }
 
-function buildCopyrightMatchMetadata(match: any) {
+export function buildCopyrightMatchMetadata(match: any) {
   const artistNames = getAcrArtistNames(match);
+  const recognizedAudioGenres = getAcrGenreNames(match);
   const title = typeof match?.title === "string" && match.title.trim()
     ? match.title.trim()
     : "Released recording";
@@ -501,6 +596,11 @@ function buildCopyrightMatchMetadata(match: any) {
     copyright_release_date: String(match?.release_date || "").trim() || null,
     copyright_rights_owner: rightsOwner || null,
     copyright_match_type: String(match?._musikalokal_match_type || "audio_fingerprint"),
+    recognized_audio_genres: recognizedAudioGenres,
+    recognized_audio_genre_source: recognizedAudioGenres.length > 0 ? "acrcloud_catalog_metadata" : null,
+    recognized_audio_genre_confidence: Number.isFinite(score)
+      ? Math.max(0, Math.min(1, score / 100))
+      : null,
   };
 }
 
@@ -839,7 +939,7 @@ async function findInternalPlaylistMatch(
 
       const { data: playlistItem, error: itemError } = await screeningContext.supabaseAdmin
         .from("playlist_items")
-        .select("id, playlist_id, title, artist_name, copyright_status, copyright_review_id, copyright_metadata")
+        .select("id, playlist_id, title, artist_name, copyright_status, copyright_review_id, copyright_metadata, playlist:playlists!playlist_id(genre)")
         .eq("id", fingerprint.playlist_item_id)
         .maybeSingle();
       if (itemError || !playlistItem) {
@@ -913,6 +1013,34 @@ async function resolveInternalPlaylistMatch(
   internalMatch: InternalPlaylistMatch,
   screeningContext: CopyrightScreeningContext,
 ): Promise<Omit<ScreeningResult, "id">> {
+  const syntheticMatch = {
+    title: internalMatch.playlistItem.title || "Playlist recording",
+    artists: internalMatch.playlistItem.artist_name
+      ? [{ name: internalMatch.playlistItem.artist_name }]
+      : [],
+    score: internalMatch.evidence.internal_match_similarity_score,
+    acrid: `internal:${internalMatch.fingerprint.provider_acrid}`,
+    genres: internalMatch.playlistItem?.playlist?.genre
+      ? [internalMatch.playlistItem.playlist.genre]
+      : [],
+    _musikalokal_match_type: "custom_audio_fingerprint",
+  };
+  if (screeningContext.context === "gig_application_performance_video") {
+    const userId = String(screeningContext.user?.id || "").trim();
+    const metadata = await attachGenreEvidenceReceipt(
+      { ...buildCopyrightMatchMetadata(syntheticMatch), ...internalMatch.evidence },
+      userId,
+    );
+    return {
+      allowed: true,
+      reason: "The recording was recognized and may be used as advisory genre evidence.",
+      publiclyAvailable: true,
+      copyrightStatus: "not_required",
+      copyrightTrackKey: String(metadata.copyright_track_key || "") || null,
+      copyrightMetadata: metadata,
+    };
+  }
+
   if (internalMatch.approvedReview) {
     const reviewMetadata = internalMatch.approvedReview.metadata &&
         typeof internalMatch.approvedReview.metadata === "object"
@@ -928,14 +1056,6 @@ async function resolveInternalPlaylistMatch(
     };
   }
 
-  const syntheticMatch = {
-    title: internalMatch.playlistItem.title || "Playlist recording",
-    artists: internalMatch.playlistItem.artist_name
-      ? [{ name: internalMatch.playlistItem.artist_name }]
-      : [],
-    score: internalMatch.evidence.internal_match_similarity_score,
-    acrid: `internal:${internalMatch.fingerprint.provider_acrid}`,
-  };
   const ownershipReview = await queueCopyrightOwnershipReview(
     screeningContext.supabaseAdmin,
     screeningContext.user || null,
@@ -951,16 +1071,10 @@ async function resolveInternalPlaylistMatch(
     };
   }
 
-  return {
-    allowed: true,
-    reason: "This performance video matches a recording in your playlist. Your application can continue while an admin reviews the ownership evidence.",
-    requiresAdminReview: true,
-    publiclyAvailable: false,
-    copyrightStatus: "pending_review",
-    copyrightReviewId: ownershipReview.reviewId,
-    copyrightTrackKey: ownershipReview.trackKey,
-    copyrightMetadata: ownershipReview.metadata,
-  };
+  return buildPendingCopyrightReviewDecision(
+    ownershipReview,
+    "This performance video matches a recording in your playlist. Your application can continue while an admin reviews the ownership evidence.",
+  );
 }
 
 async function screenAudioCopyright(
@@ -1129,6 +1243,28 @@ async function screenAudioCopyright(
   });
 
   if (bestMatch && Number(bestMatch?.score || 0) >= minScore) {
+    if (screeningContext.context === "gig_application_performance_video") {
+      const userId = String(screeningContext.user?.id || "").trim();
+      const metadata = await attachGenreEvidenceReceipt(
+        { ...buildCopyrightMatchMetadata(bestMatch), ...(internalMatch?.evidence || {}) },
+        userId,
+      );
+      console.log("[upload-safety-screen] acrcloud_gig_recording_allowed", {
+        fileName: file.fileName || "(unknown)",
+        title: bestMatch?.title || null,
+        score: bestMatch?.score || null,
+        genres: metadata.recognized_audio_genres || [],
+      });
+      return {
+        allowed: true,
+        reason: "The recording was recognized and may be used as advisory genre evidence.",
+        publiclyAvailable: true,
+        copyrightStatus: "not_required",
+        copyrightTrackKey: String(metadata.copyright_track_key || "") || null,
+        copyrightMetadata: metadata,
+      };
+    }
+
     const ownershipReview = await queueCopyrightOwnershipReview(
       screeningContext.supabaseAdmin,
       screeningContext.user || null,
@@ -1155,7 +1291,7 @@ async function screenAudioCopyright(
       };
     }
 
-    console.warn("[upload-safety-screen] acrcloud_copyright_check_blocked", {
+    console.warn("[upload-safety-screen] acrcloud_copyright_match_requires_review", {
       fileName: file.fileName || "(unknown)",
       title: bestMatch?.title || null,
       score: bestMatch?.score || null,
@@ -1172,16 +1308,10 @@ async function screenAudioCopyright(
       };
     }
 
-    return {
-      allowed: true,
-      reason: summarizeAcrMusicMatch(bestMatch),
-      requiresAdminReview: true,
-      publiclyAvailable: false,
-      copyrightStatus: "pending_review",
-      copyrightReviewId: ownershipReview.reviewId,
-      copyrightTrackKey: ownershipReview.trackKey,
-      copyrightMetadata: ownershipReview.metadata,
-    };
+    return buildPendingCopyrightReviewDecision(
+      ownershipReview,
+      summarizeAcrMusicMatch(bestMatch),
+    );
   }
 
   console.log("[upload-safety-screen] acrcloud_copyright_check_allowed", {
@@ -1415,6 +1545,7 @@ async function callGroqVisualReview(
   prompt: string,
   dataUrl: string,
   model: string,
+  apiKey: string,
 ): Promise<VisualDecision | null> {
   console.log("[upload-safety-screen] groq_visual_review_start", {
     model,
@@ -1443,7 +1574,7 @@ async function callGroqVisualReview(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${GROQ_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(requestBody),
   });
@@ -1460,7 +1591,7 @@ async function callGroqVisualReview(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${GROQ_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify(plainJsonRequestBody),
       });
@@ -1535,26 +1666,29 @@ async function screenVisualContent(
     }
   }
 
-  if (GROQ_API_KEY) {
+  if (GROQ_API_KEYS.length > 0) {
     for (const model of GROQ_VISION_MODELS) {
-      try {
-        const visualDecision = await callGroqVisualReview(prompt, parsedImage.dataUrl, model);
+      for (const [keyIndex, apiKey] of GROQ_API_KEYS.entries()) {
+        try {
+        const visualDecision = await callGroqVisualReview(prompt, parsedImage.dataUrl, model, apiKey);
         if (visualDecision) {
           reviewed = true;
           if (!visualDecision.allowed) {
             return { ...visualDecision, provider: 'groq-vision' };
           }
-          break;
+          return { allowed: true };
         } else {
           providerFailures.push(`Groq (${model}): no valid JSON decision returned`);
         }
-      } catch (error) {
+        } catch (error) {
         providerFailures.push(`Groq (${model}): ${error instanceof Error ? error.message : String(error)}`);
         console.error("[upload-safety-screen] groq_visual_review_exception_fallback", {
           model,
+          keySlot: keyIndex + 1,
           message: error instanceof Error ? error.message : String(error),
         });
-        // Try the next vision model before blocking the upload.
+        // Try the next Groq account or vision model before blocking the upload.
+        }
       }
     }
   }
@@ -1568,7 +1702,7 @@ async function screenVisualContent(
     kind: file.kind || "photo",
     providerFailures,
     hasOpenAi: Boolean(OPENAI_API_KEY),
-    hasGroq: Boolean(GROQ_API_KEY),
+    hasGroq: GROQ_API_KEYS.length > 0,
   });
 
   throw new Error("Visual safety screening is temporarily unavailable. Please try again.");
@@ -1607,7 +1741,7 @@ Return ONLY valid JSON. No markdown, no explanation.
 Format: {"results": [{"index": 0, "allowed": true}, {"index": 1, "allowed": false, "reason": "..."}]}`;
 }
 
-async function callGroq(prompt: string): Promise<string> {
+async function callGroq(prompt: string, apiKey: string): Promise<string> {
   console.log("[upload-safety-screen] groq_text_safety_start", {
     model: GROQ_SAFETY_TEXT_MODEL,
   });
@@ -1616,7 +1750,7 @@ async function callGroq(prompt: string): Promise<string> {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${GROQ_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model: GROQ_SAFETY_TEXT_MODEL,
@@ -1665,11 +1799,11 @@ async function callOpenAi(prompt: string): Promise<string> {
 }
 
 async function callAi(prompt: string): Promise<string | null> {
-  if (GROQ_API_KEY) {
+  for (const apiKey of GROQ_API_KEYS) {
     try {
-      return await callGroq(prompt);
+      return await callGroq(prompt, apiKey);
     } catch {
-      // fall through
+      // Try the next Groq account before another provider.
     }
   }
 

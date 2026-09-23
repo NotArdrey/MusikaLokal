@@ -33,3 +33,8 @@ coverage/
 **/new_errors.txt
 **/push_error*.txt
 **/env_decoded.txt
+
+# Python face-service local state
+__pycache__/
+*.py[cod]
+.venv/

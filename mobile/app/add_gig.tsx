@@ -31,9 +31,9 @@ import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
 import Modal from "../src/components/modal";
-import Navbar from "../src/components/navbar";
 import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
+import { radius, typography } from "../src/theme/tokens";
 import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../src/utils/e2eFixtures";
 import {
   DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
@@ -975,7 +975,7 @@ export default function AddGigScreen() {
             styles.textInput,
             {
               color: colors.text,
-              height: multiline ? 120 : "auto",
+              height: multiline ? 104 : 56,
               textAlign: "left",
               textAlignVertical: multiline ? "top" : "center",
               paddingVertical: multiline ? 12 : 16,
@@ -1267,84 +1267,84 @@ export default function AddGigScreen() {
       >
         <Header title="Create Gig" onBackPress={handleBack} />
 
-        {/* Enhanced Step Indicator (Fixed at top) */}
-        <View style={styles.stepIndicatorContainer}>
-          <View style={styles.stepIndicatorContent}>
-            {/* Progress Line Background */}
-            <View
-              style={[
-                styles.progressLineBg,
-                { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
-              ]}
-            />
-
-            {/* Active Progress Line */}
-            <View
-              style={[
-                styles.activeProgressLine,
-                {
-                  width: `${((step - 1) / (steps.length - 1)) * 100}%`,
-                  backgroundColor: colors.primary,
-                },
-              ]}
-            />
-
-            {steps.map((s) => {
-              const isActive = step >= s.id;
-              const isCurrent = step === s.id;
-              return (
-                <View key={s.id} style={styles.stepItem}>
-                  <View
-                    style={[
-                      styles.stepCircle,
-                      {
-                        backgroundColor: isActive
-                          ? colors.primary
-                          : isDark
-                            ? "#334155"
-                            : "#E5E7EB",
-                        borderColor: isActive
-                          ? "#818cf8"
-                          : isDark
-                            ? "#1E293B"
-                            : "#F3F4F6", // using primaryLight approx
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name={isActive ? "checkmark" : (s.icon as any)}
-                      size={18}
-                      color={isActive ? "#fff" : colors.textSecondary}
-                    />
-                  </View>
-                  <Text
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.82}
-                    style={[
-                      styles.stepText,
-                      {
-                        fontFamily: isCurrent
-                          ? "Poppins_600SemiBold"
-                          : "Poppins_400Regular",
-                        color: isActive ? colors.text : colors.textSecondary,
-                        fontWeight: isCurrent ? "bold" : "normal",
-                      },
-                    ]}
-                  >
-                    {s.title}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-        </View>
-
         <ScrollView
           style={styles.formContainer}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
+          {/* Step indicator */}
+          <View style={styles.stepIndicatorContainer}>
+            <View style={styles.stepIndicatorContent}>
+              {/* Progress Line Background */}
+              <View
+                style={[
+                  styles.progressLineBg,
+                  { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                ]}
+              />
+
+              {/* Active Progress Line */}
+              <View
+                style={[
+                  styles.activeProgressLine,
+                  {
+                    width: `${((step - 1) / (steps.length - 1)) * 100}%`,
+                    backgroundColor: colors.primary,
+                  },
+                ]}
+              />
+
+              {steps.map((s) => {
+                const isActive = step >= s.id;
+                const isCurrent = step === s.id;
+                return (
+                  <View key={s.id} style={styles.stepItem}>
+                    <View
+                      style={[
+                        styles.stepCircle,
+                        {
+                          backgroundColor: isActive
+                            ? colors.primary
+                            : isDark
+                              ? "#334155"
+                              : "#E5E7EB",
+                          borderColor: isActive
+                            ? "#818cf8"
+                            : isDark
+                              ? "#1E293B"
+                              : "#F3F4F6", // using primaryLight approx
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={isActive ? "checkmark" : (s.icon as any)}
+                        size={18}
+                        color={isActive ? "#fff" : colors.textSecondary}
+                      />
+                    </View>
+                    <Text
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.82}
+                      style={[
+                        styles.stepText,
+                        {
+                          fontFamily: isCurrent
+                            ? "Poppins_600SemiBold"
+                            : "Poppins_400Regular",
+                          color: isActive ? colors.text : colors.textSecondary,
+                          fontWeight: isCurrent ? "bold" : "normal",
+                        },
+                      ]}
+                    >
+                      {s.title}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+
           {step === 1 && (
             <View>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>
@@ -3069,7 +3069,6 @@ export default function AddGigScreen() {
           </View>
         </ScrollView>
 
-        <Navbar />
       </View>
 
       <Modal
@@ -3206,9 +3205,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   stepIndicatorContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 24,
-    paddingBottom: 8,
+    marginHorizontal: -24,
+    marginTop: 0,
+    marginBottom: 12,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 6,
   },
   stepIndicatorContent: {
     flexDirection: "row",
@@ -3220,15 +3222,15 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
-    height: 4,
-    top: 20,
+    height: 3,
+    top: 16,
     zIndex: 0,
   },
   activeProgressLine: {
     position: "absolute",
     left: 0,
-    height: 4,
-    top: 20,
+    height: 3,
+    top: 16,
     zIndex: 0,
   },
   stepItem: {
@@ -3238,16 +3240,16 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   stepCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 4,
+    borderWidth: 3,
   },
   stepText: {
     fontSize: 11,
-    marginTop: 8,
+    marginTop: 6,
     textAlign: "center",
     lineHeight: 15,
     includeFontPadding: false,
@@ -3256,16 +3258,16 @@ const styles = StyleSheet.create({
   formContainer: {
     flex: 1,
     paddingHorizontal: 24,
-    marginTop: 16,
+    marginTop: 0,
   },
   scrollContent: {
-    paddingBottom: 150,
+    paddingBottom: 40,
   },
   sectionTitle: {
-    fontSize: 20,
-    marginBottom: 24,
-    textAlign: "center",
-    fontFamily: "Poppins_600SemiBold",
+    fontSize: 22,
+    marginBottom: 18,
+    textAlign: "left",
+    fontFamily: typography.title,
   },
   inputContainer: {
     marginBottom: 20,
@@ -3275,16 +3277,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.bold,
   },
   inputWrapper: {
-    borderRadius: 12,
+    borderRadius: radius.input,
     borderWidth: 1,
     overflow: "hidden",
   },
   textInput: {
     padding: 16,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     textAlign: "left",
     textAlignVertical: "center",
   },

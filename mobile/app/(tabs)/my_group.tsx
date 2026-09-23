@@ -17,6 +17,7 @@ import { useAuth, useRequireAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../../src/utils/actionError';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
+import { palette, radius, typography } from '../../src/theme/tokens';
 
 const isMissingRelationError = (error: any, relationName: string) => {
     const message = String(error?.message || '').toLowerCase();
@@ -356,7 +357,7 @@ export default function MyGroupScreen() {
     return (
         <>
             <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header title="My Group" />
+                <Header title="My Groups" overline="MusikaLokal" showTitle={false} />
 
                 <ScrollView
                     showsVerticalScrollIndicator={false}
@@ -367,6 +368,8 @@ export default function MyGroupScreen() {
                         {isMusicianView && (
                             <MusicianWorkspaceTabs activeKey="group" />
                         )}
+
+                        <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>YOUR MUSIC CIRCLE</Text>
 
                         <InlineErrorBanner
                             message={loadError}
@@ -431,6 +434,10 @@ export default function MyGroupScreen() {
 
                                     <View style={styles.cardContent}>
                                         <Text style={[styles.cardTitle, { color: colors.text }]}>{group.name}</Text>
+                                        <View style={styles.groupMetaRow}>
+                                            <Text style={[styles.groupMetaText, { color: colors.primary }]}>{group.genre || 'Genre not set'}</Text>
+                                            {group.location ? <Text style={[styles.groupMetaText, { color: colors.textSecondary }]}>· {group.location}</Text> : null}
+                                        </View>
                                         <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
                                             {group.description}
                                         </Text>
@@ -446,10 +453,10 @@ export default function MyGroupScreen() {
                                                             ? router.push({ pathname: '/manage_group', params: { id: group.id } })
                                                             : router.push({ pathname: '/group_details', params: { id: group.id } })
                                                     }
-                                                    style={[styles.manageBtn, { backgroundColor: colors.primary }]}
+                                                    style={[styles.manageBtn, { borderColor: colors.primary }]}
                                                 >
-                                                    <Ionicons name={canManageGroup ? 'settings-outline' : 'eye-outline'} size={18} color="#FFF" />
-                                                    <Text style={styles.manageBtnText}>{canManageGroup ? 'Manage' : 'View'}</Text>
+                                                    <Ionicons name={canManageGroup ? 'arrow-forward-outline' : 'eye-outline'} size={18} color={colors.primary} />
+                                                    <Text style={[styles.manageBtnText, { color: colors.primary }]}>{canManageGroup ? 'Manage' : 'View'}</Text>
                                                 </TouchableOpacity>
 
                                                 <TouchableOpacity activeOpacity={1}
@@ -538,6 +545,12 @@ const styles = StyleSheet.create({
         paddingBottom: 180,
         paddingTop: 16,
     },
+    sectionHeading: {
+        fontFamily: typography.bold,
+        fontSize: 12,
+        letterSpacing: 1.4,
+        marginBottom: 16,
+    },
     pageTabsWrap: {
         borderWidth: 1,
         borderRadius: 14,
@@ -568,7 +581,7 @@ const styles = StyleSheet.create({
         gap: 16,
     },
     skeletonCard: {
-        borderRadius: 24,
+        borderRadius: radius.card,
         borderWidth: 1,
         padding: 16,
     },
@@ -587,15 +600,14 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
     },
     cardContainer: {
-        marginBottom: 24,
-        borderRadius: 24,
+        marginBottom: 16,
+        borderRadius: radius.card,
         overflow: 'hidden',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.1,
-        shadowRadius: 16,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: palette.line,
     },
     imageWrapper: {
-        height: 192,
+        height: 160,
         position: 'relative',
     },
     cardImage: {
@@ -608,22 +620,35 @@ const styles = StyleSheet.create({
         right: 16,
         paddingHorizontal: 12,
         paddingVertical: 4,
-        borderRadius: 100,
+        borderRadius: radius.status,
     },
     activeText: {
         fontSize: 12,
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: typography.semibold,
     },
     cardContent: {
         padding: 16,
     },
     cardTitle: {
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: 18,
+        fontFamily: typography.title,
+        fontSize: 20,
+        letterSpacing: -0.4,
         marginBottom: 4,
     },
+    groupMetaRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+        marginBottom: 8,
+    },
+    groupMetaText: {
+        fontFamily: typography.semibold,
+        fontSize: 11,
+        textTransform: 'uppercase',
+        letterSpacing: 0.7,
+    },
     cardDescription: {
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
         fontSize: 13,
         lineHeight: 20,
     },
@@ -645,18 +670,18 @@ const styles = StyleSheet.create({
         gap: 8,
         paddingHorizontal: 16,
         paddingVertical: 8,
-        borderRadius: 12,
+        borderRadius: radius.button,
+        borderWidth: 1,
     },
     manageBtnText: {
-        fontFamily: 'Poppins_500Medium',
-        color: '#FFF',
+        fontFamily: typography.semibold,
     },
     editBtn: {
         width: 38,
         height: 38,
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 12,
+        borderRadius: radius.control,
         borderWidth: 1,
     },
     editBtnIcon: {

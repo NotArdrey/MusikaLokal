@@ -3,6 +3,7 @@ import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
@@ -10,6 +11,7 @@ import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
 import { isFanUserRole } from '../src/utils/roleRouting';
 import { isStaffRole } from '../src/utils/staffAccess';
+import { radius, spacing, typography } from '../src/theme/tokens';
 
 export default function SettingsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
@@ -81,13 +83,7 @@ export default function SettingsScreen() {
   return (
     <>
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        {/* Custom Header with Back Button */}
-        <View style={[styles.header, { backgroundColor: colors.background }]}>
-          <TouchableOpacity activeOpacity={1} onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="chevron-back" size={24} color={colors.text} />
-          </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Settings</Text>
-        </View>
+        <Header title="Settings" onBackPress={() => router.back()} />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -220,29 +216,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    paddingTop: 48, // pt-12
-  },
-  backButton: {
-    padding: 8,
-    marginLeft: -8,
-    marginRight: 8,
-  },
-  headerTitle: {
-    fontSize: 20, // text-xl
-    fontFamily: 'Poppins_600SemiBold',
-  },
   scrollContent: {
-    paddingBottom: 150,
+    paddingTop: spacing.sm,
   },
   sectionContainer: {
-    paddingHorizontal: 24,
-    marginTop: 24,
-    marginBottom: 24,
+    paddingHorizontal: 20,
+    marginBottom: spacing.lg,
   },
   sectionHeader: {
     marginBottom: 12,
@@ -250,17 +229,17 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1, // tracking-wider
     paddingLeft: 4,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.bold,
   },
   card: {
     padding: 16,
-    borderRadius: 16,
+    borderRadius: radius.card,
     borderWidth: 1,
   },
   cardLabel: {
     marginBottom: 16,
     fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   themeOptionsContainer: {
     flexDirection: 'row',
@@ -277,7 +256,7 @@ const styles = StyleSheet.create({
   themeButtonText: {
     marginTop: 4,
     fontSize: 12,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
     textAlign: 'center',
   },
   cardOverflow: {
@@ -302,7 +281,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexShrink: 1,
     fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
     marginRight: 8,
   },
   footerContainer: {
@@ -321,12 +300,12 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 14,
     color: '#DC2626', // red-600
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   versionText: {
     textAlign: 'center',
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
 });
 

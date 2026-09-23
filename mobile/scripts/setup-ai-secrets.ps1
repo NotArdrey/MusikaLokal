@@ -41,6 +41,11 @@ if (-not $ProjectRef) {
 
 $secretNames = @(
     'GROQ_API_KEY',
+    'GROQ_FALLBACK_API_KEY',
+    'FACE_RECOGNITION_URL',
+    'FACE_RECOGNITION_API_KEY',
+    'FACE_RECOGNITION_TIMEOUT_MS',
+    'FACE_GROUP_MAX_MEMBERS',
     'GEMINI_API_KEY',
     'OPENAI_API_KEY',
     'ACRCLOUD_HOST',
@@ -71,7 +76,7 @@ foreach ($name in $secretNames) {
 }
 
 if ($secretPairs.Count -eq 0) {
-    throw "No Edge Function secrets found in $EnvFile. Add GROQ_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, or ACRCLOUD_* values and rerun."
+    throw "No Edge Function secrets found in $EnvFile. Add GROQ_API_KEY, FACE_RECOGNITION_URL, OPENAI_API_KEY, or ACRCLOUD_* values and rerun."
 }
 
 Write-Host "Setting $($secretPairs.Count) Edge Function secret(s) on project $ProjectRef ..."
@@ -82,4 +87,6 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ("Configured keys: " + ($configuredKeys -join ', '))
-Write-Host "Done. Deploy the function next: npx supabase functions deploy upload-safety-screen --project-ref $ProjectRef --no-verify-jwt"
+Write-Host "Done. Deploy the functions next:"
+Write-Host "  npx supabase functions deploy upload-safety-screen --project-ref $ProjectRef --no-verify-jwt"
+Write-Host "  npx supabase functions deploy gig-applications --project-ref $ProjectRef --no-verify-jwt"

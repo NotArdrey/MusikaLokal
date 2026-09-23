@@ -386,7 +386,6 @@ interface VideoUploaderProps {
   onReviewFramesChange?: (urls: string[]) => void;
   enableCopyrightScreening?: boolean;
   allowPortfolioSelection?: boolean;
-  copyrightAcknowledged?: boolean;
   onCopyrightDecisionChange?: (decision: UploadSafetyFileDecision | null) => void;
 }
 
@@ -402,7 +401,6 @@ export default function VideoUploader({
   onReviewFramesChange,
   enableCopyrightScreening = false,
   allowPortfolioSelection = false,
-  copyrightAcknowledged = false,
   onCopyrightDecisionChange,
 }: VideoUploaderProps) {
   const { colors, isDark } = useTheme();
@@ -502,11 +500,13 @@ export default function VideoUploader({
     }
   };
 
-  const prepareReviewFrames = async (assetUri: string) => {
+  const reviewFrameEnabledRef = React.useRef(false);
+
+  const prepareReviewFrames = React.useCallback(async (assetUri: string): Promise<string[]> => {
     if (!enableReviewFrame || !onReviewFrameChange) {
       onReviewFrameChange?.(null);
       onReviewFramesChange?.([]);
-      return;
+      return [];
     }
 
     setUploadMessage('Preparing representative review frames...');
@@ -527,14 +527,59 @@ export default function VideoUploader({
     }
     onReviewFrameChange(frameUrls[0] || null);
     onReviewFramesChange?.(frameUrls);
-  };
+    return frameUrls;
+  }, [bucketName, enableReviewFrame, folder, onReviewFrameChange, onReviewFramesChange, userId]);
+
+  const prepareReviewFramesRef = React.useRef(prepareReviewFrames);
+  React.useEffect(() => {
+    prepareReviewFramesRef.current = prepareReviewFrames;
+  }, [prepareReviewFrames]);
+  const canPrepareReviewFrames = Boolean(onReviewFrameChange);
+
+  React.useEffect(() => {
+    const wasEnabled = reviewFrameEnabledRef.current;
+    reviewFrameEnabledRef.current = enableReviewFrame;
+    if (!enableReviewFrame || wasEnabled || !videoUrl || !canPrepareReviewFrames) return;
+
+    let active = true;
+    const prepareExistingVideoFrames = async () => {
+      setUploading(true);
+      setUploadProgress(0);
+      try {
+        const frameUrls = await prepareReviewFramesRef.current(videoUrl);
+        if (active && frameUrls.length === 0) {
+          setAlertConfig({
+            type: 'warning',
+            title: 'AI Review Frames Unavailable',
+            message: 'Please remove and select the video again so representative frames can be prepared.',
+          });
+          setAlertVisible(true);
+        }
+      } catch (error) {
+        console.warn('Unable to prepare AI review frames after consent was enabled:', error);
+        if (active) {
+          setAlertConfig({
+            type: 'warning',
+            title: 'AI Review Frames Unavailable',
+            message: 'Please remove and select the video again so representative frames can be prepared.',
+          });
+          setAlertVisible(true);
+        }
+      } finally {
+        if (active) {
+          setUploading(false);
+          setUploadProgress(0);
+        }
+      }
+    };
+
+    void prepareExistingVideoFrames();
+    return () => {
+      active = false;
+    };
+  }, [canPrepareReviewFrames, enableReviewFrame, videoUrl]);
 
   const selectPortfolioVideo = async (url: string) => {
-    if (enableCopyrightScreening && !copyrightAcknowledged) {
-      showAlert('warning', 'Permission Confirmation Required', 'Confirm that you own this performance or have permission to submit it before choosing a video.');
-      return;
-    }
-
     setPortfolioPickerVisible(false);
     setUploading(true);
     setUploadProgress(0);
@@ -574,10 +619,6 @@ export default function VideoUploader({
   };
 
   const chooseVideoSource = async () => {
-    if (enableCopyrightScreening && !copyrightAcknowledged) {
-      showAlert('warning', 'Permission Confirmation Required', 'Confirm that you own this performance or have permission to submit it before choosing a video.');
-      return;
-    }
     if (!allowPortfolioSelection) {
       await pickAndUploadVideo();
       return;
@@ -601,11 +642,6 @@ export default function VideoUploader({
 
   const pickAndUploadVideo = async () => {
     try {
-      if (enableCopyrightScreening && !copyrightAcknowledged) {
-        showAlert('warning', 'Permission Confirmation Required', 'Confirm that you own this performance or have permission to submit it before choosing a video.');
-        return;
-      }
-
       // Check authentication first
       const { data: { session }, error: authError } = await supabase.auth.getSession();
       if (authError || !session) {

@@ -44,9 +44,16 @@ const SAFE_IMAGE_MIME_TYPES = new Set([
 ]);
 const SAFE_VIDEO_MIME_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_TEXT_MODERATION_MODEL = Deno.env.get("GROQ_TEXT_MODERATION_MODEL")?.trim() ||
-  Deno.env.get("GROQ_COMMENT_MODERATION_MODEL")?.trim() ||
-  "openai/gpt-oss-safeguard-20b";
+const GROQ_API_KEYS = Array.from(new Set([
+  Deno.env.get("GROQ_API_KEY")?.trim(),
+  Deno.env.get("GROQ_FALLBACK_API_KEY")?.trim(),
+].filter((key): key is string => Boolean(key))));
+const DEFAULT_GROQ_TEXT_MODERATION_MODEL = "openai/gpt-oss-safeguard-20b";
+const GROQ_TEXT_MODERATION_MODELS = Array.from(new Set([
+  Deno.env.get("GROQ_TEXT_MODERATION_MODEL")?.trim(),
+  Deno.env.get("GROQ_COMMENT_MODERATION_MODEL")?.trim(),
+  DEFAULT_GROQ_TEXT_MODERATION_MODEL,
+].filter((model): model is string => Boolean(model))));
 
 type TextModerationTarget = "post" | "comment";
 type TextModerationStatus = "approved" | "pending_review" | "blocked";
@@ -616,82 +623,88 @@ async function moderateTextWithGroq(
   const localDecision = localTextModeration(target, content);
   if (localDecision?.status === "blocked") return localDecision;
 
-  const apiKey = Deno.env.get("GROQ_API_KEY")?.trim();
-  if (!apiKey) {
+  if (GROQ_API_KEYS.length === 0) {
     return localDecision || moderationUnavailableDecision(target, { missingApiKey: true });
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
   const label = moderationTargetLabel(target).toLowerCase();
+  let lastFailure: Record<string, unknown> = {};
 
-  try {
-    const response = await fetch(GROQ_API_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: GROQ_TEXT_MODERATION_MODEL,
-        temperature: 0,
-        max_tokens: 400,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content:
-              "Moderate MusikaLokal social feed posts and comments. Check whether the content is safe, respectful, truthful enough to publish, and valid community content. Evaluate English, Filipino, Tagalog, Taglish, Bisaya/Cebuano, and code-switched Philippine slang, including profanity hidden with spaces, punctuation, repeated letters, or leetspeak. Block violence, threats, self-harm encouragement, hate speech, harassment, Filipino bad words used as abuse, inappropriate sexual content, spam, scams, impersonation, and clearly fake or harmful misinformation. Put uncertain cases in pending_review. Return JSON only with status approved, pending_review, or blocked; reason; categories array; score 0 to 1.",
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              target,
-              [label]: content,
-              context,
-              policy:
-                "Approve normal music, booking, community, and casual conversation. Block unsafe or abusive content, including Filipino or Taglish profanity aimed at another person. Do not block mild criticism or harmless opinions. Treat repeated links, scams, fake urgent claims, and impersonation as spam or misinformation.",
-            }),
-          },
-        ],
-      }),
-    });
-
-    if (!response.ok) {
-      return localDecision || moderationUnavailableDecision(target, {
-        groqStatus: response.status,
-        groqBody: await response.text().catch(() => ""),
+  for (const model of GROQ_TEXT_MODERATION_MODELS) {
+    for (const [keyIndex, apiKey] of GROQ_API_KEYS.entries()) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const response = await fetch(GROQ_API_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model,
+          temperature: 0,
+          max_tokens: 400,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content:
+                "Moderate MusikaLokal social feed posts and comments. Check whether the content is safe, respectful, truthful enough to publish, and valid community content. Evaluate English, Filipino, Tagalog, Taglish, Bisaya/Cebuano, and code-switched Philippine slang, including profanity hidden with spaces, punctuation, repeated letters, or leetspeak. Block violence, threats, self-harm encouragement, hate speech, harassment, Filipino bad words used as abuse, inappropriate sexual content, spam, scams, impersonation, and clearly fake or harmful misinformation. Put uncertain cases in pending_review. Return JSON only with status approved, pending_review, or blocked; reason; categories array; score 0 to 1.",
+            },
+            {
+              role: "user",
+              content: JSON.stringify({
+                target,
+                [label]: content,
+                context,
+                policy:
+                  "Approve normal music, booking, community, and casual conversation. Block unsafe or abusive content, including Filipino or Taglish profanity aimed at another person. Do not block mild criticism or harmless opinions. Treat repeated links, scams, fake urgent claims, and impersonation as spam or misinformation.",
+              }),
+            },
+          ],
+        }),
       });
+
+      if (!response.ok) {
+        lastFailure = { model, keySlot: keyIndex + 1, groqStatus: response.status };
+        console.warn("social_feed_groq_model_failed", lastFailure);
+        continue;
+      }
+
+      const payload = await response.json();
+      const raw = payload?.choices?.[0]?.message?.content || "{}";
+      const parsed = parseJsonObject(raw) || {};
+      const rawStatus = typeof parsed.status === "string" ? parsed.status.trim().toLowerCase() : "pending_review";
+      const status = normalizeModerationStatus(rawStatus);
+
+      if (localDecision && localDecision.status === "pending_review" && status === "approved") {
+        return localDecision;
+      }
+
+      return {
+        status,
+        reason: typeof parsed.reason === "string" && parsed.reason.trim()
+          ? parsed.reason.trim().slice(0, 500)
+          : status === "approved"
+            ? `${moderationTargetLabel(target)} passed moderation.`
+            : `${moderationTargetLabel(target)} needs moderation review.`,
+        categories: normalizeStringArray(parsed.categories),
+        score: Number.isFinite(Number(parsed.score)) ? Math.max(0, Math.min(1, Number(parsed.score))) : null,
+        provider: `groq:${model}`,
+        metadata: { model, raw_status: rawStatus, target },
+      };
+    } catch (error: any) {
+      lastFailure = { model, keySlot: keyIndex + 1, groqError: error?.message || "unknown" };
+      console.warn("social_feed_groq_model_failed", lastFailure);
+    } finally {
+      clearTimeout(timeout);
     }
-
-    const payload = await response.json();
-    const raw = payload?.choices?.[0]?.message?.content || "{}";
-    const parsed = parseJsonObject(raw) || {};
-    const rawStatus = typeof parsed.status === "string" ? parsed.status.trim().toLowerCase() : "pending_review";
-    const status = normalizeModerationStatus(rawStatus);
-
-    if (localDecision && localDecision.status === "pending_review" && status === "approved") {
-      return localDecision;
     }
-
-    return {
-      status,
-      reason: typeof parsed.reason === "string" && parsed.reason.trim()
-        ? parsed.reason.trim().slice(0, 500)
-        : status === "approved"
-          ? `${moderationTargetLabel(target)} passed moderation.`
-          : `${moderationTargetLabel(target)} needs moderation review.`,
-      categories: normalizeStringArray(parsed.categories),
-      score: Number.isFinite(Number(parsed.score)) ? Math.max(0, Math.min(1, Number(parsed.score))) : null,
-      provider: `groq:${GROQ_TEXT_MODERATION_MODEL}`,
-      metadata: { model: GROQ_TEXT_MODERATION_MODEL, raw_status: rawStatus, target },
-    };
-  } catch (error: any) {
-    return localDecision || moderationUnavailableDecision(target, { groqError: error?.message || "unknown" });
-  } finally {
-    clearTimeout(timeout);
   }
+
+  return localDecision || moderationUnavailableDecision(target, lastFailure);
 }
 
 async function moderateCommentWithGroq(content: string, postContent?: string | null): Promise<TextModerationDecision> {

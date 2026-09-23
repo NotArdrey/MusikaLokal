@@ -10,24 +10,6 @@ const corsHeaders = {
 
 // Minimum withdrawal amount in PHP
 const MIN_WITHDRAWAL_AMOUNT = 100;
-const WALLET_ACTIVITY_TYPES = new Set([
-  'credit',
-  'debit',
-  'deposit',
-  'earning',
-  'refund',
-  'withdrawal',
-]);
-
-const WALLET_ACTIVITY_REFERENCE_TYPES = new Set([
-  'booking',
-  'booking_payment',
-  'booking_downpayment',
-  'booking_balance',
-  'deposit',
-  'refund',
-  'withdrawal',
-]);
 
 function uniqueStrings(values: unknown[]) {
   return Array.from(
@@ -77,15 +59,19 @@ async function hydrateStudioBookingLegacy(supabaseAdmin: any, rows: any[]) {
 }
 
 function normalizeWalletActivityTransaction(tx: any) {
-  const rawReferenceType = typeof tx?.reference_type === 'string' ? tx.reference_type.trim() : '';
+  const rawReferenceType = typeof tx?.reference_type === 'string'
+    ? tx.reference_type.trim().toLowerCase()
+    : '';
   const rawType = typeof tx?.type === 'string' ? tx.type.trim().toLowerCase() : '';
-  const reference_type =
-    rawReferenceType ||
-    (WALLET_ACTIVITY_TYPES.has(rawType) ? rawType : null);
+  const isCredit = typeof tx?.is_credit === 'boolean'
+    ? tx.is_credit
+    : ['deposit', 'earning', 'refund'].includes(rawType);
 
   return {
     ...tx,
-    reference_type,
+    type: rawType || tx?.type,
+    reference_type: rawReferenceType || rawType || null,
+    is_credit: isCredit,
   };
 }
 
@@ -210,15 +196,6 @@ serve(async (req: Request) => {
       if (withdrawalsResult.error) throw withdrawalsResult.error;
 
       const walletActivityTransactions = (transactionsResult.data || [])
-        .filter((tx: any) => {
-          const rawReferenceType = typeof tx?.reference_type === 'string' ? tx.reference_type.trim() : '';
-          const rawType = typeof tx?.type === 'string' ? tx.type.trim().toLowerCase() : '';
-
-          return (
-            WALLET_ACTIVITY_TYPES.has(rawType) ||
-            WALLET_ACTIVITY_REFERENCE_TYPES.has(rawReferenceType)
-          );
-        })
         .map(normalizeWalletActivityTransaction);
       const unpaidBookings = await hydrateStudioBookingLegacy(supabaseAdmin, unpaidBookingsResult.data || []);
 

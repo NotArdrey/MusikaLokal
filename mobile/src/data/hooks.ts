@@ -113,12 +113,12 @@ export const useWalletSummaryQuery = <TData = any>(
 ) => {
   return useQuery({
     enabled: Boolean(userId) && (options?.enabled ?? true),
-    placeholderData: keepPreviousData,
     queryFn: () =>
       invokeEdgeFunction<TData>("withdrawals", {
         body: { action: "get_wallet_summary" },
       }),
     queryKey: queryKeys.wallet.summary(userId),
+    refetchOnReconnect: true,
     staleTime: 30_000,
   });
 };

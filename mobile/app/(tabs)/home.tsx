@@ -1,12 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { FlashList } from "@shopify/flash-list";
-import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Dimensions,
   RefreshControl,
   ScrollView,
@@ -44,6 +42,7 @@ import { getRecentlyViewedStorageKey } from "../../src/utils/recentlyViewed";
 import { getScreenCacheKey, peekScreenCache, readScreenCache, writeScreenCache } from "../../src/utils/screenCache";
 import { usePageLoadLogger } from "../../src/utils/loadTimeLogger";
 import { runAfterUIIdle } from "../../src/utils/idleTask";
+import { palette, radius, typography } from "../../src/theme/tokens";
 
 const { width, height } = Dimensions.get("window");
 
@@ -449,14 +448,12 @@ export default function HomeScreen() {
   const groqInfo = getGroqModelInfo();
   const groqModelLabel = groqInfo.modelLabel;
   const groqConfigured = groqInfo.configured;
-  const groqModelSource = groqInfo.modelSource;
-  const groqApiKeySource = groqInfo.apiKeySource;
-  const groqApiKeySignature = groqInfo.apiKeySignature;
 
   // AI Recommendation Mode
   const aiModeEnabled = true;
   const strictLlmModeForAiPages = true;
-  const showForYouAiCard = false;
+  const showRecommendationDiagnostics =
+    __DEV__ && process.env.EXPO_PUBLIC_SHOW_RECOMMENDATION_DIAGNOSTICS === "true";
   const [aiRecommendations, setAiRecommendations] = useState<any[]>(() =>
     Array.isArray(initialHomeFeedSnapshot?.aiRecommendations) ? initialHomeFeedSnapshot.aiRecommendations : [],
   );
@@ -672,25 +669,6 @@ export default function HomeScreen() {
       setDiscover(diversifiedRandomItems.slice(10, 20));
     }
   }, [aiRecommendations, randomRecommendations]);
-
-  useEffect(() => {
-    if (!userId) return;
-
-    const providerText = aiFeedProvider || groqModelLabel;
-    const aiFeedActive = aiRecommendations.length > 0;
-
-  }, [
-    aiFeedProvider,
-    aiFeedMessage,
-    aiRecommendations.length,
-    groqApiKeySignature,
-    groqApiKeySource,
-    groqConfigured,
-    groqModelLabel,
-    groqModelSource,
-    isHomeLlmRerankPending,
-    userId,
-  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1872,14 +1850,8 @@ export default function HomeScreen() {
     return null;
   };
 
-  // 1. Immersive Hero Section
+  // Discovery introduction
   const renderHero = () => {
-    // Musician / Live Performance Hero Image
-    // Using a moody, neon-lit stage/guitar image to match the music vibe
-    const heroImage =
-      "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?q=80&w=2560&auto=format&fit=crop";
-
-    // Dynamic Search Text
     const isOwner = userRole === "venue-owner" || userRole === "studio-owner";
     const searchPlaceholder = isOwner
       ? "Find musicians, bands..."
@@ -1887,41 +1859,21 @@ export default function HomeScreen() {
 
     return (
       <View style={styles.heroContainer}>
-        <CachedImage
-          uri={heroImage}
-          style={styles.heroImage}
-          width={1080}
-          height={640}
-          quality={80}
-          cacheVersion="home-hero-v3"
-        />
-        <LinearGradient
-          colors={[
-            "rgba(15, 23, 42, 0.2)",
-            "rgba(15, 23, 42, 0.6)",
-            "#0F172A",
-          ]} 
-          style={styles.heroGradient}
-        />
-
-        {/* Content within Hero */}
         <View style={styles.heroContent}>
-          <Text style={styles.heroGreeting}>Hey {userName}</Text>
-          <Text style={styles.heroSubtitle}>Ready to make some noise?</Text>
-
+          <Text style={[styles.heroGreeting, { color: colors.textSecondary }]}>{timeGreeting}, {userName}.</Text>
           <TouchableOpacity 
             activeOpacity={1}
             style={styles.modernSearchCard}
             onPress={openSearchSheet}
           >
-            <View style={styles.modernSearchLeft}>
-              <Ionicons name="search" size={20} color="#64748B" />
-              <Text style={styles.modernSearchPlaceholder} numberOfLines={1}>
+            <View style={[styles.modernSearchLeft, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Ionicons name="search" size={20} color={colors.textSecondary} />
+              <Text style={[styles.modernSearchPlaceholder, { color: colors.textSecondary }]} numberOfLines={1}>
                 {searchPlaceholder}
               </Text>
             </View>
-            <View style={styles.modernSearchFilterBtn}>
-              <Ionicons name="options-outline" size={20} color="#0F172A" />
+            <View style={[styles.modernSearchFilterBtn, { backgroundColor: colors.primaryLight }]}>
+              <Ionicons name="options-outline" size={20} color={colors.primary} />
             </View>
           </TouchableOpacity>
         </View>
@@ -1983,39 +1935,52 @@ export default function HomeScreen() {
         {/* Header */}
         <View
           style={{
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "flex-end",
             paddingHorizontal: 24,
             marginBottom: 16,
           }}
         >
-          <View>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
             <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
               style={[
                 styles.sectionTitle,
-                { color: colors.text, marginBottom: 0 },
+                { color: colors.text, marginBottom: 0, flex: 1, minWidth: 0 },
               ]}
             >
-              Top Picks
+              Live Around You
             </Text>
-            <Text
-              style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={openSearchSheet}
+              style={{ flexShrink: 0, marginLeft: 12 }}
             >
-              AI-powered recommendations
-            </Text>
+              <Text
+                style={{
+                  color: colors.primary,
+                  fontFamily: typography.semibold,
+                  fontSize: moderateScale(13),
+                }}
+              >
+                See all
+              </Text>
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity activeOpacity={1} onPress={openSearchSheet}>
-            <Text
-              style={{
-                color: colors.primary,
-                fontFamily: "Poppins_600SemiBold",
-                fontSize: moderateScale(13),
-              }}
-            >
-              See all
-            </Text>
-          </TouchableOpacity>
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
+          >
+            Local picks matched to your sound
+          </Text>
         </View>
 
         <FlashList
@@ -2159,7 +2124,7 @@ export default function HomeScreen() {
                   {item.type === "Studio" && item.has_active_promotion && (
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
                       <Ionicons name="pricetag" size={10} color="#10B981" />
-                      <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: "#10B981" }}>
+                      <Text style={{ fontSize: 11, fontFamily: typography.medium, color: "#10B981" }}>
                         Promo available
                       </Text>
                     </View>
@@ -2273,7 +2238,7 @@ export default function HomeScreen() {
                 { color: colors.text, marginBottom: 0 },
               ]}
             >
-              New Arrivals
+              New to the Scene
             </Text>
             <Text
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
@@ -2285,7 +2250,7 @@ export default function HomeScreen() {
             <Text
               style={{
                 color: colors.primary,
-                fontFamily: "Poppins_600SemiBold",
+                fontFamily: typography.semibold,
                 fontSize: moderateScale(13),
               }}
             >
@@ -2421,7 +2386,7 @@ export default function HomeScreen() {
                   {item.type === "Studio" && item.has_active_promotion && (
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
                       <Ionicons name="pricetag" size={10} color="#10B981" />
-                      <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: "#10B981" }}>
+                      <Text style={{ fontSize: 11, fontFamily: typography.medium, color: "#10B981" }}>
                         Promo available
                       </Text>
                     </View>
@@ -2445,7 +2410,7 @@ export default function HomeScreen() {
         <View style={styles.sectionContainer}>
           <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              For You
+              Made for Your Sound
             </Text>
           </View>
           <View
@@ -2491,7 +2456,7 @@ export default function HomeScreen() {
                 { color: colors.text, marginBottom: 0 },
               ]}
             >
-              For You
+              Made for Your Sound
             </Text>
             <Text
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
@@ -2503,7 +2468,7 @@ export default function HomeScreen() {
             <Text
               style={{
                 color: colors.primary,
-                fontFamily: "Poppins_600SemiBold",
+                fontFamily: typography.semibold,
                 fontSize: moderateScale(13),
               }}
             >
@@ -2801,7 +2766,7 @@ export default function HomeScreen() {
                 {item.type === "Studio" && item.has_active_promotion && (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
                     <Ionicons name="pricetag" size={10} color="#10B981" />
-                    <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: "#10B981" }}>
+                    <Text style={{ fontSize: 11, fontFamily: typography.medium, color: "#10B981" }}>
                       Promo available
                     </Text>
                   </View>
@@ -2813,9 +2778,6 @@ export default function HomeScreen() {
       </View>
     );
   };
-
-  // Helpers
-  const parseColor = (c: string) => c;
 
   if (loading) {
     return (
@@ -2887,16 +2849,12 @@ export default function HomeScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar
-        barStyle="light-content"
+        barStyle={isDark ? "light-content" : "dark-content"}
         translucent
-        backgroundColor="transparent"
+        backgroundColor={colors.background}
       />
 
-      <View
-        style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 100 }}
-      >
-        <Header title="MusikaLokal" transparent={!isScrolled} />
-      </View>
+      <Header title="Home" overline="MusikaLokal" showTitle={false} />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -2918,14 +2876,14 @@ export default function HomeScreen() {
       >
         {renderHero()}
 
-        <View style={{ paddingHorizontal: 24, marginTop: 8 }}>
+        <View style={{ paddingHorizontal: 20, marginTop: 4 }}>
           <ProfileCompletionBanner />
         </View>
 
-        {userId && (
+        {showRecommendationDiagnostics && userId && (
           <View
             style={{
-              marginHorizontal: 24,
+              marginHorizontal: 20,
               marginTop: 10,
               paddingHorizontal: 12,
               paddingVertical: 10,
@@ -2947,7 +2905,7 @@ export default function HomeScreen() {
               style={{
                 flex: 1,
                 color: colors.text,
-                fontFamily: "Poppins_500Medium",
+                fontFamily: typography.medium,
                 fontSize: 12,
               }}
             >
@@ -2957,10 +2915,10 @@ export default function HomeScreen() {
         )}
 
         {/* AI Recommendation Comparison Toggle */}
-        {showForYouAiCard && userId && (
+        {showRecommendationDiagnostics && userId && (
           <View
             style={{
-              marginHorizontal: 24,
+              marginHorizontal: 20,
               marginTop: 20,
               marginBottom: 8,
               padding: 16,
@@ -2999,7 +2957,7 @@ export default function HomeScreen() {
                   <View>
                     <Text
                       style={{
-                        fontFamily: "Poppins_600SemiBold",
+                        fontFamily: typography.semibold,
                         fontSize: 14,
                         color: colors.text,
                       }}
@@ -3008,7 +2966,7 @@ export default function HomeScreen() {
                     </Text>
                     <Text
                       style={{
-                        fontFamily: "Poppins_400Regular",
+                        fontFamily: typography.body,
                         fontSize: 11,
                         color: colors.textSecondary,
                         marginTop: -2,
@@ -3038,7 +2996,7 @@ export default function HomeScreen() {
                 <Text
                   style={{
                     flex: 1,
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                     fontSize: 11,
                     color: colors.textSecondary,
                   }}
@@ -3060,7 +3018,7 @@ export default function HomeScreen() {
               >
                 <Text
                   style={{
-                    fontFamily: "Poppins_500Medium",
+                    fontFamily: typography.medium,
                     fontSize: 11,
                     color: colors.textSecondary,
                     marginBottom: 8,
@@ -3088,7 +3046,7 @@ export default function HomeScreen() {
                     >
                       <Text
                         style={{
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                           fontSize: 11,
                           color: colors.text,
                         }}
@@ -3108,7 +3066,7 @@ export default function HomeScreen() {
                       >
                         <Text
                           style={{
-                            fontFamily: "Poppins_600SemiBold",
+                            fontFamily: typography.semibold,
                             fontSize: 9,
                             color: "#FFF",
                           }}
@@ -3144,7 +3102,7 @@ export default function HomeScreen() {
                 />
                 <Text
                   style={{
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                     fontSize: 11,
                     color: colors.textSecondary,
                     flex: 1,
@@ -3167,10 +3125,10 @@ export default function HomeScreen() {
         {/* Phase 2: Quick Access Modules */}
         {!isGuest && (
           <View style={styles.sectionContainer}>
-            <Text style={[styles.sectionTitle, { color: colors.text, paddingHorizontal: 24, marginBottom: 12 }]}>Explore More</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text, paddingHorizontal: 20, marginBottom: 12 }]}>Keep Exploring</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20 }}>
               {([
-                { label: "Discover", icon: "compass-outline" as const, route: "/home", color: "#3b82f6" },
+                { label: "From the Scene", icon: "radio-outline" as const, route: "/feed", color: palette.violet },
                 { label: "Shop", icon: "bag-handle-outline" as const, route: "/shop", color: "#22c55e" },
                 { label: "Orders", icon: "receipt-outline" as const, route: "/orders", color: "#eab308" },
                 { label: "Seller Hub", icon: "storefront-outline" as const, route: "/seller_hub", color: "#ec4899" },
@@ -3183,7 +3141,7 @@ export default function HomeScreen() {
                   <View style={[styles.quickAccessIcon, { backgroundColor: mod.color + "22" }]}>
                     <Ionicons name={mod.icon} size={22} color={mod.color} />
                   </View>
-                  <Text style={{ color: colors.text, fontSize: moderateScale(12), fontWeight: "600", marginTop: 6 }}>{mod.label}</Text>
+                  <Text style={{ color: colors.text, fontSize: moderateScale(12), fontFamily: typography.semibold, marginTop: 6 }}>{mod.label}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -3198,7 +3156,7 @@ export default function HomeScreen() {
                 flexDirection: "row",
                 justifyContent: "space-between",
                 alignItems: "center",
-                paddingHorizontal: 24,
+                paddingHorizontal: 20,
                 marginBottom: 12,
               }}
             >
@@ -3209,7 +3167,7 @@ export default function HomeScreen() {
                 <Text
                   style={{
                     color: colors.primary,
-                    fontFamily: "Poppins_500Medium",
+                    fontFamily: typography.medium,
                     fontSize: moderateScale(12),
                   }}
                 >
@@ -3408,106 +3366,82 @@ const styles = StyleSheet.create({
   },
   // Hero
   heroContainer: {
-    height:
-      height < 700
-        ? Math.max(height * 0.45, 340)
-        : Math.max(verticalScale(350), height * 0.38),
     width: "100%",
-    position: "relative",
-  },
-  heroImage: {
-    width: "100%",
-    height: "100%",
-  },
-  heroGradient: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: "rgba(0,0,0,0.3)", // Base darken
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 14,
   },
   heroContent: {
-    position: "absolute",
-    bottom: height < 700 ? 12 : 24,
-    left: 24, // Standardized alignment
-    right: 24, // Standardized alignment
-    zIndex: 10,
+    gap: 0,
   },
   heroGreeting: {
-    fontFamily: "Poppins_700Bold",
-    fontSize: height < 700 ? moderateScale(28) : moderateScale(34),
-    color: "#FFFFFF",
-    textShadowColor: "rgba(0, 0, 0, 0.4)",
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
-    marginBottom: 4,
-    letterSpacing: -0.5,
-  },
-  heroSubtitle: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: height < 700 ? moderateScale(14) : moderateScale(16),
-    color: "#94A3B8",
-    marginBottom: height < 700 ? 16 : 24,
+    fontFamily: typography.medium,
+    fontSize: moderateScale(13),
+    color: palette.inkMuted,
+    marginBottom: 6,
   },
   modernSearchCard: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     justifyContent: "space-between",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    elevation: 10,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   modernSearchLeft: {
     flexDirection: "row",
     alignItems: "center",
     flex: 1,
     gap: 10,
-    height: moderateScale(48),
-    borderRadius: 16,
+    height: moderateScale(54),
+    borderRadius: radius.input,
     paddingHorizontal: 16,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: palette.surface,
+    borderWidth: 1,
+    borderColor: palette.line,
   },
   modernSearchPlaceholder: {
     flex: 1,
     color: "#4B5563",
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: moderateScale(15),
     lineHeight: 20,
     includeFontPadding: false,
   },
   modernSearchFilterBtn: {
-    width: moderateScale(48),
-    height: moderateScale(48),
-    borderRadius: 16,
-    backgroundColor: "#F3F4F6",
+    width: moderateScale(54),
+    height: moderateScale(54),
+    borderRadius: radius.input,
+    backgroundColor: palette.violetWash,
     alignItems: "center",
     justifyContent: "center",
   },
 
   // Section Commons
   sectionContainer: {
-    marginTop: 32,
+    marginTop: 24,
     marginBottom: 8,
   },
   sectionTitle: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: moderateScale(20),
+    fontFamily: typography.title,
+    fontSize: moderateScale(21),
+    letterSpacing: -0.55,
     marginLeft: 0, // Removed double margin
   },
   sectionSubtitle: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: moderateScale(13),
     marginLeft: 0,
     marginTop: -2,
   },
   homeHorizontalContent: {
-    paddingLeft: 24,
-    paddingRight: 24,
+    paddingLeft: 20,
+    paddingRight: 20,
     paddingVertical: 8,
   },
   smartFeedHorizontalContent: {
-    paddingLeft: 24,
-    paddingRight: 24,
+    paddingLeft: 20,
+    paddingRight: 20,
     paddingVertical: 16,
   },
 
@@ -3575,7 +3509,7 @@ const styles = StyleSheet.create({
   },
   bentoTitleLarge: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 18,
     lineHeight: 24,
     textShadowColor: "rgba(0,0,0,0.5)",
@@ -3584,18 +3518,18 @@ const styles = StyleSheet.create({
   },
   bentoTitleSmall: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 14,
     marginBottom: 2,
   },
   bentoSubtitle: {
     color: "rgba(255,255,255,0.9)",
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
   },
   bentoRating: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 11,
     marginLeft: 4,
   },
@@ -3610,7 +3544,7 @@ const styles = StyleSheet.create({
   },
   glassBadgeText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 10,
     lineHeight: 12,
     includeFontPadding: false,
@@ -3656,12 +3590,12 @@ const styles = StyleSheet.create({
   },
   featuredBadgeText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 12,
   },
   featuredTitle: {
     color: "#FFF",
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     fontSize: moderateScale(26), // Large Typography
     marginBottom: 4,
     textShadowColor: "rgba(0,0,0,0.5)",
@@ -3670,23 +3604,23 @@ const styles = StyleSheet.create({
   },
   featuredLocation: {
     color: "rgba(255,255,255,0.9)",
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: moderateScale(14),
   },
   featuredReason: {
     color: "rgba(255,255,255,0.92)",
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: moderateScale(12),
     marginTop: 4,
   },
   featuredPrice: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 14,
   },
   featuredRating: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 13,
     marginLeft: 4,
   },
@@ -3702,7 +3636,7 @@ const styles = StyleSheet.create({
   },
   tagText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 10,
     lineHeight: 12,
     includeFontPadding: false,
@@ -3713,14 +3647,11 @@ const styles = StyleSheet.create({
   // New Arrivals Section
   newArrivalCard: {
     width: 280,
-    borderRadius: 20,
+    borderRadius: radius.card,
     overflow: "hidden",
     marginRight: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: palette.line,
   },
   newArrivalImageContainer: {
     width: "100%",
@@ -3743,11 +3674,11 @@ const styles = StyleSheet.create({
     left: 12,
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 100,
+    borderRadius: radius.control,
   },
   newArrivalTypeBadgeText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 11,
   },
   newArrivalNewBadge: {
@@ -3775,15 +3706,15 @@ const styles = StyleSheet.create({
   },
   newArrivalNewBadgeText: {
     color: "#EF4444",
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     fontSize: 10,
   },
   newArrivalDetails: {
     padding: 14,
   },
   newArrivalName: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 15,
+    fontFamily: typography.heading,
+    fontSize: 17,
     marginBottom: 6,
   },
   newArrivalRow: {
@@ -3793,12 +3724,12 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   newArrivalText: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
     flex: 1,
   },
   newArrivalPrice: {
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     fontSize: 15,
     marginTop: 6,
   },
@@ -3806,14 +3737,11 @@ const styles = StyleSheet.create({
   // Recently Viewed Section
   recentlyViewedCard: {
     width: 240,
-    borderRadius: 16,
+    borderRadius: radius.card,
     overflow: "hidden",
     marginRight: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: palette.line,
   },
   recentlyViewedImageContainer: {
     width: "100%",
@@ -3840,14 +3768,14 @@ const styles = StyleSheet.create({
   },
   recentlyViewedTypeBadgeText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 10,
   },
   recentlyViewedDetails: {
     padding: 12,
   },
   recentlyViewedName: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 14,
     marginBottom: 4,
   },
@@ -3858,7 +3786,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   recentlyViewedText: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 11,
     flex: 1,
   },
@@ -3866,12 +3794,12 @@ const styles = StyleSheet.create({
   // Empty states
   emptyText: {
     marginTop: 16,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 16,
   },
   emptySubtext: {
     marginTop: 4,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
     textAlign: "center",
   },
@@ -3913,14 +3841,14 @@ const styles = StyleSheet.create({
   },
   forYouTypeBadgeText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 11,
   },
   forYouDetails: {
     padding: 14,
   },
   forYouName: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 15,
     marginBottom: 6,
   },
@@ -3937,27 +3865,29 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   forYouText: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
     flex: 1,
   },
   forYouReasonText: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 11,
     flex: 1,
     lineHeight: 16,
   },
   forYouPrice: {
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     fontSize: 15,
     marginTop: 6,
   },
   quickAccessCard: {
     width: 90,
     paddingVertical: 14,
-    borderRadius: 16,
+    borderRadius: radius.card,
     alignItems: "center",
     marginRight: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: palette.line,
   },
   quickAccessIcon: {
     width: 44,

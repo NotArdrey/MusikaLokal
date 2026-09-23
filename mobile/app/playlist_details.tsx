@@ -1001,7 +1001,7 @@ export default function PlaylistDetailsScreen() {
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Playlist" onBackPress={() => router.back()} />
+        <Header compact title="Playlist" onBackPress={() => router.back()} />
         <View style={{ padding: 16 }}>
           <Skeleton width={SCREEN_WIDTH - 32} height={200} style={{ borderRadius: 12, marginBottom: 16 }} />
           <Skeleton width={SCREEN_WIDTH * 0.5} height={24} style={{ borderRadius: 6, marginBottom: 12 }} />
@@ -1016,7 +1016,7 @@ export default function PlaylistDetailsScreen() {
   if (!playlist) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Playlist" onBackPress={() => router.back()} />
+        <Header compact title="Playlist" onBackPress={() => router.back()} />
         <View style={styles.centered}>
           <Text style={{ color: colors.textSecondary, fontSize: moderateScale(15) }}>Playlist not found</Text>
         </View>
@@ -1122,7 +1122,7 @@ export default function PlaylistDetailsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title={playlist.title} onBackPress={() => router.back()} rightComponent={reportHeaderAction} />
+      <Header compact title={playlist.title} onBackPress={() => router.back()} rightComponent={reportHeaderAction} />
 
       <ScrollView
         style={styles.content}

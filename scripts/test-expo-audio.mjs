@@ -4,7 +4,7 @@ import { test } from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 
-function harness({ loaded = true } = {}) {
+function harness({ loaded = true, appOwnership = null } = {}) {
   const listeners = new Set();
   const timers = new Set();
   const player = {
@@ -15,6 +15,7 @@ function harness({ loaded = true } = {}) {
     },
     seeks: [],
     removed: 0,
+    lockScreenCalls: [],
     volume: 1,
     addListener(_event, listener) {
       listeners.add(listener);
@@ -28,6 +29,7 @@ function harness({ loaded = true } = {}) {
     play() { this.emit({ playing: true }); },
     pause() { this.emit({ playing: false }); },
     async seekTo(seconds) { this.seeks.push(seconds); this.emit({ currentTime: seconds }); },
+    setActiveForLockScreen(...args) { this.lockScreenCalls.push(args); },
     remove() { this.removed += 1; },
   };
   const exports = {};
@@ -38,8 +40,9 @@ function harness({ loaded = true } = {}) {
   vm.runInNewContext(compiled, {
     exports,
     require: (name) => {
-      assert.equal(name, "expo-audio");
-      return { createAudioPlayer: () => player };
+      if (name === "expo-audio") return { createAudioPlayer: () => player };
+      if (name === "expo-constants") return { __esModule: true, default: { appOwnership } };
+      assert.fail(`Unexpected module: ${name}`);
     },
     setTimeout: (callback) => { timers.add(callback); return callback; },
     clearTimeout: (callback) => timers.delete(callback),
@@ -103,4 +106,18 @@ test("disposing a preview twice is safe and detaches callbacks", async () => {
   assert.equal(player.removed, 1);
   assert.equal(listeners.size, 0);
   assert.equal((await sound.getStatusAsync()).isLoaded, false);
+});
+
+test("lock-screen controls are enabled in app builds but skipped in Expo Go", async () => {
+  for (const [appOwnership, expectedCalls] of [[null, 1], ["expo", 0]]) {
+    const { AudioSound, player } = harness({ appOwnership });
+    const { sound } = await AudioSound.createAsync({ uri: "track.mp3" });
+    sound.enableBackgroundPlayback("MusikaLokal Radio");
+    assert.equal(player.lockScreenCalls.length, expectedCalls);
+    if (expectedCalls) {
+      assert.equal(player.lockScreenCalls[0][0], true);
+      assert.equal(player.lockScreenCalls[0][1].title, "MusikaLokal Radio");
+    }
+    await sound.unloadAsync();
+  }
 });

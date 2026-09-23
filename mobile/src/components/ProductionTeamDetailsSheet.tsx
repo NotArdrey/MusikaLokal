@@ -728,7 +728,7 @@ const ProductionTeamDetailsSheet = forwardRef<
           params: {
             recipientId: team.owner_id,
             recipientName: ownerMember?.full_name || team.name,
-            recipientAvatar: ownerMember?.avatar_url || team.logo_url || "",
+            recipientAvatar: team.logo_url || ownerMember?.avatar_url || "",
           },
         });
       });

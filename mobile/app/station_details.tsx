@@ -337,7 +337,7 @@ export default function StationDetailsScreen() {
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Station" onBackPress={() => router.back()} />
+        <Header compact title="Station" onBackPress={() => router.back()} />
         <View style={{ padding: 16 }}>
           <Skeleton width={SCREEN_WIDTH - 32} height={160} style={{ borderRadius: 12, marginBottom: 16 }} />
           <Skeleton width={SCREEN_WIDTH * 0.6} height={24} style={{ borderRadius: 6, marginBottom: 12 }} />
@@ -350,7 +350,7 @@ export default function StationDetailsScreen() {
   if (!station) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Station" onBackPress={() => router.back()} />
+        <Header compact title="Station" onBackPress={() => router.back()} />
         <View style={styles.centered}>
           <Text style={{ color: colors.textSecondary, fontSize: moderateScale(15) }}>Station not found</Text>
         </View>
@@ -381,7 +381,7 @@ export default function StationDetailsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title={station.name} onBackPress={() => router.back()} />
+      <Header compact title={station.name} onBackPress={() => router.back()} />
 
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
         {/* Station art */}

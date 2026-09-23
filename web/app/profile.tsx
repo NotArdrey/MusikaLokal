@@ -2980,12 +2980,13 @@ export default function ProfileScreen() {
               activeOpacity={1}
               hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
               onPress={() => openMenu("header-menu-button")}
-              style={[
-                styles.headerMenuBtn,
-                { backgroundColor: isDark ? "#111827" : "#F8FAFC", borderColor: borderSoft },
-              ]}
+              style={styles.headerMenuHitArea}
             >
-              <Ionicons name="menu-outline" size={26} color={colors.text} />
+              <View style={styles.headerMenuLines}>
+                <View style={[styles.headerMenuLine, { backgroundColor: colors.text }]} />
+                <View style={[styles.headerMenuLine, { backgroundColor: colors.text }]} />
+                <View style={[styles.headerMenuLine, { backgroundColor: colors.text }]} />
+              </View>
             </TouchableOpacity>
           ) : !isGuest ? (
             <TouchableOpacity
@@ -5838,5 +5839,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: "center" as const,
     justifyContent: "center" as const,
+  },
+  headerMenuHitArea: {
+    width: 40,
+    height: 40,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  headerMenuLines: {
+    gap: 4,
+  },
+  headerMenuLine: {
+    width: 24,
+    height: 3,
+    borderRadius: 2,
   },
 });

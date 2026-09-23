@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   Dimensions,
@@ -25,7 +24,9 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { LoadingButtonContent } from "../src/components/LoadingState";
 import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
+import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useTheme } from "../src/context/ThemeContext";
+import { radius, typography } from "../src/theme/tokens";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 import { runAfterUIIdle } from "../src/utils/idleTask";
@@ -46,7 +47,8 @@ const SELLER_TABS = [
 
 export default function SellerHubScreen() {
   const { colors, isDark } = useTheme();
-  const { session, userId, isGuest } = useAuth();
+  const { contentBottomPadding } = useBottomBarClearance(24);
+  const { session, isGuest } = useAuth();
 
   const [tab, setTab] = useState<SellerTab>("dashboard");
   const [dashboard, setDashboard] = useState<any>(null);
@@ -167,7 +169,7 @@ export default function SellerHubScreen() {
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Header title="Seller Hub" onBackPress={() => router.back()} />
         <GuestSignInGate message="Sign in to manage your shop" />
-        
+        <Navbar />
       </View>
     );
   }
@@ -190,6 +192,7 @@ export default function SellerHubScreen() {
 
       <ScrollView
         style={styles.content}
+        contentContainerStyle={{ paddingBottom: contentBottomPadding }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         <SmoothTabTransition
@@ -198,7 +201,7 @@ export default function SellerHubScreen() {
           renderOutgoing={false}
         >
         {loading ? (
-          [1, 2, 3].map((i) => <Skeleton key={i} width={SCREEN_WIDTH - 32} height={100} style={{ marginBottom: 12, borderRadius: 12 }} />)
+          [1, 2, 3].map((i) => <Skeleton key={i} width={SCREEN_WIDTH - 40} height={100} style={{ marginBottom: 12, borderRadius: radius.card }} />)
         ) : (
           <>
             {/* Dashboard */}
@@ -272,7 +275,8 @@ export default function SellerHubScreen() {
                         }]}>
                           <Text style={{
                             color: p.status === "active" ? "#22c55e" : "#f59e0b",
-                            fontSize: moderateScale(10)
+                            fontSize: moderateScale(10),
+                            fontFamily: typography.semibold,
                           }}>
                             {p.status}
                           </Text>
@@ -282,7 +286,7 @@ export default function SellerHubScreen() {
                             style={{ marginTop: 6 }}
                             onPress={() => handlePublishProduct(p.id)}
                           >
-                            <Text style={{ color: colors.primary, fontSize: moderateScale(11), fontFamily: "Poppins_600SemiBold" }}>Publish</Text>
+                            <Text style={{ color: colors.primary, fontSize: moderateScale(11), fontFamily: typography.semibold }}>Publish</Text>
                           </TouchableOpacity>
                         )}
                       </View>
@@ -305,7 +309,7 @@ export default function SellerHubScreen() {
                     <View style={styles.orderHeader}>
                       <Text style={[styles.orderNumber, { color: colors.text }]}>#{o.order_number}</Text>
                       <View style={[styles.statusBadge, { backgroundColor: "#3b82f620" }]}>
-                        <Text style={{ color: "#3b82f6", fontSize: moderateScale(10) }}>{o.status}</Text>
+                        <Text style={{ color: "#3b82f6", fontSize: moderateScale(10), fontFamily: typography.semibold }}>{o.status}</Text>
                       </View>
                     </View>
                     <Text style={[styles.orderBuyer, { color: colors.textSecondary }]}>
@@ -325,8 +329,8 @@ export default function SellerHubScreen() {
         )}
         </SmoothTabTransition>
 
-        <View style={{ height: 100 }} />
       </ScrollView>
+      <Navbar />
 
       {/* Add Product Modal */}
       <BottomModal visible={showAddProduct} overlayLabel="SellerHubAddProductModal" onClose={() => setShowAddProduct(false)}>
@@ -387,7 +391,7 @@ export default function SellerHubScreen() {
                   size={14}
                   color={newProductType === t ? colors.primary : colors.textSecondary}
                 />
-                <Text style={{ color: newProductType === t ? colors.primary : colors.textSecondary, fontSize: moderateScale(12), marginLeft: 6 }}>
+                <Text style={{ color: newProductType === t ? colors.primary : colors.textSecondary, fontSize: moderateScale(12), fontFamily: typography.medium, marginLeft: 6 }}>
                   {t === "physical" ? "Physical" : "Digital"}
                 </Text>
               </TouchableOpacity>
@@ -413,36 +417,36 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   tabRow: { flexDirection: "row" },
   tab: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 14 },
-  tabText: { fontSize: moderateScale(13), fontFamily: "Poppins_600SemiBold" },
-  content: { flex: 1, paddingHorizontal: 16, paddingTop: 12 },
+  tabText: { fontSize: moderateScale(13), fontFamily: typography.semibold },
+  content: { flex: 1, paddingHorizontal: 20, paddingTop: 18 },
   statGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 10 },
-  statCard: { width: (SCREEN_WIDTH - 48) / 2 - 5, borderRadius: 12, borderWidth: 1, padding: 14, alignItems: "center" },
-  statValue: { fontSize: moderateScale(18), fontFamily: "Poppins_700Bold", marginTop: 8 },
-  statLabel: { fontSize: moderateScale(11), marginTop: 4 },
-  addBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 12, marginBottom: 16, gap: 6 },
-  addBtnText: { color: "#fff", fontSize: moderateScale(15), fontFamily: "Poppins_700Bold" },
-  productCard: { flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 12, borderWidth: 1, marginBottom: 10 },
+  statCard: { width: (SCREEN_WIDTH - 50) / 2, borderRadius: radius.card, borderWidth: 1, padding: 14, alignItems: "center" },
+  statValue: { fontSize: moderateScale(18), fontFamily: typography.title, marginTop: 8 },
+  statLabel: { fontSize: moderateScale(11), fontFamily: typography.medium, marginTop: 4 },
+  addBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: radius.button, marginBottom: 16, gap: 6 },
+  addBtnText: { color: "#fff", fontSize: moderateScale(15), fontFamily: typography.bold },
+  productCard: { flexDirection: "row", alignItems: "center", padding: 12, borderRadius: radius.card, borderWidth: 1, marginBottom: 12 },
   productThumb: { width: 56, height: 56, borderRadius: 8 },
   productThumbPlaceholder: { width: 56, height: 56, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-  productTitle: { fontSize: moderateScale(14), fontFamily: "Poppins_600SemiBold" },
-  productPrice: { fontSize: moderateScale(13), marginTop: 2, fontFamily: "Poppins_700Bold" },
+  productTitle: { fontSize: moderateScale(14), fontFamily: typography.semibold },
+  productPrice: { fontSize: moderateScale(13), marginTop: 2, fontFamily: typography.bold },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  orderCard: { padding: 14, borderRadius: 12, borderWidth: 1, marginBottom: 10 },
+  orderCard: { padding: 14, borderRadius: radius.card, borderWidth: 1, marginBottom: 12 },
   orderHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  orderNumber: { fontSize: moderateScale(14), fontFamily: "Poppins_700Bold" },
-  orderBuyer: { fontSize: moderateScale(12), marginTop: 4 },
-  orderTotal: { fontSize: moderateScale(15), fontFamily: "Poppins_700Bold", marginTop: 6 },
-  emptyText: { textAlign: "center", marginTop: 12, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium" },
+  orderNumber: { fontSize: moderateScale(14), fontFamily: typography.heading },
+  orderBuyer: { fontSize: moderateScale(12), fontFamily: typography.body, marginTop: 4 },
+  orderTotal: { fontSize: moderateScale(15), fontFamily: typography.bold, marginTop: 6 },
+  emptyText: { textAlign: "center", marginTop: 12, fontSize: moderateScale(15), fontFamily: typography.medium },
   modalContent: { padding: 16 },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" as const },
   modalBox: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: "80%" as any },
   modalHeader: { flexDirection: "row" as const, justifyContent: "space-between" as const, alignItems: "center" as const, marginBottom: 16 },
-  sectionTitle: { fontSize: moderateScale(17), fontFamily: "Poppins_700Bold" as const },
-  inputLabel: { fontSize: moderateScale(13), fontFamily: "Poppins_600SemiBold", marginBottom: 6, marginTop: 12 },
-  input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14) },
+  sectionTitle: { fontSize: moderateScale(17), fontFamily: typography.heading },
+  inputLabel: { fontSize: moderateScale(13), fontFamily: typography.semibold, marginBottom: 6, marginTop: 12 },
+  input: { borderWidth: 1, borderRadius: radius.input, padding: 12, fontSize: moderateScale(14), fontFamily: typography.body },
   textArea: { minHeight: 80, textAlignVertical: "top" },
   typeRow: { flexDirection: "row", gap: 10, marginTop: 4 },
   typePill: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },
   submitBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 12, marginTop: 20 },
-  submitBtnText: { color: "#fff", fontSize: moderateScale(15), fontFamily: "Poppins_700Bold" },
+  submitBtnText: { color: "#fff", fontSize: moderateScale(15), fontFamily: typography.bold },
 });

@@ -20,6 +20,7 @@ import { formatFriendlyDateTime } from '../../src/utils/friendlyDateTime';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
 import { StaffAssignment, fetchActiveStaffAssignment, getStaffPermissions } from '../../src/utils/staffAccess';
 import { createRealtimeChannelTopic } from '../../src/utils/realtimeChannel';
+import { palette, radius, typography } from '../../src/theme/tokens';
 
 const DEFAULT_GIG_IMAGE = 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop';
 const JOINED_GIG_APPLICATION_STATUSES = ['accepted', 'approved'];
@@ -544,7 +545,7 @@ export default function MyVenueScreen() {
     return (
         <>
             <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header title="My Gig" />
+                <Header title="My Gigs" overline="MusikaLokal" showTitle={false} />
 
                 <ScrollView
                     showsVerticalScrollIndicator={false}
@@ -555,6 +556,8 @@ export default function MyVenueScreen() {
                     {isMusicianView && (
                         <MusicianWorkspaceTabs activeKey="venue" />
                     )}
+
+                    <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>DATES, TALENT & APPLICANTS</Text>
 
                     <InlineErrorBanner
                         message={loadError}
@@ -648,20 +651,19 @@ export default function MyVenueScreen() {
                                     <View style={[styles.statusBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
                                         <Text style={[styles.statusText, { color: colors.primary }]}>{gig.status || 'Active'}</Text>
                                     </View>
-                                    <View style={styles.budgetBadge}>
-                                        <Text style={styles.budgetText}>₱{gig.budget?.toLocaleString()}</Text>
-                                    </View>
                                 </View>
 
                                 <View style={styles.cardContent}>
-                                    <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{gig.name}</Text>
-                                    <Text style={[styles.cardSubTitle, { color: colors.primary }]}>
+                                    <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={2}>{gig.name}</Text>
+                                    <Text style={[styles.cardSubTitle, { color: colors.textSecondary }]}>
                                         {gig.event_date ? formatFriendlyDateTime(gig.event_date, { forceDateOnly: true }) : 'Date TBA'}
-                                        {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` at ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''} - {gig.location}
+                                        {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` · ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''}
                                     </Text>
+                                    {!!gig.location && <Text style={[styles.cardLocation, { color: colors.textSecondary }]}>{gig.location}</Text>}
+                                    {gig.budget != null && <Text style={[styles.cardBudget, { color: colors.text }]}>₱{gig.budget.toLocaleString()} talent fee</Text>}
 
                                     <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
-                                        {gig.description}
+                                        {String(gig.description || '').replace(/^\[role_accurate_demo_seed_v\d+\]\s*/i, '')}
                                     </Text>
 
                                     {!isApproved && (
@@ -697,10 +699,10 @@ export default function MyVenueScreen() {
 
                                                     router.push({ pathname: '/manage_gig', params: { id: gig.id } });
                                                 }}
-                                                style={[styles.manageBtn, { backgroundColor: colors.primary }]}
+                                                style={[styles.manageBtn, { borderColor: colors.primary }]}
                                             >
-                                                <Ionicons name={canManageGig ? 'settings-outline' : 'eye-outline'} size={18} color="#FFF" />
-                                                <Text style={styles.manageBtnText}>{canManageGig ? 'Manage' : 'View'}</Text>
+                                                <Ionicons name={canManageGig ? 'arrow-forward-outline' : 'eye-outline'} size={18} color={colors.primary} />
+                                                <Text style={[styles.manageBtnText, { color: colors.primary }]}>{canManageGig ? 'Manage' : 'View'}</Text>
                                             </TouchableOpacity>
 
                                             {canEditVenue && isRejected ? (
@@ -807,6 +809,12 @@ const styles = StyleSheet.create({
         paddingBottom: 180,
         paddingTop: 16,
     },
+    sectionHeading: {
+        fontFamily: typography.bold,
+        fontSize: 12,
+        letterSpacing: 1.4,
+        marginBottom: 16,
+    },
     pageTabsWrap: {
         borderWidth: 1,
         borderRadius: 14,
@@ -837,7 +845,7 @@ const styles = StyleSheet.create({
         gap: 16,
     },
     skeletonCard: {
-        borderRadius: 24,
+        borderRadius: radius.card,
         borderWidth: 1,
         padding: 16,
     },
@@ -861,15 +869,14 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     cardContainer: {
-        marginBottom: 24,
-        borderRadius: 24,
+        marginBottom: 16,
+        borderRadius: radius.card,
         overflow: 'hidden',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.1,
-        shadowRadius: 16,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: palette.line,
     },
     imageWrapper: {
-        height: 192,
+        height: 160,
         position: 'relative',
     },
     cardImage: {
@@ -886,37 +893,37 @@ const styles = StyleSheet.create({
     },
     statusText: {
         fontSize: 12,
-        fontFamily: 'Poppins_600SemiBold',
-    },
-    budgetBadge: {
-        position: 'absolute',
-        bottom: 16,
-        left: 16,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 12,
-    },
-    budgetText: {
-        fontSize: 13,
-        fontFamily: 'Poppins_600SemiBold',
-        color: '#FFF',
+        fontFamily: typography.semibold,
     },
     cardContent: {
         padding: 16,
     },
     cardTitle: {
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: 18,
-        marginBottom: 2,
+        fontFamily: typography.title,
+        fontSize: 20,
+        lineHeight: 26,
+        letterSpacing: -0.4,
+        marginBottom: 8,
     },
     cardSubTitle: {
-        fontFamily: 'Poppins_500Medium',
-        fontSize: 13,
-        marginBottom: 6,
+        fontFamily: typography.medium,
+        fontSize: 14,
+        lineHeight: 20,
+    },
+    cardLocation: {
+        fontFamily: typography.body,
+        fontSize: 14,
+        lineHeight: 20,
+        marginTop: 2,
+    },
+    cardBudget: {
+        fontFamily: typography.semibold,
+        fontSize: 14,
+        marginTop: 10,
+        marginBottom: 8,
     },
     cardDescription: {
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
         fontSize: 13,
         lineHeight: 20,
     },
@@ -963,10 +970,10 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 8,
         borderRadius: 12,
+        borderWidth: 1,
     },
     manageBtnText: {
-        fontFamily: 'Poppins_500Medium',
-        color: '#FFF',
+        fontFamily: typography.semibold,
     },
     editBtn: {
         width: 38,

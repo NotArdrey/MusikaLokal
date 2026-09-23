@@ -14,7 +14,7 @@ export const ProfileCompletionBanner = () => {
     if (checking || isProfileComplete) return null;
 
     return (
-        <View style={[styles.container, { backgroundColor: colors.primaryLight, borderLeftColor: colors.primary }]}>
+        <View style={[styles.container, { backgroundColor: colors.primaryLight }]}>
             <View style={styles.content}>
                 <Ionicons name="alert-circle" size={24} color={colors.primary} />
                 <View style={styles.textContainer}>
@@ -39,7 +39,6 @@ const styles = StyleSheet.create({
         margin: 16,
         padding: 16,
         borderRadius: 12,
-        borderLeftWidth: 4,
         flexDirection: 'column',
         gap: 12,
         shadowColor: '#000',

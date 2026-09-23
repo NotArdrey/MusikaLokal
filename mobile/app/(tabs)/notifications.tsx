@@ -983,10 +983,7 @@ export default function NotificationsScreen() {
                     styles.notificationItem,
                     {
                         backgroundColor: isRead ? 'transparent' : (isDark ? 'rgba(99, 102, 241, 0.05)' : '#F0F4FF'),
-                        borderLeftWidth: isRead ? 0 : 4,
-                        borderLeftColor: colors.primary,
                         opacity: isRead ? 0.7 : 1,
-                        paddingLeft: isRead ? 20 : 16,
                     }
                 ]}
                 onPress={() => {

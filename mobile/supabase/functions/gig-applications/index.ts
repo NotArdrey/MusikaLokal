@@ -899,70 +899,94 @@ function evaluateGigApplication(
 }
 
 async function addGroqRecommendationExplanations(evaluations: any[]) {
-    const apiKey = Deno.env.get('GROQ_API_KEY') || ''
-    if (!apiKey || evaluations.length === 0) return evaluations
+    const apiKeys = Array.from(new Set([
+        Deno.env.get('GROQ_API_KEY'),
+        Deno.env.get('GROQ_FALLBACK_API_KEY'),
+    ].filter((key): key is string => typeof key === 'string' && key.trim().length > 0)
+        .map((key) => key.trim())))
+    if (apiKeys.length === 0 || evaluations.length === 0) return evaluations
 
-    try {
-        const model = Deno.env.get('GROQ_MODEL') || 'openai/gpt-oss-120b'
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${apiKey}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
+    const models = Array.from(new Set([
+        Deno.env.get('GROQ_TEXT_MODEL'),
+        Deno.env.get('GROQ_MODEL'),
+        Deno.env.get('GROQ_TEXT_FALLBACK_MODEL'),
+        'openai/gpt-oss-120b',
+        'qwen/qwen3.8-27b',
+        'openai/gpt-oss-20b',
+    ].filter((model): model is string => typeof model === 'string' && model.trim().length > 0)
+        .map((model) => model.trim())))
+    const messages = [
+        {
+            role: 'system',
+            content:
+                'Explain structured gig-applicant fit results. Never accept or reject applicants. Return JSON only as {"recommendations":[{"application_id":"uuid","explanation":"one concise neutral sentence"}]}. Do not infer protected or personal traits.',
+        },
+        {
+            role: 'user',
+            content: JSON.stringify(
+                evaluations.map((item) => ({
+                    application_id: item.application_id,
+                    score: item.score,
+                    status: item.recommendation_status,
+                    matched: item.matched_criteria,
+                    missing: item.missing_criteria,
+                }))
+            ),
+        },
+    ]
+
+    for (const model of models) {
+        for (const [keyIndex, apiKey] of apiKeys.entries()) {
+          try {
+            const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    model,
+                    temperature: 0.1,
+                    response_format: { type: 'json_object' },
+                    messages,
+                }),
+                signal: AbortSignal.timeout(8000),
+            })
+
+            if (!response.ok) {
+                console.warn('gig_recommendation_ai_model_failed', { model, key_slot: keyIndex + 1, status: response.status })
+                continue
+            }
+            const payload = await response.json()
+            const content = payload?.choices?.[0]?.message?.content
+            const parsed = typeof content === 'string' ? JSON.parse(content) : null
+            const explanationById = new Map(
+                (Array.isArray(parsed?.recommendations) ? parsed.recommendations : [])
+                    .filter(
+                        (item: any) => typeof item?.application_id === 'string' && typeof item?.explanation === 'string'
+                    )
+                    .map((item: any) => [item.application_id, item.explanation.trim()])
+            )
+
+            return evaluations.map((item) => ({
+                ...item,
+                explanation: explanationById.get(item.application_id) || item.explanation,
+                model_provider: explanationById.has(item.application_id) ? 'groq' : item.model_provider,
+            }))
+          } catch (error) {
+            console.warn('gig_recommendation_ai_model_failed', {
                 model,
-                temperature: 0.1,
-                response_format: { type: 'json_object' },
-                messages: [
-                    {
-                        role: 'system',
-                        content:
-                            'Explain structured gig-applicant fit results. Never accept or reject applicants. Return JSON only as {"recommendations":[{"application_id":"uuid","explanation":"one concise neutral sentence"}]}. Do not infer protected or personal traits.',
-                    },
-                    {
-                        role: 'user',
-                        content: JSON.stringify(
-                            evaluations.map((item) => ({
-                                application_id: item.application_id,
-                                score: item.score,
-                                status: item.recommendation_status,
-                                matched: item.matched_criteria,
-                                missing: item.missing_criteria,
-                            }))
-                        ),
-                    },
-                ],
-            }),
-            signal: AbortSignal.timeout(8000),
-        })
-
-        if (!response.ok) return evaluations
-        const payload = await response.json()
-        const content = payload?.choices?.[0]?.message?.content
-        const parsed = typeof content === 'string' ? JSON.parse(content) : null
-        const explanationById = new Map(
-            (Array.isArray(parsed?.recommendations) ? parsed.recommendations : [])
-                .filter(
-                    (item: any) => typeof item?.application_id === 'string' && typeof item?.explanation === 'string'
-                )
-                .map((item: any) => [item.application_id, item.explanation.trim()])
-        )
-
-        return evaluations.map((item) => ({
-            ...item,
-            explanation: explanationById.get(item.application_id) || item.explanation,
-            model_provider: explanationById.has(item.application_id) ? 'groq' : item.model_provider,
-        }))
-    } catch (error) {
-        console.warn('gig_recommendation_ai_explanation_failed', {
-            message: String((error as any)?.message || error),
-        })
-        return evaluations
+                key_slot: keyIndex + 1,
+                message: String((error as any)?.message || error),
+            })
+          }
+        }
     }
+
+    return evaluations
 }
 
-async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evaluations: any[]) {
+export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evaluations: any[]) {
     const applicationIds = evaluations
         .map((item) => item?.application_id)
         .filter((id): id is string => typeof id === 'string' && id.length > 0)
@@ -1846,18 +1870,6 @@ Deno.serve(async (req: Request) => {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 400,
                 })
-            }
-
-            if (videoUrl && videoCopyrightAcknowledged !== true) {
-                return new Response(
-                    JSON.stringify({
-                        error: 'Performance video rights acknowledgment is required',
-                    }),
-                    {
-                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                        status: 400,
-                    }
-                )
             }
 
             const { data: teamMembership, error: teamMembershipError } = await supabaseClient

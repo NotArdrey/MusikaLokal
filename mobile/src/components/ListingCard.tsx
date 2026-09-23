@@ -23,6 +23,7 @@ import { addFavoriteChangedListener, emitFavoriteChanged } from "../utils/favori
 import { isFanUserRole } from "../utils/roleRouting";
 import CachedImage from "./CachedImage";
 import PagerView from "./PagerView";
+import { palette, radius, typography } from "../theme/tokens";
 
 const debugLog = (..._args: unknown[]) => { };
 
@@ -267,6 +268,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
   const [pageIndex, setPageIndex] = useState(0);
   const isFeedVariant = variant === "feed";
   const normalizedListingType = String(item?.type || "").trim().toLowerCase();
+  const isGigListing = normalizedListingType === "gig" || normalizedListingType === "venue";
   const parsedApplicantCount = Number(item?.applicant_count);
   const showApplicantCount =
     !isFan &&
@@ -1230,6 +1232,11 @@ const ListingCard: React.FC<ListingCardProps> = ({
       style={({ pressed }) => [
         styles.card,
         isFeedVariant && styles.feedCard,
+        isGigListing && styles.gigCard,
+        normalizedListingType === "artist" && styles.artistCard,
+        normalizedListingType === "studio" && styles.studioCard,
+        normalizedListingType === "group" && styles.groupCard,
+        normalizedListingType === "production" && styles.productionCard,
         {
           width: "100%",
           backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
@@ -1247,7 +1254,12 @@ const ListingCard: React.FC<ListingCardProps> = ({
         ]}
       >
         {/* Image Section */}
-        <View style={[styles.imageContainer, isFeedVariant && styles.feedImageContainer, { height: imageHeight }]}>
+        <View style={[
+          styles.imageContainer,
+          isFeedVariant && styles.feedImageContainer,
+          isGigListing && styles.gigImageContainer,
+          { height: imageHeight },
+        ]}>
           {showProfileImagePlaceholder && (
             <View style={[styles.profileImagePlaceholder, StyleSheet.absoluteFill]}>
               <Ionicons
@@ -1905,32 +1917,43 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: 20,
     marginRight: 0,
-    borderRadius: 26,
+    borderRadius: radius.card,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "rgba(15,23,42,0.08)",
+    borderColor: palette.line,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.035,
+    shadowRadius: 3,
+    elevation: 1,
   },
   feedCard: {
     marginBottom: 12,
-    borderRadius: 22,
-    borderColor: "#EEF0F4",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.04,
-    shadowRadius: 12,
-    elevation: 2,
+    borderRadius: radius.card,
+    borderColor: palette.line,
+  },
+  gigCard: {
+    borderColor: palette.line,
+  },
+  artistCard: {
+    borderColor: palette.line,
+  },
+  studioCard: {
+    borderColor: palette.line,
+  },
+  groupCard: {
+    borderColor: palette.line,
+  },
+  productionCard: {
+    borderColor: palette.line,
   },
   cardContent: {
-    borderRadius: 26,
+    borderRadius: radius.card,
     overflow: "hidden",
     position: "relative",
   },
   feedCardContent: {
-    borderRadius: 22,
+    borderRadius: radius.card,
   },
   // --- Immersive Styles ---
   immersiveTopRow: {
@@ -1952,8 +1975,8 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   immersiveTitle: {
-    fontFamily: "Poppins_700Bold",
-    fontSize: 20,
+    fontFamily: typography.title,
+    fontSize: 22,
     color: "#FFF",
     textShadowColor: "rgba(0,0,0,0.5)",
     textShadowOffset: { width: 0, height: 2 },
@@ -1961,12 +1984,12 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   immersiveSubtitle: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 13,
     color: "rgba(255,255,255,0.95)",
   },
   immersivePrice: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.bold,
     fontSize: 16,
     color: "#FFF",
     marginTop: 4,
@@ -1984,7 +2007,7 @@ const styles = StyleSheet.create({
   },
   glassBadgeText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 11,
     lineHeight: 13,
     includeFontPadding: false,
@@ -2033,7 +2056,7 @@ const styles = StyleSheet.create({
   tagText: {
     color: "#FFF",
     fontSize: 10,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.bold,
     lineHeight: 12,
     includeFontPadding: false,
     textAlignVertical: "center",
@@ -2052,9 +2075,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#E5E7EB",
   },
   feedImageContainer: {
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
+    borderTopLeftRadius: radius.card,
+    borderTopRightRadius: radius.card,
     overflow: "hidden",
+  },
+  gigImageContainer: {
+    backgroundColor: palette.ink,
   },
   image: {
     width: "100%",
@@ -2115,7 +2141,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   ratingText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 12,
     color: "#1F2937",
     includeFontPadding: false,
@@ -2124,17 +2150,14 @@ const styles = StyleSheet.create({
   iconBtn: {
     width: 38,
     height: 38,
-    borderRadius: 19,
+    borderRadius: radius.control,
     backgroundColor: "rgba(255, 255, 255, 0.95)",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(148,163,184,0.24)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 2,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   info: {
     paddingHorizontal: 18,
@@ -2204,9 +2227,10 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
   title: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 16,
-    lineHeight: 22,
+    fontFamily: typography.title,
+    fontSize: 19,
+    lineHeight: 24,
+    letterSpacing: -0.45,
     marginRight: 8,
   },
   typeMini: {
@@ -2218,7 +2242,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   subtitle: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 13, // Standardized
   },
   priceRow: {
@@ -2259,14 +2283,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   priceAmount: {
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     fontSize: 15,
     lineHeight: 18,
     includeFontPadding: false,
     textAlignVertical: "center",
   },
   priceUnit: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 11,
     lineHeight: 14,
     includeFontPadding: false,
@@ -2274,7 +2298,7 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
   priceLabelText: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 12,
     flexShrink: 1,
   },
@@ -2289,14 +2313,14 @@ const styles = StyleSheet.create({
   feedViewBtn: {
     flex: 1,
     minHeight: 40,
-    borderRadius: 14,
+    borderRadius: radius.button,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 12,
   },
   feedViewText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 12,
     lineHeight: 16,
     includeFontPadding: false,

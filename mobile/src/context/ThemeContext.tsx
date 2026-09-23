@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { palette } from '../theme/tokens';
 
 type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -17,6 +18,10 @@ interface ThemeColors {
   card: string;
   inputBackground: string;
   inputBorder: string;
+  accent: string;
+  success: string;
+  danger: string;
+  warning: string;
 }
 
 interface ThemeContextType {
@@ -27,35 +32,43 @@ interface ThemeContextType {
 }
 
 const lightColors: ThemeColors = {
-  background: '#F9FAFB', // modern gray-50
-  surface: '#FFFFFF',
-  text: '#111827', // gray-900
-  textSecondary: '#6B7280', // gray-500
-  secondary: '#6B7280',
-  primary: '#4F46E5', // Indigo 600
-  primaryLight: '#E0E7FF', // Indigo 100
-  primaryDark: '#4338CA', // Indigo 700
-  border: '#E5E7EB', // gray-200
-  muted: '#9CA3AF',
-  card: '#FFFFFF',
-  inputBackground: '#F3F4F6',
-  inputBorder: '#D1D5DB',
+  background: palette.paper,
+  surface: palette.surface,
+  text: palette.ink,
+  textSecondary: palette.inkMuted,
+  secondary: palette.inkMuted,
+  primary: palette.violet,
+  primaryLight: palette.violetWash,
+  primaryDark: palette.violetDark,
+  border: palette.line,
+  muted: '#969790',
+  card: palette.surface,
+  inputBackground: palette.field,
+  inputBorder: '#D3D2CB',
+  accent: palette.mango,
+  success: palette.success,
+  danger: palette.danger,
+  warning: palette.warning,
 };
 
 const darkColors: ThemeColors = {
-  background: '#0F172A', // Slate 900
-  surface: '#1E293B', // Slate 800
-  text: '#F8FAFC', // Slate 50
-  textSecondary: '#94A3B8', // Slate 400
-  secondary: '#94A3B8',
-  primary: '#6366F1', // Indigo 500
-  primaryLight: '#312E81', // Indigo 900
-  primaryDark: '#4F46E5', // Indigo 600
-  border: '#334155', // Slate 700
-  muted: '#64748B',
-  card: '#1E293B', // Slate 800
-  inputBackground: '#1E293B',
-  inputBorder: '#475569',
+  background: palette.night,
+  surface: palette.nightSurface,
+  text: palette.nightText,
+  textSecondary: palette.nightMuted,
+  secondary: palette.nightMuted,
+  primary: '#776AF7',
+  primaryLight: '#2B2854',
+  primaryDark: '#9389FF',
+  border: palette.nightLine,
+  muted: '#777984',
+  card: palette.nightSurface,
+  inputBackground: palette.nightRaised,
+  inputBorder: '#464751',
+  accent: palette.mango,
+  success: '#3BC596',
+  danger: '#F16A6A',
+  warning: '#F0B04C',
 };
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);

@@ -24,6 +24,7 @@ import { isE2EFixtureMode } from '../../src/utils/e2eFixtures';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
 import { clearListingDetailsCache } from '../../src/utils/listingDetailsCache';
 import { createRealtimeChannelTopic } from '../../src/utils/realtimeChannel';
+import { palette, radius, typography } from '../../src/theme/tokens';
 
 const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
@@ -538,7 +539,7 @@ export default function MyStudioScreen() {
     return (
         <>
             <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header title="My Studio" />
+                <Header title="My Studios" overline="MusikaLokal" showTitle={false} />
 
                 <ScrollView
                     showsVerticalScrollIndicator={false}
@@ -546,6 +547,8 @@ export default function MyStudioScreen() {
                     style={styles.flex1}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 >
+                    <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>SPACES & SESSIONS</Text>
+
                     <InlineErrorBanner
                         message={loadError}
                         onRetry={() => {
@@ -642,6 +645,9 @@ export default function MyStudioScreen() {
 
                                 <View style={styles.cardContent}>
                                     <Text style={[styles.cardTitle, { color: colors.text }]}>{studio.name}</Text>
+                                    <Text style={[styles.studioMeta, { color: colors.primary }]}>
+                                        {[studio.studio_type, studio.location].filter(Boolean).join(' · ') || 'Studio details'}
+                                    </Text>
                                     <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
                                         {studio.description}
                                     </Text>
@@ -667,10 +673,10 @@ export default function MyStudioScreen() {
                                                 testID={`mobile-studio-manage-${studio.id}`}
                                                 accessibilityLabel={`mobile-studio-manage-${studio.id}`}
                                                 onPress={() => router.push({ pathname: '/manage_studio', params: { id: studio.id } })}
-                                                style={[styles.manageBtn, { backgroundColor: colors.primary }]}
+                                                style={[styles.manageBtn, { borderColor: colors.primary }]}
                                             >
-                                                <Ionicons name="settings-outline" size={18} color="#FFF" />
-                                                <Text style={styles.manageBtnText}>Manage</Text>
+                                                <Ionicons name="arrow-forward-outline" size={18} color={colors.primary} />
+                                                <Text style={[styles.manageBtnText, { color: colors.primary }]}>Manage</Text>
                                             </TouchableOpacity>
                                             ) : null}
 
@@ -789,6 +795,12 @@ const styles = StyleSheet.create({
         paddingBottom: 180,
         paddingTop: 16,
     },
+    sectionHeading: {
+        fontFamily: typography.bold,
+        fontSize: 12,
+        letterSpacing: 1.4,
+        marginBottom: 16,
+    },
     loadingText: {
         textAlign: 'center',
         marginTop: 20,
@@ -798,7 +810,7 @@ const styles = StyleSheet.create({
         gap: 16,
     },
     skeletonCard: {
-        borderRadius: 24,
+        borderRadius: radius.card,
         borderWidth: 1,
         padding: 16,
     },
@@ -817,15 +829,14 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
     },
     cardContainer: {
-        marginBottom: 24,
-        borderRadius: 24,
+        marginBottom: 16,
+        borderRadius: radius.card,
         overflow: 'hidden',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.1,
-        shadowRadius: 16,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: palette.line,
     },
     imageWrapper: {
-        height: 192,
+        height: 160,
         position: 'relative',
     },
     cardImage: {
@@ -848,12 +859,20 @@ const styles = StyleSheet.create({
         padding: 16,
     },
     cardTitle: {
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: 18,
+        fontFamily: typography.title,
+        fontSize: 20,
+        letterSpacing: -0.4,
         marginBottom: 4,
     },
+    studioMeta: {
+        fontFamily: typography.bold,
+        fontSize: 11,
+        letterSpacing: 0.7,
+        textTransform: 'uppercase',
+        marginBottom: 8,
+    },
     cardDescription: {
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
         fontSize: 13,
         lineHeight: 20,
     },
@@ -889,10 +908,10 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 8,
         borderRadius: 12,
+        borderWidth: 1,
     },
     manageBtnText: {
-        fontFamily: 'Poppins_500Medium',
-        color: '#FFF',
+        fontFamily: typography.semibold,
     },
     editBtn: {
         width: 38,

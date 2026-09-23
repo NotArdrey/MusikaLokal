@@ -3268,8 +3268,6 @@ const ListingDetailsSheet = forwardRef<
       setAiPortfolioReviewConsent={setAiPortfolioReviewConsent}
       setVideoReviewFrameUrl={setVideoReviewFrameUrl}
       setVideoReviewFrameUrls={setVideoReviewFrameUrls}
-      videoCopyrightAcknowledged={videoCopyrightAcknowledged}
-      setVideoCopyrightAcknowledged={setVideoCopyrightAcknowledged}
       videoCopyrightDecision={videoCopyrightDecision}
       setVideoCopyrightDecision={setVideoCopyrightDecision}
       isSubmittingApplication={isSubmittingApplication}
@@ -3318,8 +3316,6 @@ const ListingDetailsSheet = forwardRef<
       setAiPortfolioReviewConsent={() => {}}
       setVideoReviewFrameUrl={() => {}}
       setVideoReviewFrameUrls={() => {}}
-      videoCopyrightAcknowledged={false}
-      setVideoCopyrightAcknowledged={() => {}}
       videoCopyrightDecision={null}
       setVideoCopyrightDecision={() => {}}
       isSubmittingApplication={isSubmittingApplication}
@@ -3476,8 +3472,8 @@ const ListingDetailsSheet = forwardRef<
         return;
       }
 
-      if (request.requestKind === "application" && (!requestVideoCopyrightAcknowledged || requestVideoCopyrightDecision?.allowed !== true)) {
-        showSheetAlert("warning", "Video Rights Check Required", "Confirm your rights and upload the video again so its released-recording fingerprint can be checked.");
+      if (request.requestKind === "application" && requestVideoCopyrightDecision?.allowed !== true) {
+        showSheetAlert("warning", "Video Audio Check Required", "Upload the video again so its audio can be checked for advisory genre evidence.");
         return;
       }
 
@@ -3826,21 +3822,6 @@ const ListingDetailsSheet = forwardRef<
 
           {options.requestKind === "application" ? (
             <>
-              <TouchableOpacity
-                activeOpacity={0.78}
-                onPress={() => {
-                  const nextValue = !requestVideoCopyrightAcknowledged;
-                  setRequestVideoCopyrightAcknowledged(nextValue);
-                  if (!nextValue) {
-                    setRequestVideoCopyrightDecision(null);
-                    setRequestVideoUrl("");
-                  }
-                }}
-                style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, borderWidth: 1, borderColor: requestVideoCopyrightAcknowledged ? colors.primary : colors.border, borderRadius: 12, padding: 12, marginTop: 14 }}
-              >
-                <Ionicons name={requestVideoCopyrightAcknowledged ? "checkbox" : "square-outline"} size={21} color={requestVideoCopyrightAcknowledged ? colors.primary : colors.textSecondary} />
-                <Text style={{ color: colors.text, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, flex: 1 }}>I created this performance or have the rights, license, or permission to submit it. A fingerprint match may require admin review. *</Text>
-              </TouchableOpacity>
               <Text style={[styles.label, { color: colors.textSecondary, marginTop: 14 }]}>Upload Video / Reel *</Text>
               <View style={{ marginTop: 8 }}>
                 <VideoUploader
@@ -3852,7 +3833,6 @@ const ListingDetailsSheet = forwardRef<
                   maxSizeMB={50}
                   enableCopyrightScreening
                   allowPortfolioSelection
-                  copyrightAcknowledged={requestVideoCopyrightAcknowledged}
                   onCopyrightDecisionChange={setRequestVideoCopyrightDecision}
                 />
               </View>

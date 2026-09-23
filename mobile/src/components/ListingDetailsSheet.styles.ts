@@ -1,5 +1,7 @@
 ﻿import { Dimensions, StyleSheet } from "react-native";
 
+import { radius, typography } from "../theme/tokens";
+
 export const { width, height } = Dimensions.get("window");
 export const IMG_HEIGHT = height < 700 ? height * 0.3 : height * 0.35;
 
@@ -63,15 +65,15 @@ const styles = StyleSheet.create({
   roundBtn: {
     width: moderateScale(40),
     height: moderateScale(40),
-    borderRadius: moderateScale(20),
+    borderRadius: radius.control,
     backgroundColor: "#FFF",
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
   },
   heroIdentity: {
     position: "absolute",
@@ -80,8 +82,10 @@ const styles = StyleSheet.create({
     right: scale(24),
   },
   heroTitle: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: height < 700 ? moderateScale(24) : moderateScale(28),
+    fontFamily: typography.display,
+    fontSize: height < 700 ? moderateScale(28) : moderateScale(32),
+    lineHeight: height < 700 ? moderateScale(32) : moderateScale(36),
+    letterSpacing: -1,
     color: "#FFF",
     textShadowColor: "rgba(0,0,0,0.5)",
     textShadowOffset: { width: 0, height: 2 },
@@ -89,7 +93,7 @@ const styles = StyleSheet.create({
   },
   heroLocation: {
     color: "#FFF",
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: moderateScale(14),
     marginLeft: scale(4),
   },
@@ -109,7 +113,7 @@ const styles = StyleSheet.create({
     paddingVertical: moderateScale(16),
   },
   tabText: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.semibold,
     fontSize: moderateScale(14),
   },
   contentBody: {
@@ -124,31 +128,32 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: height < 700 ? moderateScale(16) : moderateScale(18),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     marginBottom: moderateScale(12),
   },
   description: {
+    fontFamily: typography.body,
     fontSize: moderateScale(14),
     lineHeight: moderateScale(22),
   },
   statCard: {
     flex: 1,
     padding: 12,
-    borderRadius: 12,
+    borderRadius: radius.card,
   },
   statLabel: {
     fontSize: 11,
     textTransform: "uppercase",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.bold,
     marginBottom: 4,
   },
   statValue: {
     fontSize: 16,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   offerCard: {
     padding: 16,
-    borderRadius: 16,
+    borderRadius: radius.card,
     borderWidth: 1,
     marginTop: 8,
   },
@@ -168,14 +173,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     padding: 16,
-    borderRadius: 16,
+    borderRadius: radius.card,
     borderWidth: 1,
     gap: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   dateIconContainer: {
     width: 48,
@@ -187,26 +191,25 @@ const styles = StyleSheet.create({
   dateTimeLabel: {
     fontSize: 11,
     textTransform: "uppercase",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.bold,
     letterSpacing: 0.5,
     marginBottom: 2,
   },
   dateTimeValue: {
     fontSize: 15,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   timeCard: {
     flexDirection: "row",
     alignItems: "center",
     padding: 12,
-    borderRadius: 16,
+    borderRadius: radius.card,
     borderWidth: 1,
     gap: 8,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   timeIconContainer: {
     width: 32,
@@ -218,13 +221,13 @@ const styles = StyleSheet.create({
   timeLabel: {
     fontSize: 10,
     textTransform: "uppercase",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.bold,
     letterSpacing: 0.5,
     marginBottom: 2,
   },
   timeValue: {
     fontSize: 16,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.title,
   },
   durationBadge: {
     flexDirection: "row",
@@ -242,18 +245,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     padding: 16,
-    borderRadius: 16,
+    borderRadius: radius.button,
     borderWidth: 1,
     gap: 12,
   },
   pickerLabel: {
     fontSize: 10,
     textTransform: "uppercase",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.bold,
   },
   pickerValue: {
     fontSize: 15,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   durationWrapper: {
     flexDirection: "row",
@@ -295,7 +298,7 @@ const styles = StyleSheet.create({
   reviewCard: {
     width: "100%",
     padding: 20,
-    borderRadius: 24,
+    borderRadius: radius.card,
     borderWidth: 1,
   },
   reviewUser: {
@@ -310,7 +313,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
   },
   reviewName: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 15,
   },
   reviewDate: {
@@ -318,7 +321,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   reviewBody: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
     lineHeight: 22,
   },
@@ -356,7 +359,7 @@ const styles = StyleSheet.create({
     marginBottom: moderateScale(16),
   },
   label: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.semibold,
     marginBottom: moderateScale(8),
   },
   inputWrapper: {
@@ -366,7 +369,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   input: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: moderateScale(14),
     padding: 0,
     textAlignVertical: "center",
@@ -399,25 +402,25 @@ const styles = StyleSheet.create({
   primaryBtn: {
     paddingHorizontal: moderateScale(18),
     paddingVertical: moderateScale(16),
-    borderRadius: moderateScale(16),
+    borderRadius: radius.button,
     alignItems: "center",
     justifyContent: "center",
   },
   primaryBtnText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: moderateScale(16),
   },
   secondaryBtn: {
     paddingVertical: moderateScale(14),
-    borderRadius: moderateScale(12),
+    borderRadius: radius.button,
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "center",
     borderWidth: 1,
   },
   secondaryBtnText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: moderateScale(14),
   },
   groupSelectChip: {
@@ -516,7 +519,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   priceText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: moderateScale(18),
   },
   bookBtn: {
@@ -526,7 +529,7 @@ const styles = StyleSheet.create({
   },
   bookBtnText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: moderateScale(15),
   },
   rowCenter: {

@@ -14,6 +14,7 @@ import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
+import { radius, typography } from '../src/theme/tokens';
 import { ProductionInviteTarget, sendProductionTeamInvites } from '../src/utils/productionTeamInvites';
 import { getStaffPermissions } from '../src/utils/staffAccess';
 
@@ -350,12 +351,12 @@ const styles = StyleSheet.create({
   heroTitle: { fontSize: 20, fontFamily: 'Poppins_700Bold' },
   heroText: { marginTop: 6, fontSize: 13, lineHeight: 20, fontFamily: 'Poppins_400Regular' },
   formCard: { borderWidth: 1, borderRadius: 22, padding: 18 },
-  label: { marginTop: 16, marginBottom: 10, fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, fontFamily: 'Poppins_400Regular', textAlignVertical: 'center' },
+  label: { marginTop: 16, marginBottom: 10, fontSize: 12, letterSpacing: 0.8, textTransform: 'uppercase', fontFamily: typography.bold },
+  input: { borderWidth: 1, borderRadius: radius.input, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, fontFamily: typography.body, textAlignVertical: 'center' },
   textArea: { minHeight: 110, textAlignVertical: 'top' },
   descriptionHint: { marginTop: 8, fontSize: 12, fontFamily: 'Poppins_400Regular' },
   helperText: { marginTop: 12, fontSize: 12, fontFamily: 'Poppins_500Medium' },
-  submitBtn: { marginTop: 24, borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
-  submitBtnText: { color: '#fff', fontSize: 15, fontFamily: 'Poppins_700Bold' },
+  submitBtn: { marginTop: 24, borderRadius: radius.button, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
+  submitBtnText: { color: '#fff', fontSize: 15, fontFamily: typography.bold },
 });
 

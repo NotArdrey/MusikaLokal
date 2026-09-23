@@ -43,6 +43,7 @@ import {
 } from "../src/constants/groupTypes";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { radius, typography } from "../src/theme/tokens";
 import TrackedBottomSheetModal from "../src/components/TrackedBottomSheetModal";
 import { isGroupLeaderMember } from "../src/utils/groupMembers";
 import { bottomSheetSpringConfig } from "../src/utils/motion";
@@ -1069,79 +1070,6 @@ export default function AddGroupScreen() {
       >
         <Header title="Create Group" onBackPress={handleBack} />
 
-        {/* Enhanced Step Indicator (Fixed at top) */}
-        <View style={styles.stepIndicatorContainer}>
-          <View style={styles.stepIndicatorContent}>
-            {/* Progress Line Background */}
-            <View
-              style={[
-                styles.progressLineBg,
-                { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
-              ]}
-            />
-
-            {/* Active Progress Line */}
-            <View
-              style={[
-                styles.activeProgressLine,
-                {
-                  width: `${((step - 1) / (steps.length - 1)) * 100}%`,
-                  backgroundColor: colors.primary,
-                },
-              ]}
-            />
-
-            {steps.map((s) => {
-              const isActive = step >= s.id;
-              const isCurrent = step === s.id;
-              return (
-                <View key={s.id} style={styles.stepItem}>
-                  <View
-                    style={[
-                      styles.stepCircle,
-                      {
-                        backgroundColor: isActive
-                          ? colors.primary
-                          : isDark
-                            ? "#334155"
-                            : "#E5E7EB",
-                        borderColor: isActive
-                          ? "#818cf8"
-                          : isDark
-                            ? "#1E293B"
-                            : "#F3F4F6",
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name={isActive ? "checkmark" : (s.icon as any)}
-                      size={18}
-                      color={isActive ? "#fff" : colors.textSecondary}
-                    />
-                  </View>
-                  <Text
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.82}
-                    style={[
-                      styles.stepText,
-                      {
-                        fontFamily: isCurrent
-                          ? "Poppins_600SemiBold"
-                          : "Poppins_400Regular",
-                        color: isActive ? colors.text : colors.textSecondary,
-                        fontWeight: isCurrent ? "bold" : "normal",
-                      },
-                    ]}
-                  >
-                    {s.title}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-        </View>
-
         <KeyboardAvoidingView
           style={styles.flex1}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -1161,6 +1089,79 @@ export default function AddGroupScreen() {
             keyboardShouldPersistTaps="always"
             keyboardDismissMode="on-drag"
           >
+            {/* Step indicator */}
+            <View style={styles.stepIndicatorContainer}>
+              <View style={styles.stepIndicatorContent}>
+                {/* Progress Line Background */}
+                <View
+                  style={[
+                    styles.progressLineBg,
+                    { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                  ]}
+                />
+
+                {/* Active Progress Line */}
+                <View
+                  style={[
+                    styles.activeProgressLine,
+                    {
+                      width: `${((step - 1) / (steps.length - 1)) * 100}%`,
+                      backgroundColor: colors.primary,
+                    },
+                  ]}
+                />
+
+                {steps.map((s) => {
+                  const isActive = step >= s.id;
+                  const isCurrent = step === s.id;
+                  return (
+                    <View key={s.id} style={styles.stepItem}>
+                      <View
+                        style={[
+                          styles.stepCircle,
+                          {
+                            backgroundColor: isActive
+                              ? colors.primary
+                              : isDark
+                                ? "#334155"
+                                : "#E5E7EB",
+                            borderColor: isActive
+                              ? "#818cf8"
+                              : isDark
+                                ? "#1E293B"
+                                : "#F3F4F6",
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name={isActive ? "checkmark" : (s.icon as any)}
+                          size={18}
+                          color={isActive ? "#fff" : colors.textSecondary}
+                        />
+                      </View>
+                      <Text
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.82}
+                        style={[
+                          styles.stepText,
+                          {
+                            fontFamily: isCurrent
+                              ? "Poppins_600SemiBold"
+                              : "Poppins_400Regular",
+                            color: isActive ? colors.text : colors.textSecondary,
+                            fontWeight: isCurrent ? "bold" : "normal",
+                          },
+                        ]}
+                      >
+                        {s.title}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+
             {step === 1 && (
               <View>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
@@ -1981,6 +1982,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   stepIndicatorContainer: {
+    marginHorizontal: -24,
+    marginTop: -16,
+    marginBottom: 16,
     paddingHorizontal: 16,
     paddingTop: 24,
     paddingBottom: 8,
@@ -2037,10 +2041,10 @@ const styles = StyleSheet.create({
     paddingBottom: 150,
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 22,
     marginBottom: 24,
-    textAlign: "center",
-    fontFamily: "Poppins_600SemiBold",
+    textAlign: "left",
+    fontFamily: typography.title,
   },
   inputContainer: {
     marginBottom: 20,
@@ -2050,17 +2054,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.bold,
   },
   inputWrapper: {
-    borderRadius: 12,
+    borderRadius: radius.input,
     borderWidth: 1,
     overflow: "hidden",
   },
   textInput: {
     paddingHorizontal: 16,
     paddingVertical: 16, // added explicit vertical padding here too just in case
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     textAlign: "left",
     textAlignVertical: "center",
   },
