@@ -1361,6 +1361,39 @@ const getSocialHeaderBadge = (item: any) => {
   return formatCompactPostType(item?.post_type);
 };
 
+type SocialGigRequirementLine = {
+  label: string;
+  details: string;
+};
+
+const getSocialGigRequirementSummary = (badges: string[]) => {
+  const lookingFor: string[] = [];
+  const requirementLines: SocialGigRequirementLine[] = [];
+
+  badges.forEach((badge) => {
+    const separatorIndex = badge.indexOf(":");
+    if (separatorIndex < 0) {
+      if (/^\d+ more slot requirement/i.test(badge)) {
+        requirementLines.push({ label: "", details: badge });
+      } else {
+        lookingFor.push(badge);
+      }
+      return;
+    }
+
+    const label = badge.slice(0, separatorIndex).trim();
+    const details = badge
+      .slice(separatorIndex + 1)
+      .split(",")
+      .map((value) => value.trim().replace(/^(Instrument|Genre):\s*/i, ""))
+      .filter(Boolean)
+      .join(" \u00b7 ");
+    if (label || details) requirementLines.push({ label, details });
+  });
+
+  return { lookingFor, requirementLines };
+};
+
 const getSocialSuggestionQuickInfo = (item: any) => {
   const quickInfo: { icon: keyof typeof Ionicons.glyphMap; label: string; color?: string }[] = [];
   const similarity = Number(item?.similarity || 0);
@@ -1381,6 +1414,16 @@ const getSocialSuggestionQuickInfo = (item: any) => {
       label: `${Math.round(applicantCount)} ${Math.round(applicantCount) === 1 ? "Applicant" : "Applicants"}`,
       color: "#0F766E",
     });
+  }
+
+  if (normalizedType === "gig" || normalizedType === "venue") {
+    if (location) {
+      quickInfo.push({ icon: "location-outline", label: location });
+    }
+    if (genre) {
+      quickInfo.push({ icon: "musical-notes-outline", label: `Gig genres: ${genre}` });
+    }
+    return quickInfo.slice(0, 3);
   }
 
   if (similarity > 0) {
@@ -1477,6 +1520,8 @@ const SocialPostCard = React.memo(function SocialPostCard({
       : [],
     [item?.requirements, suggestionType],
   );
+  const isGigCard = isSuggestion && ["gig", "venue"].includes(suggestionType);
+  const gigRequirementSummary = getSocialGigRequirementSummary(slotBadges);
   const featuredPerformers = useMemo(
     () =>
       isSuggestion && ["gig", "venue"].includes(suggestionType) && Array.isArray(item?.featured_performers)
@@ -1776,7 +1821,36 @@ const SocialPostCard = React.memo(function SocialPostCard({
             },
           ]}
         >
-          {bodyBadges.length > 0 || priceChips.length > 0 ? (
+          {isGigCard ? (
+            <View style={styles.socialGigSummary}>
+              <View style={styles.socialGigTypeRow}>
+                <Text style={[styles.socialGigType, { color: colors.primary }]}>LIVE GIG</Text>
+                {priceChips[0] ? (
+                  <Text style={[styles.socialGigFee, { color: colors.text }]}>{priceChips[0]}</Text>
+                ) : null}
+              </View>
+              {gigRequirementSummary.lookingFor.length > 0 ? (
+                <View style={styles.socialGigRequirementBlock}>
+                  <Text style={[styles.socialGigEyebrow, { color: colors.textSecondary }]}>LOOKING FOR</Text>
+                  <Text style={[styles.socialGigNeed, { color: colors.text }]}>
+                    {gigRequirementSummary.lookingFor.join(" \u00b7 ")}
+                  </Text>
+                  {gigRequirementSummary.requirementLines.map((requirement) => (
+                    <View key={`${requirement.label}-${requirement.details}`} style={styles.socialGigRequirementLine}>
+                      {requirement.label ? (
+                        <Text style={[styles.socialGigRequirementLabel, { color: colors.text }]}>{requirement.label}</Text>
+                      ) : null}
+                      {requirement.details ? (
+                        <Text style={[styles.socialGigRequirementDetails, { color: colors.textSecondary }]}>
+                          {requirement.details}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          ) : bodyBadges.length > 0 || priceChips.length > 0 ? (
             <View style={styles.socialEntityChipRow}>
               {bodyBadges.map((badge) => (
                 <View key={`entity-badge-${badge}`} style={[styles.socialBadgeChip, { backgroundColor: colors.primary + "12" }]}>
@@ -1795,7 +1869,7 @@ const SocialPostCard = React.memo(function SocialPostCard({
             </View>
           ) : null}
 
-          {slotBadges.length > 0 ? (
+          {!isGigCard && slotBadges.length > 0 ? (
             <View style={styles.socialEntityChipRow}>
               {slotBadges.map((badge) => (
                 <View key={`slot-${badge}`} style={[styles.socialBadgeChip, { backgroundColor: colors.primary + "12" }]}>
@@ -1817,26 +1891,29 @@ const SocialPostCard = React.memo(function SocialPostCard({
           />
 
           {suggestionQuickInfo.length > 0 ? (
-            <View style={styles.socialQuickInfoRow}>
+            <View style={isGigCard ? [styles.socialGigMetaList, { borderTopColor: borderColor }] : styles.socialQuickInfoRow}>
               {suggestionQuickInfo.map((info, index) => (
                 <View
                   key={`${info.icon}-${info.label}`}
-                  style={[
-                    styles.socialQuickInfoItem,
-                    index === 0 && styles.socialQuickInfoItemStart,
-                    index === suggestionQuickInfo.length - 1 && styles.socialQuickInfoItemEnd,
-                    {
-                      backgroundColor: isDark ? "rgba(124,58,237,0.16)" : "#FFFFFF",
-                      borderColor: isDark ? "rgba(167,139,250,0.24)" : "rgba(124,58,237,0.14)",
-                    },
-                  ]}
+                  style={isGigCard ? styles.socialGigMetaItem : [
+                      styles.socialQuickInfoItem,
+                      index === 0 && styles.socialQuickInfoItemStart,
+                      index === suggestionQuickInfo.length - 1 && styles.socialQuickInfoItemEnd,
+                      {
+                        backgroundColor: isDark ? "rgba(124,58,237,0.16)" : "#FFFFFF",
+                        borderColor: isDark ? "rgba(167,139,250,0.24)" : "rgba(124,58,237,0.14)",
+                      },
+                    ]}
                 >
                   <Ionicons
                     name={info.icon}
                     size={14}
                     color={info.color || colors.primary}
                   />
-                  <Text style={[styles.socialQuickInfoText, { color: colors.textSecondary }]} numberOfLines={1}>
+                  <Text
+                    style={[isGigCard ? styles.socialGigMetaText : styles.socialQuickInfoText, { color: colors.textSecondary }]}
+                    numberOfLines={1}
+                  >
                     {info.label}
                   </Text>
                 </View>
@@ -4102,6 +4179,73 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     alignItems: "center",
     gap: 7,
+  },
+  socialGigSummary: {
+    gap: 11,
+  },
+  socialGigTypeRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  socialGigType: {
+    fontSize: 10,
+    lineHeight: 14,
+    fontFamily: "Poppins_700Bold",
+    letterSpacing: 0.8,
+  },
+  socialGigFee: {
+    flexShrink: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: "Poppins_700Bold",
+    textAlign: "right",
+  },
+  socialGigRequirementBlock: {
+    gap: 3,
+  },
+  socialGigEyebrow: {
+    fontSize: 9,
+    lineHeight: 13,
+    fontFamily: "Poppins_600SemiBold",
+    letterSpacing: 0.7,
+  },
+  socialGigNeed: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontFamily: "Poppins_700Bold",
+  },
+  socialGigRequirementLine: {
+    marginTop: 5,
+    gap: 1,
+  },
+  socialGigRequirementLabel: {
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  socialGigRequirementDetails: {
+    fontSize: 11,
+    lineHeight: 17,
+    fontFamily: "Poppins_400Regular",
+  },
+  socialGigMetaList: {
+    borderTopWidth: 1,
+    paddingTop: 10,
+    gap: 8,
+  },
+  socialGigMetaItem: {
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  socialGigMetaText: {
+    flexShrink: 1,
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: "Poppins_500Medium",
   },
   socialQuickInfoRow: {
     flexDirection: "row",

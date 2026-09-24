@@ -31,6 +31,7 @@ import LocationPicker from "../src/components/LocationPicker";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
+import { editFormStyles } from "../src/theme/formStyles";
 import {
     getDefaultStudioDateOverrideSlot,
     getStudioAvailabilityMinDateKey,
@@ -7641,5 +7642,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Poppins_600SemiBold",
   },
+  ...editFormStyles,
 });
 

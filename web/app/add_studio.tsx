@@ -27,6 +27,7 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { wizardFormStyles } from "../src/theme/formStyles";
 import {
   getDefaultStudioDateOverrideSlot,
   getStudioAvailabilityMinDateKey,
@@ -2385,7 +2386,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       )}
       <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
         <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
-        <Header title="Add Studio" onBackPress={handleBack} />
+        <Header title="List Studio" cardStyle onBackPress={handleBack} />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
@@ -5646,7 +5647,7 @@ const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
           )}
 
           {/* Navigation Buttons */}
-          <View style={styles.navigationButtons}>
+          <View style={[styles.navigationButtons, styles.navigationButtonRow]}>
             <TouchableOpacity
               onPress={handleBack}
               disabled={creating}
@@ -6299,6 +6300,11 @@ const styles = StyleSheet.create({
     gap: 16,
     marginBottom: 16,
   },
+  navigationButtonRow: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
   backBtn: {
     flex: 1,
     paddingVertical: 16,
@@ -6659,5 +6665,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Poppins_600SemiBold',
   },
+  ...wizardFormStyles,
 });
 

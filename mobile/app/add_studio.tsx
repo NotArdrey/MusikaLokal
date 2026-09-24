@@ -25,6 +25,7 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { wizardFormStyles } from "../src/theme/formStyles";
 import { radius, typography } from "../src/theme/tokens";
 import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../src/utils/e2eFixtures";
 import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
@@ -2490,8 +2491,8 @@ export default function AddStudioScreen() {
                         styles.stepText,
                         {
                           fontFamily: isCurrent
-                            ? "Poppins_600SemiBold"
-                            : "Poppins_400Regular",
+                            ? typography.semibold
+                            : typography.medium,
                           color: isActive ? colors.text : colors.textSecondary,
                           fontWeight: isCurrent ? "bold" : "normal",
                         },
@@ -5704,7 +5705,7 @@ export default function AddStudioScreen() {
           )}
 
           {/* Navigation Buttons */}
-          <View style={styles.navigationButtons}>
+          <View style={[styles.navigationButtons, styles.navigationButtonRow]}>
             <TouchableOpacity
               testID="mobile-add-studio-back-button"
               accessibilityLabel="mobile-add-studio-back-button"
@@ -6351,6 +6352,11 @@ const styles = StyleSheet.create({
     gap: 16,
     marginBottom: 16,
   },
+  navigationButtonRow: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
   backBtn: {
     flex: 1,
     paddingVertical: 16,
@@ -6716,5 +6722,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Poppins_600SemiBold',
   },
+  ...wizardFormStyles,
 });
 

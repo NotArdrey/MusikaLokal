@@ -29,6 +29,7 @@ import LoadingState from "../src/components/LoadingState";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
+import { editFormStyles } from "../src/theme/formStyles";
 import { radius, typography } from "../src/theme/tokens";
 import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
 import { clearListingDetailsCache } from "../src/utils/listingDetailsCache";
@@ -7362,5 +7363,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Poppins_600SemiBold",
   },
+  ...editFormStyles,
 });
 

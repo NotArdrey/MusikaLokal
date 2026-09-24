@@ -20,9 +20,9 @@ export default function GigPresetDropdown({ options, selectedValues = [], onSele
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded((current) => !current)} style={[styles.trigger, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
+      <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded((current) => !current)} style={[styles.trigger, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
         <Text style={[styles.triggerText, { color: colors.text }]}>{placeholder}</Text>
-        <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={18} color={colors.textSecondary} />
+        <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={18} color={isDark ? colors.textSecondary : "#62646D"} />
       </TouchableOpacity>
       {expanded && (
         <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled" style={[styles.menu, { borderColor: colors.border, backgroundColor: colors.surface }]}>
@@ -41,8 +41,8 @@ export default function GigPresetDropdown({ options, selectedValues = [], onSele
 
 const styles = StyleSheet.create({
   container: { marginTop: 8 },
-  trigger: { minHeight: 46, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  triggerText: { flex: 1, fontSize: 13, fontFamily: "Poppins_400Regular" },
+  trigger: { height: 56, borderWidth: 1, borderRadius: 10, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  triggerText: { flex: 1, fontSize: 15, fontFamily: "Poppins_500Medium" },
   menu: { maxHeight: 210, borderWidth: 1, borderRadius: 10, marginTop: 6 },
   option: { minHeight: 42, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   optionText: { flex: 1, fontSize: 13, fontFamily: "Poppins_400Regular" },

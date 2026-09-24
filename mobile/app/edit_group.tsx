@@ -41,6 +41,7 @@ import {
     PH_MUSIC_GROUP_TYPES,
 } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
+import { editFormStyles } from "../src/theme/formStyles";
 import { radius, typography } from "../src/theme/tokens";
 import {
     getGroupMembersLabel,
@@ -1592,10 +1593,11 @@ export default function EditGroupScreen() {
               style={[
                 styles.inputWrapper,
                 {
-                  backgroundColor: colors.inputBackground,
-                  borderColor: isDark ? "#374151" : "#E5E7EB",
+                  backgroundColor: isDark ? colors.inputBackground : "#EEEDE8",
+                  borderColor: isDark ? colors.inputBorder : "#EEEDE8",
+                  height: 56,
                   paddingHorizontal: 16,
-                  paddingVertical: 16,
+                  paddingVertical: 0,
                   flexDirection: "row",
                   justifyContent: "space-between",
                   alignItems: "center",
@@ -1603,15 +1605,15 @@ export default function EditGroupScreen() {
               ]}
               onPress={() => setGroupTypeModalVisible(true)}
             >
-              <Text style={{ color: colors.text, fontFamily: "Poppins_400Regular" }}>
+              <Text style={{ color: colors.text, fontFamily: typography.medium, fontSize: 15 }}>
                 {PH_MUSIC_GROUP_TYPES.find(t => t.id === groupType)?.label || getGroupTypeLabel(groupType)}
               </Text>
-              <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
+              <Ionicons name="chevron-down" size={20} color={isDark ? colors.textSecondary : "#62646D"} />
             </TouchableOpacity>
 
-            <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-              <TextInput value={customGroupType} onChangeText={setCustomGroupType} placeholder="Enter another group type..." placeholderTextColor={colors.textSecondary} style={[styles.input, { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.border }]} />
-              <TouchableOpacity accessibilityLabel="Use custom group type" onPress={() => { const value = customGroupType.trim(); if (!value) return; setGroupType(value); setCustomGroupType(""); }} style={{ width: 44, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary }}><Ionicons name="add" size={22} color="#fff" /></TouchableOpacity>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}>
+              <TextInput value={customGroupType} onChangeText={setCustomGroupType} placeholder="Enter another group type..." placeholderTextColor={colors.textSecondary} style={[styles.input, { flex: 1, height: 56, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 0, color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]} />
+              <TouchableOpacity accessibilityLabel="Use custom group type" onPress={() => { const value = customGroupType.trim(); if (!value) return; setGroupType(value); setCustomGroupType(""); }} style={{ width: 56, height: 56, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary }}><Ionicons name="add" size={28} color="#fff" /></TouchableOpacity>
             </View>
 
             {/* Info about selected type */}
@@ -1726,7 +1728,7 @@ export default function EditGroupScreen() {
             </TouchableOpacity>
             <Text style={[styles.genreHelperText, { color: colors.textSecondary }]}>Add a custom genre</Text>
             <View style={{ flexDirection: "row", gap: 8 }}>
-              <TextInput value={customGenre} onChangeText={setCustomGenre} placeholder="Enter another genre..." placeholderTextColor={colors.textSecondary} style={[styles.input, { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.border }]} />
+              <TextInput value={customGenre} onChangeText={setCustomGenre} placeholder="Enter another genre..." placeholderTextColor={colors.textSecondary} style={[styles.input, { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]} />
               <TouchableOpacity accessibilityLabel="Add custom genre" onPress={() => { const value = customGenre.trim(); if (!value || selectedGenres.some((genre) => genre.toLowerCase() === value.toLowerCase())) return; setSelectedGenres((current) => [...current, value]); setCustomGenre(""); }} style={{ width: 46, height: 46, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary }}>
                 <Ionicons name="add" size={22} color="#fff" />
               </TouchableOpacity>
@@ -1772,7 +1774,7 @@ export default function EditGroupScreen() {
               <View
                 style={[
                   styles.searchContainer,
-                  { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
+                  { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder },
                 ]}
               >
                 <Ionicons
@@ -2497,6 +2499,7 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 12,
     position: "relative",
+    borderWidth: 1,
     borderRadius: 16,
     height: 48,
     paddingHorizontal: 16,
@@ -2714,4 +2717,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  ...editFormStyles,
 });

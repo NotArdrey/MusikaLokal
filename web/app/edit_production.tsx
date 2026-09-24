@@ -14,6 +14,7 @@ import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
+import { productionFormStyles } from '../src/theme/formStyles';
 import { ProductionInviteTarget, sendProductionTeamInvites } from '../src/utils/productionTeamInvites';
 import { getStaffPermissions } from '../src/utils/staffAccess';
 
@@ -284,7 +285,7 @@ export default function EditProductionScreen() {
 
               <Text style={[styles.label, { color: colors.text }]}>Team Name *</Text>
               <TextInput
-                style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                style={[styles.input, { color: colors.text, borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}
                 value={teamName}
                 onChangeText={setTeamName}
                 placeholder="Enter your production team name"
@@ -293,7 +294,7 @@ export default function EditProductionScreen() {
 
               <Text style={[styles.label, { color: colors.text }]}>Description *</Text>
               <TextInput
-                style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}
                 value={description}
                 onChangeText={setDescription}
                 placeholder="Describe your production team's focus, experience, or specialties"
@@ -359,4 +360,5 @@ const styles = StyleSheet.create({
   helperText: { marginTop: 12, fontSize: 12, fontFamily: 'Poppins_500Medium' },
   submitBtn: { marginTop: 24, borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
   submitBtnText: { color: '#fff', fontSize: 15, fontFamily: 'Poppins_700Bold' },
+  ...productionFormStyles,
 });

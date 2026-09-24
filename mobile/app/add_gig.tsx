@@ -34,6 +34,7 @@ import LocationPicker from "../src/components/LocationPicker";
 import Modal from "../src/components/modal";
 import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
+import { wizardFormStyles } from "../src/theme/formStyles";
 import { radius, typography } from "../src/theme/tokens";
 import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../src/utils/e2eFixtures";
 import {
@@ -1397,8 +1398,8 @@ export default function AddGigScreen() {
                         styles.stepText,
                         {
                           fontFamily: isCurrent
-                            ? "Poppins_600SemiBold"
-                            : "Poppins_400Regular",
+                            ? typography.semibold
+                            : typography.medium,
                           color: isActive ? colors.text : colors.textSecondary,
                           fontWeight: isCurrent ? "bold" : "normal",
                         },
@@ -2042,7 +2043,7 @@ export default function AddGigScreen() {
                   placeholder="Choose a genre"
                 />
 
-                <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
+                <View style={[styles.searchInputWrap, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
                   <Ionicons name="search" size={20} color={colors.textSecondary} />
                   <TextInput
                     style={[styles.searchInput, { color: colors.text }]}
@@ -3149,7 +3150,7 @@ export default function AddGigScreen() {
           )}
 
           {/* Navigation Buttons */}
-          <View style={styles.navigationButtons}>
+          <View style={[styles.navigationButtons, styles.navigationButtonRow]}>
               <TouchableOpacity
                 testID="mobile-add-gig-back-button"
                 accessibilityLabel="mobile-add-gig-back-button"
@@ -3509,6 +3510,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     borderRadius: 16,
+    borderWidth: 1,
     height: 48,
     paddingHorizontal: 16,
     marginTop: 8,
@@ -3554,6 +3556,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 16,
     marginBottom: 16,
+  },
+  navigationButtonRow: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
   },
   backBtn: {
     flex: 1,
@@ -3825,5 +3832,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Poppins_600SemiBold",
   },
+  ...wizardFormStyles,
 });
 

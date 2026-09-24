@@ -25,6 +25,7 @@ import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useTheme } from "../src/context/ThemeContext";
+import { profileFormStyles } from "../src/theme/formStyles";
 import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
 import { isE2EFixtureMode } from "../src/utils/e2eFixtures";
 import { isFanUserRole, normalizeUserRole } from "../src/utils/roleRouting";
@@ -834,7 +835,7 @@ export default function EditProfileScreen() {
               styles.disabledInput,
               {
                 backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
+                borderColor: colors.inputBorder,
               },
             ]}
           >
@@ -859,7 +860,7 @@ export default function EditProfileScreen() {
               styles.input,
               {
                 backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
+                borderColor: colors.inputBorder,
                 color: colors.text,
               },
             ]}
@@ -929,7 +930,7 @@ export default function EditProfileScreen() {
           )}
           <GigPresetDropdown options={ROLES} selectedValues={selectedRoles} onSelect={toggleRole} placeholder={isFanProfile ? "Choose an interest" : "Choose a role or instrument"} />
           {/* Search input */}
-          <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
+          <View style={[styles.searchInputWrap, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
             <Ionicons name="search" size={20} color={colors.textSecondary} />
             <TextInput
               testID="mobile-profile-role-search-input"
@@ -1030,7 +1031,7 @@ export default function EditProfileScreen() {
           )}
           <GigPresetDropdown options={GIG_GENRE_OPTIONS} selectedValues={selectedGenres} onSelect={toggleGenre} placeholder="Choose a genre" />
           {/* Search input */}
-          <View style={[styles.searchInputWrap, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
+          <View style={[styles.searchInputWrap, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]}>
             <Ionicons name="search" size={20} color={colors.textSecondary} />
             <TextInput
               testID="mobile-profile-genre-search-input"
@@ -1101,7 +1102,7 @@ export default function EditProfileScreen() {
               styles.textArea,
               {
                 backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
+                borderColor: colors.inputBorder,
                 color: colors.text,
               },
             ]}
@@ -1303,6 +1304,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     borderRadius: 16,
+    borderWidth: 1,
     height: 48,
     paddingHorizontal: 16,
   },
@@ -1381,4 +1383,5 @@ const styles = StyleSheet.create({
   removeBtn: {
     padding: 4,
   },
+  ...profileFormStyles,
 });

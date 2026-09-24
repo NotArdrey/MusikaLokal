@@ -8,6 +8,7 @@ import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import VerificationModal from '../src/components/VerificationModal';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { typography } from '../src/theme/tokens';
 
 
 
@@ -838,7 +839,7 @@ export default function LoginScreen() {
 
             {loginMessage && (
               <View style={{ marginTop: 16, backgroundColor: loginMessage.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : loginMessage.type === 'info' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(16, 185, 129, 0.1)', padding: 12, borderRadius: 8 }}>
-                <Text style={{ color: loginMessage.type === 'error' ? '#EF4444' : loginMessage.type === 'info' ? '#3B82F6' : '#10B981', textAlign: 'center', fontFamily: 'Poppins_500Medium' }}>
+                <Text style={{ color: loginMessage.type === 'error' ? '#EF4444' : loginMessage.type === 'info' ? '#3B82F6' : '#10B981', textAlign: 'center', fontFamily: typography.medium }}>
                   {loginMessage.text}
                 </Text>
               </View>
@@ -940,14 +941,13 @@ const styles = StyleSheet.create({
   },
   appName: {
     fontSize: 30, // text-3xl
-    fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 8, // mb-2
-    fontFamily: 'Poppins_700Bold',
+    fontFamily: typography.title,
   },
   appTagline: {
     textAlign: 'center',
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   formContainer: {
     gap: 20, // gap-5 (approx)
@@ -956,7 +956,7 @@ const styles = StyleSheet.create({
     marginBottom: 8, // mb-2
     fontSize: 12, // text-xs
     textTransform: 'uppercase',
-    fontWeight: 'bold',
+    fontFamily: typography.bold,
     letterSpacing: 1, // tracking-wider
   },
   inputContainer: {
@@ -971,7 +971,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 12, // ml-3
     height: '100%',
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     includeFontPadding: false,
     textAlignVertical: 'center',
     paddingVertical: 0,
@@ -981,7 +981,7 @@ const styles = StyleSheet.create({
     marginTop: 8, // mt-2
   },
   forgotPasswordText: {
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
     fontSize: 12,
   },
   loginButton: {
@@ -998,7 +998,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   loginButtonText: {
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     color: 'white',
     fontSize: 16,
   },
@@ -1020,7 +1020,7 @@ const styles = StyleSheet.create({
     marginTop: 24, // mt-6
   },
   signupLinkText: {
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     fontSize: 14,
   },
   signupLinkPressable: {
@@ -1028,7 +1028,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   signupLinkHighlight: {
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     fontSize: 14,
     textAlign: 'center',
   },
@@ -1037,7 +1037,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
     marginLeft: 4,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   resendConfirmationButton: {
     height: 48,
@@ -1047,7 +1047,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   resendConfirmationText: {
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     fontSize: 14,
   },
 });

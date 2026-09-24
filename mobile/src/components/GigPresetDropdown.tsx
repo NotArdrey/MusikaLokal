@@ -8,6 +8,7 @@ import {
   View,
 } from "react-native";
 import { useTheme } from "../context/ThemeContext";
+import { typography } from "../theme/tokens";
 
 export type GigPresetOption = string | { label: string; value: string };
 
@@ -70,7 +71,7 @@ export default function GigPresetDropdown({
           styles.trigger,
           {
             backgroundColor: colors.inputBackground,
-            borderColor: isDark ? "#374151" : "#E5E7EB",
+            borderColor: colors.inputBorder,
           },
         ]}
       >
@@ -78,7 +79,7 @@ export default function GigPresetDropdown({
         <Ionicons
           name={expanded ? "chevron-up" : "chevron-down"}
           size={18}
-          color={colors.textSecondary}
+          color={isDark ? colors.textSecondary : "#62646D"}
         />
       </TouchableOpacity>
 
@@ -116,16 +117,16 @@ export default function GigPresetDropdown({
 const styles = StyleSheet.create({
   container: { marginTop: 8 },
   trigger: {
-    minHeight: 46,
+    height: 56,
     borderWidth: 1,
     borderRadius: 10,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
   },
-  triggerText: { flex: 1, fontSize: 13, fontFamily: "Poppins_400Regular" },
+  triggerText: { flex: 1, fontSize: 15, fontFamily: typography.medium },
   menu: { maxHeight: 210, borderWidth: 1, borderRadius: 10, marginTop: 6 },
   option: {
     minHeight: 42,

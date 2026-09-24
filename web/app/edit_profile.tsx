@@ -26,6 +26,7 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useTheme } from "../src/context/ThemeContext";
+import { profileFormStyles } from "../src/theme/formStyles";
 import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
 import { isFanUserRole, normalizeUserRole } from "../src/utils/roleRouting";
 import { uploadStorageObject } from "../src/utils/storageUpload";
@@ -722,8 +723,8 @@ export default function EditProfileScreen() {
             style={[
               styles.disabledInput,
               {
-                backgroundColor: isWebDesktop ? pageCardBackground : colors.inputBackground,
-                borderColor: borderSoft,
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
               },
             ]}
           >
@@ -751,8 +752,8 @@ export default function EditProfileScreen() {
             style={[
               styles.input,
               {
-                backgroundColor: isWebDesktop ? pageCardBackground : colors.inputBackground,
-                borderColor: borderSoft,
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
                 color: colors.text,
               },
             ]}
@@ -834,8 +835,8 @@ export default function EditProfileScreen() {
             style={[
               styles.searchInput,
               {
-                backgroundColor: isWebDesktop ? pageCardBackground : colors.inputBackground,
-                borderColor: borderSoft,
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
                 color: colors.text,
               },
             ]}
@@ -940,8 +941,8 @@ export default function EditProfileScreen() {
             style={[
               styles.searchInput,
               {
-                backgroundColor: isWebDesktop ? pageCardBackground : colors.inputBackground,
-                borderColor: borderSoft,
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
                 color: colors.text,
               },
             ]}
@@ -1009,8 +1010,8 @@ export default function EditProfileScreen() {
             style={[
               styles.textArea,
               {
-                backgroundColor: isWebDesktop ? pageCardBackground : colors.inputBackground,
-                borderColor: borderSoft,
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
                 color: colors.text,
               },
             ]}
@@ -1312,4 +1313,5 @@ const styles = StyleSheet.create({
   removeBtn: {
     padding: 4,
   },
+  ...profileFormStyles,
 });

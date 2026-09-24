@@ -229,7 +229,7 @@ export default function LeafletAddressPicker({
                     styles.pickerButton,
                     {
                         backgroundColor: colors.inputBackground,
-                        borderColor: colors.border,
+                        borderColor: colors.inputBorder,
                     },
                 ]}
                 onPress={() => setModalVisible(true)}
@@ -281,7 +281,7 @@ export default function LeafletAddressPicker({
                         <View
                             style={[
                                 styles.searchInputWrapper,
-                                { backgroundColor: colors.inputBackground, borderColor: colors.border },
+                                { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder },
                             ]}
                         >
                             <Ionicons name="search" size={18} color={colors.textSecondary} />

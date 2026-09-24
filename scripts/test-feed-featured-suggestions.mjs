@@ -46,6 +46,19 @@ test("featured gig expiry uses the last Manila schedule end instead of event-dat
   assert.equal((finalScheduleEnd - eventDateMidnight) / 3_600_000, 15);
 });
 
+test("feed gig summaries expose applicant totals without metadata pills", () => {
+  const mobileFeed = read("mobile/app/(tabs)/feed.tsx");
+  const webFeed = read("web/app/feed.tsx");
+
+  for (const source of [mobileFeed, webFeed]) {
+    assert.match(source, /LIVE GIG/);
+    assert.match(source, /LOOKING FOR/);
+    assert.match(source, /socialGigMetaList/);
+    assert.match(source, /applicant_count/);
+    assert.match(source, /isGigCard \? styles\.socialGigMetaItem/);
+  }
+});
+
 test("gig video and custom-contract uploads use readable temporary files and safe storage paths", () => {
   const videoUploader = read("web/src/components/VideoUploader.tsx");
   assert.match(videoUploader, /createTemporaryUploadFile\(asset\.uri,\s*originalName\)/);

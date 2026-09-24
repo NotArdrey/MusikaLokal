@@ -36,6 +36,7 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
+import { wizardFormStyles } from "../src/theme/formStyles";
 import {
   aggregateSpecificSlotRequirements,
   getSpecificSlotRequirementLines,
@@ -1263,7 +1264,7 @@ export default function AddGigScreen() {
       )}
       <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
         <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
-        <Header title="Add Gig" onBackPress={handleBack} />
+        <Header title="Create Gig" cardStyle onBackPress={handleBack} />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
@@ -1953,7 +1954,7 @@ export default function AddGigScreen() {
                 />
 
                 <TextInput
-                  style={[styles.searchInput, { backgroundColor: colors.inputBackground, borderColor: colors.border, color: colors.text }]}
+                  style={[styles.searchInput, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder, color: colors.text }]}
                   value={genreSearch}
                   onChangeText={setGenreSearch}
                   placeholder="Enter another genre..."
@@ -3086,7 +3087,7 @@ export default function AddGigScreen() {
           )}
 
           {/* Navigation Buttons */}
-          <View style={styles.navigationButtons}>
+          <View style={[styles.navigationButtons, styles.navigationButtonRow]}>
             <TouchableOpacity
               onPress={handleBack}
               disabled={creating}
@@ -3508,6 +3509,11 @@ const styles = StyleSheet.create({
     gap: 16,
     marginBottom: 16,
   },
+  navigationButtonRow: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
   backBtn: {
     flex: 1,
     paddingVertical: 16,
@@ -3775,5 +3781,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Poppins_600SemiBold",
   },
+  ...wizardFormStyles,
 });
 

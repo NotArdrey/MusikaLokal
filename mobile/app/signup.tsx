@@ -26,6 +26,7 @@ import { LoadingButtonContent } from '../src/components/LoadingState';
 import TrackedBottomSheetModal from '../src/components/TrackedBottomSheetModal';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
+import { typography } from '../src/theme/tokens';
 import { isE2EFixtureMode } from '../src/utils/e2eFixtures';
 import { bottomSheetSpringConfig } from '../src/utils/motion';
 import { createTemporaryUploadFile, type TemporaryUploadFile } from '../src/utils/storageUpload';
@@ -3164,7 +3165,7 @@ export default function SignupScreen() {
                         );
                     })}
                 </View>
-                {errors.role ? <Text style={{ color: 'red', fontSize: 12 }}>{errors.role}</Text> : null}
+                {errors.role ? <Text style={{ color: 'red', fontSize: 12, fontFamily: typography.body }}>{errors.role}</Text> : null}
             </View>
 
             <View style={styles.formGap}>
@@ -3182,7 +3183,7 @@ export default function SignupScreen() {
                         testID="signup-email-input"
                     />
                 </View>
-                {errors.email && <Text style={{ color: 'red', fontSize: 12 }}>{errors.email}</Text>}
+                {errors.email && <Text style={{ color: 'red', fontSize: 12, fontFamily: typography.body }}>{errors.email}</Text>}
 
                 {/* Password */}
                 <View style={[styles.inputContainer, themeStyles.inputContainer, errors.password ? { borderColor: 'red' } : null]}>
@@ -3202,7 +3203,7 @@ export default function SignupScreen() {
                     </TouchableOpacity>
                 </View>
                 {errors.password ? (
-                    <Text style={{ color: 'red', fontSize: 12 }}>{errors.password}</Text>
+                    <Text style={{ color: 'red', fontSize: 12, fontFamily: typography.body }}>{errors.password}</Text>
                 ) : !showPasswordGuidance ? (
                     <Text style={[styles.passwordRequirementText, themeStyles.textSecondary]}>{PASSWORD_REQUIREMENT_HINT}</Text>
                 ) : null}
@@ -3263,7 +3264,7 @@ export default function SignupScreen() {
                     </TouchableOpacity>
                 </View>
                 {errors.confirmPassword ? (
-                    <Text style={{ color: 'red', fontSize: 12 }}>{errors.confirmPassword}</Text>
+                    <Text style={{ color: 'red', fontSize: 12, fontFamily: typography.body }}>{errors.confirmPassword}</Text>
                 ) : confirmPassword ? (
                     <View style={styles.confirmPasswordHintRow}>
                         <Ionicons
@@ -3318,7 +3319,7 @@ export default function SignupScreen() {
                         <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
                     </TouchableOpacity>
 
-                    {errors.document ? <Text style={{ color: 'red', fontSize: 12 }}>{errors.document}</Text> : null}
+                    {errors.document ? <Text style={{ color: 'red', fontSize: 12, fontFamily: typography.body }}>{errors.document}</Text> : null}
                 </View>
 
                 {isMusicianSignup ? (
@@ -3356,7 +3357,7 @@ export default function SignupScreen() {
                                 )}
                             </View>
                         </TouchableOpacity>
-                        {errors.musicVideo ? <Text style={{ color: 'red', fontSize: 12 }}>{errors.musicVideo}</Text> : null}
+                        {errors.musicVideo ? <Text style={{ color: 'red', fontSize: 12, fontFamily: typography.body }}>{errors.musicVideo}</Text> : null}
                     </View>
                 ) : null}
             </View>
@@ -3911,7 +3912,7 @@ export default function SignupScreen() {
                                 onPress={manualStatusCheck}
                                 style={{ marginTop: 20 }}
                             >
-                                <Text style={{ color: colors.primary, fontWeight: '600' }}>Click here if not redirected...</Text>
+                                <Text style={{ color: colors.primary, fontFamily: typography.semibold }}>Click here if not redirected...</Text>
                             </TouchableOpacity>
                         )}
                     </View>
@@ -3924,7 +3925,7 @@ export default function SignupScreen() {
             return (
                 <View style={{ flex: 1, backgroundColor: colors.background }}>
                     <View style={[{ padding: 16, flexDirection: 'row', alignItems: 'center' }, safeVerificationHeaderPadding]}>
-                        <Text style={[themeStyles.text, { fontSize: 18, fontWeight: 'bold' }]}>Identity Verification</Text>
+                        <Text style={[themeStyles.text, { fontSize: 18, fontFamily: typography.heading }]}>Identity Verification</Text>
                         <TouchableOpacity
                             activeOpacity={1}
                             onPress={() => {
@@ -3932,10 +3933,10 @@ export default function SignupScreen() {
                             }}
                             style={{ marginLeft: 'auto', marginRight: 18 }}
                         >
-                            <Text style={{ color: colors.primary }}>New link</Text>
+                            <Text style={{ color: colors.primary, fontFamily: typography.semibold }}>New link</Text>
                         </TouchableOpacity>
                         <TouchableOpacity activeOpacity={1} onPress={() => router.push('/')}>
-                            <Text style={{ color: colors.primary }}>Cancel</Text>
+                            <Text style={{ color: colors.primary, fontFamily: typography.semibold }}>Cancel</Text>
                         </TouchableOpacity>
                     </View>
                     {verificationUrl ? (
@@ -4025,11 +4026,11 @@ export default function SignupScreen() {
                 <Text style={[styles.stepSubtitle, themeStyles.textSecondary, { textAlign: 'center', maxWidth: 400, marginBottom: 8 }]}>
                     We have sent a confirmation link to:
                 </Text>
-                <Text style={[themeStyles.text, { fontSize: 18, fontWeight: '600', marginBottom: 32, fontFamily: 'Poppins_600SemiBold' }]}>
+                <Text style={[themeStyles.text, { fontSize: 18, marginBottom: 32, fontFamily: typography.semibold }]}>
                     {email}
                 </Text>
 
-                <Text style={[themeStyles.textSecondary, { textAlign: 'center', maxWidth: 350, fontSize: 14, marginBottom: 40, lineHeight: 22 }]}>
+                <Text style={[themeStyles.textSecondary, { textAlign: 'center', maxWidth: 350, fontSize: 14, marginBottom: 40, lineHeight: 22, fontFamily: typography.body }]}>
                     Confirm your email, then return to MusikaLokal to log in.
                 </Text>
 
@@ -4039,7 +4040,7 @@ export default function SignupScreen() {
                     onPress={handleResendEmail}
                     style={{ marginTop: 24 }}
                 >
-                    <Text style={[themeStyles.textSecondary, { fontSize: 13, textDecorationLine: 'underline' }]}>
+                    <Text style={[themeStyles.textSecondary, { fontSize: 13, textDecorationLine: 'underline', fontFamily: typography.medium }]}>
                         Resend email
                     </Text>
                 </TouchableOpacity>
@@ -4093,8 +4094,8 @@ const styles = StyleSheet.create({
     scrollContent: { flexGrow: 1 },
     contentContainer: { flex: 1, padding: 24, justifyContent: 'center' },
     stepContainer: { flex: 1, width: '100%', maxWidth: 500, alignSelf: 'center' },
-    stepTitle: { fontSize: 28, fontWeight: 'bold', marginBottom: 8, fontFamily: 'Poppins_700Bold' },
-    stepSubtitle: { fontSize: 16, marginBottom: 32, fontFamily: 'Poppins_400Regular' },
+    stepTitle: { fontSize: 28, marginBottom: 8, fontFamily: typography.title },
+    stepSubtitle: { fontSize: 16, marginBottom: 32, fontFamily: typography.body },
     roleSectionContainer: { marginBottom: 24, gap: 12 },
     roleGrid: { gap: 12 },
     roleCardBig: {
@@ -4102,11 +4103,11 @@ const styles = StyleSheet.create({
     },
     roleIconBubble: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
     roleCopy: { flex: 1, gap: 4 },
-    roleLabelBig: { fontSize: 18, fontWeight: '600', fontFamily: 'Poppins_600SemiBold' },
-    roleDescBig: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
+    roleLabelBig: { fontSize: 18, fontFamily: typography.semibold },
+    roleDescBig: { fontSize: 12, lineHeight: 18, fontFamily: typography.body },
     sectionHeadingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 },
-    sectionEyebrow: { fontSize: 11, lineHeight: 14, letterSpacing: 0.8, textTransform: 'uppercase', fontFamily: 'Poppins_700Bold' },
-    sectionHint: { fontSize: 12, lineHeight: 16, fontFamily: 'Poppins_400Regular' },
+    sectionEyebrow: { fontSize: 11, lineHeight: 14, letterSpacing: 0.8, textTransform: 'uppercase', fontFamily: typography.bold },
+    sectionHint: { fontSize: 12, lineHeight: 16, fontFamily: typography.body },
     musicianVideoSection: { marginBottom: 18 },
     nextButton: {
         height: 56,
@@ -4122,7 +4123,7 @@ const styles = StyleSheet.create({
         elevation: 10,
     },
     nextButtonDisabled: { shadowOpacity: 0, shadowRadius: 0, elevation: 0 },
-    nextButtonText: { color: 'white', fontSize: 16, fontWeight: '600', fontFamily: 'Poppins_600SemiBold' },
+    nextButtonText: { color: 'white', fontSize: 16, fontFamily: typography.semibold },
     authFooterLinkContainer: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -4130,9 +4131,9 @@ const styles = StyleSheet.create({
         flexWrap: 'wrap',
         marginTop: 18,
     },
-    authFooterText: { fontSize: 14, fontFamily: 'Poppins_400Regular' },
+    authFooterText: { fontSize: 14, fontFamily: typography.body },
     authFooterLinkPressable: { paddingVertical: 4, paddingHorizontal: 2 },
-    authFooterLinkText: { fontSize: 14, textAlign: 'center', fontFamily: 'Poppins_600SemiBold' },
+    authFooterLinkText: { fontSize: 14, textAlign: 'center', fontFamily: typography.semibold },
     inputContainer: {
         flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, height: 56, borderRadius: 16, borderWidth: 1
     },
@@ -4140,28 +4141,28 @@ const styles = StyleSheet.create({
         flex: 1,
         marginLeft: 12,
         height: '100%',
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
         includeFontPadding: false,
         textAlignVertical: 'center',
         paddingVertical: 0,
     },
     formGap: { gap: 16 },
-    passwordRequirementText: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
+    passwordRequirementText: { fontSize: 12, lineHeight: 18, fontFamily: typography.body },
     passwordStrengthCard: { borderWidth: 1, borderRadius: 16, padding: 14, gap: 10 },
     passwordStrengthHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-    passwordStrengthTitle: { fontSize: 13, lineHeight: 18, fontFamily: 'Poppins_600SemiBold' },
-    passwordStrengthLabel: { fontSize: 12, lineHeight: 16, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
+    passwordStrengthTitle: { fontSize: 13, lineHeight: 18, fontFamily: typography.semibold },
+    passwordStrengthLabel: { fontSize: 12, lineHeight: 16, fontFamily: typography.bold, textTransform: 'uppercase' },
     passwordMeterTrack: { height: 7, borderRadius: 999, overflow: 'hidden' },
     passwordMeterFill: { height: '100%', borderRadius: 999 },
     passwordChecklist: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     passwordChecklistItem: { width: '48%', minWidth: 140, flexDirection: 'row', alignItems: 'center', gap: 6 },
-    passwordChecklistText: { flex: 1, fontSize: 11, lineHeight: 15, fontFamily: 'Poppins_400Regular' },
+    passwordChecklistText: { flex: 1, fontSize: 11, lineHeight: 15, fontFamily: typography.body },
     confirmPasswordHintRow: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 18 },
-    confirmPasswordHintText: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_500Medium' },
+    confirmPasswordHintText: { fontSize: 12, lineHeight: 18, fontFamily: typography.medium },
     backLink: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, gap: 4 },
     documentSectionContainer: { gap: 8, marginTop: 4 },
-    documentSectionTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold' },
-    documentSectionSubtitle: { fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
+    documentSectionTitle: { fontSize: 14, fontFamily: typography.semibold },
+    documentSectionSubtitle: { fontSize: 12, lineHeight: 18, fontFamily: typography.body },
     documentSelectButton: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -4173,8 +4174,8 @@ const styles = StyleSheet.create({
         gap: 12,
     },
     documentSelectCopy: { flex: 1, gap: 2 },
-    documentSelectValue: { fontSize: 14, lineHeight: 18, fontFamily: 'Poppins_600SemiBold' },
-    documentSelectionMeta: { fontSize: 11, lineHeight: 14, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
+    documentSelectValue: { fontSize: 14, lineHeight: 18, fontFamily: typography.semibold },
+    documentSelectionMeta: { fontSize: 11, lineHeight: 14, fontFamily: typography.bold, textTransform: 'uppercase' },
     documentModalSheet: {
         flex: 1,
         borderTopLeftRadius: 28,
@@ -4198,8 +4199,8 @@ const styles = StyleSheet.create({
     },
     documentModalHeaderCopy: { flex: 1, gap: 4, paddingRight: 16 },
     documentModalHeaderSpacer: { width: 38, height: 38 },
-    documentModalTitle: { flex: 1, fontSize: 18, textAlign: 'center', fontFamily: 'Poppins_700Bold' },
-    documentModalSubtitle: { fontSize: 13, lineHeight: 19, marginBottom: 16, textAlign: 'center', fontFamily: 'Poppins_400Regular' },
+    documentModalTitle: { flex: 1, fontSize: 18, textAlign: 'center', fontFamily: typography.title },
+    documentModalSubtitle: { fontSize: 13, lineHeight: 19, marginBottom: 16, textAlign: 'center', fontFamily: typography.body },
     documentModalCloseButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: 0 },
     documentModalBody: { flexGrow: 0 },
     documentModalList: { gap: 8, paddingBottom: 4 },
@@ -4218,8 +4219,8 @@ const styles = StyleSheet.create({
     },
     documentModalGroupIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
     documentModalGroupCopy: { flex: 1, gap: 2 },
-    documentModalGroupTitle: { fontSize: 13, lineHeight: 17, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
-    documentModalGroupSubtitle: { fontSize: 11, lineHeight: 16, fontFamily: 'Poppins_400Regular' },
+    documentModalGroupTitle: { fontSize: 13, lineHeight: 17, fontFamily: typography.bold, textTransform: 'uppercase' },
+    documentModalGroupSubtitle: { fontSize: 11, lineHeight: 16, fontFamily: typography.body },
     documentModalGroupOptions: { gap: 8 },
     documentModalOption: {
         flexDirection: 'row',
@@ -4233,8 +4234,8 @@ const styles = StyleSheet.create({
     },
     documentModalOptionIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
     documentModalOptionCopy: { flex: 1, gap: 2 },
-    documentModalOptionTitle: { fontSize: 15, lineHeight: 20, fontFamily: 'Poppins_600SemiBold' },
-    documentModalOptionMeta: { fontSize: 11, lineHeight: 15, fontFamily: 'Poppins_700Bold', textTransform: 'uppercase' },
+    documentModalOptionTitle: { fontSize: 15, lineHeight: 20, fontFamily: typography.semibold },
+    documentModalOptionMeta: { fontSize: 11, lineHeight: 15, fontFamily: typography.bold, textTransform: 'uppercase' },
     documentModalOptionCheck: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
     manualFlowContainer: { paddingHorizontal: 20, paddingBottom: 28, gap: 16 },
     manualReviewIntroCard: {
@@ -4267,13 +4268,13 @@ const styles = StyleSheet.create({
         gap: 10,
     },
     manualInfoIcon: { width: 20, textAlign: 'center' },
-    manualInfoFieldLabel: { fontSize: 12, lineHeight: 16, fontFamily: 'Poppins_500Medium', marginLeft: 2 },
+    manualInfoFieldLabel: { fontSize: 12, lineHeight: 16, fontFamily: typography.medium, marginLeft: 2 },
     manualInfoInput: {
         flex: 1,
         height: '100%',
         fontSize: 14,
         lineHeight: 18,
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: typography.medium,
         includeFontPadding: false,
         paddingVertical: 0,
         paddingHorizontal: 0,
@@ -4288,7 +4289,7 @@ const styles = StyleSheet.create({
     manualInfoDateText: {
         fontSize: 14,
         lineHeight: 18,
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: typography.medium,
     },
     manualNoExpirationToggle: {
         minHeight: 42,
@@ -4304,7 +4305,7 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 12,
         lineHeight: 16,
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: typography.medium,
     },
     manualCalendarSheet: {
         flex: 0,
@@ -4336,13 +4337,13 @@ const styles = StyleSheet.create({
     },
     manualUploadCopy: { flex: 1, gap: 8, minWidth: 0 },
     manualUploadTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-    manualUploadTitle: { fontSize: 14, lineHeight: 19, fontFamily: 'Poppins_600SemiBold' },
-    manualUploadSubtitle: { fontSize: 11, lineHeight: 15, fontFamily: 'Poppins_400Regular' },
+    manualUploadTitle: { fontSize: 14, lineHeight: 19, fontFamily: typography.semibold },
+    manualUploadSubtitle: { fontSize: 11, lineHeight: 15, fontFamily: typography.body },
     manualPreviewRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
     manualPreviewImage: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#D1D5DB' },
     manualPreviewCopy: { flex: 1, minWidth: 0 },
-    manualUploadFileName: { fontSize: 12, lineHeight: 17, fontFamily: 'Poppins_500Medium' },
-    manualUploadPlaceholder: { fontSize: 12, lineHeight: 17, fontFamily: 'Poppins_400Regular' },
+    manualUploadFileName: { fontSize: 12, lineHeight: 17, fontFamily: typography.medium },
+    manualUploadPlaceholder: { fontSize: 12, lineHeight: 17, fontFamily: typography.body },
     manualUploadAction: {
         width: 34,
         height: 34,
@@ -4360,7 +4361,7 @@ const styles = StyleSheet.create({
         alignItems: 'flex-start',
         gap: 10,
     },
-    manualFlowHint: { flex: 1, fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
+    manualFlowHint: { flex: 1, fontSize: 12, lineHeight: 18, fontFamily: typography.body },
 });
 
 

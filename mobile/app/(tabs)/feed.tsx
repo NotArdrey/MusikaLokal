@@ -1430,6 +1430,40 @@ type FeedQuickInfoItem = {
   label: string;
 };
 
+type FeedGigRequirementLine = {
+  label: string;
+  details: string;
+};
+
+const getFeedGigRequirementSummary = (badges: string[]) => {
+  const lookingFor: string[] = [];
+  const requirementLines: FeedGigRequirementLine[] = [];
+
+  badges.forEach((badge) => {
+    const separatorIndex = badge.indexOf(":");
+    if (separatorIndex < 0) {
+      if (/^\d+ more slot requirement/i.test(badge)) {
+        requirementLines.push({ label: "", details: badge });
+      } else {
+        lookingFor.push(badge);
+      }
+      return;
+    }
+
+    const label = badge.slice(0, separatorIndex).trim();
+    const details = badge
+      .slice(separatorIndex + 1)
+      .split(",")
+      .map((value) => value.trim().replace(/^(Instrument|Genre):\s*/i, ""))
+      .filter(Boolean)
+      .join(" \u00b7 ");
+
+    if (label || details) requirementLines.push({ label, details });
+  });
+
+  return { lookingFor, requirementLines };
+};
+
 const getFeedQuickInfoIconMetrics = (icon: FeedQuickInfoItem["icon"]) => {
   switch (icon) {
     case "star":
@@ -1470,6 +1504,16 @@ const getFeedQuickInfoItems = (item: any): FeedQuickInfoItem[] => {
       icon: "people",
       label: `${Math.round(applicantCount)} ${Math.round(applicantCount) === 1 ? "Applicant" : "Applicants"}`,
     });
+  }
+
+  if (normalizedType === "gig" || normalizedType === "venue") {
+    if (locationLabel) {
+      quickInfoItems.push({ icon: "location", label: locationLabel });
+    }
+    if (genre && genre !== item?.type && genre !== "Venue") {
+      quickInfoItems.push({ icon: "musical-notes", label: `Gig genres: ${genre}` });
+    }
+    return quickInfoItems.filter((info) => info.label.length > 0).slice(0, 3);
   }
 
   if (rating > 0) {
@@ -2997,6 +3041,8 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   const slotBadges = ["gig", "venue"].includes(suggestionType)
     ? getGigSlotCardBadges(item?.requirements)
     : [];
+  const isGigCard = isSuggestion && ["gig", "venue"].includes(suggestionType);
+  const gigRequirementSummary = getFeedGigRequirementSummary(slotBadges);
   const featuredPerformers = useMemo(
     () =>
       isSuggestion && ["gig", "venue"].includes(suggestionType) && Array.isArray(item?.featured_performers)
@@ -3017,7 +3063,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   const timestamp = getFeedTimestampLabel(item, timeAgo);
   const showHeaderFollow = Boolean(followTarget && (showAuthorFollow || isSuggestion));
   const showSuggestionDetails =
-    isSuggestion &&
+    (isSuggestion || isGigCard) &&
     (bodyBadges.length > 0 || priceChips.length > 0 || slotBadges.length > 0 || quickInfoItems.length > 0 || featuredPerformers.length > 0);
 
   const handleOpenPrimary = useCallback(() => {
@@ -3310,7 +3356,36 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
             },
           ]}
         >
-          {bodyBadges.length > 0 || priceChips.length > 0 ? (
+          {isGigCard ? (
+            <View style={styles.socialGigSummary}>
+              <View style={styles.socialGigTypeRow}>
+                <Text style={[styles.socialGigType, { color: colors.primary }]}>LIVE GIG</Text>
+                {priceChips[0] ? (
+                  <Text style={[styles.socialGigFee, { color: colors.text }]}>{priceChips[0]}</Text>
+                ) : null}
+              </View>
+              {gigRequirementSummary.lookingFor.length > 0 ? (
+                <View style={styles.socialGigRequirementBlock}>
+                  <Text style={[styles.socialGigEyebrow, { color: colors.textSecondary }]}>LOOKING FOR</Text>
+                  <Text style={[styles.socialGigNeed, { color: colors.text }]}>
+                    {gigRequirementSummary.lookingFor.join(" \u00b7 ")}
+                  </Text>
+                  {gigRequirementSummary.requirementLines.map((requirement) => (
+                    <View key={`${requirement.label}-${requirement.details}`} style={styles.socialGigRequirementLine}>
+                      {requirement.label ? (
+                        <Text style={[styles.socialGigRequirementLabel, { color: colors.text }]}>{requirement.label}</Text>
+                      ) : null}
+                      {requirement.details ? (
+                        <Text style={[styles.socialGigRequirementDetails, { color: colors.textSecondary }]}>
+                          {requirement.details}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          ) : bodyBadges.length > 0 || priceChips.length > 0 ? (
             <View style={styles.socialEntityChipRow}>
               {bodyBadges.map((badge) => (
                 <View key={`entity-badge-${badge}`} style={[styles.socialBadgeChip, { backgroundColor: colors.primary + "12" }]}>
@@ -3329,7 +3404,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
             </View>
           ) : null}
 
-          {slotBadges.length > 0 ? (
+          {!isGigCard && slotBadges.length > 0 ? (
             <View style={styles.socialEntityChipRow}>
               {slotBadges.map((badge) => (
                 <View key={`slot-${badge}`} style={[styles.socialBadgeChip, { backgroundColor: colors.primary + "12" }]}>
@@ -3350,22 +3425,22 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
           />
 
           {quickInfoItems.length > 0 ? (
-            <View style={styles.socialQuickInfoRow}>
+            <View style={isGigCard ? [styles.socialGigMetaList, { borderTopColor: borderColor }] : styles.socialQuickInfoRow}>
               {quickInfoItems.map((info, index) => {
                 const iconMetrics = getFeedQuickInfoIconMetrics(info.icon);
 
                 return (
                   <View
                     key={`${info.icon}-${info.label}`}
-                    style={[
-                      styles.socialQuickInfoItem,
-                      index === 0 && styles.socialQuickInfoItemStart,
-                      index === quickInfoItems.length - 1 && styles.socialQuickInfoItemEnd,
-                      {
-                        backgroundColor: isDark ? "rgba(124,58,237,0.16)" : "#FFFFFF",
-                        borderColor: isDark ? "rgba(167,139,250,0.24)" : "rgba(124,58,237,0.14)",
-                      },
-                    ]}
+                    style={isGigCard ? styles.socialGigMetaItem : [
+                        styles.socialQuickInfoItem,
+                        index === 0 && styles.socialQuickInfoItemStart,
+                        index === quickInfoItems.length - 1 && styles.socialQuickInfoItemEnd,
+                        {
+                          backgroundColor: isDark ? "rgba(124,58,237,0.16)" : "#FFFFFF",
+                          borderColor: isDark ? "rgba(167,139,250,0.24)" : "rgba(124,58,237,0.14)",
+                        },
+                      ]}
                   >
                     <View style={styles.socialQuickInfoIconBox}>
                       <Ionicons
@@ -3375,7 +3450,10 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
                         style={styles.socialQuickInfoIcon}
                       />
                     </View>
-                    <Text style={[styles.socialQuickInfoText, { color: colors.textSecondary }]} numberOfLines={1}>
+                    <Text
+                      style={[isGigCard ? styles.socialGigMetaText : styles.socialQuickInfoText, { color: colors.textSecondary }]}
+                      numberOfLines={1}
+                    >
                       {info.label}
                     </Text>
                   </View>
@@ -8413,6 +8491,73 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     alignItems: "center",
     gap: 7,
+  },
+  socialGigSummary: {
+    gap: 11,
+  },
+  socialGigTypeRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  socialGigType: {
+    fontSize: moderateScale(10),
+    lineHeight: 14,
+    fontFamily: "Poppins_700Bold",
+    letterSpacing: 0.8,
+  },
+  socialGigFee: {
+    flexShrink: 1,
+    fontSize: moderateScale(13),
+    lineHeight: 18,
+    fontFamily: "Poppins_700Bold",
+    textAlign: "right",
+  },
+  socialGigRequirementBlock: {
+    gap: 3,
+  },
+  socialGigEyebrow: {
+    fontSize: moderateScale(9),
+    lineHeight: 13,
+    fontFamily: "Poppins_600SemiBold",
+    letterSpacing: 0.7,
+  },
+  socialGigNeed: {
+    fontSize: moderateScale(14),
+    lineHeight: 20,
+    fontFamily: "Poppins_700Bold",
+  },
+  socialGigRequirementLine: {
+    marginTop: 5,
+    gap: 1,
+  },
+  socialGigRequirementLabel: {
+    fontSize: moderateScale(11),
+    lineHeight: 16,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  socialGigRequirementDetails: {
+    fontSize: moderateScale(11),
+    lineHeight: 17,
+    fontFamily: "Poppins_400Regular",
+  },
+  socialGigMetaList: {
+    borderTopWidth: 1,
+    paddingTop: 10,
+    gap: 8,
+  },
+  socialGigMetaItem: {
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  socialGigMetaText: {
+    flexShrink: 1,
+    fontSize: moderateScale(11),
+    lineHeight: 16,
+    fontFamily: "Poppins_500Medium",
   },
   socialQuickInfoRow: {
     flexDirection: "row",

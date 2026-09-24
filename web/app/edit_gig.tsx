@@ -38,6 +38,7 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
+import { editFormStyles } from "../src/theme/formStyles";
 import {
   aggregateSpecificSlotRequirements,
   normalizeSpecificSlotRequirements,
@@ -3481,4 +3482,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Poppins_600SemiBold",
   },
+  ...editFormStyles,
 });

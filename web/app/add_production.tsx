@@ -15,6 +15,7 @@ import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
+import { productionFormStyles } from '../src/theme/formStyles';
 import { ProductionInviteTarget, sendProductionTeamInvites } from '../src/utils/productionTeamInvites';
 
 const readFunctionErrorBody = async (error: any) => {
@@ -180,7 +181,7 @@ export default function AddProductionScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: pageBackground }]}>
-      <Header title="Add Production" onBackPress={() => router.replace('/my_production')} />
+      <Header title="New Production" cardStyle onBackPress={() => router.replace('/my_production')} />
 
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]} showsVerticalScrollIndicator={false}>
         <View style={styles.contentFrame}>
@@ -207,7 +208,7 @@ export default function AddProductionScreen() {
 
           <Text style={[styles.label, { color: colors.text }]}>Team Name *</Text>
           <TextInput
-            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+            style={[styles.input, { color: colors.text, borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}
             value={teamName}
             onChangeText={setTeamName}
             placeholder="Enter your production team name"
@@ -216,7 +217,7 @@ export default function AddProductionScreen() {
 
           <Text style={[styles.label, { color: colors.text }]}>Description *</Text>
           <TextInput
-            style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+            style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}
             value={description}
             onChangeText={setDescription}
             placeholder="Describe your production team's focus, experience, or specialties"
@@ -278,4 +279,5 @@ const styles = StyleSheet.create({
   helperText: { marginTop: 12, fontSize: 12, fontFamily: 'Poppins_500Medium' },
   submitBtn: { marginTop: 24, borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
   submitBtnText: { color: '#fff', fontSize: 15, fontFamily: 'Poppins_700Bold' },
+  ...productionFormStyles,
 });

@@ -42,6 +42,7 @@ import {
 } from "../src/constants/groupTypes";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { wizardFormStyles } from "../src/theme/formStyles";
 import { radius, typography } from "../src/theme/tokens";
 import TrackedBottomSheetModal from "../src/components/TrackedBottomSheetModal";
 import { isGroupLeaderMember } from "../src/utils/groupMembers";
@@ -1146,8 +1147,8 @@ export default function AddGroupScreen() {
                           styles.stepText,
                           {
                             fontFamily: isCurrent
-                              ? "Poppins_600SemiBold"
-                              : "Poppins_400Regular",
+                              ? typography.semibold
+                              : typography.medium,
                             color: isActive ? colors.text : colors.textSecondary,
                             fontWeight: isCurrent ? "bold" : "normal",
                           },
@@ -1180,10 +1181,11 @@ export default function AddGroupScreen() {
                       style={[
                         styles.inputWrapper,
                         {
-                          backgroundColor: colors.inputBackground,
-                          borderColor: isDark ? "#374151" : "#E5E7EB",
+                          backgroundColor: isDark ? colors.inputBackground : "#EEEDE8",
+                          borderColor: isDark ? colors.inputBorder : "#EEEDE8",
+                          height: 56,
                           paddingHorizontal: 16,
-                          paddingVertical: 16,
+                          paddingVertical: 0,
                           flexDirection: "row",
                           justifyContent: "space-between",
                           alignItems: "center",
@@ -1191,15 +1193,15 @@ export default function AddGroupScreen() {
                       ]}
                       onPress={() => setGroupTypeModalVisible(true)}
                     >
-                      <Text style={{ color: colors.text, fontFamily: "Poppins_400Regular" }}>
+                      <Text style={{ color: colors.text, fontFamily: typography.medium, fontSize: 15 }}>
                         {PH_MUSIC_GROUP_TYPES.find(t => t.id === groupType)?.label || groupType || "Select Group Type"}
                       </Text>
-                      <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
+                      <Ionicons name="chevron-down" size={20} color={isDark ? colors.textSecondary : "#62646D"} />
                     </TouchableOpacity>
 
-                    <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-                      <TextInput value={customGroupType} onChangeText={setCustomGroupType} placeholder="Enter another group type..." placeholderTextColor={colors.textSecondary} style={[styles.textInput, { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.border }]} />
-                      <TouchableOpacity accessibilityLabel="Use custom group type" onPress={() => { const value = customGroupType.trim(); if (!value) return; setGroupType(value); setCustomGroupType(""); }} style={{ width: 44, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary }}><Ionicons name="add" size={22} color="#fff" /></TouchableOpacity>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 }}>
+                      <TextInput value={customGroupType} onChangeText={setCustomGroupType} placeholder="Enter another group type..." placeholderTextColor={colors.textSecondary} style={[styles.textInput, { flex: 1, height: 56, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 0, color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]} />
+                      <TouchableOpacity accessibilityLabel="Use custom group type" onPress={() => { const value = customGroupType.trim(); if (!value) return; setGroupType(value); setCustomGroupType(""); }} style={{ width: 56, height: 56, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary }}><Ionicons name="add" size={28} color="#fff" /></TouchableOpacity>
                     </View>
 
                     {/* Info about selected type */}
@@ -1294,7 +1296,7 @@ export default function AddGroupScreen() {
                   </TouchableOpacity>
                   <Text style={[styles.genreHelperText, { color: colors.textSecondary }]}>Add a custom genre</Text>
                   <View style={{ flexDirection: "row", gap: 8 }}>
-                    <TextInput value={customGenre} onChangeText={setCustomGenre} placeholder="Enter another genre..." placeholderTextColor={colors.textSecondary} style={[styles.textInput, { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.border }]} />
+                    <TextInput value={customGenre} onChangeText={setCustomGenre} placeholder="Enter another genre..." placeholderTextColor={colors.textSecondary} style={[styles.textInput, { flex: 1, minHeight: 46, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: colors.text, backgroundColor: colors.inputBackground, borderColor: colors.inputBorder }]} />
                     <TouchableOpacity accessibilityLabel="Add custom genre" onPress={() => { const value = customGenre.trim(); if (!value || selectedGenres.some((genre) => genre.toLowerCase() === value.toLowerCase())) return; setSelectedGenres((current) => [...current, value]); setCustomGenre(""); }} style={{ width: 46, height: 46, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.primary }}>
                       <Ionicons name="add" size={22} color="#fff" />
                     </TouchableOpacity>
@@ -2343,4 +2345,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  ...wizardFormStyles,
 });

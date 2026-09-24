@@ -13,6 +13,7 @@ import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
+import { productionFormStyles } from '../src/theme/formStyles';
 import { radius, typography } from '../src/theme/tokens';
 import { createE2EImageFixtureUrls, isE2EFixtureMode } from '../src/utils/e2eFixtures';
 import { ProductionInviteTarget, sendProductionTeamInvites } from '../src/utils/productionTeamInvites';
@@ -211,7 +212,7 @@ export default function AddProductionScreen() {
           <TextInput
             testID="mobile-production-name-input"
             accessibilityLabel="mobile-production-name-input"
-            style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+            style={[styles.input, { color: colors.text, borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}
             value={teamName}
             onChangeText={setTeamName}
             placeholder="Enter your production team name"
@@ -222,7 +223,7 @@ export default function AddProductionScreen() {
           <TextInput
             testID="mobile-production-description-input"
             accessibilityLabel="mobile-production-description-input"
-            style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+            style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.inputBorder, backgroundColor: colors.inputBackground }]}
             value={description}
             onChangeText={setDescription}
             placeholder="Describe your production team's focus, experience, or specialties"
@@ -280,5 +281,6 @@ const styles = StyleSheet.create({
   helperText: { marginTop: 12, fontSize: 12, fontFamily: 'Poppins_500Medium' },
   submitBtn: { marginTop: 24, borderRadius: radius.button, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
   submitBtnText: { color: '#fff', fontSize: 15, fontFamily: typography.bold },
+  ...productionFormStyles,
 });
 

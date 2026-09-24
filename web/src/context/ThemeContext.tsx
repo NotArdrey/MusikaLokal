@@ -39,8 +39,8 @@ const lightColors: ThemeColors = {
   border: '#E5E7EB', // gray-200
   muted: '#9CA3AF',
   card: '#FFFFFF',
-  inputBackground: '#F3F4F6',
-  inputBorder: '#D1D5DB',
+  inputBackground: '#EEEDE8',
+  inputBorder: '#D3D2CB',
 };
 
 const darkColors: ThemeColors = {
