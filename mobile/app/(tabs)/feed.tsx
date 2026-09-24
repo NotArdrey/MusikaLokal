@@ -293,6 +293,54 @@ const isFeedStudioAcceptingBookings = (item: any, today = new Date()) => {
   return hasWeeklyHours || hasFutureOpenDate;
 };
 
+const MANILA_UTC_OFFSET = "+08:00";
+
+const parseGigScheduleTimestamp = (dateValue: unknown, timeValue: unknown): number | null => {
+  const dateMatch = String(dateValue || "").trim().match(/^(\d{4}-\d{2}-\d{2})/);
+  const timeMatch = String(timeValue || "").trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/i);
+  if (!dateMatch || !timeMatch) return null;
+
+  let hours = Number(timeMatch[1]);
+  const minutes = Number(timeMatch[2]);
+  const meridiem = timeMatch[3]?.toUpperCase();
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || minutes < 0 || minutes > 59) return null;
+
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return null;
+    hours = hours % 12 + (meridiem === "PM" ? 12 : 0);
+  } else if (hours < 0 || hours > 23) {
+    return null;
+  }
+
+  const timestamp = Date.parse(
+    `${dateMatch[1]}T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00${MANILA_UTC_OFFSET}`,
+  );
+  return Number.isFinite(timestamp) ? timestamp : null;
+};
+
+const getGigEndTimestamp = (item: any): number | null => {
+  const requirements = item?.requirements && typeof item.requirements === "object"
+    ? item.requirements
+    : {};
+  const scheduleEndTimes = (Array.isArray(requirements.event_schedules) ? requirements.event_schedules : [])
+    .map((schedule: any) => parseGigScheduleTimestamp(schedule?.date, schedule?.end_time ?? schedule?.end))
+    .filter((timestamp: number | null): timestamp is number => timestamp !== null);
+
+  if (scheduleEndTimes.length > 0) return Math.max(...scheduleEndTimes);
+
+  const fallbackEnd = parseGigScheduleTimestamp(item?.event_date, requirements.event_end_time);
+  if (fallbackEnd !== null) return fallbackEnd;
+
+  const dateMatch = String(item?.event_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/);
+  if (dateMatch) {
+    const endOfEventDay = Date.parse(`${dateMatch[1]}T23:59:59${MANILA_UTC_OFFSET}`);
+    if (Number.isFinite(endOfEventDay)) return endOfEventDay;
+  }
+
+  const rawTimestamp = item?.event_date ? new Date(item.event_date).getTime() : Number.NaN;
+  return Number.isFinite(rawTimestamp) ? rawTimestamp : null;
+};
+
 const isOpenFeedRecommendation = (item: any) => {
   if (!item || item.__feedKind && item.__feedKind !== "ai_card" && item.__feedKind !== "following_entity") return true;
   const type = String(item?.type || "").trim().toLowerCase();
@@ -301,8 +349,10 @@ const isOpenFeedRecommendation = (item: any) => {
   if (type === "studio" || type === "venue") return isFeedStudioAcceptingBookings(item);
   if (type === "gig") {
     const statusOpen = String(item?.status || "").trim().toLowerCase() === "open";
-    const eventTime = item?.event_date ? new Date(item.event_date).getTime() : Number.POSITIVE_INFINITY;
-    return statusOpen && (!Number.isFinite(eventTime) || eventTime >= Date.now());
+    const hasFeaturedPerformers = item?.has_featured_performers === true ||
+      (Array.isArray(item?.featured_performers) && item.featured_performers.length > 0);
+    const eventEndTime = getGigEndTimestamp(item);
+    return (statusOpen || hasFeaturedPerformers) && (eventEndTime === null || eventEndTime >= Date.now());
   }
   return true;
 };
@@ -1484,17 +1534,8 @@ const getFeedPriceChips = (item: any) => {
 };
 
 const getAiRecommendationLabel = (item: any) => {
-  if (item?.ai_recommended !== true) return "";
-
-  const type = String(item?.type || "").trim().toLowerCase();
-  if (item?.__feedKind !== "ai_card" || type === "post") return "AI recommends this post for you";
-  if (type === "gig" || type === "venue") return "AI recommends this gig for you";
-  if (type === "artist" || type === "profile" || type === "musician") return "AI recommends this artist for you";
-  if (type === "production" || type === "production_team") return "AI recommends this production team for you";
-  if (type === "duo") return "AI recommends this duo for you";
-  if (type === "group") return "AI recommends this group for you";
-  if (type === "studio") return "AI recommends this studio for you";
-  return "AI recommends this for you";
+  if (item?.ai_suggested !== true && item?.ai_recommended !== true) return "";
+  return "AI Suggested";
 };
 
 const getFeedServiceBadges = (item: any) => {
@@ -1653,6 +1694,9 @@ const isOwnFeedAiRecommendationCard = (item: any, userId?: string | null) => {
 };
 
 const getFeedHeaderBadge = (item: any) => {
+  const aiRecommendationLabel = getAiRecommendationLabel(item);
+  if (aiRecommendationLabel) return aiRecommendationLabel;
+
   if (item?.__feedKind !== "ai_card") {
     if (shouldHideFeedPostTypeLabel(item?.post_type)) return "";
     return formatCompactPostType(item?.post_type);
@@ -4049,6 +4093,7 @@ export default function FeedScreen() {
       const cards = rows
         .map((item: any) => normalizeFeedAiRecommendationCard({
           ...item,
+          ai_suggested: true,
           ai_recommended: data?.aiPowered === true,
         }))
         .filter((item: any) => item?.id && !isOwnFeedAiRecommendationCard(item, resolvedUserId))
@@ -4097,7 +4142,6 @@ export default function FeedScreen() {
           .select(FEED_GIG_CARD_SELECT)
           .eq("status", "open")
           .eq("permit_status", "approved")
-          .or(`event_date.is.null,event_date.gte.${new Date().toISOString()}`)
           .order("created_at", { ascending: false })
           .limit(TALENT_CARD_LIMIT),
         supabase
@@ -4580,7 +4624,6 @@ export default function FeedScreen() {
             .select(FEED_GIG_CARD_SELECT)
             .eq("status", "open")
             .eq("permit_status", "approved")
-            .or(`event_date.is.null,event_date.gte.${new Date().toISOString()}`)
             .in("organizer_id", followedProfileIds)
             .order("created_at", { ascending: false })
             .limit(AI_CARD_LIMIT)

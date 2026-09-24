@@ -17,6 +17,10 @@ import {
   removeCopyrightVideoTemporaryFile,
   type CopyrightVideoSample,
 } from '../utils/videoCopyrightSample';
+import {
+  createTemporaryUploadFile,
+  type TemporaryUploadFile,
+} from '../utils/storageUpload';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
@@ -689,19 +693,24 @@ export default function VideoUploader({
       setUploadMessage('Preparing video...');
       setUploadProgress(0);
       let copyrightSample: CopyrightVideoSample | null = null;
+      let nativeVideoFile: TemporaryUploadFile | null = null;
 
       try {
         const originalName = getVideoOriginalName(asset);
         const fileExt = resolveVideoExtension(asset, originalName);
         const mimeType = resolveVideoMimeType(asset, fileExt);
         const fileName = `${userId}/${folder}/${Date.now()}_video.${fileExt}`;
+        nativeVideoFile = Platform.OS === 'web'
+          ? null
+          : await createTemporaryUploadFile(asset.uri, originalName);
+        const readableAssetUri = nativeVideoFile?.uri || asset.uri;
 
         setUploadMessage('Checking video content...');
-        await screenVisualUpload({ uri: asset.uri, name: originalName, mimeType, size: fileSizeBytes || undefined, kind: 'video', durationMs: asset.duration || undefined }, 'gig_video_content');
+        await screenVisualUpload({ uri: readableAssetUri, name: originalName, mimeType, size: fileSizeBytes || undefined, kind: 'video', durationMs: asset.duration || undefined }, 'gig_video_content');
         let copyrightDecision: UploadSafetyFileDecision | null = null;
         if (enableCopyrightScreening) {
           const screened = await screenCopyrightVideo({
-            uri: asset.uri,
+            uri: readableAssetUri,
             fileName: originalName,
             mimeType,
             fileSize: fileSizeBytes,
@@ -722,7 +731,7 @@ export default function VideoUploader({
 
         const data = await uploadVideoFile({
           accessToken: session.access_token,
-          assetUri: asset.uri,
+          assetUri: readableAssetUri,
           bucketName,
           fileName,
           mimeType,
@@ -747,7 +756,7 @@ export default function VideoUploader({
             const frameResults = await Promise.allSettled(
               getReviewFrameTimes(asset).map((timeMs, frameIndex) =>
                 uploadReviewFrame({
-                  assetUri: asset.uri,
+                  assetUri: readableAssetUri,
                   userId,
                   bucketName,
                   folder,
@@ -796,6 +805,7 @@ export default function VideoUploader({
         showAlert('error', safetyCheckUnavailable ? 'Safety check unavailable' : 'Upload failed', message);
       } finally {
         await removeCopyrightVideoTemporaryFile(copyrightSample);
+        await nativeVideoFile?.remove();
         setUploading(false);
         setUploadProgress(0);
       }

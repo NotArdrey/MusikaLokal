@@ -121,6 +121,10 @@ interface RecommendationItem {
     availability?: any[];
     open_dates?: string[];
     requirements?: Record<string, unknown> | null;
+    status?: string | null;
+    event_date?: string | null;
+    featured_performers?: any[];
+    has_featured_performers?: boolean;
     author_id?: string | null;
     post_type?: string | null;
     content?: string | null;
@@ -197,6 +201,59 @@ const isStudioAcceptingBookings = (item: any, today = new Date()) => {
         (value: unknown) => typeof value === "string" && value.slice(0, 10) >= todayKey,
     );
     return hasWeeklyHours || hasFutureOpenDate;
+};
+
+const MANILA_UTC_OFFSET = "+08:00";
+
+const parseGigScheduleTimestamp = (dateValue: unknown, timeValue: unknown): number | null => {
+    const dateMatch = String(dateValue || "").trim().match(/^(\d{4}-\d{2}-\d{2})/);
+    const timeMatch = String(timeValue || "").trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/i);
+    if (!dateMatch || !timeMatch) return null;
+
+    let hours = Number(timeMatch[1]);
+    const minutes = Number(timeMatch[2]);
+    const meridiem = timeMatch[3]?.toUpperCase();
+    if (!Number.isInteger(hours) || !Number.isInteger(minutes) || minutes < 0 || minutes > 59) return null;
+
+    if (meridiem) {
+        if (hours < 1 || hours > 12) return null;
+        hours = hours % 12 + (meridiem === "PM" ? 12 : 0);
+    } else if (hours < 0 || hours > 23) {
+        return null;
+    }
+
+    const timestamp = Date.parse(
+        `${dateMatch[1]}T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00${MANILA_UTC_OFFSET}`,
+    );
+    return Number.isFinite(timestamp) ? timestamp : null;
+};
+
+const getGigEndTimestamp = (item: any): number | null => {
+    const requirements = item?.requirements && typeof item.requirements === "object"
+        ? item.requirements
+        : {};
+    const scheduleEndTimes = (Array.isArray(requirements.event_schedules) ? requirements.event_schedules : [])
+        .map((schedule: any) => parseGigScheduleTimestamp(schedule?.date, schedule?.end_time ?? schedule?.end))
+        .filter((timestamp: number | null): timestamp is number => timestamp !== null);
+
+    if (scheduleEndTimes.length > 0) return Math.max(...scheduleEndTimes);
+
+    const fallbackEnd = parseGigScheduleTimestamp(item?.event_date, requirements.event_end_time);
+    if (fallbackEnd !== null) return fallbackEnd;
+
+    const dateMatch = String(item?.event_date || "").trim().match(/^(\d{4}-\d{2}-\d{2})/);
+    if (dateMatch) {
+        const endOfEventDay = Date.parse(`${dateMatch[1]}T23:59:59${MANILA_UTC_OFFSET}`);
+        if (Number.isFinite(endOfEventDay)) return endOfEventDay;
+    }
+
+    const rawTimestamp = item?.event_date ? new Date(item.event_date).getTime() : Number.NaN;
+    return Number.isFinite(rawTimestamp) ? rawTimestamp : null;
+};
+
+const isGigUpcomingOrInProgress = (item: any, now = Date.now()) => {
+    const endTimestamp = getGigEndTimestamp(item);
+    return endTimestamp === null || endTimestamp >= now;
 };
 
 const HOME_FEED_CANDIDATE_SOURCE_LIMIT = 48;
@@ -558,12 +615,24 @@ const ensureRecommendationTypeCoverage = (
     requiredTypes: RecommendationItemType[],
     limit: number,
 ) => {
-    if (requiredTypes.length === 0) {
-        return ranked.slice(0, limit);
-    }
-
     const out = ranked.slice(0, limit);
     const usedIds = new Set(out.map((entry) => entry.item.id));
+
+    // Once a performer accepts public featuring, keep the gig visible even
+    // after its final slot automatically closes. Otherwise the featured card
+    // disappears at the exact moment the performer becomes eligible for it.
+    const featuredCandidates = candidates
+        .filter((entry) => entry.item.has_featured_performers === true)
+        .slice(0, 3);
+    featuredCandidates.reverse().forEach((candidate) => {
+        if (usedIds.has(candidate.item.id)) return;
+        out.splice(Math.min(1, out.length), 0, candidate);
+        usedIds.add(candidate.item.id);
+        if (out.length > limit) {
+            const removed = out.pop();
+            if (removed) usedIds.delete(removed.item.id);
+        }
+    });
 
     for (const type of requiredTypes) {
         if (out.some((entry) => entry.item.type === type)) continue;
@@ -851,9 +920,9 @@ const fetchCandidates = async (supabaseClient: any, includePosts = false): Promi
         supabaseClient
             .from("gigs_with_stats")
             .select("id, name, description, images, location, budget, rate, requirements, rating, review_count, organizer_id, created_at, event_date, status, permit_status")
-            .eq("status", "open")
+            .neq("status", "cancelled")
             .eq("permit_status", "approved")
-            .or(`event_date.is.null,event_date.gte.${new Date().toISOString()}`)
+            .order("event_date", { ascending: false, nullsFirst: false })
             .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
         supabaseClient
             .from("profiles")
@@ -1036,7 +1105,31 @@ const fetchCandidates = async (supabaseClient: any, includePosts = false): Promi
         };
     });
 
-    const gigItems: CandidateItem[] = (gigsResult.data || []).map((item: any) => {
+    const gigRows = (gigsResult.data || []).filter((item: any) => isGigUpcomingOrInProgress(item));
+    const featuredPerformersByGigId = new Map<string, any[]>();
+    if (gigRows.length > 0) {
+        const { data: featuredRows, error: featuredError } = await supabaseClient.rpc(
+            "get_gig_featured_performers_for_feed",
+            { p_gig_ids: gigRows.map((item: any) => item.id) },
+        );
+        if (featuredError) {
+            console.error("home-feed featured performers query error:", featuredError);
+        } else {
+            for (const row of featuredRows || []) {
+                if (typeof row?.gig_id !== "string") continue;
+                const current = featuredPerformersByGigId.get(row.gig_id) || [];
+                current.push(row);
+                featuredPerformersByGigId.set(row.gig_id, current);
+            }
+        }
+    }
+
+    const gigItems: CandidateItem[] = gigRows
+      .filter((item: any) =>
+          String(item?.status || "").trim().toLowerCase() === "open" ||
+          (featuredPerformersByGigId.get(item.id)?.length || 0) > 0,
+      )
+      .map((item: any) => {
         const requirementGenres = Array.isArray(item.requirements?.genres)
             ? item.requirements.genres
             : [];
@@ -1061,6 +1154,10 @@ const fetchCandidates = async (supabaseClient: any, includePosts = false): Promi
             updated_at: item.updated_at || null,
             owner_id: null,
             organizer_id: item.organizer_id || null,
+            status: item.status || null,
+            event_date: item.event_date || null,
+            featured_performers: featuredPerformersByGigId.get(item.id) || [],
+            has_featured_performers: (featuredPerformersByGigId.get(item.id)?.length || 0) > 0,
             requirements: item.requirements && typeof item.requirements === "object" ? item.requirements : null,
             searchableText: `${item.name || ""} ${item.description || ""} ${item.location || ""} ${JSON.stringify(item.requirements || {})}`,
             extractedGenres: genres,
@@ -1232,9 +1329,9 @@ const getFeaturedPayload = async (supabaseClient: any) => {
             .select("*")
             .eq("status", "open")
             .eq("permit_status", "approved")
-            .or(`event_date.is.null,event_date.gte.${new Date().toISOString()}`)
+            .order("event_date", { ascending: false, nullsFirst: false })
             .order("created_at", { ascending: false })
-            .limit(5),
+            .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
         supabaseClient
             .from("studios_with_stats")
             .select("*")
@@ -1256,7 +1353,9 @@ const getFeaturedPayload = async (supabaseClient: any) => {
         });
     }
 
-    const safeFeaturedGigs = Array.isArray(featuredGigs) ? featuredGigs : [];
+    const safeFeaturedGigs = (Array.isArray(featuredGigs) ? featuredGigs : [])
+        .filter((item: any) => isGigUpcomingOrInProgress(item))
+        .slice(0, 5);
     const safeFeaturedStudios = (Array.isArray(featuredStudios) ? featuredStudios : []).filter((item: any) => isStudioAcceptingBookings(item));
     const newArrivalIds = (Array.isArray(newArrivals) ? newArrivals : []).map((group: any) => group.id).filter(Boolean);
     const { data: openGroups, error: openGroupsError } = newArrivalIds.length > 0

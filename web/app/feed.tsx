@@ -1151,17 +1151,8 @@ const getTimestampLabel = (value: unknown) => {
 };
 
 const getAiRecommendationLabel = (item: any) => {
-  if (item?.ai_recommended !== true) return "";
-
-  const type = String(item?.type || "").trim().toLowerCase();
-  if (item?.__feedKind !== "ai_card" || type === "post") return "AI recommends this post for you";
-  if (type === "gig" || type === "venue") return "AI recommends this gig for you";
-  if (type === "artist" || type === "profile" || type === "musician") return "AI recommends this artist for you";
-  if (type === "production" || type === "production_team") return "AI recommends this production team for you";
-  if (type === "duo") return "AI recommends this duo for you";
-  if (type === "group") return "AI recommends this group for you";
-  if (type === "studio") return "AI recommends this studio for you";
-  return "AI recommends this for you";
+  if (item?.ai_suggested !== true && item?.ai_recommended !== true) return "";
+  return "AI Suggested";
 };
 
 const getSocialServiceBadges = (item: any) => {
@@ -1353,6 +1344,9 @@ const buildFeedActivityMetadata = (
 };
 
 const getSocialHeaderBadge = (item: any) => {
+  const aiRecommendationLabel = getAiRecommendationLabel(item);
+  if (aiRecommendationLabel) return aiRecommendationLabel;
+
   if (item?.__feedKind === "ai_card") {
     if (typeof item?.type === "string" && item.type.trim().length > 0) {
       const type = item.type.trim();
@@ -2143,6 +2137,7 @@ export default function FeedScreen() {
       return rows
         .map((item: any) => normalizeAiRecommendationCard({
           ...item,
+          ai_suggested: true,
           ai_recommended: data?.aiPowered === true,
         }))
         .filter((item: any) => {

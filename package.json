@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "test:workflows": "node --test scripts/test-gig-history-upload-moderation.mjs scripts/test-upload-screening.mjs scripts/test-gig-genre-matching.mjs scripts/test-gig-face-matching.mjs",
+    "test:workflows": "node --test scripts/test-gig-history-upload-moderation.mjs scripts/test-upload-screening.mjs scripts/test-gig-genre-matching.mjs scripts/test-gig-face-matching.mjs scripts/test-feed-featured-suggestions.mjs",
     "benchmark:face": "node --experimental-strip-types scripts/face-benchmark.ts",
     "test:upload-files": "node --test scripts/test-native-upload-uri-handling.cjs",
     "e2e:admin-crud": "playwright test -c e2e/playwright.config.ts --project=admin",
