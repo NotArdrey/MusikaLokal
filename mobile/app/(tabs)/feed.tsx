@@ -3034,6 +3034,7 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
   const isSuggestion = item?.__feedKind === "ai_card";
   const suggestionType = String(item?.type || "").trim().toLowerCase();
   const [commentBusy, setCommentBusy] = useState(false);
+  const [isGigDetailsExpanded, setIsGigDetailsExpanded] = useState(false);
   const mediaUrls = useMemo(() => getFeedMediaUrls(item), [item]);
   const badges = useMemo(() => getFeedServiceBadges(item), [item]);
   const priceChips = useMemo(() => getFeedPriceChips(item), [item]);
@@ -3358,13 +3359,27 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
         >
           {isGigCard ? (
             <View style={styles.socialGigSummary}>
-              <View style={styles.socialGigTypeRow}>
+              <TouchableOpacity
+                activeOpacity={0.78}
+                accessibilityRole="button"
+                accessibilityLabel={`${isGigDetailsExpanded ? "Hide" : "Show"} gig details`}
+                accessibilityState={{ expanded: isGigDetailsExpanded }}
+                onPress={() => setIsGigDetailsExpanded((expanded) => !expanded)}
+                style={styles.socialGigTypeRow}
+              >
                 <Text style={[styles.socialGigType, { color: colors.primary }]}>LIVE GIG</Text>
-                {priceChips[0] ? (
-                  <Text style={[styles.socialGigFee, { color: colors.text }]}>{priceChips[0]}</Text>
-                ) : null}
-              </View>
-              {gigRequirementSummary.lookingFor.length > 0 ? (
+                <View style={styles.socialGigFeeGroup}>
+                  {priceChips[0] ? (
+                    <Text style={[styles.socialGigFee, { color: colors.text }]}>{priceChips[0]}</Text>
+                  ) : null}
+                  <Ionicons
+                    name={isGigDetailsExpanded ? "chevron-up" : "chevron-down"}
+                    size={18}
+                    color={colors.textSecondary}
+                  />
+                </View>
+              </TouchableOpacity>
+              {isGigDetailsExpanded && gigRequirementSummary.lookingFor.length > 0 ? (
                 <View style={styles.socialGigRequirementBlock}>
                   <Text style={[styles.socialGigEyebrow, { color: colors.textSecondary }]}>LOOKING FOR</Text>
                   <Text style={[styles.socialGigNeed, { color: colors.text }]}>
@@ -3416,15 +3431,17 @@ const SocialFeedCard = React.memo(function SocialFeedCard({
             </View>
           ) : null}
 
-          <FeaturedGigPerformers
-            performers={featuredPerformers}
-            primaryColor={colors.primary}
-            textColor={colors.text}
-            mutedTextColor={colors.textSecondary}
-            isDark={isDark}
-          />
+          {!isGigCard || isGigDetailsExpanded ? (
+            <FeaturedGigPerformers
+              performers={featuredPerformers}
+              primaryColor={colors.primary}
+              textColor={colors.text}
+              mutedTextColor={colors.textSecondary}
+              isDark={isDark}
+            />
+          ) : null}
 
-          {quickInfoItems.length > 0 ? (
+          {quickInfoItems.length > 0 && (!isGigCard || isGigDetailsExpanded) ? (
             <View style={isGigCard ? [styles.socialGigMetaList, { borderTopColor: borderColor }] : styles.socialQuickInfoRow}>
               {quickInfoItems.map((info, index) => {
                 const iconMetrics = getFeedQuickInfoIconMetrics(info.icon);
@@ -8513,6 +8530,14 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontFamily: "Poppins_700Bold",
     textAlign: "right",
+  },
+  socialGigFeeGroup: {
+    minWidth: 0,
+    flexShrink: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 7,
   },
   socialGigRequirementBlock: {
     gap: 3,

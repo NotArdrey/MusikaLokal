@@ -303,7 +303,7 @@ for (const relativePath of portfolioReviewPaths) {
     assert.match(source, /inspectImages/);
     assert.match(source, /MAX_VISION_IMAGES_PER_REQUEST = 3/);
     assert.match(source, /profile_portfolio_used: false/);
-    assert.match(source, /gig-portfolio-v6-cv-name-check/);
+    assert.match(source, /gig-portfolio-v7-document-and-genre-evidence/);
     assert.match(source, /candidate_name/);
     assert.match(source, /cv_name_check:\s*cvNameCheck/);
     assert.doesNotMatch(source, /from\('profile_portfolio_urls'\)/);
@@ -338,6 +338,19 @@ test("CV name comparison tolerates middle names and initials but flags clear con
   assert.equal(
     exports.compareCvApplicantName("Neil Laza", ["Neil Ardrey Payoyo Laza"], 0.55).status,
     "unclear",
+  );
+});
+
+test("CV header fallback reads a prominent owner name without treating headings as names", () => {
+  const { exports } = loadPortfolioReviewHarness();
+
+  assert.equal(
+    exports.extractLikelyCvHeaderName("JARED CARIASO\nMUSICIAN | VOCALIST | GUITARIST\nPROFESSIONAL SUMMARY"),
+    "JARED CARIASO",
+  );
+  assert.equal(
+    exports.extractLikelyCvHeaderName("PROFESSIONAL SUMMARY\nLive performer with five years of experience"),
+    null,
   );
 });
 
@@ -443,7 +456,7 @@ test("an unrelated reviewed upload no longer earns portfolio match points", asyn
   assert.equal(result.criteria_snapshot.score_breakdown.possible_points, 15);
   assert.ok(!result.matched_criteria.includes("Portfolio or performance evidence fits the gig"));
   assert.ok(result.missing_criteria.includes("Submitted performance evidence does not fit the gig"));
-  assert.match(result.explanation, /does not show relevant performance or portfolio experience/i);
+  assert.match(result.explanation, /did not clearly show the required performance experience/i);
 });
 
 test("an unclear media review does not preserve unverified portfolio points", async () => {
@@ -513,7 +526,7 @@ test("AI review is enabled by default without a checkbox and applicant review se
   assert.match(reviewSource, /The applicant may appear in the performance video\./);
   assert.match(reviewSource, /Only one clear frame was found\. Please verify manually\./);
   assert.match(reviewSource, /Name matches/);
-  assert.match(reviewSource, /Name needs review/);
+  assert.match(reviewSource, /Name does not match/);
   assert.match(reviewSource, /Name not confirmed/);
   assert.match(reviewSource, /source_summary\?\.cv_name_check/);
   assert.doesNotMatch(reviewSource, /No additional song evidence is available\./);

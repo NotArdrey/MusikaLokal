@@ -538,6 +538,7 @@ function RootContent() {
 
     try {
       const { hostname, path, queryParams } = Linking.parse(url);
+      const linkPath = String(path || hostname || "").replace(/^\/+/, "");
       console.log("📱 Parsed deep link:", { hostname, path, queryParams });
 
       // Create a unique key for this deep link to prevent double processing
@@ -584,6 +585,11 @@ function RootContent() {
             session_id: queryParams?.session_id as string,
           },
         } as any);
+        return;
+      }
+
+      if (linkPath === "verification-callback") {
+        router.replace("/identity_verification");
         return;
       }
 

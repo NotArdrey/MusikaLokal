@@ -90,6 +90,22 @@ async function cleanupStaleSignupUserRelations(client: any, userId: string) {
     }
 }
 
+async function findAuthUserByEmail(client: any, email: string) {
+    const perPage = 1000
+
+    for (let page = 1; page <= 100; page += 1) {
+        const { data, error } = await client.auth.admin.listUsers({ page, perPage })
+        if (error) throw error
+
+        const users = data?.users || []
+        const matchingUser = users.find((user: any) => user.email?.toLowerCase() === email)
+        if (matchingUser) return matchingUser
+        if (users.length < perPage) return null
+    }
+
+    throw new Error('Unable to complete account lookup. Please contact support.')
+}
+
 function getDefaultDisplayNameForRole(role: unknown) {
     return String(role || '').trim().toLowerCase() === 'fan' ? 'Fan' : 'Musician'
 }
@@ -501,6 +517,29 @@ serve(async (req) => {
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         )
 
+        if (action === 'check_account_status') {
+            const normalizedEmail = String(email || '').trim().toLowerCase()
+            if (!normalizedEmail) {
+                return new Response(JSON.stringify({ error: 'Email required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const existingUser = await findAuthUserByEmail(supabaseAdmin, normalizedEmail)
+            const confirmationGate = existingUser && !existingUser.email_confirmed_at
+                ? await getEmailConfirmationGate(supabaseAdmin, existingUser)
+                : null
+            return new Response(JSON.stringify({
+                exists: Boolean(existingUser),
+                emailConfirmed: Boolean(existingUser?.email_confirmed_at),
+                identityStatus: confirmationGate?.status || null,
+            }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
         if (action === 'resend_confirmation_email') {
             const normalizedEmail = String(email || '').trim().toLowerCase()
             if (!normalizedEmail) {
@@ -510,10 +549,7 @@ serve(async (req) => {
                 })
             }
 
-            const { data: listData, error: listError } = await supabaseAdmin.auth.admin.listUsers()
-            if (listError) throw listError
-
-            const existingUser = listData?.users.find(u => u.email?.toLowerCase() === normalizedEmail)
+            const existingUser = await findAuthUserByEmail(supabaseAdmin, normalizedEmail)
             if (!existingUser) {
                 return new Response(JSON.stringify({ error: 'Account not found' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -807,14 +843,7 @@ serve(async (req) => {
         const effectiveIsVerified = effectiveVerificationStatus === 'APPROVED'
 
         // 1. Check if user already exists in Auth
-        const { data: listData, error: listError } = await supabaseAdmin.auth.admin.listUsers()
-
-        if (listError) {
-            throw listError
-        }
-
-        // Find existing user by email
-        let existingUser = listData?.users.find(u => u.email?.toLowerCase() === normalizedEmail)
+        const existingUser = await findAuthUserByEmail(supabaseAdmin, normalizedEmail)
 
         if (existingUser) {
 

@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase, supabaseUrl } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
-import VerificationModal from '../src/components/VerificationModal';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { typography } from '../src/theme/tokens';
@@ -109,7 +108,7 @@ const buildBanMessage = (ban: LoginBanStatus) => {
 
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
-  const { session, loading: authLoading, roleResolved, userRole } = useAuth();
+  const { session, loading: authLoading, roleResolved, userRole, identityRequired, identityChecked } = useAuth();
   const {
     verified,
     accountCreated,
@@ -129,12 +128,12 @@ export default function LoginScreen() {
 
   useEffect(() => {
     if (!authLoading && session) {
-      if (!roleResolved) return;
+      if (!roleResolved || !identityChecked) return;
 
-      const route = resolvePostLoginRoute();
+      const route = identityRequired ? '/identity_verification' : resolvePostLoginRoute();
       router.replace(route as any);
     }
-  }, [authLoading, roleResolved, session, userRole]);
+  }, [authLoading, identityChecked, identityRequired, roleResolved, session, userRole]);
 
   // ... (existing initializeAuth is fine)
 
@@ -194,8 +193,6 @@ export default function LoginScreen() {
   const passwordInputRef = useRef<TextInput>(null);
 
   // Verification Modal State
-  const [showVerification, setShowVerification] = useState(false);
-  const [verificationUrl, setVerificationUrl] = useState('');
   const [loginMessage, setLoginMessage] = useState<{ type: 'error' | 'success' | 'info', text: string } | null>(null);
 
   // Custom Alert State
@@ -474,14 +471,13 @@ export default function LoginScreen() {
           const metaVerified = user.user_metadata?.is_verified;
 
           if (metaVerified === false) {
-            await supabase.auth.signOut();
             setLoginMessage({ type: 'error', text: 'Account not verified. Please complete verification.' });
             showAlert(
               'warning',
               'Verification Required',
               'Your account is not verified. Please complete verification to continue.',
               [
-                { text: 'Verify Now', onPress: () => startVerification(user.id) },
+                { text: 'Verify Now', onPress: () => router.replace('/identity_verification') },
                 { text: 'Cancel', style: 'cancel' }
               ]
             );
@@ -545,8 +541,6 @@ export default function LoginScreen() {
 
           // If profile is STILL missing OR unverified -> BLOCK
           if (!profile || !profile.is_verified) {
-            await supabase.auth.signOut();
-
             setLoginMessage({ type: 'error', text: !profile ? 'Account setup incomplete. Verify identity.' : 'Identity verification required.' });
 
             showAlert(
@@ -556,7 +550,7 @@ export default function LoginScreen() {
               [
                 {
                   text: 'Verify Now',
-                  onPress: () => startVerification(user.id),
+                  onPress: () => router.replace('/identity_verification'),
                   style: 'default'
                 },
                 {
@@ -665,31 +659,6 @@ export default function LoginScreen() {
     }
 
     await signInWithCredentials(email, password);
-  };
-
-  const startVerification = async (userId: string) => {
-    try {
-      // Direct URL construction with unique reference to prevent stale sessions
-      const DIDIT_VERIFICATION_URL = 'https://verify.didit.me/verify/kxYhKHgC1LESNW-TQEmPcw';
-
-      // CRITICAL: Randomize BOTH reference and vendor_data to bypass Didit's caching
-      const uniqueRef = `${userId}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-
-      // Use uniqueRef for vendor_data to force new session perception
-      const url = `${DIDIT_VERIFICATION_URL}?reference=${uniqueRef}&vendor_data=${uniqueRef}`;
-
-      setVerificationUrl(url);
-      setShowVerification(true);
-
-      // Success alert handled by Modal onSuccess
-    } catch (e) {
-      showAlert('error', 'Error', 'Failed to start verification.');
-    }
-  };
-
-  const handleVerificationSuccess = () => {
-    setShowVerification(false);
-    // Silent
   };
 
   const logoSource = isDark
@@ -887,13 +856,6 @@ export default function LoginScreen() {
           </View>
         </View>
       </ScrollView>
-
-      <VerificationModal
-        visible={showVerification}
-        url={verificationUrl}
-        onClose={() => setShowVerification(false)}
-        onSuccess={handleVerificationSuccess}
-      />
 
       <CustomAlert
         visible={alertState.visible}

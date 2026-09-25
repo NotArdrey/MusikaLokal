@@ -335,20 +335,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         console.log("Failed to clear guest mode:", e);
       });
 
-    const filterSession = (currentSession: Session | null) => {
-      const metadata = currentSession?.user?.user_metadata;
-      const metadataStatus =
-        typeof metadata?.verification_status === "string"
-          ? metadata.verification_status.toUpperCase()
-          : "";
-
-      if (metadata?.is_verified === false && metadataStatus !== "APPROVED") {
-        return null;
-      }
-
-      return currentSession;
-    };
-
     // Helper to handle auth errors gracefully (e.g., invalid refresh tokens)
     const handleAuthError = async (error: unknown) => {
       const message =
@@ -403,12 +389,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         // Always refresh the session on bootstrap to guarantee a gateway-valid
         // token is in memory. Avoids stale/cached tokens being used.
-        let secureSession = filterSession(session);
+        let secureSession = session;
 
         if (secureSession) {
           const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
           if (!refreshError && refreshData.session) {
-            secureSession = filterSession(refreshData.session);
+            secureSession = refreshData.session;
           } else if (refreshError) {
             // Refresh failed — session is truly expired, clear it
             await handleAuthError(refreshError);
@@ -419,6 +405,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         setSession(secureSession);
         if (secureSession) {
+          setIdentityChecked(false);
           setGuestMode(false);
           prepareRoleFetch(secureSession.user.id);
           void fetchUserRole(secureSession.user.id, secureSession);
@@ -469,9 +456,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return;
       }
 
-      const secureSession = filterSession(session);
+      const secureSession = session;
       setSession(secureSession);
       if (secureSession) {
+        setIdentityChecked(false);
         setGuestMode(false);
         prepareRoleFetch(secureSession.user.id);
         void fetchUserRole(secureSession.user.id, secureSession);

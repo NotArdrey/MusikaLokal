@@ -47,6 +47,61 @@ const titleCase = (value: unknown) =>
 
 const list = (value: unknown): any[] => (Array.isArray(value) ? value : []);
 
+const criterionLabel = (value: unknown) => {
+  const labels: Record<string, string> = {
+    instrument_requirement: "Required instruments or roles",
+    genre_requirement: "Required music genres",
+    location_requirement: "Preferred performance location",
+    portfolio_requirement: "Relevant performance experience",
+  };
+  const key = String(value || "").trim();
+  return labels[key] || titleCase(key);
+};
+
+const normalizeGenre = (value: unknown) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\bmusic\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^r and b$/, "rnb")
+    .replace(/^rhythm and blues$/, "rnb")
+    .replace(/^hip hop$/, "hiphop")
+    .replace(/^electronic dance(?: music)?$/, "edm")
+    .replace(/^original pilipino(?: music)?$/, "opm");
+
+const genresMatch = (expected: unknown, actual: unknown) => {
+  const normalizedExpected = normalizeGenre(expected);
+  const normalizedActual = normalizeGenre(actual);
+  if (!normalizedExpected || !normalizedActual) return false;
+  if (normalizedExpected === normalizedActual) return true;
+  const expectedTokens = normalizedExpected.split(" ");
+  return expectedTokens.length === 1 && normalizedExpected.length >= 3 && normalizedActual.split(" ").includes(normalizedExpected);
+};
+
+const friendlyRecommendationSummary = (recommendation: any, matchPercentage: number | null) => {
+  const status = String(recommendation?.recommendation_status || "").toLowerCase();
+  if (status === "recommended") {
+    return "This applicant appears to be a strong match. Review the submitted files before making your final decision.";
+  }
+  if (status === "possible_match") {
+    return "This applicant meets some of the gig requirements. Review the items that still need confirmation before deciding.";
+  }
+  if (status === "not_eligible" && matchPercentage !== null && matchPercentage >= 70) {
+    return "This applicant matches many preferences, but at least one required item could not be confirmed. Review the checks below before deciding.";
+  }
+  if (status === "not_eligible") {
+    return "One or more required items could not be confirmed. Review the checks below before deciding.";
+  }
+  if (status === "insufficient_data") {
+    return "There is not enough configured information to calculate a reliable match. Review the application manually.";
+  }
+  return recommendation?.explanation || "Review the application details below before deciding.";
+};
+
 const faceMatchLabel = (value: unknown) => {
   const status = String(value || "").toLowerCase();
   if (status === "likely_same_person") return "Possible match";
@@ -337,26 +392,11 @@ export default function ApplicantDetailsModal({
   }, [aiReviewStatus, application.id, loading, visible]);
 
   const evidence = list(aiReview?.evidence);
-  const genreEvidence = evidence.find((item) => item?.criterion === "genre_requirement") || null;
-  const genreEvidenceResult = String(genreEvidence?.result || "").toLowerCase();
-  const genreEvidenceColor = genreEvidenceResult === "supported"
-    ? "#10B981"
-    : genreEvidenceResult === "not_supported"
-      ? "#EF4444"
-      : "#F59E0B";
-  const genreEvidenceLabel = genreEvidenceResult === "supported"
-    ? "Genre appears to match"
-    : genreEvidenceResult === "not_supported"
-      ? "Genre may not match"
-      : "Genre match unclear";
-  const genreEvidenceMessage = genreEvidenceResult === "supported"
-    ? "The identified song's genre aligns with the gig."
-    : genreEvidenceResult === "not_supported"
-      ? "The identified song's genre may not align with the gig."
-      : "The identified song didn't provide a clear genre result.";
   const storedCvReview = list(aiReview?.source_summary?.cv_requirement_review);
   const cvDocumentClassification = aiReview?.source_summary?.cv_document_classification || null;
   const cvDocumentStatus = String(cvDocumentClassification?.status || "").toLowerCase();
+  const cvTextExtracted = aiReview?.source_summary?.cv_text_extracted === true;
+  const cvExtractionMethod = String(aiReview?.source_summary?.cv_extraction_method || "");
   const cvNameCheck = aiReview?.source_summary?.cv_name_check || null;
   const cvNameCheckStatus = String(cvNameCheck?.status || "not_run").toLowerCase();
   const cvEvidence = storedCvReview.length
@@ -366,6 +406,10 @@ export default function ApplicantDetailsModal({
     ? list(application.video_copyright_metadata?.recognized_audio_genres)
     : [];
   const hasRecognizedRecording = recognizedAudioGenres.length > 0;
+  const requiredGenres = list(recommendation?.criteria_snapshot?.requirements?.genres);
+  const recognizedGenreMatchesRequirement = requiredGenres.length > 0 && requiredGenres.some((expected) =>
+    recognizedAudioGenres.some((actual) => genresMatch(expected, actual)),
+  );
   const screening = hasRecognizedRecording
     ? {
         label: "Song identified",
@@ -394,8 +438,24 @@ export default function ApplicantDetailsModal({
   const applicationStatus = titleCase(application.status || "pending");
   const matchedCriteriaCount = list(recommendation?.matched_criteria).length;
   const viewedProfileId = profile?.id || application.applicant_id || application.submitted_by_user_id;
-  const audioGenreStatus = hasRecognizedRecording && genreEvidence
-    ? { label: genreEvidenceLabel, color: genreEvidenceColor }
+  const audioGenreStatus = hasRecognizedRecording
+    ? requiredGenres.length === 0
+      ? {
+          label: "Song identified",
+          color: "#F59E0B",
+          message: "A song genre was identified, but this gig has no genre requirement to compare it with.",
+        }
+      : recognizedGenreMatchesRequirement
+        ? {
+            label: "Song genre matches the gig",
+            color: "#10B981",
+            message: `The detected genre (${recognizedAudioGenres.join(", ")}) fits the gig's requested genre (${requiredGenres.join(", ")}).`,
+          }
+        : {
+            label: "Song genre does not match the gig",
+            color: "#EF4444",
+            message: `The detected genre (${recognizedAudioGenres.join(", ")}) does not match the gig's requested genre (${requiredGenres.join(", ")}).`,
+          }
     : screening;
 
   const openApplicantProfile = () => {
@@ -421,7 +481,7 @@ export default function ApplicantDetailsModal({
           </TouchableOpacity>
           <View style={styles.headerCopy}>
             <Text style={[styles.eyebrow, { color: colors.textSecondary }]}>APPLICANT REVIEW</Text>
-            <Text numberOfLines={1} style={[styles.modalTitle, { color: colors.text }]}>{name}</Text>
+            <Text numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.78} style={[styles.modalTitle, { color: colors.text }]}>{name}</Text>
           </View>
         </View>
 
@@ -471,7 +531,7 @@ export default function ApplicantDetailsModal({
                 ) : (
                   <>
                     <Text style={[styles.matchSummary, { color: colors.textSecondary }]}>
-                      {recommendation.explanation || "No explanation was stored."}
+                      {friendlyRecommendationSummary(recommendation, matchPercentage)}
                     </Text>
                     <Text style={[styles.label, { color: "#10B981" }]}>Requirements met</Text>
                     <BulletList values={list(recommendation.matched_criteria)} colors={colors} empty="No matched requirements were recorded." />
@@ -649,14 +709,17 @@ export default function ApplicantDetailsModal({
                   ) : (
                     <View style={styles.stackMedium}>
                       <StatusRow icon="checkmark-circle-outline" label="CV check complete" color="#10B981" />
-                      <Text style={[styles.body, { color: colors.textSecondary }]}>Job-related fit: {cvResult.fitPercent}%</Text>
-                      <ReviewDetails colors={colors}>
-                        <Text style={[styles.label, { color: "#10B981" }]}>Matched requirements</Text>
-                        <BulletList values={cvResult.matched.map((item) => item.criterion)} colors={colors} empty="No requirements were confirmed from the CV." />
-                        <Text style={[styles.label, { color: "#EF4444" }]}>Missing requirements</Text>
-                        <BulletList values={cvResult.missing.map((item) => item.criterion)} colors={colors} empty="No missing requirements were found." />
-                        <Text style={[styles.label, { color: "#F59E0B" }]}>Unclear requirements</Text>
-                        <BulletList values={cvResult.unclear.map((item) => item.criterion)} colors={colors} empty="No unclear requirements were recorded." />
+                      {cvTextExtracted ? (
+                        <Text style={[styles.body, { color: colors.textSecondary }]}>The text in the uploaded {cvExtractionMethod === "pdf_text" ? "PDF" : cvExtractionMethod === "docx_text" || cvExtractionMethod === "doc_text" ? "Word document" : "document"} was read successfully.</Text>
+                      ) : null}
+                       <Text style={[styles.body, { color: colors.textSecondary }]}>CV match: {cvResult.fitPercent}% ({cvResult.matched.length} of {cvEvidence.length} requirements confirmed)</Text>
+                       <ReviewDetails colors={colors}>
+                         <Text style={[styles.label, { color: "#10B981" }]}>Confirmed from the CV</Text>
+                         <BulletList values={cvResult.matched.map((item) => criterionLabel(item.criterion))} colors={colors} empty="Nothing was confirmed from the CV." />
+                         <Text style={[styles.label, { color: "#EF4444" }]}>Not found in the CV</Text>
+                         <BulletList values={cvResult.missing.map((item) => criterionLabel(item.criterion))} colors={colors} empty="No required items were clearly missing." />
+                         <Text style={[styles.label, { color: "#F59E0B" }]}>Could not confirm from the CV</Text>
+                         <BulletList values={cvResult.unclear.map((item) => criterionLabel(item.criterion))} colors={colors} empty="No items were left unclear." />
                         {cvEvidence.flatMap((item) => list(item.evidence)).slice(0, 4).map((entry, index) => (
                           <Text key={index} style={[styles.body, { color: colors.textSecondary }]}>{entry?.observation || "Evidence unavailable"}</Text>
                         ))}
@@ -668,13 +731,19 @@ export default function ApplicantDetailsModal({
                   !["queued", "processing", "failed", "consent_revoked"].includes(String(aiReview?.status)) ? (
                     <View style={styles.stackMedium}>
                       <StatusRow
-                        icon={cvNameCheckStatus === "match" ? "checkmark-circle-outline" : "warning-outline"}
-                        label={cvNameCheckStatus === "match" ? "Name matches" : cvNameCheckStatus === "mismatch" ? "Name needs review" : "Name not confirmed"}
-                        color={cvNameCheckStatus === "match" ? "#10B981" : "#F59E0B"}
+                        icon={cvNameCheckStatus === "match" ? "checkmark-circle-outline" : cvNameCheckStatus === "mismatch" ? "alert-circle-outline" : "warning-outline"}
+                        label={cvNameCheckStatus === "match" ? "Name matches" : cvNameCheckStatus === "mismatch" ? "Name does not match" : "Name not confirmed"}
+                        color={cvNameCheckStatus === "match" ? "#10B981" : cvNameCheckStatus === "mismatch" ? "#EF4444" : "#F59E0B"}
                       />
-                      <Text style={[styles.body, { color: colors.textSecondary }]}>
-                        {cvNameCheck?.summary || "We couldn't confirm the name on the CV. Verify it manually."}
-                      </Text>
+                       <Text style={[styles.body, { color: colors.textSecondary }]}>
+                         {cvNameCheck?.summary || "We couldn't confirm the name on the CV. Verify it manually."}
+                       </Text>
+                       {cvNameCheck?.extracted_name ? (
+                         <ReviewDetails colors={colors}>
+                           <Text style={[styles.body, { color: colors.textSecondary }]}>Name read from CV: {cvNameCheck.extracted_name}</Text>
+                           <Text style={[styles.body, { color: colors.textSecondary }]}>Applicant name: {name}</Text>
+                         </ReviewDetails>
+                       ) : null}
                     </View>
                   ) : null}
                   <TouchableOpacity onPress={() => onOpenMedia(application.cv_url, "Applicant CV")} style={[styles.outlineButton, { borderColor: colors.primary }]}>
@@ -693,29 +762,6 @@ export default function ApplicantDetailsModal({
                   <Text style={[styles.outlineButtonText, { color: colors.primary }]}>Watch performance</Text>
                 </TouchableOpacity>
               ) : <EmptyState colors={colors}>No performance video was uploaded.</EmptyState>}
-              </Subsection>
-
-              <View style={[styles.reviewDivider, { backgroundColor: colors.border }]} />
-
-              <Subsection title="Song & Genre Check" icon="radio-outline" colors={colors}>
-              <StatusRow
-                icon={audioGenreStatus.color === "#10B981" ? "checkmark-circle-outline" : audioGenreStatus.color === "#EF4444" ? "alert-circle-outline" : "warning-outline"}
-                label={audioGenreStatus.label}
-                color={audioGenreStatus.color}
-              />
-              <Text style={[styles.body, { color: colors.textSecondary }]}>
-                {hasRecognizedRecording && genreEvidence ? genreEvidenceMessage : screening.message}
-              </Text>
-              <Text style={[styles.manualPrompt, { color: colors.text }]}>Review the performance video if needed.</Text>
-              {application.video_copyright_metadata?.copyright_title ||
-              application.video_copyright_metadata?.internal_match_playlist_title ||
-              recognizedAudioGenres.length > 0 ? (
-                <ReviewDetails colors={colors}>
-                  {application.video_copyright_metadata?.copyright_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Song found: {application.video_copyright_metadata.copyright_title}{application.video_copyright_metadata.copyright_artist_label ? ` by ${application.video_copyright_metadata.copyright_artist_label}` : ""}</Text> : null}
-                  {recognizedAudioGenres.length > 0 ? <Text style={[styles.body, { color: colors.textSecondary }]}>Song genres: {recognizedAudioGenres.join(", ")}</Text> : null}
-                  {application.video_copyright_metadata?.internal_match_playlist_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Possible song: {application.video_copyright_metadata.internal_match_playlist_title}{application.video_copyright_metadata.internal_match_playlist_artist ? ` by ${application.video_copyright_metadata.internal_match_playlist_artist}` : ""}</Text> : null}
-                </ReviewDetails>
-              ) : null}
               </Subsection>
 
               <View style={[styles.reviewDivider, { backgroundColor: colors.border }]} />
@@ -766,6 +812,30 @@ export default function ApplicantDetailsModal({
                   ) : null}
                 </View>
               )}
+              </Subsection>
+
+              <View style={[styles.reviewDivider, { backgroundColor: colors.border }]} />
+
+              <Subsection title="Song & Genre Check" icon="radio-outline" colors={colors}>
+              <StatusRow
+                icon={audioGenreStatus.color === "#10B981" ? "checkmark-circle-outline" : audioGenreStatus.color === "#EF4444" ? "alert-circle-outline" : "warning-outline"}
+                label={audioGenreStatus.label}
+                color={audioGenreStatus.color}
+              />
+              <Text style={[styles.body, { color: colors.textSecondary }]}>
+                {audioGenreStatus.message}
+              </Text>
+              <Text style={[styles.manualPrompt, { color: colors.text }]}>Review the performance video if needed.</Text>
+              {application.video_copyright_metadata?.copyright_title ||
+              application.video_copyright_metadata?.internal_match_playlist_title ||
+              recognizedAudioGenres.length > 0 ? (
+                <ReviewDetails colors={colors}>
+                  {application.video_copyright_metadata?.copyright_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Song found: {application.video_copyright_metadata.copyright_title}{application.video_copyright_metadata.copyright_artist_label ? ` by ${application.video_copyright_metadata.copyright_artist_label}` : ""}</Text> : null}
+                  {recognizedAudioGenres.length > 0 ? <Text style={[styles.body, { color: colors.textSecondary }]}>Song genres: {recognizedAudioGenres.join(", ")}</Text> : null}
+                  {requiredGenres.length > 0 ? <Text style={[styles.body, { color: colors.textSecondary }]}>Gig genres: {requiredGenres.join(", ")}</Text> : null}
+                  {application.video_copyright_metadata?.internal_match_playlist_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Possible song: {application.video_copyright_metadata.internal_match_playlist_title}{application.video_copyright_metadata.internal_match_playlist_artist ? ` by ${application.video_copyright_metadata.internal_match_playlist_artist}` : ""}</Text> : null}
+                </ReviewDetails>
+              ) : null}
               </Subsection>
 
             </Section>
@@ -844,9 +914,9 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   modalHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1 },
   closeButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  headerCopy: { flex: 1, marginLeft: 12 },
+  headerCopy: { flex: 1, minWidth: 0, marginLeft: 12 },
   eyebrow: { fontFamily: "Poppins_600SemiBold", fontSize: 9, lineHeight: 13, letterSpacing: 1.25 },
-  modalTitle: { fontFamily: "Poppins_700Bold", fontSize: 17, lineHeight: 23 },
+  modalTitle: { flexShrink: 1, fontFamily: "Poppins_700Bold", fontSize: 15, lineHeight: 20 },
   scrollContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32, gap: 12 },
   centerState: { flex: 1, padding: 32, alignItems: "center", justifyContent: "center", gap: 14 },
   heroCard: { borderWidth: 1, borderRadius: 18, padding: 16, gap: 14 },

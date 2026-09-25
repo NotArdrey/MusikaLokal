@@ -60,16 +60,18 @@ for (const relativePath of [
     assert.equal(evidence.result, "supported");
     assert.equal(evidence.confidence, 0.96);
     assert.equal(evidence.evidence[0].source, "recognized_audio");
-    assert.match(evidence.evidence[0].observation, /matched Rock/);
+    assert.match(evidence.evidence[0].observation, /matches the requested Rock genre/);
   });
 
-  test(`${relativePath} does not claim a genre match when catalog genres differ`, () => {
+  test(`${relativePath} records a clear mismatch when catalog genres differ`, () => {
     const helpers = loadGenreHelpers(relativePath);
     const evidence = helpers.buildRecognizedAudioGenreEvidence(
       [{ key: "genre_requirement", requirement: "Jazz" }],
       { recognized_audio_genres: ["Alternative Rock"] },
     );
-    assert.equal(evidence, null);
+    assert.equal(evidence.result, "not_supported");
+    assert.equal(evidence.evidence[0].source, "recognized_audio");
+    assert.match(evidence.evidence[0].observation, /does not match the requested Jazz genre/);
   });
 
   test(`${relativePath} accepts only untampered signed genre evidence`, async () => {

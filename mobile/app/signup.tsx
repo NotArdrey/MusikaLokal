@@ -2511,6 +2511,83 @@ export default function SignupScreen() {
         setLoading(true);
 
         try {
+            const normalizedSignupEmail = email.trim().toLowerCase();
+            logSignupFlow('detailsNext.accountStatus.start', {
+                email: maskEmailForLog(normalizedSignupEmail),
+            });
+            const { data: accountStatus, error: accountStatusError } = await supabase.functions.invoke('create-unverified-user', {
+                body: {
+                    action: 'check_account_status',
+                    email: normalizedSignupEmail,
+                },
+            });
+
+            if (accountStatusError) {
+                logSignupFlowError('detailsNext.accountStatus.error', accountStatusError, {
+                    email: maskEmailForLog(normalizedSignupEmail),
+                });
+                Alert.alert('Unable to Check Account', 'We could not check this email right now. Please try again before starting identity verification.');
+                setLoading(false);
+                return;
+            }
+
+            logSignupFlow('detailsNext.accountStatus.result', {
+                email: maskEmailForLog(normalizedSignupEmail),
+                exists: Boolean(accountStatus?.exists),
+                emailConfirmed: Boolean(accountStatus?.emailConfirmed),
+                identityStatus: accountStatus?.identityStatus ?? null,
+            });
+
+            const existingIdentityStatus = String(accountStatus?.identityStatus || '').trim().toUpperCase();
+            const canRetryExistingIdentity = ['DECLINED', 'ABANDONED'].includes(existingIdentityStatus);
+
+            if (accountStatus?.exists && accountStatus?.emailConfirmed) {
+                Alert.alert(
+                    'Account Exists',
+                    'This email is already registered and verified. Please sign in.',
+                    [{ text: 'Sign In', onPress: () => router.replace('/') }],
+                );
+                setLoading(false);
+                return;
+            }
+
+            if (accountStatus?.exists && !canRetryExistingIdentity) {
+                const resendRedirectTo = createEmailConfirmationRedirectUrl();
+                const { data: resendData, error: resendError } = await supabase.functions.invoke('create-unverified-user', {
+                    body: {
+                        action: 'resend_confirmation_email',
+                        email: normalizedSignupEmail,
+                        redirectTo: resendRedirectTo,
+                    },
+                });
+                const emailDelivery = (resendData as any)?.emailDelivery;
+                const errorEmailDelivery = getEmailDeliveryFromInvokeError(resendError);
+
+                if ((resendData as any)?.alreadyConfirmed) {
+                    Alert.alert(
+                        'Account Exists',
+                        'This email is already registered and verified. Please sign in.',
+                        [{ text: 'Sign In', onPress: () => router.replace('/') }],
+                    );
+                } else if (diditEmailConfirmationWasDeferred(resendData, emailDelivery ?? errorEmailDelivery)) {
+                    Alert.alert(
+                        'Account Exists',
+                        (resendData as any)?.message || 'This account already exists and its identity verification is still under review.',
+                    );
+                } else if (!resendError || diditEmailDeliveryWasAccepted(emailDelivery ?? errorEmailDelivery)) {
+                    setStep('email_verification');
+                    Alert.alert('Account Exists', 'This account is awaiting email confirmation. We sent a new confirmation link to your inbox.');
+                } else {
+                    logSignupFlowError('detailsNext.resendExisting.error', resendError, {
+                        email: maskEmailForLog(normalizedSignupEmail),
+                    });
+                    Alert.alert('Account Exists', 'This email is already registered, but we could not resend its confirmation link. Please try again later.');
+                }
+
+                setLoading(false);
+                return;
+            }
+
             logSignupFlow('detailsNext.profileLookup.start', {
                 email: maskEmailForLog(email),
             });
@@ -2983,6 +3060,15 @@ export default function SignupScreen() {
                 platform: Platform.OS,
             });
             // Handle "User already registered" specifically
+            if (/already registered and verified/i.test(String(authErr?.message || ''))) {
+                Alert.alert(
+                    'Account Exists',
+                    'This email is already registered and verified. Please sign in.',
+                    [{ text: 'Sign In', onPress: () => router.replace('/') }],
+                );
+                return;
+            }
+
             if (authErr?.message?.includes('already registered') || authErr?.status === 422) {
                 logDiditEmailFlow('auth.signUp.accountAlreadyRegistered', {
                     email: maskEmailForLog(email),
@@ -3011,7 +3097,13 @@ export default function SignupScreen() {
                 const emailDelivery = (resendData as any)?.emailDelivery;
                 const errorEmailDelivery = getEmailDeliveryFromInvokeError(resendError);
                 const confirmationDeferred = diditEmailConfirmationWasDeferred(resendData, emailDelivery ?? errorEmailDelivery);
-                if (resendError && !diditEmailDeliveryWasAccepted(errorEmailDelivery)) {
+                if ((resendData as any)?.alreadyConfirmed) {
+                    Alert.alert(
+                        'Account Exists',
+                        'This email is already registered and verified. Please sign in.',
+                        [{ text: 'Sign In', onPress: () => router.replace('/') }],
+                    );
+                } else if (resendError && !diditEmailDeliveryWasAccepted(errorEmailDelivery)) {
                     logDiditEmailFlowError('auth.resendExisting.error', resendError, {
                         email: maskEmailForLog(email),
                         diditSessionId: refToLink,
@@ -3096,6 +3188,14 @@ export default function SignupScreen() {
                 platform: Platform.OS,
             });
 
+            if ((data as any)?.alreadyConfirmed) {
+                Alert.alert(
+                    'Account Already Confirmed',
+                    'This email is already verified. Please sign in.',
+                    [{ text: 'Sign In', onPress: () => router.replace('/') }],
+                );
+                return;
+            }
             if (error && !diditEmailDeliveryWasAccepted(errorEmailDelivery)) {
                 logDiditEmailFlowError('auth.resendManual.error', error, {
                     email: maskEmailForLog(email),

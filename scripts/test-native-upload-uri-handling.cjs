@@ -251,3 +251,22 @@ test("mobile and web report temporary visual-screening outages as retryable serv
     assert.match(uploaderSource, /Safety check unavailable/);
   }
 });
+
+test("video frame moderation cannot hide full-video evidence uploads behind a zero-percent spinner", () => {
+  for (const root of ["mobile", "web"]) {
+    const visualSource = readFileSync(`${root}/src/services/visualUploadScreen.ts`, "utf8");
+    const safetySource = readFileSync(`${root}/src/services/uploadSafetyScreen.ts`, "utf8");
+
+    assert.match(visualSource, /preserveOriginal:\s*input\.kind !== ["']video["']/);
+    assert.match(visualSource, /VISUAL_SCREEN_TIMEOUT_MS\s*=\s*60_000/);
+    assert.match(safetySource, /if \(input\.preserveOriginal === false\) return/);
+  }
+});
+
+test("handled video rejections do not open the Expo warning overlay", () => {
+  for (const root of ["mobile", "web"]) {
+    const uploaderSource = readFileSync(`${root}/src/components/VideoUploader.tsx`, "utf8");
+    assert.doesNotMatch(uploaderSource, /console\.warn\(['"]Error uploading video:/);
+    assert.doesNotMatch(uploaderSource, /console\.warn\(['"]Error selecting portfolio video:/);
+  }
+});

@@ -15,6 +15,7 @@ export interface UploadSafetyFileInput {
   durationMs?: number;
   uri?: string;
   contentDataUrl?: string;
+  preserveOriginal?: boolean;
   kind: UploadSafetyKind;
 }
 
@@ -360,6 +361,9 @@ const resolveDecisionReason = (input: UploadSafetyFileInput, rawReason?: string)
 
 const evidenceAttachments = new Map<string, Promise<void>>();
 const preserveModerationOriginal = async (input: UploadSafetyFileInput, caseId: string): Promise<void> => {
+  // Video-frame screening already stores the exact flagged frame server-side.
+  // Do not synchronously upload the full source video for every sampled frame.
+  if (input.preserveOriginal === false) return;
   const uri = input.originalUri || input.uri?.replace(/#frame-\d+$/, '');
   if (!uri || input.kind === 'audio' || input.kind === 'document') return;
   const existing = evidenceAttachments.get(caseId);

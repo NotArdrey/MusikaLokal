@@ -629,7 +629,7 @@ export default function VideoUploader({
           : 'Your My Media video is ready for this application.',
       );
     } catch (error: any) {
-      console.warn('Error selecting portfolio video:', error);
+      debugLog('Error selecting portfolio video:', error);
       showAlert('error', 'Video unavailable', error?.message || 'This My Media video could not be used.');
     } finally {
       await removeCopyrightVideoTemporaryFile(sample);
@@ -806,7 +806,9 @@ export default function VideoUploader({
             : 'Video uploaded successfully!',
         );
       } catch (e: any) {
-        console.warn('Error uploading video:', e);
+        // This error is handled below with an in-app alert. Using console.warn
+        // here opens Expo's LogBox for expected safety-screening rejections.
+        debugLog('Error uploading video:', e);
         const rawMessage = e.message || 'Failed to upload video';
         const safetyCheckUnavailable = isUploadSafetyRetryableFailure(rawMessage);
         const message = safetyCheckUnavailable

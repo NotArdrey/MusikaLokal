@@ -1121,20 +1121,20 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
             notes.push('The uploaded document could not be confirmed as a CV or resume.')
         }
         if (portfolioResult === 'not_supported') {
-            notes.push('The submitted media does not show relevant performance or portfolio experience.')
+            notes.push('The CV and video did not clearly show the required performance experience.')
         } else if (portfolioResult === 'unclear') {
-            notes.push('The submitted media could not be reviewed clearly.')
+            notes.push('The performance evidence still needs a manual review.')
         }
 
         const faceStatus = String(review?.face_similarity?.status || '')
         if (faceStatus === 'likely_same_person') {
-            notes.push('The person in the video appears to match the profile photo.')
+            notes.push('The performer appears to match the profile photo.')
         } else if (faceStatus === 'likely_different_person') {
-            notes.push('The person in the video may not match the profile photo. Please review the original files.')
+            notes.push('The performer may not match the profile photo, so please check the video.')
         } else if (faceStatus === 'unclear') {
-            notes.push('The profile photo and video could not be compared clearly.')
+            notes.push('The profile photo and video comparison was unclear.')
         } else if (faceStatus === 'not_run') {
-            notes.push('The profile photo and video could not be compared.')
+            notes.push('The profile photo and video were not compared.')
         }
 
         const missingRequiredItems = [
@@ -1161,21 +1161,23 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
         ].filter(Boolean)
         const requiredMismatchExplanation =
             missingRequiredItems.length !== 1
-                ? 'This applicant does not match one or more required gig requirements.'
+                ? 'One or more required gig items could not be confirmed.'
                 : missingRequiredItems[0] === 'instrument_or_role'
-                ? 'This applicant does not match the required instrument or role.'
+                ? 'The required instrument or role could not be confirmed.'
                 : missingRequiredItems[0] === 'genre'
-                ? 'This applicant does not match the required genre.'
+                ? 'The required genre could not be confirmed.'
                 : missingRequiredItems[0] === 'location'
-                ? 'This applicant does not match the required location range.'
-                : 'This applicant does not provide the required performance or portfolio evidence.'
+                ? 'The required location range could not be confirmed.'
+                : 'The required performance experience could not be confirmed.'
         const baseExplanation =
             recommendationStatus === 'recommended'
-                ? 'This applicant appears to match the gig requirements.'
+                ? 'This applicant appears to be a strong match for the gig.'
                 : recommendationStatus === 'possible_match'
-                ? 'This applicant may be a match. Please review the items below.'
+                ? 'This applicant meets some of the gig requirements. Review the remaining items before deciding.'
                 : recommendationStatus === 'insufficient_data'
-                ? 'No applicable AI Match Review criteria are configured for this gig.'
+                ? 'There is not enough configured information to calculate a reliable match.'
+                : Number(score) >= 70
+                ? `This applicant matches many preferences, but a required item still needs review. ${requiredMismatchExplanation}`
                 : requiredMismatchExplanation
         return {
             ...item,

@@ -6,6 +6,22 @@ import {
   type UploadSafetyFileInput,
 } from "./uploadSafetyScreen";
 
+const VISUAL_SCREEN_TIMEOUT_MS = 60_000;
+
+const withTimeout = async <T>(promise: Promise<T>, message: string): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), VISUAL_SCREEN_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
+
 const readBlobDataUrl = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -126,17 +142,19 @@ export async function screenVisualUpload(
   }
   if (!frames.length)
     throw new Error("Unable to read media for safety screening.");
-  const summary = await screenUploadsWithAi(
+  const summary = await withTimeout(screenUploadsWithAi(
     frames.map((contentDataUrl, index) => ({
       ...input,
       contentDataUrl,
       originalUri: input.uri,
       originalMimeType: input.mimeType,
+      // The server already retained the exact sampled frame as moderation evidence.
+      preserveOriginal: input.kind !== "video",
       uri:
         input.kind === "video" ? `${input.uri}#frame-${index + 1}` : input.uri,
     })),
     context,
-  );
+  ), "Safety check took too long. Please try again.");
   if (!summary.allowed)
     throw new Error(summary.reason || "This media is blocked pending review.");
 }

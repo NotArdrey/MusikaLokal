@@ -953,6 +953,11 @@ function RootContent() {
         return;
       }
 
+      if (linkPath === "verification-callback") {
+        router.replace("/identity_verification");
+        return;
+      }
+
       // Handle payment result deep links
       if (hostname === "payment-result" || path === "payment-result") {
         const status = queryParams?.status as string;

@@ -36,7 +36,7 @@ const DEFAULT_TEXT_FALLBACK_MODELS = ['qwen/qwen3.8-27b', 'openai/gpt-oss-20b']
 const DEFAULT_VISION_MODEL = 'qwen/qwen3.8-27b'
 const DEFAULT_SPEECH_MODEL = 'whisper-large-v3-turbo'
 const DEFAULT_SPEECH_FALLBACK_MODEL = 'whisper-large-v3'
-export const GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION = 'gig-portfolio-v6-cv-name-check'
+export const GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION = 'gig-portfolio-v7-document-and-genre-evidence'
 const MAX_CV_BYTES = 10 * 1024 * 1024
 const MAX_CV_TEXT_CHARS = 16_000
 const MAX_TRANSCRIPT_CHARS = 16_000
@@ -160,6 +160,42 @@ const redactSensitiveText = (value: unknown, maxLength: number) => String(value 
     .trim()
     .slice(0, maxLength)
 
+const redactSensitiveDocumentText = (value: unknown, maxLength: number) => String(value || '')
+    .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[email redacted]')
+    .replace(/(?:\+?63|0)\s*9\d{2}[\s-]?\d{3}[\s-]?\d{4}/g, '[phone redacted]')
+    .replace(/\b(?:\+?\d[\d\s().-]{7,}\d)\b/g, '[phone redacted]')
+    .replace(/https?:\/\/\S+/g, '[link redacted]')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, maxLength)
+
+const CV_HEADER_NON_NAME_WORDS = new Set([
+    'about', 'availability', 'career', 'contact', 'curriculum', 'education', 'experience',
+    'genre', 'genres', 'guitarist', 'information', 'musician', 'objective', 'performer',
+    'portfolio', 'profile', 'professional', 'references', 'resume', 'skills', 'summary',
+    'vocalist', 'vitae', 'work',
+])
+
+export function extractLikelyCvHeaderName(value: unknown) {
+    const lines = String(value || '')
+        .split(/\r?\n/)
+        .map((line) => line.replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+        .slice(0, 14)
+
+    for (const line of lines) {
+        if (line.length < 4 || line.length > 90 || /[@|:;/\\\d]/.test(line)) continue
+        const tokens = normalizedNameTokens(line)
+        if (tokens.length < 2 || tokens.length > 6) continue
+        if (tokens.some((token) => CV_HEADER_NON_NAME_WORDS.has(token))) continue
+        if (!tokens.every((token) => /^[a-z][a-z'.-]*$/i.test(token))) continue
+        return line.replace(/\s*[-|]\s*$/, '')
+    }
+    return null
+}
+
 function normalizeGenreLabel(value: unknown) {
     const normalized = String(value || '')
         .trim()
@@ -273,17 +309,18 @@ export function buildRecognizedAudioGenreEvidence(
     const matchedExpectedGenres = expectedGenres.filter((expected) => (
         audio.genres.some((actual) => genreLabelsMatch(expected, actual))
     ))
-    if (matchedExpectedGenres.length === 0) return null
-
     const recording = [audio.title, audio.artists ? `by ${audio.artists}` : ''].filter(Boolean).join(' ')
+    const isMatch = matchedExpectedGenres.length > 0
     return {
         criterion: genreCriterion.key,
-        result: 'supported',
+        result: isMatch ? 'supported' : 'not_supported',
         confidence: audio.confidence,
         evidence: [{
             source: 'recognized_audio',
             observation: cleanText(
-                `ACRCloud recognized ${recording || 'the submitted audio'} with catalog genre${audio.genres.length === 1 ? '' : 's'} ${audio.genres.join(', ')}; matched ${matchedExpectedGenres.join(', ')}.`,
+                isMatch
+                    ? `The recognized song ${recording || ''} has catalog genre${audio.genres.length === 1 ? '' : 's'} ${audio.genres.join(', ')} and matches the requested ${matchedExpectedGenres.join(', ')} genre.`
+                    : `The recognized song ${recording || ''} has catalog genre${audio.genres.length === 1 ? '' : 's'} ${audio.genres.join(', ')}, which does not match the requested ${expectedGenres.join(', ')} genre.`,
                 500,
             ),
             timestamp_seconds: null,
@@ -405,9 +442,9 @@ async function extractDocumentText(
     label: string,
     maxTextChars: number,
 ) {
-    if (!documentUrl) return { text: '', limitation: `No ${label.toLowerCase()} was submitted.` }
+    if (!documentUrl) return { text: '', limitation: `No ${label.toLowerCase()} was submitted.`, method: 'none' }
     const safeUrl = safeStorageUrl(documentUrl, supabaseUrl)
-    if (!safeUrl) return { text: '', limitation: `The ${label.toLowerCase()} URL was not an approved storage URL.` }
+    if (!safeUrl) return { text: '', limitation: `The ${label.toLowerCase()} URL was not an approved storage URL.`, method: 'none' }
 
     try {
         const response = await fetch(safeUrl, { signal: AbortSignal.timeout(15_000) })
@@ -418,24 +455,32 @@ async function extractDocumentText(
         if (bytes.byteLength > MAX_CV_BYTES) throw new Error(`${label} exceeds the 10MB review limit`)
 
         const contentType = String(response.headers.get('content-type') || '').toLowerCase()
-        const lowerUrl = safeUrl.toLowerCase()
+        const lowerPath = new URL(safeUrl).pathname.toLowerCase()
+        const isPdf = bytes.length >= 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46
+        const isZip = bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04
+        const isOleDocument = bytes.length >= 4 && bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0
         let extracted = ''
-        if (contentType.includes('pdf') || lowerUrl.includes('.pdf')) {
+        let method = 'unknown'
+        if (contentType.includes('pdf') || lowerPath.endsWith('.pdf') || isPdf) {
             const { extractText } = await import('npm:unpdf@1.6.2')
             const result = await extractText(bytes, { mergePages: true })
             extracted = String(result.text || '')
+            method = 'pdf_text'
         } else if (
             contentType.includes('wordprocessingml') ||
             contentType.includes('officedocument.wordprocessingml') ||
-            lowerUrl.includes('.docx')
+            lowerPath.endsWith('.docx') ||
+            isZip
         ) {
             const mammoth = await import('npm:mammoth@1.10.0')
             const arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
             const result = await mammoth.extractRawText({ arrayBuffer })
             extracted = String(result.value || '')
+            method = 'docx_text'
         } else if (
             contentType.includes('msword') ||
-            /\.doc(?:\?|$)/i.test(safeUrl)
+            lowerPath.endsWith('.doc') ||
+            isOleDocument
         ) {
             const [{ default: WordExtractor }, { Buffer }] = await Promise.all([
                 import('npm:word-extractor@1.0.4'),
@@ -444,20 +489,25 @@ async function extractDocumentText(
             const extractor = new WordExtractor()
             const result = await extractor.extract(Buffer.from(bytes))
             extracted = String(result.getBody?.() || '')
+            method = 'doc_text'
         } else if (contentType.startsWith('text/')) {
             extracted = new TextDecoder().decode(bytes)
+            method = 'plain_text'
         } else {
-            return { text: '', limitation: `The ${label.toLowerCase()} format could not be converted to text.` }
+            return { text: '', limitation: `The ${label.toLowerCase()} format could not be converted to text.`, method: 'unsupported' }
         }
 
-        const text = redactSensitiveText(extracted, maxTextChars)
+        // Preserve line breaks so the CV owner's header name remains distinguishable
+        // from employers, schools, references, and other names later in the document.
+        const text = redactSensitiveDocumentText(extracted, maxTextChars)
         return text
-            ? { text, limitation: '' }
-            : { text: '', limitation: `The ${label.toLowerCase()} contained no extractable text; scanned PDFs need OCR.` }
+            ? { text, limitation: '', method }
+            : { text: '', limitation: `The ${label.toLowerCase()} contained no extractable text; scanned PDFs need OCR.`, method }
     } catch (error) {
         return {
             text: '',
             limitation: `${label} review was unavailable: ${cleanText((error as any)?.message || error, 180)}`,
+            method: 'failed',
         }
     }
 }
@@ -467,6 +517,7 @@ async function extractCvText(cvUrl: string | null, supabaseUrl: string) {
 }
 
 async function classifyCvDocument(text: string, apiKeys: string[], models: string[]) {
+    const headerCandidateName = extractLikelyCvHeaderName(text)
     if (!text) {
         return {
             status: 'not_run' as CvDocumentStatus,
@@ -494,10 +545,13 @@ async function classifyCvDocument(text: string, apiKeys: string[], models: strin
         const status: CvDocumentStatus = confidence >= 0.7 ? confidentStatus : 'uncertain'
         const summary = redactSensitiveText(parsed?.summary, 500) || 'The document type could not be confidently determined.'
         const rawCandidateName = cleanText(parsed?.candidate_name, 160)
-        const candidateName = rawCandidateName && !/^(?:null|none|unknown|not found|unavailable)$/i.test(rawCandidateName)
+        const modelCandidateName = rawCandidateName && !/^(?:null|none|unknown|not found|unavailable)$/i.test(rawCandidateName)
             ? rawCandidateName
             : null
-        const nameConfidence = Math.max(0, Math.min(1, Number(parsed?.name_confidence) || 0))
+        const modelNameConfidence = Math.max(0, Math.min(1, Number(parsed?.name_confidence) || 0))
+        const useHeaderFallback = Boolean(headerCandidateName && (!modelCandidateName || modelNameConfidence < 0.7))
+        const candidateName = useHeaderFallback ? headerCandidateName : modelCandidateName
+        const nameConfidence = useHeaderFallback ? 0.85 : modelNameConfidence
         return {
             status,
             confidence,
@@ -1077,6 +1131,9 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
             source_summary: {
                 review_pipeline_version: GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION,
                 cv_text_extracted: Boolean(cv.text),
+                cv_text_length: cv.text.length,
+                cv_extraction_method: cv.method,
+                cv_extraction_limitation: cv.limitation || null,
                 cv_document_classification: {
                     status: cvDocumentClassification.status,
                     confidence: cvDocumentClassification.confidence,

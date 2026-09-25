@@ -855,6 +855,29 @@ serve(async (req) => {
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         )
 
+        if (action === 'check_account_status') {
+            const normalizedEmail = String(email || '').trim().toLowerCase()
+            if (!normalizedEmail) {
+                return new Response(JSON.stringify({ error: 'Email required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const existingUser = await findAuthUserByEmail(supabaseAdmin, normalizedEmail)
+            const confirmationGate = existingUser && !existingUser.email_confirmed_at
+                ? await getEmailConfirmationGate(supabaseAdmin, existingUser)
+                : null
+            return new Response(JSON.stringify({
+                exists: Boolean(existingUser),
+                emailConfirmed: Boolean(existingUser?.email_confirmed_at),
+                identityStatus: confirmationGate?.status || null,
+            }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
         if (action === 'resend_confirmation_email') {
             const normalizedEmail = String(email || '').trim().toLowerCase()
             if (!normalizedEmail) {
