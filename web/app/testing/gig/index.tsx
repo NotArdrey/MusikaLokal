@@ -707,7 +707,7 @@ export default function GigTestingPage() {
       {result?.aiReview ? <View style={styles.card}>
         <Text style={styles.cardTitle}>AI evidence review</Text>
         <Text style={styles.sectionTitle}>TRANSCRIPTION</Text><Text style={styles.stageMessage}>{result.aiReview.source_summary?.video_transcribed ? "✓ Completed" : "⚠ No transcript available"}</Text>
-        <Text style={styles.sectionTitle}>CV ANALYSIS</Text><JsonBlock value={{ classification: result.aiReview.source_summary?.cv_document_classification, criteria: result.aiReview.source_summary?.cv_requirement_review }} />
+        <Text style={styles.sectionTitle}>CV ANALYSIS</Text><JsonBlock value={{ classification: result.aiReview.source_summary?.cv_document_classification, name_check: result.aiReview.source_summary?.cv_name_check, criteria: result.aiReview.source_summary?.cv_requirement_review }} />
         <Text style={styles.sectionTitle}>PORTFOLIO / VISION</Text><JsonBlock value={{ frames_analyzed: result.aiReview.source_summary?.video_frames_reviewed, portfolio_images_reviewed: result.aiReview.source_summary?.portfolio_images_reviewed, evidence: result.aiReview.evidence }} />
         <Text style={styles.sectionTitle}>ACRCLOUD</Text><JsonBlock value={result.aiReview.source_summary?.recognized_audio_genre || { status: "No trusted catalog genre evidence" }} />
         <Text style={styles.sectionTitle}>FACE VERIFICATION · DEEPFACE / ARCFACE</Text><JsonBlock value={{ solo: result.aiReview.face_similarity, group: result.aiReview.group_face_similarity }} />

@@ -80,8 +80,8 @@ const effectiveFaceMatchStatus = (result: any) => {
 
 const faceMatchSummary = (result: any) => {
   const status = effectiveFaceMatchStatus(result);
-  if (status === "likely_same_person") return "The profile photo appears to match a person in the video.";
-  if (status === "likely_different_person") return "The profile photo may not match a person in the video.";
+  if (status === "likely_same_person") return "The applicant may appear in the performance video.";
+  if (status === "likely_different_person") return "The applicant may not appear in the performance video.";
   return "There wasn't enough clear information to confirm a match.";
 };
 
@@ -89,7 +89,7 @@ const faceMatchDetails = (result: any) => {
   const usable = Math.max(0, Number(result?.usable_frames ?? result?.frames_compared) || 0);
   const matched = Math.max(0, Number(result?.matched_frames) || 0);
   if (usable === 0) return null;
-  if (usable === 1) return "Only one clear frame was available. Please verify manually.";
+  if (usable === 1) return "Only one clear frame was found. Please verify manually.";
   return `${matched} of ${usable} clear frames appeared to match.`;
 };
 
@@ -113,7 +113,7 @@ const shortLocation = (value: unknown) => {
 
 const screeningMeta = (statusValue: unknown) => {
   const status = String(statusValue || "not_screened").toLowerCase();
-  if (status === "not_required") return { label: "Genre not identified", color: "#F59E0B", message: "We couldn't identify the song, so the genre wasn't scored." };
+  if (status === "not_required") return { label: "Genre not identified", color: "#F59E0B", message: "We couldn't identify the song or genre." };
   if (status === "pending_review") return { label: "Song may have been recognized", color: "#F59E0B", message: "The possible song match still needs to be checked." };
   if (status === "approved") return { label: "Song match checked", color: "#10B981", message: "The possible song match and permission details were checked." };
   if (status === "declined") return { label: "Permission concern found", color: "#EF4444", message: "The possible song match was checked and the permission claim was not accepted." };
@@ -357,6 +357,8 @@ export default function ApplicantDetailsModal({
   const storedCvReview = list(aiReview?.source_summary?.cv_requirement_review);
   const cvDocumentClassification = aiReview?.source_summary?.cv_document_classification || null;
   const cvDocumentStatus = String(cvDocumentClassification?.status || "").toLowerCase();
+  const cvNameCheck = aiReview?.source_summary?.cv_name_check || null;
+  const cvNameCheckStatus = String(cvNameCheck?.status || "not_run").toLowerCase();
   const cvEvidence = storedCvReview.length
     ? storedCvReview
     : evidence.filter((item) => list(item?.evidence).some((entry) => entry?.source === "cv"));
@@ -451,7 +453,7 @@ export default function ApplicantDetailsModal({
                     <Text style={[styles.matchPanelLabel, { color: colors.text }]}>AI Match Review</Text>
                   </View>
                   <Text style={[styles.matchPanelScore, { color: colors.primary }]}>
-                    {matchPercentage === null ? "Not scored" : `${matchPercentage}% Match`}
+                    {matchPercentage === null ? "Match unavailable" : `${matchPercentage}% Match`}
                   </Text>
                 </View>
                 {matchPercentage !== null ? (
@@ -611,7 +613,7 @@ export default function ApplicantDetailsModal({
                   ) : !aiReview ? (
                     <View style={styles.stackMedium}>
                       <StatusRow icon="warning-outline" label="Manual review needed" color="#F59E0B" />
-                      <Text style={[styles.body, { color: colors.textSecondary }]}>{"The CV couldn't be scored automatically."}</Text>
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>{"The CV couldn't be reviewed automatically."}</Text>
                     </View>
                   ) : ["queued", "processing"].includes(String(aiReview.status)) ? (
                     <View style={styles.stackMedium}>
@@ -621,7 +623,7 @@ export default function ApplicantDetailsModal({
                   ) : cvDocumentStatus === "not_a_cv" ? (
                     <View style={styles.stackMedium}>
                       <StatusRow icon="warning-outline" label="Manual review needed" color="#F59E0B" />
-                      <Text style={[styles.body, { color: colors.textSecondary }]}>{"The file wasn't recognized as a CV, so it wasn't scored."}</Text>
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>{"The file couldn't be reviewed as a CV."}</Text>
                       <ReviewDetails colors={colors}>
                         <Text style={[styles.body, { color: colors.textSecondary }]}>{cvDocumentClassification?.summary || "The uploaded file did not contain enough CV or resume content."}</Text>
                       </ReviewDetails>
@@ -629,7 +631,7 @@ export default function ApplicantDetailsModal({
                   ) : cvDocumentStatus === "uncertain" ? (
                     <View style={styles.stackMedium}>
                       <StatusRow icon="warning-outline" label="Manual review needed" color="#F59E0B" />
-                      <Text style={[styles.body, { color: colors.textSecondary }]}>{"The file type couldn't be confirmed, so the CV wasn't scored."}</Text>
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>{"The file type couldn't be confirmed. Review the CV manually."}</Text>
                       <ReviewDetails colors={colors}>
                         <Text style={[styles.body, { color: colors.textSecondary }]}>{cvDocumentClassification?.summary || "The file could not be confidently identified as a CV."}</Text>
                       </ReviewDetails>
@@ -637,7 +639,7 @@ export default function ApplicantDetailsModal({
                   ) : cvDocumentStatus === "not_run" || ["failed", "consent_revoked"].includes(String(aiReview.status)) || cvEvidence.length === 0 ? (
                     <View style={styles.stackMedium}>
                       <StatusRow icon="warning-outline" label="Manual review needed" color="#F59E0B" />
-                      <Text style={[styles.body, { color: colors.textSecondary }]}>{"The CV couldn't be scored automatically."}</Text>
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>{"The CV couldn't be reviewed automatically."}</Text>
                       {cvDocumentClassification?.summary ? (
                         <ReviewDetails colors={colors}>
                           <Text style={[styles.body, { color: colors.textSecondary }]}>{cvDocumentClassification.summary}</Text>
@@ -661,6 +663,20 @@ export default function ApplicantDetailsModal({
                       </ReviewDetails>
                     </View>
                   )}
+                  {application.ai_portfolio_review_consent === true &&
+                  cvDocumentStatus === "cv" &&
+                  !["queued", "processing", "failed", "consent_revoked"].includes(String(aiReview?.status)) ? (
+                    <View style={styles.stackMedium}>
+                      <StatusRow
+                        icon={cvNameCheckStatus === "match" ? "checkmark-circle-outline" : "warning-outline"}
+                        label={cvNameCheckStatus === "match" ? "Name matches" : cvNameCheckStatus === "mismatch" ? "Name needs review" : "Name not confirmed"}
+                        color={cvNameCheckStatus === "match" ? "#10B981" : "#F59E0B"}
+                      />
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>
+                        {cvNameCheck?.summary || "We couldn't confirm the name on the CV. Verify it manually."}
+                      </Text>
+                    </View>
+                  ) : null}
                   <TouchableOpacity onPress={() => onOpenMedia(application.cv_url, "Applicant CV")} style={[styles.outlineButton, { borderColor: colors.primary }]}>
                     <Ionicons name="open-outline" size={17} color={colors.primary} />
                     <Text style={[styles.outlineButtonText, { color: colors.primary }]}>View CV</Text>
@@ -690,27 +706,16 @@ export default function ApplicantDetailsModal({
               <Text style={[styles.body, { color: colors.textSecondary }]}>
                 {hasRecognizedRecording && genreEvidence ? genreEvidenceMessage : screening.message}
               </Text>
-              <Text style={[styles.manualPrompt, { color: colors.text }]}>Review the video manually.</Text>
-              <ReviewDetails colors={colors}>
-                {application.video_copyright_metadata?.copyright_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Song found: {application.video_copyright_metadata.copyright_title}{application.video_copyright_metadata.copyright_artist_label ? ` by ${application.video_copyright_metadata.copyright_artist_label}` : ""}</Text> : null}
-                {recognizedAudioGenres.length > 0 ? <Text style={[styles.body, { color: colors.textSecondary }]}>Song genres: {recognizedAudioGenres.join(", ")}</Text> : null}
-                {application.video_copyright_metadata?.internal_match_playlist_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Possible song: {application.video_copyright_metadata.internal_match_playlist_title}{application.video_copyright_metadata.internal_match_playlist_artist ? ` by ${application.video_copyright_metadata.internal_match_playlist_artist}` : ""}</Text> : null}
-                {hasRecognizedRecording && genreEvidence ? (
-                  <View style={styles.stackMedium}>
-                    {list(genreEvidence.evidence).map((entry, index) => (
-                      <Text key={`${entry?.source || "genre"}-${index}`} style={[styles.body, { color: colors.textSecondary }]}>{entry?.observation || "No explanation is available."}</Text>
-                    ))}
-                    {list(genreEvidence.limitations).map((limitation, index) => (
-                      <Text key={`genre-limitation-${index}`} style={[styles.disclaimer, { color: colors.textSecondary }]}>{String(limitation)}</Text>
-                    ))}
-                  </View>
-                ) : application.ai_portfolio_review_consent !== true ? (
-                  <Text style={[styles.body, { color: colors.textSecondary }]}>Extra video review was not authorized.</Text>
-                ) : (
-                  <Text style={[styles.body, { color: colors.textSecondary }]}>No additional song evidence is available.</Text>
-                )}
-              </ReviewDetails>
-              <Text style={[styles.advisory, { color: colors.textSecondary }]}>Advisory only · Not included in score</Text>
+              <Text style={[styles.manualPrompt, { color: colors.text }]}>Review the performance video if needed.</Text>
+              {application.video_copyright_metadata?.copyright_title ||
+              application.video_copyright_metadata?.internal_match_playlist_title ||
+              recognizedAudioGenres.length > 0 ? (
+                <ReviewDetails colors={colors}>
+                  {application.video_copyright_metadata?.copyright_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Song found: {application.video_copyright_metadata.copyright_title}{application.video_copyright_metadata.copyright_artist_label ? ` by ${application.video_copyright_metadata.copyright_artist_label}` : ""}</Text> : null}
+                  {recognizedAudioGenres.length > 0 ? <Text style={[styles.body, { color: colors.textSecondary }]}>Song genres: {recognizedAudioGenres.join(", ")}</Text> : null}
+                  {application.video_copyright_metadata?.internal_match_playlist_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Possible song: {application.video_copyright_metadata.internal_match_playlist_title}{application.video_copyright_metadata.internal_match_playlist_artist ? ` by ${application.video_copyright_metadata.internal_match_playlist_artist}` : ""}</Text> : null}
+                </ReviewDetails>
+              ) : null}
               </Subsection>
 
               <View style={[styles.reviewDivider, { backgroundColor: colors.border }]} />
@@ -735,9 +740,6 @@ export default function ApplicantDetailsModal({
                       {Math.max(0, Number(member?.usable_frames ?? member?.frames_compared) || 0) === 1 ? (
                         <Text style={[styles.manualPrompt, { color: colors.text }]}>{faceMatchDetails(member)}</Text>
                       ) : null}
-                      <ReviewDetails colors={colors}>
-                        <Text style={[styles.body, { color: colors.textSecondary }]}>{faceMatchDetails(member) || "No clear frame count is available."}</Text>
-                      </ReviewDetails>
                     </View>
                   ))}
                 </View>
@@ -762,13 +764,8 @@ export default function ApplicantDetailsModal({
                   {Math.max(0, Number(faceSimilarity?.usable_frames ?? faceSimilarity?.frames_compared) || 0) === 1 ? (
                     <Text style={[styles.manualPrompt, { color: colors.text }]}>{faceMatchDetails(faceSimilarity)}</Text>
                   ) : null}
-                  <ReviewDetails colors={colors}>
-                    <Text style={[styles.body, { color: colors.textSecondary }]}>{faceMatchDetails(faceSimilarity) || "No clear frame count is available."}</Text>
-                    <Text style={[styles.body, { color: colors.textSecondary }]}>The profile photo was compared with clear frames from the performance video.</Text>
-                  </ReviewDetails>
                 </View>
               )}
-              <Text style={[styles.advisory, { color: colors.textSecondary }]}>Advisory only · Not included in score</Text>
               </Subsection>
 
             </Section>

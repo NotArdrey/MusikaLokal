@@ -303,7 +303,9 @@ for (const relativePath of portfolioReviewPaths) {
     assert.match(source, /inspectImages/);
     assert.match(source, /MAX_VISION_IMAGES_PER_REQUEST = 3/);
     assert.match(source, /profile_portfolio_used: false/);
-    assert.match(source, /gig-portfolio-v5-application-media-only/);
+    assert.match(source, /gig-portfolio-v6-cv-name-check/);
+    assert.match(source, /candidate_name/);
+    assert.match(source, /cv_name_check:\s*cvNameCheck/);
     assert.doesNotMatch(source, /from\('profile_portfolio_urls'\)/);
     assert.doesNotMatch(source, /from\('group_media'\)/);
     assert.doesNotMatch(source, /portfolioImageUrls|portfolioDocumentUrls|portfolioDocuments/);
@@ -313,6 +315,31 @@ for (const relativePath of portfolioReviewPaths) {
     assert.doesNotMatch(source, /FACE_RECOGNITION_URL|compareApplicantFacesWithDeepFace/);
   });
 }
+
+test("CV name comparison tolerates middle names and initials but flags clear conflicts", () => {
+  const { exports } = loadPortfolioReviewHarness();
+
+  assert.equal(
+    exports.compareCvApplicantName("Neil P. Laza", ["Neil Ardrey Payoyo Laza"], 0.95).status,
+    "match",
+  );
+  assert.equal(
+    exports.compareCvApplicantName("Laza, Neil", ["Neil Ardrey Payoyo Laza"], 0.95).status,
+    "match",
+  );
+  assert.equal(
+    exports.compareCvApplicantName("Neil Santos", ["Neil Ardrey Payoyo Laza"], 0.95).status,
+    "unclear",
+  );
+  assert.equal(
+    exports.compareCvApplicantName("Maria Santos", ["Neil Ardrey Payoyo Laza"], 0.95).status,
+    "mismatch",
+  );
+  assert.equal(
+    exports.compareCvApplicantName("Neil Laza", ["Neil Ardrey Payoyo Laza"], 0.55).status,
+    "unclear",
+  );
+});
 
 test("queued portfolio review invokes Face++ and stores its normalized result with the existing evidence fields", async () => {
   const harness = loadPortfolioReviewHarness();
@@ -331,6 +358,7 @@ test("queued portfolio review invokes Face++ and stores its normalized result wi
   assert.equal(stored.face_similarity.confidence, 91.5);
   assert.equal(stored.source_summary.face_match_model, "Face++ Compare API");
   assert.ok("cv_document_classification" in stored.source_summary);
+  assert.equal(stored.source_summary.cv_name_check.status, "not_run");
   assert.ok("video_transcribed" in stored.source_summary);
   assert.ok("video_frames_reviewed" in stored.source_summary);
   assert.ok("recognized_audio_genre" in stored.source_summary);
@@ -480,7 +508,18 @@ test("AI review is enabled by default without a checkbox and applicant review se
   assert.match(reviewSource, /title="Profile & Video Check"/);
   assert.match(reviewSource, /Possible match/);
   assert.match(reviewSource, /View details/);
-  assert.match(reviewSource, /Advisory only · Not included in score/);
+  assert.match(reviewSource, /We couldn't identify the song or genre\./);
+  assert.match(reviewSource, /Review the performance video if needed\./);
+  assert.match(reviewSource, /The applicant may appear in the performance video\./);
+  assert.match(reviewSource, /Only one clear frame was found\. Please verify manually\./);
+  assert.match(reviewSource, /Name matches/);
+  assert.match(reviewSource, /Name needs review/);
+  assert.match(reviewSource, /Name not confirmed/);
+  assert.match(reviewSource, /source_summary\?\.cv_name_check/);
+  assert.doesNotMatch(reviewSource, /No additional song evidence is available\./);
+  assert.doesNotMatch(reviewSource, /The profile photo was compared with clear frames from the performance video\./);
+  assert.doesNotMatch(reviewSource, /Advisory only · Not included in score/);
+  assert.doesNotMatch(reviewSource, /Not scored|wasn't scored|couldn't be scored|included in score/i);
   assert.doesNotMatch(reviewSource, /statusPill|Audio & Genre Evidence|Optional Profile-Video Face Match/);
 });
 
