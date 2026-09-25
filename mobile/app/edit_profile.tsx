@@ -26,7 +26,6 @@ import Skeleton from "../src/components/Skeleton";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useTheme } from "../src/context/ThemeContext";
 import { profileFormStyles } from "../src/theme/formStyles";
-import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
 import { isE2EFixtureMode } from "../src/utils/e2eFixtures";
 import { isFanUserRole, normalizeUserRole } from "../src/utils/roleRouting";
 import { uploadStorageObject } from "../src/utils/storageUpload";
@@ -349,11 +348,18 @@ export default function EditProfileScreen() {
               .map((item: any) => item.genre)
               .filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0);
 
+        const storedLatitude = Number(resolvedProfile.latitude);
+        const storedLongitude = Number(resolvedProfile.longitude);
+        const hasStoredCoordinates =
+          Number.isFinite(storedLatitude) &&
+          Number.isFinite(storedLongitude) &&
+          !(storedLatitude === 0 && storedLongitude === 0);
+
         setDisplayName(resolvedProfile.full_name || "");
         setContactNumber(resolvedProfile.contact_number || "");
         setLocation(resolvedProfile.address || resolvedProfile.location || "");
-        setLatitude(Number.isFinite(Number(resolvedProfile.latitude)) ? Number(resolvedProfile.latitude) : null);
-        setLongitude(Number.isFinite(Number(resolvedProfile.longitude)) ? Number(resolvedProfile.longitude) : null);
+        setLatitude(hasStoredCoordinates ? storedLatitude : null);
+        setLongitude(hasStoredCoordinates ? storedLongitude : null);
         setBio(resolvedProfile.bio || "");
         const normalizedAvatarUrl = sanitizeAvatarUrl(resolvedProfile.avatar_url);
         setAvatarUrl(normalizedAvatarUrl || DEFAULT_AVATAR);
@@ -363,8 +369,8 @@ export default function EditProfileScreen() {
         initialSnapshotRef.current = {
           contactNumber: (resolvedProfile.contact_number || "").trim(),
           location: (resolvedProfile.address || resolvedProfile.location || "").trim(),
-          latitude: Number.isFinite(Number(resolvedProfile.latitude)) ? Number(resolvedProfile.latitude) : null,
-          longitude: Number.isFinite(Number(resolvedProfile.longitude)) ? Number(resolvedProfile.longitude) : null,
+          latitude: hasStoredCoordinates ? storedLatitude : null,
+          longitude: hasStoredCoordinates ? storedLongitude : null,
           bio: (resolvedProfile.bio || "").trim(),
           roles: normalizeList(resolvedSkills),
           genres: normalizeList(resolvedGenres),
@@ -424,31 +430,13 @@ export default function EditProfileScreen() {
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.5,
-        base64: true, // Request base64 directly from ImagePicker
       });
 
       if (result.canceled || !result.assets?.[0]) return;
 
       const asset = result.assets[0];
 
-      if (!asset.base64) {
-        showAlert("warning", "Couldn't Read Image", "Could not read image data. Please try a different photo.");
-        return;
-      }
-
       const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
-      const mimeType = `image/${ext === "jpg" ? "jpeg" : ext}`;
-      await ensureUploadPassesSafetyScreening(
-        {
-          name: (asset as any)?.fileName || `profile-photo.${ext}`,
-          mimeType,
-          size: Math.floor((asset.base64.length * 3) / 4),
-          uri: asset.uri,
-          contentDataUrl: `data:${mimeType};base64,${asset.base64}`,
-          kind: "photo",
-        },
-        "edit_profile_avatar",
-      );
       setPendingAvatar({
         ext,
         uri: asset.uri,
@@ -484,31 +472,13 @@ export default function EditProfileScreen() {
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.5,
-        base64: true,
       });
 
       if (result.canceled || !result.assets?.[0]) return;
 
       const asset = result.assets[0];
 
-      if (!asset.base64) {
-        showAlert("warning", "Couldn't Read Image", "Could not read image data. Please try again.");
-        return;
-      }
-
       const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
-      const mimeType = `image/${ext === "jpg" ? "jpeg" : ext}`;
-      await ensureUploadPassesSafetyScreening(
-        {
-          name: (asset as any)?.fileName || `profile-photo.${ext}`,
-          mimeType,
-          size: Math.floor((asset.base64.length * 3) / 4),
-          uri: asset.uri,
-          contentDataUrl: `data:${mimeType};base64,${asset.base64}`,
-          kind: "photo",
-        },
-        "edit_profile_avatar",
-      );
       setPendingAvatar({
         ext,
         uri: asset.uri,

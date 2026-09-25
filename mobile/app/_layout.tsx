@@ -60,6 +60,7 @@ SplashScreen.preventAutoHideAsync();
 
 LogBox.ignoreLogs([
   "AuthApiError: Invalid Refresh Token: Refresh Token Not Found",
+  "Cannot connect to Expo CLI",
   "Network request failed",
   "TypeError: Network request failed",
   "SafeAreaView has been deprecated and will be removed in a future release.",
@@ -638,7 +639,7 @@ function RootContent() {
       }
 
       if (!realtimeAuthReady) {
-        console.warn("[notification-toast] Realtime auth unavailable; retrying", {
+        logNotificationToastDebug("Realtime auth unavailable; retrying", {
           reason,
           activeUserId,
         });
@@ -709,7 +710,7 @@ function RootContent() {
           }
 
           if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-            console.warn("[notification-toast] Realtime channel unavailable", {
+            logNotificationToastDebug("Realtime channel unavailable", {
               reason,
               status,
               activeUserId,

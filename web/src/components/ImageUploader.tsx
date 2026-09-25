@@ -91,7 +91,7 @@ interface PreparedImageUpload {
   extension: string;
   mimeType: string;
   size: number;
-  contentDataUrl: string;
+  contentDataUrl?: string;
   uploadBody?: Blob;
 }
 
@@ -127,6 +127,7 @@ const formatSkippedImageFeedback = (
 
 const prepareImageForUpload = async (
   asset: ImagePicker.ImagePickerAsset,
+  includeSafetyContent: boolean,
 ): Promise<PreparedImageUpload> => {
   const fallbackName = asset.uri.split('/').pop() || 'image-upload.jpg';
   const originalName =
@@ -140,19 +141,24 @@ const prepareImageForUpload = async (
 
   const webFile = Platform.OS === 'web' ? (asset as any)?.file : null;
   if (typeof Blob !== 'undefined' && webFile instanceof Blob) {
-    contentDataUrl = await blobToDataUrl(webFile);
-    base64 = contentDataUrl.split(',')[1] || '';
+    if (includeSafetyContent) {
+      contentDataUrl = await blobToDataUrl(webFile);
+      base64 = contentDataUrl.split(',')[1] || '';
+    }
     size = webFile.size || estimateBase64Bytes(base64);
     uploadBody = webFile;
-  } else {
+  } else if (includeSafetyContent) {
     base64 = await FileSystem.readAsStringAsync(asset.uri, {
       encoding: 'base64',
     });
     size = size || estimateBase64Bytes(base64);
     contentDataUrl = `data:${mimeType};base64,${base64}`;
+  } else if (!size) {
+    const info = await FileSystem.getInfoAsync(asset.uri);
+    size = info.exists && typeof info.size === 'number' ? info.size : 0;
   }
 
-  if (!base64 || size <= 0) {
+  if ((includeSafetyContent && !base64) || size <= 0) {
     throw new Error('Could not read the selected image. Please try a different photo.');
   }
 
@@ -179,6 +185,7 @@ interface ImageUploaderProps {
   userId: string;
   folder?: string;
   safetyContext?: string;
+  enableAiSafetyScreening?: boolean;
 }
 
 type ImageUploadAlertConfig = {
@@ -200,6 +207,7 @@ export default function ImageUploader({
   userId,
   folder = 'general',
   safetyContext = 'add_edit_upload',
+  enableAiSafetyScreening = true,
 }: ImageUploaderProps) {
   const { colors, isDark } = useTheme();
   const uploadingRef = useRef(false);
@@ -287,7 +295,7 @@ export default function ImageUploader({
       setUploadMessage('Preparing photos...');
 
       const preparedResults = await Promise.allSettled(
-        result.assets.map((asset) => prepareImageForUpload(asset)),
+        result.assets.map((asset) => prepareImageForUpload(asset, enableAiSafetyScreening)),
       );
       const preparedUploads = preparedResults
         .filter((result): result is PromiseFulfilledResult<PreparedImageUpload> => result.status === 'fulfilled')
@@ -314,34 +322,37 @@ export default function ImageUploader({
         return;
       }
 
-      setUploadMessage('Checking photos...');
-      const safetyDecisions = await screenUploadsWithAiDecisions(
-        preparedUploads.map((item) => ({
-          name: item.originalName,
-          mimeType: item.mimeType,
-          size: item.size,
-          uri: item.asset.uri,
-          kind: 'photo' as const,
-          contentDataUrl: item.contentDataUrl,
-          relatedType, relatedId,
-        })),
-        safetyContext,
-      );
-
       const skippedImages: SkippedImageFeedback[] = [...skippedBeforeScreening];
-      const approvedUploads = preparedUploads.filter((item, index) => {
-        const decision = safetyDecisions[index];
-        if (decision?.allowed === true) {
-          return true;
-        }
+      let approvedUploads = preparedUploads;
+      if (enableAiSafetyScreening) {
+        setUploadMessage('Checking photos...');
+        const safetyDecisions = await screenUploadsWithAiDecisions(
+          preparedUploads.map((item) => ({
+            name: item.originalName,
+            mimeType: item.mimeType,
+            size: item.size,
+            uri: item.asset.uri,
+            kind: 'photo' as const,
+            contentDataUrl: item.contentDataUrl,
+            relatedType, relatedId,
+          })),
+          safetyContext,
+        );
 
-        skippedImages.push({
-          name: item.originalName,
-          reason: decision?.reason || 'This image did not pass safety screening.',
-          retryable: Boolean(decision?.retryable) || isUploadSafetyRetryableFailure(decision?.reason),
+        approvedUploads = preparedUploads.filter((item, index) => {
+          const decision = safetyDecisions[index];
+          if (decision?.allowed === true) {
+            return true;
+          }
+
+          skippedImages.push({
+            name: item.originalName,
+            reason: decision?.reason || 'This image did not pass safety screening.',
+            retryable: Boolean(decision?.retryable) || isUploadSafetyRetryableFailure(decision?.reason),
+          });
+          return false;
         });
-        return false;
-      });
+      }
 
       if (approvedUploads.length === 0) {
         const screeningUnavailable = skippedImages.length > 0 && skippedImages.every((item) => item.retryable);
@@ -478,7 +489,7 @@ export default function ImageUploader({
         <View style={styles.loadingOverlay}>
           <View
             accessible
-            accessibilityLabel={`${uploadMessage} Keep this screen open while your photos are checked and uploaded.`}
+            accessibilityLabel={`${uploadMessage} Keep this screen open while your photos are uploaded.`}
             accessibilityLiveRegion="polite"
             accessibilityRole="progressbar"
             style={[styles.loadingCard, { backgroundColor: colors.surface }]}
@@ -486,7 +497,7 @@ export default function ImageUploader({
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={[styles.loadingTitle, { color: colors.text }]}>{uploadMessage}</Text>
             <Text style={[styles.loadingSubtitle, { color: colors.textSecondary }]}>
-              Keep this screen open while your photos are checked and uploaded.
+              Keep this screen open while your photos are uploaded.
             </Text>
           </View>
         </View>

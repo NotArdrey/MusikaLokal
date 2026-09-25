@@ -63,14 +63,10 @@ Gig applicants can optionally consent to an advisory review of redacted CV text,
 video speech, up to three client-generated video frames, and stored portfolio
 images. Groq continues to handle CV classification, transcription, neutral visual
 observations, and criteria evidence. Face matching alone is sent by the Supabase
-Edge Function to the local service in `services/face-recognition`, which uses
-DeepFace with ArcFace embeddings, RetinaFace detection, alignment, and cosine
-distance. It compares up to three frames already sampled by the Expo client; the
-Python service does not extract a second set of frames. For group applications,
-the database snapshots the authorized lineup and the same service compares each
-available member reference image against the sampled video faces. If a video
-frame contains several people, the lowest ArcFace distance is retained and the
-frame is marked as a multiple-person frame.
+Edge Function directly to the Face++ Compare API. It compares the profile photo
+with up to three frames already sampled by the Expo client. For group
+applications, the database snapshots the authorized lineup and Face++ compares
+each available member reference image against the sampled video frames.
 Results remain limited to
 `likely_same_person`, `likely_different_person`, or `unclear`; they do not identify
 any person. The stored result also includes similarity, confidence, sampled,
@@ -82,23 +78,21 @@ Deploy `20260719010000_add_consent_gated_gig_portfolio_reviews.sql` followed by
 `20260719030000_add_gig_face_similarity_review.sql`, then
 `20260719040000_add_group_member_face_similarity_review.sql` before deploying
 the `gig-applications` Edge Function. Configure `GROQ_API_KEY`,
-`FACE_RECOGNITION_URL` and, when configured on the service,
-`FACE_RECOGNITION_API_KEY` as Supabase Edge Function secrets.
-`FACE_RECOGNITION_TIMEOUT_MS` is optional and defaults to 60000. The pinned
-DeepFace 0.0.101 ArcFace/cosine threshold (`0.68`) is used unless the service operator explicitly
-sets `FACE_ARCFACE_THRESHOLD`; benchmark analysis never changes production
-configuration. Never put these settings in Expo variables or client code.
+`FACEPP_API_KEY` and `FACEPP_API_SECRET` as Supabase Edge Function secrets.
+`FACEPP_API_BASE_URL` is optional and defaults to the Face++ US endpoint;
+`FACEPP_THRESHOLD_TIER` defaults to `1e-5`, `FACEPP_TIMEOUT_MS` defaults to
+20000, `FACEPP_MAX_CONCURRENCY_RETRIES` defaults to 3, and
+`FACEPP_RETRY_BASE_DELAY_MS` defaults to 1000. The client retries only Face++
+concurrency-limit responses with capped exponential backoff and jitter. The
+comparison uses the threshold returned by Face++ for the configured
+tier. Never put these settings in Expo variables or client code.
 Optional model overrides are documented in `mobile/.env.example`; enable Groq
 Zero Data Retention in GroqCloud Data Controls when required by the deployment's
 privacy policy.
 
-Run `npm run benchmark:face -- services/face-recognition/benchmark-dataset.example.json`
-with a labeled, consented dataset copy to generate the face-only benchmark report
-and dashboard under `output/face-benchmark`. The benchmark imports the same face
-service client as production and reports production-parity metadata, false match
-and non-match rates, coverage, conditional accuracy, unclear/no-face/multiple-face
-rates, processing/service failure rates, distance distributions, and diagnostic
-threshold analysis separately from genre accuracy.
+Face comparison remains advisory and excluded from automated application
+decisions. Keep the original profile photo and performance video available for
+manual review whenever Face++ returns unclear or insufficient evidence.
 
 ## Gig performance video recording screening
 

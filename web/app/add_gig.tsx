@@ -1371,6 +1371,7 @@ export default function AddGigScreen() {
                   Event Photos
                 </Text>
                 <ImageUploader relatedType="gig" relatedId={newGigId || undefined}
+                  enableAiSafetyScreening={false}
                   images={images}
                   onImagesChange={setImages}
                   thumbnailIndex={thumbnailIndex}

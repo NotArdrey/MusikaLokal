@@ -647,6 +647,7 @@ export default function CreatePlaylistScreen() {
           <Text style={[styles.label, { color: colors.text }]}>Album Cover</Text>
           {userId ? (
             <ImageUploader
+              enableAiSafetyScreening={false}
               images={coverImages}
               onImagesChange={(images) => setCoverImages(images.slice(0, 1))}
               maxImages={1}
@@ -770,6 +771,7 @@ export default function CreatePlaylistScreen() {
                       <>
                         <Text style={[styles.trackImageLabel, { color: colors.textSecondary }]}>Music Image (Optional)</Text>
                         <ImageUploader
+                          enableAiSafetyScreening={false}
                           images={track.cover_image_url ? [track.cover_image_url] : []}
                           onImagesChange={(images) => setTrackCoverImage(track.id, images[0] || null)}
                           maxImages={1}

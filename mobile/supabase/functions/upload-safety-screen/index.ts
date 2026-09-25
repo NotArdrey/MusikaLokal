@@ -37,6 +37,8 @@ const ACRCLOUD_CUSTOM_ACCESS_KEY = Deno.env.get("ACRCLOUD_CUSTOM_ACCESS_KEY")?.t
 const ACRCLOUD_CUSTOM_ACCESS_SECRET = Deno.env.get("ACRCLOUD_CUSTOM_ACCESS_SECRET")?.trim() || "";
 
 const MAX_FILES_PER_REQUEST = 10;
+const MAX_GIG_VIDEO_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+const MAX_GIG_VIDEO_DURATION_MS = 5 * 60 * 1000;
 const DEFAULT_GROQ_VISION_MODEL = "qwen/qwen3.8-27b";
 const GROQ_VISION_MODELS = Array.from(
   new Set([
@@ -48,6 +50,8 @@ const GROQ_VISION_MODELS = Array.from(
 // The response is a tiny JSON object. A large reservation needlessly consumes
 // Groq's output-token allowance and makes multi-frame videos hit 429s.
 const GROQ_VISION_MAX_COMPLETION_TOKENS = 160;
+const MAX_GROQ_RATE_LIMIT_RETRY_MS = 15_000;
+const GROQ_RATE_LIMIT_RETRY_BUFFER_MS = 500;
 const GROQ_SAFETY_TEXT_MODEL = "openai/gpt-oss-safeguard-20b";
 const MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024;
 const MAX_ACRCLOUD_AUDIO_SAMPLE_BYTES = 4 * 1024 * 1024;
@@ -158,6 +162,7 @@ interface FileCandidate {
   fileName?: string;
   mimeType?: string | null;
   fileSize?: number;
+  durationMs?: number;
   kind?: "photo" | "document" | "video" | "audio";
   contentDataUrl?: string | null;
 }
@@ -211,7 +216,7 @@ function extractExtension(fileName: string): string {
   return cleaned.slice(dotIndex + 1);
 }
 
-function ruleBasedScreen(file: FileCandidate): VisualDecision {
+function ruleBasedScreen(file: FileCandidate, context = ""): VisualDecision {
   const ext = extractExtension(file.fileName || "");
 
   if (ext && BLOCKED_EXTENSIONS.has(ext)) {
@@ -256,6 +261,24 @@ function ruleBasedScreen(file: FileCandidate): VisualDecision {
   }
 
   if (file.kind === "video") {
+    if (context === "gig_video_content" || context === "gig_application_performance_video") {
+      const fileSize = Number(file.fileSize || 0);
+      if (Number.isFinite(fileSize) && fileSize > MAX_GIG_VIDEO_FILE_SIZE_BYTES) {
+        return {
+          allowed: false,
+          reason: "Performance videos must be 50MB or smaller.",
+        };
+      }
+
+      const durationMs = Number(file.durationMs || 0);
+      if (Number.isFinite(durationMs) && durationMs > MAX_GIG_VIDEO_DURATION_MS) {
+        return {
+          allowed: false,
+          reason: "Performance videos must be 5 minutes or shorter.",
+        };
+      }
+    }
+
     if (ext && !SAFE_VIDEO_EXTENSIONS.has(ext)) {
       return {
         allowed: false,
@@ -1608,7 +1631,19 @@ async function callGroqVisualReview(
         statusText: response.statusText,
         body: errorBody.slice(0, 1000),
       });
-      throw new Error(`Groq visual review error: ${response.status}${errorBody ? ` ${errorBody}` : ""}`);
+      const failure = new Error(`Groq visual review error: ${response.status}${errorBody ? ` ${errorBody}` : ""}`) as Error & {
+        retryAfterMs?: number;
+      };
+      if (response.status === 429) {
+        const retryAfterHeader = response.headers.get("retry-after");
+        if (retryAfterHeader !== null) {
+          const retryAfterSeconds = Number(retryAfterHeader);
+          if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
+            failure.retryAfterMs = Math.ceil(retryAfterSeconds * 1000);
+          }
+        }
+      }
+      throw failure;
     }
   }
 
@@ -1637,6 +1672,12 @@ async function screenVisualContent(
   const prompt = buildVisualReviewPrompt(context, file);
   let reviewed = false;
   const providerFailures: string[] = [];
+  const rateLimitRetries: Array<{
+    model: string;
+    apiKey: string;
+    keyIndex: number;
+    retryAfterMs: number;
+  }> = [];
 
   if (OPENAI_API_KEY) {
     try {
@@ -1682,6 +1723,14 @@ async function screenVisualContent(
         }
         } catch (error) {
         providerFailures.push(`Groq (${model}): ${error instanceof Error ? error.message : String(error)}`);
+        const retryAfterMs = Number((error as Error & { retryAfterMs?: number })?.retryAfterMs);
+        if (
+          Number.isFinite(retryAfterMs) &&
+          retryAfterMs >= 0 &&
+          retryAfterMs <= MAX_GROQ_RATE_LIMIT_RETRY_MS
+        ) {
+          rateLimitRetries.push({ model, apiKey, keyIndex, retryAfterMs });
+        }
         console.error("[upload-safety-screen] groq_visual_review_exception_fallback", {
           model,
           keySlot: keyIndex + 1,
@@ -1690,6 +1739,39 @@ async function screenVisualContent(
         // Try the next Groq account or vision model before blocking the upload.
         }
       }
+    }
+  }
+
+  if (!reviewed && rateLimitRetries.length > 0) {
+    const retry = rateLimitRetries.sort((a, b) => a.retryAfterMs - b.retryAfterMs)[0];
+    const waitMs = retry.retryAfterMs + GROQ_RATE_LIMIT_RETRY_BUFFER_MS;
+    console.warn("[upload-safety-screen] groq_rate_limit_wait", {
+      model: retry.model,
+      keySlot: retry.keyIndex + 1,
+      waitMs,
+    });
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    try {
+      const visualDecision = await callGroqVisualReview(
+        prompt,
+        parsedImage.dataUrl,
+        retry.model,
+        retry.apiKey,
+      );
+      if (visualDecision) {
+        if (!visualDecision.allowed) {
+          return { ...visualDecision, provider: "groq-vision" };
+        }
+        return { allowed: true };
+      }
+      providerFailures.push(`Groq (${retry.model}): retry returned no valid JSON decision`);
+    } catch (error) {
+      providerFailures.push(`Groq (${retry.model}) retry: ${error instanceof Error ? error.message : String(error)}`);
+      console.error("[upload-safety-screen] groq_rate_limit_retry_failed", {
+        model: retry.model,
+        keySlot: retry.keyIndex + 1,
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -2004,7 +2086,7 @@ serve(async (req: Request) => {
     const files = rawFiles.slice(0, MAX_FILES_PER_REQUEST);
 
     // Step 1: Rule-based pre-screen
-    const ruleResults = files.map((file) => ruleBasedScreen(file));
+    const ruleResults = files.map((file) => ruleBasedScreen(file, context));
     // Step 2: Content screening when the client provides actual media bytes.
     const hasInlineMediaContent = files.some(
       (file) => typeof file.contentDataUrl === "string" && file.contentDataUrl.trim().length > 0,

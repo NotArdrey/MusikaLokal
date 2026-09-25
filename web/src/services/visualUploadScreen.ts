@@ -81,9 +81,7 @@ async function webVideoFrames(uri: string): Promise<string[]> {
 }
 
 export async function screenVisualUpload(
-  input: Omit<UploadSafetyFileInput, "contentDataUrl"> & {
-    durationMs?: number;
-  },
+  input: Omit<UploadSafetyFileInput, "contentDataUrl">,
   context: string,
 ): Promise<void> {
   if (!input.uri)

@@ -17,8 +17,13 @@ const mobileFeed = readFileSync(
 
 test("mobile video preview waits for user playback and pauses during cleanup", () => {
   assert.doesNotMatch(mobileViewer, /videoPlayer\.play\(\)/);
-  assert.match(mobileViewer, /const player = useVideoPlayer\(uri\);/);
-  assert.match(mobileViewer, /return \(\) => \{\s*player\.pause\(\);/);
+  assert.match(mobileViewer, /useVideoPlayer\(uri, \(videoPlayer\) => videoPlayer\.pause\(\)\)/);
+});
+
+test("Android documents bypass the slow Google Docs proxy", () => {
+  assert.doesNotMatch(mobileViewer, /docs\.google\.com\/gview/);
+  assert.match(mobileViewer, /Platform\.OS === "android" && mediaType === "document"/);
+  assert.match(mobileViewer, /Linking\.openURL\(uri\)/);
 });
 
 test("web video preview does not autoplay and tears down playback when hidden", () => {

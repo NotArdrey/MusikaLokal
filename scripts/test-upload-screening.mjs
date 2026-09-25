@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { test } from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
@@ -12,6 +14,7 @@ function createScreeningHarness({ fallbackGroqApiKey = "" } = {}) {
     providerFailure = false,
     primaryAccountFailure = false,
     primaryVisionFailure = false,
+    rateLimitFirstPass = false,
     providerAllows = false,
     jsonModeFailure = false,
     storageFailure = false,
@@ -130,6 +133,12 @@ function createScreeningHarness({ fallbackGroqApiKey = "" } = {}) {
         const authorization = init?.headers?.Authorization || init?.headers?.authorization || "";
         providerAuthorizationHeaders.push(authorization);
         if (providerFailure) return new Response("Unavailable", { status: 503 });
+        if (rateLimitFirstPass && providerCalls <= 2) {
+          return Response.json(
+            { error: { code: "rate_limit_exceeded", message: "Rate limit reached" } },
+            { status: 429, headers: { "retry-after": "0" } },
+          );
+        }
         if (primaryAccountFailure && authorization === "Bearer groq-fixture") {
           return Response.json(
             { error: { code: "rate_limit_exceeded", message: "Account rate limit reached" } },
@@ -209,6 +218,9 @@ function createScreeningHarness({ fallbackGroqApiKey = "" } = {}) {
     },
     failPrimaryAccount() {
       primaryAccountFailure = true;
+    },
+    rateLimitFirstPass() {
+      rateLimitFirstPass = true;
     },
     allowProvider() {
       providerAllows = true;
@@ -358,6 +370,14 @@ test("visual screening retries the same model with the secondary Groq account", 
     "Bearer groq-fallback-fixture",
   ]);
 });
+test("visual screening honors Groq retry-after before reporting an outage", async () => {
+  const h = createScreeningHarness();
+  h.allowProvider();
+  h.rateLimitFirstPass();
+  const result = await h.screen([file("image-one")]);
+  assert.equal(result.body.results[0].allowed, true);
+  assert.equal(h.providerCalls, 3);
+});
 test("ACRCloud catalog genres are preserved in copyright metadata", () => {
   const h = createScreeningHarness();
   const metadata = h.buildCopyrightMatchMetadata({
@@ -424,6 +444,56 @@ test("ordinary image, video, avatar, feed, portfolio, and metadata uploads pass 
   assert.equal(documentResult.body.results[0].allowed, true);
   assert.equal(document.cases.length, 0);
 });
+test("gig performance videos over five minutes are blocked before provider screening", async () => {
+  const h = createScreeningHarness();
+  h.allowProvider();
+  const candidate = {
+    ...file("over-duration-video"),
+    fileName: "performance.mp4",
+    mimeType: "video/mp4",
+    kind: "video",
+    fileSize: 50 * 1024 * 1024,
+    durationMs: 5 * 60 * 1000 + 1,
+  };
+
+  const result = await h.screen([candidate], "valid", "gig_video_content");
+  assert.equal(result.body.results[0].allowed, false);
+  assert.match(result.body.results[0].reason, /5 minutes or shorter/i);
+  assert.equal(h.providerCalls, 0);
+});
+test("gig performance videos over 50MB are blocked before provider screening", async () => {
+  const h = createScreeningHarness();
+  h.allowProvider();
+  const candidate = {
+    ...file("over-size-video"),
+    fileName: "performance.mp4",
+    mimeType: "video/mp4",
+    kind: "video",
+    fileSize: 50 * 1024 * 1024 + 1,
+    durationMs: 5 * 60 * 1000,
+  };
+
+  const result = await h.screen([candidate], "valid", "gig_video_content");
+  assert.equal(result.body.results[0].allowed, false);
+  assert.match(result.body.results[0].reason, /50MB or smaller/i);
+  assert.equal(h.providerCalls, 0);
+});
+test("gig performance videos at the five-minute and 50MB limits are allowed", async () => {
+  const h = createScreeningHarness();
+  h.allowProvider();
+  const candidate = {
+    ...file("boundary-video"),
+    fileName: "performance.mp4",
+    mimeType: "video/mp4",
+    kind: "video",
+    fileSize: 50 * 1024 * 1024,
+    durationMs: 5 * 60 * 1000,
+  };
+
+  const result = await h.screen([candidate], "valid", "gig_video_content");
+  assert.equal(result.body.results[0].allowed, true);
+  assert.equal(h.providerCalls, 1);
+});
 test("upload screening contains no Google or Gemini provider path", () => {
   for (const path of [
     "../mobile/supabase/functions/upload-safety-screen/index.ts",
@@ -447,4 +517,67 @@ test("image or video metadata alone cannot authorize a public upload", async () 
   assert.equal((await h.screen([candidate])).body.results[0].allowed, false);
   assert.equal(h.providerCalls, 0);
   assert.equal(h.cases.length, 0);
+});
+
+test("non-group app image uploaders bypass AI while group uploaders retain screening", () => {
+  const appRoots = [
+    new URL("../mobile/app/", import.meta.url),
+    new URL("../web/app/", import.meta.url),
+  ];
+  const visit = (directory) => {
+    const files = [];
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) files.push(...visit(path));
+      else if (entry.name.endsWith(".tsx")) files.push(path);
+    }
+    return files;
+  };
+
+  const uploaderCalls = appRoots.flatMap((root) =>
+    visit(fileURLToPath(root)).flatMap((path) => {
+      const source = readFileSync(path, "utf8");
+      return Array.from(source.matchAll(/<ImageUploader\b[\s\S]*?\/>/g), (match) => ({
+        path,
+        call: match[0],
+      }));
+    }),
+  );
+
+  assert.ok(uploaderCalls.length > 0);
+  for (const { path, call } of uploaderCalls) {
+    const isGroupFlow = /group/i.test(path);
+    if (isGroupFlow) {
+      assert.doesNotMatch(call, /enableAiSafetyScreening=\{false\}/, path);
+    } else {
+      assert.match(call, /enableAiSafetyScreening=\{false\}/, path);
+    }
+  }
+});
+
+test("custom profile image and document flows bypass AI but portfolio videos retain it", () => {
+  for (const path of ["../mobile/app/edit_profile.tsx", "../web/app/edit_profile.tsx"]) {
+    const source = readFileSync(new URL(path, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /ensureUploadPassesSafetyScreening/);
+    assert.doesNotMatch(source, /base64:\s*true/);
+  }
+
+  for (const path of ["../mobile/app/(tabs)/profile.tsx", "../web/app/profile.tsx"]) {
+    const source = readFileSync(new URL(path, import.meta.url), "utf8");
+    assert.match(source, /if \(options\.uploadKind !== "video"\) \{\s*return;/);
+    assert.match(source, /if \(uploadKind === "video"\)/);
+    assert.doesNotMatch(source, /This document did not pass safety screening/);
+  }
+});
+
+test("storage uploads retry transient slow-network failures", () => {
+  for (const path of [
+    "../mobile/src/utils/storageUpload.ts",
+    "../web/src/utils/storageUpload.ts",
+  ]) {
+    const source = readFileSync(new URL(path, import.meta.url), "utf8");
+    assert.match(source, /STORAGE_UPLOAD_ATTEMPTS = 3/);
+    assert.match(source, /\[408, 425, 429, 500, 502, 503, 504\]/);
+    assert.match(source, /network request failed\|network error\|timeout/);
+  }
 });

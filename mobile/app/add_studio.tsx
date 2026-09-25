@@ -2581,6 +2581,7 @@ export default function AddStudioScreen() {
                   Studio Photos
                 </Text>
                 <ImageUploader
+                  enableAiSafetyScreening={false}
                   images={images}
                   onImagesChange={setImages}
                   thumbnailIndex={thumbnailIndex}

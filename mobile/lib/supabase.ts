@@ -740,13 +740,15 @@ const unregisterCurrentPushDevice = async () => {
         };
 
         if (result.error && !skipSessionAuthorization && isAuthUnauthorizedError(result.error)) {
-            console.warn('[supabase.functions.invoke] Authorization failed, retrying once with refreshed session', {
-                functionName,
-                message: result.error?.message,
-                status: result.error?.status,
-                code: result.error?.code,
-                hadUserAuthorizationHeader: firstAttemptHadAuthorization,
-            });
+            if (__DEV__ && FUNCTIONS_INVOKE_DEBUG_LOGS) {
+                console.warn('[supabase.functions.invoke] Authorization failed, retrying once with refreshed session', {
+                    functionName,
+                    message: result.error?.message,
+                    status: result.error?.status,
+                    code: result.error?.code,
+                    hadUserAuthorizationHeader: firstAttemptHadAuthorization,
+                });
+            }
 
             invalidateTokenCache();
 
@@ -760,7 +762,7 @@ const unregisterCurrentPushDevice = async () => {
         }
 
         if (result.error && isTransientFunctionsError(result.error)) {
-            if (__DEV__) {
+            if (__DEV__ && FUNCTIONS_INVOKE_DEBUG_LOGS) {
                 const status = getFunctionsErrorStatus(result.error);
                 console.warn('[supabase.functions.invoke] Transient function invoke error, retrying once', {
                     functionName,
@@ -783,7 +785,7 @@ const unregisterCurrentPushDevice = async () => {
         if (result.error) {
             const responseBody = await readFunctionsErrorBody(result.error);
 
-            if (__DEV__) {
+            if (__DEV__ && FUNCTIONS_INVOKE_DEBUG_LOGS) {
                 console.warn('[supabase.functions.invoke] Function invoke failed after retries', {
                     functionName,
                     status: getFunctionsErrorStatus(result.error),

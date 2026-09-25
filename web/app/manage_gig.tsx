@@ -1537,13 +1537,13 @@ export default function GigDetailsScreen() {
                                   <View style={{ marginTop: 9, padding: 10, borderWidth: 1, borderColor: faceColor, borderRadius: 10 }}>
                                     <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
                                       <Ionicons name="person-circle-outline" size={16} color={faceColor} />
-                                      <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 11, flex: 1 }}>ArcFace video match</Text>
+                                      <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 11, flex: 1 }}>Face++ video match</Text>
                                       <Text style={{ color: faceColor, fontFamily: "Poppins_600SemiBold", fontSize: 9, textTransform: "uppercase" }}>{faceLabel}</Text>
                                     </View>
                                     <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 5 }}>{faceSimilarity.summary}</Text>
-                                    {faceSimilarity?.provider === "deepface_arcface" ? (
+                                    {faceSimilarity?.provider === "faceplusplus_compare" ? (
                                       <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 9, lineHeight: 14, marginTop: 4 }}>
-                                        Match rate {Math.round(Number(faceSimilarity.match_rate || 0) * 100)}% | {Number(faceSimilarity.matched_frames || 0)}/{Number(faceSimilarity.usable_frames || faceSimilarity.frames_compared || 0)} matched usable frames | {Number(faceSimilarity.sampled_frames || 0)} sampled{faceSimilarity.distance != null && faceSimilarity.threshold != null && Number.isFinite(Number(faceSimilarity.distance)) && Number.isFinite(Number(faceSimilarity.threshold)) ? ` | median distance ${Number(faceSimilarity.distance).toFixed(3)} (threshold ${Number(faceSimilarity.threshold).toFixed(3)})` : ""}
+                                        Match rate {Math.round(Number(faceSimilarity.match_rate || 0) * 100)}% | {Number(faceSimilarity.matched_frames || 0)}/{Number(faceSimilarity.usable_frames || faceSimilarity.frames_compared || 0)} matched clear frames | {Number(faceSimilarity.sampled_frames || 0)} sampled{faceSimilarity.confidence != null && faceSimilarity.threshold != null ? ` | confidence ${Number(faceSimilarity.confidence).toFixed(2)} (threshold ${Number(faceSimilarity.threshold).toFixed(2)})` : ""}
                                       </Text>
                                     ) : null}
                                     <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 4 }}>Not identity verification. Compare the original profile photo and video yourself; never decide from this signal alone.</Text>
@@ -1562,9 +1562,9 @@ export default function GigDetailsScreen() {
                                       <Text style={{ color: faceColor, fontFamily: "Poppins_600SemiBold", fontSize: 9, textTransform: "uppercase" }}>{faceLabel}</Text>
                                     </View>
                                     <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 5 }}>{memberResult?.summary || "No comparison explanation was available."}</Text>
-                                    {memberResult?.provider === "deepface_arcface" ? (
+                                    {memberResult?.provider === "faceplusplus_compare" ? (
                                       <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 9, lineHeight: 14, marginTop: 4 }}>
-                                        Match rate {Math.round(Number(memberResult.match_rate || 0) * 100)}% | {Number(memberResult.matched_frames || 0)}/{Number(memberResult.usable_frames || memberResult.frames_compared || 0)} matched usable frames | {Number(memberResult.sampled_frames || 0)} sampled{memberResult.distance != null && memberResult.threshold != null && Number.isFinite(Number(memberResult.distance)) && Number.isFinite(Number(memberResult.threshold)) ? ` | median distance ${Number(memberResult.distance).toFixed(3)} (threshold ${Number(memberResult.threshold).toFixed(3)})` : ""}
+                                        Match rate {Math.round(Number(memberResult.match_rate || 0) * 100)}% | {Number(memberResult.matched_frames || 0)}/{Number(memberResult.usable_frames || memberResult.frames_compared || 0)} matched clear frames | {Number(memberResult.sampled_frames || 0)} sampled{memberResult.confidence != null && memberResult.threshold != null ? ` | confidence ${Number(memberResult.confidence).toFixed(2)} (threshold ${Number(memberResult.threshold).toFixed(2)})` : ""}
                                       </Text>
                                     ) : null}
                                     <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 4 }}>Advisory group-member similarity only. Inspect the member profile and original video yourself.</Text>

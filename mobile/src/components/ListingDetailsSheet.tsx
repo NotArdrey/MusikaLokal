@@ -554,7 +554,7 @@ const ListingDetailsSheet = forwardRef<
   // Application State (for Gig applications)
   const [pitchMessage, setPitchMessage] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
-  const [aiPortfolioReviewConsent, setAiPortfolioReviewConsent] = useState(false);
+  const [aiPortfolioReviewConsent, setAiPortfolioReviewConsent] = useState(true);
   const [videoReviewFrameUrl, setVideoReviewFrameUrl] = useState("");
   const [videoReviewFrameUrls, setVideoReviewFrameUrls] = useState<string[]>([]);
   const [videoCopyrightAcknowledged, setVideoCopyrightAcknowledged] = useState(false);
@@ -2068,7 +2068,7 @@ const ListingDetailsSheet = forwardRef<
       // Reset application state
       setPitchMessage("");
       setVideoUrl("");
-      setAiPortfolioReviewConsent(false);
+      setAiPortfolioReviewConsent(true);
       setVideoReviewFrameUrl("");
       setVideoReviewFrameUrls([]);
       setVideoCopyrightAcknowledged(false);
@@ -3831,9 +3831,9 @@ const ListingDetailsSheet = forwardRef<
       setCvUrl={setCvUrl}
       videoUrl={videoUrl}
       setVideoUrl={setVideoUrl}
-      aiPortfolioReviewConsent={false}
-      setVideoReviewFrameUrl={() => {}}
-      setVideoReviewFrameUrls={() => {}}
+      aiPortfolioReviewConsent={aiPortfolioReviewConsent}
+      setVideoReviewFrameUrl={setVideoReviewFrameUrl}
+      setVideoReviewFrameUrls={setVideoReviewFrameUrls}
       videoCopyrightDecision={null}
       setVideoCopyrightDecision={() => {}}
       isSubmittingApplication={isSubmittingApplication}
@@ -4358,6 +4358,7 @@ const ListingDetailsSheet = forwardRef<
                   bucketName="documents"
                   folder="performance-videos"
                   maxSizeMB={50}
+                  maxDurationMinutes={5}
                   enableCopyrightScreening
                   allowPortfolioSelection
                   onCopyrightDecisionChange={setRequestVideoCopyrightDecision}

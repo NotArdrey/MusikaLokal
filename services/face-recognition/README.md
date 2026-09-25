@@ -1,8 +1,12 @@
-# MusikaLokal DeepFace / ArcFace service
+# Legacy MusikaLokal DeepFace / ArcFace service
 
-This service is the only face-recognition implementation used by the gig portfolio
-review. It consumes the representative JPEG frames already produced by the client;
-it never extracts a second set of frames from the video.
+This service is retained for local experiments and historical benchmark work. It
+is not used by the production gig portfolio review. Production now calls the
+Face++ Compare API directly from the Supabase Edge Function using
+`FACEPP_API_KEY` and `FACEPP_API_SECRET`.
+
+The legacy service consumes the representative JPEG frames already produced by
+the client; it never extracts a second set of frames from the video.
 
 Configuration is intentionally explicit: ArcFace, RetinaFace, cosine distance,
 alignment enabled, at most three frames, and the existing production aggregation
@@ -34,7 +38,5 @@ No-face and near-threshold frames are excluded from usable frames. Download and
 decode failures remain `unclear`; service/model failures return HTTP 503 so the
 TypeScript client can store `not_run` with the actual error.
 
-For a hosted Supabase Edge Function, `FACE_RECOGNITION_URL` must be an HTTPS URL
-reachable from Supabase; `127.0.0.1` is suitable only when Supabase is also running
-locally. Keep the service private or authenticated and do not expose model files or
-image contents in diagnostics.
+Do not configure `FACE_RECOGNITION_URL` for the production application. This
+service is optional and is not required for Face++-backed applicant reviews.

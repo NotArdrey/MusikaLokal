@@ -4397,6 +4397,7 @@ export default function EditStudioScreen() {
 
           {renderSectionHeader("Visuals", "image")}
           <ImageUploader
+            enableAiSafetyScreening={false}
             images={selectedImages}
             onImagesChange={setSelectedImages}
             thumbnailIndex={thumbnailIndex}

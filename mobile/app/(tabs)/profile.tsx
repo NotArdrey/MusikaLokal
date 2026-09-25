@@ -79,7 +79,6 @@ import { isStaffRole } from "../../src/utils/staffAccess";
 import {
   createTemporaryUploadFile,
   DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
-  readLocalFileAsBase64,
   uploadStorageObject,
   type TemporaryUploadFile,
 } from "../../src/utils/storageUpload";
@@ -941,61 +940,25 @@ const screenProfilePortfolioMedia = async (
     mimeType: string;
     uploadKind: PortfolioUploadKind;
     size: number;
-    base64?: string;
   },
 ) => {
   const originalName = getPortfolioOriginalName(file, options.fileExt);
-  const isVideoUpload = options.uploadKind === "video";
-  const isDocumentUpload = options.uploadKind === "document";
-
-  if (isDocumentUpload) {
-    const screeningSummary = await screenUploadsWithAi(
-      [
-        {
-          name: originalName,
-          mimeType: options.mimeType,
-          size: options.size,
-          uri: file.uri,
-          kind: "document" as const,
-        },
-      ],
-      "profile_portfolio_media",
-    );
-
-    if (!screeningSummary.allowed) {
-      throw new Error(
-        screeningSummary.reason || "This document did not pass safety screening.",
-      );
-    }
+  if (options.uploadKind !== "video") {
     return;
   }
-  const videoFrameDataUrls = isVideoUpload ? await buildPortfolioVideoFrameDataUrls(file) : [];
+  const videoFrameDataUrls = await buildPortfolioVideoFrameDataUrls(file);
 
   const screeningSummary = await screenUploadsWithAi(
-    isVideoUpload
-      ? videoFrameDataUrls.map((contentDataUrl, index) => ({
-          name: originalName,
-          mimeType: options.mimeType,
-          size: options.size,
-          uri: `${file.uri}#frame-${index + 1}`,
-          originalUri: file.uri,
-          originalMimeType: options.mimeType,
-          contentDataUrl,
-          kind: "video" as const,
-        }))
-      : [
-          {
-            name: originalName,
-            mimeType: options.mimeType,
-            size: options.size,
-            uri: file.uri,
-            contentDataUrl: ensureScreenableDataUrl(
-              `data:${options.mimeType};base64,${options.base64 || ""}`,
-              "This image is too large to safety screen. Please choose an image under 4 MB.",
-            ),
-            kind: "photo" as const,
-          },
-        ],
+    videoFrameDataUrls.map((contentDataUrl, index) => ({
+      name: originalName,
+      mimeType: options.mimeType,
+      size: options.size,
+      uri: `${file.uri}#frame-${index + 1}`,
+      originalUri: file.uri,
+      originalMimeType: options.mimeType,
+      contentDataUrl,
+      kind: "video" as const,
+    })),
     "profile_portfolio_media",
   );
 
@@ -2660,30 +2623,25 @@ export default function ProfileScreen() {
         resolvedFileSize: fileSize,
       });
 
-      let base64: string | undefined;
-      if (uploadKind === "photo") {
-        base64 = await readLocalFileAsBase64(readableFile.uri, displayName);
-      }
-
       logProfileMedia("file_prepared", {
         byteLength: fileSize,
-        base64Length: base64?.length || 0,
         uploadMode: "streamed_file",
       });
-      setUploadMessage(`Checking media ${index + 1}/${selectedAssets.length}...`);
-      logProfileMedia("safety_check_started", {
-        fileName,
-        mimeType,
-        byteLength: fileSize,
-      });
-      await withSafetyTimeout(screenProfilePortfolioMedia(readableFile, {
-        fileExt,
-        mimeType,
-        uploadKind,
-        size: fileSize,
-        base64,
-      }));
-      logProfileMedia("safety_check_passed", { fileName });
+      if (uploadKind === "video") {
+        setUploadMessage(`Checking video ${index + 1}/${selectedAssets.length}...`);
+        logProfileMedia("safety_check_started", {
+          fileName,
+          mimeType,
+          byteLength: fileSize,
+        });
+        await withSafetyTimeout(screenProfilePortfolioMedia(readableFile, {
+          fileExt,
+          mimeType,
+          uploadKind,
+          size: fileSize,
+        }));
+        logProfileMedia("safety_check_passed", { fileName });
+      }
 
       setUploadMessage(`Uploading media ${index + 1}/${selectedAssets.length}...`);
       logProfileMedia("storage_upload_started", {

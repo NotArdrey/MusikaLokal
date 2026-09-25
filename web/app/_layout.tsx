@@ -311,7 +311,7 @@ function RootContent() {
       }
 
       if (!realtimeAuthReady) {
-        console.warn("[notification-toast] Realtime auth unavailable; retrying", {
+        logNotificationToastDebug("Realtime auth unavailable; retrying", {
           reason,
           activeUserId,
         });
@@ -373,7 +373,7 @@ function RootContent() {
           }
 
           if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-            console.warn("[notification-toast] Realtime channel unavailable", {
+            logNotificationToastDebug("Realtime channel unavailable", {
               reason,
               status,
               activeUserId,

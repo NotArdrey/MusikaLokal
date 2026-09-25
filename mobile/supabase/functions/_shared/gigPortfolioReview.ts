@@ -1,5 +1,5 @@
 import {
-    compareApplicantFacesWithDeepFace,
+    compareApplicantFacesWithFacePlusPlus,
     unavailableFaceMatch,
     type FaceMatchSubject,
 } from './faceRecognitionClient.ts'
@@ -11,7 +11,7 @@ type ReviewEvidence = {
     result: ReviewCriterionResult
     confidence: number
     evidence: Array<{
-        source: 'cv' | 'video_transcript' | 'video_frame' | 'portfolio_image' | 'profile' | 'recognized_audio'
+        source: 'cv' | 'video_transcript' | 'video_frame' | 'portfolio_image' | 'portfolio_document' | 'profile' | 'recognized_audio'
         observation: string
         timestamp_seconds: number | null
     }>
@@ -35,9 +35,11 @@ const DEFAULT_TEXT_FALLBACK_MODELS = ['qwen/qwen3.8-27b', 'openai/gpt-oss-20b']
 const DEFAULT_VISION_MODEL = 'qwen/qwen3.8-27b'
 const DEFAULT_SPEECH_MODEL = 'whisper-large-v3-turbo'
 const DEFAULT_SPEECH_FALLBACK_MODEL = 'whisper-large-v3'
+export const GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION = 'gig-portfolio-v5-application-media-only'
 const MAX_CV_BYTES = 10 * 1024 * 1024
 const MAX_CV_TEXT_CHARS = 16_000
 const MAX_TRANSCRIPT_CHARS = 16_000
+const MAX_VISION_IMAGES_PER_REQUEST = 3
 const DEFAULT_MAX_GROUP_FACE_MEMBERS = 8
 
 const uniqueStrings = (values: unknown[]) => Array.from(new Set(
@@ -300,18 +302,23 @@ async function groqJson(
     throw lastError
 }
 
-async function extractCvText(cvUrl: string | null, supabaseUrl: string) {
-    if (!cvUrl) return { text: '', limitation: 'No CV was submitted.' }
-    const safeUrl = safeStorageUrl(cvUrl, supabaseUrl)
-    if (!safeUrl) return { text: '', limitation: 'The CV URL was not an approved storage URL.' }
+async function extractDocumentText(
+    documentUrl: string | null,
+    supabaseUrl: string,
+    label: string,
+    maxTextChars: number,
+) {
+    if (!documentUrl) return { text: '', limitation: `No ${label.toLowerCase()} was submitted.` }
+    const safeUrl = safeStorageUrl(documentUrl, supabaseUrl)
+    if (!safeUrl) return { text: '', limitation: `The ${label.toLowerCase()} URL was not an approved storage URL.` }
 
     try {
         const response = await fetch(safeUrl, { signal: AbortSignal.timeout(15_000) })
         if (!response.ok) throw new Error(`download status ${response.status}`)
         const declaredLength = Number(response.headers.get('content-length') || 0)
-        if (declaredLength > MAX_CV_BYTES) throw new Error('CV exceeds the 10MB review limit')
+        if (declaredLength > MAX_CV_BYTES) throw new Error(`${label} exceeds the 10MB review limit`)
         const bytes = new Uint8Array(await response.arrayBuffer())
-        if (bytes.byteLength > MAX_CV_BYTES) throw new Error('CV exceeds the 10MB review limit')
+        if (bytes.byteLength > MAX_CV_BYTES) throw new Error(`${label} exceeds the 10MB review limit`)
 
         const contentType = String(response.headers.get('content-type') || '').toLowerCase()
         const lowerUrl = safeUrl.toLowerCase()
@@ -343,19 +350,23 @@ async function extractCvText(cvUrl: string | null, supabaseUrl: string) {
         } else if (contentType.startsWith('text/')) {
             extracted = new TextDecoder().decode(bytes)
         } else {
-            return { text: '', limitation: 'The CV format could not be converted to text.' }
+            return { text: '', limitation: `The ${label.toLowerCase()} format could not be converted to text.` }
         }
 
-        const text = redactSensitiveText(extracted, MAX_CV_TEXT_CHARS)
+        const text = redactSensitiveText(extracted, maxTextChars)
         return text
             ? { text, limitation: '' }
-            : { text: '', limitation: 'The CV contained no extractable text; scanned PDFs need OCR.' }
+            : { text: '', limitation: `The ${label.toLowerCase()} contained no extractable text; scanned PDFs need OCR.` }
     } catch (error) {
         return {
             text: '',
-            limitation: `CV review was unavailable: ${cleanText((error as any)?.message || error, 180)}`,
+            limitation: `${label} review was unavailable: ${cleanText((error as any)?.message || error, 180)}`,
         }
     }
+}
+
+async function extractCvText(cvUrl: string | null, supabaseUrl: string) {
+    return extractDocumentText(cvUrl, supabaseUrl, 'CV', MAX_CV_TEXT_CHARS)
 }
 
 async function classifyCvDocument(text: string, apiKeys: string[], models: string[]) {
@@ -458,20 +469,21 @@ async function transcribeVideo(videoUrl: string | null, supabaseUrl: string, api
 }
 
 async function inspectImages(
-    imageSources: Array<{ source: 'video_frame' | 'portfolio_image'; url: string; timestamp_seconds: number | null }>,
+    imageSources: Array<{ source: 'video_frame'; url: string; timestamp_seconds: number | null }>,
     apiKeys: string[],
     models: string[],
 ) {
     if (imageSources.length === 0) {
-        return { observations: [], limitation: 'No reviewable video frame or portfolio images were available.' }
+        return { observations: [], limitation: 'No reviewable performance-video frames were available.' }
     }
 
     try {
+        const selectedSources = imageSources.slice(0, MAX_VISION_IMAGES_PER_REQUEST)
         const content: any[] = [{
             type: 'text',
-            text: `Review these applicant-provided images only for visible evidence relevant to a musical gig. Do not identify people, infer age, gender, ethnicity, health, disability, religion, or other protected traits. Do not judge attractiveness or overall talent. Return JSON only as {"observations":[{"image_index":0,"observation":"neutral visible fact","confidence":0.0}]}. Image 0 may be a representative video frame; the remaining images are portfolio items.`,
+            text: `Review these frames from the applicant's submitted performance video only for visible evidence relevant to a musical gig. Do not identify people, infer age, gender, ethnicity, health, disability, religion, or other protected traits. Do not judge attractiveness or overall talent. Return JSON only as {"observations":[{"image_index":0,"observation":"neutral visible fact","confidence":0.0}]}.`,
         }]
-        imageSources.forEach((item) => content.push({
+        selectedSources.forEach((item) => content.push({
             type: 'image_url',
             image_url: { url: item.url },
         }))
@@ -480,7 +492,7 @@ async function inspectImages(
         const observations = (Array.isArray(parsed?.observations) ? parsed.observations : [])
             .map((item: any) => {
                 const index = Math.floor(Number(item?.image_index))
-                const source = imageSources[index]
+                const source = selectedSources[index]
                 if (!source) return null
                 return {
                     source: source.source,
@@ -550,7 +562,7 @@ function sanitizeReviewEvidence(rawCriteria: any[], allowedCriteria: Array<{ key
                 .slice(0, 6)
                 .map((entry: any) => {
                     const source = String(entry?.source || '')
-                    if (!['cv', 'video_transcript', 'video_frame', 'portfolio_image', 'profile', 'recognized_audio'].includes(source)) return null
+                    if (!['cv', 'video_transcript', 'video_frame', 'portfolio_image', 'portfolio_document', 'profile', 'recognized_audio'].includes(source)) return null
                     const timestamp = Number(entry?.timestamp_seconds)
                     return {
                         source,
@@ -612,7 +624,7 @@ export async function queueGigPortfolioReview(client: any, applicationId: string
             applicant_id: application.applicant_id,
             status: 'queued',
             consented_at: application.ai_portfolio_review_consented_at,
-            source_summary: {},
+            source_summary: { review_pipeline_version: GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION },
             evidence: [],
             overall_summary: '',
             limitations: [],
@@ -705,16 +717,14 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
             : []
         const reviewedGroupMemberIds = groupMemberIds.slice(0, maxGroupFaceMembers)
 
-        const [gigResult, requirementResult, profileResult, skillsResult, genresResult, portfolioResult, groupResult, groupRosterResult, groupMediaResult, groupMemberProfilesResult] = await Promise.all([
+        const [gigResult, requirementResult, profileResult, skillsResult, genresResult, groupResult, groupRosterResult, groupMemberProfilesResult] = await Promise.all([
             client.from('gigs').select('name, description, location').eq('id', application.gig_id).maybeSingle(),
             client.from('gig_requirements').select('requirement_key, requirement_value').eq('gig_id', application.gig_id),
             profileId ? client.from('profiles').select('full_name, bio, location, avatar_url').eq('id', profileId).maybeSingle() : Promise.resolve({ data: null, error: null }),
             profileId ? client.from('profile_skills').select('skill').eq('profile_id', profileId) : Promise.resolve({ data: [], error: null }),
             profileId ? client.from('profile_genres').select('genre').eq('profile_id', profileId) : Promise.resolve({ data: [], error: null }),
-            profileId ? client.from('profile_portfolio_urls').select('portfolio_url, sort_order').eq('profile_id', profileId).order('sort_order') : Promise.resolve({ data: [], error: null }),
             groupId ? client.from('groups').select('name, description, genre, location, group_type').eq('id', groupId).maybeSingle() : Promise.resolve({ data: null, error: null }),
             groupId ? client.from('group_roster_members').select('member_role, instrument').eq('group_id', groupId) : Promise.resolve({ data: [], error: null }),
-            groupId ? client.from('group_media').select('media_url, media_type, sort_order').eq('group_id', groupId).order('sort_order') : Promise.resolve({ data: [], error: null }),
             reviewedGroupMemberIds.length > 0
                 ? client.from('profiles').select('id, full_name, avatar_url').in('id', reviewedGroupMemberIds)
                 : Promise.resolve({ data: [], error: null }),
@@ -743,27 +753,18 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
             : {}
         const recognizedAudioGenre = buildRecognizedAudioGenreContext(trustedCopyrightMetadata)
 
-        const portfolioUrls = uniqueStrings([
-            (portfolioResult.data || []).map((item: any) => item.portfolio_url),
-            (groupMediaResult.data || []).map((item: any) => item.media_url),
-        ])
-            .map((url) => safeStorageUrl(url, supabaseUrl))
-            .filter((url): url is string => Boolean(url && isImageUrl(url)))
         const frameUrls = uniqueStrings([
             Array.isArray(application.ai_review_frame_urls) ? application.ai_review_frame_urls : [],
             application.ai_review_frame_url,
         ])
             .map((url) => safeStorageUrl(url, supabaseUrl))
             .filter((url): url is string => Boolean(url && isImageUrl(url)))
-            .slice(0, 3)
-        const imageSources = [
-            ...frameUrls.map((url, index) => ({ source: 'video_frame' as const, url, timestamp_seconds: index === 0 ? 1 : null })),
-            ...portfolioUrls.slice(0, Math.max(0, 3 - frameUrls.length)).map((url) => ({
-                source: 'portfolio_image' as const,
-                url,
-                timestamp_seconds: null,
-            })),
-        ].slice(0, 3)
+            .slice(0, MAX_VISION_IMAGES_PER_REQUEST)
+        const imageSources = frameUrls.map((url, index) => ({
+            source: 'video_frame' as const,
+            url,
+            timestamp_seconds: index === 0 ? 1 : null,
+        }))
         const profilePhotoUrl = safeStorageUrl(profileResult.data?.avatar_url, supabaseUrl)
         const faceComparisonEligible = Boolean(profileId && !groupId)
         const groupProfilesById = new Map((groupMemberProfilesResult.data || []).map((profile: any) => [String(profile.id), profile]))
@@ -782,18 +783,22 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
                 }))
                 .filter((subject: any): subject is FaceMatchSubject => Boolean(subject.reference_image_url)),
         ]
-        // CHANGE IMPACT:
-        // Face identity comparison now delegates to the local DeepFace/ArcFace service.
-        // Groq still handles CV, transcription, and visual portfolio observations;
+        // Face++ handles only the optional 1:1 profile-photo/video-frame comparison.
+        // Groq handles only the submitted CV, video transcription, and video-frame observations.
+        // Profile and group portfolio media are intentionally excluded from application scoring.
         // ACRCloud catalog genre evidence and recommendation behavior are unchanged.
-        const [cv, video, visual, deepFaceResults] = await Promise.all([
+        const [cv, video, visual, facePlusPlusResults] = await Promise.all([
             extractCvText(application.cv_url, supabaseUrl),
             transcribeVideo(application.video_url, supabaseUrl, apiKeys, speechModels),
             inspectImages(imageSources, apiKeys, visionModels),
-            compareApplicantFacesWithDeepFace(faceSubjects, frameUrls, {
-                serviceUrl: String(Deno.env.get('FACE_RECOGNITION_URL') || ''),
-                apiKey: String(Deno.env.get('FACE_RECOGNITION_API_KEY') || ''),
-                timeoutMs: Number(Deno.env.get('FACE_RECOGNITION_TIMEOUT_MS') || 60_000),
+            compareApplicantFacesWithFacePlusPlus(faceSubjects, frameUrls, {
+                apiKey: String(Deno.env.get('FACEPP_API_KEY') || ''),
+                apiSecret: String(Deno.env.get('FACEPP_API_SECRET') || ''),
+                apiBaseUrl: String(Deno.env.get('FACEPP_API_BASE_URL') || ''),
+                thresholdTier: String(Deno.env.get('FACEPP_THRESHOLD_TIER') || '1e-5'),
+                timeoutMs: Number(Deno.env.get('FACEPP_TIMEOUT_MS') || 20_000),
+                maxConcurrencyRetries: Number(Deno.env.get('FACEPP_MAX_CONCURRENCY_RETRIES') || 3),
+                retryBaseDelayMs: Number(Deno.env.get('FACEPP_RETRY_BASE_DELAY_MS') || 1_000),
             }),
         ])
         const faceSimilarity = !faceComparisonEligible
@@ -803,20 +808,18 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
                     'No approved applicant profile photo was available.',
                     'Face matching was not run because the applicant profile photo was unavailable.',
                 )
-                : deepFaceResults.get('solo-applicant') || unavailableFaceMatch(
-                    'DeepFace/ArcFace face matching did not return a result.',
-                    'The face service response was incomplete.',
+                : facePlusPlusResults.get('solo-applicant') || unavailableFaceMatch(
+                    'Face++ face matching did not return a result.',
+                    'The Face++ response was incomplete.',
                 )
         const groupFaceSimilarity = groupMemberProfiles.map((member: any) => ({
             profile_id: member.id,
             display_name: cleanText(member.full_name, 120) || 'Group member',
-            ...(deepFaceResults.get(String(member.id)) || unavailableFaceMatch(
+            ...(facePlusPlusResults.get(String(member.id)) || unavailableFaceMatch(
                 'No approved group-member profile photo was available.',
-                'DeepFace/ArcFace face matching was not run for this group member.',
+                'Face++ face matching was not run for this group member.',
             )),
         }))
-        const faceRuntime = [faceSimilarity, ...groupFaceSimilarity]
-            .find((result: any) => Boolean(result?.service_version)) || faceSimilarity
         const cvDocumentClassification = await classifyCvDocument(cv.text, apiKeys, textModels)
         const cvTextForScoring = cvDocumentClassification.status === 'cv' ? cv.text : ''
         const groupFaceReviewLimitations = [
@@ -856,7 +859,7 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
         const parsed = await groqJson(apiKeys, textModels, [
             {
                 role: 'system',
-                content: `You perform advisory evidence extraction for musical gig applications. You never authenticate claims, score talent, rank applicants, determine eligibility, or accept/reject anyone. Evaluate only the supplied owner criteria. For instrument, genre, and location criteria, absence of evidence means "unclear", not "not_supported"; use "not_supported" only for direct contradictory evidence. Recognized-audio catalog genres are strong genre evidence when they match the requested genre, but may not fully describe a live rearrangement. For portfolio_requirement, return "supported" only when the submitted CV, transcript, or images contain relevant musical-performance or professional-portfolio evidence. If submitted sources were successfully reviewed but contain no such evidence, return "not_supported". Use "unclear" only when the relevant sources were unavailable or too ambiguous to assess. Do not infer protected or personal traits. Return JSON only as {"summary":"neutral advisory summary","criteria":[{"criterion":"provided key","result":"supported|not_supported|unclear","confidence":0.0,"evidence":[{"source":"cv|video_transcript|video_frame|portfolio_image|profile|recognized_audio","observation":"short evidence excerpt or observation","timestamp_seconds":null}],"limitations":["short limitation"]}],"cv_criteria":[{"criterion":"provided key","result":"supported|not_supported|unclear","confidence":0.0,"evidence":[{"source":"cv","observation":"concise resume evidence","timestamp_seconds":null}],"limitations":["short limitation"]}],"limitations":["overall limitation"]}. Evaluate cv_criteria using CV text only. If the CV has no evidence for a criterion, mark it unclear.`,
+                content: `You perform advisory evidence extraction for musical gig applications. You never authenticate claims, score talent, rank applicants, determine eligibility, or accept/reject anyone. Evaluate only the supplied owner criteria. For instrument, genre, and location criteria, absence of evidence means "unclear", not "not_supported"; use "not_supported" only for direct contradictory evidence. Recognized-audio catalog genres are strong genre evidence when they match the requested genre, but may not fully describe a live rearrangement. For portfolio_requirement, evaluate only the submitted application CV, performance-video transcript, and performance-video frames. Never use declared profile context or profile/group portfolio media for portfolio_requirement. Return "supported" when those submitted application sources contain relevant musical-performance or professional evidence. If they were successfully reviewed but contain no such evidence, return "not_supported". An unrelated school assignment, software document, invoice, or other non-musical upload is not performance evidence. Use "unclear" only when the relevant submitted application sources were unavailable or too ambiguous to assess. Do not infer protected or personal traits. Return JSON only as {"summary":"neutral advisory summary","criteria":[{"criterion":"provided key","result":"supported|not_supported|unclear","confidence":0.0,"evidence":[{"source":"cv|video_transcript|video_frame|profile|recognized_audio","observation":"short evidence excerpt or observation","timestamp_seconds":null}],"limitations":["short limitation"]}],"cv_criteria":[{"criterion":"provided key","result":"supported|not_supported|unclear","confidence":0.0,"evidence":[{"source":"cv","observation":"concise resume evidence","timestamp_seconds":null}],"limitations":["short limitation"]}],"limitations":["overall limitation"]}. Evaluate cv_criteria using CV text only. If the CV has no evidence for a criterion, mark it unclear.`,
             },
             {
                 role: 'user',
@@ -880,7 +883,19 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
             },
         ], 40_000)
 
-        const evidence = sanitizeReviewEvidence(parsed?.criteria, criteria)
+        const evidence = sanitizeReviewEvidence(parsed?.criteria, criteria).map((item) => {
+            if (item.criterion !== 'portfolio_requirement') return item
+            const applicationEvidence = item.evidence.filter((entry) =>
+                ['cv', 'video_transcript', 'video_frame'].includes(entry.source)
+            )
+            return {
+                ...item,
+                result: item.result === 'supported' && applicationEvidence.length === 0
+                    ? 'unclear' as ReviewCriterionResult
+                    : item.result,
+                evidence: applicationEvidence,
+            }
+        })
         const recognizedGenreEvidence = buildRecognizedAudioGenreEvidence(
             criteria,
             trustedCopyrightMetadata,
@@ -935,6 +950,7 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
         const { error: updateError } = await client.from('gig_application_ai_reviews').update({
             status: isPartial ? 'partial' : 'completed',
             source_summary: {
+                review_pipeline_version: GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION,
                 cv_text_extracted: Boolean(cv.text),
                 cv_document_classification: {
                     status: cvDocumentClassification.status,
@@ -943,18 +959,19 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
                 },
                 cv_criteria_scored: cvDocumentClassification.status === 'cv',
                 video_transcribed: Boolean(video.transcript),
-                video_frames_reviewed: visual.observations.filter((item: any) => item.source === 'video_frame').length,
-                portfolio_images_reviewed: visual.observations.filter((item: any) => item.source === 'portfolio_image').length,
+                video_frames_reviewed: visual.limitation
+                    ? 0
+                    : imageSources.filter((item) => item.source === 'video_frame').length,
+                profile_portfolio_used: false,
+                portfolio_images_reviewed: 0,
+                portfolio_documents_found: 0,
+                portfolio_documents_reviewed: 0,
                 profile_photo_compared: Boolean(profilePhotoUrl && faceSimilarity.status !== 'not_run'),
-                face_match_provider: 'deepface_arcface',
-                face_match_model: 'ArcFace',
-                face_match_service_version: faceRuntime.service_version,
-                face_match_deepface_version: faceRuntime.deepface_version,
-                face_match_detector_backend: faceRuntime.detector_backend,
-                face_match_distance_metric: faceRuntime.distance_metric,
-                face_match_threshold: faceRuntime.threshold,
-                face_match_alignment: faceRuntime.alignment,
-                face_match_aggregation: faceRuntime.aggregation_strategy,
+                face_match_provider: 'faceplusplus_compare',
+                face_match_model: 'Face++ Compare API',
+                face_match_threshold_tier: faceSimilarity.threshold_tier,
+                face_match_threshold: faceSimilarity.threshold,
+                face_match_aggregation: faceSimilarity.aggregation_strategy,
                 group_members_snapshotted: groupMemberIds.length,
                 group_profile_photos_compared: groupFaceSimilarity.filter((item: any) => item.status !== 'not_run').length,
                 recognized_audio_genre: recognizedAudioGenre,
@@ -965,8 +982,8 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
             evidence,
             overall_summary: redactSensitiveText(parsed?.summary, 1_200) || 'AI evidence review completed. Inspect the original files before making a decision.',
             limitations: allLimitations,
-            model_provider: 'groq+deepface_arcface',
-            model_version: `accounts=${apiKeys.length}; text=${textModels.join(' -> ')}; vision=${visionModels.join(' -> ')}; speech=${speechModels.join(' -> ')}; face=DeepFace/${faceRuntime.deepface_version || 'unknown'}/ArcFace`,
+            model_provider: 'groq+faceplusplus',
+            model_version: `accounts=${apiKeys.length}; text=${textModels.join(' -> ')}; vision=${visionModels.join(' -> ')}; speech=${speechModels.join(' -> ')}; face=Face++/Compare/${faceSimilarity.threshold_tier || '1e-5'}`,
             error_message: null,
             completed_at: completedAt,
             updated_at: completedAt,

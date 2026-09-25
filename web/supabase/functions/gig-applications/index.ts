@@ -4,13 +4,14 @@ import { buildNotificationRouteMeta } from '../_shared/notificationRoutes.ts'
 import { buildGigApplicationAudienceMeta, resolveGigApplicationAudience } from '../_shared/gigApplicationAudience.ts'
 import { scheduleCoreActionEmailForNotification } from '../_shared/coreActionEmail.ts'
 import {
+    GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION,
     queueGigPortfolioReview,
     scheduleGigPortfolioReview,
 } from '../_shared/gigPortfolioReview.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-ai-review-admin-secret',
 }
 
 function extractAccessToken(authHeader: string): string | null {
@@ -544,7 +545,7 @@ const DEFAULT_RECOMMENDATION_SETTINGS = {
     },
 }
 
-const RECOMMENDATION_MODEL_VERSION = 'gig-fit-v4'
+const RECOMMENDATION_MODEL_VERSION = 'gig-fit-v7'
 
 function normalizeCriterionMode(value: unknown, fallback: RecommendationCriterionMode) {
     const normalized = String(value || '')
@@ -651,6 +652,7 @@ function readCoordinates(source: any) {
     const longitude = Number(source?.longitude)
     if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) return null
     if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) return null
+    if (latitude === 0 && longitude === 0) return null
     return { latitude, longitude }
 }
 
@@ -707,11 +709,7 @@ function getApplicationPerformer(application: any) {
         ]),
         location: String(group?.location || profile?.location || '').trim(),
         coordinates: readCoordinates(group) || readCoordinates(profile),
-        hasPortfolio: Boolean(
-            application?.video_url ||
-                application?.cv_url ||
-                (Array.isArray(profile?.portfolio_urls) && profile.portfolio_urls.length > 0)
-        ),
+        hasPortfolio: Boolean(application?.video_url || application?.cv_url),
     }
 }
 
@@ -829,11 +827,14 @@ function evaluateGigApplication(
     }
     if (settings.criteria.portfolio !== 'ignore') {
         possiblePoints += 15
-        if (performer.hasPortfolio) {
-            earnedPoints += 15
-            matched.push('Portfolio or application media provided')
+        if (!performer.hasPortfolio) {
+            missing.push('Submitted performance evidence not provided')
+            if (settings.criteria.portfolio === 'required') missingRequired = true
+        } else if (application.ai_portfolio_review_consent === true) {
+            missing.push('Performance evidence review pending')
+            if (settings.criteria.portfolio === 'required') missingRequired = true
         } else {
-            missing.push('Portfolio or application media not provided')
+            missing.push('Performance evidence not checked because permission was not given')
             if (settings.criteria.portfolio === 'required') missingRequired = true
         }
     }
@@ -887,6 +888,10 @@ function evaluateGigApplication(
                 has_portfolio: performer.hasPortfolio,
             },
             distance_km: distanceKm,
+            score_breakdown: {
+                earned_points: earnedPoints,
+                possible_points: possiblePoints,
+            },
         },
         model_provider: 'rules',
         model_version: RECOMMENDATION_MODEL_VERSION,
@@ -1027,6 +1032,30 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
         }
         applySupportingEvidence('Instrument or role fit', instrumentResult)
         applySupportingEvidence('Genre fit', genreResult)
+        const portfolioLabel = 'Submitted performance evidence fits the gig'
+        const portfolioMissingLabels = [
+            'Portfolio fit review pending',
+            'Portfolio fit not checked because permission was not given',
+            'Portfolio or performance evidence does not fit the gig',
+            'Portfolio fit could not be confirmed',
+            'Performance evidence review pending',
+            'Performance evidence not checked because permission was not given',
+            'Submitted performance evidence does not fit the gig',
+            'Performance evidence could not be confirmed',
+        ]
+        if (portfolioEvidence && portfolioResult === 'supported') {
+            missingCriteria = missingCriteria.filter((label: string) => !portfolioMissingLabels.includes(label))
+            if (!matchedCriteria.includes(portfolioLabel)) matchedCriteria = [...matchedCriteria, portfolioLabel]
+        } else if (portfolioEvidence) {
+            matchedCriteria = matchedCriteria.filter((label: string) => label !== portfolioLabel)
+            const unavailablePortfolioLabel = portfolioResult === 'not_supported'
+                ? 'Submitted performance evidence does not fit the gig'
+                : 'Performance evidence could not be confirmed'
+            missingCriteria = missingCriteria.filter((label: string) => !portfolioMissingLabels.includes(label))
+            if (!missingCriteria.includes(unavailablePortfolioLabel)) {
+                missingCriteria = [...missingCriteria, unavailablePortfolioLabel]
+            }
+        }
 
         const settings = item?.criteria_snapshot?.settings || {}
         const expected = item?.criteria_snapshot?.requirements || {}
@@ -1068,7 +1097,7 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
         addScoredCriterion(
             String(criteria.portfolio || ''),
             true,
-            hasMatched('Portfolio or application media provided'),
+            hasMatched('Submitted performance evidence fits the gig'),
             15
         )
 
@@ -1126,7 +1155,7 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
             !matchedCriteria.some((label: string) => label.startsWith('Within '))
                 ? 'location'
                 : '',
-            criteria.portfolio === 'required' && !hasMatched('Portfolio or application media provided')
+            criteria.portfolio === 'required' && !hasMatched('Submitted performance evidence fits the gig')
                 ? 'portfolio'
                 : '',
         ].filter(Boolean)
@@ -1156,11 +1185,23 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
             matched_criteria: matchedCriteria,
             missing_criteria: missingCriteria,
             explanation: `${baseExplanation} ${notes.join(' ')}`.trim(),
+            criteria_snapshot: {
+                ...item.criteria_snapshot,
+                score_breakdown: {
+                    earned_points: earnedPoints,
+                    possible_points: possiblePoints,
+                },
+            },
         }
     })
 }
 
-async function attachGigApplicationRecommendations(supabaseClient: any, gigId: string, applications: any[]) {
+async function attachGigApplicationRecommendations(
+    supabaseClient: any,
+    gigId: string,
+    applications: any[],
+    includeAiExplanations = true
+) {
     const [{ data: requirementRows, error: requirementError }, { data: gigRecord, error: gigError }] =
         await Promise.all([
             supabaseClient.from('gig_requirements').select('requirement_key, requirement_value').eq('gig_id', gigId),
@@ -1186,7 +1227,7 @@ async function attachGigApplicationRecommendations(supabaseClient: any, gigId: s
     }
 
     let evaluations = applications.map((application) => evaluateGigApplication(application, requirements, settings))
-    evaluations = await addGroqRecommendationExplanations(evaluations)
+    if (includeAiExplanations) evaluations = await addGroqRecommendationExplanations(evaluations)
     evaluations = await addAdvisoryMediaReviewSummaries(supabaseClient, evaluations)
 
     if (evaluations.length > 0) {
@@ -1320,6 +1361,28 @@ Deno.serve(async (req: Request) => {
         }
 
         const supabaseClient = createClient(supabaseUrl, serviceRoleKey)
+        const { action, ...params } = await req.json()
+        const reviewAdminSecret = Deno.env.get('AI_REVIEW_ADMIN_SECRET') || ''
+        const suppliedReviewAdminSecret = req.headers.get('x-ai-review-admin-secret') || ''
+        const hasReviewAdminAccess = accessToken === serviceRoleKey || Boolean(
+            reviewAdminSecret && suppliedReviewAdminSecret === reviewAdminSecret
+        )
+
+        if (hasReviewAdminAccess && action === 'reprocess_ai_portfolio_review') {
+            const { applicationId } = params
+            if (!applicationId) {
+                return new Response(JSON.stringify({ error: 'applicationId is required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+            await queueGigPortfolioReview(supabaseClient, applicationId)
+            await scheduleGigPortfolioReview(supabaseClient, applicationId, supabaseUrl)
+            return new Response(JSON.stringify({ application_id: applicationId, status: 'queued' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 202,
+            })
+        }
 
         const {
             data: { user: authUser },
@@ -1335,7 +1398,6 @@ Deno.serve(async (req: Request) => {
 
         const authenticatedUserId = authUser.id
 
-        const { action, ...params } = await req.json()
         const { userId } = params
 
         if (userId && userId !== authenticatedUserId) {
@@ -1473,15 +1535,66 @@ Deno.serve(async (req: Request) => {
             ])
             if (reviewResult.error) console.warn('gig_application_ai_review_read_failed', { message: reviewResult.error.message })
             if (recommendationResult.error) console.warn('gig_application_recommendation_read_failed', { message: recommendationResult.error.message })
+            let reviewData = reviewResult.error ? null : reviewResult.data || null
+            const reviewStatus = String(reviewData?.status || '')
+            const reviewPipelineVersion = String(reviewData?.source_summary?.review_pipeline_version || '')
+            const storedFaceError = String(reviewData?.face_similarity?.error || '').toLowerCase()
+            const storedFaceSummary = String(reviewData?.face_similarity?.summary || '').toLowerCase()
+            const hasStaleFaceConfigurationFailure =
+                storedFaceError === 'missing_face_service_url' ||
+                storedFaceError === 'missing_facepp_credentials' ||
+                storedFaceSummary.includes('not configured')
+            const shouldRefreshReview = applicationRecord.ai_portfolio_review_consent === true && (
+                !reviewData ||
+                reviewStatus === 'failed' ||
+                hasStaleFaceConfigurationFailure ||
+                (['completed', 'partial'].includes(reviewStatus) &&
+                    reviewPipelineVersion !== GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION)
+            )
+            if (shouldRefreshReview) {
+                try {
+                    await queueGigPortfolioReview(supabaseClient, applicationId)
+                    await scheduleGigPortfolioReview(supabaseClient, applicationId, supabaseUrl)
+                    reviewData = {
+                        ...(reviewData || {}),
+                        status: 'queued',
+                        source_summary: { review_pipeline_version: GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION },
+                        evidence: [],
+                        overall_summary: '',
+                        face_similarity: {},
+                        group_face_similarity: [],
+                    }
+                } catch (reviewRefreshError) {
+                    console.warn('gig_application_ai_review_refresh_failed', {
+                        applicationId,
+                        message: String((reviewRefreshError as any)?.message || reviewRefreshError),
+                    })
+                }
+            }
             const [applicationWithHistory] = await attachPriorApplicationCounts(
                 supabaseClient,
                 gigRecord.organizer_id,
                 [hydratedApplication]
             )
+            let recommendationData = recommendationResult.error ? null : recommendationResult.data || null
+            try {
+                const [applicationWithFreshRecommendation] = await attachGigApplicationRecommendations(
+                    supabaseClient,
+                    applicationRecord.gig_id,
+                    [applicationWithHistory],
+                    false
+                )
+                recommendationData = applicationWithFreshRecommendation?.ai_recommendation || null
+            } catch (recommendationRefreshError) {
+                console.warn('gig_application_recommendation_refresh_failed', {
+                    applicationId,
+                    message: String((recommendationRefreshError as any)?.message || recommendationRefreshError),
+                })
+            }
             return new Response(JSON.stringify({
                 ...applicationWithHistory,
-                ai_portfolio_review: reviewResult.error ? null : reviewResult.data || null,
-                ai_recommendation: recommendationResult.error ? null : recommendationResult.data || null,
+                ai_portfolio_review: reviewData,
+                ai_recommendation: recommendationData,
             }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 
@@ -1536,7 +1649,7 @@ Deno.serve(async (req: Request) => {
 
             const hydratedData = await hydrateLegacyApplicationFields(supabaseClient, data || [])
             const applicationIds = hydratedData.map((application: any) => application.id).filter(Boolean)
-            const [recommendationResult, settingsResult] = await Promise.all([
+            const [recommendationResult, settingsResult, reviewFreshnessResult] = await Promise.all([
                 applicationIds.length > 0
                     ? supabaseClient
                           .from('gig_application_recommendations')
@@ -1548,11 +1661,18 @@ Deno.serve(async (req: Request) => {
                     .select('gig_id, requirement_value')
                     .in('gig_id', allowedGigIds)
                     .eq('requirement_key', 'ai_recommendation_settings'),
+                applicationIds.length > 0
+                    ? supabaseClient
+                          .from('gig_application_ai_reviews')
+                          .select('application_id, updated_at')
+                          .in('application_id', applicationIds)
+                    : Promise.resolve({ data: [], error: null }),
             ])
             const { data: existingRecommendations, error: recommendationError } = recommendationResult
 
             if (recommendationError) throw recommendationError
             if (settingsResult.error) throw settingsResult.error
+            if (reviewFreshnessResult.error) throw reviewFreshnessResult.error
 
             const recommendationEnabledGigIds = new Set(
                 (settingsResult.data || [])
@@ -1560,6 +1680,12 @@ Deno.serve(async (req: Request) => {
                     .map((row: any) => row.gig_id)
             )
             const freshRecommendationCutoff = Date.now() - 5 * 60 * 1000
+            const reviewUpdatedAtByApplicationId = new Map(
+                (reviewFreshnessResult.data || []).map((review: any) => [
+                    review.application_id,
+                    new Date(review.updated_at || 0).getTime(),
+                ])
+            )
 
             const existingByApplicationId = new Map(
                 (existingRecommendations || [])
@@ -1567,7 +1693,9 @@ Deno.serve(async (req: Request) => {
                         (recommendation: any) =>
                             recommendationEnabledGigIds.has(recommendation.gig_id) &&
                             recommendation.model_version === RECOMMENDATION_MODEL_VERSION &&
-                            new Date(recommendation.generated_at || 0).getTime() >= freshRecommendationCutoff
+                            new Date(recommendation.generated_at || 0).getTime() >= freshRecommendationCutoff &&
+                            new Date(recommendation.generated_at || 0).getTime() >=
+                                Number(reviewUpdatedAtByApplicationId.get(recommendation.application_id) || 0)
                     )
                     .map((recommendation: any) => [recommendation.application_id, recommendation])
             )

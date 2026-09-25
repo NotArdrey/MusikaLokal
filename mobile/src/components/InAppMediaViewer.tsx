@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  Linking,
   Modal,
   Pressable,
   Platform,
@@ -49,24 +50,13 @@ const getExtension = (url: string) => {
   return match?.[1]?.toLowerCase() || "";
 };
 
-const canUseGoogleDocsPreview = (url: string | null | undefined, mediaType: InAppMediaType | null) => {
-  const normalizedUrl = String(url || "").trim();
-  if (mediaType !== "document" || !/^https?:\/\//i.test(normalizedUrl)) return false;
-
-  const extension = getExtension(normalizedUrl);
-  return Platform.OS === "android" || !PREVIEWABLE_DOCUMENT_EXTENSIONS.includes(extension);
-};
-
 const isPreviewableDocumentUrl = (url: string | null | undefined, mediaType: InAppMediaType | null = getInAppMediaType(url)) => {
+  if (Platform.OS === "android" || mediaType !== "document") return false;
   const extension = getExtension(String(url || ""));
-  return PREVIEWABLE_DOCUMENT_EXTENSIONS.includes(extension) || canUseGoogleDocsPreview(url, mediaType);
+  return PREVIEWABLE_DOCUMENT_EXTENSIONS.includes(extension);
 };
 
 const getPreviewUri = (url: string, mediaType: InAppMediaType | null) => {
-  if (canUseGoogleDocsPreview(url, mediaType)) {
-    return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(url)}`;
-  }
-
   if (mediaType !== "document" || getExtension(url) !== "pdf") return url;
 
   const [baseUrl] = url.split("#");
@@ -86,8 +76,10 @@ export const getInAppMediaType = (url: string | null | undefined): InAppMediaTyp
   return null;
 };
 
-export const isInAppMediaUrl = (url: string | null | undefined) =>
-  getInAppMediaType(url) !== null;
+export const isInAppMediaUrl = (url: string | null | undefined) => {
+  const mediaType = getInAppMediaType(url);
+  return mediaType !== null && !(Platform.OS === "android" && mediaType === "document");
+};
 
 interface InAppMediaViewerProps {
   visible: boolean;
@@ -161,7 +153,7 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
         <View style={styles.mediaFrame}>
           {loading && (
             <View style={styles.loadingOverlay}>
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color={mediaType === "document" ? "#5B4BC4" : "#FFFFFF"} />
             </View>
           )}
 
@@ -192,9 +184,20 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
               />
             </View>
           ) : uri && mediaType === "document" ? (
-            <Text style={styles.unsupportedText}>
-              This document type cannot be previewed in-app.
-            </Text>
+            <View style={styles.documentFallback}>
+              <Ionicons name="document-text-outline" size={34} color="#FFFFFF" />
+              <Text style={styles.unsupportedText}>
+                Open this document with your device viewer.
+              </Text>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => void Linking.openURL(uri)}
+                style={styles.openExternalButton}
+              >
+                <Ionicons name="open-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.openExternalButtonText}>Open document</Text>
+              </TouchableOpacity>
+            </View>
           ) : uri && mediaType === "web" ? (
             <View style={styles.documentFrame}>
               <WebView
@@ -273,6 +276,26 @@ const styles = StyleSheet.create({
   loadingOverlay: {
     position: "absolute",
     zIndex: 1,
+  },
+  documentFallback: {
+    alignItems: "center",
+    gap: 14,
+    paddingHorizontal: 28,
+  },
+  openExternalButton: {
+    minHeight: 46,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 20,
+    borderRadius: 23,
+    backgroundColor: "#5B4BC4",
+  },
+  openExternalButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontFamily: "Poppins_600SemiBold",
   },
   unsupportedText: {
     color: "#FFFFFF",

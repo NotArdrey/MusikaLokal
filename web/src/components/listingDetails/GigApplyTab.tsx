@@ -864,6 +864,7 @@ const GigApplyTab = ({
         bucketName="documents"
         folder="performance-videos"
         maxSizeMB={50}
+        maxDurationMinutes={5}
         enableReviewFrame={aiPortfolioReviewConsent}
         onReviewFrameChange={(url) => setVideoReviewFrameUrl(url || "")}
         onReviewFramesChange={setVideoReviewFrameUrls}

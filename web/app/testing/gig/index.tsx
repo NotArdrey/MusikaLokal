@@ -671,7 +671,7 @@ export default function GigTestingPage() {
           label="AI portfolio review (optional)"
           checked={applicationForm.aiPortfolioReviewConsent}
           onPress={() => setApplicationForm((current) => ({ ...current, aiPortfolioReviewConsent: !current.aiPortfolioReviewConsent }))}
-          hint="Allows Groq text/vision/Whisper and the DeepFace/ArcFace service to review redacted application evidence. Advisory only; it does not accept or reject the application."
+          hint="Allows Groq text/vision/Whisper and Face++ Compare to review redacted application evidence. Advisory only; it does not accept or reject the application."
         />
         <View style={styles.grid}>
           <View style={styles.field}><Text style={styles.label}>CV / resume *</Text><WebFileInput accept="application/pdf,.doc,.docx,text/plain" disabled={busy} onFiles={(files) => setCvFile(files[0] || null)} /><Text style={styles.hint}>{cvFile?.name || "No CV selected."}</Text></View>

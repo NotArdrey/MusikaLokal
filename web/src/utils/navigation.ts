@@ -13,7 +13,11 @@ export const hasValidCoordinates = (
   latitude?: number | string | null,
   longitude?: number | string | null,
 ) => {
-  return toCoordinate(latitude) !== null && toCoordinate(longitude) !== null;
+  const lat = toCoordinate(latitude);
+  const lng = toCoordinate(longitude);
+  return lat !== null && lng !== null &&
+    lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 &&
+    !(lat === 0 && lng === 0);
 };
 
 type OpenNavigationInput = {
@@ -45,7 +49,7 @@ export const openNavigationDirections = async ({
   const lat = toCoordinate(latitude);
   const lng = toCoordinate(longitude);
   const normalizedText = destinationText?.trim() || "";
-  const hasCoords = lat !== null && lng !== null;
+  const hasCoords = hasValidCoordinates(lat, lng);
 
   if (!hasCoords && !normalizedText) {
     throw new Error("Missing navigation destination");

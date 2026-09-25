@@ -644,7 +644,7 @@ export const useApplicationSubmissionAction = ({
 
         setPitchMessage("");
         setVideoUrl("");
-        setAiPortfolioReviewConsent(false);
+        setAiPortfolioReviewConsent(true);
         setVideoReviewFrameUrl("");
         setVideoReviewFrameUrls([]);
         setVideoCopyrightAcknowledged(false);
@@ -849,7 +849,7 @@ export const useApplicationSubmissionAction = ({
 
       setPitchMessage("");
       setVideoUrl("");
-      setAiPortfolioReviewConsent(false);
+      setAiPortfolioReviewConsent(true);
       setVideoReviewFrameUrl("");
       setVideoReviewFrameUrls([]);
       setVideoCopyrightAcknowledged(false);

@@ -43,6 +43,7 @@ import { emitToast } from "../src/events/toastBus";
 import { screenUploadsWithAi } from "../src/services/uploadSafetyScreen";
 import { isFanUserRole } from "../src/utils/roleRouting";
 import { isStaffRole } from "../src/utils/staffAccess";
+import { uploadStorageObject } from "../src/utils/storageUpload";
 import {
   applyPlaylistAudioCopyrightDecision,
   pickPlaylistAudioFile,
@@ -715,14 +716,6 @@ const ensureScreenableDataUrl = (dataUrl: string, message: string): string => {
   return dataUrl;
 };
 
-const readBlobAsDataUrl = (blob: Blob): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("Could not read media for safety screening."));
-    reader.readAsDataURL(blob);
-  });
-
 const getPortfolioSourceBlob = async (file: PortfolioUploadAsset): Promise<Blob> => {
   const webFile = (file as any)?.file;
   if (typeof Blob !== "undefined" && webFile instanceof Blob) {
@@ -906,56 +899,21 @@ const screenProfilePortfolioMedia = async (
   },
 ) => {
   const originalName = getPortfolioOriginalName(file, options.fileExt);
-  const isVideoUpload = options.uploadKind === "video";
-  const isDocumentUpload = options.uploadKind === "document";
-
-  if (isDocumentUpload) {
-    const screeningSummary = await screenUploadsWithAi(
-      [
-        {
-          name: originalName,
-          mimeType: options.mimeType,
-          size: options.size,
-          uri: file.uri,
-          kind: "document" as const,
-        },
-      ],
-      "profile_portfolio_media",
-    );
-
-    if (!screeningSummary.allowed) {
-      throw new Error(
-        screeningSummary.reason || "This document did not pass safety screening.",
-      );
-    }
+  if (options.uploadKind !== "video") {
     return;
   }
 
   const screeningSummary = await screenUploadsWithAi(
-    isVideoUpload
-      ? (await buildPortfolioVideoFrameDataUrls(options.sourceBlob)).map((contentDataUrl, index) => ({
-          name: originalName,
-          mimeType: options.mimeType,
-          size: options.size,
-          uri: `${file.uri}#frame-${index + 1}`,
-          originalUri: file.uri,
-          originalMimeType: options.mimeType,
-          contentDataUrl,
-          kind: "video" as const,
-        }))
-      : [
-          {
-            name: originalName,
-            mimeType: options.mimeType,
-            size: options.size,
-            uri: file.uri,
-            contentDataUrl: ensureScreenableDataUrl(
-              await readBlobAsDataUrl(options.sourceBlob),
-              "This image is too large to safety screen. Please choose an image under 4 MB.",
-            ),
-            kind: "photo" as const,
-          },
-        ],
+    (await buildPortfolioVideoFrameDataUrls(options.sourceBlob)).map((contentDataUrl, index) => ({
+      name: originalName,
+      mimeType: options.mimeType,
+      size: options.size,
+      uri: `${file.uri}#frame-${index + 1}`,
+      originalUri: file.uri,
+      originalMimeType: options.mimeType,
+      contentDataUrl,
+      kind: "video" as const,
+    })),
     "profile_portfolio_media",
   );
 
@@ -2715,20 +2673,22 @@ export default function ProfileScreen() {
         byteLength: sourceBlob.size,
         blobType: sourceBlob.type,
       });
-      setUploadMessage(`Checking media ${index + 1}/${selectedAssets.length}...`);
-      logProfileMedia("safety_check_started", {
-        fileName,
-        mimeType,
-        byteLength: sourceBlob.size,
-      });
-      await withSafetyTimeout(screenProfilePortfolioMedia(file, {
-        fileExt,
-        mimeType,
-        uploadKind,
-        sourceBlob,
-        size: sourceBlob.size || Number((file as any)?.fileSize || (file as any)?.size || 0),
-      }));
-      logProfileMedia("safety_check_passed", { fileName });
+      if (uploadKind === "video") {
+        setUploadMessage(`Checking video ${index + 1}/${selectedAssets.length}...`);
+        logProfileMedia("safety_check_started", {
+          fileName,
+          mimeType,
+          byteLength: sourceBlob.size,
+        });
+        await withSafetyTimeout(screenProfilePortfolioMedia(file, {
+          fileExt,
+          mimeType,
+          uploadKind,
+          sourceBlob,
+          size: sourceBlob.size || Number((file as any)?.fileSize || (file as any)?.size || 0),
+        }));
+        logProfileMedia("safety_check_passed", { fileName });
+      }
 
       setUploadMessage(`Uploading media ${index + 1}/${selectedAssets.length}...`);
       logProfileMedia("storage_upload_started", {
@@ -2736,12 +2696,14 @@ export default function ProfileScreen() {
         fileName,
         contentType: mimeType,
       });
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from("portfolio")
-        .upload(fileName, sourceBlob, {
-          contentType: mimeType,
-          upsert: true,
-        });
+      const { data: uploadData, error: uploadError } = await uploadStorageObject({
+        bucket: "portfolio",
+        path: fileName,
+        contentType: mimeType,
+        upsert: true,
+        uri: file.uri,
+        body: sourceBlob,
+      });
 
       if (uploadError) {
         logProfileMedia("storage_upload_failed", { message: uploadError.message });
@@ -3919,6 +3881,7 @@ export default function ProfileScreen() {
                   <Text style={[styles.playlistModalLabel, { color: colors.text }]}>Album Cover</Text>
                   {currentUserId ? (
                     <ImageUploader
+                      enableAiSafetyScreening={false}
                       images={playlistCoverImages}
                       onImagesChange={(images) => setPlaylistCoverImages(images.slice(0, 1))}
                       maxImages={1}
@@ -4098,6 +4061,7 @@ export default function ProfileScreen() {
                           <>
                             <Text style={[styles.playlistTrackImageLabel, { color: colors.textSecondary }]}>Music Image (Optional)</Text>
                             <ImageUploader
+                              enableAiSafetyScreening={false}
                               images={track.cover_image_url ? [track.cover_image_url] : []}
                               onImagesChange={(images) => setPlaylistTrackCoverImage(track.id, images[0] || null)}
                               maxImages={1}

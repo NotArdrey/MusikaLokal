@@ -27,7 +27,6 @@ import Navbar from "../src/components/navbar";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useTheme } from "../src/context/ThemeContext";
 import { profileFormStyles } from "../src/theme/formStyles";
-import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
 import { isFanUserRole, normalizeUserRole } from "../src/utils/roleRouting";
 import { uploadStorageObject } from "../src/utils/storageUpload";
 
@@ -147,6 +146,8 @@ export default function EditProfileScreen() {
   const [displayName, setDisplayName] = useState("");
   const [contactNumber, setContactNumber] = useState("");
   const [location, setLocation] = useState("");
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
   const [bio, setBio] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<any>(DEFAULT_AVATAR);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
@@ -187,6 +188,8 @@ export default function EditProfileScreen() {
   const initialSnapshotRef = useRef<{
     contactNumber: string;
     location: string;
+    latitude: number | null;
+    longitude: number | null;
     bio: string;
     roles: string[];
     genres: string[];
@@ -201,11 +204,13 @@ export default function EditProfileScreen() {
     () => ({
       contactNumber: contactNumber.trim(),
       location: location.trim(),
+      latitude,
+      longitude,
       bio: bio.trim(),
       roles: normalizeList(selectedRoles),
       genres: normalizeList(selectedGenres),
     }),
-    [contactNumber, location, bio, selectedRoles, selectedGenres],
+    [contactNumber, location, latitude, longitude, bio, selectedRoles, selectedGenres],
   );
 
   const hasIncompleteRequiredFields = useMemo(
@@ -225,6 +230,8 @@ export default function EditProfileScreen() {
     return (
       initial.contactNumber !== currentSnapshot.contactNumber ||
       initial.location !== currentSnapshot.location ||
+      initial.latitude !== currentSnapshot.latitude ||
+      initial.longitude !== currentSnapshot.longitude ||
       initial.bio !== currentSnapshot.bio ||
       JSON.stringify(initial.roles) !== JSON.stringify(currentSnapshot.roles) ||
       JSON.stringify(initial.genres) !== JSON.stringify(currentSnapshot.genres) ||
@@ -306,9 +313,18 @@ export default function EditProfileScreen() {
       }
 
       if (resolvedProfile) {
+        const storedLatitude = Number(resolvedProfile.latitude);
+        const storedLongitude = Number(resolvedProfile.longitude);
+        const hasStoredCoordinates =
+          Number.isFinite(storedLatitude) &&
+          Number.isFinite(storedLongitude) &&
+          !(storedLatitude === 0 && storedLongitude === 0);
+
         setDisplayName(resolvedProfile.full_name || "");
         setContactNumber(resolvedProfile.contact_number || "");
         setLocation(resolvedProfile.address || resolvedProfile.location || "");
+        setLatitude(hasStoredCoordinates ? storedLatitude : null);
+        setLongitude(hasStoredCoordinates ? storedLongitude : null);
         setBio(resolvedProfile.bio || "");
         setAvatarUrl(resolvedProfile.avatar_url || DEFAULT_AVATAR);
         setSelectedRoles(normalizeProfileSkills(
@@ -319,6 +335,8 @@ export default function EditProfileScreen() {
         initialSnapshotRef.current = {
           contactNumber: (resolvedProfile.contact_number || "").trim(),
           location: (resolvedProfile.address || resolvedProfile.location || "").trim(),
+          latitude: hasStoredCoordinates ? storedLatitude : null,
+          longitude: hasStoredCoordinates ? storedLongitude : null,
           bio: (resolvedProfile.bio || "").trim(),
           roles: normalizeProfileSkills(
             Array.isArray(resolvedProfile.skills) ? resolvedProfile.skills : [],
@@ -382,31 +400,13 @@ export default function EditProfileScreen() {
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.5,
-        base64: true, // Request base64 directly from ImagePicker
       });
 
       if (result.canceled || !result.assets?.[0]) return;
 
       const asset = result.assets[0];
 
-      if (!asset.base64) {
-        showAlert("error", "Error", "Could not read image data");
-        return;
-      }
-
       const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
-      const mimeType = `image/${ext === "jpg" ? "jpeg" : ext}`;
-      await ensureUploadPassesSafetyScreening(
-        {
-          name: (asset as any)?.fileName || `profile-photo.${ext}`,
-          mimeType,
-          size: Math.floor((asset.base64.length * 3) / 4),
-          uri: asset.uri,
-          contentDataUrl: `data:${mimeType};base64,${asset.base64}`,
-          kind: "photo",
-        },
-        "edit_profile_avatar",
-      );
       setPendingAvatar({
         ext,
         uri: asset.uri,
@@ -442,31 +442,13 @@ export default function EditProfileScreen() {
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.5,
-        base64: true,
       });
 
       if (result.canceled || !result.assets?.[0]) return;
 
       const asset = result.assets[0];
 
-      if (!asset.base64) {
-        showAlert("error", "Error", "Could not read captured image data");
-        return;
-      }
-
       const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
-      const mimeType = `image/${ext === "jpg" ? "jpeg" : ext}`;
-      await ensureUploadPassesSafetyScreening(
-        {
-          name: (asset as any)?.fileName || `profile-photo.${ext}`,
-          mimeType,
-          size: Math.floor((asset.base64.length * 3) / 4),
-          uri: asset.uri,
-          contentDataUrl: `data:${mimeType};base64,${asset.base64}`,
-          kind: "photo",
-        },
-        "edit_profile_avatar",
-      );
       setPendingAvatar({
         ext,
         uri: asset.uri,
@@ -571,6 +553,8 @@ export default function EditProfileScreen() {
         contact_number: contactNumber,
         address: location,
         location,
+        latitude,
+        longitude,
       };
 
       if (uploadedAvatarUrl) {
@@ -633,6 +617,8 @@ export default function EditProfileScreen() {
       initialSnapshotRef.current = {
         contactNumber: contactNumber.trim(),
         location: location.trim(),
+        latitude,
+        longitude,
         bio: bio.trim(),
         roles: normalizeList(cleanedRoles),
         genres: normalizeList(cleanedGenres),
@@ -778,7 +764,11 @@ export default function EditProfileScreen() {
           </Text>
           <LeafletAddressPicker
             value={location}
-            onAddressSelect={(address) => setLocation(address)}
+            onAddressSelect={(address, lat, lng) => {
+              setLocation(address);
+              setLatitude(typeof lat === "number" && Number.isFinite(lat) ? lat : null);
+              setLongitude(typeof lng === "number" && Number.isFinite(lng) ? lng : null);
+            }}
             placeholder="Tap to select your address"
           />
         </View>

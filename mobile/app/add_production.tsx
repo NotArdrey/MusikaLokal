@@ -198,6 +198,7 @@ export default function AddProductionScreen() {
         <View style={[styles.formCard, { backgroundColor: colors.surface, borderColor: isDark ? '#334155' : '#E2E8F0' }]}>
           <Text style={[styles.label, { color: colors.text }]}>Team Logo *</Text>
           <ImageUploader
+            enableAiSafetyScreening={false}
             images={logoImages}
             onImagesChange={setLogoImages}
             thumbnailIndex={thumbnailIndex}

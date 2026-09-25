@@ -397,6 +397,7 @@ interface VideoUploaderProps {
   bucketName?: string;
   folder?: string;
   maxSizeMB?: number;
+  maxDurationMinutes?: number;
   enableReviewFrame?: boolean;
   onReviewFrameChange?: (url: string | null) => void;
   onReviewFramesChange?: (urls: string[]) => void;
@@ -412,6 +413,7 @@ export default function VideoUploader({
   bucketName = 'documents',
   folder = 'performance-videos',
   maxSizeMB = 50,
+  maxDurationMinutes = 5,
   enableReviewFrame = false,
   onReviewFrameChange,
   onReviewFramesChange,
@@ -448,6 +450,7 @@ export default function VideoUploader({
     fileName: string;
     mimeType: string;
     fileSize?: number | null;
+    durationMs?: number | null;
     webFile?: Blob | null;
   }): Promise<{ decision: UploadSafetyFileDecision; sample: CopyrightVideoSample }> => {
     setUploadMessage('Preparing a valid audio sample...');
@@ -463,6 +466,7 @@ export default function VideoUploader({
         name: source.fileName,
         mimeType: source.mimeType,
         size: source.fileSize || sample.byteLength,
+        durationMs: source.durationMs || undefined,
         uri: source.uri,
         kind: 'video',
         contentDataUrl: sample.contentDataUrl,
@@ -684,9 +688,15 @@ export default function VideoUploader({
 
       const fileSizeBytes = await getAssetSizeBytes(asset);
       const fileSizeMB = (fileSizeBytes || 0) / (1024 * 1024);
+      const durationMs = Number(asset.duration || 0);
 
       if (fileSizeBytes && fileSizeMB > maxSizeMB) {
-        showAlert('error', 'File Too Large', `Video must be under ${maxSizeMB}MB. Your file is ${fileSizeMB.toFixed(1)}MB.`);
+        showAlert('error', 'File Too Large', `Video must be ${maxSizeMB}MB or smaller. Your file is ${fileSizeMB.toFixed(1)}MB.`);
+        return;
+      }
+
+      if (Number.isFinite(durationMs) && durationMs > maxDurationMinutes * 60_000) {
+        showAlert('error', 'Video Too Long', `Video must be ${maxDurationMinutes} minutes or shorter.`);
         return;
       }
 
@@ -707,7 +717,7 @@ export default function VideoUploader({
         const readableAssetUri = nativeVideoFile?.uri || asset.uri;
 
         setUploadMessage('Checking video content...');
-        await screenVisualUpload({ uri: readableAssetUri, name: originalName, mimeType, size: fileSizeBytes || undefined, kind: 'video', durationMs: asset.duration || undefined }, 'gig_video_content');
+        await screenVisualUpload({ uri: readableAssetUri, name: originalName, mimeType, size: fileSizeBytes || undefined, kind: 'video', durationMs: durationMs || undefined }, 'gig_video_content');
         let copyrightDecision: UploadSafetyFileDecision | null = null;
         if (enableCopyrightScreening) {
           const screened = await screenCopyrightVideo({
@@ -715,6 +725,7 @@ export default function VideoUploader({
             fileName: originalName,
             mimeType,
             fileSize: fileSizeBytes,
+            durationMs,
             webFile: (asset as any)?.file as Blob | undefined,
           });
           copyrightDecision = screened.decision;
@@ -953,7 +964,7 @@ export default function VideoUploader({
                 Upload Performance Video (Required)
               </Text>
               <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                Max {maxSizeMB}MB • MP4, MOV
+                Max {maxDurationMinutes} min • {maxSizeMB}MB • MP4, MOV
               </Text>
               {allowPortfolioSelection ? (
                 <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }}>

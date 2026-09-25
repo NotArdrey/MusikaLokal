@@ -29,7 +29,7 @@ function loadGenreHelpers(relativePath) {
     require: (specifier) => {
       if (String(specifier).includes("faceRecognitionClient")) {
         return {
-          compareApplicantFacesWithDeepFace: async () => new Map(),
+          compareApplicantFacesWithFacePlusPlus: async () => new Map(),
           unavailableFaceMatch: () => ({ status: "not_run", limitation: "" }),
         };
       }

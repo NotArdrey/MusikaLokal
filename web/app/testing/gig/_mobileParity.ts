@@ -921,7 +921,7 @@ export const pollApplicationDebug = async (
         });
         const face = aiReview.face_similarity || {};
         reporter({
-          id: "face-verification", group: "FACE VERIFICATION", label: "DeepFace / ArcFace similarity",
+          id: "face-verification", group: "FACE VERIFICATION", label: "Face++ Compare similarity",
           state: reviewFailed ? "failed" : face.status && face.status !== "not_run" ? "success" : "warning",
           message: face.summary || "Face similarity was not run.", details: { solo: face, group: aiReview.group_face_similarity || [] },
         });

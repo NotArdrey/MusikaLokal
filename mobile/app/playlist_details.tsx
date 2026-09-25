@@ -1349,6 +1349,7 @@ export default function PlaylistDetailsScreen() {
               <>
                 <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Music Image (Optional)</Text>
                 <ImageUploader
+                  enableAiSafetyScreening={false}
                   images={newTrackCoverImages}
                   onImagesChange={(images) => setNewTrackCoverImages(images.slice(0, 1))}
                   maxImages={1}

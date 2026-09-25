@@ -12,6 +12,7 @@ export interface UploadSafetyFileInput {
   relatedId?: string;
   mimeType?: string;
   size?: number;
+  durationMs?: number;
   uri?: string;
   contentDataUrl?: string;
   kind: UploadSafetyKind;
@@ -80,8 +81,8 @@ const SAFETY_OWNERSHIP_REVIEW_CACHE_TTL_MS = 30 * 1000;
 const SCREENING_FUNCTION_NAME = "upload-safety-screen";
 const MAX_CANDIDATES_PER_REQUEST = 10;
 const MAX_CONCURRENT_INLINE_SCREENINGS = 2;
-const MAX_REMOTE_SCREENING_ATTEMPTS = 3;
-const REMOTE_SCREENING_RETRY_DELAY_MS = 750;
+const MAX_REMOTE_SCREENING_ATTEMPTS = 2;
+const REMOTE_SCREENING_RETRY_DELAY_MS = 12_000;
 const SCREENING_UNAVAILABLE_BLOCK_MESSAGE =
   "Safety check is temporarily unavailable. Please try again in a moment.";
 const SAFETY_RATE_LIMIT_MESSAGE =
@@ -158,6 +159,7 @@ const getCacheKey = (input: UploadSafetyFileInput, scope: string): string => {
     normalizeText(input.name),
     normalizeText(input.mimeType),
     clampSize(input.size),
+    clampSize(input.durationMs),
     sanitizeUriTail(input.uri),
     input.contentDataUrl ? hashValue(input.contentDataUrl) : "",
   ].join("|");
@@ -395,6 +397,7 @@ const screenChunkWithRemoteAi = async (
         fileName: input.name,
         mimeType: input.mimeType || null,
         fileSize: clampSize(input.size),
+        durationMs: clampSize(input.durationMs),
         kind: input.kind,
         contentDataUrl: input.contentDataUrl || null,
         relatedType: input.relatedType || null,

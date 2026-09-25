@@ -84,7 +84,7 @@ const BookingDetailsSheet = forwardRef<
   const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
-  const snapPoints = useMemo(() => ["85%"], []);
+  const snapPoints = useMemo(() => ["94%"], []);
   const handleSheetChange = useCallback((index: number) => {
     const nextOpen = index >= 0;
     setIsSheetOpen(nextOpen);
@@ -453,39 +453,30 @@ const BookingDetailsSheet = forwardRef<
           contentContainerStyle={styles.scrollContent}
         >
           <View style={styles.container}>
-            <View style={styles.header}>
-              <View style={styles.headerTop}>
-                <Text style={[styles.title, { color: colors.text }]}>Request Details</Text>
-                <TouchableOpacity
-                  activeOpacity={1}
-                  onPress={() => (ref as any)?.current?.dismiss()}
-                  style={[
-                    styles.closeBtn,
-                    { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
-                  ]}
-                >
-                  <Ionicons name="close" size={24} color={colors.text} />
-                </TouchableOpacity>
-              </View>
-
-              <View
-                style={[
-                  styles.statusBadge,
-                  { backgroundColor: getStatusColor(booking.status) + "20" },
-                ]}
+            <View style={[styles.header, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <TouchableOpacity
+                activeOpacity={0.75}
+                accessibilityRole="button"
+                accessibilityLabel="Close request details"
+                onPress={() => (ref as any)?.current?.dismiss()}
+                style={[styles.closeBtn, { borderColor: colors.border }]}
               >
+                <Ionicons name="arrow-down" size={21} color={colors.text} />
+              </TouchableOpacity>
+              <View style={styles.headerCopy}>
+                <Text style={[styles.eyebrow, { color: colors.textSecondary }]}>REQUEST REVIEW</Text>
+                <Text numberOfLines={1} style={[styles.title, { color: colors.text }]}>
+                  {booking?.counterparty_name || booking?.type || "Request Details"}
+                </Text>
+              </View>
+              <View style={[styles.statusBadge, { borderColor: getStatusColor(booking.status) + "66" }]}>
                 <Ionicons
                   name={getStatusIcon(booking.status) as any}
-                  size={18}
+                  size={15}
                   color={getStatusColor(booking.status)}
                 />
-                <Text
-                  style={[
-                    styles.statusText,
-                    { color: getStatusColor(booking.status) },
-                  ]}
-                >
-                  {formatStatusLabel(booking.status).toUpperCase()}
+                <Text style={[styles.statusText, { color: getStatusColor(booking.status) }]}>
+                  {formatStatusLabel(booking.status)}
                 </Text>
               </View>
             </View>
@@ -493,7 +484,7 @@ const BookingDetailsSheet = forwardRef<
             <View
               style={[
                 styles.card,
-                { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                { backgroundColor: colors.surface, borderColor: colors.border },
               ]}
             >
               <View style={styles.cardHeader}>
@@ -631,7 +622,7 @@ const BookingDetailsSheet = forwardRef<
             <View
               style={[
                 styles.card,
-                { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                { backgroundColor: colors.surface, borderColor: colors.border },
               ]}
             >
               <View style={styles.cardHeader}>
@@ -682,11 +673,12 @@ const BookingDetailsSheet = forwardRef<
               ) : null}
             </View>
 
-            <View style={styles.actions}>
+            <View style={[styles.footerActions, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <TouchableOpacity
                 activeOpacity={1}
                 style={[
                   styles.actionBtn,
+                  styles.footerActionBtn,
                   styles.cancelBtn,
                   { borderColor: colors.border },
                 ]}
@@ -886,41 +878,32 @@ const BookingDetailsSheet = forwardRef<
       >
         <View style={styles.container}>
           {/* Header */}
-          <View style={styles.header}>
-            <View style={styles.headerTop}>
-              <Text style={[styles.title, { color: colors.text }]}>
-                {isGig ? "Application Details" : "Booking Details"}
-              </Text>
-              <TouchableOpacity activeOpacity={1}
-                onPress={() => (ref as any)?.current?.dismiss()}
-                style={[
-                  styles.closeBtn,
-                  { backgroundColor: isDark ? "#374151" : "#F3F4F6" },
-                ]}
-              >
-                <Ionicons name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            {/* Status Badge */}
-            <View
-              style={[
-                styles.statusBadge,
-                { backgroundColor: getStatusColor(booking.status) + "20" },
-              ]}
+          <View style={[styles.header, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <TouchableOpacity
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel={`Close ${isGig ? "application" : "booking"} details`}
+              onPress={() => (ref as any)?.current?.dismiss()}
+              style={[styles.closeBtn, { borderColor: colors.border }]}
             >
+              <Ionicons name="arrow-down" size={21} color={colors.text} />
+            </TouchableOpacity>
+            <View style={styles.headerCopy}>
+              <Text style={[styles.eyebrow, { color: colors.textSecondary }]}>
+                {isGig ? "APPLICATION REVIEW" : "BOOKING REVIEW"}
+              </Text>
+              <Text numberOfLines={1} style={[styles.title, { color: colors.text }]}>
+                {studioDetails?.name || booking.name || (isGig ? "Application Details" : "Booking Details")}
+              </Text>
+            </View>
+            <View style={[styles.statusBadge, { borderColor: getStatusColor(booking.status) + "66" }]}>
               <Ionicons
                 name={getStatusIcon(booking.status) as any}
-                size={18}
+                size={15}
                 color={getStatusColor(booking.status)}
               />
-              <Text
-                style={[
-                  styles.statusText,
-                  { color: getStatusColor(booking.status) },
-                ]}
-              >
-                {formatStatusLabel(booking.status).toUpperCase()}
+              <Text style={[styles.statusText, { color: getStatusColor(booking.status) }]}>
+                {formatStatusLabel(booking.status)}
               </Text>
             </View>
           </View>
@@ -936,7 +919,7 @@ const BookingDetailsSheet = forwardRef<
                 <View
                   style={[
                     styles.card,
-                    { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                    { backgroundColor: colors.surface, borderColor: colors.border },
                   ]}
                 >
                   <CachedImage
@@ -1104,7 +1087,7 @@ const BookingDetailsSheet = forwardRef<
                 <View
                   style={[
                     styles.card,
-                    { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                    { backgroundColor: colors.surface, borderColor: colors.border },
                   ]}
                 >
                   <View style={styles.cardHeader}>
@@ -1209,7 +1192,7 @@ const BookingDetailsSheet = forwardRef<
                   <View
                     style={[
                       styles.card,
-                      { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                      { backgroundColor: colors.surface, borderColor: colors.border },
                     ]}
                   >
                     <View style={styles.cardHeader}>
@@ -1336,7 +1319,7 @@ const BookingDetailsSheet = forwardRef<
               <View
                 style={[
                   styles.card,
-                  { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                  { backgroundColor: colors.surface, borderColor: colors.border },
                 ]}
               >
                 <View style={styles.cardHeader}>
@@ -1635,7 +1618,7 @@ const BookingDetailsSheet = forwardRef<
                 <View
                   style={[
                     styles.card,
-                    { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                    { backgroundColor: colors.surface, borderColor: colors.border },
                   ]}
                 >
                   <View style={styles.cardHeader}>
@@ -1847,12 +1830,13 @@ const BookingDetailsSheet = forwardRef<
               )}
 
               {/* Action Buttons */}
-              <View style={styles.actions}>
+              <View style={[styles.footerActions, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 {isReadOnly ? (
                   <TouchableOpacity
                     activeOpacity={1}
                     style={[
                       styles.actionBtn,
+                      styles.footerActionBtn,
                       styles.cancelBtn,
                       { borderColor: colors.border },
                     ]}
@@ -1864,7 +1848,7 @@ const BookingDetailsSheet = forwardRef<
 
                 {!isReadOnly && booking.status === "pending" && onConfirm && (
                   <TouchableOpacity activeOpacity={1}
-                    style={[styles.actionBtn, styles.confirmBtn]}
+                    style={[styles.actionBtn, styles.footerActionBtn, styles.confirmBtn]}
                     onPress={() => {
                       onConfirm(booking.id);
                       (ref as any)?.current?.dismiss();
@@ -1880,6 +1864,7 @@ const BookingDetailsSheet = forwardRef<
                   <TouchableOpacity activeOpacity={1}
                     style={[
                       styles.actionBtn,
+                      styles.footerActionBtn,
                       { backgroundColor: colors.primary },
                     ]}
                     onPress={() => {
@@ -1905,6 +1890,7 @@ const BookingDetailsSheet = forwardRef<
                     <TouchableOpacity activeOpacity={1}
                       style={[
                         styles.actionBtn,
+                        styles.footerActionBtn,
                         styles.cancelBtn,
                         { borderColor: colors.border },
                       ]}
@@ -1943,10 +1929,19 @@ const styles = StyleSheet.create({
     paddingBottom: height < 700 ? verticalScale(100) : verticalScale(116),
   },
   container: {
-    padding: height < 700 ? scale(16) : scale(24),
+    paddingHorizontal: scale(16),
+    paddingTop: scale(12),
   },
   header: {
-    marginBottom: height < 700 ? moderateScale(16) : moderateScale(24),
+    minHeight: moderateScale(68),
+    marginBottom: moderateScale(12),
+    paddingHorizontal: moderateScale(12),
+    paddingVertical: moderateScale(10),
+    borderWidth: 1,
+    borderRadius: moderateScale(16),
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(10),
   },
   headerTop: {
     flexDirection: "row",
@@ -1955,27 +1950,41 @@ const styles = StyleSheet.create({
     marginBottom: height < 700 ? moderateScale(12) : moderateScale(16),
   },
   title: {
-    fontSize: height < 700 ? moderateScale(20) : moderateScale(24),
+    fontSize: moderateScale(17),
+    lineHeight: moderateScale(23),
     fontFamily: "Poppins_700Bold",
   },
   closeBtn: {
     width: moderateScale(40),
     height: moderateScale(40),
     borderRadius: moderateScale(20),
+    borderWidth: 1,
     justifyContent: "center",
     alignItems: "center",
+  },
+  headerCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  eyebrow: {
+    fontSize: moderateScale(9),
+    lineHeight: moderateScale(13),
+    letterSpacing: 1.2,
+    fontFamily: "Poppins_600SemiBold",
   },
   statusBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: scale(8),
-    paddingHorizontal: scale(16),
-    paddingVertical: moderateScale(10),
-    borderRadius: moderateScale(12),
-    alignSelf: "flex-start",
+    gap: scale(5),
+    paddingHorizontal: scale(9),
+    paddingVertical: moderateScale(5),
+    borderRadius: 999,
+    borderWidth: 1,
+    maxWidth: "36%",
   },
   statusText: {
-    fontSize: moderateScale(14),
+    flexShrink: 1,
+    fontSize: moderateScale(10),
     fontFamily: "Poppins_600SemiBold",
   },
   loadingContainer: {
@@ -1984,14 +1993,9 @@ const styles = StyleSheet.create({
   },
   card: {
     borderRadius: moderateScale(16),
+    borderWidth: 1,
     padding: height < 700 ? moderateScale(12) : moderateScale(16),
-    marginBottom: height < 700 ? moderateScale(12) : moderateScale(16),
-    // Tighter, crisp native mobile shadow
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
+    marginBottom: moderateScale(12),
   },
   studioImage: {
     width: "100%",
@@ -2043,28 +2047,29 @@ const styles = StyleSheet.create({
   cardHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: scale(12),
-    marginBottom: moderateScale(16),
+    gap: scale(10),
+    marginBottom: moderateScale(12),
   },
   cardTitle: {
-    fontSize: moderateScale(18),
+    fontSize: moderateScale(13),
+    lineHeight: moderateScale(18),
     fontFamily: "Poppins_600SemiBold",
   },
   detailsGrid: {
-    gap: moderateScale(16),
+    gap: moderateScale(12),
   },
   detailItem: {
     gap: moderateScale(4),
   },
   detailLabel: {
-    fontSize: moderateScale(12),
-    fontFamily: "Poppins_500Medium",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
+    fontSize: moderateScale(9),
+    lineHeight: moderateScale(13),
+    fontFamily: "Poppins_400Regular",
   },
   detailValue: {
-    fontSize: moderateScale(16),
-    fontFamily: "Poppins_600SemiBold",
+    fontSize: moderateScale(12),
+    lineHeight: moderateScale(17),
+    fontFamily: "Poppins_500Medium",
   },
   notesSection: {
     marginTop: moderateScale(16),
@@ -2118,14 +2123,26 @@ const styles = StyleSheet.create({
     marginTop: moderateScale(8),
     marginBottom: moderateScale(24),
   },
+  footerActions: {
+    flexDirection: "row",
+    gap: moderateScale(10),
+    borderWidth: 1,
+    borderRadius: moderateScale(16),
+    padding: moderateScale(12),
+    marginTop: moderateScale(2),
+    marginBottom: moderateScale(16),
+  },
+  footerActionBtn: {
+    flex: 1,
+  },
   actionBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: scale(8),
-    minHeight: moderateScale(52),
+    minHeight: moderateScale(48),
     paddingVertical: 0,
-    borderRadius: moderateScale(12),
+    borderRadius: 999,
   },
   confirmBtn: {
     backgroundColor: "#10B981",
@@ -2140,8 +2157,8 @@ const styles = StyleSheet.create({
   },
   actionBtnText: {
     color: "#FFFFFF",
-    fontSize: moderateScale(16),
-    lineHeight: moderateScale(20),
+    fontSize: moderateScale(13),
+    lineHeight: moderateScale(18),
     fontFamily: "Poppins_600SemiBold",
     textAlign: "center",
     includeFontPadding: false,
@@ -2149,16 +2166,16 @@ const styles = StyleSheet.create({
   },
   cancelBtnText: {
     color: "#EF4444",
-    fontSize: moderateScale(16),
-    lineHeight: moderateScale(20),
+    fontSize: moderateScale(13),
+    lineHeight: moderateScale(18),
     fontFamily: "Poppins_600SemiBold",
     textAlign: "center",
     includeFontPadding: false,
     textAlignVertical: "center",
   },
   viewStudioBtnText: {
-    fontSize: moderateScale(16),
-    lineHeight: moderateScale(20),
+    fontSize: moderateScale(13),
+    lineHeight: moderateScale(18),
     fontFamily: "Poppins_600SemiBold",
     includeFontPadding: false,
     textAlign: "center",

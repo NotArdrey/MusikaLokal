@@ -1663,6 +1663,7 @@ export default function AdminManagePage() {
                 <>
                   <FieldLabel label="Logo" colors={colors} />
                   <ImageUploader
+                    enableAiSafetyScreening={false}
                     images={uniqueList([form.logoUrl]).filter(isImageUrl)}
                     onImagesChange={(images) => updateForm({ logoUrl: images[0] || '' })}
                     maxImages={1}
@@ -1695,6 +1696,7 @@ export default function AdminManagePage() {
                   />
                   <FieldLabel label="Images" colors={colors} />
                   <ImageUploader
+                    enableAiSafetyScreening={false}
                     images={splitList(form.imageUrls).filter(isImageUrl)}
                     onImagesChange={(images) => updateForm({ imageUrls: images.join('\n') })}
                     maxImages={10}

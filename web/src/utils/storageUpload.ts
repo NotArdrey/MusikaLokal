@@ -42,6 +42,8 @@ const WORKING_UPLOAD_DIRECTORY = NATIVE_UPLOAD_DIRECTORY
 const STALE_PENDING_UPLOAD_AGE_SECONDS = 24 * 60 * 60;
 const FILE_READ_RETRY_DELAY_MS = 75;
 const FILE_READ_ATTEMPTS = 3;
+const STORAGE_UPLOAD_ATTEMPTS = 3;
+const STORAGE_UPLOAD_RETRY_DELAYS_MS = [1_500, 4_000];
 
 // Android picker URIs are most reliable when copied straight from their
 // provider grant into app-owned storage. iOS still needs the picker cache copy
@@ -68,6 +70,25 @@ const delay = (milliseconds: number) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, milliseconds);
   });
+
+const getUploadErrorStatus = (error: unknown) =>
+  Number((error as { statusCode?: number; status?: number })?.statusCode ||
+    (error as { status?: number })?.status || 0);
+
+const isRetryableUploadFailure = (error: unknown) => {
+  const status = getUploadErrorStatus(error);
+  const message = String((error as { message?: string })?.message || error || "").toLowerCase();
+  return (
+    [408, 425, 429, 500, 502, 503, 504].includes(status) ||
+    /network request failed|network error|timeout|timed out|socket|connection|fetch failed/.test(message)
+  );
+};
+
+const isDuplicateUploadFailure = (error: unknown) => {
+  const status = getUploadErrorStatus(error);
+  const message = String((error as { message?: string })?.message || error || "").toLowerCase();
+  return status === 409 || /already exists|duplicate/.test(message);
+};
 
 const removeLocalFile = async (uri?: string | null) => {
   if (!uri) return;
@@ -237,22 +258,45 @@ export const uploadStorageObject = async ({
 
       const baseUrl = supabaseUrl.replace(/\/+$/, "");
       const uploadUrl = `${baseUrl}/storage/v1/object/${encodeURIComponent(bucket)}/${encodeStoragePath(path)}`;
-      const result = await FileSystem.uploadAsync(uploadUrl, temporaryFile.uri, {
-        httpMethod: "POST",
-        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          apikey: supabaseAnonKey,
-          "Content-Type": contentType,
-          "x-upsert": String(upsert),
-        },
-      });
+      for (let attempt = 0; attempt < STORAGE_UPLOAD_ATTEMPTS; attempt += 1) {
+        try {
+          const result = await FileSystem.uploadAsync(uploadUrl, temporaryFile.uri, {
+            httpMethod: "POST",
+            uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              apikey: supabaseAnonKey,
+              "Content-Type": contentType,
+              "x-upsert": String(upsert),
+            },
+          });
 
-      if (result.status < 200 || result.status >= 300) {
-        throw parseStorageUploadError(result.status, result.body);
+          if (result.status >= 200 && result.status < 300) {
+            return { data: { path }, error: null };
+          }
+          if (attempt > 0 && result.status === 409) {
+            return { data: { path }, error: null };
+          }
+
+          const uploadError = parseStorageUploadError(result.status, result.body);
+          Object.assign(uploadError, { status: result.status });
+          if (attempt < STORAGE_UPLOAD_ATTEMPTS - 1 && isRetryableUploadFailure(uploadError)) {
+            await delay(STORAGE_UPLOAD_RETRY_DELAYS_MS[attempt]);
+            continue;
+          }
+          throw uploadError;
+        } catch (error) {
+          if (attempt > 0 && isDuplicateUploadFailure(error)) {
+            return { data: { path }, error: null };
+          }
+          if (attempt < STORAGE_UPLOAD_ATTEMPTS - 1 && isRetryableUploadFailure(error)) {
+            await delay(STORAGE_UPLOAD_RETRY_DELAYS_MS[attempt]);
+            continue;
+          }
+          throw error;
+        }
       }
-
-      return { data: { path }, error: null };
+      throw new Error("Upload failed after multiple attempts. Please check your connection and try again.");
     } finally {
       await temporaryFile?.remove();
     }
@@ -264,8 +308,32 @@ export const uploadStorageObject = async ({
     throw new Error("No upload body was provided.");
   }
 
-  return supabase.storage.from(bucket).upload(path, uploadBody, {
-    contentType,
-    upsert,
-  });
+  for (let attempt = 0; attempt < STORAGE_UPLOAD_ATTEMPTS; attempt += 1) {
+    try {
+      const result = await supabase.storage.from(bucket).upload(path, uploadBody, {
+        contentType,
+        upsert,
+      });
+      if (!result.error) return result;
+      if (attempt > 0 && isDuplicateUploadFailure(result.error)) {
+        return { data: { path }, error: null };
+      }
+      if (attempt < STORAGE_UPLOAD_ATTEMPTS - 1 && isRetryableUploadFailure(result.error)) {
+        await delay(STORAGE_UPLOAD_RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      return result;
+    } catch (error) {
+      if (attempt > 0 && isDuplicateUploadFailure(error)) {
+        return { data: { path }, error: null };
+      }
+      if (attempt < STORAGE_UPLOAD_ATTEMPTS - 1 && isRetryableUploadFailure(error)) {
+        await delay(STORAGE_UPLOAD_RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error("Upload failed after multiple attempts. Please check your connection and try again.");
 };

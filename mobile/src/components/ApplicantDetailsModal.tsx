@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo, useState } from "react";
+import { useRouter } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -48,9 +49,23 @@ const list = (value: unknown): any[] => (Array.isArray(value) ? value : []);
 
 const faceMatchLabel = (value: unknown) => {
   const status = String(value || "").toLowerCase();
-  if (status === "likely_same_person") return "Match";
-  if (status === "likely_different_person") return "No Match";
-  return status === "not_run" ? "Not Run" : "Unclear";
+  if (status === "likely_same_person") return "Possible match";
+  if (status === "likely_different_person") return "Possible mismatch";
+  return status === "not_run" ? "Not checked" : "Needs review";
+};
+
+const faceMatchColor = (value: unknown, fallback: string) => {
+  const status = String(value || "").toLowerCase();
+  if (status === "likely_same_person") return "#10B981";
+  if (status === "likely_different_person") return "#EF4444";
+  return fallback;
+};
+
+const faceMatchIcon = (value: unknown): keyof typeof Ionicons.glyphMap => {
+  const status = String(value || "").toLowerCase();
+  if (status === "likely_same_person") return "checkmark-circle-outline";
+  if (status === "likely_different_person") return "alert-circle-outline";
+  return "warning-outline";
 };
 
 const effectiveFaceMatchStatus = (result: any) => {
@@ -63,31 +78,28 @@ const effectiveFaceMatchStatus = (result: any) => {
   return storedStatus;
 };
 
-const isLegacySingleFrameMatch = (result: any) =>
-  String(result?.status || "").toLowerCase() === "unclear" &&
-  effectiveFaceMatchStatus(result) === "likely_same_person";
+const faceMatchSummary = (result: any) => {
+  const status = effectiveFaceMatchStatus(result);
+  if (status === "likely_same_person") return "The profile photo appears to match a person in the video.";
+  if (status === "likely_different_person") return "The profile photo may not match a person in the video.";
+  return "There wasn't enough clear information to confirm a match.";
+};
 
-const faceMatchSummary = (result: any) =>
-  isLegacySingleFrameMatch(result)
-    ? "ArcFace found a match in the only clear representative video frame."
-    : result?.summary || "No comparison explanation was stored.";
-
-const faceMatchLimitation = (result: any) =>
-  isLegacySingleFrameMatch(result)
-    ? "Only one clear frame was available, so this result has limited evidence and must be checked against the original profile photo and video."
-    : result?.limitation;
-
-const faceMatchMetrics = (result: any) => {
+const faceMatchDetails = (result: any) => {
   const usable = Math.max(0, Number(result?.usable_frames ?? result?.frames_compared) || 0);
   const matched = Math.max(0, Number(result?.matched_frames) || 0);
-  const sampled = Math.max(usable, Number(result?.sampled_frames) || 0);
-  const rate = Math.max(0, Math.min(1, Number(result?.match_rate) || 0));
-  const distance = Number(result?.distance);
-  const threshold = Number(result?.threshold);
-  const distanceDetail = result?.distance != null && result?.threshold != null && Number.isFinite(distance) && Number.isFinite(threshold)
-    ? ` | median distance ${distance.toFixed(3)} (threshold ${threshold.toFixed(3)})`
-    : "";
-  return `Match rate ${Math.round(rate * 100)}% | ${matched}/${usable} matched usable frames | ${sampled} sampled${distanceDetail}`;
+  if (usable === 0) return null;
+  if (usable === 1) return "Only one clear frame was available. Please verify manually.";
+  return `${matched} of ${usable} clear frames appeared to match.`;
+};
+
+const unavailableFaceMatchMessage = (result: any) => {
+  const error = String(result?.error || "").toLowerCase();
+  const summary = String(result?.summary || "").toLowerCase();
+  if (["missing_face_service_url", "missing_facepp_credentials"].includes(error) || summary.includes("not configured")) {
+    return "Profile and video comparison is temporarily unavailable.";
+  }
+  return "The profile photo and performance video could not be compared.";
 };
 
 const shortLocation = (value: unknown) => {
@@ -99,22 +111,16 @@ const shortLocation = (value: unknown) => {
   return parts.slice(-3, -1).join(", ");
 };
 
-const documentType = (url: unknown) => {
-  const clean = String(url || "").split("?")[0];
-  const extension = clean.match(/\.([a-z0-9]+)$/i)?.[1]?.toUpperCase();
-  return extension && ["PDF", "DOC", "DOCX"].includes(extension) ? extension : "Document";
-};
-
 const screeningMeta = (statusValue: unknown) => {
   const status = String(statusValue || "not_screened").toLowerCase();
-  if (status === "not_required") return { label: "No released-recording match", color: "#10B981", message: "No released-recording match was returned by the configured screening service." };
-  if (status === "pending_review") return { label: "Possible released-recording match", color: "#F59E0B", message: "A possible match requires ownership or permission review." };
-  if (status === "approved") return { label: "Possible match · permission approved", color: "#10B981", message: "A possible match was reviewed and the ownership or permission claim was approved." };
-  if (status === "declined") return { label: "Possible match · permission declined", color: "#EF4444", message: "A possible match was reviewed and the ownership or permission claim was declined." };
-  if (status === "pending" || status === "processing") return { label: "Screening pending", color: "#F59E0B", message: "Released-recording screening is still processing." };
-  if (status === "unavailable") return { label: "Screening unavailable", color: "#6B7280", message: "Released-recording screening is unavailable. No conclusion was produced." };
-  if (status === "failed") return { label: "Screening failed", color: "#EF4444", message: "Screening could not be completed. No conclusion was produced." };
-  return { label: "Not yet screened", color: "#6B7280", message: "This video has no completed released-recording screening result." };
+  if (status === "not_required") return { label: "Genre not identified", color: "#F59E0B", message: "We couldn't identify the song, so the genre wasn't scored." };
+  if (status === "pending_review") return { label: "Song may have been recognized", color: "#F59E0B", message: "The possible song match still needs to be checked." };
+  if (status === "approved") return { label: "Song match checked", color: "#10B981", message: "The possible song match and permission details were checked." };
+  if (status === "declined") return { label: "Permission concern found", color: "#EF4444", message: "The possible song match was checked and the permission claim was not accepted." };
+  if (status === "pending" || status === "processing") return { label: "Still checking", color: "#F59E0B", message: "The sound in the video is still being checked." };
+  if (status === "unavailable") return { label: "Could not check the audio", color: "#6B7280", message: "No audio result is available. Check the video yourself." };
+  if (status === "failed") return { label: "Audio check did not finish", color: "#EF4444", message: "The audio could not be checked. Check the video yourself." };
+  return { label: "Audio not checked yet", color: "#6B7280", message: "The sound in this video has not been checked yet." };
 };
 
 function Section({
@@ -152,6 +158,65 @@ function Section({
 
 function EmptyState({ children, colors }: { children: React.ReactNode; colors: Colors }) {
   return <Text style={[styles.body, { color: colors.textSecondary }]}>{children}</Text>;
+}
+
+function StatusRow({
+  icon,
+  label,
+  color,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  color: string;
+}) {
+  return (
+    <View style={styles.statusRow}>
+      <Ionicons name={icon} size={18} color={color} />
+      <Text style={[styles.statusRowText, { color }]}>{label}</Text>
+    </View>
+  );
+}
+
+function ReviewDetails({ children, colors }: { children: React.ReactNode; colors: Colors }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={styles.reviewDetails}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen((current) => !current)}
+        style={styles.reviewDetailsButton}
+      >
+        <Text style={[styles.reviewDetailsButtonText, { color: colors.primary }]}>
+          {open ? "Hide details" : "View details"}
+        </Text>
+        <Ionicons name={open ? "chevron-up" : "chevron-down"} size={15} color={colors.primary} />
+      </TouchableOpacity>
+      {open ? <View style={[styles.reviewDetailsBody, { borderLeftColor: colors.border }]}>{children}</View> : null}
+    </View>
+  );
+}
+
+function Subsection({
+  title,
+  icon,
+  colors,
+  children,
+}: {
+  title: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  colors: Colors;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={styles.subsection}>
+      <View style={styles.subsectionHeader}>
+        <Ionicons name={icon} size={18} color={colors.primary} />
+        <Text style={[styles.subsectionTitle, { color: colors.text }]}>{title}</Text>
+      </View>
+      <View style={styles.subsectionBody}>{children}</View>
+    </View>
+  );
 }
 
 function BulletList({ values, colors, empty }: { values: unknown[]; colors: Colors; empty: string }) {
@@ -222,6 +287,7 @@ export default function ApplicantDetailsModal({
   onDecline,
   onFire,
 }: Props) {
+  const router = useRouter();
   const application = details || summary || {};
   const rosterProfile = application.production_roster?.roster_profile;
   const rosterGroup = application.production_roster?.roster_group;
@@ -240,7 +306,54 @@ export default function ApplicantDetailsModal({
       );
   const recommendation = application.ai_recommendation || null;
   const aiReview = application.ai_portfolio_review || null;
+  const aiReviewStatus = String(aiReview?.status || "").toLowerCase();
+  const retryRef = useRef(onRetry);
+  const refreshAttemptsRef = useRef(0);
+  const refreshingApplicationIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    retryRef.current = onRetry;
+  }, [onRetry]);
+
+  useEffect(() => {
+    const applicationId = String(application.id || "") || null;
+    if (!visible || refreshingApplicationIdRef.current !== applicationId) {
+      refreshingApplicationIdRef.current = applicationId;
+      refreshAttemptsRef.current = 0;
+    }
+
+    if (
+      !visible ||
+      loading ||
+      refreshAttemptsRef.current >= 12 ||
+      !["queued", "processing"].includes(aiReviewStatus)
+    ) return;
+
+    const refreshTimer = setTimeout(() => {
+      refreshAttemptsRef.current += 1;
+      retryRef.current();
+    }, 3500);
+    return () => clearTimeout(refreshTimer);
+  }, [aiReviewStatus, application.id, loading, visible]);
+
   const evidence = list(aiReview?.evidence);
+  const genreEvidence = evidence.find((item) => item?.criterion === "genre_requirement") || null;
+  const genreEvidenceResult = String(genreEvidence?.result || "").toLowerCase();
+  const genreEvidenceColor = genreEvidenceResult === "supported"
+    ? "#10B981"
+    : genreEvidenceResult === "not_supported"
+      ? "#EF4444"
+      : "#F59E0B";
+  const genreEvidenceLabel = genreEvidenceResult === "supported"
+    ? "Genre appears to match"
+    : genreEvidenceResult === "not_supported"
+      ? "Genre may not match"
+      : "Genre match unclear";
+  const genreEvidenceMessage = genreEvidenceResult === "supported"
+    ? "The identified song's genre aligns with the gig."
+    : genreEvidenceResult === "not_supported"
+      ? "The identified song's genre may not align with the gig."
+      : "The identified song didn't provide a clear genre result.";
   const storedCvReview = list(aiReview?.source_summary?.cv_requirement_review);
   const cvDocumentClassification = aiReview?.source_summary?.cv_document_classification || null;
   const cvDocumentStatus = String(cvDocumentClassification?.status || "").toLowerCase();
@@ -253,9 +366,9 @@ export default function ApplicantDetailsModal({
   const hasRecognizedRecording = recognizedAudioGenres.length > 0;
   const screening = hasRecognizedRecording
     ? {
-        label: "Recording recognized for genre",
+        label: "Song identified",
         color: "#10B981",
-        message: "The catalog genres below are advisory evidence only and do not block this application.",
+        message: "A song was identified, but the genre result still needs review.",
       }
     : screeningMeta(application.video_copyright_status);
   const portfolio = list(profile.portfolio_urls);
@@ -278,14 +391,24 @@ export default function ApplicantDetailsModal({
       String(profile?.verification_status || "").toUpperCase() === "APPROVED");
   const applicationStatus = titleCase(application.status || "pending");
   const matchedCriteriaCount = list(recommendation?.matched_criteria).length;
+  const viewedProfileId = profile?.id || application.applicant_id || application.submitted_by_user_id;
+  const audioGenreStatus = hasRecognizedRecording && genreEvidence
+    ? { label: genreEvidenceLabel, color: genreEvidenceColor }
+    : screening;
 
-  const cvResult = useMemo(() => {
+  const openApplicantProfile = () => {
+    if (!viewedProfileId) return;
+    onClose();
+    router.push({ pathname: "/profile", params: { userId: String(viewedProfileId) } });
+  };
+
+  const cvResult = (() => {
     const matched = cvEvidence.filter((item) => item?.result === "supported");
     const missing = cvEvidence.filter((item) => item?.result === "not_supported");
     const unclear = cvEvidence.filter((item) => !["supported", "not_supported"].includes(item?.result));
     const fitPercent = cvEvidence.length > 0 ? Math.round((matched.length / cvEvidence.length) * 100) : null;
     return { matched, missing, unclear, fitPercent };
-  }, [cvEvidence]);
+  })();
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
@@ -315,7 +438,11 @@ export default function ApplicantDetailsModal({
           </View>
         ) : (
           <>
-          <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            key={`applicant-review-${application.id || "unknown"}-${visible ? "open" : "closed"}`}
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+          >
             <View style={[styles.heroCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <View style={[styles.matchPanel, { backgroundColor: `${colors.primary}0D` }]}>
                 <View style={styles.matchPanelHeader}>
@@ -397,15 +524,26 @@ export default function ApplicantDetailsModal({
               </View>
             </View>
 
-            <Section title="Profile Details" icon="person-outline" colors={colors} defaultOpen>
+            <Section title="Applicant Overview" icon="person-outline" colors={colors}>
+              <Subsection title="Profile Details" icon="person-outline" colors={colors}>
               <DetailRow icon="musical-notes-outline" label="Applied role or slot" value={appliedRole} colors={colors} />
-              <DetailRow icon="location-outline" label="Full location" value={fullLocation} colors={colors} />
               <DetailRow
                 icon={isVerified ? "shield-checkmark-outline" : "shield-outline"}
                 label="Verification"
                 value={isVerified ? "Verified profile" : "Not verified"}
                 colors={colors}
               />
+              {viewedProfileId ? (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={`View ${name}'s profile`}
+                  onPress={openApplicantProfile}
+                  style={[styles.outlineButton, { borderColor: colors.primary }]}
+                >
+                  <Ionicons name="person-outline" size={17} color={colors.primary} />
+                  <Text style={[styles.outlineButtonText, { color: colors.primary }]}>View Profile</Text>
+                </TouchableOpacity>
+              ) : null}
               {application.production_team?.name ? (
                 <DetailRow icon="people-outline" label="Production team" value={application.production_team.name} colors={colors} />
               ) : null}
@@ -437,9 +575,9 @@ export default function ApplicantDetailsModal({
                   />
                 </>
               ) : null}
-            </Section>
+              </Subsection>
 
-            <Section title="Application Details" icon="information-circle-outline" colors={colors} defaultOpen>
+              <Subsection title="Application Details" icon="information-circle-outline" colors={colors}>
               <DetailRow
                 icon="calendar-outline"
                 label="Submitted"
@@ -456,102 +594,183 @@ export default function ApplicantDetailsModal({
                   {application.pitch_message || "No application message was supplied."}
                 </Text>
               </View>
+              </Subsection>
             </Section>
 
-            <Section title="CV Requirement Review" icon="document-text-outline" colors={colors}>
-              {application.cv_url ? (
-                <TouchableOpacity onPress={() => onOpenMedia(application.cv_url, "Applicant CV")} style={[styles.outlineButton, { borderColor: colors.primary }]}>
-                  <Ionicons name="open-outline" size={17} color={colors.primary} />
-                  <Text style={[styles.outlineButtonText, { color: colors.primary }]}>Open original {documentType(application.cv_url)}</Text>
-                </TouchableOpacity>
-              ) : <EmptyState colors={colors}>Missing source file: no CV or resume was uploaded.</EmptyState>}
-              {!application.cv_url ? null : !aiReview ? (
-                <EmptyState colors={colors}>Resume analysis is unavailable. Review the original document manually.</EmptyState>
-              ) : ["queued", "processing"].includes(String(aiReview.status)) ? (
-                <EmptyState colors={colors}>Resume analysis is still processing.</EmptyState>
-              ) : cvDocumentStatus === "not_a_cv" ? (
-                <View style={styles.stackMedium}>
-                  <Text style={[styles.label, { color: "#EF4444" }]}>Not detected as a CV or resume</Text>
-                  <Text style={[styles.body, { color: colors.textSecondary }]}>{cvDocumentClassification?.summary || "The uploaded document does not contain sufficient CV or resume content."}</Text>
-                  <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>CV requirement scoring was skipped. Open the original file for manual review.</Text>
-                </View>
-              ) : cvDocumentStatus === "uncertain" ? (
-                <View style={styles.stackMedium}>
-                  <Text style={[styles.label, { color: "#F59E0B" }]}>Document type is uncertain</Text>
-                  <Text style={[styles.body, { color: colors.textSecondary }]}>{cvDocumentClassification?.summary || "The document could not be confidently identified as a CV or resume."}</Text>
-                  <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>CV requirement scoring was skipped to avoid a misleading result.</Text>
-                </View>
-              ) : ["failed", "consent_revoked"].includes(String(aiReview.status)) || cvEvidence.length === 0 ? (
-                <EmptyState colors={colors}>Resume could not be analyzed. Review the original document manually.</EmptyState>
+            <Section title="Qualification Review" icon="checkmark-done-outline" colors={colors}>
+              <Subsection title="CV Check" icon="document-text-outline" colors={colors}>
+              {!application.cv_url ? (
+                <EmptyState colors={colors}>No CV was uploaded.</EmptyState>
               ) : (
-                <View style={styles.stackMedium}>
-                  <Text style={[styles.score, { color: colors.primary }]}>Overall job-related fit: {cvResult.fitPercent}%</Text>
-                  <Text style={[styles.label, { color: "#10B981" }]}>Matched requirements</Text>
-                  <BulletList values={cvResult.matched.map((item) => item.criterion)} colors={colors} empty="No requirements were confirmed from the resume." />
-                  <Text style={[styles.label, { color: "#EF4444" }]}>Missing requirements</Text>
-                  <BulletList values={cvResult.missing.map((item) => item.criterion)} colors={colors} empty="No directly contradicted requirements were found." />
-                  <Text style={[styles.label, { color: "#F59E0B" }]}>Unclear requirements</Text>
-                  <BulletList values={cvResult.unclear.map((item) => item.criterion)} colors={colors} empty="No unclear requirements were recorded." />
-                  {cvEvidence.flatMap((item) => list(item.evidence)).slice(0, 4).map((entry, index) => (
-                    <Text key={index} style={[styles.body, { color: colors.textSecondary }]}>Resume evidence: {entry?.observation || "Evidence unavailable"}</Text>
-                  ))}
-                </View>
+                <>
+                  {application.ai_portfolio_review_consent !== true ? (
+                    <View style={styles.stackMedium}>
+                      <StatusRow icon="warning-outline" label="Manual review needed" color="#F59E0B" />
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>The applicant did not authorize optional AI file review. Review the CV manually.</Text>
+                    </View>
+                  ) : !aiReview ? (
+                    <View style={styles.stackMedium}>
+                      <StatusRow icon="warning-outline" label="Manual review needed" color="#F59E0B" />
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>{"The CV couldn't be scored automatically."}</Text>
+                    </View>
+                  ) : ["queued", "processing"].includes(String(aiReview.status)) ? (
+                    <View style={styles.stackMedium}>
+                      <StatusRow icon="time-outline" label="Check in progress" color="#F59E0B" />
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>The CV is still being checked.</Text>
+                    </View>
+                  ) : cvDocumentStatus === "not_a_cv" ? (
+                    <View style={styles.stackMedium}>
+                      <StatusRow icon="warning-outline" label="Manual review needed" color="#F59E0B" />
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>{"The file wasn't recognized as a CV, so it wasn't scored."}</Text>
+                      <ReviewDetails colors={colors}>
+                        <Text style={[styles.body, { color: colors.textSecondary }]}>{cvDocumentClassification?.summary || "The uploaded file did not contain enough CV or resume content."}</Text>
+                      </ReviewDetails>
+                    </View>
+                  ) : cvDocumentStatus === "uncertain" ? (
+                    <View style={styles.stackMedium}>
+                      <StatusRow icon="warning-outline" label="Manual review needed" color="#F59E0B" />
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>{"The file type couldn't be confirmed, so the CV wasn't scored."}</Text>
+                      <ReviewDetails colors={colors}>
+                        <Text style={[styles.body, { color: colors.textSecondary }]}>{cvDocumentClassification?.summary || "The file could not be confidently identified as a CV."}</Text>
+                      </ReviewDetails>
+                    </View>
+                  ) : cvDocumentStatus === "not_run" || ["failed", "consent_revoked"].includes(String(aiReview.status)) || cvEvidence.length === 0 ? (
+                    <View style={styles.stackMedium}>
+                      <StatusRow icon="warning-outline" label="Manual review needed" color="#F59E0B" />
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>{"The CV couldn't be scored automatically."}</Text>
+                      {cvDocumentClassification?.summary ? (
+                        <ReviewDetails colors={colors}>
+                          <Text style={[styles.body, { color: colors.textSecondary }]}>{cvDocumentClassification.summary}</Text>
+                        </ReviewDetails>
+                      ) : null}
+                    </View>
+                  ) : (
+                    <View style={styles.stackMedium}>
+                      <StatusRow icon="checkmark-circle-outline" label="CV check complete" color="#10B981" />
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>Job-related fit: {cvResult.fitPercent}%</Text>
+                      <ReviewDetails colors={colors}>
+                        <Text style={[styles.label, { color: "#10B981" }]}>Matched requirements</Text>
+                        <BulletList values={cvResult.matched.map((item) => item.criterion)} colors={colors} empty="No requirements were confirmed from the CV." />
+                        <Text style={[styles.label, { color: "#EF4444" }]}>Missing requirements</Text>
+                        <BulletList values={cvResult.missing.map((item) => item.criterion)} colors={colors} empty="No missing requirements were found." />
+                        <Text style={[styles.label, { color: "#F59E0B" }]}>Unclear requirements</Text>
+                        <BulletList values={cvResult.unclear.map((item) => item.criterion)} colors={colors} empty="No unclear requirements were recorded." />
+                        {cvEvidence.flatMap((item) => list(item.evidence)).slice(0, 4).map((entry, index) => (
+                          <Text key={index} style={[styles.body, { color: colors.textSecondary }]}>{entry?.observation || "Evidence unavailable"}</Text>
+                        ))}
+                      </ReviewDetails>
+                    </View>
+                  )}
+                  <TouchableOpacity onPress={() => onOpenMedia(application.cv_url, "Applicant CV")} style={[styles.outlineButton, { borderColor: colors.primary }]}>
+                    <Ionicons name="open-outline" size={17} color={colors.primary} />
+                    <Text style={[styles.outlineButtonText, { color: colors.primary }]}>View CV</Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.advisory, { color: colors.textSecondary }]}>Advisory only · Review before deciding</Text>
+                </>
               )}
-              <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>Manual review required. This advisory result must not automatically accept or decline an applicant.</Text>
-            </Section>
+              </Subsection>
 
-            <Section title="Performance Video" icon="videocam-outline" colors={colors}>
+              <Subsection title="Performance Video" icon="videocam-outline" colors={colors}>
               {application.video_url ? (
                 <TouchableOpacity onPress={() => onOpenMedia(application.video_url, "Performance Video")} style={[styles.outlineButton, { borderColor: colors.primary }]}>
                   <Ionicons name="play-outline" size={18} color={colors.primary} />
-                  <Text style={[styles.outlineButtonText, { color: colors.primary }]}>Open performance video</Text>
+                  <Text style={[styles.outlineButtonText, { color: colors.primary }]}>Watch performance</Text>
                 </TouchableOpacity>
-              ) : <EmptyState colors={colors}>Missing source file: no performance video was uploaded.</EmptyState>}
-            </Section>
+              ) : <EmptyState colors={colors}>No performance video was uploaded.</EmptyState>}
+              </Subsection>
 
-            <Section title="Audio & Genre Evidence" icon="radio-outline" colors={colors}>
-              <Text style={[styles.body, { color: colors.textSecondary }]}>Checks whether the performance video contains a recognized released recording, then uses its catalog genres as supporting evidence for the requested genre.</Text>
-              <View style={[styles.statusPill, { borderColor: screening.color }]}>
-                <Text style={[styles.statusPillText, { color: screening.color }]}>{screening.label}</Text>
-              </View>
-              <Text style={[styles.body, { color: colors.textSecondary }]}>{screening.message}</Text>
-              {application.video_copyright_metadata?.copyright_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Recognized recording: {application.video_copyright_metadata.copyright_title}{application.video_copyright_metadata.copyright_artist_label ? ` by ${application.video_copyright_metadata.copyright_artist_label}` : ""}</Text> : null}
-              {recognizedAudioGenres.length > 0 ? <Text style={[styles.body, { color: colors.textSecondary }]}>Recognized recording genres: {recognizedAudioGenres.join(", ")}</Text> : null}
-              {application.video_copyright_metadata?.internal_match_playlist_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Playlist recording: {application.video_copyright_metadata.internal_match_playlist_title}{application.video_copyright_metadata.internal_match_playlist_artist ? ` by ${application.video_copyright_metadata.internal_match_playlist_artist}` : ""} ({String(application.video_copyright_metadata.internal_match_similarity_score || "strong")} match)</Text> : null}
-              <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>This evidence can support genre matching and flag a possible permission review. It is not a legal copyright decision and does not automatically accept or reject an applicant.</Text>
-            </Section>
+              <View style={[styles.reviewDivider, { backgroundColor: colors.border }]} />
 
-            <Section title="Optional Profile-Video Face Match" icon="person-circle-outline" colors={colors}>
-              {!application.ai_portfolio_review_consent ? <EmptyState colors={colors}>Applicant consent for this optional review is not recorded.</EmptyState> : groupFaceSimilarity.length > 0 ? (
+              <Subsection title="Song & Genre Check" icon="radio-outline" colors={colors}>
+              <StatusRow
+                icon={audioGenreStatus.color === "#10B981" ? "checkmark-circle-outline" : audioGenreStatus.color === "#EF4444" ? "alert-circle-outline" : "warning-outline"}
+                label={audioGenreStatus.label}
+                color={audioGenreStatus.color}
+              />
+              <Text style={[styles.body, { color: colors.textSecondary }]}>
+                {hasRecognizedRecording && genreEvidence ? genreEvidenceMessage : screening.message}
+              </Text>
+              <Text style={[styles.manualPrompt, { color: colors.text }]}>Review the video manually.</Text>
+              <ReviewDetails colors={colors}>
+                {application.video_copyright_metadata?.copyright_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Song found: {application.video_copyright_metadata.copyright_title}{application.video_copyright_metadata.copyright_artist_label ? ` by ${application.video_copyright_metadata.copyright_artist_label}` : ""}</Text> : null}
+                {recognizedAudioGenres.length > 0 ? <Text style={[styles.body, { color: colors.textSecondary }]}>Song genres: {recognizedAudioGenres.join(", ")}</Text> : null}
+                {application.video_copyright_metadata?.internal_match_playlist_title ? <Text style={[styles.body, { color: colors.textSecondary }]}>Possible song: {application.video_copyright_metadata.internal_match_playlist_title}{application.video_copyright_metadata.internal_match_playlist_artist ? ` by ${application.video_copyright_metadata.internal_match_playlist_artist}` : ""}</Text> : null}
+                {hasRecognizedRecording && genreEvidence ? (
+                  <View style={styles.stackMedium}>
+                    {list(genreEvidence.evidence).map((entry, index) => (
+                      <Text key={`${entry?.source || "genre"}-${index}`} style={[styles.body, { color: colors.textSecondary }]}>{entry?.observation || "No explanation is available."}</Text>
+                    ))}
+                    {list(genreEvidence.limitations).map((limitation, index) => (
+                      <Text key={`genre-limitation-${index}`} style={[styles.disclaimer, { color: colors.textSecondary }]}>{String(limitation)}</Text>
+                    ))}
+                  </View>
+                ) : application.ai_portfolio_review_consent !== true ? (
+                  <Text style={[styles.body, { color: colors.textSecondary }]}>Extra video review was not authorized.</Text>
+                ) : (
+                  <Text style={[styles.body, { color: colors.textSecondary }]}>No additional song evidence is available.</Text>
+                )}
+              </ReviewDetails>
+              <Text style={[styles.advisory, { color: colors.textSecondary }]}>Advisory only · Not included in score</Text>
+              </Subsection>
+
+              <View style={[styles.reviewDivider, { backgroundColor: colors.border }]} />
+
+              <Subsection title="Profile & Video Check" icon="person-circle-outline" colors={colors}>
+              {!application.ai_portfolio_review_consent ? (
+                <View style={styles.stackMedium}>
+                  <StatusRow icon="information-circle-outline" label="Not checked" color={colors.textSecondary} />
+                  <Text style={[styles.body, { color: colors.textSecondary }]}>The applicant did not authorize this optional check.</Text>
+                </View>
+              ) : groupFaceSimilarity.length > 0 ? (
                 <View style={styles.stackMedium}>
                   {groupFaceSimilarity.map((member, index) => (
                     <View key={member?.profile_id || index} style={[styles.memberSignal, { borderColor: colors.border }]}>
                       <Text style={[styles.label, { color: colors.text }]}>{member?.display_name || `Group member ${index + 1}`}</Text>
-                      <Text style={[styles.body, { color: effectiveFaceMatchStatus(member) === "likely_same_person" ? "#10B981" : effectiveFaceMatchStatus(member) === "likely_different_person" ? "#EF4444" : colors.textSecondary }]}>{faceMatchLabel(effectiveFaceMatchStatus(member))}</Text>
+                      <StatusRow
+                        icon={faceMatchIcon(effectiveFaceMatchStatus(member))}
+                        label={faceMatchLabel(effectiveFaceMatchStatus(member))}
+                        color={faceMatchColor(effectiveFaceMatchStatus(member), colors.textSecondary)}
+                      />
                       <Text style={[styles.body, { color: colors.textSecondary }]}>{faceMatchSummary(member)}</Text>
-                      {faceMatchLimitation(member) ? <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>{faceMatchLimitation(member)}</Text> : null}
-                      {member?.provider === "deepface_arcface" ? <Text style={[styles.body, { color: colors.textSecondary }]}>{faceMatchMetrics(member)}</Text> : null}
+                      {Math.max(0, Number(member?.usable_frames ?? member?.frames_compared) || 0) === 1 ? (
+                        <Text style={[styles.manualPrompt, { color: colors.text }]}>{faceMatchDetails(member)}</Text>
+                      ) : null}
+                      <ReviewDetails colors={colors}>
+                        <Text style={[styles.body, { color: colors.textSecondary }]}>{faceMatchDetails(member) || "No clear frame count is available."}</Text>
+                      </ReviewDetails>
                     </View>
                   ))}
                 </View>
-              ) : !faceSimilarity?.status || faceSimilarity.status === "not_run" ? <EmptyState colors={colors}>{faceSimilarity?.summary || "Processing unavailable. Manually compare the original profile photo and video."}</EmptyState> : <>
-                <Text style={[styles.body, { color: effectiveFaceMatchStatus(faceSimilarity) === "likely_same_person" ? "#10B981" : effectiveFaceMatchStatus(faceSimilarity) === "likely_different_person" ? "#EF4444" : colors.textSecondary }]}>{faceMatchLabel(effectiveFaceMatchStatus(faceSimilarity))}</Text>
-                <Text style={[styles.body, { color: colors.textSecondary }]}>{faceMatchSummary(faceSimilarity)}</Text>
-                {faceMatchLimitation(faceSimilarity) ? <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>{faceMatchLimitation(faceSimilarity)}</Text> : null}
-                {faceSimilarity?.provider === "deepface_arcface" ? <Text style={[styles.body, { color: colors.textSecondary }]}>{faceMatchMetrics(faceSimilarity)}</Text> : null}
-              </>}
-              <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>DeepFace with ArcFace compares the profile photo with representative frames from the performance video. A single clear frame can now produce a limited advisory result; unclear frames stay inconclusive. This is not identity verification and is excluded from the AI Match Review score.</Text>
-            </Section>
+              ) : ["queued", "processing"].includes(aiReviewStatus) ? (
+                <View style={styles.stackMedium}>
+                  <StatusRow icon="time-outline" label="Check in progress" color="#F59E0B" />
+                  <Text style={[styles.body, { color: colors.textSecondary }]}>Profile and video comparison is still processing.</Text>
+                </View>
+              ) : !faceSimilarity?.status || faceSimilarity.status === "not_run" ? (
+                <View style={styles.stackMedium}>
+                  <StatusRow icon="warning-outline" label="Manual review needed" color="#F59E0B" />
+                  <Text style={[styles.body, { color: colors.textSecondary }]}>{unavailableFaceMatchMessage(faceSimilarity)}</Text>
+                </View>
+              ) : (
+                <View style={styles.stackMedium}>
+                  <StatusRow
+                    icon={faceMatchIcon(effectiveFaceMatchStatus(faceSimilarity))}
+                    label={faceMatchLabel(effectiveFaceMatchStatus(faceSimilarity))}
+                    color={faceMatchColor(effectiveFaceMatchStatus(faceSimilarity), colors.textSecondary)}
+                  />
+                  <Text style={[styles.body, { color: colors.textSecondary }]}>{faceMatchSummary(faceSimilarity)}</Text>
+                  {Math.max(0, Number(faceSimilarity?.usable_frames ?? faceSimilarity?.frames_compared) || 0) === 1 ? (
+                    <Text style={[styles.manualPrompt, { color: colors.text }]}>{faceMatchDetails(faceSimilarity)}</Text>
+                  ) : null}
+                  <ReviewDetails colors={colors}>
+                    <Text style={[styles.body, { color: colors.textSecondary }]}>{faceMatchDetails(faceSimilarity) || "No clear frame count is available."}</Text>
+                    <Text style={[styles.body, { color: colors.textSecondary }]}>The profile photo was compared with clear frames from the performance video.</Text>
+                  </ReviewDetails>
+                </View>
+              )}
+              <Text style={[styles.advisory, { color: colors.textSecondary }]}>Advisory only · Not included in score</Text>
+              </Subsection>
 
-            <Section title="Portfolio Evidence" icon="images-outline" colors={colors}>
-              {portfolio.length ? portfolio.map((url, index) => (
-                <TouchableOpacity key={`${url}-${index}`} onPress={() => onOpenMedia(String(url), `Portfolio ${index + 1}`)} style={[styles.outlineButton, { borderColor: colors.border }]}>
-                  <Ionicons name="open-outline" size={16} color={colors.primary} />
-                  <Text numberOfLines={1} style={[styles.outlineButtonText, { color: colors.primary }]}>Open portfolio file {index + 1}</Text>
-                </TouchableOpacity>
-              )) : <EmptyState colors={colors}>No uploaded portfolio files were found. Manual review may be required.</EmptyState>}
-              <Text style={[styles.body, { color: colors.textSecondary }]}>Analysis state: {aiReview ? titleCase(aiReview.status) : "Unavailable"}</Text>
-              {aiReview?.overall_summary ? <Text style={[styles.body, { color: colors.textSecondary }]}>{aiReview.overall_summary}</Text> : null}
             </Section>
 
             <Section title="Application History" icon="time-outline" colors={colors}>
@@ -659,10 +878,23 @@ const styles = StyleSheet.create({
   sectionIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   sectionTitle: { flex: 1, fontFamily: "Poppins_600SemiBold", fontSize: 13, lineHeight: 18 },
   sectionBody: { borderTopWidth: 1, padding: 14, gap: 10 },
+  subsection: { gap: 10 },
+  subsectionHeader: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 8 },
+  subsectionTitle: { flex: 1, fontFamily: "Poppins_600SemiBold", fontSize: 12, lineHeight: 17 },
+  subsectionBody: { gap: 10 },
+  reviewDivider: { height: 1, marginVertical: 4 },
   flexOne: { flex: 1 },
   body: { fontFamily: "Poppins_400Regular", fontSize: 12, lineHeight: 19 },
   label: { fontFamily: "Poppins_600SemiBold", fontSize: 12, marginTop: 4 },
   disclaimer: { fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 16, marginTop: 5 },
+  advisory: { fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15 },
+  manualPrompt: { fontFamily: "Poppins_600SemiBold", fontSize: 11, lineHeight: 17 },
+  statusRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  statusRowText: { flex: 1, fontFamily: "Poppins_600SemiBold", fontSize: 12, lineHeight: 18 },
+  reviewDetails: { alignItems: "flex-start" },
+  reviewDetailsButton: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 4 },
+  reviewDetailsButtonText: { fontFamily: "Poppins_600SemiBold", fontSize: 10, lineHeight: 15 },
+  reviewDetailsBody: { width: "100%", borderLeftWidth: 2, paddingLeft: 10, gap: 7 },
   detailRow: { flexDirection: "row", alignItems: "flex-start", gap: 9 },
   detailLabel: { fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 13 },
   detailValue: { marginTop: 1, fontFamily: "Poppins_500Medium", fontSize: 12, lineHeight: 17 },
@@ -681,9 +913,6 @@ const styles = StyleSheet.create({
   outlineButtonText: { flex: 1, fontFamily: "Poppins_600SemiBold", fontSize: 12 },
   primaryButton: { minHeight: 44, borderRadius: 11, paddingHorizontal: 22, alignItems: "center", justifyContent: "center" },
   primaryButtonText: { color: "#FFF", fontFamily: "Poppins_600SemiBold" },
-  statusPill: { alignSelf: "flex-start", maxWidth: "100%", borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
-  statusPillText: { fontFamily: "Poppins_600SemiBold", fontSize: 10, flexShrink: 1 },
-  score: { fontFamily: "Poppins_700Bold", fontSize: 24 },
   actionFooter: { borderTopWidth: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14, flexDirection: "row", gap: 10 },
   footerSecondaryButton: { flex: 0.8, minHeight: 48, borderRadius: 999, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   footerPrimaryButton: { flex: 1.2, minHeight: 48, borderRadius: 999, flexDirection: "row", gap: 7, alignItems: "center", justifyContent: "center" },

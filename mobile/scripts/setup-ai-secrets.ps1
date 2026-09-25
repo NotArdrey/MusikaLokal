@@ -42,9 +42,15 @@ if (-not $ProjectRef) {
 $secretNames = @(
     'GROQ_API_KEY',
     'GROQ_FALLBACK_API_KEY',
-    'FACE_RECOGNITION_URL',
-    'FACE_RECOGNITION_API_KEY',
-    'FACE_RECOGNITION_TIMEOUT_MS',
+    'GROQ_VISION_MODEL',
+    'GROQ_VISION_FALLBACK_MODEL',
+    'FACEPP_API_KEY',
+    'FACEPP_API_SECRET',
+    'FACEPP_API_BASE_URL',
+    'FACEPP_THRESHOLD_TIER',
+    'FACEPP_TIMEOUT_MS',
+    'FACEPP_MAX_CONCURRENCY_RETRIES',
+    'FACEPP_RETRY_BASE_DELAY_MS',
     'FACE_GROUP_MAX_MEMBERS',
     'GEMINI_API_KEY',
     'OPENAI_API_KEY',
@@ -76,7 +82,7 @@ foreach ($name in $secretNames) {
 }
 
 if ($secretPairs.Count -eq 0) {
-    throw "No Edge Function secrets found in $EnvFile. Add GROQ_API_KEY, FACE_RECOGNITION_URL, OPENAI_API_KEY, or ACRCLOUD_* values and rerun."
+    throw "No Edge Function secrets found in $EnvFile. Add GROQ_API_KEY, FACEPP_API_KEY/FACEPP_API_SECRET, OPENAI_API_KEY, or ACRCLOUD_* values and rerun."
 }
 
 Write-Host "Setting $($secretPairs.Count) Edge Function secret(s) on project $ProjectRef ..."

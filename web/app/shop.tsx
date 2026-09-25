@@ -680,6 +680,7 @@ export default function ShopScreen() {
         <FormScroll showsVerticalScrollIndicator={false} style={useBottomSheetScroll ? undefined : { maxHeight: 600 }}>
           <Text style={[styles.inputLabel, { color: colors.text }]}>Photos</Text>
           <ImageUploader
+            enableAiSafetyScreening={false}
             images={listingImages}
             onImagesChange={setListingImages}
             thumbnailIndex={listingThumbnailIndex}

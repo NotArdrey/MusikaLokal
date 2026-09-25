@@ -1566,6 +1566,7 @@ export default function EditGigScreen() {
               Event Photos
             </Text>
             <ImageUploader relatedType="gig" relatedId={Array.isArray(id) ? id[0] : id}
+              enableAiSafetyScreening={false}
               images={images}
               onImagesChange={setImages}
               thumbnailIndex={thumbnailIndex}

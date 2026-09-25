@@ -10,7 +10,7 @@ export type FaceFrameResult = {
     frame_url: string
     outcome: 'matched' | 'different' | 'unclear' | 'no_face' | 'processing_error'
     verified: boolean | null
-    distance: number | null
+    confidence: number | null
     threshold: number | null
     faces_detected: number
     error: string | null
@@ -22,6 +22,7 @@ export type FaceMatchResult = {
     similarity: number | null
     distance: number | null
     threshold: number | null
+    threshold_tier: string
     summary: string
     frames_compared: number
     sampled_frames: number
@@ -31,44 +32,33 @@ export type FaceMatchResult = {
     no_face_frames: number
     multiple_people_frames: number
     processing_failure_frames: number
-    provider: 'deepface_arcface'
-    model: 'ArcFace'
-    detector_backend: string
-    distance_metric: string
-    alignment: boolean
+    provider: 'faceplusplus_compare'
+    model: 'Face++ Compare API'
     aggregation_strategy: string
-    service_version: string
-    deepface_version: string
     frames: FaceFrameResult[]
     limitation: string
     error: string | null
 }
 
-export type FaceServiceMetadata = {
-    status?: string
-    provider?: string
-    engine?: string
-    service_version?: string
-    deepface_version?: string
-    model?: string
-    detector_backend?: string
-    distance_metric?: string
-    threshold?: number | null
-    threshold_source?: string
-    alignment?: boolean
-    aggregation_strategy?: string
-    frame_configuration?: string
-}
-
-export type FaceServiceClientOptions = {
-    serviceUrl: string
-    apiKey?: string
+export type FacePlusPlusClientOptions = {
+    apiKey: string
+    apiSecret: string
+    apiBaseUrl?: string
+    thresholdTier?: string
     timeoutMs?: number
+    maxConcurrencyRetries?: number
+    retryBaseDelayMs?: number
     fetchImpl?: typeof fetch
+    sleepImpl?: (delayMs: number) => Promise<void>
 }
 
-const DEFAULT_TIMEOUT_MS = 60_000
+const DEFAULT_API_BASE_URL = 'https://api-us.faceplusplus.com'
+const DEFAULT_THRESHOLD_TIER = '1e-5'
+const DEFAULT_TIMEOUT_MS = 20_000
+const DEFAULT_MAX_CONCURRENCY_RETRIES = 3
+const DEFAULT_RETRY_BASE_DELAY_MS = 1_000
 const MAX_FRAMES = 3
+const AGGREGATION_STRATEGY = 'two_frame_consensus_or_single_clear_frame'
 
 const finiteNumber = (value: unknown): number | null => {
     if (value === null || value === undefined || value === '') return null
@@ -76,20 +66,27 @@ const finiteNumber = (value: unknown): number | null => {
     return Number.isFinite(parsed) ? parsed : null
 }
 
-const boundedInteger = (value: unknown, fallback = 0) => {
-    const parsed = finiteNumber(value)
-    return parsed === null ? fallback : Math.max(0, Math.floor(parsed))
-}
-
-const boundedRate = (value: unknown) => {
-    const parsed = finiteNumber(value)
-    return parsed === null ? 0 : Math.max(0, Math.min(1, parsed))
-}
-
 const cleanText = (value: unknown, maxLength = 500) => String(value || '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, maxLength)
+
+const normalizeThresholdTier = (value: unknown) => {
+    const tier = cleanText(value, 20).toLowerCase()
+    return ['1e-3', '1e-4', '1e-5'].includes(tier) ? tier : DEFAULT_THRESHOLD_TIER
+}
+
+const compareEndpoint = (baseUrl: string) =>
+    `${baseUrl.trim().replace(/\/+$/, '') || DEFAULT_API_BASE_URL}/facepp/v3/compare`
+
+const median = (values: number[]) => {
+    if (values.length === 0) return null
+    const sorted = [...values].sort((left, right) => left - right)
+    const midpoint = Math.floor(sorted.length / 2)
+    return sorted.length % 2 === 0
+        ? (sorted[midpoint - 1] + sorted[midpoint]) / 2
+        : sorted[midpoint]
+}
 
 export function unavailableFaceMatch(summary: string, limitation = '', error: string | null = null): FaceMatchResult {
     return {
@@ -98,6 +95,7 @@ export function unavailableFaceMatch(summary: string, limitation = '', error: st
         similarity: null,
         distance: null,
         threshold: null,
+        threshold_tier: '',
         summary,
         frames_compared: 0,
         sampled_frames: 0,
@@ -107,91 +105,188 @@ export function unavailableFaceMatch(summary: string, limitation = '', error: st
         no_face_frames: 0,
         multiple_people_frames: 0,
         processing_failure_frames: 0,
-        provider: 'deepface_arcface',
-        model: 'ArcFace',
-        detector_backend: '',
-        distance_metric: 'cosine',
-        alignment: true,
-        aggregation_strategy: 'two_frame_consensus_or_single_clear_frame',
-        service_version: '',
-        deepface_version: '',
+        provider: 'faceplusplus_compare',
+        model: 'Face++ Compare API',
+        aggregation_strategy: AGGREGATION_STRATEGY,
         frames: [],
         limitation,
         error,
     }
 }
 
-function normalizeFrame(value: any, index: number): FaceFrameResult {
-    const allowedOutcomes = new Set(['matched', 'different', 'unclear', 'no_face', 'processing_error'])
-    const outcome = allowedOutcomes.has(String(value?.outcome))
-        ? String(value.outcome) as FaceFrameResult['outcome']
-        : 'processing_error'
-    return {
-        frame: boundedInteger(value?.frame, index + 1),
-        frame_url: cleanText(value?.frame_url, 2_000),
-        outcome,
-        verified: typeof value?.verified === 'boolean' ? value.verified : null,
-        distance: finiteNumber(value?.distance),
-        threshold: finiteNumber(value?.threshold),
-        faces_detected: boundedInteger(value?.faces_detected),
-        error: cleanText(value?.error, 300) || null,
-    }
+const isNoFaceError = (message: string) => /NO_FACE_FOUND|FACE_NOT_FOUND/i.test(message)
+const isConcurrencyLimitError = (message: string) => /CONCURRENCY_LIMIT_EXCEEDED/i.test(message)
+
+const boundedInteger = (value: unknown, fallback: number, minimum: number, maximum: number) => {
+    const parsed = finiteNumber(value)
+    return parsed === null ? fallback : Math.max(minimum, Math.min(maximum, Math.floor(parsed)))
 }
 
-function normalizeResult(value: any): FaceMatchResult {
-    const allowedStatuses = new Set<FaceSimilarityStatus>([
-        'likely_same_person',
-        'likely_different_person',
-        'unclear',
-        'not_run',
-    ])
-    const rawStatus = String(value?.status || '') as FaceSimilarityStatus
-    const status = allowedStatuses.has(rawStatus) ? rawStatus : 'unclear'
-    const frames = (Array.isArray(value?.frames) ? value.frames : []).slice(0, MAX_FRAMES).map(normalizeFrame)
+const wait = (delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs))
+
+const retryDelayMs = (response: Response, attempt: number, baseDelayMs: number) => {
+    const retryAfterSeconds = finiteNumber(response.headers?.get?.('retry-after'))
+    if (retryAfterSeconds !== null && retryAfterSeconds > 0) {
+        return Math.min(10_000, Math.ceil(retryAfterSeconds * 1_000))
+    }
+
+    const exponentialDelay = baseDelayMs * (2 ** attempt)
+    const jitter = Math.floor(Math.random() * Math.min(250, baseDelayMs))
+    return Math.min(10_000, exponentialDelay + jitter)
+}
+
+async function compareFrame(
+    subject: FaceMatchSubject,
+    frameUrl: string,
+    frameIndex: number,
+    options: FacePlusPlusClientOptions,
+    thresholdTier: string,
+): Promise<FaceFrameResult> {
+    const maxConcurrencyRetries = boundedInteger(
+        options.maxConcurrencyRetries,
+        DEFAULT_MAX_CONCURRENCY_RETRIES,
+        0,
+        5,
+    )
+    const baseDelayMs = boundedInteger(
+        options.retryBaseDelayMs,
+        DEFAULT_RETRY_BASE_DELAY_MS,
+        250,
+        5_000,
+    )
+    const sleep = options.sleepImpl || wait
+
+    for (let attempt = 0; attempt <= maxConcurrencyRetries; attempt += 1) {
+        const body = new FormData()
+        body.set('api_key', options.apiKey)
+        body.set('api_secret', options.apiSecret)
+        body.set('image_url1', subject.reference_image_url)
+        body.set('image_url2', frameUrl)
+
+        try {
+            const timeoutMs = Math.max(5_000, Math.min(60_000, Number(options.timeoutMs) || DEFAULT_TIMEOUT_MS))
+            const response = await (options.fetchImpl || fetch)(
+                compareEndpoint(options.apiBaseUrl || DEFAULT_API_BASE_URL),
+                { method: 'POST', body, signal: AbortSignal.timeout(timeoutMs) },
+            )
+            const payload = await response.json().catch(() => ({}))
+            const apiError = cleanText(payload?.error_message || (!response.ok ? `HTTP ${response.status}` : ''), 300)
+            const facesDetected = Array.isArray(payload?.faces2) ? payload.faces2.length : 0
+            if (apiError) {
+                if (isConcurrencyLimitError(apiError) && attempt < maxConcurrencyRetries) {
+                    await sleep(retryDelayMs(response, attempt, baseDelayMs))
+                    continue
+                }
+
+                return {
+                    frame: frameIndex + 1,
+                    frame_url: frameUrl,
+                    outcome: isNoFaceError(apiError) ? 'no_face' : 'processing_error',
+                    verified: null,
+                    confidence: null,
+                    threshold: null,
+                    faces_detected: facesDetected,
+                    error: apiError,
+                }
+            }
+
+            const confidence = finiteNumber(payload?.confidence)
+            const threshold = finiteNumber(payload?.thresholds?.[thresholdTier])
+            if (confidence === null || threshold === null) {
+                return {
+                    frame: frameIndex + 1,
+                    frame_url: frameUrl,
+                    outcome: facesDetected === 0 ? 'no_face' : 'processing_error',
+                    verified: null,
+                    confidence,
+                    threshold,
+                    faces_detected: facesDetected,
+                    error: facesDetected === 0 ? 'Face++ found no comparable face.' : 'Face++ returned no usable confidence threshold.',
+                }
+            }
+
+            const verified = confidence >= threshold
+            return {
+                frame: frameIndex + 1,
+                frame_url: frameUrl,
+                outcome: verified ? 'matched' : 'different',
+                verified,
+                confidence,
+                threshold,
+                faces_detected: facesDetected,
+                error: null,
+            }
+        } catch (caught) {
+            return {
+                frame: frameIndex + 1,
+                frame_url: frameUrl,
+                outcome: 'processing_error',
+                verified: null,
+                confidence: null,
+                threshold: null,
+                faces_detected: 0,
+                error: cleanText((caught as any)?.message || caught, 300) || 'Face++ request failed.',
+            }
+        }
+    }
+
+    throw new Error('Face++ retry loop ended unexpectedly.')
+}
+
+function aggregateResult(frames: FaceFrameResult[], thresholdTier: string): FaceMatchResult {
+    const usable = frames.filter((frame) => frame.outcome === 'matched' || frame.outcome === 'different')
+    const matched = usable.filter((frame) => frame.outcome === 'matched')
+    const noFaceCount = frames.filter((frame) => frame.outcome === 'no_face').length
+    const failureFrames = frames.filter((frame) => frame.outcome === 'processing_error')
+    const confidence = median(usable.flatMap((frame) => frame.confidence === null ? [] : [frame.confidence]))
+    const threshold = median(usable.flatMap((frame) => frame.threshold === null ? [] : [frame.threshold]))
+    const status: FaceSimilarityStatus = usable.length >= 2 && matched.length >= 2
+        ? 'likely_same_person'
+        : usable.length >= 2 && matched.length === 0
+            ? 'likely_different_person'
+            : 'unclear'
+    const summary = status === 'likely_same_person'
+        ? `Face++ matched ${matched.length} of ${usable.length} clear representative video frames.`
+        : status === 'likely_different_person'
+            ? `Face++ did not match the profile photo in ${usable.length} clear representative video frames.`
+            : usable.length === 1 && matched.length === 1
+                ? 'Face++ matched the only clear representative video frame, so the evidence is limited.'
+                : usable.length === 0
+                    ? 'Face++ could not find a usable face comparison in the representative video frames.'
+                    : 'Face++ returned mixed or insufficient face-comparison evidence.'
+    const firstFailure = failureFrames.find((frame) => frame.error)?.error || null
+
     return {
-        status,
-        // DeepFace distance is not converted into a made-up percentage. These legacy
-        // compatibility fields remain nullable until a calibrated mapping is approved.
-        confidence: finiteNumber(value?.confidence),
-        similarity: finiteNumber(value?.similarity),
-        distance: finiteNumber(value?.distance),
-        threshold: finiteNumber(value?.threshold),
-        summary: cleanText(value?.summary, 700) || 'Face comparison completed without a summary.',
-        frames_compared: boundedInteger(value?.frames_compared ?? value?.usable_frames),
-        sampled_frames: boundedInteger(value?.sampled_frames),
-        usable_frames: boundedInteger(value?.usable_frames),
-        matched_frames: boundedInteger(value?.matched_frames),
-        match_rate: boundedRate(value?.match_rate),
-        no_face_frames: boundedInteger(value?.no_face_frames),
-        multiple_people_frames: boundedInteger(value?.multiple_people_frames),
-        processing_failure_frames: boundedInteger(value?.processing_failure_frames),
-        provider: 'deepface_arcface',
-        model: 'ArcFace',
-        detector_backend: cleanText(value?.detector_backend, 80),
-        distance_metric: cleanText(value?.distance_metric, 40) || 'cosine',
-        alignment: value?.alignment !== false,
-        aggregation_strategy: cleanText(value?.aggregation_strategy, 160)
-            || 'two_frame_consensus_or_single_clear_frame',
-        service_version: cleanText(value?.service_version, 80),
-        deepface_version: cleanText(value?.deepface_version, 80),
+        status: usable.length === 0 && failureFrames.length === frames.length ? 'not_run' : status,
+        confidence,
+        similarity: confidence === null ? null : confidence / 100,
+        distance: null,
+        threshold,
+        threshold_tier: thresholdTier,
+        summary,
+        frames_compared: usable.length,
+        sampled_frames: frames.length,
+        usable_frames: usable.length,
+        matched_frames: matched.length,
+        match_rate: usable.length > 0 ? matched.length / usable.length : 0,
+        no_face_frames: noFaceCount,
+        multiple_people_frames: frames.filter((frame) => frame.faces_detected > 1).length,
+        processing_failure_frames: failureFrames.length,
+        provider: 'faceplusplus_compare',
+        model: 'Face++ Compare API',
+        aggregation_strategy: AGGREGATION_STRATEGY,
         frames,
-        limitation: cleanText(value?.limitation, 700),
-        error: cleanText(value?.error, 500) || null,
+        limitation: usable.length < 2
+            ? 'Fewer than two clear representative video frames were available; review the original photo and video.'
+            : '',
+        error: firstFailure,
     }
 }
 
-function endpoint(serviceUrl: string, path: string) {
-    return `${serviceUrl.trim().replace(/\/+$/, '')}${path}`
-}
-
-// PRODUCTION PARITY:
-// This client is the single integration point for the production DeepFace/ArcFace
-// service. The face benchmark imports this same client instead of implementing its
-// own request or result-normalization logic.
-export async function compareApplicantFacesWithDeepFace(
+export async function compareApplicantFacesWithFacePlusPlus(
     subjects: FaceMatchSubject[],
     frameUrls: string[],
-    options: FaceServiceClientOptions,
+    options: FacePlusPlusClientOptions,
 ): Promise<Map<string, FaceMatchResult>> {
     const results = new Map<string, FaceMatchResult>()
     if (subjects.length === 0) return results
@@ -205,60 +300,22 @@ export async function compareApplicantFacesWithDeepFace(
         return results
     }
 
-    const serviceUrl = cleanText(options.serviceUrl, 2_000)
-    if (!serviceUrl) {
+    if (!cleanText(options.apiKey) || !cleanText(options.apiSecret)) {
         subjects.forEach((subject) => results.set(subject.id, unavailableFaceMatch(
-            'DeepFace/ArcFace face matching is not configured.',
-            'Set FACE_RECOGNITION_URL as a server-side Edge Function secret.',
-            'missing_face_service_url',
+            'Face++ face matching is not configured.',
+            'Set FACEPP_API_KEY and FACEPP_API_SECRET as Supabase Edge Function secrets.',
+            'missing_facepp_credentials',
         )))
         return results
     }
 
-    const timeoutMs = Math.max(5_000, Math.min(120_000, boundedInteger(options.timeoutMs, DEFAULT_TIMEOUT_MS)))
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (options.apiKey) headers['X-Face-Service-Key'] = options.apiKey
-
-    try {
-        const response = await (options.fetchImpl || fetch)(endpoint(serviceUrl, '/v1/face-match/batch'), {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ subjects, frame_urls: selectedFrames }),
-            signal: AbortSignal.timeout(timeoutMs),
-        })
-        const payload = await response.json().catch(() => ({}))
-        if (!response.ok) {
-            throw new Error(`DeepFace/ArcFace service returned ${response.status}${payload?.detail ? `: ${cleanText(payload.detail, 220)}` : ''}`)
+    const thresholdTier = normalizeThresholdTier(options.thresholdTier)
+    for (const subject of subjects) {
+        const frames: FaceFrameResult[] = []
+        for (const [frameIndex, frameUrl] of selectedFrames.entries()) {
+            frames.push(await compareFrame(subject, frameUrl, frameIndex, options, thresholdTier))
         }
-
-        const returned = new Map<string, FaceMatchResult>(
-            (Array.isArray(payload?.results) ? payload.results : [])
-                .filter((item: any) => item?.subject_id)
-                .map((item: any) => [String(item.subject_id), normalizeResult({ ...payload, ...item })]),
-        )
-        subjects.forEach((subject) => {
-            results.set(subject.id, returned.get(subject.id) || unavailableFaceMatch(
-                'DeepFace/ArcFace face matching did not return a result.',
-                'The face service response was incomplete.',
-                'missing_subject_result',
-            ))
-        })
-    } catch (caught) {
-        const detail = cleanText((caught as any)?.message || caught, 300)
-        subjects.forEach((subject) => results.set(subject.id, unavailableFaceMatch(
-            'DeepFace/ArcFace face matching was unavailable.',
-            `DeepFace/ArcFace face matching was unavailable: ${detail}`,
-            detail || 'face_service_unavailable',
-        )))
+        results.set(subject.id, aggregateResult(frames, thresholdTier))
     }
     return results
-}
-
-export async function getFaceServiceMetadata(options: FaceServiceClientOptions): Promise<FaceServiceMetadata> {
-    const response = await (options.fetchImpl || fetch)(endpoint(options.serviceUrl, '/version'), {
-        headers: options.apiKey ? { 'X-Face-Service-Key': options.apiKey } : undefined,
-        signal: AbortSignal.timeout(Math.max(5_000, Math.min(30_000, options.timeoutMs || 10_000))),
-    })
-    if (!response.ok) throw new Error(`Face service version request returned ${response.status}`)
-    return await response.json()
 }

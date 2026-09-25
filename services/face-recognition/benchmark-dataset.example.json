@@ -1,16 +1,12 @@
 {
   "name": "replace-with-labeled-consented-test-data",
   "production": {
-    "provider": "deepface_arcface",
-    "service_version": "1.0.0",
-    "deepface_version": "0.0.101",
-    "model": "ArcFace",
-    "detector_backend": "retinaface",
-    "distance_metric": "cosine",
-    "threshold": 0.68,
-    "alignment": true,
-    "aggregation_strategy": "at_least_2_usable_frames_and_2_verified_matches",
-    "frame_configuration": "existing_client_representative_jpegs; maximum_3_frames"
+    "provider": "faceplusplus_compare",
+    "model": "Face++ Compare API",
+    "threshold": null,
+    "threshold_tier": "1e-5",
+    "aggregation_strategy": "two_frame_consensus_or_single_clear_frame",
+    "frame_configuration": "up_to_3_client_sampled_frames"
   },
   "cases": [
     {
