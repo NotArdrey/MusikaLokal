@@ -615,7 +615,6 @@ export default function MyVenueScreen() {
                                     const staffPermissions = userRole === 'staff'
                                         ? getStaffPermissions(staffAssignments.find((assignment) => assignment.gig_id === gig.id)?.access_level)
                                         : null;
-                                    const canShowActions = !staffPermissions?.canViewOnly;
                                     const canManageBookings = !staffPermissions || staffPermissions.canManageBookings;
                                     const canEditVenue = gig.is_owner === true && (!staffPermissions || staffPermissions.canEditListing);
                                     const canManageGig = (!isMusicianView || gig.is_owner === true) && canManageBookings;
@@ -686,7 +685,6 @@ export default function MyVenueScreen() {
                                         </Text>
                                     )}
 
-                                    {canShowActions ? (
                                     <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                         <View style={styles.actionLeft}>
                                             <TouchableOpacity
@@ -760,7 +758,6 @@ export default function MyVenueScreen() {
                                             </TouchableOpacity>
                                         ) : null}
                                     </View>
-                                    ) : null}
                                 </View>
                                         </>
                                     );

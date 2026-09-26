@@ -678,7 +678,7 @@ export default function ProductionTeamScreen() {
     const canManage =
       selectedTeam.member_role === "owner" ||
       selectedTeam.member_role === "manager" ||
-      Boolean(selectedStaffPermissions?.canEditListing);
+      Boolean(selectedStaffPermissions?.canManageBookings);
 
     return (
       <>

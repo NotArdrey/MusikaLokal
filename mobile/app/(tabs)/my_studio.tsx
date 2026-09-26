@@ -601,7 +601,6 @@ export default function MyStudioScreen() {
                                 const staffPermissions = userRole === 'staff'
                                     ? getStaffPermissions(staffAssignments.find((assignment) => assignment.studio_id === studio.id)?.access_level)
                                     : null;
-                                const canShowActions = !staffPermissions?.canViewOnly;
                                 const canManageBookings = !staffPermissions || staffPermissions.canManageBookings;
                                 const canEditListing = !staffPermissions || staffPermissions.canEditListing;
                                 const normalizedPermitStatus = normalizePermitStatus(studio.permit_status);
@@ -666,10 +665,8 @@ export default function MyStudioScreen() {
                                         </Text>
                                     )}
 
-                                    {canShowActions ? (
                                     <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                         <View style={styles.actionLeft}>
-                                            {canManageBookings ? (
                                             <TouchableOpacity
                                                 activeOpacity={1}
                                                 testID={`mobile-studio-manage-${studio.id}`}
@@ -677,10 +674,9 @@ export default function MyStudioScreen() {
                                                 onPress={() => router.push({ pathname: '/manage_studio', params: { id: studio.id } })}
                                                 style={[styles.manageBtn, { borderColor: colors.primary }]}
                                             >
-                                                <Ionicons name="arrow-forward-outline" size={18} color={colors.primary} />
-                                                <Text style={[styles.manageBtnText, { color: colors.primary }]}>Manage</Text>
+                                                <Ionicons name={canManageBookings ? "arrow-forward-outline" : "eye-outline"} size={18} color={colors.primary} />
+                                                <Text style={[styles.manageBtnText, { color: colors.primary }]}>{canManageBookings ? 'Manage' : 'View'}</Text>
                                             </TouchableOpacity>
-                                            ) : null}
 
                                             {canEditListing ? (
                                             <>
@@ -731,7 +727,6 @@ export default function MyStudioScreen() {
                                         </TouchableOpacity>
                                         ) : null}
                                     </View>
-                                    ) : null}
                                 </View>
                                         </>
                                     );

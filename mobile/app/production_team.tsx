@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
@@ -690,7 +690,7 @@ export default function ProductionTeamScreen() {
     const canManage =
       selectedTeam.member_role === "owner" ||
       selectedTeam.member_role === "manager" ||
-      Boolean(selectedStaffPermissions?.canEditListing);
+      Boolean(selectedStaffPermissions?.canManageBookings);
     const tabs = canManage
       ? PRODUCTION_TABS
       : PRODUCTION_TABS.filter((tab) => tab !== "Applications");

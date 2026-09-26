@@ -221,7 +221,7 @@ export default function MyProductionScreen() {
                   );
                   const canDelete = !isMusicianView && !staffPermissions && team.member_role === 'owner';
                   const canOnlyViewAndChat = isMusicianView && !isOwnerTeam;
-                  const showManageAsView = canOnlyViewAndChat || Boolean(staffPermissions && !staffPermissions.canEditListing);
+                  const showManageAsView = canOnlyViewAndChat || Boolean(staffPermissions && staffPermissions.canViewOnly);
 
                   return (
                     <View key={team.id} style={[styles.gridItem, isWebDesktop && styles.gridItemWeb]}>
