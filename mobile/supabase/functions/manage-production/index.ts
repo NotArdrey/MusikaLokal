@@ -2547,7 +2547,7 @@ serve(async (req: Request) => {
 
         teamsById.set(teamRecord.id, {
           ...teamRecord,
-          member_role: `staff-level-${staffRow.access_level}`,
+          member_role: "staff",
           staff_access_level: Number(staffRow.access_level),
           staff_can_edit: Number(staffRow.access_level) === 1,
           staff_can_manage_bookings: Number(staffRow.access_level) <= 2,

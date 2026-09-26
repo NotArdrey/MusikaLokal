@@ -310,7 +310,7 @@ export default function ProductionTeamScreen() {
 
       const resolvedMemberRole = data.owner_id === userId
         ? "owner"
-        : membershipData?.role || (isAssignedStaff ? `staff-level-${staffAssignment?.access_level}` : "viewer");
+        : membershipData?.role || (isAssignedStaff ? "staff" : "viewer");
       const selectedTeamData: Team = {
         ...data,
         member_role: resolvedMemberRole,
@@ -1219,7 +1219,7 @@ export default function ProductionTeamScreen() {
                   <View style={styles.teamCardMeta}>
                     <View style={[styles.roleBadgeSmall, { backgroundColor: statusColor(team.member_role) + "22" }]}>
                       <Text style={[styles.roleBadgeSmallText, { color: statusColor(team.member_role) }]}>
-                        {team.member_role}
+                        {team.staff_access_level || /^staff(?:[-_]|$)/i.test(team.member_role) ? "staff" : team.member_role}
                       </Text>
                     </View>
                   </View>

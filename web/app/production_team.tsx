@@ -1088,7 +1088,7 @@ export default function ProductionTeamScreen() {
                   <View style={styles.teamCardMeta}>
                     <View style={[styles.roleBadgeSmall, { backgroundColor: statusColor(team.member_role) + "22" }]}>
                       <Text style={[styles.roleBadgeSmallText, { color: statusColor(team.member_role) }]}>
-                        {team.member_role}
+                        {team.staff_access_level || /^staff(?:[-_]|$)/i.test(team.member_role) ? "staff" : team.member_role}
                       </Text>
                     </View>
                   </View>

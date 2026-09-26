@@ -257,7 +257,9 @@ export default function MyProductionScreen() {
                       </View>
                     )}
                     <View style={[styles.roleBadge, { backgroundColor: colors.primary + '16' }]}>
-                      <Text style={[styles.roleBadgeText, { color: colors.primary }]}>{team.member_role}</Text>
+                      <Text style={[styles.roleBadgeText, { color: colors.primary }]}>
+                        {team.staff_access_level || /^staff(?:[-_]|$)/i.test(team.member_role) ? 'Staff' : team.member_role}
+                      </Text>
                     </View>
                   </View>
 
