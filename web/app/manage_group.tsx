@@ -2108,7 +2108,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(2,6,23,0.72)",
   },
   playlistPopupBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   playlistPopupCard: {
     width: "100%",

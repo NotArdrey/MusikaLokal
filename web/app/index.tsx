@@ -101,10 +101,14 @@ export default function LoginScreen() {
     verificationPendingReview,
     diditPendingReview,
     diditVerified,
+    roleAdded,
+    addedRole,
+    addedRoleStatus,
     banned,
     banned_until,
     ban_reason,
     ban_permanent,
+    role_changed,
   } = useLocalSearchParams();
   const shownRouteBanRef = useRef(false);
   const { width } = Dimensions.get('window');
@@ -310,9 +314,28 @@ export default function LoginScreen() {
     });
   }, [banned, banned_until, ban_reason, ban_permanent]);
 
+  useEffect(() => {
+    if (getStringParam(role_changed) !== 'true') return;
+    showAlert(
+      'info',
+      'Role Updated',
+      'An administrator changed your account role. Please sign in again to continue with your new access.',
+    );
+    router.setParams({ role_changed: '' });
+  }, [role_changed]);
+
   // Check for Account Created success (New User)
   useEffect(() => {
     if (accountCreated === 'true') {
+      if (roleAdded === 'true') {
+        const roleLabel = String(addedRole || 'fan').toLowerCase() === 'musician' ? 'Musician' : 'Fan';
+        const roleIsActive = String(addedRoleStatus || '').toUpperCase() === 'ACTIVE';
+        showAlert('success', roleIsActive ? `${roleLabel} Role Added` : `${roleLabel} Role In Review`,
+          roleIsActive
+            ? `Your existing account now also has the ${roleLabel} role. Sign in with the same email and password to continue.`
+            : `Your ${roleLabel} role request is under review. Your existing account and its current role remain active while you wait.`);
+        return;
+      }
       if (diditPendingReview === 'true') {
         showAlert(
           'success',
@@ -353,7 +376,7 @@ export default function LoginScreen() {
       );
       return;
     }
-  }, [verified, accountCreated, createdEmail, verificationPendingReview, diditPendingReview, diditVerified]);
+  }, [verified, accountCreated, createdEmail, verificationPendingReview, diditPendingReview, diditVerified, roleAdded, addedRole, addedRoleStatus]);
 
   const signInWithCredentials = async (loginEmail: string, loginPassword: string) => {
     setLoading(true);

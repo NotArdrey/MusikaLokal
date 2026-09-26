@@ -1645,7 +1645,7 @@ export default function AddGroupScreen() {
       {groupTypeModalVisible && (
         <View
           style={[
-            StyleSheet.absoluteFillObject,
+            StyleSheet.absoluteFill,
             {
               alignItems: "center",
               justifyContent: "center",
@@ -1656,7 +1656,7 @@ export default function AddGroupScreen() {
           ]}
         >
           <TouchableOpacity
-            style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(2,6,23,0.72)" }]}
+            style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(2,6,23,0.72)" }]}
             activeOpacity={1}
             onPress={() => setGroupTypeModalVisible(false)}
           />

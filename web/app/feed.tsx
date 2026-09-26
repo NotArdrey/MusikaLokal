@@ -2,7 +2,7 @@ import { screenVisualUpload } from "../src/services/visualUploadScreen";
 import { isUploadSafetyRetryableFailure } from "../src/services/uploadSafetyScreen";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router/react-navigation";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -4088,7 +4088,7 @@ const styles = StyleSheet.create({
   socialMenuBackdrop: {
     ...(Platform.OS === "web"
       ? ({ position: "fixed" as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 40 } as any)
-      : StyleSheet.absoluteFillObject),
+      : StyleSheet.absoluteFill),
   },
   socialMenuPopover: {
     position: "absolute",
@@ -4150,7 +4150,7 @@ const styles = StyleSheet.create({
     borderRadius: 0,
   },
   socialGalleryMoreOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(15,23,42,0.56)",

@@ -10,6 +10,7 @@ import {
   DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
   persistUploadAsset,
   removePersistedUploadAsset,
+  uploadStorageObject,
 } from "./storageUpload";
 
 export const MAX_PLAYLIST_AUDIO_DURATION_SECONDS = 300;
@@ -134,35 +135,6 @@ const inferMimeType = (name: string, mimeType?: string | null) => {
   }
 
   return "audio/mpeg";
-};
-
-const base64ToUint8Array = (base64: string): Uint8Array => {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const lookup = new Uint8Array(256);
-  for (let index = 0; index < chars.length; index += 1) {
-    lookup[chars.charCodeAt(index)] = index;
-  }
-
-  const normalizedBase64 = base64.replace(/=/g, "");
-  const bytes = new Uint8Array(Math.floor(normalizedBase64.length * 0.75));
-  let pointer = 0;
-
-  for (let index = 0; index < normalizedBase64.length; index += 4) {
-    const e1 = lookup[normalizedBase64.charCodeAt(index)];
-    const e2 = lookup[normalizedBase64.charCodeAt(index + 1)];
-    const e3 = lookup[normalizedBase64.charCodeAt(index + 2)];
-    const e4 = lookup[normalizedBase64.charCodeAt(index + 3)];
-
-    bytes[pointer++] = (e1 << 2) | (e2 >> 4);
-    if (!Number.isNaN(e3)) {
-      bytes[pointer++] = ((e2 & 15) << 4) | (e3 >> 2);
-    }
-    if (!Number.isNaN(e4)) {
-      bytes[pointer++] = ((e3 & 3) << 6) | e4;
-    }
-  }
-
-  return bytes;
 };
 
 const buildAudioSafetyDataUrl = (base64: string, mimeType: string) => {
@@ -404,10 +376,15 @@ export const screenPlaylistAudioForCopyright = async (
     sizeLabel: formatBytesForLog(audioFile.sizeBytes),
   });
 
-  let base64 = "";
+  let sampleBase64 = "";
   try {
-    base64 = await FileSystem.readAsStringAsync(audioFile.uri, {
+    // Only the first few megabytes are needed by the fingerprint service.
+    // Reading the entire MP3 as base64 can briefly create several full-size JS
+    // copies and cause Android to kill/restart the Expo process.
+    sampleBase64 = await FileSystem.readAsStringAsync(audioFile.uri, {
       encoding: FileSystem.EncodingType.Base64,
+      position: 0,
+      length: ACR_CLOUD_AUDIO_SAMPLE_BYTES,
     });
   } catch (error) {
     logPlaylistAudioError("base64_read_failed", traceId, error, {
@@ -416,13 +393,13 @@ export const screenPlaylistAudioForCopyright = async (
     throw error;
   }
   const base64ReadMs = Date.now() - startedAt;
-  const estimatedDecodedBytes = Math.floor((base64.replace(/=+$/, "").length * 3) / 4);
-  const safetyDataUrl = buildAudioSafetyDataUrl(base64, audioFile.mimeType);
+  const estimatedDecodedBytes = Math.floor((sampleBase64.replace(/=+$/, "").length * 3) / 4);
+  const safetyDataUrl = buildAudioSafetyDataUrl(sampleBase64, audioFile.mimeType);
   const safetyBase64Length = safetyDataUrl.split(",")[1]?.length || 0;
   const safetySampleBytes = Math.min(ACR_CLOUD_AUDIO_SAMPLE_BYTES, estimatedDecodedBytes);
 
   logPlaylistAudio("base64_read_done", traceId, {
-    base64Length: base64.length,
+    base64Length: sampleBase64.length,
     estimatedDecodedBytes,
     estimatedDecodedSizeLabel: formatBytesForLog(estimatedDecodedBytes),
     elapsedMs: base64ReadMs,
@@ -433,7 +410,8 @@ export const screenPlaylistAudioForCopyright = async (
     safetySampleBytes,
     safetySampleSizeLabel: formatBytesForLog(safetySampleBytes),
     safetyBase64Length,
-    truncatedForScreening: estimatedDecodedBytes > ACR_CLOUD_AUDIO_SAMPLE_BYTES,
+    truncatedForScreening:
+      typeof audioFile.sizeBytes === "number" && audioFile.sizeBytes > ACR_CLOUD_AUDIO_SAMPLE_BYTES,
   });
 
   try {
@@ -474,7 +452,7 @@ export const screenPlaylistAudioForCopyright = async (
       copyrightReviewId: decision.copyrightReviewId || null,
     });
 
-    return { base64, decision };
+    return { base64: sampleBase64, decision };
   } catch (error) {
     logPlaylistAudioError("copyright_screen_failed", traceId, error, {
       elapsedMs: Date.now() - startedAt,
@@ -525,22 +503,7 @@ export const uploadPlaylistAudioFile = async (
     elapsedMs: Date.now() - startedAt,
   });
 
-  const { base64, decision } = await screenPlaylistAudioForCopyright(audioFile);
-  const convertStartedAt = Date.now();
-
-  logPlaylistAudio("base64_to_bytes_start", traceId, {
-    base64Length: base64.length,
-    elapsedMs: Date.now() - startedAt,
-  });
-
-  const bytes = base64ToUint8Array(base64);
-
-  logPlaylistAudio("base64_to_bytes_done", traceId, {
-    byteLength: bytes.byteLength,
-    sizeLabel: formatBytesForLog(bytes.byteLength),
-    convertMs: Date.now() - convertStartedAt,
-    elapsedMs: Date.now() - startedAt,
-  });
+  const { decision } = await screenPlaylistAudioForCopyright(audioFile);
 
   const safeFileName = sanitizeFileName(audioFile.name, audioFile.extension);
   const storagePath = `playlist-audio/${session.user.id}/${playlistId}/${Date.now()}_${safeFileName}`;
@@ -549,17 +512,19 @@ export const uploadPlaylistAudioFile = async (
     bucket: PLAYLIST_AUDIO_BUCKET,
     storagePath,
     contentType: audioFile.mimeType,
-    byteLength: bytes.byteLength,
-    sizeLabel: formatBytesForLog(bytes.byteLength),
+    byteLength: audioFile.sizeBytes,
+    sizeLabel: formatBytesForLog(audioFile.sizeBytes),
+    uploadMode: "native_stream",
   });
 
   const storageStartedAt = Date.now();
-  const { error } = await supabase.storage
-    .from(PLAYLIST_AUDIO_BUCKET)
-    .upload(storagePath, bytes, {
-      contentType: audioFile.mimeType,
-      upsert: false,
-    });
+  const { error } = await uploadStorageObject({
+    bucket: PLAYLIST_AUDIO_BUCKET,
+    path: storagePath,
+    contentType: audioFile.mimeType,
+    uri: audioFile.uri,
+    upsert: false,
+  });
 
   if (error) {
     logPlaylistAudioError("storage_upload_failed", traceId, error, {

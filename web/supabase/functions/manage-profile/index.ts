@@ -86,6 +86,36 @@ serve(async (req: Request) => {
             { global: { headers: { Authorization: authHeader } } }
         ) : null
 
+        if (action === 'switch_role') {
+            const normalizedRole = String(params.role || '').trim().toLowerCase()
+            if (!['fan', 'musician'].includes(normalizedRole)) throw new Error('Only fan or musician roles can be selected.')
+            const { data: callerData, error: callerError } = await supabaseClient!.auth.getUser()
+            if (callerError || !callerData?.user) {
+                return new Response(JSON.stringify({ error: 'Authentication required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401,
+                })
+            }
+            const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '')
+            const userId = callerData.user.id
+            const { data: membership, error: membershipError } = await supabaseAdmin.from('profile_roles')
+                .select('status').eq('profile_id', userId).eq('role', normalizedRole).maybeSingle()
+            if (membershipError) throw membershipError
+            if (membership?.status !== 'ACTIVE') {
+                return new Response(JSON.stringify({ error: 'This role is not active for your account.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403,
+                })
+            }
+            const { error: profileError } = await supabaseAdmin.from('profiles').update({ role: normalizedRole }).eq('id', userId)
+            if (profileError) throw profileError
+            const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+                user_metadata: { ...(callerData.user.user_metadata || {}), role: normalizedRole },
+            })
+            if (authError) throw authError
+            return new Response(JSON.stringify({ role: normalizedRole }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
+            })
+        }
+
         // 1. FETCH PROFILE (using view with computed stats)
         if (action === 'fetch') {
             const { userId } = params
@@ -252,6 +282,12 @@ serve(async (req: Request) => {
                 console.error('Profile creation error:', error)
                 throw error
             }
+
+            const { error: roleMembershipError } = await supabaseAdmin.from('profile_roles').upsert({
+                profile_id: userId, role: normalizedRole, status: 'PENDING_REVIEW',
+                source: 'SIGNUP_FALLBACK', updated_at: new Date().toISOString(),
+            }, { onConflict: 'profile_id,role' })
+            if (roleMembershipError) throw roleMembershipError
 
 
             return new Response(JSON.stringify(data), {

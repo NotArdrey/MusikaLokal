@@ -2401,7 +2401,7 @@ export default function GigDetailsScreen() {
           <TouchableOpacity
             activeOpacity={1}
             onPress={closeGroupPreview}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
           />
           <View
             style={[
@@ -2870,7 +2870,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(2,6,23,0.72)",
   },
   invitePopupBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   invitePopupContainer: {
     width: Platform.OS === "web" ? 460 : "100%",

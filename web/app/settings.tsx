@@ -14,7 +14,7 @@ import { isStaffRole } from '../src/utils/staffAccess';
 export default function SettingsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const { theme, setTheme, colors, isDark } = useTheme();
-  const { isGuest, setGuestMode } = useAuth();
+  const { isGuest, setGuestMode, availableRoles, userRole: activeUserRole, switchRole } = useAuth();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const isWebDesktop = Platform.OS === 'web' && width >= 768;
@@ -41,6 +41,24 @@ export default function SettingsScreen() {
       : '#D8E3F2'
     : colors.border;
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [switchingRole, setSwitchingRole] = useState<string | null>(null);
+  const [roleSwitchError, setRoleSwitchError] = useState('');
+  const switchableRoles = availableRoles.filter((role) => role === 'fan' || role === 'musician');
+
+  const handleSwitchRole = async (role: string) => {
+    if (role === activeUserRole || switchingRole) return;
+    setSwitchingRole(role);
+    setRoleSwitchError('');
+    try {
+      await switchRole(role);
+      setUserRole(role);
+      router.replace('/feed');
+    } catch (error: any) {
+      setRoleSwitchError(error?.message || 'Unable to switch account role.');
+    } finally {
+      setSwitchingRole(null);
+    }
+  };
 
   // Fetch user role on mount
   useFocusEffect(
@@ -176,6 +194,33 @@ export default function SettingsScreen() {
               </View>
             </View>
           </View>
+
+          {!isGuest && switchableRoles.length > 1 ? (
+            <View style={styles.sectionContainer}>
+              <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>Account Mode</Text>
+              <View style={[styles.card, isWebDesktop && styles.webSectionCard, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}>
+                <Text style={[styles.cardLabel, { color: colors.text }]}>Use MusikaLokal as</Text>
+                <Text style={[styles.roleHelperText, { color: colors.textSecondary }]}>Both roles belong to this same email and profile.</Text>
+                <View style={styles.roleOptionsContainer}>
+                  {switchableRoles.map((role) => {
+                    const isActive = activeUserRole === role;
+                    return (
+                      <TouchableOpacity key={role} activeOpacity={0.8} disabled={Boolean(switchingRole) || isActive}
+                        onPress={() => void handleSwitchRole(role)}
+                        style={[styles.roleButton, { backgroundColor: isActive ? colors.primary : surfaceBackground, borderColor: isActive ? colors.primary : borderSoft }]}>
+                        <Ionicons name={role === 'musician' ? 'musical-notes' : 'heart'} size={19} color={isActive ? '#FFFFFF' : colors.text} />
+                        <Text style={[styles.roleButtonText, { color: isActive ? '#FFFFFF' : colors.text }]}>
+                          {switchingRole === role ? 'Switching…' : role === 'musician' ? 'Musician' : 'Fan'}
+                        </Text>
+                        {isActive ? <Text style={styles.activeRoleText}>Current</Text> : null}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                {roleSwitchError ? <Text style={styles.roleSwitchError}>{roleSwitchError}</Text> : null}
+              </View>
+            </View>
+          ) : null}
 
           {settingsSections.map((section) => (
             <View key={section.title} style={styles.sectionContainer}>
@@ -357,6 +402,12 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_500Medium',
     textAlign: 'center',
   },
+  roleHelperText: { marginTop: -10, marginBottom: 14, fontSize: 12, lineHeight: 18, fontFamily: 'Poppins_400Regular' },
+  roleOptionsContainer: { flexDirection: 'row', gap: 10 },
+  roleButton: { flex: 1, minHeight: 52, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  roleButtonText: { fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
+  activeRoleText: { color: '#FFFFFF', fontSize: 10, fontFamily: 'Poppins_500Medium', opacity: 0.84 },
+  roleSwitchError: { color: '#DC2626', fontSize: 12, lineHeight: 18, marginTop: 10, fontFamily: 'Poppins_400Regular' },
   cardOverflow: {
     borderRadius: 16,
     overflow: 'hidden',

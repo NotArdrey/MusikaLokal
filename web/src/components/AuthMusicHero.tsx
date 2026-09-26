@@ -94,14 +94,14 @@ const styles = StyleSheet.create({
     borderRightColor: 'rgba(148, 163, 184, 0.18)',
   },
   fullSurface: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   overlayBase: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(2, 6, 23, 0.62)',
   },
   overlayAccent: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(15, 23, 42, 0.25)',
   },
   content: {

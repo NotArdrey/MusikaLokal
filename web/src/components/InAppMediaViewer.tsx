@@ -160,7 +160,7 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
 
         <View style={styles.header}>
           <Text style={styles.title} numberOfLines={1}>

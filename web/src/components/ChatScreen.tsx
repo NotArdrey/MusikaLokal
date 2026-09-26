@@ -1407,7 +1407,7 @@ const styles = StyleSheet.create({
         marginTop: 2,
     },
     popoverOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         zIndex: 30,
         elevation: 30,
     },

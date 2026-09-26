@@ -5,7 +5,7 @@ import {
   BottomSheetScrollView,
   useBottomSheetTimingConfigs,
 } from "@gorhom/bottom-sheet";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router/react-navigation";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -886,7 +886,7 @@ const styles = StyleSheet.create({
   productImageWrap: { position: "relative", width: "100%", aspectRatio: 1 },
   productImage: { width: "100%", height: "100%" },
   productImagePlaceholder: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center" },
-  soldOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15, 23, 42, 0.42)" },
+  soldOverlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15, 23, 42, 0.42)" },
   soldBadge: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 999, backgroundColor: "#F97316", paddingHorizontal: 10, paddingVertical: 6 },
   soldBadgeText: { color: "#fff", fontSize: 11, fontFamily: "Poppins_700Bold" },
   productInfo: { padding: 10 },

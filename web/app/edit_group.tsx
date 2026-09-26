@@ -2434,7 +2434,7 @@ export default function EditGroupScreen() {
 
       {/* Group Type Selector Modal Native Implementation */}
       {groupTypeModalVisible && (
-        <View style={StyleSheet.absoluteFillObject}>
+        <View style={StyleSheet.absoluteFill}>
           <TouchableOpacity
             style={{ flex: 1, minWidth: 150, backgroundColor: "rgba(0,0,0,0.5)" }}
             activeOpacity={1}

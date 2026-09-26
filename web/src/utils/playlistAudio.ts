@@ -1,5 +1,5 @@
 import { Audio } from "expo-av";
-import * as FileSystem from "expo-file-system/src/legacy";
+import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../../lib/supabase";
 import {
   screenUploadsWithAiDecisions,

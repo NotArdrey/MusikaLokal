@@ -5552,16 +5552,16 @@ const styles = StyleSheet.create({
     borderRadius: 0,
   },
   gridVideoFallback: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
   gridVideoScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.16)",
   },
   gridVideoPlayBadgeWrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
@@ -5721,22 +5721,22 @@ const styles = StyleSheet.create({
   },
   // Drawer styles
   drawerOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "transparent",
     zIndex: 1000,
     elevation: 1000,
   },
   drawerScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.4)",
     zIndex: 1,
   },
   drawerBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 2,
   },
   drawerBackdropTouchTarget: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   drawerContent: {
     width: DRAWER_WIDTH,

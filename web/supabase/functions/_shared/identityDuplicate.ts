@@ -754,6 +754,7 @@ export async function queueIdentityReview(
     .eq("user_id", userId)
     .eq("status", "PENDING_REVIEW")
     .eq("source", reviewSource)
+    .eq("submitted_role", normalizedRole)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -790,6 +791,7 @@ export async function queueIdentityReview(
         .eq("user_id", userId)
         .eq("status", "PENDING_REVIEW")
         .eq("source", reviewSource)
+        .eq("submitted_role", normalizedRole)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();

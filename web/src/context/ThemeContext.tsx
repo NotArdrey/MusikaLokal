@@ -61,7 +61,7 @@ const darkColors: ThemeColors = {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
-const normalizeColorScheme = (colorScheme: ColorSchemeName): 'light' | 'dark' => (
+const normalizeColorScheme = (colorScheme: ColorSchemeName | null | undefined): 'light' | 'dark' => (
   colorScheme === 'dark' ? 'dark' : 'light'
 );
 

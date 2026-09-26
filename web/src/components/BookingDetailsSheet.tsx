@@ -1746,7 +1746,7 @@ const styles = StyleSheet.create({
     padding: scale(16),
   },
   modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   modalCard: {
     width: "100%",

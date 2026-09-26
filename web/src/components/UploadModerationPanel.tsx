@@ -87,6 +87,7 @@ export default function UploadModerationPanel({
   const { colors, isDark } = useTheme();
   const { height, width } = useWindowDimensions();
   const isCompact = width < 720;
+  const isNarrowReportList = width < 1100;
   const [cases, setCases] = useState<Case[]>([]);
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -330,8 +331,15 @@ export default function UploadModerationPanel({
         const uploaderName = entry.uploader?.full_name || entry.uploader_name || "Deleted uploader";
         const uploaderEmail = entry.uploader?.email || entry.uploader_email || "no email";
         return (
-          <View key={entry.id} style={[styles.caseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.reportCardHeader}>
+          <View
+            key={entry.id}
+            style={[
+              styles.caseCard,
+              isNarrowReportList && styles.caseCardCompact,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <View style={[styles.reportCardHeader, isNarrowReportList && styles.reportCardHeaderCompact]}>
               <View style={styles.reportCardTitleBlock}>
                 <Text numberOfLines={1} style={[styles.reportCardTitle, { color: colors.text }]}>{entry.file_name}</Text>
                 <Text numberOfLines={2} style={[styles.reportCardReason, { color: colors.textSecondary }]}>{entry.reason}</Text>
@@ -340,21 +348,23 @@ export default function UploadModerationPanel({
                 <Text style={[styles.caseStatusText, { color: tone.color }]}>{tone.label}</Text>
               </View>
             </View>
-            <View style={styles.reportMetaGrid}>
-              <Text style={[styles.reportMetaText, { color: colors.textSecondary }]}>
-                <Text style={[styles.reportMetaLabel, { color: colors.text }]}>Uploader: </Text>
-                {uploaderName} ({uploaderEmail})
-              </Text>
+            <View style={[styles.reportMetaGrid, isNarrowReportList && styles.reportMetaGridCompact]}>
+              <View style={styles.reportUploaderMeta}>
+                <Text style={[styles.reportMetaText, { color: colors.textSecondary }]}>
+                  <Text style={[styles.reportMetaLabel, { color: colors.text }]}>Uploader: </Text>
+                  {uploaderName} ({uploaderEmail})
+                </Text>
+                <Text style={[styles.reportMetaText, { color: colors.textSecondary }]}>
+                  <Text style={[styles.reportMetaLabel, { color: colors.text }]}>Created: </Text>
+                  {new Date(entry.created_at).toLocaleString()}
+                </Text>
+              </View>
               <Text style={[styles.reportMetaText, { color: colors.textSecondary }]}>
                 <Text style={[styles.reportMetaLabel, { color: colors.text }]}>Media: </Text>
                 {label(entry.media_kind)}
               </Text>
-              <Text style={[styles.reportMetaText, { color: colors.textSecondary }]}>
-                <Text style={[styles.reportMetaLabel, { color: colors.text }]}>Created: </Text>
-                {new Date(entry.created_at).toLocaleString()}
-              </Text>
             </View>
-            <View style={styles.reportCardActionsRow}>
+            <View style={[styles.reportCardActionsRow, isNarrowReportList && styles.reportCardActionsRowCompact]}>
               <TouchableOpacity
                 accessibilityRole="button"
                 accessibilityLabel={`View ${entry.file_name}`}
@@ -710,8 +720,8 @@ const styles = StyleSheet.create({
   filterButton: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
   filterText: { fontSize: 14, fontWeight: "600", textTransform: "capitalize" },
   alert: { borderWidth: 1, borderRadius: 10, padding: 12 },
-  caseCard: { padding: 16, gap: 14, borderWidth: 1, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  caseCardCompact: { flexDirection: "column", alignItems: "stretch" },
+  caseCard: { padding: 16, gap: 18, borderWidth: 1, borderRadius: 14, flexDirection: "row", alignItems: "center" },
+  caseCardCompact: { flexDirection: "column", alignItems: "stretch", gap: 12 },
   caseCardBody: { flex: 1, gap: 6 },
   caseTitleRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   caseTitleCopy: { flex: 1, gap: 2 },
@@ -751,21 +761,28 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   reportCardHeader: {
+    flexGrow: 1.35,
+    flexShrink: 1,
+    flexBasis: 520,
+    minWidth: 0,
     flexDirection: "row",
-    flexWrap: "wrap",
     alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 10,
   },
-  reportCardTitleBlock: { flex: 1, minWidth: 220, gap: 3 },
+  reportCardHeaderCompact: { flexGrow: 0, flexBasis: "auto", width: "100%" },
+  reportCardTitleBlock: { flex: 1, minWidth: 0, gap: 3 },
   reportCardTitle: { fontSize: 15, fontFamily: "Poppins_600SemiBold" },
   reportCardReason: { fontSize: 12, lineHeight: 18, fontFamily: "Poppins_400Regular" },
   caseStatusPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
   caseStatusText: { fontSize: 11, fontFamily: "Poppins_600SemiBold" },
-  reportMetaGrid: { marginTop: 4, flexDirection: "row", flexWrap: "wrap", columnGap: 18, rowGap: 2 },
-  reportMetaText: { flexGrow: 1, flexBasis: 280, fontSize: 12, lineHeight: 18, fontFamily: "Poppins_400Regular" },
+  reportMetaGrid: { flexGrow: 1, flexShrink: 1, flexBasis: 440, minWidth: 0, flexDirection: "row", alignItems: "flex-start", columnGap: 24 },
+  reportMetaGridCompact: { flexBasis: "auto", width: "100%", flexWrap: "wrap", rowGap: 4 },
+  reportUploaderMeta: { flexGrow: 2, flexShrink: 1, flexBasis: 280, minWidth: 0 },
+  reportMetaText: { flexGrow: 1, flexShrink: 1, minWidth: 0, fontSize: 12, lineHeight: 18, fontFamily: "Poppins_400Regular" },
   reportMetaLabel: { fontFamily: "Poppins_600SemiBold" },
-  reportCardActionsRow: { marginTop: 10, flexDirection: "row", flexWrap: "wrap", alignItems: "stretch", justifyContent: "flex-end", gap: 8 },
+  reportCardActionsRow: { flexShrink: 0, flexDirection: "row", alignItems: "stretch", justifyContent: "flex-end", gap: 8 },
+  reportCardActionsRowCompact: { width: "100%" },
   reportActionButton: {
     flexBasis: 126,
     minWidth: 112,

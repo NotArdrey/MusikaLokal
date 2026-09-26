@@ -4135,7 +4135,7 @@ const ListingDetailsSheet = forwardRef<
         >
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 40 }}>
             <TouchableOpacity
-               style={StyleSheet.absoluteFillObject}
+               style={StyleSheet.absoluteFill}
                activeOpacity={1}
                onPress={dismissSelf}
             />

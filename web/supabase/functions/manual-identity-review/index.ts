@@ -248,6 +248,32 @@ async function findAuthUserByEmail(supabaseAdmin: any, email: string) {
   return null;
 }
 
+async function authenticateExistingAccount(email: string, password: string, expectedUserId: string) {
+  const authClient = createClient(Deno.env.get("SUPABASE_URL") || "", Deno.env.get("SUPABASE_ANON_KEY") || "", {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+  const { data, error } = await authClient.auth.signInWithPassword({ email, password });
+  if (error || !data?.user || data.user.id !== expectedUserId) {
+    throw new Error("This email already has an account. Enter its current password to add another role.");
+  }
+}
+
+async function getProfileRoleMembership(client: any, profileId: string, role: string) {
+  const { data, error } = await client.from("profile_roles").select("status")
+    .eq("profile_id", profileId).eq("role", role).maybeSingle();
+  if (error) throw new Error(`Unable to check account roles: ${error.message}`);
+  return data || null;
+}
+
+async function upsertProfileRoleMembership(client: any, profileId: string, role: string, status: string, source: string) {
+  const nowIso = new Date().toISOString();
+  const { error } = await client.from("profile_roles").upsert({
+    profile_id: profileId, role, status, source,
+    activated_at: status === "ACTIVE" ? nowIso : null, updated_at: nowIso,
+  }, { onConflict: "profile_id,role" });
+  if (error) throw new Error(`Unable to save account role: ${error.message}`);
+}
+
 async function enforceManualReviewRateLimit(supabaseAdmin: any, email: string, userId?: string | null) {
   const normalizedEmail = String(email || "").trim().toLowerCase();
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -293,6 +319,7 @@ async function ensurePendingReviewProfile(
   submittedFullName: string | null = null,
   idDocumentExpiry: string | null = null,
   role = "musician",
+  preserveExistingAccount = false,
 ) {
   const metadata = authUser?.user_metadata || {};
   const normalizedRole = String(role || metadata.role || "musician").trim().toLowerCase();
@@ -304,6 +331,13 @@ async function ensurePendingReviewProfile(
     String(submittedFullName || metadata.full_name || metadata.display_name || metadata.name || "").trim() ||
     email.split("@")[0] ||
     getDefaultDisplayNameForRole(normalizedRole);
+
+  if (preserveExistingAccount) {
+    const { data, error } = await supabaseAdmin.from("profiles").select("id")
+      .eq("id", authUser.id).maybeSingle();
+    if (error || !data) throw new Error("The existing account profile could not be loaded.");
+    return;
+  }
 
   const { error } = await supabaseAdmin
     .from("profiles")
@@ -353,7 +387,7 @@ async function ensurePendingReviewAuthUser(
       throw new Error("User not found");
     }
 
-    return authUserData.user;
+    return { user: authUserData.user, addingRoleToExistingAccount: false };
   }
 
   const passwordValidationError = getPasswordValidationError(payload.password);
@@ -365,12 +399,23 @@ async function ensurePendingReviewAuthUser(
   if (existingUser) {
     const { data: existingProfile } = await supabaseAdmin
       .from("profiles")
-      .select("id, role, is_verified, verification_status")
+      .select("id, role, is_verified, verification_status, is_banned")
       .eq("id", existingUser.id)
       .maybeSingle();
 
     const existingRole = String(existingProfile?.role || existingUser.user_metadata?.role || "").trim().toLowerCase();
     const existingStatus = String(existingProfile?.verification_status || existingUser.user_metadata?.verification_status || "").trim().toUpperCase();
+
+    if (existingUser.email_confirmed_at) {
+      if (!existingProfile) throw new Error("The existing account profile could not be loaded.");
+      if (existingProfile.is_banned) throw new Error("This account is currently restricted.");
+      if (!allowedSignupRoles.has(existingRole)) throw new Error("Additional roles are only available to fan and musician accounts.");
+      await authenticateExistingAccount(payload.email, payload.password, existingUser.id);
+      const membership = await getProfileRoleMembership(supabaseAdmin, existingUser.id, role);
+      if (membership?.status === "ACTIVE") throw new Error(`This account already has the ${role} role. Please sign in.`);
+      if (membership?.status === "PENDING_REVIEW") throw new Error(`The ${role} role is already pending review for this account.`);
+      return { user: existingUser, addingRoleToExistingAccount: true };
+    }
 
     if (existingRole && existingRole !== role) {
       throw new Error("This email is already registered with another account type. Please log in to continue.");
@@ -410,7 +455,7 @@ async function ensurePendingReviewAuthUser(
       throw new Error(updateUserError?.message || "Unable to update existing signup user for review.");
     }
 
-    return updatedUserData.user;
+    return { user: updatedUserData.user, addingRoleToExistingAccount: false };
   }
 
   const fallbackName = payload.fullName || payload.email.split("@")[0] || getDefaultDisplayNameForRole(role);
@@ -438,7 +483,7 @@ async function ensurePendingReviewAuthUser(
     throw new Error(createUserError?.message || "Unable to create manual review account.");
   }
 
-  return createdUser.user;
+  return { user: createdUser.user, addingRoleToExistingAccount: false };
 }
 
 async function uploadImage(
@@ -660,17 +705,7 @@ serve(async (req: Request) => {
       birthDate: body?.birthDate || body?.birth_date || body?.dateOfBirth || body?.date_of_birth,
     });
 
-    const duplicateIdentity = documentFingerprint
-      ? await findSameRoleIdentityDuplicate(supabaseAdmin, {
-        documentFingerprint,
-        role,
-        email,
-      })
-      : { hasDuplicate: false, matches: [] };
-
-    const duplicateReason = duplicateIdentity.hasDuplicate ? getDuplicateIdentityReviewReason(role) : null;
-
-    const authUser = await ensurePendingReviewAuthUser(supabaseAdmin, {
+    const authUserResult = await ensurePendingReviewAuthUser(supabaseAdmin, {
       userId,
       email,
       password,
@@ -683,6 +718,8 @@ serve(async (req: Request) => {
       idDocumentExpiry,
       idDocumentNoExpiration,
     });
+    const authUser = authUserResult.user;
+    const addingRoleToExistingAccount = authUserResult.addingRoleToExistingAccount;
 
     userId = String(authUser.id || "").trim();
     const authEmail = String(authUser.email || "").trim().toLowerCase();
@@ -690,7 +727,13 @@ serve(async (req: Request) => {
       return jsonResponse({ error: "Email mismatch for this user" }, 400);
     }
 
-    await ensurePendingReviewProfile(supabaseAdmin, authUser, authEmail || email, diditSessionId, fullName || null, idDocumentExpiry, role);
+    const duplicateIdentity = documentFingerprint
+      ? await findSameRoleIdentityDuplicate(supabaseAdmin, { documentFingerprint, role, userId, email })
+      : { hasDuplicate: false, matches: [] };
+    const duplicateReason = duplicateIdentity.hasDuplicate ? getDuplicateIdentityReviewReason(role) : null;
+
+    await ensurePendingReviewProfile(supabaseAdmin, authUser, authEmail || email, diditSessionId,
+      fullName || null, idDocumentExpiry, role, addingRoleToExistingAccount);
 
     const frontImage = normalizeImagePayload(body?.frontImage, "front");
     if (!frontImage && source === "MANUAL_UPLOAD") {
@@ -723,6 +766,7 @@ serve(async (req: Request) => {
       .eq("user_id", userId)
       .eq("status", "PENDING_REVIEW")
       .eq("source", source)
+      .eq("submitted_role", role)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -830,6 +874,10 @@ serve(async (req: Request) => {
       }
     }
 
+    await upsertProfileRoleMembership(supabaseAdmin, userId, role, "PENDING_REVIEW",
+      addingRoleToExistingAccount ? "ROLE_SIGNUP_MANUAL" : "SIGNUP_MANUAL");
+
+    if (!addingRoleToExistingAccount) {
     await supabaseAdmin
       .from("profiles")
       .update({
@@ -840,6 +888,7 @@ serve(async (req: Request) => {
         id_verified_at: null,
       })
       .eq("id", userId);
+    }
 
     await recordIdentityDocumentClaim(supabaseAdmin, {
       userId,
@@ -850,6 +899,8 @@ serve(async (req: Request) => {
       documentCountry,
       source,
       status: "PENDING_REVIEW",
+      roleAddedToExistingAccount: addingRoleToExistingAccount,
+      roleStatus: "PENDING_REVIEW",
       manualReviewId: reviewId,
       email,
       verifiedFullLegalName: identityNameBirthDate.fullLegalName,

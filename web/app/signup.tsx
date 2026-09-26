@@ -2,7 +2,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCameraPermissions } from 'expo-camera';
-import * as FileSystem from 'expo-file-system/src/legacy';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -1406,7 +1406,7 @@ export default function SignupScreen() {
 
         try {
             const emailRedirectTo = createEmailConfirmationRedirectUrl();
-            const { error: pendingSignupError } = await supabase.functions.invoke('create-unverified-user', {
+            const { data: pendingSignupData, error: pendingSignupError } = await supabase.functions.invoke('create-unverified-user', {
                 body: {
                     email: email.trim(),
                     password,
@@ -1454,6 +1454,10 @@ export default function SignupScreen() {
                     accountCreated: 'true',
                     email,
                     diditPendingReview: 'true',
+                    ...((pendingSignupData as any)?.roleAddedToExistingAccount ? {
+                        roleAdded: 'true', addedRole: selectedRole,
+                        addedRoleStatus: String((pendingSignupData as any)?.roleStatus || 'PENDING_REVIEW'),
+                    } : {}),
                 },
             } as any);
         } catch (authErr: any) {
@@ -1471,7 +1475,7 @@ export default function SignupScreen() {
                 return;
             }
 
-            Alert.alert('Creation Failed', authErr?.message || 'Unable to create your account right now.');
+            Alert.alert('Creation Failed', retryPayload?.error || authErr?.message || 'Unable to create your account right now.');
         } finally {
             setLoading(false);
         }
@@ -1538,7 +1542,7 @@ export default function SignupScreen() {
         setLoading(true);
 
         try {
-            const { error: manualSubmitError } = await supabase.functions.invoke('manual-identity-review', {
+            const { data: manualSubmitData, error: manualSubmitError } = await supabase.functions.invoke('manual-identity-review', {
                 body: {
                     action: 'submit_manual_review_signup',
                     email: email.trim(),
@@ -1582,15 +1586,20 @@ export default function SignupScreen() {
                     accountCreated: 'true',
                     email,
                     verificationPendingReview: 'true',
+                    ...((manualSubmitData as any)?.roleAddedToExistingAccount ? {
+                        roleAdded: 'true', addedRole: selectedRole,
+                        addedRoleStatus: String((manualSubmitData as any)?.roleStatus || 'PENDING_REVIEW'),
+                    } : {}),
                 },
             } as any);
         } catch (authErr: any) {
+            const responsePayload = await getJsonPayloadFromInvokeError(authErr);
             if (authErr?.message?.includes('already registered') || authErr?.status === 422) {
                 Alert.alert('Account Exists', 'This email is already registered. Please log in to continue.');
                 return;
             }
 
-            Alert.alert('Manual Review Failed', authErr?.message || 'Unable to submit your manual review request.');
+            Alert.alert('Manual Review Failed', responsePayload?.error || authErr?.message || 'Unable to submit your manual review request.');
         } finally {
             setLoading(false);
         }
@@ -1653,6 +1662,7 @@ export default function SignupScreen() {
                 body: {
                     action: 'check_account_status',
                     email: normalizedSignupEmail,
+                    role: selectedRole,
                 },
             });
 
@@ -1662,12 +1672,23 @@ export default function SignupScreen() {
                 return;
             }
 
-            if (accountStatus?.exists && accountStatus?.emailConfirmed) {
-                Alert.alert(
-                    'Account Exists',
-                    'This email is already registered and verified. Please sign in.',
-                    [{ text: 'Sign In', onPress: () => router.replace('/') }],
-                );
+            const existingAccountRole = String(accountStatus?.accountRole || '').trim().toLowerCase();
+            const requestedRoleStatus = String(accountStatus?.requestedRoleStatus || '').trim().toUpperCase();
+            const canAddRoleToConfirmedAccount = Boolean(
+                accountStatus?.exists &&
+                accountStatus?.emailConfirmed &&
+                isAllowedSignupRole(existingAccountRole) &&
+                existingAccountRole !== selectedRole &&
+                !['ACTIVE', 'PENDING_REVIEW'].includes(requestedRoleStatus)
+            );
+
+            if (accountStatus?.exists && accountStatus?.emailConfirmed && !canAddRoleToConfirmedAccount) {
+                const message = requestedRoleStatus === 'PENDING_REVIEW'
+                    ? `The ${selectedRole} role is already pending review for this account.`
+                    : requestedRoleStatus === 'ACTIVE' || existingAccountRole === selectedRole
+                        ? `This account already has the ${selectedRole} role. Please sign in.`
+                        : 'This account type cannot add another role through signup.';
+                Alert.alert('Account Exists', message, [{ text: 'Sign In', onPress: () => router.replace('/') }]);
                 setLoading(false);
                 return;
             }
@@ -1722,7 +1743,7 @@ export default function SignupScreen() {
                 return;
             }
 
-            if (profile) {
+            if (profile && !canAddRoleToConfirmedAccount) {
                 const existingStatus = String((profile as any).verification_status || '').trim().toUpperCase();
                 const canRetryVerification = ['DECLINED', 'ABANDONED'].includes(existingStatus);
 
@@ -1921,6 +1942,8 @@ export default function SignupScreen() {
 
             const edgeSignupUser = (edgeSignupData as any)?.user;
             const duplicateIdentityReview = Boolean((edgeSignupData as any)?.duplicateIdentityReview);
+            const roleAddedToExistingAccount = Boolean((edgeSignupData as any)?.roleAddedToExistingAccount);
+            const roleStatus = String((edgeSignupData as any)?.roleStatus || '');
 
             logDiditEmailFlow('auth.edgeSignup.result', {
                 email: maskEmailForLog(email),
@@ -1952,6 +1975,9 @@ export default function SignupScreen() {
                     params: {
                         accountCreated: 'true',
                         email,
+                        ...(roleAddedToExistingAccount ? {
+                            roleAdded: 'true', addedRole: selectedRole, addedRoleStatus: roleStatus,
+                        } : {}),
                         ...(duplicateIdentityReview ? { diditPendingReview: 'true' } : { diditVerified: 'true' }),
                     }
                 } as any);
@@ -2245,7 +2271,7 @@ export default function SignupScreen() {
                 }
                 return;
             }
-            Alert.alert('Creation Failed', authErr.message);
+            Alert.alert('Creation Failed', retryPayload?.error || authErr.message);
         } finally {
             setLoading(false);
         }
@@ -3385,7 +3411,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
         paddingVertical: 40,
     },
-    documentModalBackdrop: { ...StyleSheet.absoluteFillObject },
+    documentModalBackdrop: { ...StyleSheet.absoluteFill },
     documentModalSheet: {
         width: '100%',
         maxWidth: 480,

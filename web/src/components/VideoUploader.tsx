@@ -1,6 +1,6 @@
 import { screenVisualUpload } from "../services/visualUploadScreen";
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system/src/legacy';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import React, { useState } from 'react';

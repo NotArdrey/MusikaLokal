@@ -42,10 +42,6 @@ const roleAliases: Record<string, string> = {
   "musician-member": "musician",
 };
 
-const hiddenUserManagementVerificationStatuses = [
-  "DECLINED",
-  "PENDING_REVIEW",
-];
 const COPYRIGHT_OWNERSHIP_REVIEW_SOURCE = "COPYRIGHT_OWNERSHIP";
 const KNOWN_PLAYLIST_AUDIO_BUCKETS = new Set(["documents", "playlist-assets"]);
 const userListProfileSelect =
@@ -1897,7 +1893,6 @@ serve(async (req: Request) => {
       let fetchResult = await client
         .from("profiles")
         .select(userListProfileSelect)
-        .or(`verification_status.is.null,verification_status.not.in.(${hiddenUserManagementVerificationStatuses.join(",")})`)
         .order("created_at", { ascending: false })
         .limit(limit);
 
@@ -1905,7 +1900,6 @@ serve(async (req: Request) => {
         fetchResult = await client
           .from("profiles")
           .select(userListProfileSelectLegacy)
-          .or(`verification_status.is.null,verification_status.not.in.(${hiddenUserManagementVerificationStatuses.join(",")})`)
           .order("created_at", { ascending: false })
           .limit(limit);
       }
@@ -2779,11 +2773,16 @@ serve(async (req: Request) => {
 
       const { data: preDecisionProfile } = await client
         .from("profiles")
-        .select("role, email")
+        .select("role, email, is_verified, verification_status")
         .eq("id", review.user_id)
         .maybeSingle();
 
       const reviewRoleForClaim = String(review.submitted_role || preDecisionProfile?.role || "musician").trim().toLowerCase();
+      const { data: otherActiveRoles, error: otherActiveRolesError } = await client
+        .from("profile_roles").select("role").eq("profile_id", review.user_id)
+        .eq("status", "ACTIVE").neq("role", reviewRoleForClaim);
+      if (otherActiveRolesError) return jsonResponse({ error: otherActiveRolesError.message }, 400);
+      const isAdditionalRoleReview = Boolean(otherActiveRoles?.length);
       let duplicateMatchesForApproval: any[] = [];
       const documentFingerprintForDecision = String(review.document_fingerprint || "").trim() || null;
       const reviewSourceForDecision = String(review.source || "").trim().toUpperCase();
@@ -3021,32 +3020,26 @@ serve(async (req: Request) => {
       const emailAlreadyConfirmed = Boolean(authUserData.user.email_confirmed_at);
       const isVerified = decision === "APPROVED" && emailAlreadyConfirmed;
 
-      const { error: profileUpdateError } = await client
-        .from("profiles")
-        .update({
-          is_verified: isVerified,
-          verification_status: profileVerificationStatus,
-          id_verified_at: isVerified ? nowIso : null,
-        })
-        .eq("id", review.user_id);
-
-      if (profileUpdateError) {
-        return jsonResponse({ error: profileUpdateError.message }, 400);
-      }
-
       const existingMetadata = (authUserData.user.user_metadata || {}) as Record<string, unknown>;
-      const authUpdatePayload: Record<string, unknown> = {
-        user_metadata: {
-          ...existingMetadata,
-          is_verified: decision === "APPROVED",
-          verification_status: profileVerificationStatus,
-        },
-      };
-
-      const { error: authUpdateError } = await client.auth.admin.updateUserById(String(review.user_id), authUpdatePayload);
-
-      if (authUpdateError) {
-        return jsonResponse({ error: authUpdateError.message }, 400);
+      if (isAdditionalRoleReview) {
+        if (decision === "APPROVED") {
+          const { error } = await client.from("profiles").update({ role: reviewRoleForClaim }).eq("id", review.user_id);
+          if (error) return jsonResponse({ error: error.message }, 400);
+          const { error: authError } = await client.auth.admin.updateUserById(String(review.user_id), {
+            user_metadata: { ...existingMetadata, role: reviewRoleForClaim },
+          });
+          if (authError) return jsonResponse({ error: authError.message }, 400);
+        }
+      } else {
+        const { error: profileUpdateError } = await client.from("profiles").update({
+          is_verified: isVerified, verification_status: profileVerificationStatus,
+          id_verified_at: isVerified ? nowIso : null,
+        }).eq("id", review.user_id);
+        if (profileUpdateError) return jsonResponse({ error: profileUpdateError.message }, 400);
+        const { error: authUpdateError } = await client.auth.admin.updateUserById(String(review.user_id), {
+          user_metadata: { ...existingMetadata, is_verified: decision === "APPROVED", verification_status: profileVerificationStatus },
+        });
+        if (authUpdateError) return jsonResponse({ error: authUpdateError.message }, 400);
       }
 
       const reviewNameBirthForClaim = prepareIdentityNameBirthDateDuplicateInput(null, {
@@ -3108,6 +3101,16 @@ serve(async (req: Request) => {
           });
         }
       }
+
+      const { error: roleMembershipUpdateError } = await client.from("profile_roles").upsert({
+        profile_id: review.user_id,
+        role: reviewRoleForClaim,
+        status: decision === "APPROVED" ? "ACTIVE" : "DECLINED",
+        source: "ADMIN_REVIEW",
+        activated_at: decision === "APPROVED" ? nowIso : null,
+        updated_at: nowIso,
+      }, { onConflict: "profile_id,role" });
+      if (roleMembershipUpdateError) return jsonResponse({ error: roleMembershipUpdateError.message }, 400);
 
       await client.from("notifications").insert({
         user_id: review.user_id,
@@ -3183,7 +3186,9 @@ serve(async (req: Request) => {
       }
 
       if (decision === "DECLINED") {
-        if (String(review.user_id) === actorId) {
+        if (isAdditionalRoleReview) {
+          declinedAccountDeletion.skipped_reason = "Only the additional role was declined; the existing account remains active.";
+        } else if (String(review.user_id) === actorId) {
           declinedAccountDeletion.skipped_reason = "Refused to delete the signed-in admin account.";
           console.error("manual_identity_review_declined_account_delete_skipped", {
             reviewId,
@@ -3499,88 +3504,11 @@ serve(async (req: Request) => {
         }
       }
 
-      let roleChangeReviewId: string | null = null;
-      if (
+      const roleChanged = Boolean(
         profileUpdates.role !== undefined &&
         existingProfileForUpdate?.["role"] &&
         String(existingProfileForUpdate["role"]).trim().toLowerCase() !== String(profileUpdates.role).trim().toLowerCase()
-      ) {
-        const previousRole = String(existingProfileForUpdate["role"] || "").trim().toLowerCase();
-        const nextRole = String(profileUpdates.role || "").trim().toLowerCase();
-        const existingStatus = String(existingProfileForUpdate["verification_status"] || "").trim().toUpperCase();
-        const wasVerified = existingProfileForUpdate["is_verified"] === true || existingStatus === "APPROVED";
-
-        if (wasVerified) {
-          const { data: latestApprovedClaim } = await client
-            .from("identity_document_claims")
-            .select("document_fingerprint, document_type, document_type_key, document_country, didit_session_id, verified_full_legal_name, normalized_full_legal_name, birth_date")
-            .eq("user_id", userId)
-            .eq("role", previousRole)
-            .eq("status", "APPROVED")
-            .order("last_seen_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          if (latestApprovedClaim?.document_fingerprint) {
-            const roleClaim = await claimApprovedIdentityDocument(client, {
-              userId,
-              role: nextRole,
-              documentFingerprint: latestApprovedClaim.document_fingerprint,
-              documentType: latestApprovedClaim.document_type,
-              documentTypeKey: latestApprovedClaim.document_type_key,
-              documentCountry: latestApprovedClaim.document_country || "PHL",
-              source: "DIDIT",
-              diditSessionId: latestApprovedClaim.didit_session_id || null,
-              email: existingProfileForUpdate["email"] || null,
-              verifiedFullLegalName: latestApprovedClaim.verified_full_legal_name || null,
-              normalizedFullLegalName: latestApprovedClaim.normalized_full_legal_name || null,
-              birthDate: latestApprovedClaim.birth_date || null,
-              metadata: {
-                claimed_due_to_admin_role_change: true,
-                previous_role: previousRole,
-                next_role: nextRole,
-                changed_by: actorId,
-              },
-            });
-
-            if (roleClaim?.decision !== "APPROVED") {
-              const reviewRecord = await queueIdentityReview(client, {
-                userId,
-                email: existingProfileForUpdate["email"] || "",
-                role: nextRole,
-                documentType: latestApprovedClaim.document_type || "Government ID",
-                documentTypeKey: latestApprovedClaim.document_type_key || null,
-                documentCountry: latestApprovedClaim.document_country || "PHL",
-                source: "DIDIT_DUPLICATE",
-                diditSessionId: latestApprovedClaim.didit_session_id || null,
-                documentFingerprint: latestApprovedClaim.document_fingerprint,
-                duplicateReason: getApprovalClaimReviewReason(roleClaim, nextRole),
-                duplicateMatchCount: roleClaim?.duplicate_count || roleClaim?.matches?.length || 1,
-                verifiedFullLegalName: latestApprovedClaim.verified_full_legal_name || null,
-                normalizedFullLegalName: latestApprovedClaim.normalized_full_legal_name || null,
-                birthDate: latestApprovedClaim.birth_date || null,
-                reviewReason: getApprovalClaimReviewReason(roleClaim, nextRole),
-                matchedOn: getApprovalClaimMatchedOn(roleClaim),
-                metadata: {
-                  created_due_to_admin_role_change: true,
-                  previous_role: previousRole,
-                  next_role: nextRole,
-                  matched_on: getApprovalClaimMatchedOn(roleClaim),
-                  claim_result: roleClaim,
-                },
-              });
-              roleChangeReviewId = reviewRecord?.id || null;
-              profileUpdates.is_verified = false;
-              profileUpdates.verification_status = "PENDING_REVIEW";
-              profileUpdates.id_verified_at = null;
-            }
-          } else {
-            profileUpdates.is_verified = false;
-            profileUpdates.verification_status = "PENDING_REVIEW";
-            profileUpdates.id_verified_at = null;
-          }
-        }
-      }
+      );
 
       const hasListUpdates = maybeSkills !== undefined || maybeGenres !== undefined;
       const targetRole = String(profileUpdates.role ?? existingProfileForUpdate?.["role"] ?? "").trim().toLowerCase();
@@ -3626,6 +3554,18 @@ serve(async (req: Request) => {
 
       if (hasPasswordUpdate) {
         authUpdatePayload.password = nextPassword;
+      }
+
+      // A role change must take effect in a fresh session. Revoke the target
+      // user's sessions before changing authorization data so stale sessions
+      // cannot continue using the previous role.
+      if (roleChanged) {
+        const { error: revokeSessionsError } = await client.rpc("revoke_user_auth_sessions", {
+          p_user_id: userId,
+        });
+        if (revokeSessionsError) {
+          return jsonResponse({ error: `Unable to sign out the user before changing roles: ${revokeSessionsError.message}` }, 400);
+        }
       }
 
       const { error: authUpdateError } = await client.auth.admin.updateUserById(userId, authUpdatePayload);
@@ -3674,6 +3614,18 @@ serve(async (req: Request) => {
           maybeGenres !== undefined
             ? replaceProfileList(client, "profile_genres", "genre", userId, normalizeStringList(maybeGenres))
             : Promise.resolve(),
+          roleChanged
+            ? client.from("profile_roles").upsert({
+              profile_id: userId,
+              role: targetRole,
+              status: "ACTIVE",
+              source: "ADMIN_ROLE_CHANGE",
+              activated_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }, { onConflict: "profile_id,role" }).then(({ error }: any) => {
+              if (error) throw error;
+            })
+            : Promise.resolve(),
         ]);
 
         if (targetRole === "staff" && hasStaffAssignmentUpdate && normalizedStaffAssignment) {
@@ -3688,7 +3640,7 @@ serve(async (req: Request) => {
 
       const [item] = await attachProfileLists(client, [updatedProfile]);
 
-      return jsonResponse({ item: item || updatedProfile, role_change_review_id: roleChangeReviewId }, 200);
+      return jsonResponse({ item: item || updatedProfile, role_changed: roleChanged }, 200);
     }
 
     if (action === "unban_user") {

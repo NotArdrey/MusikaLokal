@@ -6,6 +6,21 @@ import { test } from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 
+test("declining a copyright review cannot reach identity account deletion", () => {
+  const source = readFileSync(
+    new URL("../web/supabase/functions/admin-users-management/index.ts", import.meta.url),
+    "utf8",
+  );
+  const copyrightBranch = source.match(
+    /if \(isCopyrightOwnershipReview\(review\)\) \{[\s\S]+?\n\s*const \{ data: preDecisionProfile \}/,
+  )?.[0];
+
+  assert(copyrightBranch, "expected a dedicated copyright ownership review branch");
+  assert.match(copyrightBranch, /declined_account_delete_attempted:\s*false/);
+  assert.match(copyrightBranch, /return jsonResponse\(\{/);
+  assert.doesNotMatch(copyrightBranch, /deleteReviewedIdentityAccount\(/);
+});
+
 function createScreeningHarness({ fallbackGroqApiKey = "" } = {}) {
   const cases = [],
     objects = new Map();

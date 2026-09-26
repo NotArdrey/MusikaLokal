@@ -212,8 +212,6 @@ const userFilters: { value: UserFilter; label: string }[] = [
   { value: 'staff', label: 'staff' },
 ];
 
-const USER_MANAGEMENT_HIDDEN_VERIFICATION_STATUSES = new Set(['DECLINED', 'PENDING_REVIEW']);
-
 const getDetailsSectionIcon = (title: string) => {
   const normalized = title.toLowerCase();
   if (normalized.includes('account') || normalized.includes('profile')) return 'person-circle-outline';
@@ -329,11 +327,6 @@ const normalizeUserRole = (rawRole: unknown): UserRole => {
   }
 
   return userRoleOptions.includes(normalized as UserRole) ? (normalized as UserRole) : 'musician';
-};
-
-const isVisibleInUserManagement = (user: UserEntry) => {
-  const verificationStatus = String(user.verification_status || '').trim().toUpperCase();
-  return !USER_MANAGEMENT_HIDDEN_VERIFICATION_STATUSES.has(verificationStatus);
 };
 
 const getUserDetailsRecord = (
@@ -1113,9 +1106,7 @@ export default function AdminUsersPage() {
         limit: 300,
       });
 
-      const items = Array.isArray(data?.items)
-        ? data.items.filter(isVisibleInUserManagement)
-        : [];
+      const items = Array.isArray(data?.items) ? data.items : [];
       setUsers(items);
       writeAdminPageCache(usersCacheKey, items);
     } catch (error) {
@@ -1375,7 +1366,7 @@ export default function AdminUsersPage() {
           throw new Error('Missing user id for update.');
         }
 
-        await invokeAdminUsersManagement({
+        const updateResult = await invokeAdminUsersManagement({
           action: 'update_user',
           userId: editingUserId,
           email,
@@ -1391,7 +1382,13 @@ export default function AdminUsersPage() {
           ...(nextPassword ? { password: nextPassword } : {}),
         });
 
-        showAlert('success', 'User updated', `${fullName}'s account and profile details were saved.`);
+        showAlert(
+          'success',
+          'User updated',
+          updateResult?.role_changed
+            ? `${fullName}'s role was changed and their active sessions were signed out.`
+            : `${fullName}'s account and profile details were saved.`,
+        );
       }
 
       invalidateAdminPageCache();
@@ -1565,8 +1562,6 @@ export default function AdminUsersPage() {
 
   const filteredUsers = useMemo(() => {
     const roleFiltered = users.filter((item) => {
-      if (!isVisibleInUserManagement(item)) return false;
-
       const role = String(item.role || '').trim().toLowerCase();
 
       if (userFilter === 'all') return true;

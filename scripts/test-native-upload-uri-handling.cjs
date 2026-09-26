@@ -214,6 +214,24 @@ test("the shared image uploader reads picker files through the safe-copy helper"
   assert.doesNotMatch(imageUploaderSource, /FileSystem\.readAsStringAsync/);
 });
 
+test("playlist audio screening is bounded and the full MP3 uses native streaming", () => {
+  const playlistAudioSource = readFileSync("mobile/src/utils/playlistAudio.ts", "utf8");
+  const screening = playlistAudioSource.match(
+    /export const screenPlaylistAudioForCopyright[\s\S]+?export const ensurePlaylistAudioPassesCopyrightScreening/,
+  )?.[0];
+  const upload = playlistAudioSource.match(
+    /export const uploadPlaylistAudioFile[\s\S]+$/,
+  )?.[0];
+
+  assert(screening, "expected the playlist audio screening helper");
+  assert(upload, "expected the playlist audio upload helper");
+  assert.match(screening, /position:\s*0/);
+  assert.match(screening, /length:\s*ACR_CLOUD_AUDIO_SAMPLE_BYTES/);
+  assert.match(upload, /uploadStorageObject\(\{/);
+  assert.match(upload, /uri:\s*audioFile\.uri/);
+  assert.doesNotMatch(upload, /base64ToUint8Array|\.upload\(storagePath,\s*bytes/);
+});
+
 test("mobile and web video upload recovery never loads the full video as base64", () => {
   for (const file of [
     "mobile/src/components/VideoUploader.tsx",

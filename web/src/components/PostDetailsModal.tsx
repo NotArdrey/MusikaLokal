@@ -605,12 +605,12 @@ const styles = StyleSheet.create({
   overlayWrap: {
     ...(Platform.OS === "web"
       ? ({ position: "fixed" as any, top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 } as any)
-      : StyleSheet.absoluteFillObject),
+      : StyleSheet.absoluteFill),
     alignItems: "center",
     justifyContent: "center",
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(15, 23, 42, 0.55)",
   },
   shell: {

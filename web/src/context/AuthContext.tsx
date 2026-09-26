@@ -27,6 +27,10 @@ type AccountBanRecord = {
   ban_action?: string | null;
 };
 
+type ProfileAuthRecord = AccountBanRecord & {
+  role?: string | null;
+};
+
 const isBanColumnError = (errorLike: unknown) => {
   const error = errorLike as { code?: string; message?: string; details?: string; hint?: string } | null;
   const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
@@ -65,6 +69,8 @@ type AuthContextType = {
   setGuestMode: (enabled: boolean) => Promise<void>;
   isAdmin: boolean;
   userRole: string | null;
+  availableRoles: string[];
+  switchRole: (role: string) => Promise<void>;
   roleResolved: boolean;
   userId: string | null;
   // Backward-compatible fields; unpaid balances no longer lock app actions.
@@ -86,6 +92,8 @@ const AuthContext = createContext<AuthContextType>({
   setGuestMode: async () => { },
   isAdmin: false,
   userRole: null,
+  availableRoles: [],
+  switchRole: async () => { },
   roleResolved: false,
   userId: null,
   isSystemLocked: false,
@@ -137,6 +145,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isGuest, setIsGuest] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [availableRoles, setAvailableRoles] = useState<string[]>([]);
   const [roleResolved, setRoleResolved] = useState(false);
 
   // Payment reminder state. Outstanding balances are surfaced in wallet/activity,
@@ -154,6 +163,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const identityExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roleUserIdRef = useRef<string | null>(null);
   const banLogoutUserIdRef = useRef<string | null>(null);
+  const roleChangeLogoutUserIdRef = useRef<string | null>(null);
 
   const setGuestMode = useCallback(async (enabled: boolean) => {
     setIsGuest(enabled);
@@ -303,6 +313,34 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     } as any);
     return true;
   }, [clearAuthenticatedStateForBan, session?.user?.id]);
+
+  const handleProfileRoleChange = useCallback(async (
+    previousRecord?: ProfileAuthRecord | null,
+    nextRecord?: ProfileAuthRecord | null,
+  ) => {
+    const previousRole = String(previousRecord?.role || userRole || "").trim().toLowerCase();
+    const nextRole = String(nextRecord?.role || "").trim().toLowerCase();
+    const activeUserId = session?.user?.id || null;
+    if (!activeUserId || !previousRole || !nextRole || previousRole === nextRole) return false;
+    if (roleChangeLogoutUserIdRef.current === activeUserId) return true;
+    roleChangeLogoutUserIdRef.current = activeUserId;
+
+    try {
+      await supabase.auth.signOut({ scope: "local" });
+    } catch {
+      // The server may already have revoked this session.
+    }
+
+    try {
+      await clearSupabaseAuthStorage();
+    } catch {
+      // Ignore storage-clear errors.
+    }
+
+    clearAuthenticatedStateForBan();
+    router.replace({ pathname: "/", params: { role_changed: "true" } } as any);
+    return true;
+  }, [clearAuthenticatedStateForBan, session?.user?.id, userRole]);
 
   const checkAccountBanStatus = useCallback(async () => {
     const activeUserId = session?.user?.id;
@@ -583,6 +621,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           filter: `id=eq.${activeUserId}`,
         },
         async (payload) => {
+          if (await handleProfileRoleChange(
+            payload.old as ProfileAuthRecord,
+            payload.new as ProfileAuthRecord,
+          )) {
+            return;
+          }
           if (await handleActiveAccountBan(payload.new as AccountBanRecord)) {
             return;
           }
@@ -599,7 +643,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         profileRealtimeChannelRef.current = null;
       }
     };
-  }, [session?.user?.id, checkIdentityStatus, checkSystemLock, handleActiveAccountBan]);
+  }, [session?.user?.id, checkIdentityStatus, checkSystemLock, handleActiveAccountBan, handleProfileRoleChange]);
 
   // Re-check on app foreground to catch expiry transitions after backgrounding.
   useEffect(() => {
@@ -665,6 +709,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     if (roleUserIdRef.current !== nextUserId) {
       roleUserIdRef.current = nextUserId;
       setUserRole(null);
+      setAvailableRoles([]);
       setIsAdmin(false);
     }
     setRoleResolved(false);
@@ -673,6 +718,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const clearResolvedRole = () => {
     roleUserIdRef.current = null;
     setUserRole(null);
+    setAvailableRoles([]);
     setIsAdmin(false);
     setRoleResolved(true);
   };
@@ -686,6 +732,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const fetchUserRole = async (userId: string, _activeSession?: Session | null) => {
     try {
+      const { data: roleMemberships, error: roleMembershipError } = await supabase.from("profile_roles")
+        .select("role").eq("profile_id", userId).eq("status", "ACTIVE");
+      if (!roleMembershipError) {
+        setAvailableRoles(Array.from(new Set((roleMemberships || [])
+          .map((membership: any) => normalizeRole(membership?.role))
+          .filter((role): role is string => Boolean(role)))));
+      }
       console.log("🔍 Fetching role for user ID:", userId);
       const { data, error } = await supabase
         .from("profiles")
@@ -699,6 +752,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       const profileRole = normalizeRole(data?.role);
       if (profileRole) {
+        setAvailableRoles((roles) => roles.includes(profileRole) ? roles : [...roles, profileRole]);
         console.log("✅ User role fetched from profiles:", profileRole);
         applyResolvedRole(profileRole, userId);
         return;
@@ -730,6 +784,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const switchRole = useCallback(async (role: string) => {
+    const normalizedRole = normalizeRole(role);
+    if (!session?.user?.id || !normalizedRole) throw new Error("Sign in before switching roles.");
+    const { data, error } = await supabase.functions.invoke("manage-profile", {
+      body: { action: "switch_role", role: normalizedRole },
+    });
+    if (error) throw error;
+    const nextRole = normalizeRole((data as any)?.role) || normalizedRole;
+    setUserRole(nextRole);
+    setIsAdmin(nextRole === "admin");
+    setRoleResolved(true);
+  }, [session?.user?.id]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -739,6 +806,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setGuestMode,
         isAdmin,
         userRole,
+        availableRoles,
+        switchRole,
         roleResolved,
         userId: session?.user?.id || null,
         isSystemLocked,

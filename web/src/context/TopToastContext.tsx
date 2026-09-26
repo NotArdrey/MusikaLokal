@@ -169,7 +169,7 @@ export function TopToastProvider({ children }: { children: React.ReactNode }) {
       {children}
 
       <Portal name="top-toast">
-        <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
+        <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
           <View pointerEvents="box-none" style={[styles.toastStack, { top: topOffset }]}>
             {toasts.map((toast, index) => (
               <ToastCard
@@ -327,7 +327,7 @@ function ToastCard({
     >
       <View
         style={[
-          StyleSheet.absoluteFillObject,
+          StyleSheet.absoluteFill,
           {
             backgroundColor: isDark ? config.darkBackground : config.lightBackground,
             borderColor: isDark ? config.darkBorder : config.lightBorder,

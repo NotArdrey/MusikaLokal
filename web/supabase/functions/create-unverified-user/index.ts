@@ -210,6 +210,42 @@ async function findAuthUserByEmail(supabaseAdmin: any, email: string) {
     return null
 }
 
+async function authenticateExistingAccount(email: string, password: string, expectedUserId: string) {
+    const authClient = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    })
+    const { data, error } = await authClient.auth.signInWithPassword({ email, password })
+    if (error || !data?.user || data.user.id !== expectedUserId) {
+        throw new Error('This email already has an account. Enter its current password to add another role.')
+    }
+}
+
+async function getProfileRoleMembership(client: any, profileId: string, role: string) {
+    const { data, error } = await client.from('profile_roles').select('status')
+        .eq('profile_id', profileId).eq('role', role).maybeSingle()
+    if (error) throw new Error(`Unable to check account roles: ${error.message}`)
+    return data || null
+}
+
+async function upsertProfileRoleMembership(client: any, profileId: string, role: string, status: string, source: string) {
+    const nowIso = new Date().toISOString()
+    const { error } = await client.from('profile_roles').upsert({
+        profile_id: profileId, role, status, source,
+        activated_at: status === 'ACTIVE' ? nowIso : null,
+        updated_at: nowIso,
+    }, { onConflict: 'profile_id,role' })
+    if (error) throw new Error(`Unable to save account role: ${error.message}`)
+}
+
+async function activateExistingAccountRole(client: any, existingUser: any, role: string) {
+    const { error: profileError } = await client.from('profiles').update({ role }).eq('id', existingUser.id)
+    if (profileError) throw new Error(`Unable to activate account role: ${profileError.message}`)
+    const { error: authError } = await client.auth.admin.updateUserById(existingUser.id, {
+        user_metadata: { ...(existingUser.user_metadata || {}), role },
+    })
+    if (authError) throw new Error(`Unable to update active account role: ${authError.message}`)
+}
+
 async function getValidatedDiditSession(
     supabaseAdmin: any,
     diditSessionId: string,
@@ -857,6 +893,7 @@ serve(async (req) => {
 
         if (action === 'check_account_status') {
             const normalizedEmail = String(email || '').trim().toLowerCase()
+            const requestedRole = String(role || '').trim().toLowerCase()
             if (!normalizedEmail) {
                 return new Response(JSON.stringify({ error: 'Email required' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -868,10 +905,23 @@ serve(async (req) => {
             const confirmationGate = existingUser && !existingUser.email_confirmed_at
                 ? await getEmailConfirmationGate(supabaseAdmin, existingUser)
                 : null
+            let accountRole: string | null = null
+            let requestedRoleStatus: string | null = null
+            if (existingUser) {
+                const { data: existingProfile } = await supabaseAdmin.from('profiles')
+                    .select('role').eq('id', existingUser.id).maybeSingle()
+                accountRole = String(existingProfile?.role || existingUser.user_metadata?.role || '').trim().toLowerCase() || null
+                if (allowedSignupRoles.has(requestedRole)) {
+                    const membership = await getProfileRoleMembership(supabaseAdmin, existingUser.id, requestedRole)
+                    requestedRoleStatus = String(membership?.status || '').trim().toUpperCase() || null
+                }
+            }
             return new Response(JSON.stringify({
                 exists: Boolean(existingUser),
                 emailConfirmed: Boolean(existingUser?.email_confirmed_at),
                 identityStatus: confirmationGate?.status || null,
+                accountRole,
+                requestedRoleStatus,
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
@@ -968,6 +1018,8 @@ serve(async (req) => {
         let duplicateIdentityReview: any = null
         let resolvedDiditStatus = ''
         let registrationAttemptId: string | null = null
+        let existingUser: any = null
+        let addingRoleToExistingAccount = false
 
         if (!diditSessionId) {
             return new Response(JSON.stringify({ error: 'Didit session is required for Didit account creation.' }), {
@@ -998,6 +1050,40 @@ serve(async (req) => {
                 })
             }
             throw rateLimitError
+        }
+
+        existingUser = await findAuthUserByEmail(supabaseAdmin, normalizedEmail)
+        if (existingUser?.email_confirmed_at) {
+            await authenticateExistingAccount(normalizedEmail, password, existingUser.id)
+            const { data: existingProfile, error: existingProfileError } = await supabaseAdmin
+                .from('profiles').select('id, role, is_banned').eq('id', existingUser.id).maybeSingle()
+            if (existingProfileError || !existingProfile) {
+                return new Response(JSON.stringify({ error: 'The existing account profile could not be loaded.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409,
+                })
+            }
+            if (existingProfile.is_banned) {
+                return new Response(JSON.stringify({ error: 'This account is currently restricted.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403,
+                })
+            }
+            if (!allowedSignupRoles.has(String(existingProfile.role || '').trim().toLowerCase())) {
+                return new Response(JSON.stringify({ error: 'Additional roles are only available to fan and musician accounts.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409,
+                })
+            }
+            const membership = await getProfileRoleMembership(supabaseAdmin, existingUser.id, normalizedRole)
+            if (membership?.status === 'ACTIVE' || membership?.status === 'PENDING_REVIEW') {
+                const pending = membership.status === 'PENDING_REVIEW'
+                return new Response(JSON.stringify({
+                    error: pending
+                        ? `The ${normalizedRole} role is already pending review for this account.`
+                        : `This account already has the ${normalizedRole} role. Please sign in.`,
+                    roleAlreadyExists: !pending,
+                    rolePendingReview: pending,
+                }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409 })
+            }
+            addingRoleToExistingAccount = true
         }
 
         const sessionData = await getValidatedDiditSession(supabaseAdmin, diditSessionId, sessionNonce)
@@ -1112,6 +1198,7 @@ serve(async (req) => {
             duplicateIdentityReview = await findSameRoleIdentityDuplicate(supabaseAdmin, {
                 documentFingerprint,
                 role: normalizedRole,
+                userId: addingRoleToExistingAccount ? existingUser.id : null,
                 email: normalizedEmail,
                 normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
                 birthDate: identityNameBirthDate.birthDate,
@@ -1132,23 +1219,11 @@ serve(async (req) => {
             ? 'APPROVED'
             : (pendingByDidit || requiresDuplicateIdentityReview) ? 'PENDING_REVIEW' : 'PENDING'
         const effectiveIsVerified = effectiveVerificationStatus === 'APPROVED'
-        // 1. Check if user already exists in Auth
-        let existingUser = await findAuthUserByEmail(supabaseAdmin, normalizedEmail)
-
         let authUserForResponse: any = null
         let userId = ''
         let createdNewUser = false
 
-        if (existingUser) {
-
-            // If they are already confirmed, STOP.
-            if (existingUser.email_confirmed_at) {
-                return new Response(JSON.stringify({ error: 'This email is already registered and verified. Please login.' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 400,
-                })
-            }
-
+        if (existingUser && !addingRoleToExistingAccount) {
             // If they are NOT confirmed, this is a stalled/failed signup.
             // Clear FK blockers first, then delete them to allow a fresh start.
             try {
@@ -1172,66 +1247,48 @@ serve(async (req) => {
 
             // Also clean up profile if it exists
             await supabaseAdmin.from('profiles').delete().eq('id', existingUser.id)
-
+            existingUser = null
         }
 
-        // 2. Create Fresh User
-        // Didit approval verifies identity only. The Supabase auth email must
-        // still be confirmed before password login is allowed.
-        const { data: user, error: createError } = await supabaseAdmin.auth.admin.createUser({
-            email: normalizedEmail,
-            password,
-            email_confirm: false,
-            user_metadata: {
-                is_verified: effectiveIsVerified,
-                role: normalizedRole,
-                verification_status: effectiveVerificationStatus,
-                didit_session_id: diditSessionId || null,
-                selected_document_type: selectedDocumentType || null,
-                selected_document_type_key: selectedDocumentTypeKey || null,
-                verification_mode: verificationMode || null,
-                full_name: fallbackName,
-                display_name: fallbackName,
-                name: fallbackName,
-            }
-        })
-
-        if (createError) {
-            return new Response(JSON.stringify({ error: createError.message }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 400,
+        if (addingRoleToExistingAccount) {
+            authUserForResponse = existingUser
+            userId = existingUser.id
+        } else {
+            const { data: user, error: createError } = await supabaseAdmin.auth.admin.createUser({
+                email: normalizedEmail, password, email_confirm: false,
+                user_metadata: {
+                    is_verified: effectiveIsVerified, role: normalizedRole,
+                    verification_status: effectiveVerificationStatus, didit_session_id: diditSessionId || null,
+                    selected_document_type: selectedDocumentType || null,
+                    selected_document_type_key: selectedDocumentTypeKey || null,
+                    verification_mode: verificationMode || null,
+                    full_name: fallbackName, display_name: fallbackName, name: fallbackName,
+                }
             })
-        }
-
-        if (!user.user) {
-            throw new Error('User creation failed');
-        }
-
-        authUserForResponse = user.user
-        userId = user.user.id
-        createdNewUser = true
-
-        const { error: profileError } = await supabaseAdmin
-            .from('profiles')
-            .upsert({
-                id: userId,
-                email: normalizedEmail,
-                full_name: fallbackName,
-                role: normalizedRole,
-                is_verified: false,
-                verification_status: effectiveVerificationStatus,
-                didit_session_id: diditSessionId || null,
-                id_document_expiry: diditVerificationData?.id_document_expiry || null,
-                id_verified_at: null,
-            })
-
-        if (profileError) {
-            console.error('Profile creation error:', profileError)
-            if (createdNewUser) {
-                await supabaseAdmin.auth.admin.deleteUser(userId)
+            if (createError) {
+                return new Response(JSON.stringify({ error: createError.message }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400,
+                })
             }
-            throw new Error('Failed to create profile: ' + profileError.message)
+            if (!user.user) throw new Error('User creation failed')
+            authUserForResponse = user.user
+            userId = user.user.id
+            createdNewUser = true
+            const { error: profileError } = await supabaseAdmin.from('profiles').upsert({
+                id: userId, email: normalizedEmail, full_name: fallbackName, role: normalizedRole,
+                is_verified: false, verification_status: effectiveVerificationStatus,
+                didit_session_id: diditSessionId || null,
+                id_document_expiry: diditVerificationData?.id_document_expiry || null, id_verified_at: null,
+            })
+            if (profileError) {
+                if (createdNewUser) await supabaseAdmin.auth.admin.deleteUser(userId)
+                throw new Error('Failed to create profile: ' + profileError.message)
+            }
         }
+
+        await upsertProfileRoleMembership(supabaseAdmin, userId, normalizedRole,
+            effectiveVerificationStatus === 'APPROVED' ? 'ACTIVE' : 'PENDING_REVIEW',
+            addingRoleToExistingAccount ? 'ROLE_SIGNUP' : 'SIGNUP')
 
         let identityReviewRecord = null
         let finalVerificationStatus = effectiveVerificationStatus
@@ -1400,6 +1457,7 @@ serve(async (req) => {
                 finalVerificationStatus = 'PENDING_REVIEW'
                 finalDuplicateIdentityReview = true
 
+                if (!addingRoleToExistingAccount) {
                 await supabaseAdmin
                     .from('profiles')
                     .update({
@@ -1418,6 +1476,7 @@ serve(async (req) => {
                 })
                 if (demotedUser?.user) {
                     authUserForResponse = demotedUser.user
+                }
                 }
             }
         }
@@ -1501,6 +1560,7 @@ serve(async (req) => {
             finalVerificationStatus = 'PENDING_REVIEW'
             finalDuplicateIdentityReview = true
 
+            if (!addingRoleToExistingAccount) {
             await supabaseAdmin
                 .from('profiles')
                 .update({
@@ -1522,10 +1582,20 @@ serve(async (req) => {
             if (demotedUser?.user) {
                 authUserForResponse = demotedUser.user
             }
+            }
         }
 
-        const emailConfirmationRequired = finalVerificationStatus === 'APPROVED'
-        const emailDelivery = emailConfirmationRequired
+        const finalRoleStatus = finalVerificationStatus === 'APPROVED' ? 'ACTIVE' : 'PENDING_REVIEW'
+        await upsertProfileRoleMembership(supabaseAdmin, userId, normalizedRole, finalRoleStatus,
+            addingRoleToExistingAccount ? 'ROLE_SIGNUP' : 'SIGNUP')
+        if (addingRoleToExistingAccount && finalRoleStatus === 'ACTIVE') {
+            await activateExistingAccountRole(supabaseAdmin, existingUser, normalizedRole)
+        }
+
+        const emailConfirmationRequired = !addingRoleToExistingAccount && finalVerificationStatus === 'APPROVED'
+        const emailDelivery = addingRoleToExistingAccount
+            ? { sent: false, queued: false, provider: 'not_required' }
+            : emailConfirmationRequired
             ? await sendEmailConfirmationLink(
                 supabaseAdmin,
                 normalizedEmail,
@@ -1551,12 +1621,18 @@ serve(async (req) => {
         return new Response(JSON.stringify({
             user: authUserForResponse,
             emailConfirmationRequired,
-            emailConfirmationDeferred: !emailConfirmationRequired,
+            emailConfirmationDeferred: !addingRoleToExistingAccount && !emailConfirmationRequired,
+            roleAddedToExistingAccount: addingRoleToExistingAccount,
+            roleStatus: finalRoleStatus,
             duplicateIdentityReview: finalDuplicateIdentityReview,
             identityReviewId: identityReviewRecord?.id || null,
             musicianVideoReviewRequired: requiresMusicianVideoReview,
             emailDelivery,
-            message: finalVerificationStatus === 'APPROVED'
+            message: addingRoleToExistingAccount
+                ? finalRoleStatus === 'ACTIVE'
+                    ? `The ${normalizedRole} role was added to this account.`
+                    : `The ${normalizedRole} role is pending review; existing account access remains active.`
+                : finalVerificationStatus === 'APPROVED'
                 ? 'User created with verified identity; email confirmation required'
                 : finalVerificationStatus === 'PENDING_REVIEW'
                     ? 'User created with identity pending review; email confirmation will be sent after approval'

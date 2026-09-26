@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system/src/legacy';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { createFile, MP4BoxBuffer, type Movie } from 'mp4box';
 

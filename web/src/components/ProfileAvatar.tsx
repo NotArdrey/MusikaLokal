@@ -50,7 +50,7 @@ const ProfileAvatar = ({
       />
       <CachedImage
         uri={uri}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         width={width}
         height={height}
         quality={76}
