@@ -701,7 +701,6 @@ export default function MyVenueScreen() {
                                                 }}
                                                 style={[styles.manageBtn, { borderColor: colors.primary }]}
                                             >
-                                                <Ionicons name={canManageGig ? 'arrow-forward-outline' : 'eye-outline'} size={18} color={colors.primary} />
                                                 <Text style={[styles.manageBtnText, { color: colors.primary }]}>{canManageGig ? 'Manage' : 'View'}</Text>
                                             </TouchableOpacity>
 

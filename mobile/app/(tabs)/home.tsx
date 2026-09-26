@@ -3499,7 +3499,7 @@ const styles = StyleSheet.create({
     borderRadius: 24, // Re-apply for safety
   },
   bentoOverlay: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     justifyContent: "flex-end",
     padding: 12,
     borderRadius: 24, // Re-apply for safety
@@ -3572,7 +3572,7 @@ const styles = StyleSheet.create({
     borderRadius: 32, // Match parent
   },
   featuredGradient: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     padding: 24,
     justifyContent: "space-between",
     borderRadius: 32, // Match parent

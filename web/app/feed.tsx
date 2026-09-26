@@ -2,7 +2,7 @@ import { screenVisualUpload } from "../src/services/visualUploadScreen";
 import { isUploadSafetyRetryableFailure } from "../src/services/uploadSafetyScreen";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router/react-navigation";
+import { useFocusEffect } from "expo-router";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -4150,7 +4150,7 @@ const styles = StyleSheet.create({
     borderRadius: 0,
   },
   socialGalleryMoreOverlay: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(15,23,42,0.56)",

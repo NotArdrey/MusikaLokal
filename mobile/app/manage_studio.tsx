@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -709,7 +709,7 @@ export default function StudioDetailsScreen() {
   const formatCurrency = (value?: unknown) => {
     const amount = Number(value || 0);
     if (!Number.isFinite(amount) || amount <= 0) return "Price pending";
-    return `₱${amount.toLocaleString()}`;
+    return `?${amount.toLocaleString()}`;
   };
 
   const getBookingSessionLabel = (booking: any) =>
@@ -888,13 +888,13 @@ export default function StudioDetailsScreen() {
             : "Rate";
   const studioRateDisplay =
     hasRehearsalRate && hasRecordingRate
-      ? `₱${rehearsalRateValue.toLocaleString()}/hr | ₱${recordingRateValue.toLocaleString()}/song`
+      ? `?${rehearsalRateValue.toLocaleString()}/hr | ?${recordingRateValue.toLocaleString()}/song`
       : hasRecordingRate
-        ? `₱${recordingRateValue.toLocaleString()}/song`
+        ? `?${recordingRateValue.toLocaleString()}/song`
         : hasRehearsalRate
-          ? `₱${rehearsalRateValue.toLocaleString()}/hr`
+          ? `?${rehearsalRateValue.toLocaleString()}/hr`
           : hourlyRateValue > 0
-            ? `₱${hourlyRateValue.toLocaleString()}/hr`
+            ? `?${hourlyRateValue.toLocaleString()}/hr`
             : "N/A";
   const studioEquipment = Array.isArray(studio?.instruments)
     ? studio.instruments.filter((item: any) => {
@@ -1046,7 +1046,7 @@ export default function StudioDetailsScreen() {
     const value = Number(promo?.discount_value || 0);
     if (!value) return "Discount";
     return promo?.discount_type === "fixed_amount"
-      ? `₱${value.toLocaleString()} off`
+      ? `?${value.toLocaleString()} off`
       : `${value}% off`;
   };
   const formatPromotionTarget = (value?: unknown) => {
@@ -1955,7 +1955,7 @@ export default function StudioDetailsScreen() {
                                   ["confirmed", "checked_in"].includes(
                                     normalizeBookingStatus(booking.status),
                                   )
-                                  ? `Active • ${statusLabel}`
+                                  ? `Active � ${statusLabel}`
                                   : statusLabel;
                               const slots = getBookingSlots(booking);
                               const notes =
@@ -2258,7 +2258,7 @@ export default function StudioDetailsScreen() {
                                 { color: colors.primary },
                               ]}
                             >
-                              ₱
+                              ?
                               {(
                                 booking.total_price ||
                                 booking.final_price ||

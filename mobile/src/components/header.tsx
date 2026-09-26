@@ -748,7 +748,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(15, 23, 42, 0.36)',
     },
     guestMenuBackdrop: {
-        ...StyleSheet.absoluteFill,
+        position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     },
     guestMenuPanel: {
         width: '78%',

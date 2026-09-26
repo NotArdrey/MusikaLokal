@@ -1,4 +1,4 @@
-﻿import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import {
     BottomSheetBackdrop,
     BottomSheetModal,
@@ -959,7 +959,7 @@ const ListingDetailsSheet = forwardRef<
         url: shareUrl,
       });
     } catch {
-      // user cancelled or share failed — no action needed
+      // user cancelled or share failed � no action needed
     }
   };
 

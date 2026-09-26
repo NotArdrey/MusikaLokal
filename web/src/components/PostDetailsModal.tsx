@@ -610,7 +610,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   backdrop: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     backgroundColor: "rgba(15, 23, 42, 0.55)",
   },
   shell: {

@@ -1428,7 +1428,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(2,6,23,0.72)",
   },
   popupBackdrop: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
   },
   popupContainer: {
     width: IS_WEB ? 460 : "100%",

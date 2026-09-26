@@ -1,4 +1,4 @@
-﻿import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -169,7 +169,7 @@ export default function AdminProductsPage() {
               <View style={styles.cardRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: colors.text, fontSize: 14, fontFamily: 'Poppins_600SemiBold' }} numberOfLines={1}>{item.title}</Text>
-                  <Text style={{ color: colors.primary, fontSize: 13, fontFamily: 'Poppins_700Bold', marginTop: 2 }}>₱{Number(item.price || 0).toFixed(2)}</Text>
+                  <Text style={{ color: colors.primary, fontSize: 13, fontFamily: 'Poppins_700Bold', marginTop: 2 }}>?{Number(item.price || 0).toFixed(2)}</Text>
                   <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 2 }}>Seller: {item.seller_name || item.seller_id?.slice(0, 8)}</Text>
                   <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 2 }}>Status: {item.status} | Type: {item.product_type}</Text>
                 </View>

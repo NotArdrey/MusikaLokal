@@ -5552,16 +5552,16 @@ const styles = StyleSheet.create({
     borderRadius: 0,
   },
   gridVideoFallback: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
   gridVideoScrim: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     backgroundColor: "rgba(0,0,0,0.16)",
   },
   gridVideoPlayBadgeWrap: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
@@ -5721,22 +5721,22 @@ const styles = StyleSheet.create({
   },
   // Drawer styles
   drawerOverlay: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     backgroundColor: "transparent",
     zIndex: 1000,
     elevation: 1000,
   },
   drawerScrim: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     backgroundColor: "rgba(0,0,0,0.4)",
     zIndex: 1,
   },
   drawerBackdrop: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     zIndex: 2,
   },
   drawerBackdropTouchTarget: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
   },
   drawerContent: {
     width: DRAWER_WIDTH,

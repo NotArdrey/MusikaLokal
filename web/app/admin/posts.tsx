@@ -1,4 +1,4 @@
-﻿import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -222,7 +222,7 @@ export default function AdminPostsPage() {
                   <View key={comment.id} style={[styles.commentReviewCard, { borderColor: colors.border }]}>
                     <Text style={{ color: colors.text, fontSize: 13, fontFamily: 'Poppins_600SemiBold' }} numberOfLines={3}>{comment.content}</Text>
                     <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 4 }}>
-                      {comment.author_name || comment.author_id?.slice(0, 8)} • {comment.moderation_status || 'review'}
+                      {comment.author_name || comment.author_id?.slice(0, 8)} � {comment.moderation_status || 'review'}
                     </Text>
                     {!!comment.moderation_reason && (
                       <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 4 }} numberOfLines={2}>{comment.moderation_reason}</Text>

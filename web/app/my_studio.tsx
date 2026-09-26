@@ -596,7 +596,7 @@ export default function MyStudioScreen() {
                                                                 onPress={() => router.push({ pathname: '/manage_studio', params: { id: studio.id } })}
                                                                 style={[styles.manageBtn, { backgroundColor: colors.primary }]}
                                                             >
-                                                                <Ionicons name={canManageBookings ? "settings-outline" : "eye-outline"} size={16} color="#FFF" />
+                                                                
                                                                 <Text style={styles.manageBtnText}>{canManageBookings ? 'Manage' : 'View'}</Text>
                                                             </TouchableOpacity>
 

@@ -1086,7 +1086,7 @@ const styles = StyleSheet.create({
   productImageWrap: { position: "relative", width: "100%" },
   productImage: { width: "100%" },
   productImagePlaceholder: { width: "100%", alignItems: "center", justifyContent: "center" },
-  soldOverlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15, 23, 42, 0.42)" },
+  soldOverlay: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15, 23, 42, 0.42)" },
   soldBadge: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 999, backgroundColor: "#F97316", paddingHorizontal: 10, paddingVertical: 6 },
   soldBadgeText: { color: "#fff", fontSize: moderateScale(11), fontFamily: typography.bold },
   productInfo: { padding: 10 },

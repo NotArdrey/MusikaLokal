@@ -5508,16 +5508,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   gridVideoFallback: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     alignItems: "center",
     justifyContent: "center",
   },
   gridVideoScrim: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     backgroundColor: "rgba(0,0,0,0.16)",
   },
   gridVideoPlayBadgeWrap: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -5762,7 +5762,7 @@ const styles = StyleSheet.create({
   },
   // Drawer styles
   drawerOverlay: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     backgroundColor: "transparent",
     zIndex: 20000,
     elevation: 20000,
@@ -5778,16 +5778,16 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   drawerScrim: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     backgroundColor: "rgba(0,0,0,0.42)",
     zIndex: 1,
   },
   drawerBackdrop: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
     zIndex: 2,
   },
   drawerBackdropTouchTarget: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0,
   },
   drawerContent: {
     width: DRAWER_WIDTH,

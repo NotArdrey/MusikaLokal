@@ -278,7 +278,7 @@ export default function MyProductionScreen() {
                           onPress={() => router.push({ pathname: '/production_team', params: { teamId: team.id } })}
                           style={[styles.manageBtn, { borderColor: colors.primary }]}
                         >
-                          <Ionicons name={showManageAsView ? 'eye-outline' : 'arrow-forward-outline'} size={18} color={colors.primary} />
+                          
                           <Text style={[styles.manageBtnText, { color: colors.primary }]}>{showManageAsView ? 'View' : 'Manage'}</Text>
                         </TouchableOpacity>
 
