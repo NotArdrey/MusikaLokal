@@ -4,9 +4,11 @@ import { router, usePathname } from 'expo-router';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Platform, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
+import { fetchActiveStaffAssignment } from '../utils/staffAccess';
 
 export const NAVBAR_BOTTOM_OFFSET = 24;
 export const NAVBAR_HEIGHT = 84;
@@ -23,17 +25,39 @@ function Navbar() {
     const isWebDesktop = Platform.OS === 'web' && width >= 768;
 
     useEffect(() => {
+        let active = true;
+
         if (isGuest || isFan || !session?.user?.id) {
             setManageRoute('/manage');
-            return;
+            return () => { active = false; };
         }
 
         if (!roleResolved) {
             setManageRoute('/manage');
-            return;
+            return () => { active = false; };
+        }
+
+        if (userRole === 'staff') {
+            void fetchActiveStaffAssignment(supabase, session.user.id)
+                .then((assignment) => {
+                    if (!active) return;
+                    const route = assignment?.entity_type === 'studio'
+                        ? '/my_studio'
+                        : assignment?.entity_type === 'venue'
+                            ? '/my_venue'
+                            : assignment?.entity_type === 'production'
+                                ? '/my_production'
+                                : '/manage';
+                    setManageRoute(route);
+                })
+                .catch(() => {
+                    if (active) setManageRoute('/manage');
+                });
+            return () => { active = false; };
         }
 
         setManageRoute(resolveRoleManageRoute(userRole, { adminRoute: isAdmin ? '/admin' : undefined }));
+        return () => { active = false; };
     }, [isAdmin, isFan, isGuest, roleResolved, session?.user?.id, userRole]);
 
     const activeTab = useMemo(() => {

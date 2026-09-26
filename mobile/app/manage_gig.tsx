@@ -406,17 +406,20 @@ export default function GigDetailsScreen() {
       if (ownedGigError) throw ownedGigError;
 
       let canManageAssignedGig = !!ownedGig?.id && profile?.role === "venue-owner";
+      let canViewAssignedGig = canManageAssignedGig;
 
       if (!canManageAssignedGig && profile?.role === "staff") {
         const assignment = await fetchActiveStaffAssignment(supabase, user.id, 'venue', gigId);
         const permissions = getStaffPermissions(assignment?.access_level);
-        canManageAssignedGig =
+        canViewAssignedGig =
           assignment?.entity_type === "venue" &&
-          assignment.gig_id === gigId &&
+          assignment.gig_id === gigId;
+        canManageAssignedGig =
+          canViewAssignedGig &&
           permissions.canManageBookings;
       }
 
-      const canViewAcceptedGig = canManageAssignedGig ? true : await hasAcceptedGigAccess(user.id, gigId);
+      const canViewAcceptedGig = canViewAssignedGig ? true : await hasAcceptedGigAccess(user.id, gigId);
 
       if (!canManageAssignedGig && !canViewAcceptedGig) {
         Alert.alert("Unauthorized", "You can only view gigs you manage or have been accepted for.");

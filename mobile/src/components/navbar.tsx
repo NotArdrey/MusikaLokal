@@ -5,6 +5,7 @@ import { router, usePathname } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated as RNAnimated, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useBottomOverlay } from '../context/BottomOverlayContext';
 import { useTheme } from '../context/ThemeContext';
@@ -12,6 +13,7 @@ import { prefetchNavbarColdBootQueries } from '../data/coldBootPrefetch';
 import { isE2EFixtureMode } from '../utils/e2eFixtures';
 import { logLoadTime } from '../utils/loadTimeLogger';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
+import { fetchActiveStaffAssignment } from '../utils/staffAccess';
 import { typography } from '../theme/tokens';
 
 export const NAVBAR_BOTTOM_OFFSET = 0;
@@ -220,17 +222,39 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
         !isBottomOverlayActive && !hideForE2EForm && (forceVisible || hasTabNavigator);
 
     useEffect(() => {
+        let active = true;
+
         if (isGuest || isFan || !session?.user?.id) {
             setManageRoute('/manage');
-            return;
+            return () => { active = false; };
         }
 
         if (!roleResolved) {
             setManageRoute('/manage');
-            return;
+            return () => { active = false; };
+        }
+
+        if (userRole === 'staff') {
+            void fetchActiveStaffAssignment(supabase, session.user.id)
+                .then((assignment) => {
+                    if (!active) return;
+                    const route = assignment?.entity_type === 'studio'
+                        ? '/my_studio'
+                        : assignment?.entity_type === 'venue'
+                            ? '/my_venue'
+                            : assignment?.entity_type === 'production'
+                                ? '/my_production'
+                                : '/manage';
+                    setManageRoute(route);
+                })
+                .catch(() => {
+                    if (active) setManageRoute('/manage');
+                });
+            return () => { active = false; };
         }
 
         setManageRoute(resolveRoleManageRoute(userRole));
+        return () => { active = false; };
     }, [isFan, isGuest, roleResolved, session?.user?.id, userRole]);
 
     const activeTab = useMemo(() => {

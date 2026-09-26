@@ -28,6 +28,7 @@ import { isFanUserRole } from "../utils/roleRouting";
 import { getSmoothTabIndex, setSmoothTab } from "../utils/smoothTabs";
 import { formatDashedNumericDate } from "../utils/friendlyDateTime";
 import { runAfterUIIdle } from "../utils/idleTask";
+import { fetchActiveStaffAssignment, getStaffPermissions, StaffAssignment } from "../utils/staffAccess";
 import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
@@ -225,6 +226,7 @@ const ProductionTeamDetailsSheet = forwardRef<
   const [team, setTeam] = useState<ProductionTeamRecord | null>(null);
   const [members, setMembers] = useState<ProductionTeamMember[]>([]);
   const [membershipRole, setMembershipRole] = useState<string | null>(null);
+  const [staffAssignment, setStaffAssignment] = useState<StaffAssignment | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState("Musician");
@@ -251,6 +253,24 @@ const ProductionTeamDetailsSheet = forwardRef<
     message: string;
     buttons?: SheetAlertButton[];
   }>({ type: "info", title: "", message: "" });
+
+  useEffect(() => {
+    let active = true;
+
+    if (userRole !== "staff" || !userId || !teamId) {
+      return () => { active = false; };
+    }
+
+    void fetchActiveStaffAssignment(supabase, userId, "production", teamId)
+      .then((assignment) => {
+        if (active) setStaffAssignment(assignment);
+      })
+      .catch(() => {
+        if (active) setStaffAssignment(null);
+      });
+
+    return () => { active = false; };
+  }, [teamId, userId, userRole]);
 
   const showSheetAlert = useCallback(
     (
@@ -637,6 +657,10 @@ const ProductionTeamDetailsSheet = forwardRef<
     membershipRole === "owner" || membershipRole === "manager"
       ? "Open Team Workspace"
       : "Open Team Page";
+  const staffPermissions = staffAssignment
+    ? getStaffPermissions(staffAssignment.access_level)
+    : null;
+  const isAssignedStaffTeam = userRole === "staff" && staffAssignment?.production_team_id === team?.id;
 
   const handleShare = useCallback(async () => {
     if (!team) return;
@@ -697,7 +721,7 @@ const ProductionTeamDetailsSheet = forwardRef<
 
   const accentColor = "#F97316";
   const accentSoft = isDark ? "rgba(249, 115, 22, 0.18)" : "rgba(249, 115, 22, 0.12)";
-  const canMessageTeamOwner = !isFan && Boolean(team?.owner_id && team.owner_id !== userId);
+  const canMessageTeamOwner = !isFan && !isAssignedStaffTeam && Boolean(team?.owner_id && team.owner_id !== userId);
 
   useEffect(() => {
     if (!tabsToRender.includes(activeTab)) {
@@ -1298,9 +1322,11 @@ const ProductionTeamDetailsSheet = forwardRef<
                   <TouchableOpacity activeOpacity={1} onPress={handleShare} style={styles.roundBtn}>
                     <Ionicons name="share-outline" size={22} color="#000" />
                   </TouchableOpacity>
-                  <TouchableOpacity activeOpacity={1} onPress={toggleFavorite} style={styles.roundBtn}>
-                    <Ionicons name={isFavorited ? "bookmark" : "bookmark-outline"} size={22} color={isFavorited ? "#6366F1" : "#000"} />
-                  </TouchableOpacity>
+                  {!isAssignedStaffTeam ? (
+                    <TouchableOpacity activeOpacity={1} onPress={toggleFavorite} style={styles.roundBtn}>
+                      <Ionicons name={isFavorited ? "bookmark" : "bookmark-outline"} size={22} color={isFavorited ? "#6366F1" : "#000"} />
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               </View>
 
@@ -1323,6 +1349,37 @@ const ProductionTeamDetailsSheet = forwardRef<
                 </View>
               </View>
             </View>
+
+            {isAssignedStaffTeam && (staffPermissions?.canManageBookings || staffPermissions?.canEditListing) ? (
+              <View style={[styles.staffActionBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                {staffPermissions?.canManageBookings ? (
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    onPress={() => {
+                      closeSheet();
+                      router.push({ pathname: "/production_team", params: { teamId: team.id } });
+                    }}
+                    style={[styles.staffPrimaryAction, { backgroundColor: colors.primary }]}
+                  >
+                    <Ionicons name="settings-outline" size={17} color="#FFFFFF" />
+                    <Text style={styles.staffPrimaryActionText}>Manage</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {staffPermissions?.canEditListing ? (
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    onPress={() => {
+                      closeSheet();
+                      router.push({ pathname: "/edit_production", params: { id: team.id } });
+                    }}
+                    style={[styles.staffSecondaryAction, { borderColor: colors.border }]}
+                  >
+                    <Ionicons name="pencil-outline" size={17} color={colors.text} />
+                    <Text style={[styles.staffSecondaryActionText, { color: colors.text }]}>Edit</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : null}
 
             {showTabs ? renderTabs() : null}
             <SmoothTabTransition
@@ -1361,6 +1418,44 @@ const ProductionTeamDetailsSheet = forwardRef<
 });
 
 const styles = StyleSheet.create({
+  staffActionBar: {
+    flexDirection: "row",
+    gap: 10,
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 4,
+    padding: 10,
+    borderWidth: 1,
+    borderRadius: 14,
+  },
+  staffPrimaryAction: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+  staffPrimaryActionText: {
+    color: "#FFFFFF",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+  },
+  staffSecondaryAction: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 11,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+  staffSecondaryActionText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+  },
   stateContainer: {
     flex: 1,
     alignItems: "center",

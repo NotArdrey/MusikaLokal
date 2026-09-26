@@ -2102,12 +2102,15 @@ export default function BookingsScreen() {
       if (bookings?.role && bookings.role !== role) {
         role = bookings.role;
         setUserRole(role);
-        if (role === "venue-owner" && !venueTabInitializedRef.current) {
-          setActiveTab("Applicants");
-          venueTabInitializedRef.current = true;
-        } else if (role !== "venue-owner") {
-          venueTabInitializedRef.current = false;
-        }
+      }
+      const shouldUseVenueOwnerTabs =
+        (role === "venue-owner" || (role === "staff" && hasVenueStaffAccess)) &&
+        !hasNonVenueStaffAccess;
+      if (shouldUseVenueOwnerTabs && !venueTabInitializedRef.current) {
+        setActiveTab("Applicants");
+        venueTabInitializedRef.current = true;
+      } else if (!shouldUseVenueOwnerTabs) {
+        venueTabInitializedRef.current = false;
       }
 
       const needsLocalFallback = !!error || !bookings;
@@ -4305,7 +4308,9 @@ export default function BookingsScreen() {
   const isHistoryTabView = activeTab === "History";
   const hasVenueStaffWorkspace = staffBookingContexts.some((context) => context?.entity_type === "venue");
   const hasNonVenueStaffWorkspace = staffBookingContexts.some((context) => context?.entity_type === "studio" || context?.entity_type === "production");
-  const usesVenueOwnerTabs = userRole === "venue-owner" && !hasNonVenueStaffWorkspace;
+  const usesVenueOwnerTabs =
+    (userRole === "venue-owner" || (userRole === "staff" && hasVenueStaffWorkspace)) &&
+    !hasNonVenueStaffWorkspace;
   const visiblePendingPermitListings = pendingPermitStudios.filter((listing: any) => (
     (activeTab === "Applicants" && listing?.entity_type === "gig") ||
     (activeTab === "Pending" && listing?.entity_type === "studio")

@@ -99,16 +99,21 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
                 return;
             }
 
+            const routeEntityType = routePathname === '/my_studio'
+                ? 'studio'
+                : routePathname === '/my_venue'
+                    ? 'venue'
+                    : routePathname === '/my_production'
+                        ? 'production'
+                        : null;
+            if (!routeEntityType) {
+                setStaffAccessLevel(null);
+                return;
+            }
+
             try {
                 const assignments = await fetchActiveStaffAssignments(supabase, userId);
-                const routeEntityType = routePathname === '/my_studio'
-                    ? 'studio'
-                    : routePathname === '/my_venue'
-                        ? 'venue'
-                        : routePathname === '/my_production'
-                            ? 'production'
-                            : null;
-                const assignment = assignments.find((item) => !routeEntityType || item.entity_type === routeEntityType);
+                const assignment = assignments.find((item) => item.entity_type === routeEntityType);
                 if (!cancelled) {
                     setStaffAccessLevel(assignment?.access_level || null);
                 }

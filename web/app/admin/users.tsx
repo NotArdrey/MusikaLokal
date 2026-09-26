@@ -2329,6 +2329,9 @@ export default function AdminUsersPage() {
                       <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
                         {STAFF_ENTITY_LABELS[staffFormEntityType]} <Text style={styles.requiredMark}>*</Text>
                       </Text>
+                      <Text style={[styles.staffLevelText, { color: colors.textSecondary }]}>
+                        Only active {STAFF_ENTITY_LABELS[staffFormEntityType].toLowerCase()} records are shown. You can select more than one.
+                      </Text>
                       {staffTargetsLoading ? (
                         <View style={styles.inlineLoader}>
                           <ActivityIndicator size="small" color={colors.primary} />

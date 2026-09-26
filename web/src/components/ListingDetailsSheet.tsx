@@ -2981,10 +2981,29 @@ const ListingDetailsSheet = forwardRef<
         (normalizedListingType === "production" || normalizedListingType === "production_team") &&
         staffAssignment.production_team_id === group.id)
     );
-  const isStaffViewOnlyListing =
-    staffTargetMatchesListing &&
-    getStaffPermissions(staffAssignment?.access_level).canViewOnly;
-  const showReportButton = !!group && !isOwnListing && !isGuest && !isStaffViewOnlyListing;
+  const assignedStaffPermissions = staffTargetMatchesListing
+    ? getStaffPermissions(staffAssignment?.access_level)
+    : null;
+  const isAssignedStaffListing = userRole === "staff" && staffTargetMatchesListing;
+  const showReportButton = !!group && !isOwnListing && !isGuest && !isAssignedStaffListing;
+
+  const openAssignedStaffWorkspace = (mode: "manage" | "edit") => {
+    if (!group?.id || !staffAssignment) return;
+    dismissSelf();
+
+    if (staffAssignment.entity_type === "studio") {
+      router.push({ pathname: mode === "edit" ? "/edit_studio" : "/manage_studio", params: { id: group.id } });
+      return;
+    }
+    if (staffAssignment.entity_type === "venue") {
+      router.push({ pathname: mode === "edit" ? "/edit_gig" : "/manage_gig", params: { id: group.id } });
+      return;
+    }
+    router.push({
+      pathname: mode === "edit" ? "/edit_production" : "/production_team",
+      params: mode === "edit" ? { id: group.id } : { teamId: group.id },
+    });
+  };
   const isGroupListing = group?.type === "Group";
   const isGigListing = group?.type === "Gig";
   const normalizedGigStatus = String(group?.status || "").trim().toLowerCase();
@@ -4071,14 +4090,39 @@ const ListingDetailsSheet = forwardRef<
         styles={styles}
         isFavorited={isFavorited}
         favoriteCount={favoriteCount}
-        showFavoriteButton={!isGuest && !isStaffViewOnlyListing}
+        showFavoriteButton={!isGuest && !isAssignedStaffListing}
         showReportButton={showReportButton}
         onClose={dismissSelf}
         onToggleFavorite={toggleFavorite}
         onReport={handleReport}
         onShare={handleShare}
-        onChat={isGuest || isFan || isStaffViewOnlyListing ? undefined : openListingChat}
+        onChat={isGuest || isFan || isAssignedStaffListing ? undefined : openListingChat}
       />
+
+      {isAssignedStaffListing && (assignedStaffPermissions?.canManageBookings || assignedStaffPermissions?.canEditListing) ? (
+        <View style={[styles.staffActionBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          {assignedStaffPermissions?.canManageBookings ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => openAssignedStaffWorkspace("manage")}
+              style={[styles.staffPrimaryAction, { backgroundColor: colors.primary }]}
+            >
+              <Ionicons name="settings-outline" size={17} color="#FFFFFF" />
+              <Text style={styles.staffPrimaryActionText}>Manage</Text>
+            </TouchableOpacity>
+          ) : null}
+          {assignedStaffPermissions?.canEditListing ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => openAssignedStaffWorkspace("edit")}
+              style={[styles.staffSecondaryAction, { borderColor: colors.border }]}
+            >
+              <Ionicons name="pencil-outline" size={17} color={colors.text} />
+              <Text style={[styles.staffSecondaryActionText, { color: colors.text }]}>Edit</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : null}
 
       {/* TABS SELECTOR */}
       {showTabs && renderTabs()}
@@ -4464,6 +4508,44 @@ const ListingDetailsSheet = forwardRef<
 });
 
 const styles = StyleSheet.create({
+  staffActionBar: {
+    flexDirection: "row",
+    gap: 10,
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 4,
+    padding: 10,
+    borderWidth: 1,
+    borderRadius: 14,
+  },
+  staffPrimaryAction: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+  staffPrimaryActionText: {
+    color: "#FFFFFF",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+  },
+  staffSecondaryAction: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 11,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+  staffSecondaryActionText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+  },
   loadingContainer: {
     width: "100%",
     paddingHorizontal: 16,

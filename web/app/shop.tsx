@@ -87,7 +87,8 @@ export default function ShopScreen() {
 
   useEffect(() => {
     if (!canSell && tab === "sell") {
-      setTab("browse");
+      const resetTab = setTimeout(() => setTab("browse"), 0);
+      return () => clearTimeout(resetTab);
     }
   }, [canSell, tab]);
 
@@ -104,6 +105,7 @@ export default function ShopScreen() {
   const [newDescription, setNewDescription] = useState("");
   const [newPrice, setNewPrice] = useState("");
   const [newCategory, setNewCategory] = useState("");
+  const [listingConfirmed, setListingConfirmed] = useState(false);
   const [listingImages, setListingImages] = useState<string[]>([]);
   const [listingThumbnailIndex, setListingThumbnailIndex] = useState(0);
   const [adding, setAdding] = useState(false);
@@ -234,6 +236,7 @@ export default function ShopScreen() {
     setNewDescription("");
     setNewPrice("");
     setNewCategory("");
+    setListingConfirmed(false);
     setListingImages([]);
     setListingThumbnailIndex(0);
   }, []);
@@ -270,6 +273,7 @@ export default function ShopScreen() {
       setNewDescription(product.description || "");
       setNewPrice(String(product.price || product.base_price || ""));
       setNewCategory(product.category || "");
+      setListingConfirmed(true);
       setListingImages(mediaUrls);
       setListingThumbnailIndex(0);
       setShowAddProduct(true);
@@ -332,7 +336,10 @@ export default function ShopScreen() {
   };
 
   const parsedListingPrice = Number.parseFloat(newPrice);
-  const isProductFormReady = newTitle.trim().length > 0 && (!newPrice.trim() || Number.isFinite(parsedListingPrice));
+  const isProductFormReady =
+    newTitle.trim().length > 0 &&
+    (!newPrice.trim() || Number.isFinite(parsedListingPrice)) &&
+    listingConfirmed;
 
   const handleSubmitProduct = async () => {
     if (adding) return;
@@ -342,6 +349,10 @@ export default function ShopScreen() {
     }
     if (!newTitle.trim()) {
       setAlert({ type: "warning", title: "Missing Title", message: "Enter a listing title." });
+      return;
+    }
+    if (!listingConfirmed) {
+      setAlert({ type: "warning", title: "Confirmation Required", message: "Confirm that the listing details are accurate and that you are authorized to sell this item." });
       return;
     }
     const price = parseFloat(newPrice);
@@ -741,6 +752,23 @@ export default function ShopScreen() {
           </ScrollView>
 
           <TouchableOpacity
+            activeOpacity={0.85}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: listingConfirmed }}
+            onPress={() => setListingConfirmed((current) => !current)}
+            style={styles.confirmationRow}
+          >
+            <Ionicons
+              name={listingConfirmed ? "checkbox" : "square-outline"}
+              size={22}
+              color={listingConfirmed ? colors.primary : colors.textSecondary}
+            />
+            <Text style={[styles.confirmationText, { color: colors.textSecondary }]}>
+              I confirm these details are accurate and I am authorized to sell this item.
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
             activeOpacity={adding || !isProductFormReady ? 1 : 0.85}
             style={[styles.submitBtn, { backgroundColor: isProductFormReady ? colors.primary : borderSoft, opacity: adding || !isProductFormReady ? 0.6 : 1 }]}
             onPress={handleSubmitProduct}
@@ -880,6 +908,8 @@ const styles = StyleSheet.create({
 
   modalCategoryRow: { gap: 8, paddingVertical: 4, paddingRight: 16 },
   modalCategoryPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
+  confirmationRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginTop: 18 },
+  confirmationText: { flex: 1, fontSize: 12, lineHeight: 18, fontFamily: "Poppins_400Regular" },
 
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-start", gap: 12 },
   productCard: { borderRadius: 12, borderWidth: 1, marginBottom: 4, overflow: "hidden" },

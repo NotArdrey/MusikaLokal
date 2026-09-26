@@ -11,6 +11,7 @@ import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 import { formatDashedNumericDate } from '../utils/friendlyDateTime';
 import { resolveNotificationNavigationTarget } from '../utils/notificationNavigation';
 import { createRealtimeChannelTopic } from '../utils/realtimeChannel';
+import { fetchActiveStaffAssignment } from '../utils/staffAccess';
 import ThemeModeToggle from './ThemeModeToggle';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -234,17 +235,39 @@ export default function SidebarNav() {
     }, []);
 
     useEffect(() => {
+        let active = true;
+
         if (isGuest || isFan || !session?.user?.id) {
             setManageRoute('/manage');
-            return;
+            return () => { active = false; };
         }
 
         if (!roleResolved) {
             setManageRoute('/manage');
-            return;
+            return () => { active = false; };
+        }
+
+        if (userRole === 'staff') {
+            void fetchActiveStaffAssignment(supabase, session.user.id)
+                .then((assignment) => {
+                    if (!active) return;
+                    const route = assignment?.entity_type === 'studio'
+                        ? '/my_studio'
+                        : assignment?.entity_type === 'venue'
+                            ? '/my_venue'
+                            : assignment?.entity_type === 'production'
+                                ? '/my_production'
+                                : '/manage';
+                    setManageRoute(route);
+                })
+                .catch(() => {
+                    if (active) setManageRoute('/manage');
+                });
+            return () => { active = false; };
         }
 
         setManageRoute(resolveRoleManageRoute(userRole, { adminRoute: isAdmin ? '/admin' : undefined }));
+        return () => { active = false; };
     }, [isAdmin, isFan, isGuest, roleResolved, session?.user?.id, userRole]);
 
     const refreshSidebarState = useCallback(async () => {

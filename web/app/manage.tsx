@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
@@ -8,7 +8,7 @@ import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { resolveRoleManageRoute } from '../src/utils/roleRouting';
-import { fetchActiveStaffAssignments } from '../src/utils/staffAccess';
+import { fetchActiveStaffAssignment } from '../src/utils/staffAccess';
 
 export default function ManageScreen() {
     const { colors, isDark } = useTheme();
@@ -42,6 +42,7 @@ export default function ManageScreen() {
     const { session, loading: authLoading, userId, userRole, roleResolved, isGuest } = useAuth();
     const isAuthenticated = !!session;
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
 
     useEffect(() => {
         if (!authLoading && !isAuthenticated && !isGuest) {
@@ -110,24 +111,26 @@ export default function ManageScreen() {
     };
 
     const handleRedirect = async (role: string) => {
+        setLoadError(null);
         if (role === 'staff' && userId) {
             try {
-                const assignments = await fetchActiveStaffAssignments(supabase, userId);
-                const entityTypes = Array.from(new Set(assignments.map((assignment) => assignment.entity_type)));
-                if (entityTypes[0] === 'studio') {
+                const assignment = await fetchActiveStaffAssignment(supabase, userId);
+                if (assignment?.entity_type === 'studio') {
                     router.replace('/my_studio');
                     return;
                 }
-                if (entityTypes[0] === 'venue') {
+                if (assignment?.entity_type === 'venue') {
                     router.replace('/my_venue');
                     return;
                 }
-                if (entityTypes[0] === 'production') {
+                if (assignment?.entity_type === 'production') {
                     router.replace('/my_production');
                     return;
                 }
+                setLoadError('No active staff workspace is assigned to this account.');
             } catch (error) {
                 console.log('Manage - Error fetching staff assignment:', error);
+                setLoadError(error instanceof Error ? error.message : 'Your staff workspace could not be loaded.');
             }
         }
 
@@ -186,8 +189,19 @@ export default function ManageScreen() {
                         <Text style={[styles.description, { color: textSecondary }]}>
                             It seems we couldn&apos;t automatically direct you to your specific dashboard. Please ensure your account has the correct role assigned or contact support for assistance.
                         </Text>
-
-
+                        {loadError ? <Text style={[styles.errorText, { color: isDark ? '#F87171' : '#DC2626' }]}>{loadError}</Text> : null}
+                        {userRole ? (
+                            <TouchableOpacity
+                                activeOpacity={0.82}
+                                onPress={() => {
+                                    setLoading(true);
+                                    void handleRedirect(userRole);
+                                }}
+                                style={[styles.retryButton, { backgroundColor: colors.primary }]}
+                            >
+                                <Text style={styles.retryButtonText}>Try again</Text>
+                            </TouchableOpacity>
+                        ) : null}
                     </View>
                 </ScrollView>
             </View>
@@ -249,5 +263,24 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
         lineHeight: 22,
         marginBottom: 32,
+    },
+    errorText: {
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 13,
+        lineHeight: 19,
+        marginBottom: 16,
+    },
+    retryButton: {
+        alignItems: 'center',
+        alignSelf: 'flex-start',
+        borderRadius: 12,
+        minWidth: 112,
+        paddingHorizontal: 18,
+        paddingVertical: 11,
+    },
+    retryButtonText: {
+        color: '#FFFFFF',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 14,
     },
 });

@@ -2885,12 +2885,15 @@ export default function BookingsScreen() {
       if (bookings?.role && bookings.role !== role) {
         role = bookings.role;
         setUserRole(role);
-        if (role === "venue-owner" && !venueTabInitializedRef.current) {
-          setActiveTab("Applicants");
-          venueTabInitializedRef.current = true;
-        } else if (role !== "venue-owner") {
-          venueTabInitializedRef.current = false;
-        }
+      }
+      const shouldUseVenueOwnerTabs =
+        (role === "venue-owner" || (role === "staff" && hasVenueStaffAccess)) &&
+        !hasNonVenueStaffAccess;
+      if (shouldUseVenueOwnerTabs && !venueTabInitializedRef.current) {
+        setActiveTab("Applicants");
+        venueTabInitializedRef.current = true;
+      } else if (!shouldUseVenueOwnerTabs) {
+        venueTabInitializedRef.current = false;
       }
 
       const fallbackBookings =
@@ -5928,7 +5931,9 @@ export default function BookingsScreen() {
 
   const hasVenueStaffWorkspace = staffBookingContexts.some((context) => context?.entity_type === "venue");
   const hasNonVenueStaffWorkspace = staffBookingContexts.some((context) => context?.entity_type === "studio" || context?.entity_type === "production");
-  const usesVenueOwnerTabs = userRole === "venue-owner" && !hasNonVenueStaffWorkspace;
+  const usesVenueOwnerTabs =
+    (userRole === "venue-owner" || (userRole === "staff" && hasVenueStaffWorkspace)) &&
+    !hasNonVenueStaffWorkspace;
   const visiblePendingPermitListings = pendingPermitStudios.filter((listing: any) => (
     (renderActiveTab === "Applicants" && listing?.entity_type === "gig") ||
     (renderActiveTab === "Pending" && listing?.entity_type === "studio")
@@ -5980,7 +5985,7 @@ export default function BookingsScreen() {
             ? ["Applicants", "Pending", "Upcoming", "Ongoing", "Review", "History"]
             : ["Pending", "Upcoming", "Ongoing", "Review", "History"]) as Tab[]).map((tab) => ({
             key: tab,
-            label: tab,
+            label: tab === "Applicants" ? "Applications" : tab,
             testID: `mobile-bookings-tab-${normalizeBookingTestId(tab)}`,
           })),
       [hasVenueStaffWorkspace, usesVenueOwnerTabs],

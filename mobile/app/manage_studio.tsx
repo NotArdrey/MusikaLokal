@@ -110,6 +110,7 @@ export default function StudioDetailsScreen() {
   const [selectedDate, setSelectedDate] = useState("");
 
   const [authorized, setAuthorized] = useState(false);
+  const [canManageStudio, setCanManageStudio] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   const [studio, setStudio] = useState<any>(null);
@@ -344,7 +345,8 @@ export default function StudioDetailsScreen() {
         return;
       }
 
-      let canManageStudio = false;
+      let mayManageStudio = false;
+      let mayViewStudio = false;
       if (profile?.role === "studio-owner") {
         const { data: ownedStudio, error: ownedStudioError } = await supabase
           .from("studios")
@@ -354,24 +356,27 @@ export default function StudioDetailsScreen() {
           .maybeSingle();
 
         if (ownedStudioError) throw ownedStudioError;
-        canManageStudio = !!ownedStudio?.id;
+        mayManageStudio = !!ownedStudio?.id;
+        mayViewStudio = mayManageStudio;
       }
 
-      if (!canManageStudio && profile?.role === "staff") {
+      if (!mayViewStudio && profile?.role === "staff") {
         const assignment = await fetchActiveStaffAssignment(supabase, user.id, 'studio', studioId);
         const permissions = getStaffPermissions(assignment?.access_level);
-        canManageStudio =
+        const isAssignedStudio =
           assignment?.entity_type === "studio" &&
-          assignment.studio_id === studioId &&
-          permissions.canManageBookings;
+          assignment.studio_id === studioId;
+        mayViewStudio = isAssignedStudio;
+        mayManageStudio = isAssignedStudio && permissions.canManageBookings;
       }
 
-      if (!canManageStudio) {
-        Alert.alert("Unauthorized", "Only the studio owner or staff with booking-management permission can access this page.");
+      if (!mayViewStudio) {
+        Alert.alert("Unauthorized", "Only the studio owner or assigned staff can access this page.");
         router.replace("/home");
         return;
       }
 
+      setCanManageStudio(mayManageStudio);
       setAuthorized(true);
       if (id) fetchData(user.id);
     } catch (e) {
@@ -1132,7 +1137,7 @@ export default function StudioDetailsScreen() {
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Manage Studio" />
+        <Header title={canManageStudio ? "Manage Studio" : "View Studio"} />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -1456,7 +1461,7 @@ export default function StudioDetailsScreen() {
                       >
                         No contract uploaded
                       </Text>
-                      <TouchableOpacity activeOpacity={1}
+                      {canManageStudio ? <TouchableOpacity activeOpacity={1}
                         onPress={() =>
                           router.push({
                             pathname: "/edit_studio",
@@ -1474,7 +1479,7 @@ export default function StudioDetailsScreen() {
                         >
                           Add Contract
                         </Text>
-                      </TouchableOpacity>
+                      </TouchableOpacity> : null}
                     </View>
                   )}
                 </View>
@@ -1775,7 +1780,7 @@ export default function StudioDetailsScreen() {
                   )}
                 </View>
 
-                <TouchableOpacity activeOpacity={1}
+                {canManageStudio ? <TouchableOpacity activeOpacity={1}
                   onPress={() =>
                     router.push({
                       pathname: "/edit_studio",
@@ -1790,7 +1795,7 @@ export default function StudioDetailsScreen() {
                   <Text style={[styles.addGearText, { color: colors.primary }]}>
                     Edit Setup
                   </Text>
-                </TouchableOpacity>
+                </TouchableOpacity> : null}
               </View>
             )}
 
@@ -2370,7 +2375,7 @@ export default function StudioDetailsScreen() {
                         )}
 
                         {/* Action buttons if pending */}
-                        {booking.status === "pending" && (
+                        {canManageStudio && booking.status === "pending" && (
                           <View style={{ marginTop: 16 }}>
                             {/* If multi-slot, show partial approval option */}
                             {booking.time_slots &&

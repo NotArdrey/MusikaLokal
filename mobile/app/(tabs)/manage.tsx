@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import GuestSignInGate from '../../src/components/GuestSignInGate';
 import Header from '../../src/components/header';
@@ -10,7 +10,7 @@ import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { resolveRoleManageRoute } from '../../src/utils/roleRouting';
-import { fetchActiveStaffAssignments } from '../../src/utils/staffAccess';
+import { fetchActiveStaffAssignment } from '../../src/utils/staffAccess';
 import { spacing, typography } from '../../src/theme/tokens';
 
 export default function ManageScreen() {
@@ -19,6 +19,7 @@ export default function ManageScreen() {
     const { session, loading: authLoading, userId, userRole, roleResolved, isGuest } = useAuth();
     const isAuthenticated = !!session;
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
 
     useEffect(() => {
         if (!authLoading && !isAuthenticated && !isGuest) {
@@ -75,28 +76,31 @@ export default function ManageScreen() {
                 setLoading(false);
             }
         } catch (error) {
+            setLoadError(error instanceof Error ? error.message : 'Your workspace could not be loaded.');
             setLoading(false);
         }
     };
 
     const handleRedirect = async (role: string) => {
+        setLoadError(null);
         if (role === 'staff' && userId) {
             try {
-                const assignments = await fetchActiveStaffAssignments(supabase, userId);
-                const entityTypes = Array.from(new Set(assignments.map((assignment) => assignment.entity_type)));
-                if (entityTypes[0] === 'studio') {
+                const assignment = await fetchActiveStaffAssignment(supabase, userId);
+                if (assignment?.entity_type === 'studio') {
                     router.replace('/my_studio');
                     return;
                 }
-                if (entityTypes[0] === 'venue') {
+                if (assignment?.entity_type === 'venue') {
                     router.replace('/my_venue');
                     return;
                 }
-                if (entityTypes[0] === 'production') {
+                if (assignment?.entity_type === 'production') {
                     router.replace('/my_production');
                     return;
                 }
-            } catch {
+                setLoadError('No active staff workspace is assigned to this account.');
+            } catch (error) {
+                setLoadError(error instanceof Error ? error.message : 'Your staff workspace could not be loaded.');
                 // Fall through to the generic manage fallback.
             }
         }
@@ -146,8 +150,21 @@ export default function ManageScreen() {
                     <Text style={[styles.description, { color: colors.textSecondary }]}>
                         Check that your account has the correct role assigned, or contact support for assistance.
                     </Text>
-
-
+                    {loadError ? (
+                        <Text style={[styles.errorText, { color: colors.danger }]}>{loadError}</Text>
+                    ) : null}
+                    {userRole ? (
+                        <TouchableOpacity
+                            activeOpacity={0.82}
+                            onPress={() => {
+                                setLoading(true);
+                                void handleRedirect(userRole);
+                            }}
+                            style={[styles.retryButton, { backgroundColor: colors.primary }]}
+                        >
+                            <Text style={styles.retryButtonText}>Try again</Text>
+                        </TouchableOpacity>
+                    ) : null}
                 </View>
             </ScrollView>
             <Navbar />
@@ -195,5 +212,24 @@ const styles = StyleSheet.create({
         fontSize: 14,
         lineHeight: 21,
         marginBottom: spacing.lg,
+    },
+    errorText: {
+        fontFamily: typography.body,
+        fontSize: 13,
+        lineHeight: 19,
+        marginBottom: spacing.md,
+    },
+    retryButton: {
+        alignItems: 'center',
+        alignSelf: 'flex-start',
+        borderRadius: 12,
+        minWidth: 112,
+        paddingHorizontal: 18,
+        paddingVertical: 11,
+    },
+    retryButtonText: {
+        color: '#FFFFFF',
+        fontFamily: typography.semibold,
+        fontSize: 14,
     },
 });

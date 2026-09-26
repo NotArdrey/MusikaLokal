@@ -732,7 +732,7 @@ export default function StudioDetailsScreen() {
     <>
       <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
         <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
-        <Header title="Manage Studio" />
+        <Header title={canManageStudio ? "Manage Studio" : "View Studio"} />
 
         <ScrollView
           showsVerticalScrollIndicator={false}

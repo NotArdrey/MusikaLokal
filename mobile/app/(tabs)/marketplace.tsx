@@ -81,8 +81,10 @@ export default function MarketplaceScreen() {
   const resolvedUserId = session?.user?.id ?? userId ?? null;
   const normalizedUserRole = (userRole || "").toLowerCase();
   const isFan = normalizedUserRole === "fan";
-  const isMusician = normalizedUserRole === "musician";
-  const canSell = Boolean(session && resolvedUserId) && roleResolved && !isMusician;
+  const canSell =
+    Boolean(session && resolvedUserId) &&
+    roleResolved &&
+    ["producer", "venue-owner", "studio-owner"].includes(normalizedUserRole);
   const productCardWidth = Math.max(
     0,
     (viewportWidth - (PAGE_HORIZONTAL_PADDING * 2) - PRODUCT_GRID_GAP) / 2,
@@ -93,7 +95,8 @@ export default function MarketplaceScreen() {
 
   useEffect(() => {
     if (!canSell && tab === "sell") {
-      setTab("browse");
+      const resetTab = setTimeout(() => setTab("browse"), 0);
+      return () => clearTimeout(resetTab);
     }
   }, [canSell, tab]);
 
@@ -107,6 +110,7 @@ export default function MarketplaceScreen() {
   const [newDescription, setNewDescription] = useState("");
   const [newPrice, setNewPrice] = useState("");
   const [newCategory, setNewCategory] = useState("");
+  const [listingConfirmed, setListingConfirmed] = useState(false);
   const [listingImages, setListingImages] = useState<string[]>([]);
   const [listingThumbnailIndex, setListingThumbnailIndex] = useState(0);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -245,6 +249,7 @@ export default function MarketplaceScreen() {
     setNewDescription("");
     setNewPrice("");
     setNewCategory("");
+    setListingConfirmed(false);
     setListingImages([]);
     setListingThumbnailIndex(0);
   }, []);
@@ -256,6 +261,7 @@ export default function MarketplaceScreen() {
       setNewCategory("other");
       setListingImages(createE2EImageFixtureUrls(1));
       setListingThumbnailIndex(0);
+      setListingConfirmed(true);
     }
     setShowAddProduct(true);
   }, []);
@@ -281,6 +287,7 @@ export default function MarketplaceScreen() {
       setNewDescription(product.description || "");
       setNewPrice(String(product.price || product.base_price || ""));
       setNewCategory(product.category || "");
+      setListingConfirmed(true);
       setListingImages(mediaUrls);
       setListingThumbnailIndex(0);
       setShowAddProduct(true);
@@ -335,13 +342,18 @@ export default function MarketplaceScreen() {
       setAlert({
         type: "warning",
         title: "Selling Unavailable",
-        message: "Only non-musician accounts can create marketplace listings.",
+        message: "Only producer, gig owner, and studio-owner accounts can create marketplace listings.",
       });
       return;
     }
 
     if (!newTitle.trim()) {
       setAlert({ type: "warning", title: "Missing Title", message: "Enter a listing title." });
+      return;
+    }
+
+    if (!listingConfirmed) {
+      setAlert({ type: "warning", title: "Confirmation Required", message: "Confirm that the listing details are accurate and that you are authorized to sell this item." });
       return;
     }
 
@@ -420,7 +432,7 @@ export default function MarketplaceScreen() {
       setAlert({
         type: "warning",
         title: "Selling Unavailable",
-        message: "Only non-musician accounts can create marketplace listings.",
+        message: "Only producer, gig owner, and studio-owner accounts can create marketplace listings.",
       });
       return;
     }
@@ -472,7 +484,8 @@ export default function MarketplaceScreen() {
   const parsedListingPrice = Number.parseFloat(newPrice);
   const isProductFormReady =
     newTitle.trim().length > 0 &&
-    (!newPrice.trim() || Number.isFinite(parsedListingPrice));
+    (!newPrice.trim() || Number.isFinite(parsedListingPrice)) &&
+    listingConfirmed;
 
   const handleListingStatus = async (productId: string, action: "publish_product" | "mark_product_sold" | "relist_product") => {
     if (statusUpdatingId) return;
@@ -1019,6 +1032,22 @@ export default function MarketplaceScreen() {
                 })}
               </ScrollView>
               <TouchableOpacity
+                activeOpacity={0.82}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: listingConfirmed }}
+                onPress={() => setListingConfirmed((current) => !current)}
+                style={styles.confirmationRow}
+              >
+                <Ionicons
+                  name={listingConfirmed ? "checkbox" : "square-outline"}
+                  size={22}
+                  color={listingConfirmed ? colors.primary : colors.textSecondary}
+                />
+                <Text style={[styles.confirmationText, { color: colors.textSecondary }]}>
+                  I confirm these details are accurate and I am authorized to sell this item.
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
                 testID={isE2EFixtureMode() ? "mobile-marketplace-submit-button-bottom" : "mobile-marketplace-submit-button"}
                 accessibilityLabel={isE2EFixtureMode() ? "mobile-marketplace-submit-button-bottom" : "mobile-marketplace-submit-button"}
                 activeOpacity={adding || !isProductFormReady ? 1 : 0.78}
@@ -1050,6 +1079,8 @@ const styles = StyleSheet.create({
   categoryPill: { minHeight: 38, justifyContent: "center", borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, marginRight: 8 },
   modalCategoryRow: { gap: 8, paddingVertical: 4, paddingRight: 16 },
   modalCategoryPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
+  confirmationRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginTop: 18 },
+  confirmationText: { flex: 1, fontSize: moderateScale(12), lineHeight: moderateScale(18), fontFamily: typography.body },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: PRODUCT_GRID_GAP },
   productCard: { borderRadius: 12, borderWidth: 1, marginBottom: 2, overflow: "hidden" },
   productImageWrap: { position: "relative", width: "100%" },
