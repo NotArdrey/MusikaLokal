@@ -33,7 +33,7 @@ const getAllowedMimeTypes = (bucket) => {
 
   return bucket.public
     ? ["image/png", "image/jpeg", "image/jpg", "image/gif", "video/mp4", "video/quicktime"]
-    : ["application/pdf", "image/png", "image/jpeg", "image/jpg", "audio/mpeg", "audio/mp3"];
+    : ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/png", "image/jpeg", "image/jpg", "audio/mpeg", "audio/mp3"];
 };
 
 async function setupBuckets() {

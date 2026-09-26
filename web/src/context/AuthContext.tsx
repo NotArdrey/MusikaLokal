@@ -364,6 +364,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [handleActiveAccountBan, session?.user?.id]);
 
+  const checkProfileRoleStatus = useCallback(async () => {
+    const activeUserId = session?.user?.id;
+    if (!activeUserId || !userRole) return false;
+
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", activeUserId)
+        .maybeSingle();
+      if (error || !data?.role) return false;
+
+      return await handleProfileRoleChange(
+        { role: userRole },
+        { role: data.role },
+      );
+    } catch {
+      return false;
+    }
+  }, [handleProfileRoleChange, session?.user?.id, userRole]);
+
   useEffect(() => {
     AsyncStorage.removeItem("auth_guest_mode")
       .then(() => {
@@ -651,14 +672,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const appStateSub = AppState.addEventListener("change", (nextState: AppStateStatus) => {
       if (nextState === "active") {
-        void Promise.all([checkIdentityStatus(), checkSystemLock(), checkAccountBanStatus()]);
+        void Promise.all([checkIdentityStatus(), checkSystemLock(), checkAccountBanStatus(), checkProfileRoleStatus()]);
       }
     });
 
+    const roleCheckInterval = setInterval(() => {
+      void checkProfileRoleStatus();
+    }, 15_000);
+
     return () => {
       appStateSub.remove();
+      clearInterval(roleCheckInterval);
     };
-  }, [session?.user?.id, checkIdentityStatus, checkSystemLock, checkAccountBanStatus]);
+  }, [session?.user?.id, checkIdentityStatus, checkSystemLock, checkAccountBanStatus, checkProfileRoleStatus]);
 
   // Trigger re-check exactly when identity document expiry timestamp is reached.
   useEffect(() => {

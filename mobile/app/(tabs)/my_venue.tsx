@@ -12,13 +12,14 @@ import Modal, { normalizeVisibleInput } from '../../src/components/modal';
 import MusicianWorkspaceTabs from '../../src/components/MusicianWorkspaceTabs';
 import Navbar from '../../src/components/navbar';
 import Skeleton from '../../src/components/Skeleton';
+import StaffWorkspaceTabs from '../../src/components/StaffWorkspaceTabs';
 import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../../src/utils/actionError';
 import { formatFriendlyDateTime } from '../../src/utils/friendlyDateTime';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
-import { StaffAssignment, fetchActiveStaffAssignment, getStaffPermissions } from '../../src/utils/staffAccess';
+import { StaffAssignment, fetchActiveStaffAssignments, getStaffPermissions } from '../../src/utils/staffAccess';
 import { createRealtimeChannelTopic } from '../../src/utils/realtimeChannel';
 import { palette, radius, typography } from '../../src/theme/tokens';
 
@@ -157,7 +158,7 @@ export default function MyVenueScreen() {
     const [selectedName, setSelectedName] = useState('');
     const [cancellationReason, setCancellationReason] = useState('');
     const [gigs, setGigs] = useState<any[]>([]);
-    const [staffAssignment, setStaffAssignment] = useState<StaffAssignment | null>(null);
+    const [staffAssignments, setStaffAssignments] = useState<StaffAssignment[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -184,12 +185,12 @@ export default function MyVenueScreen() {
         setLoadError(null);
         try {
             let baseGigs: any[] = [];
-            const activeStaffAssignment = userRole === 'staff'
-                ? await fetchActiveStaffAssignment(supabase, userId)
-                : null;
-            setStaffAssignment(activeStaffAssignment);
+            const activeStaffAssignments = userRole === 'staff'
+                ? (await fetchActiveStaffAssignments(supabase, userId)).filter((assignment) => assignment.entity_type === 'venue')
+                : [];
+            setStaffAssignments(activeStaffAssignments);
 
-            if (userRole === 'staff' && (!activeStaffAssignment || activeStaffAssignment.entity_type !== 'venue' || !activeStaffAssignment.gig_id)) {
+            if (userRole === 'staff' && activeStaffAssignments.length === 0) {
                 setGigs([]);
                 return;
             }
@@ -294,8 +295,9 @@ export default function MyVenueScreen() {
                     .select('id, organizer_id, name, location, budget, description, event_date, status, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
                     .order('created_at', { ascending: false });
 
-                gigsQuery = activeStaffAssignment?.entity_type === 'venue' && activeStaffAssignment.gig_id
-                    ? gigsQuery.eq('id', activeStaffAssignment.gig_id)
+                const assignedGigIds = activeStaffAssignments.map((assignment) => assignment.gig_id).filter(Boolean) as string[];
+                gigsQuery = assignedGigIds.length > 0
+                    ? gigsQuery.in('id', assignedGigIds)
                     : gigsQuery.eq('organizer_id', userId);
 
                 const { data, error: baseError } = await gigsQuery;
@@ -375,7 +377,7 @@ export default function MyVenueScreen() {
                     permit_status: normalizedPermitStatus,
                     permit_rejection_reason: gig.permit_rejection_reason || null,
                     permit_reviewed_at: gig.permit_reviewed_at || null,
-                    is_owner: gig.organizer_id === userId || activeStaffAssignment?.gig_id === gig.id,
+                    is_owner: gig.organizer_id === userId || activeStaffAssignments.some((assignment) => assignment.gig_id === gig.id),
                 };
             });
 
@@ -424,15 +426,13 @@ export default function MyVenueScreen() {
     useEffect(() => {
         if (!isAuthenticated || !userId || isMusicianView) return;
 
-        const realtimeFilter = staffAssignment?.entity_type === 'venue' && staffAssignment.gig_id
-            ? `id=eq.${staffAssignment.gig_id}`
-            : `organizer_id=eq.${userId}`;
+        const realtimeFilter = userRole === 'staff' ? undefined : `organizer_id=eq.${userId}`;
 
         const channel = supabase
             .channel(createRealtimeChannelTopic(`my-venue-listings:${userId}`))
             .on(
                 'postgres_changes',
-                { event: '*', schema: 'public', table: 'gigs', filter: realtimeFilter },
+                { event: '*', schema: 'public', table: 'gigs', ...(realtimeFilter ? { filter: realtimeFilter } : {}) },
                 () => {
                     void fetchGigs();
                 }
@@ -442,7 +442,7 @@ export default function MyVenueScreen() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [isAuthenticated, userId, fetchGigs, isMusicianView, staffAssignment]);
+    }, [isAuthenticated, userId, fetchGigs, isMusicianView, userRole]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -557,6 +557,7 @@ export default function MyVenueScreen() {
                     {isMusicianView && (
                         <MusicianWorkspaceTabs activeKey="venue" />
                     )}
+                    {userRole === 'staff' && <StaffWorkspaceTabs activeKey="venue" />}
 
                     <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>DATES, TALENT & APPLICANTS</Text>
 
@@ -612,7 +613,7 @@ export default function MyVenueScreen() {
                                     const isApproved = normalizedPermitStatus === 'approved';
                                     const isResubmitted = normalizedPermitStatus === 'resubmitted';
                                     const staffPermissions = userRole === 'staff'
-                                        ? getStaffPermissions(staffAssignment?.access_level)
+                                        ? getStaffPermissions(staffAssignments.find((assignment) => assignment.gig_id === gig.id)?.access_level)
                                         : null;
                                     const canShowActions = !staffPermissions?.canViewOnly;
                                     const canManageBookings = !staffPermissions || staffPermissions.canManageBookings;

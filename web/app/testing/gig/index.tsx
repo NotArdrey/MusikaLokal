@@ -603,7 +603,7 @@ export default function GigTestingPage() {
     <View style={styles.banner}>
       <Text style={styles.bannerTitle}>Current session</Text>
       {context ? <Text style={styles.bannerText}>{context.profile?.full_name || context.userId} · {context.profile?.role || "unknown role"} · {context.userId}</Text> : <Text style={contextError ? styles.error : styles.bannerText}>{contextError || "Loading authenticated profile…"}</Text>}
-      <Text style={styles.hint}>Create and delete require the owner. Applications require a musician. Edit permits the owner or assigned Level 1 venue staff, matching mobile.</Text>
+      <Text style={styles.hint}>Create and delete require the owner. Applications require a musician. Edit permits the owner or venue staff with edit permission, matching mobile.</Text>
     </View>
 
     <View style={styles.tabs}>

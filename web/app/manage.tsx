@@ -8,7 +8,7 @@ import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { resolveRoleManageRoute } from '../src/utils/roleRouting';
-import { fetchActiveStaffAssignment } from '../src/utils/staffAccess';
+import { fetchActiveStaffAssignments } from '../src/utils/staffAccess';
 
 export default function ManageScreen() {
     const { colors, isDark } = useTheme();
@@ -42,7 +42,6 @@ export default function ManageScreen() {
     const { session, loading: authLoading, userId, userRole, roleResolved, isGuest } = useAuth();
     const isAuthenticated = !!session;
     const [loading, setLoading] = useState(true);
-    const [fetchedRole, setFetchedRole] = useState<string | null>(null);
 
     useEffect(() => {
         if (!authLoading && !isAuthenticated && !isGuest) {
@@ -99,7 +98,6 @@ export default function ManageScreen() {
 
             if (data?.role) {
                 console.log('✅ Manage - Role fetched:', data.role);
-                setFetchedRole(data.role);
                 void handleRedirect(data.role);
             } else {
                 console.log('⚠️ Manage - No role data found');
@@ -114,16 +112,17 @@ export default function ManageScreen() {
     const handleRedirect = async (role: string) => {
         if (role === 'staff' && userId) {
             try {
-                const assignment = await fetchActiveStaffAssignment(supabase, userId);
-                if (assignment?.entity_type === 'studio') {
+                const assignments = await fetchActiveStaffAssignments(supabase, userId);
+                const entityTypes = Array.from(new Set(assignments.map((assignment) => assignment.entity_type)));
+                if (entityTypes[0] === 'studio') {
                     router.replace('/my_studio');
                     return;
                 }
-                if (assignment?.entity_type === 'venue') {
+                if (entityTypes[0] === 'venue') {
                     router.replace('/my_venue');
                     return;
                 }
-                if (assignment?.entity_type === 'production') {
+                if (entityTypes[0] === 'production') {
                     router.replace('/my_production');
                     return;
                 }
@@ -185,16 +184,10 @@ export default function ManageScreen() {
                             Management Dashboard
                         </Text>
                         <Text style={[styles.description, { color: textSecondary }]}>
-                            It seems we couldn't automatically direct you to your specific dashboard.
-                            Please ensure your account has the correct role assigned or contact support for assistance.
+                            It seems we couldn&apos;t automatically direct you to your specific dashboard. Please ensure your account has the correct role assigned or contact support for assistance.
                         </Text>
 
 
-                        {(userRole || fetchedRole) && (
-                            <Text style={[styles.roleText, { color: textSecondary }]}>
-                                Detected Role: {userRole || fetchedRole}
-                            </Text>
-                        )}
                     </View>
                 </ScrollView>
             </View>
@@ -256,10 +249,5 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
         lineHeight: 22,
         marginBottom: 32,
-    },
-    roleText: {
-        marginTop: 20,
-        fontFamily: 'Poppins_400Regular',
-        textAlign: 'center',
     },
 });

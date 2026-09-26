@@ -15,10 +15,11 @@ import InlineErrorBanner from '../../src/components/InlineErrorBanner';
 import Modal, { normalizeConfirmationInput } from '../../src/components/modal';
 import Navbar from '../../src/components/navbar';
 import Skeleton from '../../src/components/Skeleton';
+import StaffWorkspaceTabs from '../../src/components/StaffWorkspaceTabs';
 import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
-import { StaffAssignment, fetchActiveStaffAssignment, getStaffPermissions } from '../../src/utils/staffAccess';
+import { StaffAssignment, fetchActiveStaffAssignments, getStaffPermissions } from '../../src/utils/staffAccess';
 import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../../src/utils/actionError';
 import { isE2EFixtureMode } from '../../src/utils/e2eFixtures';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
@@ -48,7 +49,7 @@ export default function MyStudioScreen() {
     const [selectedName, setSelectedName] = useState('');
     const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
     const [studios, setStudios] = useState<any[]>([]);
-    const [staffAssignment, setStaffAssignment] = useState<StaffAssignment | null>(null);
+    const [staffAssignments, setStaffAssignments] = useState<StaffAssignment[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -76,12 +77,12 @@ export default function MyStudioScreen() {
         if (!userId) return;
         setLoadError(null);
         try {
-            const activeStaffAssignment = userRole === 'staff'
-                ? await fetchActiveStaffAssignment(supabase, userId)
-                : null;
-            setStaffAssignment(activeStaffAssignment);
+            const activeStaffAssignments = userRole === 'staff'
+                ? (await fetchActiveStaffAssignments(supabase, userId)).filter((assignment) => assignment.entity_type === 'studio')
+                : [];
+            setStaffAssignments(activeStaffAssignments);
 
-            if (userRole === 'staff' && (!activeStaffAssignment || activeStaffAssignment.entity_type !== 'studio' || !activeStaffAssignment.studio_id)) {
+            if (userRole === 'staff' && activeStaffAssignments.length === 0) {
                 setStudios([]);
                 return;
             }
@@ -91,8 +92,9 @@ export default function MyStudioScreen() {
                 .select('id, owner_id, name, description, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
                 .order('created_at', { ascending: false });
 
-            studioQuery = activeStaffAssignment?.entity_type === 'studio' && activeStaffAssignment.studio_id
-                ? studioQuery.eq('id', activeStaffAssignment.studio_id)
+            const assignedStudioIds = activeStaffAssignments.map((assignment) => assignment.studio_id).filter(Boolean) as string[];
+            studioQuery = assignedStudioIds.length > 0
+                ? studioQuery.in('id', assignedStudioIds)
                 : studioQuery.eq('owner_id', userId);
 
             const { data: baseStudios, error: baseError } = await studioQuery;
@@ -202,15 +204,13 @@ export default function MyStudioScreen() {
     useEffect(() => {
         if (!isAuthenticated || !userId) return;
 
-        const realtimeFilter = staffAssignment?.entity_type === 'studio' && staffAssignment.studio_id
-            ? `id=eq.${staffAssignment.studio_id}`
-            : `owner_id=eq.${userId}`;
+        const realtimeFilter = userRole === 'staff' ? undefined : `owner_id=eq.${userId}`;
 
         const channel = supabase
             .channel(createRealtimeChannelTopic(`my-studio-listings:${userId}`))
             .on(
                 'postgres_changes',
-                { event: '*', schema: 'public', table: 'studios', filter: realtimeFilter },
+                { event: '*', schema: 'public', table: 'studios', ...(realtimeFilter ? { filter: realtimeFilter } : {}) },
                 () => {
                     void fetchStudios();
                 }
@@ -220,7 +220,7 @@ export default function MyStudioScreen() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [isAuthenticated, userId, fetchStudios, staffAssignment]);
+    }, [isAuthenticated, userId, fetchStudios, userRole]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -547,6 +547,8 @@ export default function MyStudioScreen() {
                     style={styles.flex1}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 >
+                    {userRole === 'staff' && <StaffWorkspaceTabs activeKey="studio" />}
+
                     <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>SPACES & SESSIONS</Text>
 
                     <InlineErrorBanner
@@ -597,7 +599,7 @@ export default function MyStudioScreen() {
                             >
                             {(() => {
                                 const staffPermissions = userRole === 'staff'
-                                    ? getStaffPermissions(staffAssignment?.access_level)
+                                    ? getStaffPermissions(staffAssignments.find((assignment) => assignment.studio_id === studio.id)?.access_level)
                                     : null;
                                 const canShowActions = !staffPermissions?.canViewOnly;
                                 const canManageBookings = !staffPermissions || staffPermissions.canManageBookings;

@@ -458,7 +458,7 @@ export default function EditGigScreen() {
       }
 
       if (!canEditGig && profile?.role === "staff") {
-        const assignment = await fetchActiveStaffAssignment(supabase, user.id);
+        const assignment = await fetchActiveStaffAssignment(supabase, user.id, 'venue', gigId);
         const permissions = getStaffPermissions(assignment?.access_level);
         canEditGig =
           assignment?.entity_type === "venue" &&
@@ -467,7 +467,7 @@ export default function EditGigScreen() {
       }
 
       if (!canEditGig) {
-        showAlert("warning", "Unauthorized", "Only the gig owner or assigned Level 1 staff can edit this gig.");
+        showAlert("warning", "Unauthorized", "Only the gig owner or staff with edit permission can edit this gig.");
         router.replace("/home");
         return;
       }

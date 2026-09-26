@@ -370,7 +370,7 @@ export default function ProductionTeamScreen() {
         .maybeSingle();
 
       const staffAssignment = userRole === "staff" && userId
-        ? await fetchActiveStaffAssignment(supabase, userId)
+        ? await fetchActiveStaffAssignment(supabase, userId, "production", teamId)
         : null;
       const isAssignedStaff =
         staffAssignment?.entity_type === "production" &&
@@ -383,7 +383,7 @@ export default function ProductionTeamScreen() {
         ...data,
         member_role: data.owner_id === userId
           ? "owner"
-          : membershipData?.role || (isAssignedStaff ? `staff-level-${staffAssignment?.access_level}` : "viewer"),
+          : membershipData?.role || (isAssignedStaff ? "staff" : "viewer"),
         staff_access_level: isAssignedStaff ? staffAssignment?.access_level || null : null,
         staff_can_edit: Boolean(staffPermissions?.canEditListing),
         staff_can_manage_bookings: Boolean(staffPermissions?.canManageBookings),

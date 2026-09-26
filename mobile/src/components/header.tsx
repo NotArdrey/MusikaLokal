@@ -10,7 +10,7 @@ import { runAfterUIIdle } from '../utils/idleTask';
 import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
 import { createRealtimeChannelTopic } from '../utils/realtimeChannel';
-import { fetchActiveStaffAssignment, isStaffRole, normalizeStaffAccessLevel } from '../utils/staffAccess';
+import { fetchActiveStaffAssignments, isStaffRole } from '../utils/staffAccess';
 import { typography } from '../theme/tokens';
 
 const AnimatedIcon = Animated.createAnimatedComponent(Ionicons);
@@ -149,9 +149,17 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
             }
 
             try {
-                const assignment = await fetchActiveStaffAssignment(supabase, userId);
+                const assignments = await fetchActiveStaffAssignments(supabase, userId);
+                const routeEntityType = routePathname === '/my_studio'
+                    ? 'studio'
+                    : routePathname === '/my_venue'
+                        ? 'venue'
+                        : routePathname === '/my_production'
+                            ? 'production'
+                            : null;
+                const assignment = assignments.find((item) => !routeEntityType || item.entity_type === routeEntityType);
                 if (!cancelled) {
-                    setStaffAccessLevel(normalizeStaffAccessLevel(assignment?.access_level));
+                    setStaffAccessLevel(assignment?.access_level || null);
                 }
             } catch {
                 if (!cancelled) {
@@ -165,7 +173,7 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
         return () => {
             cancelled = true;
         };
-    }, [isStaff, userId]);
+    }, [isStaff, routePathname, userId]);
 
     const defaultBackRoute = useMemo(() => {
         if (routePathname === "/notifications" && isFan) return "/feed";

@@ -187,7 +187,20 @@ const GigApplyTab = ({
     const preferredGenres = shared.preferred_genres;
     const preferredInstruments = shared.preferred_instruments;
     const specificRequirements = Array.isArray(slot.specific_requirements)
-      ? slot.specific_requirements.filter((item: unknown) => item && typeof item === "object")
+      ? slot.specific_requirements.filter((item: unknown) => {
+          if (!item || typeof item !== "object") return false;
+
+          const requirement = item as Record<string, unknown>;
+          return [
+            requirement.roles,
+            requirement.preferred_genres,
+            requirement.preferred_instruments,
+          ].some(
+            (values) =>
+              Array.isArray(values) &&
+              values.some((value) => typeof value === "string" && value.trim().length > 0),
+          );
+        })
       : [];
     const preferredGroupTypesRaw = selectedSlotType === "band" && Array.isArray(slot.preferred_group_types)
       ? slot.preferred_group_types.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)

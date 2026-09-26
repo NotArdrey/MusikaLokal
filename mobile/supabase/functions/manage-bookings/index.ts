@@ -644,39 +644,33 @@ function buildStaffContext(assignment: StaffAssignment | null) {
   };
 }
 
-async function getActiveStaffAssignment(supabaseAdmin: any, userId: string): Promise<StaffAssignment | null> {
+async function getActiveStaffAssignments(supabaseAdmin: any, userId: string): Promise<StaffAssignment[]> {
   const { data, error } = await supabaseAdmin
     .from("staff_listing_access")
     .select("id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level")
     .eq("staff_user_id", userId)
-    .is("revoked_at", null)
-    .maybeSingle();
+    .is("revoked_at", null);
 
   if (error) {
-    if (isMissingTableError(error, "staff_listing_access")) return null;
+    if (isMissingTableError(error, "staff_listing_access")) return [];
     throw error;
   }
 
-  if (!data) return null;
-  const entityType = String(data.entity_type || "").trim();
-  const level = Number(data.access_level);
+  return (data || []).flatMap((row: any) => {
+    const entityType = String(row.entity_type || "").trim();
+    const level = Number(row.access_level);
+    if (!["studio", "venue", "production"].includes(entityType) || ![1, 2, 3].includes(level)) return [];
 
-  if (
-    !["studio", "venue", "production"].includes(entityType) ||
-    ![1, 2, 3].includes(level)
-  ) {
-    return null;
-  }
-
-  return {
-    id: data.id,
-    staff_user_id: data.staff_user_id,
-    entity_type: entityType as StaffAssignment["entity_type"],
-    studio_id: data.studio_id || null,
-    gig_id: data.gig_id || null,
-    production_team_id: data.production_team_id || null,
-    access_level: level,
-  };
+    return [{
+      id: row.id,
+      staff_user_id: row.staff_user_id,
+      entity_type: entityType as StaffAssignment["entity_type"],
+      studio_id: row.studio_id || null,
+      gig_id: row.gig_id || null,
+      production_team_id: row.production_team_id || null,
+      access_level: level,
+    }];
+  });
 }
 
 async function getStaffAccessForStudio(supabaseAdmin: any, userId: string, studioId: string) {
@@ -1251,14 +1245,27 @@ serve(async (req: Request) => {
 
       const userRole = profile?.role;
       let activityRole = userRole;
+      let staffAssignments: StaffAssignment[] = [];
       let staffAssignment: StaffAssignment | null = null;
       let staffContext: ReturnType<typeof buildStaffContext> = null;
 
       if (userRole === "staff") {
-        staffAssignment = await getActiveStaffAssignment(supabaseAdmin, requesterId);
+        staffAssignments = await getActiveStaffAssignments(supabaseAdmin, requesterId);
+        staffAssignment = staffAssignments[0] || null;
         staffContext = buildStaffContext(staffAssignment);
         activityRole = staffContext?.effective_role || "staff";
       }
+      const staffAssignmentsFor = (entityType: StaffAssignment["entity_type"]) =>
+        staffAssignments.filter((assignment) => assignment.entity_type === entityType);
+      const staffContextForTarget = (entityType: StaffAssignment["entity_type"], targetId: string | null | undefined) =>
+        buildStaffContext(staffAssignments.find((assignment) => (
+          assignment.entity_type === entityType &&
+          (entityType === "studio"
+            ? assignment.studio_id === targetId
+            : entityType === "venue"
+              ? assignment.gig_id === targetId
+              : assignment.production_team_id === targetId)
+        )) || null);
 
       if (userRole === "musician" || userRole === "studio-owner") {
         await autoStartBookingsAndNotify(supabaseAdmin, requesterId, userRole);
@@ -1433,15 +1440,15 @@ serve(async (req: Request) => {
       }
 
       // B. For Studio Owners: Fetch bookings for THEIR studios
-      if (activityRole === "studio-owner") {
+      if (activityRole === "studio-owner" || staffAssignmentsFor("studio").length > 0) {
         // First get their studios
-        const studioIds = staffAssignment?.entity_type === "studio" && staffAssignment.studio_id
-          ? [staffAssignment.studio_id]
+        const assignedStudios = staffAssignmentsFor("studio");
+        const studioIds = assignedStudios.length > 0
+          ? assignedStudios.map((assignment) => assignment.studio_id).filter(Boolean) as string[]
           : ((await supabaseClient
             .from("studios")
             .select("id")
             .eq("owner_id", requesterId)).data || []).map((s: any) => s.id);
-        const staffCanAct = !staffContext || staffContext.can_manage_bookings;
 
         if (studioIds.length > 0) {
           const { data: bookings, error: bookingError } = await supabaseClient
@@ -1505,6 +1512,8 @@ serve(async (req: Request) => {
           // Process Studio Bookings
           // @ts-ignore
           bookings?.forEach((b: any) => {
+            const itemStaffContext = staffContextForTarget("studio", b.studio_id);
+            const staffCanAct = !itemStaffContext || itemStaffContext.can_manage_bookings;
             const bookingDate = new Date(`${b.booking_date}T${b.start_time}`);
             const endDate = new Date(`${b.booking_date}T${b.end_time}`);
             const lateReportMeta = lateReportByBooking.get(b.id);
@@ -1594,10 +1603,11 @@ serve(async (req: Request) => {
               has_late_report: Boolean(lateReportMeta),
               late_report_count: lateReportMeta?.count || 0,
               late_reported_at: lateReportMeta?.latestAt || null,
-              viewer_access: staffContext ? "staff" : "studio_owner",
+              viewer_access: itemStaffContext ? "staff" : "studio_owner",
+              staff_entity_type: itemStaffContext ? "studio" : null,
               viewer_can_act: staffCanAct,
               viewer_read_only_reason: staffCanAct ? null : "This staff account has view-only access.",
-              staff_access_level: staffContext?.access_level || null,
+              staff_access_level: itemStaffContext?.access_level || null,
             };
 
             if (b.status === "pending" || b.status === "pending_relocation") {
@@ -1845,9 +1855,10 @@ serve(async (req: Request) => {
       }
 
       // C2. For Producers: Fetch production-routed gig applications
-      if (activityRole === "producer") {
-        const teamMembershipsResult = staffAssignment?.entity_type === "production" && staffAssignment.production_team_id
-          ? { data: [{ team_id: staffAssignment.production_team_id, role: `staff_level_${staffAssignment.access_level}` }], error: null }
+      if (activityRole === "producer" || staffAssignmentsFor("production").length > 0) {
+        const assignedProductions = staffAssignmentsFor("production");
+        const teamMembershipsResult = assignedProductions.length > 0
+          ? { data: assignedProductions.map((assignment) => ({ team_id: assignment.production_team_id, role: `staff_level_${assignment.access_level}` })), error: null }
           : await supabaseClient
             .from("production_team_members")
             .select("team_id, role")
@@ -1890,6 +1901,7 @@ serve(async (req: Request) => {
           }
 
           productionApps?.forEach((app: any) => {
+            const itemStaffContext = staffContextForTarget("production", app.production_team_id);
             const normalizedStatus = (app.status || "").toLowerCase();
             const requiresReconfirmation =
               normalizedStatus === "pending" &&
@@ -1898,8 +1910,8 @@ serve(async (req: Request) => {
             const gig = app.gig;
             const teamRole = teamRoleById.get(app.production_team_id) || "member";
             const canManageApplication =
-              staffContext
-                ? staffContext.can_manage_bookings
+              itemStaffContext
+                ? itemStaffContext.can_manage_bookings
                 : ["owner", "manager"].includes(String(teamRole)) ||
                   app.applicant_id === requesterId ||
                   app.submitted_by_user_id === requesterId;
@@ -1933,6 +1945,7 @@ serve(async (req: Request) => {
               system_status_reason: app.system_status_reason || null,
               requires_reconfirmation: requiresReconfirmation,
               viewer_access: canManageApplication ? "production_manager" : "group_member",
+              staff_entity_type: itemStaffContext ? "production" : null,
               viewer_can_act: canManageApplication,
               viewer_read_only_reason: canManageApplication
                 ? null
@@ -1968,7 +1981,7 @@ serve(async (req: Request) => {
               cv_url: app.cv_url,
               slot_type: app.slot_type,
               reviewed_by_applicant: app.reviewed_by_applicant || false,
-              staff_access_level: staffContext?.access_level || null,
+              staff_access_level: itemStaffContext?.access_level || null,
             };
 
             if (normalizedStatus === "pending") {
@@ -2018,20 +2031,20 @@ serve(async (req: Request) => {
       }
 
       // D. For Gig Owners: Fetch pending and resolved applications for their gigs
-      if (activityRole === "venue-owner") {
+      if (activityRole === "venue-owner" || staffAssignmentsFor("venue").length > 0) {
         // First get their gigs
-        const { data: gigs } = staffAssignment?.entity_type === "venue" && staffAssignment.gig_id
+        const assignedVenues = staffAssignmentsFor("venue");
+        const { data: gigs } = assignedVenues.length > 0
           ? await supabaseClient
             .from("gigs")
             .select("id, name, event_date, location, gig_media(media_url, sort_order)")
-            .eq("id", staffAssignment.gig_id)
+            .in("id", assignedVenues.map((assignment) => assignment.gig_id).filter(Boolean) as string[])
           : await supabaseClient
             .from("gigs")
             .select("id, name, event_date, location, gig_media(media_url, sort_order)")
             .eq("organizer_id", requesterId);
 
         const gigIds = gigs?.map((g: any) => g.id) || [];
-        const staffCanAct = !staffContext || staffContext.can_manage_bookings;
 
         if (gigIds.length > 0) {
           const { data: acceptedApps, error: appError } = await supabaseClient
@@ -2061,6 +2074,8 @@ serve(async (req: Request) => {
 
           // Process accepted applications
           acceptedApps?.forEach((app: any) => {
+            const itemStaffContext = staffContextForTarget("venue", app.gig_id);
+            const staffCanAct = !itemStaffContext || itemStaffContext.can_manage_bookings;
             const normalizedStatus = String(app.status || "").toLowerCase();
             const requiresReconfirmation =
               normalizedStatus === "pending" &&
@@ -2099,7 +2114,8 @@ serve(async (req: Request) => {
               reconfirmation_due_at: app.reconfirmation_due_at || null,
               system_status_reason: app.system_status_reason || null,
               requires_reconfirmation: requiresReconfirmation,
-              viewer_access: staffContext ? "staff" : "organizer",
+              viewer_access: itemStaffContext ? "staff" : "organizer",
+              staff_entity_type: itemStaffContext ? "venue" : null,
               viewer_can_act: staffCanAct,
               viewer_read_only_reason: staffCanAct ? null : "This staff account has view-only access.",
               submitted_by_name: app.submitter?.full_name || null,
@@ -2141,7 +2157,7 @@ serve(async (req: Request) => {
               pitch_message: app.pitch_message, // Added pitch message
               group_members: [], // Include group members for display
               reviewed_by_organizer: app.reviewed_by_organizer || false,
-              staff_access_level: staffContext?.access_level || null,
+              staff_access_level: itemStaffContext?.access_level || null,
             };
 
             if (app.status === "pending") {
@@ -2195,6 +2211,24 @@ serve(async (req: Request) => {
 
       if (params.includeScreenPayload === true) {
         const loadPendingPermitListings = async () => {
+          if (staffAssignments.length > 0) {
+            const targets = [
+              { entityType: "studio", table: "studios", ids: staffAssignmentsFor("studio").map((item) => item.studio_id).filter(Boolean) as string[] },
+              { entityType: "gig", table: "gigs", ids: staffAssignmentsFor("venue").map((item) => item.gig_id).filter(Boolean) as string[] },
+            ];
+            const results = await Promise.all(targets.filter((target) => target.ids.length > 0).map(async (target) => {
+              const { data, error } = await supabaseClient
+                .from(target.table)
+                .select("id, name, permit_status, permit_rejection_reason, permit_resubmissions_used, permit_reviewed_at, created_at")
+                .in("id", target.ids)
+                .in("permit_status", ["pending", "pending_review", "resubmitted", "rejected"])
+                .order("created_at", { ascending: false });
+              if (error) throw error;
+              return (data || []).map((row: any) => ({ ...row, entity_type: target.entityType }));
+            }));
+            return results.flat().sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          }
+
           if (activityRole !== "studio-owner" && activityRole !== "venue-owner") {
             return [];
           }
@@ -2226,7 +2260,7 @@ serve(async (req: Request) => {
         const connectionRequestSelect =
           "id, created_at, sender_id, receiver_id, group_id, studio_id, message, status, event_details, attachment_url";
         const loadOwnedGroupIds = async () => {
-          if (staffContext) return [];
+          if (staffAssignments.length > 0) return [];
 
           const { data: ownedGroups, error: ownedGroupsError } = await supabaseClient
             .from("groups")
@@ -2245,13 +2279,14 @@ serve(async (req: Request) => {
           loadOwnedGroupIds(),
         ]);
 
+        const assignedStudioIds = staffAssignmentsFor("studio").map((item) => item.studio_id).filter(Boolean) as string[];
         const requestResults = await Promise.all(
-          staffContext?.entity_type === "studio" && staffContext.studio_id
+          assignedStudioIds.length > 0
             ? [
                 supabaseClient
                   .from("booking_requests")
                   .select(connectionRequestSelect)
-                  .eq("studio_id", staffContext.studio_id)
+                  .in("studio_id", assignedStudioIds)
                   .in("status", ["pending", "accepted", "approved", "connected", "rejected", "declined", "cancelled"])
                   .order("created_at", { ascending: false })
                   .limit(40),
@@ -2339,6 +2374,7 @@ serve(async (req: Request) => {
           role: activityRole,
           profile_role: userRole,
           staff_context: staffContext,
+          staff_contexts: staffAssignments.map(buildStaffContext).filter(Boolean),
           ownedGroupIds,
           pendingPermitListings,
           connectionRequests,
@@ -2357,6 +2393,7 @@ serve(async (req: Request) => {
         role: activityRole,
         profile_role: userRole,
         staff_context: staffContext,
+        staff_contexts: staffAssignments.map(buildStaffContext).filter(Boolean),
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,

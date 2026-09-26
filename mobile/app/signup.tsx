@@ -695,6 +695,7 @@ export default function SignupScreen() {
     const diditStatusPollInFlightRef = useRef(false);
     const diditStatusPollFinalizedRef = useRef(false);
     const diditVerificationReturnHandledRef = useRef(false);
+    const signupCancellationVersionRef = useRef(0);
     const pendingReviewSignupRef = useRef(false);
     const finishAccountCreationRef = useRef(false);
     const documentSheetSnapPoints = useMemo(() => ['88%'], []);
@@ -952,6 +953,14 @@ export default function SignupScreen() {
                             checkVerification: check_verification,
                             sessionIdParam: summarizeSessionRefForLog(session_id),
                         });
+                        diditVerificationReturnHandledRef.current = true;
+                        setVerificationUrl('');
+                        setSessionId('');
+                        setSessionNonce('');
+                        setTempSessionRef('');
+                        setLoading(false);
+                        setStep('details');
+                        router.setParams({ verified: '', check_verification: '', session_id: '' });
                     }
                 } catch (e) {
                     logSignupFlowError('restoreState.error', e, {
@@ -959,6 +968,15 @@ export default function SignupScreen() {
                         checkVerification: check_verification,
                         sessionIdParam: summarizeSessionRefForLog(session_id),
                     });
+                    diditVerificationReturnHandledRef.current = true;
+                    setVerificationUrl('');
+                    setSessionId('');
+                    setSessionNonce('');
+                    setTempSessionRef('');
+                    setLoading(false);
+                    setStep('details');
+                    await AsyncStorage.removeItem('signup_current_session').catch(() => undefined);
+                    router.setParams({ verified: '', check_verification: '', session_id: '' });
                 }
             };
             restoreState();
@@ -1611,8 +1629,18 @@ export default function SignupScreen() {
     const resetDiditVerificationReturnState = useCallback(async (reason: string) => {
         diditVerificationReturnHandledRef.current = true;
         await clearDiditSignupSession(reason);
-        router.setParams({ verified: '', check_verification: '' });
+        router.setParams({ verified: '', check_verification: '', session_id: '' });
     }, [clearDiditSignupSession, router]);
+
+    const handleCancelSignup = useCallback(async () => {
+        signupCancellationVersionRef.current += 1;
+        diditVerificationReturnHandledRef.current = true;
+        diditStatusPollFinalizedRef.current = true;
+        setLoading(false);
+        setStep('details');
+        await clearDiditSignupSession('user_cancelled_signup');
+        router.replace('/');
+    }, [clearDiditSignupSession]);
 
     const handleDocumentSelect = (documentKey: string) => {
         if (documentKey !== selectedDocumentKey) {
@@ -1680,6 +1708,8 @@ export default function SignupScreen() {
 
         diditVerificationReturnHandledRef.current = false;
         creatingDiditSessionRef.current = true;
+        const cancellationVersion = signupCancellationVersionRef.current;
+        const wasCancelled = () => cancellationVersion !== signupCancellationVersionRef.current;
         const existingSessionId = forceNew ? '' : sessionId;
         const existingSessionNonce = forceNew ? '' : sessionNonce;
         const storageSessionId = existingSessionId || sessionId;
@@ -1724,6 +1754,10 @@ export default function SignupScreen() {
                 existingSessionId: summarizeSessionRefForLog(existingSessionId),
                 hasExistingSessionNonce: Boolean(existingSessionNonce),
             });
+            if (wasCancelled()) {
+                await AsyncStorage.removeItem('signup_current_session').catch(() => undefined);
+                return '';
+            }
         } catch (e) {
             logSignupFlowError('diditSession.statePersistFailed.preCreate', e, {
                 tempRef: summarizeSessionRefForLog(tempRef),
@@ -1774,6 +1808,11 @@ export default function SignupScreen() {
                 }
             });
 
+            if (wasCancelled()) {
+                await AsyncStorage.removeItem('signup_current_session').catch(() => undefined);
+                return '';
+            }
+
             if (error) throw error;
             logSignupFlow('diditSession.invokeCreate.result', {
                 tempRef: summarizeSessionRefForLog(tempRef),
@@ -1817,6 +1856,10 @@ export default function SignupScreen() {
                         sessionId: summarizeSessionRefForLog(createdSessionId),
                         hasSessionNonce: Boolean(createdSessionNonce),
                     });
+                    if (wasCancelled()) {
+                        await AsyncStorage.removeItem('signup_current_session').catch(() => undefined);
+                        return '';
+                    }
                 } catch (e) {
                     logSignupFlowError('diditSession.statePersistFailed.postCreate', e, {
                         tempRef: summarizeSessionRefForLog(tempRef),
@@ -1841,6 +1884,10 @@ export default function SignupScreen() {
             });
             return createdVerificationUrl;
         } catch (e: any) {
+            if (wasCancelled()) {
+                await AsyncStorage.removeItem('signup_current_session').catch(() => undefined);
+                return '';
+            }
             logSignupFlowError('diditSession.invokeCreate.error', e, {
                 tempRef: summarizeSessionRefForLog(tempRef),
                 email: maskEmailForLog(email),
@@ -3484,7 +3531,7 @@ export default function SignupScreen() {
                 </Text>
                 <TouchableOpacity
                     activeOpacity={0.65}
-                    onPress={() => router.push('/')}
+                    onPress={() => void handleCancelSignup()}
                     style={styles.authFooterLinkPressable}
                 >
                     <Text style={[styles.authFooterLinkText, { color: colors.primary }]}>Log in</Text>
@@ -4015,6 +4062,14 @@ export default function SignupScreen() {
                                 <Text style={{ color: colors.primary, fontFamily: typography.semibold }}>Click here if not redirected...</Text>
                             </TouchableOpacity>
                         )}
+
+                        <TouchableOpacity
+                            activeOpacity={0.7}
+                            onPress={() => void handleCancelSignup()}
+                            style={{ marginTop: 24 }}
+                        >
+                            <Text style={themeStyles.textSecondary}>Cancel registration</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
             );
@@ -4028,14 +4083,9 @@ export default function SignupScreen() {
                         <Text style={[themeStyles.text, { fontSize: 18, fontFamily: typography.heading }]}>Identity Verification</Text>
                         <TouchableOpacity
                             activeOpacity={1}
-                            onPress={() => {
-                                void startNewVerificationSession({ forceNew: true });
-                            }}
-                            style={{ marginLeft: 'auto', marginRight: 18 }}
+                            onPress={() => void handleCancelSignup()}
+                            style={{ marginLeft: 'auto' }}
                         >
-                            <Text style={{ color: colors.primary, fontFamily: typography.semibold }}>New link</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity activeOpacity={1} onPress={() => router.push('/')}>
                             <Text style={{ color: colors.primary, fontFamily: typography.semibold }}>Cancel</Text>
                         </TouchableOpacity>
                     </View>
@@ -4098,7 +4148,7 @@ export default function SignupScreen() {
                         </Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity activeOpacity={1} onPress={() => router.push('/')} style={{ marginTop: 24 }}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => void handleCancelSignup()} style={{ marginTop: 24 }}>
                         <Text style={themeStyles.textSecondary}>{"I'll do this later"}</Text>
                     </TouchableOpacity>
                 </View>

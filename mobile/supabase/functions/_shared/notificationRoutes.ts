@@ -135,7 +135,29 @@ const inferNotificationRoute = (
     meta.type,
   );
   const senderEntityType = readString(meta.sender_entity_type, meta.senderEntityType)?.toLowerCase();
+  const receiverEntityType = readString(meta.receiver_entity_type, meta.receiverEntityType)?.toLowerCase();
   const requestKind = readString(meta.request_kind, meta.requestKind)?.toLowerCase();
+
+  if (
+    eventType === "listing_connection_request" &&
+    receiverEntityType === "production_team" &&
+    requestKind === "application"
+  ) {
+    const teamId = readString(
+      meta.production_team_id,
+      meta.productionTeamId,
+      meta.team_id,
+      meta.teamId,
+      meta.receiver_entity_id,
+      meta.receiverEntityId,
+    );
+    if (teamId) {
+      return {
+        pathname: "/production_team",
+        routeParams: { teamId, tab: "Applications" },
+      };
+    }
+  }
 
   if (eventType?.includes("booking_request")) {
     const status = readString(meta.status)?.toLowerCase();

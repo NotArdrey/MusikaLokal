@@ -45,7 +45,7 @@ import type { UploadSafetyFileDecision } from "../services/uploadSafetyScreen";
 import { getGigReapplicationCooldownInfo } from "../utils/gigReapplicationCooldown";
 import { submitListingRequest, uploadListingRequestDocument } from "../utils/listingRequests";
 import { isFanUserRole } from "../utils/roleRouting";
-import { fetchActiveStaffAssignment, getStaffPermissions } from "../utils/staffAccess";
+import { fetchActiveStaffAssignments, getStaffPermissions } from "../utils/staffAccess";
 import CustomAlert from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
 import ReportModal from "./ReportModal";
@@ -297,7 +297,7 @@ const ListingDetailsSheet = forwardRef<
   const { isProfileComplete } = useProfileCompletion();
   const [loading, setLoading] = useState(false);
   const [group, setGroup] = useState<any>(null);
-  const [staffAssignment, setStaffAssignment] = useState<any>(null);
+  const [staffAssignments, setStaffAssignments] = useState<any[]>([]);
   const [isFavorited, setIsFavorited] = useState(false);
   const [favoriteCount, setFavoriteCount] = useState(0);
   const [modalVisible, setModalVisible] = useState(false);
@@ -323,16 +323,16 @@ const ListingDetailsSheet = forwardRef<
 
     const loadStaffAssignment = async () => {
       if (userRole !== "staff" || !userId) {
-        setStaffAssignment(null);
+        setStaffAssignments([]);
         return;
       }
 
       try {
-        const assignment = await fetchActiveStaffAssignment(supabase, userId);
-        if (!cancelled) setStaffAssignment(assignment);
+        const assignments = await fetchActiveStaffAssignments(supabase, userId);
+        if (!cancelled) setStaffAssignments(assignments);
       } catch (error) {
         console.warn("Failed to load staff listing assignment", error);
-        if (!cancelled) setStaffAssignment(null);
+        if (!cancelled) setStaffAssignments([]);
       }
     };
 
@@ -2959,6 +2959,11 @@ const ListingDetailsSheet = forwardRef<
   ]);
 
   const normalizedListingType = String(group?.type || "").toLowerCase();
+  const staffAssignment = staffAssignments.find((assignment) => (
+    (assignment.entity_type === "studio" && normalizedListingType === "studio" && assignment.studio_id === group?.id) ||
+    (assignment.entity_type === "venue" && (normalizedListingType === "gig" || normalizedListingType === "venue") && assignment.gig_id === group?.id) ||
+    (assignment.entity_type === "production" && (normalizedListingType === "production" || normalizedListingType === "production_team") && assignment.production_team_id === group?.id)
+  )) || null;
   const listingOwnerId = normalizedListingType === "artist"
     ? group?.id || null
     : group?.owner_id || group?.organizer_id || null;

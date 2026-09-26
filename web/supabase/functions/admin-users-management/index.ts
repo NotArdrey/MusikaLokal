@@ -529,7 +529,7 @@ async function attachStaffAssignments(client: any, profiles: any[]) {
   const gigNames = await loadTargetNames(client, "gigs", assignments.map((item: any) => item?.gig_id));
   const productionNames = await loadTargetNames(client, "production_teams", assignments.map((item: any) => item?.production_team_id));
 
-  const assignmentsByUser = new Map<string, any>();
+  const assignmentsByUser = new Map<string, any[]>();
   for (const assignment of assignments) {
     const staffUserId = String(assignment?.staff_user_id || "");
     const entityType = normalizeStaffEntityType(assignment?.entity_type);
@@ -549,16 +549,18 @@ async function attachStaffAssignments(client: any, profiles: any[]) {
       target_name: targetName || null,
     };
 
-    assignmentsByUser.set(staffUserId, hydratedAssignment);
+    if (!assignmentsByUser.has(staffUserId)) assignmentsByUser.set(staffUserId, []);
+    assignmentsByUser.get(staffUserId)?.push(hydratedAssignment);
   }
 
   return items.map((profile) => {
-    const assignment = assignmentsByUser.get(String(profile?.id || "")) || null;
+    const staffAssignments = assignmentsByUser.get(String(profile?.id || "")) || [];
+    const assignment = staffAssignments[0] || null;
     return {
       ...profile,
+      staff_assignments: staffAssignments,
       staff_assignment: assignment,
-      staff_assignment_label: getStaffAssignmentLabel(assignment),
-      staff_access_level_label: assignment?.access_level ? `Level ${assignment.access_level}` : null,
+      staff_assignment_label: staffAssignments.map(getStaffAssignmentLabel).filter(Boolean).join("; ") || null,
     };
   });
 }
@@ -640,6 +642,63 @@ function isMissingTableError(error: any, tableName: string) {
 type StaffEntityType = "studio" | "venue" | "production";
 type StaffAccessLevel = 1 | 2 | 3;
 
+const managedRoleTargets: Record<string, { table: string; ownerColumn: string; entityType: StaffEntityType }> = {
+  "studio-owner": { table: "studios", ownerColumn: "owner_id", entityType: "studio" },
+  "venue-owner": { table: "gigs", ownerColumn: "organizer_id", entityType: "venue" },
+  producer: { table: "production_teams", ownerColumn: "owner_id", entityType: "production" },
+};
+
+function getListingAssignmentTargetId(raw: any): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const targetId = String(raw.target_id || raw.targetId || "").trim();
+  return targetId || null;
+}
+
+async function assignManagedListingOwner(client: any, role: string, targetId: string, userId: string) {
+  const target = managedRoleTargets[role];
+  if (!target) return null;
+
+  const { data: existing, error: existingError } = await client
+    .from(target.table)
+    .select(`id, name, ${target.ownerColumn}`)
+    .eq("id", targetId)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+  if (!existing?.id) throw new Error(`The selected ${target.entityType} no longer exists.`);
+
+  const previousOwnerId = String(existing[target.ownerColumn] || "").trim() || null;
+  const { data, error } = await client
+    .from(target.table)
+    .update({ [target.ownerColumn]: userId })
+    .eq("id", targetId)
+    .select("id, name")
+    .maybeSingle();
+
+  if (error) throw error;
+
+  if (target.entityType === "production") {
+    const { error: membershipError } = await client.from("production_team_members").upsert({
+      team_id: targetId,
+      user_id: userId,
+      role: "owner",
+    }, { onConflict: "team_id,user_id" });
+    if (membershipError) throw membershipError;
+
+    if (previousOwnerId && previousOwnerId !== userId) {
+      const { error: previousOwnerError } = await client
+        .from("production_team_members")
+        .update({ role: "manager" })
+        .eq("team_id", targetId)
+        .eq("user_id", previousOwnerId)
+        .eq("role", "owner");
+      if (previousOwnerError) throw previousOwnerError;
+    }
+  }
+
+  return data;
+}
+
 type NormalizedStaffAssignment = {
   entity_type: StaffEntityType;
   access_level: StaffAccessLevel;
@@ -653,6 +712,17 @@ const staffEntityTypes = new Set(["studio", "venue", "production"]);
 function normalizeStaffEntityType(raw: unknown): StaffEntityType | null {
   const entityType = String(raw || "").trim().toLowerCase();
   return staffEntityTypes.has(entityType) ? entityType as StaffEntityType : null;
+}
+
+function getPhilippineTodayStartIso() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "";
+  return `${value("year")}-${value("month")}-${value("day")}T00:00:00+08:00`;
 }
 
 function normalizeStaffAccessLevel(raw: unknown): StaffAccessLevel | null {
@@ -704,7 +774,27 @@ function getStaffAssignmentLabel(assignment: any) {
   if (!entityType || !targetId || !level) return null;
 
   const entityLabel = entityType === "venue" ? "Gig" : entityType === "production" ? "Production" : "Studio";
-  return `${entityLabel}: ${targetName || targetId} (Level ${level})`;
+  const permissionLabel = level === 1
+    ? "View, manage, and edit"
+    : level === 2
+      ? "View and manage"
+      : "View only";
+  return `${entityLabel}: ${targetName || targetId} (${permissionLabel})`;
+}
+
+function normalizeStaffAssignments(raw: any): NormalizedStaffAssignment[] {
+  if (!Array.isArray(raw)) return [];
+
+  const seen = new Set<string>();
+  return raw.flatMap((item) => {
+    const assignment = normalizeStaffAssignment(item);
+    if (!assignment) return [];
+    const targetId = getStaffAssignmentTargetId(assignment);
+    const key = `${assignment.entity_type}:${targetId}`;
+    if (!targetId || seen.has(key)) return [];
+    seen.add(key);
+    return [assignment];
+  });
 }
 
 async function assertStaffAccessTableReady(client: any) {
@@ -735,15 +825,39 @@ async function validateStaffAssignmentTarget(
     throw new Error(`Select a ${target.label} for this staff user.`);
   }
 
+  const targetSelect = assignment.entity_type === "studio"
+    ? "id, name, permit_status"
+    : assignment.entity_type === "venue"
+      ? "id, name, status, permit_status, event_date"
+      : "id, name";
   const { data, error } = await client
     .from(target.table)
-    .select("id, name")
+    .select(targetSelect)
     .eq("id", target.id)
     .maybeSingle();
 
   if (error) throw error;
   if (!data?.id) {
     throw new Error(`The selected ${target.label} no longer exists.`);
+  }
+
+  if (
+    assignment.entity_type === "studio" &&
+    String(data.permit_status || "").trim().toLowerCase() !== "approved"
+  ) {
+    throw new Error("The selected studio is not active and approved.");
+  }
+
+  if (assignment.entity_type === "venue") {
+    const status = String(data.status || "").trim().toLowerCase();
+    const permitStatus = String(data.permit_status || "").trim().toLowerCase();
+    const eventTime = data.event_date ? new Date(data.event_date).getTime() : null;
+    const todayStart = new Date(getPhilippineTodayStartIso()).getTime();
+    const eventIsPast = eventTime !== null && (!Number.isFinite(eventTime) || eventTime < todayStart);
+
+    if (status !== "open" || permitStatus !== "approved" || eventIsPast) {
+      throw new Error("The selected gig is not active or its event date has passed.");
+    }
   }
 
   return data;
@@ -761,19 +875,21 @@ async function revokeStaffAssignments(client: any, staffUserId: string) {
   if (error) throw error;
 }
 
-async function replaceStaffAssignment(
+async function replaceStaffAssignments(
   client: any,
   staffUserId: string,
-  assignment: NormalizedStaffAssignment,
+  assignments: NormalizedStaffAssignment[],
   actorId: string,
 ) {
   await assertStaffAccessTableReady(client);
-  const target = await validateStaffAssignmentTarget(client, assignment);
+  const targets = await Promise.all(assignments.map((assignment) => validateStaffAssignmentTarget(client, assignment)));
   await revokeStaffAssignments(client, staffUserId);
+
+  if (assignments.length === 0) return [];
 
   const { data, error } = await client
     .from("staff_listing_access")
-    .insert({
+    .insert(assignments.map((assignment) => ({
       staff_user_id: staffUserId,
       entity_type: assignment.entity_type,
       studio_id: assignment.studio_id,
@@ -781,17 +897,16 @@ async function replaceStaffAssignment(
       production_team_id: assignment.production_team_id,
       access_level: assignment.access_level,
       created_by: actorId,
-    })
-    .select("id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level, created_at, updated_at")
-    .maybeSingle();
+    })))
+    .select("id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level, created_at, updated_at");
 
   if (error) throw error;
 
-  return {
-    ...data,
-    target_id: getStaffAssignmentTargetId(data),
-    target_name: target?.name || null,
-  };
+  return (data || []).map((item: any, index: number) => ({
+    ...item,
+    target_id: getStaffAssignmentTargetId(item),
+    target_name: targets[index]?.name || null,
+  }));
 }
 
 async function deleteRowsByIds(client: any, table: string, column: string, ids: string[]) {
@@ -3297,6 +3412,54 @@ serve(async (req: Request) => {
       });
     }
 
+    if (action === "fetch_role_targets") {
+      const requestedRole = parseRole(body?.role);
+      const requestedEntityType = normalizeStaffEntityType(body?.entity_type || body?.entityType);
+      const target = requestedRole && managedRoleTargets[requestedRole]
+        ? managedRoleTargets[requestedRole]
+        : requestedEntityType === "studio"
+          ? { table: "studios", ownerColumn: "owner_id", entityType: "studio" as StaffEntityType }
+          : requestedEntityType === "venue"
+            ? { table: "gigs", ownerColumn: "organizer_id", entityType: "venue" as StaffEntityType }
+            : requestedEntityType === "production"
+              ? { table: "production_teams", ownerColumn: "owner_id", entityType: "production" as StaffEntityType }
+              : null;
+
+      if (!target) return jsonResponse({ error: "Invalid listing role or entity type" }, 400);
+
+      let targetsQuery = client
+        .from(target.table)
+        .select(`id, name, created_at, ${target.entityType === "venue" ? "event_date, " : ""}${target.ownerColumn}`);
+
+      if (target.entityType === "studio") {
+        targetsQuery = targetsQuery.eq("permit_status", "approved");
+      } else if (target.entityType === "venue") {
+        targetsQuery = targetsQuery
+          .eq("status", "open")
+          .eq("permit_status", "approved")
+          .or(`event_date.is.null,event_date.gte.${getPhilippineTodayStartIso()}`);
+      }
+
+      const { data, error } = await targetsQuery
+        .order(target.entityType === "venue" ? "event_date" : "created_at", {
+          ascending: target.entityType === "venue",
+          nullsFirst: false,
+        })
+        .limit(300);
+      if (error) return jsonResponse({ error: error.message }, 400);
+
+      return jsonResponse({
+        items: (data || []).map((item: any) => ({
+          id: item.id,
+          name: item.name || "Untitled",
+          created_at: item.created_at || null,
+          event_date: item.event_date || null,
+          owner_id: item[target.ownerColumn] || null,
+          entity_type: target.entityType,
+        })),
+      });
+    }
+
     if (action === "create_user") {
       const email = String(body?.email || "").trim().toLowerCase();
       const password = String(body?.password || "");
@@ -3311,14 +3474,18 @@ serve(async (req: Request) => {
       const bio = normalizeTextField(body?.bio);
       const skills = normalizeStringList(body?.skills);
       const genres = normalizeStringList(body?.genres);
-      const staffAssignment = role === "staff" ? normalizeStaffAssignment(body?.staffAssignment) : null;
+      const staffAssignments = role === "staff"
+        ? (Array.isArray(body?.staffAssignments)
+          ? normalizeStaffAssignments(body.staffAssignments)
+          : [normalizeStaffAssignment(body?.staffAssignment)].filter(Boolean) as NormalizedStaffAssignment[])
+        : [];
 
       if (!email || !password || !role) {
         return jsonResponse({ error: "Missing required fields" }, 400);
       }
 
-      if (role === "staff" && !staffAssignment) {
-        return jsonResponse({ error: "Select a staff target and access level." }, 400);
+      if (role === "staff" && staffAssignments.length === 0) {
+        return jsonResponse({ error: "Select at least one staff target and allowed actions." }, 400);
       }
 
       if (!fullName) {
@@ -3381,8 +3548,8 @@ serve(async (req: Request) => {
           replaceProfileList(client, "profile_genres", "genre", userId, genres),
         ]);
 
-        if (staffAssignment) {
-          await replaceStaffAssignment(client, userId, staffAssignment, actorId);
+        if (staffAssignments.length > 0) {
+          await replaceStaffAssignments(client, userId, staffAssignments, actorId);
         }
       } catch (listError) {
         if (role === "staff") {
@@ -3415,10 +3582,15 @@ serve(async (req: Request) => {
       const maybeSkills = body?.skills;
       const maybeGenres = body?.genres;
       const maybePassword = body?.password;
-      const hasStaffAssignmentUpdate = Object.prototype.hasOwnProperty.call(body || {}, "staffAssignment");
-      const normalizedStaffAssignment = hasStaffAssignmentUpdate
-        ? normalizeStaffAssignment(body?.staffAssignment)
-        : null;
+      const hasStaffAssignmentUpdate =
+        Object.prototype.hasOwnProperty.call(body || {}, "staffAssignments") ||
+        Object.prototype.hasOwnProperty.call(body || {}, "staffAssignment");
+      const listingAssignmentTargetId = getListingAssignmentTargetId(body?.listingAssignment);
+      const normalizedStaffAssignments = hasStaffAssignmentUpdate
+        ? (Array.isArray(body?.staffAssignments)
+          ? normalizeStaffAssignments(body.staffAssignments)
+          : [normalizeStaffAssignment(body?.staffAssignment)].filter(Boolean) as NormalizedStaffAssignment[])
+        : [];
 
       if (!userId) {
         return jsonResponse({ error: "Missing userId" }, 400);
@@ -3513,8 +3685,8 @@ serve(async (req: Request) => {
       const hasListUpdates = maybeSkills !== undefined || maybeGenres !== undefined;
       const targetRole = String(profileUpdates.role ?? existingProfileForUpdate?.["role"] ?? "").trim().toLowerCase();
 
-      if (targetRole === "staff" && (maybeRole !== undefined || hasStaffAssignmentUpdate) && !normalizedStaffAssignment) {
-        return jsonResponse({ error: "Select a staff target and access level." }, 400);
+      if (targetRole === "staff" && (maybeRole !== undefined || hasStaffAssignmentUpdate) && normalizedStaffAssignments.length === 0) {
+        return jsonResponse({ error: "Select at least one staff target and allowed actions." }, 400);
       }
 
       if (Object.keys(profileUpdates).length === 0 && !hasListUpdates && !hasPasswordUpdate && !hasStaffAssignmentUpdate) {
@@ -3554,18 +3726,6 @@ serve(async (req: Request) => {
 
       if (hasPasswordUpdate) {
         authUpdatePayload.password = nextPassword;
-      }
-
-      // A role change must take effect in a fresh session. Revoke the target
-      // user's sessions before changing authorization data so stale sessions
-      // cannot continue using the previous role.
-      if (roleChanged) {
-        const { error: revokeSessionsError } = await client.rpc("revoke_user_auth_sessions", {
-          p_user_id: userId,
-        });
-        if (revokeSessionsError) {
-          return jsonResponse({ error: `Unable to sign out the user before changing roles: ${revokeSessionsError.message}` }, 400);
-        }
       }
 
       const { error: authUpdateError } = await client.auth.admin.updateUserById(userId, authUpdatePayload);
@@ -3628,17 +3788,41 @@ serve(async (req: Request) => {
             : Promise.resolve(),
         ]);
 
-        if (targetRole === "staff" && hasStaffAssignmentUpdate && normalizedStaffAssignment) {
-          await replaceStaffAssignment(client, userId, normalizedStaffAssignment, actorId);
+        if (targetRole === "staff" && hasStaffAssignmentUpdate && normalizedStaffAssignments.length > 0) {
+          await replaceStaffAssignments(client, userId, normalizedStaffAssignments, actorId);
         } else if (targetRole !== "staff" && (hasStaffAssignmentUpdate || profileUpdates.role !== undefined)) {
           await revokeStaffAssignments(client, userId);
         }
+
+        if (listingAssignmentTargetId && managedRoleTargets[targetRole]) {
+          await assignManagedListingOwner(client, targetRole, listingAssignmentTargetId, userId);
+        }
       } catch (listError) {
+        if (roleChanged) {
+          // The profile role has already changed at this point. Even if a
+          // related assignment failed, do not leave the old session active.
+          await client.rpc("revoke_user_auth_sessions", { p_user_id: userId });
+        }
         const message = listError instanceof Error ? listError.message : "Unable to save profile details";
         return jsonResponse({ error: message }, 400);
       }
 
       const [item] = await attachProfileLists(client, [updatedProfile]);
+
+      // Publish the profile update first so the target app can observe the role
+      // change and clear its local token. Then revoke every server-side session
+      // to prevent refresh or continued use from another device.
+      if (roleChanged) {
+        const { error: revokeSessionsError } = await client.rpc("revoke_user_auth_sessions", {
+          p_user_id: userId,
+        });
+        if (revokeSessionsError) {
+          return jsonResponse({
+            error: `The role was changed, but the user's sessions could not be revoked: ${revokeSessionsError.message}`,
+            role_changed: true,
+          }, 500);
+        }
+      }
 
       return jsonResponse({ item: item || updatedProfile, role_changed: roleChanged }, 200);
     }

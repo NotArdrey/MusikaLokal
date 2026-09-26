@@ -1,6 +1,5 @@
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Ionicons } from '@expo/vector-icons';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import GuestSignInGate from '../../src/components/GuestSignInGate';
@@ -11,8 +10,8 @@ import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { resolveRoleManageRoute } from '../../src/utils/roleRouting';
-import { fetchActiveStaffAssignment } from '../../src/utils/staffAccess';
-import { radius, spacing, typography } from '../../src/theme/tokens';
+import { fetchActiveStaffAssignments } from '../../src/utils/staffAccess';
+import { spacing, typography } from '../../src/theme/tokens';
 
 export default function ManageScreen() {
     const { colors } = useTheme();
@@ -20,7 +19,6 @@ export default function ManageScreen() {
     const { session, loading: authLoading, userId, userRole, roleResolved, isGuest } = useAuth();
     const isAuthenticated = !!session;
     const [loading, setLoading] = useState(true);
-    const [fetchedRole, setFetchedRole] = useState<string | null>(null);
 
     useEffect(() => {
         if (!authLoading && !isAuthenticated && !isGuest) {
@@ -72,7 +70,6 @@ export default function ManageScreen() {
             }
 
             if (data?.role) {
-                setFetchedRole(data.role);
                 void handleRedirect(data.role);
             } else {
                 setLoading(false);
@@ -85,16 +82,17 @@ export default function ManageScreen() {
     const handleRedirect = async (role: string) => {
         if (role === 'staff' && userId) {
             try {
-                const assignment = await fetchActiveStaffAssignment(supabase, userId);
-                if (assignment?.entity_type === 'studio') {
+                const assignments = await fetchActiveStaffAssignments(supabase, userId);
+                const entityTypes = Array.from(new Set(assignments.map((assignment) => assignment.entity_type)));
+                if (entityTypes[0] === 'studio') {
                     router.replace('/my_studio');
                     return;
                 }
-                if (assignment?.entity_type === 'venue') {
+                if (entityTypes[0] === 'venue') {
                     router.replace('/my_venue');
                     return;
                 }
-                if (assignment?.entity_type === 'production') {
+                if (entityTypes[0] === 'production') {
                     router.replace('/my_production');
                     return;
                 }
@@ -143,9 +141,6 @@ export default function ManageScreen() {
 
             <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}>
                 <View style={styles.dashboardContainer}>
-                    <View style={[styles.fallbackIcon, { backgroundColor: colors.primary + '14' }]}>
-                        <Ionicons name="briefcase-outline" size={24} color={colors.primary} />
-                    </View>
                     <Text style={[styles.eyebrow, { color: colors.primary }]}>Workspace unavailable</Text>
                     <Text style={[styles.title, { color: colors.text }]}>We couldn&apos;t open your role workspace.</Text>
                     <Text style={[styles.description, { color: colors.textSecondary }]}>
@@ -153,11 +148,6 @@ export default function ManageScreen() {
                     </Text>
 
 
-                    {(userRole || fetchedRole) && (
-                        <Text style={[styles.roleText, { color: colors.textSecondary }]}>
-                            Detected Role: {userRole || fetchedRole}
-                        </Text>
-                    )}
                 </View>
             </ScrollView>
             <Navbar />
@@ -187,14 +177,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
         paddingTop: spacing.lg,
     },
-    fallbackIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: radius.card,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: spacing.md,
-    },
     eyebrow: {
         fontFamily: typography.bold,
         fontSize: 11,
@@ -213,9 +195,5 @@ const styles = StyleSheet.create({
         fontSize: 14,
         lineHeight: 21,
         marginBottom: spacing.lg,
-    },
-    roleText: {
-        fontFamily: typography.medium,
-        fontSize: 12,
     },
 });

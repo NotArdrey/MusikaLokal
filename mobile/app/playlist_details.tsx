@@ -228,6 +228,7 @@ export default function PlaylistDetailsScreen() {
 
   const [playlist, setPlaylist] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [alert, setAlert] = useState<PlaylistAlert | null>(null);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
@@ -675,6 +676,9 @@ export default function PlaylistDetailsScreen() {
   };
 
   const handleDelete = async () => {
+    if (deleting) return;
+
+    setDeleting(true);
     try {
       const body = { action: "delete_playlist", playlist_id: playlist.id };
       const { data, error } = await supabase.functions.invoke("manage-playlists", {
@@ -695,6 +699,8 @@ export default function PlaylistDetailsScreen() {
       throw new Error(data?.error || "Failed to delete playlist.");
     } catch (e: any) {
       setAlert({ type: "error", title: "Error", message: e.message });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -1269,11 +1275,16 @@ export default function PlaylistDetailsScreen() {
                 <Text style={styles.actionBtnText}>Edit</Text>
               </TouchableOpacity>
               <TouchableOpacity activeOpacity={1}
-                style={[styles.actionBtn, { backgroundColor: "#ef4444" }]}
+                disabled={deleting}
+                style={[styles.actionBtn, { backgroundColor: "#ef4444" }, deleting && styles.actionBtnDisabled]}
                 onPress={promptDeletePlaylist}
               >
-                <Ionicons name="trash" size={16} color="#fff" />
-                <Text style={styles.actionBtnText}>Delete</Text>
+                {deleting ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name="trash" size={16} color="#fff" />
+                )}
+                <Text style={styles.actionBtnText}>{deleting ? "Deleting..." : "Delete"}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1476,6 +1487,7 @@ const styles = StyleSheet.create({
   linkText: { fontSize: moderateScale(12), fontWeight: "500" },
   ownerActions: { flexDirection: "row", gap: 10 },
   actionBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 },
+  actionBtnDisabled: { opacity: 0.7 },
   actionBtnText: { color: "#fff", fontSize: moderateScale(13), fontWeight: "600" },
   headerReportBtn: { width: 40, height: 40, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   emptyText: { textAlign: "center", fontSize: moderateScale(13), marginTop: 12 },

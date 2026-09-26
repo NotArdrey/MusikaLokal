@@ -837,6 +837,8 @@ const ProductionTeamDetailsSheet = forwardRef<
         notificationMessage: `${senderEntityName} wants to join ${team.name}.`,
         notificationImage: team.logo_url || null,
         attachmentUrl: uploadedDocumentUrl,
+        routePath: "/production_team",
+        routeParams: { teamId: team.id, tab: "Applications" },
         extraMeta: {
           source: "production_team_details",
           request_kind: "application",

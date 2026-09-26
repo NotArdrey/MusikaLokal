@@ -358,7 +358,7 @@ export default function StudioDetailsScreen() {
       }
 
       if (!canManageStudio && profile?.role === "staff") {
-        const assignment = await fetchActiveStaffAssignment(supabase, user.id);
+        const assignment = await fetchActiveStaffAssignment(supabase, user.id, 'studio', studioId);
         const permissions = getStaffPermissions(assignment?.access_level);
         canManageStudio =
           assignment?.entity_type === "studio" &&
@@ -367,7 +367,7 @@ export default function StudioDetailsScreen() {
       }
 
       if (!canManageStudio) {
-        Alert.alert("Unauthorized", "Only the studio owner or assigned Level 1/2 staff can access this page.");
+        Alert.alert("Unauthorized", "Only the studio owner or staff with booking-management permission can access this page.");
         router.replace("/home");
         return;
       }

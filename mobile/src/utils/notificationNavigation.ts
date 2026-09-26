@@ -92,6 +92,45 @@ const isProductionTeamInviteNotification = (
   return senderEntityType === "production_team" || requestKind === "invite";
 };
 
+const resolveProductionTeamApplicationTarget = (
+  notificationType: string | undefined,
+  record: Record<string, unknown>,
+  meta: Record<string, unknown>,
+): NotificationNavigationTarget | null => {
+  if (notificationType !== "listing_connection_request") return null;
+
+  const receiverEntityType = readStringId(
+    meta.receiver_entity_type,
+    meta.receiverEntityType,
+    record.receiver_entity_type,
+    record.receiverEntityType,
+  )?.toLowerCase();
+  const requestKind = readStringId(
+    meta.request_kind,
+    meta.requestKind,
+    record.request_kind,
+    record.requestKind,
+  )?.toLowerCase();
+  const teamId = readStringId(
+    record.team_id,
+    record.teamId,
+    record.production_team_id,
+    record.productionTeamId,
+    meta.team_id,
+    meta.teamId,
+    meta.production_team_id,
+    meta.productionTeamId,
+    meta.receiver_entity_id,
+    meta.receiverEntityId,
+  );
+
+  if (receiverEntityType !== "production_team" || requestKind !== "application" || !teamId) {
+    return null;
+  }
+
+  return { pathname: "/production_team", params: { teamId, tab: "Applications" } };
+};
+
 const resolveBookingRequestNotificationTarget = (
   notificationType: string | undefined,
   record: Record<string, unknown>,
@@ -205,6 +244,11 @@ export const resolveNotificationNavigationTarget = (
     || normalizeNotificationRouteParams(meta.route_params)
     || normalizeNotificationRouteParams(meta.params);
   const notificationType = readNotificationEventType(record, meta);
+
+  const productionApplicationTarget = resolveProductionTeamApplicationTarget(notificationType, record, meta);
+  if (productionApplicationTarget) {
+    return productionApplicationTarget;
+  }
 
   if (isProductionTeamInviteNotification(notificationType, record, meta)) {
     return { pathname: "/bookings", params: { tab: "Pending" } };

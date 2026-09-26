@@ -1572,6 +1572,9 @@ serve(async (req: Request) => {
       }
 
       try {
+        const isProductionApplication = isProductionTeamApplicationRequest({
+          event_details: eventDetails,
+        });
         await insertNotification(supabaseAdmin, {
           user_id: receiverUserId,
           type: "info",
@@ -1579,7 +1582,9 @@ serve(async (req: Request) => {
           message: notificationMessage,
           image: notificationImage,
           meta: {
-            type: "listing_connection_request",
+            type: isProductionApplication
+              ? "production_team_join_request"
+              : "listing_connection_request",
             request_id: requestRow?.id || null,
             sender_entity_type: eventDetails.sender_entity_type || null,
             sender_entity_id: eventDetails.sender_entity_id || null,
@@ -1592,8 +1597,12 @@ serve(async (req: Request) => {
             production_team_id: eventDetails.production_team_id || null,
             request_kind: eventDetails.request_kind || null,
             request_details: eventDetails.request_details || null,
-            route: eventDetails.route || null,
-            route_params: eventDetails.route_params || null,
+            route: isProductionApplication
+              ? "/production_team"
+              : eventDetails.route || null,
+            route_params: isProductionApplication
+              ? { teamId: eventDetails.production_team_id, tab: "Applications" }
+              : eventDetails.route_params || null,
           },
         });
       } catch (notificationError) {
@@ -1866,7 +1875,7 @@ serve(async (req: Request) => {
       const editorAccess = await getProductionEditorAccess(supabaseAdmin, team_id, authUser.id);
 
       if (!editorAccess) {
-        return jsonResponse({ error: "Only team owners, managers, or level 1 staff can update this team" }, 403);
+        return jsonResponse({ error: "Only team owners, managers, or staff with edit permission can update this team" }, 403);
       }
 
       const { data: team, error: teamErr } = await supabaseAdmin
@@ -1937,7 +1946,7 @@ serve(async (req: Request) => {
       if (!team_id || !user_id) return jsonResponse({ error: "team_id and user_id are required" }, 400);
 
       const callerAccess = await getProductionEditorAccess(supabaseAdmin, team_id, authUser.id);
-      if (!callerAccess) return jsonResponse({ error: "Only team owners, managers, or level 1 staff can add members" }, 403);
+      if (!callerAccess) return jsonResponse({ error: "Only team owners, managers, or staff with edit permission can add members" }, 403);
 
       const memberRole = role || "member";
       if (!["owner", "manager", "member"].includes(memberRole)) {
@@ -1975,7 +1984,7 @@ serve(async (req: Request) => {
       if (!team) return jsonResponse({ error: "Production team not found" }, 404);
 
       const callerMember = await getProductionEditorAccess(supabaseAdmin, team_id, authUser.id);
-      if (!callerMember) return jsonResponse({ error: "Only team owners, managers, or level 1 staff can remove members" }, 403);
+      if (!callerMember) return jsonResponse({ error: "Only team owners, managers, or staff with edit permission can remove members" }, 403);
 
       // Cannot remove the team owner
       const { data: targetMember } = await supabaseAdmin
@@ -2096,7 +2105,7 @@ serve(async (req: Request) => {
 
       const membership = await getProductionEditorAccess(supabaseAdmin, team_id, authUser.id);
       if (!membership) {
-        return jsonResponse({ error: "Only team owners, managers, or level 1 staff can update the roster" }, 403);
+        return jsonResponse({ error: "Only team owners, managers, or staff with edit permission can update the roster" }, 403);
       }
 
       const { data: profile, error: profileError } = await supabaseAdmin
@@ -2146,7 +2155,7 @@ serve(async (req: Request) => {
 
       const membership = await getProductionEditorAccess(supabaseAdmin, team_id, authUser.id);
       if (!membership) {
-        return jsonResponse({ error: "Only team owners, managers, or level 1 staff can update the roster" }, 403);
+        return jsonResponse({ error: "Only team owners, managers, or staff with edit permission can update the roster" }, 403);
       }
 
       let groupResult: any;
@@ -2191,7 +2200,7 @@ serve(async (req: Request) => {
 
       const membership = await getProductionEditorAccess(supabaseAdmin, team_id, authUser.id);
       if (!membership) {
-        return jsonResponse({ error: "Only team owners, managers, or level 1 staff can update the roster" }, 403);
+        return jsonResponse({ error: "Only team owners, managers, or staff with edit permission can update the roster" }, 403);
       }
 
       const { data: rosterEntry, error: rosterEntryError } = await supabaseAdmin

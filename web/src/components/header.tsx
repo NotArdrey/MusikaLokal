@@ -7,7 +7,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
-import { fetchActiveStaffAssignment, isStaffRole, normalizeStaffAccessLevel } from '../utils/staffAccess';
+import { fetchActiveStaffAssignments, isStaffRole } from '../utils/staffAccess';
 import ThemeModeToggle from './ThemeModeToggle';
 
 interface HeaderProps {
@@ -100,9 +100,17 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
             }
 
             try {
-                const assignment = await fetchActiveStaffAssignment(supabase, userId);
+                const assignments = await fetchActiveStaffAssignments(supabase, userId);
+                const routeEntityType = routePathname === '/my_studio'
+                    ? 'studio'
+                    : routePathname === '/my_venue'
+                        ? 'venue'
+                        : routePathname === '/my_production'
+                            ? 'production'
+                            : null;
+                const assignment = assignments.find((item) => !routeEntityType || item.entity_type === routeEntityType);
                 if (!cancelled) {
-                    setStaffAccessLevel(normalizeStaffAccessLevel(assignment?.access_level));
+                    setStaffAccessLevel(assignment?.access_level || null);
                 }
             } catch {
                 if (!cancelled) {
@@ -116,7 +124,7 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
         return () => {
             cancelled = true;
         };
-    }, [isStaff, userId]);
+    }, [isStaff, routePathname, userId]);
 
     const defaultBackRoute = useMemo(() => {
         if (routePathname === "/edit_profile") return "/profile";

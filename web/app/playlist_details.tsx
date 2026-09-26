@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
   FlatList,
   Platform,
@@ -45,6 +46,7 @@ export default function PlaylistDetailsScreen() {
   const [teaserAssets, setTeaserAssets] = useState<any[]>([]);
   const [externalLinks, setExternalLinks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -73,6 +75,9 @@ export default function PlaylistDetailsScreen() {
   useEffect(() => { fetchPlaylist(); }, [fetchPlaylist]);
 
   const handleDelete = async () => {
+    if (deleting) return;
+
+    setDeleting(true);
     try {
       const { data, error } = await supabase.functions.invoke("manage-playlists", {
         body: { action: "delete_playlist", playlist_id: playlist.id },
@@ -86,6 +91,8 @@ export default function PlaylistDetailsScreen() {
       }
     } catch (e: any) {
       setAlert({ type: "error", title: "Delete Failed", message: e?.message || "Please try again." });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -189,8 +196,18 @@ export default function PlaylistDetailsScreen() {
               <TouchableOpacity activeOpacity={1} style={[styles.ownerBtn, { backgroundColor: colors.primary }]} onPress={() => router.push({ pathname: "/create_playlist", params: { edit_id: playlist.id } })}>
                 <Ionicons name="pencil" size={16} color="#fff" /><Text style={styles.ownerBtnText}>Edit</Text>
               </TouchableOpacity>
-              <TouchableOpacity activeOpacity={1} style={[styles.ownerBtn, { backgroundColor: "#ef4444" }]} onPress={promptDeletePlaylist}>
-                <Ionicons name="trash" size={16} color="#fff" /><Text style={styles.ownerBtnText}>Delete</Text>
+              <TouchableOpacity
+                activeOpacity={1}
+                disabled={deleting}
+                style={[styles.ownerBtn, { backgroundColor: "#ef4444" }, deleting && styles.ownerBtnDisabled]}
+                onPress={promptDeletePlaylist}
+              >
+                {deleting ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name="trash" size={16} color="#fff" />
+                )}
+                <Text style={styles.ownerBtnText}>{deleting ? "Deleting..." : "Delete"}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -286,6 +303,7 @@ const styles = StyleSheet.create({
   headerReportBtn: { width: 40, height: 40, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   ownerRow: { flexDirection: "row", gap: 12, marginTop: 14 },
   ownerBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
+  ownerBtnDisabled: { opacity: 0.7 },
   ownerBtnText: { color: "#fff", fontWeight: "600", fontSize: 13 },
   teaserCard: { width: 110, padding: 10, borderRadius: 10, borderWidth: 1, marginRight: 10, alignItems: "center" },
   teaserThumb: { width: 80, height: 60, borderRadius: 8 },

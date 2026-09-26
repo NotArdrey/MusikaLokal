@@ -299,7 +299,7 @@ export default function ProductionTeamScreen() {
         .maybeSingle();
 
       const staffAssignment = userRole === "staff" && userId
-        ? await fetchActiveStaffAssignment(supabase, userId)
+        ? await fetchActiveStaffAssignment(supabase, userId, "production", teamId)
         : null;
       const isAssignedStaff =
         staffAssignment?.entity_type === "production" &&

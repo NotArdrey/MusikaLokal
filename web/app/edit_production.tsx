@@ -141,7 +141,7 @@ export default function EditProductionScreen() {
         existingTeam.member_role !== 'manager' &&
         !staffPermissions?.canEditListing
       ) {
-        throw new Error('Only team owners, managers, or assigned Level 1 staff can edit this production team.');
+        throw new Error('Only team owners, managers, or staff with Edit listing permission can edit this production team.');
       }
 
       setTeam(existingTeam);
@@ -162,7 +162,7 @@ export default function EditProductionScreen() {
 
   useEffect(() => {
     if (userRole && userRole !== 'producer' && userRole !== 'staff') {
-      setAlert({ type: 'warning', title: 'Production Only', message: 'Only production users or assigned Level 1 staff can edit production teams.' });
+      setAlert({ type: 'warning', title: 'Production Only', message: 'Only production users or staff with Edit listing permission can edit production teams.' });
       router.replace('/manage');
       return;
     }

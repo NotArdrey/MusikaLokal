@@ -10,6 +10,7 @@ import Modal, { normalizeConfirmationInput } from '../src/components/modal';
 import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
 import Navbar from '../src/components/navbar';
 import Skeleton from '../src/components/Skeleton';
+import StaffWorkspaceTabs from '../src/components/StaffWorkspaceTabs';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { getStaffPermissions } from '../src/utils/staffAccess';
@@ -181,6 +182,7 @@ export default function MyProductionScreen() {
             {isMusicianView && (
               <MusicianWorkspaceTabs activeKey="producer" />
             )}
+            {userRole === 'staff' && <StaffWorkspaceTabs activeKey="production" />}
 
             {loading ? (
               <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
@@ -212,7 +214,6 @@ export default function MyProductionScreen() {
                 {teams.map((team) => {
                   const isOwnerTeam = team.member_role === 'owner';
                   const staffPermissions = team.staff_access_level ? getStaffPermissions(team.staff_access_level) : null;
-                  const canShowActions = !staffPermissions?.canViewOnly;
                   const canEdit = !isMusicianView && (
                     team.member_role === 'owner' ||
                     team.member_role === 'manager' ||
@@ -248,7 +249,6 @@ export default function MyProductionScreen() {
                             {team.description || 'No description added yet.'}
                           </Text>
 
-                          {canShowActions ? (
                           <View style={[styles.actionRow, { borderColor: colors.border }]}>
                             <View style={styles.actionLeft}>
                               <TouchableOpacity activeOpacity={1}
@@ -297,7 +297,6 @@ export default function MyProductionScreen() {
                               </TouchableOpacity>
                             ) : null}
                           </View>
-                          ) : null}
                         </View>
                       </View>
                     </View>

@@ -951,7 +951,7 @@ export default function EditStudioScreen() {
       }
 
       if (!canEditStudio && profile?.role === "staff") {
-        const assignment = await fetchActiveStaffAssignment(supabase, user.id);
+        const assignment = await fetchActiveStaffAssignment(supabase, user.id, 'studio', studioId);
         const permissions = getStaffPermissions(assignment?.access_level);
         canEditStudio =
           assignment?.entity_type === "studio" &&
@@ -963,7 +963,7 @@ export default function EditStudioScreen() {
         showAlert(
           "warning",
           "Unauthorized",
-          "Only the studio owner or assigned Level 1 staff can edit this studio.",
+          "Only the studio owner or staff with Edit listing permission can edit this studio.",
         );
         router.replace("/feed");
         return;

@@ -58,7 +58,7 @@ import { usePageLoadLogger } from "../utils/loadTimeLogger";
 import { detailSheetTimingConfig } from "../utils/motion";
 import { isFanUserRole } from "../utils/roleRouting";
 import { getSmoothTabIndex, setSmoothTab } from "../utils/smoothTabs";
-import { fetchActiveStaffAssignment, getStaffPermissions } from "../utils/staffAccess";
+import { fetchActiveStaffAssignments, getStaffPermissions } from "../utils/staffAccess";
 import CustomAlert from "./CustomAlert";
 import DocumentUploader from "./DocumentUploader";
 import ReportModal from "./ReportModal";
@@ -520,7 +520,7 @@ const ListingDetailsSheet = forwardRef<
   const [loading, setLoading] = useState(false);
   const [group, setGroup] = useState<any>(null);
   const latestListingIdRef = useRef(listingId);
-  const [staffAssignment, setStaffAssignment] = useState<any>(null);
+  const [staffAssignments, setStaffAssignments] = useState<any[]>([]);
   const [isFavorited, setIsFavorited] = useState(false);
   const [favoriteCount, setFavoriteCount] = useState(0);
   const [modalVisible, setModalVisible] = useState(false);
@@ -531,16 +531,16 @@ const ListingDetailsSheet = forwardRef<
 
     const loadStaffAssignment = async () => {
       if (userRole !== "staff" || !userId) {
-        setStaffAssignment(null);
+        setStaffAssignments([]);
         return;
       }
 
       try {
-        const assignment = await fetchActiveStaffAssignment(supabase, userId);
-        if (!cancelled) setStaffAssignment(assignment);
+        const assignments = await fetchActiveStaffAssignments(supabase, userId);
+        if (!cancelled) setStaffAssignments(assignments);
       } catch (error) {
         console.warn("Failed to load staff listing assignment", error);
-        if (!cancelled) setStaffAssignment(null);
+        if (!cancelled) setStaffAssignments([]);
       }
     };
 
@@ -1166,6 +1166,11 @@ const ListingDetailsSheet = forwardRef<
     group?.organizer_id ||
     (normalizedListingType === "artist" ? group?.id || null : null);
   const isOwnListing = !!userId && !!listingOwnerId && listingOwnerId === userId;
+  const staffAssignment = staffAssignments.find((assignment) => (
+    (assignment.entity_type === "studio" && normalizedListingType === "studio" && assignment.studio_id === group?.id) ||
+    (assignment.entity_type === "venue" && (normalizedListingType === "gig" || normalizedListingType === "venue") && assignment.gig_id === group?.id) ||
+    (assignment.entity_type === "production" && (normalizedListingType === "production" || normalizedListingType === "production_team") && assignment.production_team_id === group?.id)
+  )) || null;
   const staffTargetMatchesListing =
     !!group &&
     (

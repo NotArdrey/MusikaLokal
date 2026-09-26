@@ -10,10 +10,11 @@ import Modal, { normalizeVisibleInput } from '../src/components/modal';
 import MusicianWorkspaceTabs from '../src/components/MusicianWorkspaceTabs';
 import Navbar from '../src/components/navbar';
 import Skeleton from '../src/components/Skeleton';
+import StaffWorkspaceTabs from '../src/components/StaffWorkspaceTabs';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { formatDashedNumericDate } from '../src/utils/friendlyDateTime';
-import { StaffAssignment, fetchActiveStaffAssignment, getStaffPermissions } from '../src/utils/staffAccess';
+import { StaffAssignment, fetchActiveStaffAssignments, getStaffPermissions } from '../src/utils/staffAccess';
 import { createRealtimeChannelTopic } from '../src/utils/realtimeChannel';
 
 const DEFAULT_GIG_IMAGE = 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop';
@@ -107,7 +108,7 @@ export default function MyVenueScreen() {
     const [selectedName, setSelectedName] = useState('');
     const [cancellationReason, setCancellationReason] = useState('');
     const [gigs, setGigs] = useState<any[]>([]);
-    const [staffAssignment, setStaffAssignment] = useState<StaffAssignment | null>(null);
+    const [staffAssignments, setStaffAssignments] = useState<StaffAssignment[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -132,12 +133,12 @@ export default function MyVenueScreen() {
         if (!userId) return;
         try {
             let baseGigs: any[] = [];
-            const activeStaffAssignment = userRole === 'staff'
-                ? await fetchActiveStaffAssignment(supabase, userId)
-                : null;
-            setStaffAssignment(activeStaffAssignment);
+            const activeStaffAssignments = userRole === 'staff'
+                ? (await fetchActiveStaffAssignments(supabase, userId)).filter((assignment) => assignment.entity_type === 'venue')
+                : [];
+            setStaffAssignments(activeStaffAssignments);
 
-            if (userRole === 'staff' && (!activeStaffAssignment || activeStaffAssignment.entity_type !== 'venue' || !activeStaffAssignment.gig_id)) {
+            if (userRole === 'staff' && activeStaffAssignments.length === 0) {
                 setGigs([]);
                 return;
             }
@@ -232,8 +233,9 @@ export default function MyVenueScreen() {
                     .select('id, organizer_id, name, location, budget, description, event_date, status, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
                     .order('created_at', { ascending: false });
 
-                gigsQuery = activeStaffAssignment?.entity_type === 'venue' && activeStaffAssignment.gig_id
-                    ? gigsQuery.eq('id', activeStaffAssignment.gig_id)
+                const assignedGigIds = activeStaffAssignments.map((assignment) => assignment.gig_id).filter(Boolean) as string[];
+                gigsQuery = assignedGigIds.length > 0
+                    ? gigsQuery.in('id', assignedGigIds)
                     : gigsQuery.eq('organizer_id', userId);
 
                 const { data, error: baseError } = await gigsQuery;
@@ -313,7 +315,7 @@ export default function MyVenueScreen() {
                     permit_status: normalizedPermitStatus,
                     permit_rejection_reason: gig.permit_rejection_reason || null,
                     permit_reviewed_at: gig.permit_reviewed_at || null,
-                    is_owner: gig.organizer_id === userId || activeStaffAssignment?.gig_id === gig.id,
+                    is_owner: gig.organizer_id === userId || activeStaffAssignments.some((assignment) => assignment.gig_id === gig.id),
                 };
             }));
         } catch (e) {
@@ -342,15 +344,13 @@ export default function MyVenueScreen() {
     useEffect(() => {
         if (!isAuthenticated || !userId || isMusicianView) return;
 
-        const realtimeFilter = staffAssignment?.entity_type === 'venue' && staffAssignment.gig_id
-            ? `id=eq.${staffAssignment.gig_id}`
-            : `organizer_id=eq.${userId}`;
+        const realtimeFilter = userRole === 'staff' ? undefined : `organizer_id=eq.${userId}`;
 
         const channel = supabase
             .channel(createRealtimeChannelTopic(`my-venue-listings:${userId}`))
             .on(
                 'postgres_changes',
-                { event: '*', schema: 'public', table: 'gigs', filter: realtimeFilter },
+                { event: '*', schema: 'public', table: 'gigs', ...(realtimeFilter ? { filter: realtimeFilter } : {}) },
                 () => {
                     fetchGigs();
                 }
@@ -360,7 +360,7 @@ export default function MyVenueScreen() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [isAuthenticated, userId, fetchGigs, isMusicianView, staffAssignment]);
+    }, [isAuthenticated, userId, fetchGigs, isMusicianView, userRole]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -473,6 +473,7 @@ export default function MyVenueScreen() {
                         {isMusicianView && (
                             <MusicianWorkspaceTabs activeKey="venue" />
                         )}
+                        {userRole === 'staff' && <StaffWorkspaceTabs activeKey="venue" />}
 
                         {loading ? (
                             <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
@@ -505,9 +506,8 @@ export default function MyVenueScreen() {
                             <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
                                 {gigs.map((gig) => {
                                     const staffPermissions = userRole === 'staff'
-                                        ? getStaffPermissions(staffAssignment?.access_level)
+                                        ? getStaffPermissions(staffAssignments.find((assignment) => assignment.gig_id === gig.id)?.access_level)
                                         : null;
-                                    const canShowActions = !staffPermissions?.canViewOnly;
                                     const canManageBookings = !staffPermissions || staffPermissions.canManageBookings;
                                     const canEditVenue = !staffPermissions || staffPermissions.canEditListing;
                                     const normalizedPermitStatus = normalizePermitStatus(gig.permit_status);
@@ -589,7 +589,6 @@ export default function MyVenueScreen() {
                                                     </Text>
                                                 )}
 
-                                                {canShowActions ? (
                                                 <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                                     <View style={styles.actionLeft}>
                                                         <TouchableOpacity activeOpacity={1}
@@ -633,7 +632,6 @@ export default function MyVenueScreen() {
                                                         </TouchableOpacity>
                                                     ) : null}
                                                 </View>
-                                                ) : null}
                                             </View>
                                         </View>
                                     </View>

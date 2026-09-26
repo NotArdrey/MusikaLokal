@@ -1692,7 +1692,7 @@ export default function BookingsScreen() {
   const [userRole, setUserRole] = useState<string>(
     () => initialBookingsCacheRef.current?.userRole || "",
   );
-  const [staffBookingContext, setStaffBookingContext] = useState<any>(null);
+  const [staffBookingContexts, setStaffBookingContexts] = useState<any[]>([]);
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
   const [locallyReportedLateBookings, setLocallyReportedLateBookings] = useState<Record<string, boolean>>({});
   const [requestActionId, setRequestActionId] = useState<string | null>(null);
@@ -2873,7 +2873,15 @@ export default function BookingsScreen() {
       }
 
       const returnedStaffContext = bookings?.staff_context || null;
-      setStaffBookingContext(returnedStaffContext);
+      const returnedStaffContexts = Array.isArray(bookings?.staff_contexts)
+        ? bookings.staff_contexts
+        : returnedStaffContext
+          ? [returnedStaffContext]
+          : [];
+      const returnedStaffEntityTypes = new Set(returnedStaffContexts.map((context: any) => context?.entity_type));
+      const hasVenueStaffAccess = returnedStaffEntityTypes.has("venue");
+      const hasNonVenueStaffAccess = returnedStaffEntityTypes.has("studio") || returnedStaffEntityTypes.has("production");
+      setStaffBookingContexts(returnedStaffContexts);
       if (bookings?.role && bookings.role !== role) {
         role = bookings.role;
         setUserRole(role);
@@ -3367,8 +3375,8 @@ export default function BookingsScreen() {
       );
 
       const applicants =
-        role === "venue-owner"
-          ? pendingGigApplications
+        role === "venue-owner" || hasVenueStaffAccess
+          ? pendingGigApplications.filter((item: any) => role === "venue-owner" || item?.staff_entity_type === "venue")
           : [];
 
       const studioPending = rawPending.filter(
@@ -3381,8 +3389,14 @@ export default function BookingsScreen() {
           : studioPending;
 
       const pendingItems =
-        role === "venue-owner"
+        role === "venue-owner" && !hasNonVenueStaffAccess
           ? []
+          : returnedStaffContexts.length > 0
+            ? [
+                ...pendingGigApplications.filter((item: any) => item?.staff_entity_type !== "venue"),
+                ...pendingConnectionRequests,
+                ...groupedStudioPending,
+              ]
           : role === "musician" || isProducerActivityRole(role)
             ? [...pendingGigApplications, ...pendingConnectionRequests, ...groupedStudioPending]
             : [...pendingConnectionRequests, ...groupedStudioPending];
@@ -3479,13 +3493,13 @@ export default function BookingsScreen() {
         item.type_id === "gig_application" &&
         ["declined", "rejected", "cancelled", "resigned"].includes(getGigApplicationReviewStatus(item));
       const hasCurrentViewerReviewedGigApplication = (item: any) => {
-        if (role === "venue-owner") return item.reviewed_by_organizer === true;
+        if (role === "venue-owner" || item?.staff_entity_type === "venue") return item.reviewed_by_organizer === true;
         return item.reviewed_by_applicant === true;
       };
       const alreadyReviewedCompleted = rawReview.filter((item: any) => {
         if (item.type_id === "gig_application") return false;
 
-        if (role === "studio-owner") {
+        if (role === "studio-owner" || item?.staff_entity_type === "studio") {
           return item.reviewed_by_owner === true;
         }
 
@@ -3523,14 +3537,14 @@ export default function BookingsScreen() {
       // 5. Review - role-aware unreviewed items
       const unreviewedItems = [
         ...rawReview.filter((item: any) => {
-          if (role === "venue-owner") {
+          if (role === "venue-owner" || item?.staff_entity_type === "venue") {
             return (
               isReviewRequiredGigApplication(item) &&
               item.reviewed_by_organizer !== true
             );
           }
 
-          if (isProducerActivityRole(role)) {
+          if (isProducerActivityRole(role) || item?.staff_entity_type === "production") {
             return isReviewRequiredGigApplication(item) &&
               item.viewer_can_act !== false &&
               item.reviewed_by_applicant !== true;
@@ -3995,7 +4009,7 @@ export default function BookingsScreen() {
   };
 
   const handleDetailsPress = (item: any) => {
-    if (userRole === "venue-owner" && item?.type_id === "gig_application") {
+    if ((userRole === "venue-owner" || item?.staff_entity_type === "venue") && item?.type_id === "gig_application") {
       void loadApplicantDetails(item);
       return;
     }
@@ -4004,14 +4018,28 @@ export default function BookingsScreen() {
     bookingDetailsRef.current?.present();
   };
 
+  const getStaffBookingContextForItem = (item: any) => staffBookingContexts.find((context) => (
+    (context?.entity_type === "studio" && context?.studio_id && context.studio_id === item?.studio_id) ||
+    (context?.entity_type === "venue" && context?.gig_id && context.gig_id === item?.gig_id) ||
+    (context?.entity_type === "production" && context?.production_team_id && context.production_team_id === item?.production_team_id)
+  )) || null;
+  const isStudioManagerItem = (item: any) =>
+    userRole === "studio-owner" || item?.staff_entity_type === "studio";
+  const isVenueManagerItem = (item: any) =>
+    userRole === "venue-owner" || item?.staff_entity_type === "venue";
+  const isListingManagerItem = (item: any) =>
+    isStudioManagerItem(item) || isVenueManagerItem(item) || item?.staff_entity_type === "production";
+  const getItemViewerRole = (item: any) =>
+    isVenueManagerItem(item) ? "venue-owner" : isStudioManagerItem(item) ? "studio-owner" : userRole;
+
   const isReadOnlyBookingItem = (item: any) => {
     if (item?.is_preview === true && item?.type_id === "booking_request") {
       return true;
     }
 
-    if (staffBookingContext?.view_only === true) {
-      return true;
-    }
+    if (item?.viewer_can_act === false) return true;
+    if (item?.viewer_can_act === true) return false;
+    if (getStaffBookingContextForItem(item)?.view_only === true) return true;
 
     const normalizedItemStatus = String(item?.raw_status || item?.status || "")
       .trim()
@@ -4035,9 +4063,7 @@ export default function BookingsScreen() {
   const showReadOnlyBookingAlert = () => {
     Alert.alert(
       "View Only",
-      staffBookingContext?.view_only === true
-        ? "This staff account has view-only access for this workspace."
-        : "This application was submitted on your behalf. You can view the details, but actions are managed by the applicant or production team.",
+      "This item is read-only because your staff permission is View only.",
     );
   };
 
@@ -4423,7 +4449,7 @@ export default function BookingsScreen() {
 
     // If it's an active musician, we treat it as 'fire'
     const isFire =
-      activeTab === "Active Musicians" && userRole === "venue-owner";
+      activeTab === "Active Musicians" && isVenueManagerItem(selectedItem);
     setCancellationReason("");
     setModalMode(isFire ? "fire" : "cancel");
     setModalVisible(true);
@@ -4472,8 +4498,7 @@ export default function BookingsScreen() {
   const shouldShowLateReportDot = (item: any) => {
     if (item?.type_id !== "studio_booking") return false;
 
-    const isOwnerView =
-      userRole === "studio-owner" || userRole === "venue-owner";
+    const isOwnerView = isListingManagerItem(item);
 
     if (!isOwnerView) return false;
 
@@ -4528,7 +4553,7 @@ export default function BookingsScreen() {
         return false;
       }
 
-      if (userRole === "venue-owner") {
+      if (isVenueManagerItem(item)) {
         return !!(item.applicant_id || item.user_id || item.submitted_by_user_id);
       }
 
@@ -4566,7 +4591,7 @@ export default function BookingsScreen() {
         chatContext.studioBookingId = item.id;
         if (item.studio_id) chatContext.studioId = item.studio_id;
 
-        if (userRole === "musician") {
+        if (!isListingManagerItem(item) && userRole === "musician") {
           recipientId = item.studio_owner_id || null;
           recipientName = item.studio_name || item.name || "Studio Owner";
         } else {
@@ -4579,7 +4604,7 @@ export default function BookingsScreen() {
         if (item.gig_id) chatContext.gigId = item.gig_id;
         if (item.group_id) chatContext.groupId = item.group_id;
 
-        if (userRole === "venue-owner") {
+        if (isVenueManagerItem(item)) {
           recipientId =
             item.applicant_id || item.user_id || item.submitted_by_user_id || null;
           recipientName = item.customer_name || item.performer || "Musician";
@@ -5434,9 +5459,9 @@ export default function BookingsScreen() {
 
     // Determine reviewer role based on user role and item type
     const isOwner =
-      item.type_id === "studio_booking" && userRole === "studio-owner";
+      item.type_id === "studio_booking" && isStudioManagerItem(item);
     const isOrganizer =
-      item.type_id === "gig_application" && userRole === "venue-owner";
+      item.type_id === "gig_application" && isVenueManagerItem(item);
 
     const reviewerRole =
       item.type_id === "studio_booking"
@@ -5901,6 +5926,14 @@ export default function BookingsScreen() {
     return 0;
   };
 
+  const hasVenueStaffWorkspace = staffBookingContexts.some((context) => context?.entity_type === "venue");
+  const hasNonVenueStaffWorkspace = staffBookingContexts.some((context) => context?.entity_type === "studio" || context?.entity_type === "production");
+  const usesVenueOwnerTabs = userRole === "venue-owner" && !hasNonVenueStaffWorkspace;
+  const visiblePendingPermitListings = pendingPermitStudios.filter((listing: any) => (
+    (renderActiveTab === "Applicants" && listing?.entity_type === "gig") ||
+    (renderActiveTab === "Pending" && listing?.entity_type === "studio")
+  ));
+
   // Determine items to show based on view mode without rebuilding the list during the tab press.
   const currentItems = React.useMemo(() => {
     const items =
@@ -5910,10 +5943,10 @@ export default function BookingsScreen() {
           ? dynamicBookingsData.ActiveMusicians
           : dynamicBookingsData[deferredActiveTab as keyof typeof dynamicBookingsData] || [];
 
-    return userRole === "venue-owner"
-      ? items.filter((item: any) => item?.type_id === "gig_application")
-      : items;
-  }, [applicationData, deferredActiveAppTab, deferredActiveTab, dynamicBookingsData, userRole, viewMode]);
+    return usesVenueOwnerTabs
+        ? items.filter((item: any) => item?.type_id === "gig_application")
+        : items;
+    }, [applicationData, deferredActiveAppTab, deferredActiveTab, dynamicBookingsData, usesVenueOwnerTabs, userRole, viewMode]);
 
   useEffect(() => {
     if (!isAuthenticated || isGuest) return;
@@ -5936,19 +5969,21 @@ export default function BookingsScreen() {
   const isHistoryTabView = renderActiveTab === "History";
   const bookingTabs = React.useMemo(
     () =>
-      userRole === "venue-owner"
+        usesVenueOwnerTabs
         ? [
             { key: "Applicants" as Tab, label: "Pending", testID: "mobile-bookings-tab-pending-applicants" },
             { key: "Active Musicians" as Tab, label: "Active", testID: "mobile-bookings-tab-active-musicians" },
             { key: "Review" as Tab, label: "Review", testID: "mobile-bookings-tab-review" },
             { key: "History" as Tab, label: "History", testID: "mobile-bookings-tab-history" },
           ]
-        : (["Pending", "Upcoming", "Ongoing", "Review", "History"] as Tab[]).map((tab) => ({
+        : ((hasVenueStaffWorkspace
+            ? ["Applicants", "Pending", "Upcoming", "Ongoing", "Review", "History"]
+            : ["Pending", "Upcoming", "Ongoing", "Review", "History"]) as Tab[]).map((tab) => ({
             key: tab,
             label: tab,
             testID: `mobile-bookings-tab-${normalizeBookingTestId(tab)}`,
           })),
-    [userRole],
+      [hasVenueStaffWorkspace, usesVenueOwnerTabs],
   );
   const sortedCurrentItems = React.useMemo(
     () =>
@@ -6025,7 +6060,7 @@ export default function BookingsScreen() {
       const layout: ActivityLayoutToken[] = [];
 
       filteredItems.forEach((item: any, index) => {
-        const descriptor = getApplicationActivityGroup(item, userRole);
+        const descriptor = getApplicationActivityGroup(item, getItemViewerRole(item));
 
         if (!descriptor) {
           layout.push({ kind: "booking", booking: item, index });
@@ -6383,11 +6418,11 @@ export default function BookingsScreen() {
             <>
               {bookingsControlsHeader}
               {!loading &&
-              userRole === "studio-owner" &&
-              renderActiveTab === "Pending" &&
-              pendingPermitStudios.length > 0 ? (
+                (userRole === "studio-owner" || staffBookingContexts.some((context) => context?.entity_type === "studio")) &&
+                renderActiveTab === "Pending" &&
+                visiblePendingPermitListings.length > 0 ? (
                 <View style={styles.permitReviewList}>
-                {pendingPermitStudios.map((listing: any) => {
+                  {visiblePendingPermitListings.map((listing: any) => {
                   const normalizedStatus = String(listing?.permit_status || "pending_review").toLowerCase();
                   const isRejected = normalizedStatus === "rejected";
                   const permitResubmissionsUsed = Number(listing?.permit_resubmissions_used || 0);
@@ -6619,7 +6654,7 @@ export default function BookingsScreen() {
             ) : filteredItems.length === 0 ? (
               <View style={styles.centerContainer}>
                 <Ionicons
-                  name={userRole === "venue-owner" ? "people-outline" : "calendar-outline"}
+                    name={usesVenueOwnerTabs ? "people-outline" : "calendar-outline"}
                   size={48}
                   color={colors.border}
                 />
@@ -6628,7 +6663,7 @@ export default function BookingsScreen() {
                 >
                   {hasSearchOrFilter
                     ? "No matches found for the selected search/filter."
-                    : userRole === "venue-owner"
+                    : usesVenueOwnerTabs
                     ? renderActiveTab === "Applicants"
                       ? "No pending applications"
                       : renderActiveTab === "Active Musicians"
@@ -6636,7 +6671,7 @@ export default function BookingsScreen() {
                         : renderActiveTab === "Review"
                           ? "No reviews pending"
                           : "No items"
-                      : userRole === "studio-owner" && renderActiveTab === "Pending" && pendingPermitStudios.length > 0
+                      : renderActiveTab === "Pending" && visiblePendingPermitListings.length > 0
                         ? "No pending items below"
                         : renderActiveTab === "Pending"
                           ? "No pending items"
@@ -6648,14 +6683,14 @@ export default function BookingsScreen() {
                               ? `No ${renderActiveTab.toLowerCase()} activity`
                               : `No ${renderActiveTab.toLowerCase()} bookings`}
                 </Text>
-                  {userRole === "studio-owner" && renderActiveTab === "Pending" && pendingPermitStudios.length > 0 && (
+                  {renderActiveTab === "Pending" && visiblePendingPermitListings.length > 0 && (
                     <Text
                       style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
                     >
                       Permit review items are listed above. New pending items will appear here.
                     </Text>
                   )}
-                {userRole === "venue-owner" && renderActiveTab === "Applicants" && (
+                {(userRole === "venue-owner" || hasVenueStaffWorkspace) && renderActiveTab === "Applicants" && (
                   <Text
                     style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
                   >
@@ -7811,7 +7846,7 @@ export default function BookingsScreen() {
                               </Text>
                             </TouchableOpacity>
                           ) : renderActiveTab === "Applicants" ? (
-                            userRole === "venue-owner" ? (
+                            isVenueManagerItem(item) ? (
                               <>
                                 <View style={styles.compactActionRow}>
                                   <TouchableOpacity activeOpacity={1}
@@ -8311,8 +8346,7 @@ export default function BookingsScreen() {
                         </Text>
 
                         {/* Booker Info for Studio/Gig Owners */}
-                        {(userRole === "studio-owner" ||
-                          userRole === "venue-owner") &&
+                        {isListingManagerItem(item) &&
                           item.customer_name && (
                             <TouchableOpacity activeOpacity={1}
                               style={[
@@ -8370,7 +8404,7 @@ export default function BookingsScreen() {
                           )}
 
                         {/* Contact Info (Studio Owners) */}
-                        {userRole === "studio-owner" &&
+                        {isStudioManagerItem(item) &&
                           item.type_id === "studio_booking" && (
                             <View style={{ marginTop: 4, gap: 4 }}>
                               {item.customer_contact && (
@@ -8426,7 +8460,7 @@ export default function BookingsScreen() {
                           )}
 
                         {/* Video & Note (Gig Owners / Gig Applications) */}
-                        {userRole === "venue-owner" &&
+                        {isVenueManagerItem(item) &&
                           item.type_id === "gig_application" && (
                             <View style={{ marginTop: 8, gap: 8 }}>
                               {item.video_url && (
@@ -9215,7 +9249,7 @@ export default function BookingsScreen() {
                           </View>
                         ) : renderActiveTab === "Pending" &&
                           item.type_id === "studio_booking" &&
-                          (userRole === "studio-owner" || userRole === "venue-owner") ? (
+                          isStudioManagerItem(item) ? (
                           // Studio Owner view for pending bookings
                           <View
                             style={{
@@ -9287,7 +9321,7 @@ export default function BookingsScreen() {
                           </View>
                         ) : renderActiveTab === "Review" ? (
                           item.type_id === "studio_booking" &&
-                          (userRole === "studio-owner" || userRole === "venue-owner") &&
+                          isStudioManagerItem(item) &&
                           item.raw_status !== "completed" &&
                           !isReadOnlyBookingItem(item) ? (
                             <TouchableOpacity activeOpacity={1}
@@ -9438,7 +9472,7 @@ export default function BookingsScreen() {
                                     </TouchableOpacity>
                                   ) : null}
 
-                                  {userRole === "studio-owner" || userRole === "venue-owner" ? (
+                                  {isListingManagerItem(item) ? (
                                     <TouchableOpacity activeOpacity={1}
                                       testID={bookingActionTestId(item, "clear-balance")}
                                       accessibilityLabel={bookingActionTestId(item, "clear-balance")}
@@ -9633,7 +9667,7 @@ export default function BookingsScreen() {
                         : (() => {
                           // Cancel mode
                           if (selectedItem?.type_id === "gig_application") {
-                            if (userRole === "venue-owner") {
+                            if (isVenueManagerItem(selectedItem)) {
                               return "Are you sure you want to revoke this accepted application? The musician will be notified.";
                             }
 
@@ -9644,7 +9678,7 @@ export default function BookingsScreen() {
                             return "Are you sure you want to withdraw this application? The gig owner will be notified.";
                           } else {
                             // For studio bookings, owner cancellations refund the musician.
-                            const ownerCancellation = isStudioOwnerCancellation(selectedItem, userId, userRole);
+                            const ownerCancellation = isStudioOwnerCancellation(selectedItem, userId, getItemViewerRole(selectedItem));
                             const paidAmount = getBookingPaidAmount(selectedItem);
 
                             if (ownerCancellation) {
@@ -9797,7 +9831,7 @@ export default function BookingsScreen() {
               // Cancel mode (from Upcoming tab)
               status =
                 selectedItem.type_id === "gig_application"
-                  ? getGigApplicationCancelStatusForViewer(selectedItem, userRole)
+                  ? getGigApplicationCancelStatusForViewer(selectedItem, getItemViewerRole(selectedItem))
                   : "cancelled";
             } else if (modalMode === "fire") {
               status =

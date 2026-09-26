@@ -19,12 +19,6 @@ export type StaffPermissions = {
   canViewOnly: boolean;
 };
 
-export const STAFF_ACCESS_LEVEL_LABELS: Record<StaffAccessLevel, string> = {
-  1: 'Level 1 - edit and actions',
-  2: 'Level 2 - actions only',
-  3: 'Level 3 - view only',
-};
-
 export const STAFF_ENTITY_LABELS: Record<StaffEntityType, string> = {
   studio: 'Studio',
   venue: 'Gig',
@@ -69,36 +63,51 @@ export const isStaffRole = (role: unknown): boolean =>
 export const fetchActiveStaffAssignment = async (
   supabase: any,
   userId: string,
+  entityType?: StaffEntityType,
+  targetId?: string,
 ): Promise<StaffAssignment | null> => {
-  if (!userId) return null;
+  const assignments = await fetchActiveStaffAssignments(supabase, userId);
+  if (!entityType) return assignments[0] || null;
+
+  return assignments.find((assignment) => (
+    assignment.entity_type === entityType &&
+    (!targetId || getStaffTargetId(assignment) === targetId)
+  )) || null;
+};
+
+export const fetchActiveStaffAssignments = async (
+  supabase: any,
+  userId: string,
+): Promise<StaffAssignment[]> => {
+  if (!userId) return [];
 
   const { data, error } = await supabase
     .from('staff_listing_access')
     .select('id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level')
     .eq('staff_user_id', userId)
     .is('revoked_at', null)
-    .maybeSingle();
+    .order('created_at', { ascending: true });
 
   if (error) throw error;
-  if (!data) return null;
+  return (data || []).flatMap((row: any) => {
+    const entityType = normalizeStaffEntityType(row.entity_type);
+    const accessLevel = normalizeStaffAccessLevel(row.access_level);
+    if (!entityType || !accessLevel) return [];
 
-  const entityType = normalizeStaffEntityType(data.entity_type);
-  const accessLevel = normalizeStaffAccessLevel(data.access_level);
-  if (!entityType || !accessLevel) return null;
-
-  return {
-    id: String(data.id),
-    staff_user_id: String(data.staff_user_id),
-    entity_type: entityType,
-    studio_id: data.studio_id || null,
-    gig_id: data.gig_id || null,
-    production_team_id: data.production_team_id || null,
-    access_level: accessLevel,
-    target_id:
-      entityType === 'studio'
-        ? data.studio_id || null
-        : entityType === 'venue'
-          ? data.gig_id || null
-          : data.production_team_id || null,
-  };
+    return [{
+      id: String(row.id),
+      staff_user_id: String(row.staff_user_id),
+      entity_type: entityType,
+      studio_id: row.studio_id || null,
+      gig_id: row.gig_id || null,
+      production_team_id: row.production_team_id || null,
+      access_level: accessLevel,
+      target_id:
+        entityType === 'studio'
+          ? row.studio_id || null
+          : entityType === 'venue'
+            ? row.gig_id || null
+            : row.production_team_id || null,
+    }];
+  });
 };

@@ -11,6 +11,11 @@ import {
 } from '../utils/storageUpload';
 import CustomAlert, { AlertType } from './CustomAlert';
 
+const ACCEPTED_DOCUMENT_TYPES = [
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+];
+
 interface DocumentUploaderProps {
     onFileSelect: (file: any) => void;
     label?: string;
@@ -55,7 +60,7 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
             }
 
             const result = await DocumentPicker.getDocumentAsync({
-                type: 'application/pdf', // Limit to PDFs for now, or '*/*'
+                type: ACCEPTED_DOCUMENT_TYPES,
                 copyToCacheDirectory: DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
             });
 
@@ -98,7 +103,7 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
                 >
                     <Ionicons name="cloud-upload-outline" size={24} color={colors.primary} />
                     <Text style={[styles.uploadText, { color: colors.text }]}>
-                        {checking ? 'Opening documents...' : 'Select PDF Document'}
+                        {checking ? 'Opening documents...' : 'Select PDF or DOCX Document'}
                     </Text>
                 </TouchableOpacity>
             ) : (

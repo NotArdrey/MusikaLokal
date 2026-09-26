@@ -12,6 +12,7 @@ import Modal, { normalizeConfirmationInput } from '../../src/components/modal';
 import MusicianWorkspaceTabs from '../../src/components/MusicianWorkspaceTabs';
 import Navbar from '../../src/components/navbar';
 import Skeleton from '../../src/components/Skeleton';
+import StaffWorkspaceTabs from '../../src/components/StaffWorkspaceTabs';
 import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -186,6 +187,7 @@ export default function MyProductionScreen() {
           {isMusicianView && (
             <MusicianWorkspaceTabs activeKey="producer" />
           )}
+          {userRole === 'staff' && <StaffWorkspaceTabs activeKey="production" />}
 
           <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>PROJECTS & COLLABORATORS</Text>
 
