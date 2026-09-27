@@ -46,8 +46,27 @@ async function insertCoreNotification(supabaseClient: any, payload: Record<strin
     })
 }
 
+async function getProfileRole(client: any, userId: string): Promise<string | null> {
+    if (!userId) return null
+
+    const { data, error } = await client
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .maybeSingle()
+
+    if (error) throw error
+
+    return typeof data?.role === 'string' ? data.role.trim().toLowerCase() : null
+}
+
 async function getVenueStaffAccessLevel(client: any, userId: string, gigId: string): Promise<number | null> {
     if (!userId || !gigId) return null
+    const { data: isActiveStaff, error: activeStaffError } = await client.rpc('is_active_staff', {
+        p_user_id: userId,
+    })
+    if (activeStaffError) throw activeStaffError
+    if (!isActiveStaff) return null
 
     const { data, error } = await client
         .from('staff_listing_access')
@@ -291,15 +310,53 @@ const FEATURE_CONSENT_SELECT = `
 const ORGANIZER_APPLICATION_SELECT = `
     *,
     gig:gig_id(name, organizer_id),
-    applicant:applicant_id(full_name),
-    group:group_id(name),
+    applicant:applicant_id(id, full_name),
+    group:group_id(id, name, owner_id),
     production_team:production_team_id(name),
     production_roster:production_roster_id(
+        id,
         entity_kind,
-        roster_profile:profile_id(full_name),
-        roster_group:group_id(name)
+        profile_id,
+        group_id,
+        roster_profile:profile_id(id, full_name),
+        roster_group:group_id(id, name, owner_id)
     )
 `
+
+async function hasApplicationActorConflict(client: any, application: any, actorUserId: string) {
+    const directActorIds = [
+        application?.applicant_id,
+        application?.submitted_by_user_id,
+        application?.production_roster?.profile_id,
+        application?.production_roster?.roster_profile?.id,
+    ]
+
+    if (directActorIds.some((value) => String(value || '') === actorUserId)) return true
+
+    const groupIds = Array.from(
+        new Set(
+            [
+                application?.group_id,
+                application?.group?.id,
+                application?.production_roster?.group_id,
+                application?.production_roster?.roster_group?.id,
+            ].filter((value): value is string => typeof value === 'string' && value.length > 0),
+        ),
+    )
+
+    for (const groupId of groupIds) {
+        const [{ data: ownedGroup, error: ownedGroupError }, { data: membership, error: membershipError }] = await Promise.all([
+            client.from('groups').select('id').eq('id', groupId).eq('owner_id', actorUserId).limit(1),
+            client.from('group_members').select('id').eq('group_id', groupId).eq('user_id', actorUserId).limit(1),
+        ])
+
+        if (ownedGroupError) throw ownedGroupError
+        if (membershipError) throw membershipError
+        if (ownedGroup?.length || membership?.length) return true
+    }
+
+    return false
+}
 
 function getApplicationStatusNotification(normalizedStatus: string, gigName: string, productionLabel = '') {
     if (normalizedStatus === 'rejected') {
@@ -1947,7 +2004,8 @@ Deno.serve(async (req: Request) => {
 
             if (teamMembershipError) throw teamMembershipError
 
-            if (!teamMembership) {
+            const currentProfileRole = await getProfileRole(supabaseClient, effectiveUserId)
+            if (!teamMembership || currentProfileRole !== 'producer') {
                 return new Response(
                     JSON.stringify({
                         error: 'Only production team owners or managers can send this application',
@@ -2262,14 +2320,35 @@ Deno.serve(async (req: Request) => {
             const venueStaffAccessLevel = appDetails?.gig_id
                 ? await getVenueStaffAccessLevel(supabaseClient, effectiveUserId, appDetails.gig_id)
                 : null
+            const currentProfileRole = await getProfileRole(supabaseClient, effectiveUserId)
+            const isCurrentVenueOwner =
+                appDetails?.gig?.organizer_id === effectiveUserId && currentProfileRole === 'venue-owner'
             if (
                 !appDetails ||
-                (appDetails.gig?.organizer_id !== effectiveUserId &&
-                    !(venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2))
+                (!isCurrentVenueOwner && !(venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2))
             ) {
                 return new Response(JSON.stringify({ error: 'Forbidden' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 403,
+                })
+            }
+
+            if (await hasApplicationActorConflict(supabaseClient, appDetails, effectiveUserId)) {
+                return new Response(JSON.stringify({ error: 'You cannot decide an application in which you are the applicant or represented performer' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                })
+            }
+
+            const organizerTransitions: Record<string, string[]> = {
+                pending: ['accepted', 'approved', 'rejected', 'cancelled'],
+                accepted: ['completed', 'fired', 'cancelled'],
+                approved: ['completed', 'fired', 'cancelled'],
+            }
+            if (!(organizerTransitions[appDetails.status] || []).includes(normalizedStatus)) {
+                return new Response(JSON.stringify({ error: 'This status transition is not allowed from the application\'s current state' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
                 })
             }
 
@@ -2328,6 +2407,7 @@ Deno.serve(async (req: Request) => {
                     .from('gig_applications')
                     .update({ status: normalizedStatus })
                     .eq('id', applicationId)
+                    .eq('status', appDetails.status)
                     .select()
                     .single()
 

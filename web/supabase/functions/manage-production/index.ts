@@ -39,10 +39,15 @@ function isMissingTableError(error: any, tableName: string) {
   );
 }
 
-async function getProductionStaffAccessLevel(supabaseAdmin: any, teamId: string, userId: string) {
+async function getProductionStaffAccess(supabaseAdmin: any, teamId: string, userId: string) {
+  const { data: isActiveStaff, error: activeStaffError } = await supabaseAdmin.rpc("is_active_staff", {
+    p_user_id: userId,
+  });
+  if (activeStaffError) throw activeStaffError;
+  if (!isActiveStaff) return null;
   const { data, error } = await supabaseAdmin
     .from("staff_listing_access")
-    .select("access_level")
+    .select("access_level, can_edit_listing, can_add_listing, can_delete_listing")
     .eq("staff_user_id", userId)
     .eq("entity_type", "production")
     .eq("production_team_id", teamId)
@@ -54,22 +59,31 @@ async function getProductionStaffAccessLevel(supabaseAdmin: any, teamId: string,
     throw error;
   }
 
-  return data?.access_level ? Number(data.access_level) : null;
+  return data
+    ? {
+        access_level: Number(data.access_level),
+        can_edit_listing: data.can_edit_listing === true,
+        can_add_listing: data.can_add_listing === true,
+        can_delete_listing: data.can_delete_listing === true,
+      }
+    : null;
 }
 
 async function getProductionEditorAccess(supabaseAdmin: any, teamId: string, userId: string) {
   const membership = await getTeamManagerMembership(supabaseAdmin, teamId, userId);
   if (membership) return { role: membership.role || "manager", staff_access_level: null };
 
-  const staffAccessLevel = await getProductionStaffAccessLevel(supabaseAdmin, teamId, userId);
-  if (staffAccessLevel === 1) {
-    return { role: "staff_level_1", staff_access_level: staffAccessLevel };
+  const staffAccess = await getProductionStaffAccess(supabaseAdmin, teamId, userId);
+  if (staffAccess?.can_edit_listing) {
+    return { role: "staff_editor", staff_access_level: staffAccess.access_level };
   }
 
   return null;
 }
 
 async function getTeamManagerMembership(supabaseAdmin: any, teamId: string, userId: string) {
+  if ((await getProfileRole(supabaseAdmin, userId)) !== "producer") return null;
+
   const { data } = await supabaseAdmin
     .from("production_team_members")
     .select("role")
@@ -1124,6 +1138,53 @@ function getProductionTeamIdFromRequest(request: any) {
   return null;
 }
 
+async function hasProductionApplicationConflict(
+  supabaseAdmin: any,
+  request: any,
+  actorUserId: string,
+) {
+  if (toNonEmptyString(request?.sender_id) === actorUserId) return true;
+  const eventDetails = request?.event_details && typeof request.event_details === "object"
+    ? request.event_details
+    : {};
+  const senderEntityType = normalizeConnectionEntityType(readEventString(eventDetails, "sender_entity_type"));
+  if (
+    senderEntityType === "musician" &&
+    readEventString(eventDetails, "sender_entity_id") === actorUserId
+  ) {
+    return true;
+  }
+
+  const rosterProfileId =
+    readEventString(eventDetails, "roster_profile_id") ||
+    readEventString(eventDetails, "production_roster_profile_id") ||
+    readEventString(eventDetails, "profile_id");
+  if (rosterProfileId === actorUserId) return true;
+
+  const groupIds = Array.from(
+    new Set(
+      [
+        toNonEmptyString(request?.group_id),
+        senderEntityType === "group" ? readEventString(eventDetails, "sender_entity_id") : null,
+        readEventString(eventDetails, "group_id"),
+        readEventString(eventDetails, "roster_group_id"),
+      ].filter((groupId): groupId is string => Boolean(groupId)),
+    ),
+  );
+
+  for (const groupId of groupIds) {
+    const [{ data: group, error: groupError }, { data: membership, error: membershipError }] = await Promise.all([
+      supabaseAdmin.from("groups").select("id").eq("id", groupId).eq("owner_id", actorUserId).limit(1),
+      supabaseAdmin.from("group_members").select("id").eq("group_id", groupId).eq("user_id", actorUserId).limit(1),
+    ]);
+    if (groupError) throw groupError;
+    if (membershipError) throw membershipError;
+    if (group?.length || membership?.length) return true;
+  }
+
+  return false;
+}
+
 const PRODUCTION_APPLICATION_STATUSES = [
   "pending",
   "accepted",
@@ -1527,6 +1588,27 @@ serve(async (req: Request) => {
           );
         }
 
+        if (isProductionTeamApplicationRequest({ event_details: eventDetails })) {
+          if (receiverUserId === authUser.id) {
+            return jsonResponse({ error: "You cannot submit a production application to yourself." }, 403);
+          }
+
+          const teamId = getProductionTeamIdFromRequest({ event_details: eventDetails });
+          const productionTeamEditor = teamId
+            ? await getProductionEditorAccess(supabaseAdmin, teamId, authUser.id)
+            : null;
+          if (
+            productionTeamEditor &&
+            await hasProductionApplicationConflict(
+              supabaseAdmin,
+              { sender_id: authUser.id, group_id: groupId, event_details: eventDetails },
+              authUser.id,
+            )
+          ) {
+            return jsonResponse({ error: "You cannot apply to a production team that you manage." }, 403);
+          }
+        }
+
         const duplicateValidation = await validateActiveListingRequestDuplicate(supabaseAdmin, {
           eventDetails,
           groupId,
@@ -1662,13 +1744,28 @@ serve(async (req: Request) => {
       const productionTeamManager = productionTeamApplicationId
         ? await getProductionEditorAccess(supabaseAdmin, productionTeamApplicationId, authUser.id)
         : null;
+      const productionTeamReceiverIsProducer = Boolean(
+        isProductionTeamApplication &&
+        requestRow.receiver_id === authUser.id &&
+        (await getProfileRole(supabaseAdmin, authUser.id)) === "producer"
+      );
+      const canActOnProductionApplication = Boolean(
+        productionTeamManager || productionTeamReceiverIsProducer
+      );
+      const hasApplicationConflict = Boolean(
+        isProductionTeamApplication &&
+        canActOnProductionApplication &&
+        await hasProductionApplicationConflict(supabaseAdmin, requestRow, authUser.id)
+      );
       const canRespond = productionTeamApplicationId
-        ? requestRow.receiver_id === authUser.id || !!productionTeamManager
+        ? !hasApplicationConflict && canActOnProductionApplication
         : requestRow.receiver_id === authUser.id ||
           (groupRecord?.owner_id && groupRecord.owner_id === authUser.id);
 
       if (!canRespond) {
-        return jsonResponse({ error: "Only the request recipient can respond" }, 403);
+        return jsonResponse({ error: hasApplicationConflict
+          ? "You cannot decide a production application in which you are the applicant or represented performer."
+          : "Only the request recipient can respond" }, 403);
       }
 
       let productionAcceptanceResult: any = null;
@@ -1805,17 +1902,42 @@ serve(async (req: Request) => {
     // ================================================================
 
     if (action === "create_production_team") {
-      const { name, description, logo_url } = params;
+      const { name, description, logo_url, owner_id } = params;
       if (!name?.trim()) return jsonResponse({ error: "Team name is required" }, 400);
 
       const callerRole = await getProfileRole(supabaseAdmin, authUser.id);
-      if (callerRole !== "producer") {
-        return jsonResponse({ error: "Only production users can create a production team" }, 403);
+      let effectiveOwnerId = authUser.id;
+      let sourceStaffAssignment: any = null;
+
+      if (callerRole === "staff") {
+        if (!owner_id) return jsonResponse({ error: "An assigned production owner is required" }, 400);
+
+        const { data: assignments, error: assignmentsError } = await supabaseAdmin
+          .from("staff_listing_access")
+          .select("id, production_team_id, access_level, can_edit_listing, can_add_listing, can_delete_listing, can_manage_marketplace")
+          .eq("staff_user_id", authUser.id)
+          .eq("entity_type", "production")
+          .eq("can_add_listing", true)
+          .is("revoked_at", null);
+        if (assignmentsError) return jsonResponse({ error: assignmentsError.message }, 500);
+
+        const sourceTeamIds = (assignments || []).map((item: any) => item.production_team_id).filter(Boolean);
+        const { data: sourceTeam, error: sourceTeamError } = sourceTeamIds.length > 0
+          ? await supabaseAdmin.from("production_teams").select("id, owner_id").in("id", sourceTeamIds).eq("owner_id", owner_id).limit(1).maybeSingle()
+          : { data: null, error: null };
+        if (sourceTeamError) return jsonResponse({ error: sourceTeamError.message }, 500);
+        sourceStaffAssignment = (assignments || []).find((item: any) => item.production_team_id === sourceTeam?.id) || null;
+        if (!sourceTeam || !sourceStaffAssignment) {
+          return jsonResponse({ error: "Add listing permission is required to create a team for this owner" }, 403);
+        }
+        effectiveOwnerId = owner_id;
+      } else if (callerRole !== "producer") {
+        return jsonResponse({ error: "Only production users or staff with add listing permission can create a production team" }, 403);
       }
 
       const { data: team, error: teamErr } = await supabaseAdmin
         .from("production_teams")
-        .insert({ owner_id: authUser.id, name: name.trim(), description, logo_url })
+        .insert({ owner_id: effectiveOwnerId, name: name.trim(), description, logo_url })
         .select()
         .single();
 
@@ -1826,14 +1948,14 @@ serve(async (req: Request) => {
         .from("production_team_members")
         .upsert({
           team_id: team.id,
-          user_id: authUser.id,
+          user_id: effectiveOwnerId,
           role: "owner",
         }, { onConflict: "team_id,user_id" });
 
       if (ownerMemberError) {
         console.error("[manage-production] Failed to attach owner membership", {
           team_id: team.id,
-          user_id: authUser.id,
+          user_id: effectiveOwnerId,
           message: ownerMemberError.message,
           code: ownerMemberError.code,
           details: ownerMemberError.details,
@@ -1844,11 +1966,31 @@ serve(async (req: Request) => {
           .from("production_teams")
           .delete()
           .eq("id", team.id)
-          .eq("owner_id", authUser.id);
+          .eq("owner_id", effectiveOwnerId);
 
         return jsonResponse({
           error: `Failed to create production team membership: ${ownerMemberError.message}`,
         }, 500);
+      }
+
+      if (sourceStaffAssignment) {
+        const { error: staffAssignmentError } = await supabaseAdmin
+          .from("staff_listing_access")
+          .insert({
+            staff_user_id: authUser.id,
+            entity_type: "production",
+            production_team_id: team.id,
+            access_level: sourceStaffAssignment.access_level,
+            can_edit_listing: sourceStaffAssignment.can_edit_listing === true,
+            can_add_listing: sourceStaffAssignment.can_add_listing === true,
+            can_delete_listing: sourceStaffAssignment.can_delete_listing === true,
+            can_manage_marketplace: sourceStaffAssignment.can_manage_marketplace === true,
+            created_by: authUser.id,
+          });
+        if (staffAssignmentError) {
+          await supabaseAdmin.from("production_teams").delete().eq("id", team.id);
+          return jsonResponse({ error: `Failed to assign the new team to staff: ${staffAssignmentError.message}` }, 500);
+        }
       }
 
       return jsonResponse({ success: true, team });
@@ -1904,8 +2046,14 @@ serve(async (req: Request) => {
         .maybeSingle();
 
       if (!team) return jsonResponse({ error: "Production team not found" }, 404);
-      if (team.owner_id !== authUser.id) {
-        return jsonResponse({ error: "Only the team owner can delete this team" }, 403);
+      const staffAccess = team.owner_id === authUser.id
+        ? null
+        : await getProductionStaffAccess(supabaseAdmin, team_id, authUser.id);
+      if (team.owner_id !== authUser.id && !staffAccess?.can_delete_listing) {
+        return jsonResponse({ error: "Only the team owner or staff with delete permission can delete this team" }, 403);
+      }
+      if (team.owner_id === authUser.id && (await getProfileRole(supabaseAdmin, authUser.id)) !== "producer") {
+        return jsonResponse({ error: "Only current producer profiles can delete a production team" }, 403);
       }
 
 
@@ -1929,8 +2077,7 @@ serve(async (req: Request) => {
       const { error: teamDeleteError } = await supabaseAdmin
         .from("production_teams")
         .delete()
-        .eq("id", team_id)
-        .eq("owner_id", authUser.id);
+        .eq("id", team_id);
 
       if (teamDeleteError) return jsonResponse({ error: teamDeleteError.message }, 500);
 
@@ -2079,8 +2226,8 @@ serve(async (req: Request) => {
         .eq("user_id", authUser.id)
         .maybeSingle();
 
-      const staffAccessLevel = membership ? null : await getProductionStaffAccessLevel(supabaseAdmin, team_id, authUser.id);
-      if (!membership && !staffAccessLevel) {
+      const staffAccess = membership ? null : await getProductionStaffAccess(supabaseAdmin, team_id, authUser.id);
+      if (!membership && !staffAccess) {
         return jsonResponse({ error: "Only team members can view this roster" }, 403);
       }
 
@@ -2479,9 +2626,14 @@ serve(async (req: Request) => {
       const userRole = await getProfileRole(supabaseAdmin, authUser.id);
       let staffTeamRows: any[] = [];
       if (userRole === "staff") {
+        const { data: isActiveStaff, error: activeStaffError } = await supabaseAdmin.rpc("is_active_staff", {
+          p_user_id: authUser.id,
+        });
+        if (activeStaffError) return jsonResponse({ error: activeStaffError.message }, 500);
+        if (!isActiveStaff) return jsonResponse({ teams: [] });
         const { data: staffAssignments, error: staffAssignmentsError } = await supabaseAdmin
           .from("staff_listing_access")
-          .select("access_level, production_team:production_team_id(*)")
+          .select("access_level, can_edit_listing, can_add_listing, can_delete_listing, production_team:production_team_id(*)")
           .eq("staff_user_id", authUser.id)
           .eq("entity_type", "production")
           .is("revoked_at", null);
@@ -2545,7 +2697,10 @@ serve(async (req: Request) => {
           ...teamRecord,
           member_role: "staff",
           staff_access_level: Number(staffRow.access_level),
-          staff_can_edit: Number(staffRow.access_level) === 1,
+          staff_can_edit: staffRow.can_edit_listing === true,
+          staff_can_edit_listing: staffRow.can_edit_listing === true,
+          staff_can_add_listing: staffRow.can_add_listing === true,
+          staff_can_delete_listing: staffRow.can_delete_listing === true,
           staff_can_manage_bookings: Number(staffRow.access_level) <= 2,
         });
       }

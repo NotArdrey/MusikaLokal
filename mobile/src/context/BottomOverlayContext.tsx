@@ -216,6 +216,17 @@ export function BottomOverlayProvider({ children }: { children: ReactNode }) {
     const activeOverlays = activeOverlaysRef.current;
     const clearedLabels = getActiveOverlayLabels(activeOverlays);
 
+    // Focus effects call this defensively whenever a tab becomes active. Treat an
+    // already-clear registry as a no-op; incrementing the reset signal here makes
+    // every overlay consumer render again and can feed back into the navigator's
+    // focus lifecycle indefinitely.
+    if (
+      activeOverlays.size === 0 &&
+      !lastOverlaySnapshotRef.current.active
+    ) {
+      return;
+    }
+
     logBottomOverlayDebug("clear", {
       activeCount: activeOverlays.size,
       labels: clearedLabels,

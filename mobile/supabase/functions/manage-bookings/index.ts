@@ -111,6 +111,12 @@ function normalizeTime(value?: string | null) {
   return `${hours}:${minutes}:${seconds}`;
 }
 
+function hasManilaDateTimePassed(date?: string | null, time?: string | null) {
+  if (!date || !time) return false;
+  const now = getManilaNowParts();
+  return `${now.date}T${now.time}` >= `${date}T${normalizeTime(time)}`;
+}
+
 function toHours(start: string, end: string) {
   const [startHour, startMinute] = start.split(":").map(Number);
   const [endHour, endMinute] = end.split(":").map(Number);
@@ -130,12 +136,16 @@ function toManilaDateTime(dateValue: string, timeValue: string): Date | null {
   return parsed;
 }
 
+function getManilaDayWindow(dateValue?: string | null) {
+  if (!dateValue) return null;
+  const start = toManilaDateTime(dateValue, "00:00:00");
+  const end = toManilaDateTime(dateValue, "23:59:59");
+  return start && end ? { start, end } : null;
+}
+
 function toGigEventStart(value: unknown): Date | null {
   if (!value) return null;
-  const parsed = new Date(String(value));
-  if (Number.isNaN(parsed.getTime())) return null;
-  parsed.setHours(0, 0, 0, 0);
-  return parsed;
+  return toManilaDateTime(String(value).slice(0, 10), "00:00:00");
 }
 
 function shouldPenalizeAcceptedGigWithdrawal({
@@ -612,6 +622,9 @@ type StaffAssignment = {
   gig_id: string | null;
   production_team_id: string | null;
   access_level: number;
+  can_edit_listing: boolean;
+  can_add_listing: boolean;
+  can_delete_listing: boolean;
 };
 
 function buildStaffContext(assignment: StaffAssignment | null) {
@@ -638,16 +651,27 @@ function buildStaffContext(assignment: StaffAssignment | null) {
     studio_id: assignment.studio_id,
     gig_id: assignment.gig_id,
     production_team_id: assignment.production_team_id,
-    can_edit_listing: assignment.access_level === 1,
+    can_edit_listing: assignment.can_edit_listing,
+    can_add_listing: assignment.can_add_listing,
+    can_delete_listing: assignment.can_delete_listing,
     can_manage_bookings: assignment.access_level === 1 || assignment.access_level === 2,
     view_only: assignment.access_level === 3,
   };
 }
 
+async function hasActiveStaffRole(supabaseAdmin: any, userId: string) {
+  const { data: isActiveStaff, error: activeStaffError } = await supabaseAdmin.rpc("is_active_staff", {
+    p_user_id: userId,
+  });
+  if (activeStaffError) throw activeStaffError;
+  return isActiveStaff === true;
+}
+
 async function getActiveStaffAssignments(supabaseAdmin: any, userId: string): Promise<StaffAssignment[]> {
+  if (!(await hasActiveStaffRole(supabaseAdmin, userId))) return [];
   const { data, error } = await supabaseAdmin
     .from("staff_listing_access")
-    .select("id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level")
+    .select("id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level, can_edit_listing, can_add_listing, can_delete_listing")
     .eq("staff_user_id", userId)
     .is("revoked_at", null);
 
@@ -669,11 +693,15 @@ async function getActiveStaffAssignments(supabaseAdmin: any, userId: string): Pr
       gig_id: row.gig_id || null,
       production_team_id: row.production_team_id || null,
       access_level: level,
+      can_edit_listing: row.can_edit_listing === true,
+      can_add_listing: row.can_add_listing === true,
+      can_delete_listing: row.can_delete_listing === true,
     }];
   });
 }
 
 async function getStaffAccessForStudio(supabaseAdmin: any, userId: string, studioId: string) {
+  if (!(await hasActiveStaffRole(supabaseAdmin, userId))) return null;
   const { data, error } = await supabaseAdmin
     .from("staff_listing_access")
     .select("access_level")
@@ -692,6 +720,7 @@ async function getStaffAccessForStudio(supabaseAdmin: any, userId: string, studi
 }
 
 async function getStaffAccessForGig(supabaseAdmin: any, userId: string, gigId: string) {
+  if (!(await hasActiveStaffRole(supabaseAdmin, userId))) return null;
   const { data, error } = await supabaseAdmin
     .from("staff_listing_access")
     .select("access_level")
@@ -710,6 +739,7 @@ async function getStaffAccessForGig(supabaseAdmin: any, userId: string, gigId: s
 }
 
 async function getStaffAccessForProduction(supabaseAdmin: any, userId: string, teamId: string) {
+  if (!(await hasActiveStaffRole(supabaseAdmin, userId))) return null;
   const { data, error } = await supabaseAdmin
     .from("staff_listing_access")
     .select("access_level")
@@ -725,6 +755,35 @@ async function getStaffAccessForProduction(supabaseAdmin: any, userId: string, t
   }
 
   return data?.access_level ? Number(data.access_level) : null;
+}
+
+async function isUserRepresentedByGigApplication(supabaseAdmin: any, application: any, userId: string) {
+  if (!application || !userId) return false;
+  if (application.applicant_id === userId || application.submitted_by_user_id === userId) return true;
+
+  const groupIds = new Set<string>();
+  if (application.group_id) groupIds.add(application.group_id);
+
+  if (application.production_roster_id) {
+    const { data: roster, error: rosterError } = await supabaseAdmin
+      .from("production_team_roster")
+      .select("profile_id, group_id")
+      .eq("id", application.production_roster_id)
+      .maybeSingle();
+    if (rosterError) throw rosterError;
+    if (roster?.profile_id === userId) return true;
+    if (roster?.group_id) groupIds.add(roster.group_id);
+  }
+
+  if (groupIds.size === 0) return false;
+  const ids = Array.from(groupIds);
+  const [{ data: ownedGroup, error: ownedGroupError }, { data: membership, error: membershipError }] = await Promise.all([
+    supabaseAdmin.from("groups").select("id").in("id", ids).eq("owner_id", userId).limit(1),
+    supabaseAdmin.from("group_members").select("group_id").in("group_id", ids).eq("user_id", userId).limit(1),
+  ]);
+  if (ownedGroupError) throw ownedGroupError;
+  if (membershipError) throw membershipError;
+  return Boolean(ownedGroup?.length || membership?.length);
 }
 
 const GIG_APPLICATION_BOOKING_SELECT = `
@@ -1317,8 +1376,8 @@ serve(async (req: Request) => {
         // Process Studio Bookings
         // @ts-ignore
         bookings?.forEach((b: any) => {
-          const bookingDate = new Date(`${b.booking_date}T${b.start_time}`);
-          const endDate = new Date(`${b.booking_date}T${b.end_time}`);
+          const bookingDate = toManilaDateTime(b.booking_date, b.start_time);
+          const endDate = toManilaDateTime(b.booking_date, b.end_time);
           const isVenue = false;
 
           // DEBUG: Log date parsing for first few items
@@ -1403,7 +1462,7 @@ serve(async (req: Request) => {
           if (b.status === "pending" || b.status === "pending_relocation") {
             // @ts-ignore
             categorized.Pending.push(item);
-          } else if (b.status === "confirmed") {
+          } else if (b.status === "confirmed" && bookingDate && endDate) {
             if (now > endDate) {
               // AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
               // @ts-ignore
@@ -1416,7 +1475,7 @@ serve(async (req: Request) => {
               // @ts-ignore
               categorized.Upcoming.push(item);
             }
-          } else if (b.status === "checked_in") {
+          } else if (b.status === "checked_in" && endDate) {
             if (now > endDate) {
               // AUTO-COMPLETE: If checked_in and time passed, it's done. Move to Review.
               // @ts-ignore
@@ -1514,8 +1573,8 @@ serve(async (req: Request) => {
           bookings?.forEach((b: any) => {
             const itemStaffContext = staffContextForTarget("studio", b.studio_id);
             const staffCanAct = !itemStaffContext || itemStaffContext.can_manage_bookings;
-            const bookingDate = new Date(`${b.booking_date}T${b.start_time}`);
-            const endDate = new Date(`${b.booking_date}T${b.end_time}`);
+            const bookingDate = toManilaDateTime(b.booking_date, b.start_time);
+            const endDate = toManilaDateTime(b.booking_date, b.end_time);
             const lateReportMeta = lateReportByBooking.get(b.id);
 
             const customerName =
@@ -1613,7 +1672,7 @@ serve(async (req: Request) => {
             if (b.status === "pending" || b.status === "pending_relocation") {
               // @ts-ignore
               categorized.Pending.push(item);
-            } else if (b.status === "confirmed") {
+            } else if (b.status === "confirmed" && bookingDate && endDate) {
               if (now > endDate) {
                 // AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
                 // @ts-ignore
@@ -1626,7 +1685,7 @@ serve(async (req: Request) => {
                 // @ts-ignore
                 categorized.Upcoming.push(item);
               }
-            } else if (b.status === "checked_in") {
+            } else if (b.status === "checked_in" && endDate) {
               if (now > endDate) {
                 // AUTO-COMPLETE: If checked_in and time passed, it's done. Move to Review.
                 // @ts-ignore
@@ -1681,12 +1740,8 @@ serve(async (req: Request) => {
             gig?.event_date || g.created_at?.split("T")[0] || "TBA";
 
           // Parse event date for time-based categorization
-          let eventDate: Date | null = null;
-          if (gig?.event_date) {
-            eventDate = new Date(gig.event_date);
-            // Assume gig ends at midnight of the same day if no end time
-            eventDate.setHours(23, 59, 59, 999);
-          }
+          const eventWindow = getManilaDayWindow(gig?.event_date);
+          const eventDate = eventWindow?.end || null;
 
           const item = {
             id: g.id,
@@ -1757,8 +1812,7 @@ serve(async (req: Request) => {
           } else if (normalizedStatus === "accepted" || normalizedStatus === "approved") {
             // Time-based categorization for accepted gigs
             if (eventDate) {
-              const eventStart = new Date(gig.event_date);
-              eventStart.setHours(0, 0, 0, 0); // Start of event day
+              const eventStart = eventWindow?.start || eventDate;
 
               if (now >= eventStart && now <= eventDate) {
                 // Gig is happening today
@@ -1922,11 +1976,8 @@ serve(async (req: Request) => {
               app.production_roster?.roster_group?.name ||
               "Performer";
 
-            let eventDate: Date | null = null;
-            if (gig?.event_date) {
-              eventDate = new Date(gig.event_date);
-              eventDate.setHours(23, 59, 59, 999);
-            }
+            const eventWindow = getManilaDayWindow(gig?.event_date);
+            const eventDate = eventWindow?.end || null;
 
             const item = {
               id: app.id,
@@ -1994,8 +2045,7 @@ serve(async (req: Request) => {
               }
             } else if (normalizedStatus === "accepted" || normalizedStatus === "approved") {
               if (eventDate) {
-                const eventStart = new Date(gig.event_date);
-                eventStart.setHours(0, 0, 0, 0);
+                const eventStart = eventWindow?.start || eventDate;
 
                 if (now >= eventStart && now <= eventDate) {
                   // @ts-ignore
@@ -2091,11 +2141,8 @@ serve(async (req: Request) => {
               "Performer";
 
             // Parse event date for time-based categorization
-            let eventDate: Date | null = null;
-            if (gig?.event_date) {
-              eventDate = new Date(gig.event_date);
-              eventDate.setHours(23, 59, 59, 999);
-            }
+            const eventWindow = getManilaDayWindow(gig?.event_date);
+            const eventDate = eventWindow?.end || null;
 
             const item = {
               id: app.id,
@@ -2170,8 +2217,7 @@ serve(async (req: Request) => {
               }
             } else if (app.status === "accepted" || app.status === "approved") {
               if (eventDate) {
-                const eventStart = new Date(gig.event_date);
-                eventStart.setHours(0, 0, 0, 0);
+                const eventStart = eventWindow?.start || eventDate;
 
                 if (now >= eventStart && now <= eventDate) {
                   // Gig is happening today - Ongoing
@@ -3581,6 +3627,7 @@ serve(async (req: Request) => {
       }
 
       const updateData: any = { status: new_status };
+      let expectedPreviousStatus: string | null = null;
       let studioBalanceSettlement: any = null;
       let studioBalanceSettlementBooking: any = null;
       let ownerRequestedRelocationCancellation = false;
@@ -3588,7 +3635,7 @@ serve(async (req: Request) => {
       if (table === "studio_bookings") {
         const { data: targetBooking, error: targetBookingError } = await supabaseAdmin
           .from("studio_bookings")
-          .select("id, user_id, studio_id, status, payment_status, payment_amount, final_price, remaining_balance, paid_at, relocation_requested_at, relocation_expires_at, relocation_proposed_date, relocation_proposed_start_time, relocation_proposed_end_time, studio:studios(id, name, owner_id)")
+          .select("id, user_id, studio_id, booking_date, end_time, status, payment_status, payment_amount, final_price, remaining_balance, paid_at, relocation_requested_at, relocation_expires_at, relocation_proposed_date, relocation_proposed_start_time, relocation_proposed_end_time, studio:studios(id, name, owner_id)")
           .eq("id", booking_id)
           .maybeSingle();
 
@@ -3601,16 +3648,43 @@ serve(async (req: Request) => {
           });
         }
 
+        expectedPreviousStatus = targetBooking.status;
         const staffAccessLevel = await getStaffAccessForStudio(supabaseAdmin, authUser.id, targetBooking.studio_id);
+        const actorRole = await getRequesterRole(supabaseAdmin, authUser.id);
+        const isCustomer = targetBooking.user_id === authUser.id;
+        const isStudioOwner = actorRole === "studio-owner" && targetBooking.studio?.owner_id === authUser.id;
+        const isStudioStaffManager = actorRole === "staff" && staffAccessLevel !== null && staffAccessLevel <= 2;
+        const customerTransitions: Record<string, string[]> = {
+          pending: ["cancelled"],
+          confirmed: ["cancelled"],
+          pending_relocation: ["cancelled"],
+        };
+        const managerTransitions: Record<string, string[]> = {
+          pending: ["confirmed", "cancelled"],
+          confirmed: ["completed", "cancelled"],
+          checked_in: ["completed"],
+          pending_relocation: ["cancelled"],
+        };
+        const hasManagementConflict = isCustomer && (isStudioOwner || isStudioStaffManager);
         const canUpdateStudioBooking =
-          targetBooking.user_id === authUser.id ||
-          targetBooking.studio?.owner_id === authUser.id ||
-          (staffAccessLevel !== null && staffAccessLevel <= 2);
+          (isCustomer && (customerTransitions[targetBooking.status] || []).includes(new_status)) ||
+          (!hasManagementConflict && (isStudioOwner || isStudioStaffManager) &&
+            (managerTransitions[targetBooking.status] || []).includes(new_status));
 
         if (!canUpdateStudioBooking) {
-          return new Response(JSON.stringify({ error: "Forbidden" }), {
+          return new Response(JSON.stringify({ error: hasManagementConflict
+            ? "You cannot manage a studio booking in which you are the customer."
+            : "This status transition is not allowed for your role." }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
             status: 403,
+          });
+        }
+
+        if (new_status === "completed" &&
+          !hasManilaDateTimePassed(targetBooking.booking_date, targetBooking.end_time)) {
+          return new Response(JSON.stringify({ error: "A studio booking cannot be completed before its scheduled end time." }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
           });
         }
 
@@ -3635,8 +3709,7 @@ serve(async (req: Request) => {
         if (new_status === "completed") {
           studioBalanceSettlement = getStudioBookingBalanceSettlementFields(targetBooking);
           const canSettleBalance =
-            targetBooking.studio?.owner_id === authUser.id ||
-            (staffAccessLevel !== null && staffAccessLevel <= 2);
+            isStudioOwner || isStudioStaffManager;
 
           if (studioBalanceSettlement && !canSettleBalance) {
             return new Response(
@@ -3658,7 +3731,7 @@ serve(async (req: Request) => {
       if (table === "gig_applications") {
         const { data: targetApplication, error: targetError } = await supabaseAdmin
           .from("gig_applications")
-          .select("id, applicant_id, submitted_by_user_id, gig_id, production_team_id, status")
+          .select("id, applicant_id, submitted_by_user_id, group_id, gig_id, production_team_id, production_roster_id, status")
           .eq("id", booking_id)
           .maybeSingle();
 
@@ -3671,6 +3744,7 @@ serve(async (req: Request) => {
           });
         }
 
+        expectedPreviousStatus = targetApplication.status;
         const { data: targetGig, error: targetGigError } = await supabaseAdmin
           .from("gigs")
           .select("id, organizer_id, event_date")
@@ -3679,17 +3753,20 @@ serve(async (req: Request) => {
 
         if (targetGigError) throw targetGigError;
 
-        const isOrganizer = targetGig?.organizer_id === authUser.id;
+        const actorRole = await getRequesterRole(supabaseAdmin, authUser.id);
+        const isOrganizer = actorRole === "venue-owner" && targetGig?.organizer_id === authUser.id;
         const isApplicant =
-          targetApplication.applicant_id === authUser.id ||
-          targetApplication.submitted_by_user_id === authUser.id;
+          actorRole === "musician" && (
+            targetApplication.applicant_id === authUser.id ||
+            targetApplication.submitted_by_user_id === authUser.id
+          );
         let isProductionManager = false;
         const venueStaffAccessLevel = await getStaffAccessForGig(supabaseAdmin, authUser.id, targetApplication.gig_id);
         const productionStaffAccessLevel = targetApplication.production_team_id
           ? await getStaffAccessForProduction(supabaseAdmin, authUser.id, targetApplication.production_team_id)
           : null;
-        const isVenueStaffManager = venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2;
-        const isProductionStaffManager = productionStaffAccessLevel !== null && productionStaffAccessLevel <= 2;
+        const isVenueStaffManager = actorRole === "staff" && venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2;
+        const isProductionStaffManager = actorRole === "staff" && productionStaffAccessLevel !== null && productionStaffAccessLevel <= 2;
 
         if (targetApplication.production_team_id) {
           const { data: productionMembership, error: productionMembershipError } =
@@ -3702,21 +3779,44 @@ serve(async (req: Request) => {
               .maybeSingle();
 
           if (productionMembershipError) throw productionMembershipError;
-          isProductionManager = !!productionMembership;
+          isProductionManager = actorRole === "producer" && !!productionMembership;
         }
 
-        const organizerAllowedStatuses = ["accepted", "rejected", "completed", "cancelled", "fired"];
-        const applicantAllowedStatuses = ["cancelled", "resigned"];
-        const productionManagerAllowedStatuses = ["cancelled", "resigned", "fired"];
+        const hasPerformerConflict = await isUserRepresentedByGigApplication(
+          supabaseAdmin,
+          targetApplication,
+          authUser.id,
+        );
+        const canUseManagerAuthority = !hasPerformerConflict;
+
+        const organizerTransitions: Record<string, string[]> = {
+          pending: ["accepted", "approved", "rejected", "cancelled"],
+          accepted: ["completed", "fired", "cancelled"],
+          approved: ["completed", "fired", "cancelled"],
+        };
+        const applicantTransitions: Record<string, string[]> = {
+          pending: ["cancelled", "resigned"],
+          accepted: ["cancelled", "resigned"],
+          approved: ["cancelled", "resigned"],
+        };
+        const productionManagerTransitions: Record<string, string[]> = {
+          accepted: ["cancelled", "resigned", "fired"],
+          approved: ["cancelled", "resigned", "fired"],
+        };
+        const organizerTransitionAllowed = (organizerTransitions[targetApplication.status] || []).includes(new_status);
+        const applicantTransitionAllowed = (applicantTransitions[targetApplication.status] || []).includes(new_status);
+        const productionTransitionAllowed = (productionManagerTransitions[targetApplication.status] || []).includes(new_status);
 
         if (
-          !(isOrganizer && organizerAllowedStatuses.includes(new_status)) &&
-          !(isApplicant && applicantAllowedStatuses.includes(new_status)) &&
-          !(isProductionManager && productionManagerAllowedStatuses.includes(new_status)) &&
-          !(isVenueStaffManager && organizerAllowedStatuses.includes(new_status)) &&
-          !(isProductionStaffManager && productionManagerAllowedStatuses.includes(new_status))
+          !(canUseManagerAuthority && isOrganizer && organizerTransitionAllowed) &&
+          !(isApplicant && applicantTransitionAllowed) &&
+          !(canUseManagerAuthority && isProductionManager && productionTransitionAllowed) &&
+          !(canUseManagerAuthority && isVenueStaffManager && organizerTransitionAllowed) &&
+          !(canUseManagerAuthority && isProductionStaffManager && productionTransitionAllowed)
         ) {
-          return new Response(JSON.stringify({ error: "Forbidden" }), {
+          return new Response(JSON.stringify({ error: hasPerformerConflict && !applicantTransitionAllowed
+            ? "You cannot manage an application in which you are a represented performer."
+            : "This status transition is not allowed from the application's current state." }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
             status: 403,
           });
@@ -3745,7 +3845,15 @@ serve(async (req: Request) => {
       let data: any = null;
       let error: any = null;
 
-      if (table === "gig_applications" && new_status === "rejected") {
+      if (table === "gig_applications" && ["accepted", "approved"].includes(new_status)) {
+        const result = await supabaseAdmin.rpc("accept_gig_application_safely", {
+          p_application_id: booking_id,
+          p_actor_user_id: authUser.id,
+          p_new_status: new_status,
+        });
+        data = result.data;
+        error = result.error;
+      } else if (table === "gig_applications" && new_status === "rejected") {
         const result = await supabaseAdmin.rpc("decline_gig_application_safely", {
           p_application_id: booking_id,
           p_actor_user_id: authUser.id,
@@ -3766,6 +3874,7 @@ serve(async (req: Request) => {
           .from(table)
           .update(updateData)
           .eq("id", booking_id)
+          .eq("status", expectedPreviousStatus)
           .select()
           .maybeSingle();
         data = result.data;
@@ -4372,9 +4481,12 @@ serve(async (req: Request) => {
       }
 
       const staffAccessLevel = await getStaffAccessForStudio(supabaseAdmin, authUser.id, bookingDetails.studio_id);
+      const actorRole = await getRequesterRole(supabaseAdmin, authUser.id);
       const canApprovePartialSlots =
-        bookingDetails.studio?.owner_id === authUser.id ||
-        (staffAccessLevel !== null && staffAccessLevel <= 2);
+        bookingDetails.user_id !== authUser.id && (
+          (actorRole === "studio-owner" && bookingDetails.studio?.owner_id === authUser.id) ||
+          (actorRole === "staff" && staffAccessLevel !== null && staffAccessLevel <= 2)
+        );
 
       if (!canApprovePartialSlots) {
         return new Response(
@@ -4565,136 +4677,155 @@ serve(async (req: Request) => {
 
     // 4. CREATE REVIEW
     if (action === "create_review") {
-      const {
-        userId,
-        rating,
-        content,
-        studioId,
-        gigId,
-        groupId,
-        targetUserId, // For reviewing a user (musician or owner)
-        bookingId,
-        bookingType, // 'studio_booking' or 'gig_application'
-        reviewerRole, // 'customer' or 'owner' / 'applicant' or 'organizer'
-      } = params;
+      const { userId, rating, content, bookingId, bookingType } = params;
+      if (userId && userId !== authUser.id) {
+        return new Response(JSON.stringify({ error: "Forbidden: userId mismatch" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+      if (!bookingId || !["studio_booking", "gig_application"].includes(bookingType)) {
+        return new Response(JSON.stringify({ error: "A valid booking is required to submit a review." }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+      const normalizedRating = Number(rating);
+      if (!Number.isInteger(normalizedRating) || normalizedRating < 1 || normalizedRating > 5) {
+        return new Response(JSON.stringify({ error: "Rating must be an integer from 1 to 5." }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
 
-      // Enforce role ownership against the booking to avoid mis-targeted reviews.
-      if (bookingId && bookingType === "studio_booking") {
-        const { data: bookingAuth, error: bookingAuthError } = await supabaseClient
+      const actorId = authUser.id;
+      const actorRole = await getRequesterRole(supabaseAdmin, actorId);
+      let reviewerRole: "customer" | "owner" | "applicant" | "organizer";
+      const reviewData: any = {
+        author_id: actorId,
+        rating: normalizedRating,
+        content: content || null,
+      };
+
+      if (bookingType === "studio_booking") {
+        const { data: booking, error: bookingError } = await supabaseAdmin
           .from("studio_bookings")
-          .select("id, user_id, studio_id, studio:studios(owner_id)")
+          .select("id, user_id, studio_id, status, studio:studios(owner_id)")
           .eq("id", bookingId)
-          .single();
-
-        if (bookingAuthError || !bookingAuth) {
-          return new Response(
-            JSON.stringify({ error: "Studio booking not found." }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404 },
-          );
+          .maybeSingle();
+        if (bookingError) throw bookingError;
+        if (!booking) {
+          return new Response(JSON.stringify({ error: "Studio booking not found." }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404,
+          });
+        }
+        if (booking.status !== "completed") {
+          return new Response(JSON.stringify({ error: "Reviews are available only after the booking is completed." }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 409,
+          });
         }
 
-        const isStudioOwnerReviewer = reviewerRole === "owner" && bookingAuth.studio?.owner_id === userId;
-        const isCustomerReviewer = reviewerRole === "customer" && bookingAuth.user_id === userId;
-        const staffAccessLevel = reviewerRole === "owner"
-          ? await getStaffAccessForStudio(supabaseAdmin, userId, bookingAuth.studio_id)
-          : null;
-        const isStudioStaffReviewer = staffAccessLevel !== null && staffAccessLevel <= 2;
-
-        if (!isStudioOwnerReviewer && !isCustomerReviewer && !isStudioStaffReviewer) {
-          return new Response(
-            JSON.stringify({ error: "You are not allowed to submit this studio review." }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 },
-          );
+        const staffAccessLevel = await getStaffAccessForStudio(supabaseAdmin, actorId, booking.studio_id);
+        const isCustomer = booking.user_id === actorId;
+        const isOwner = actorRole === "studio-owner" && booking.studio?.owner_id === actorId;
+        const isStaffManager = actorRole === "staff" && staffAccessLevel !== null && staffAccessLevel <= 2;
+        if (isCustomer && (isOwner || isStaffManager)) {
+          return new Response(JSON.stringify({ error: "You cannot review a booking in which you are both customer and manager." }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
+          });
         }
-      }
-
-      if (bookingId && bookingType === "gig_application") {
-        const { data: appAuth, error: appAuthError } = await supabaseClient
+        if (isCustomer) {
+          reviewerRole = "customer";
+          reviewData.studio_id = booking.studio_id;
+        } else if (isOwner || isStaffManager) {
+          if (!booking.user_id || booking.user_id === actorId) {
+            return new Response(JSON.stringify({ error: "Self-reviews are not allowed." }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
+            });
+          }
+          reviewerRole = "owner";
+          reviewData.user_id = booking.user_id;
+        } else {
+          return new Response(JSON.stringify({ error: "You are not allowed to review this studio booking." }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
+          });
+        }
+        reviewData.studio_booking_id = bookingId;
+      } else {
+        const { data: application, error: applicationError } = await supabaseAdmin
           .from("gig_applications")
-          .select("id, applicant_id, group_id, gig_id, production_team_id, gig:gig_id(organizer_id)")
+          .select("id, applicant_id, submitted_by_user_id, group_id, gig_id, production_roster_id, status, gig:gig_id(organizer_id)")
           .eq("id", bookingId)
-          .single();
-
-        if (appAuthError || !appAuth) {
-          return new Response(
-            JSON.stringify({ error: "Gig application not found." }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404 },
-          );
+          .maybeSingle();
+        if (applicationError) throw applicationError;
+        if (!application) {
+          return new Response(JSON.stringify({ error: "Gig application not found." }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404,
+          });
+        }
+        if (application.status !== "completed") {
+          return new Response(JSON.stringify({ error: "Reviews are available only after the gig is completed." }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 409,
+          });
         }
 
-        const isOrganizerReviewer = reviewerRole === "organizer" && appAuth.gig?.organizer_id === userId;
-        const isApplicantReviewer = reviewerRole === "applicant" && appAuth.applicant_id === userId;
-        const venueStaffAccessLevel = reviewerRole === "organizer"
-          ? await getStaffAccessForGig(supabaseAdmin, userId, appAuth.gig_id)
-          : null;
-        const productionStaffAccessLevel = reviewerRole === "organizer" && appAuth.production_team_id
-          ? await getStaffAccessForProduction(supabaseAdmin, userId, appAuth.production_team_id)
-          : null;
-        const isGigStaffReviewer =
-          (venueStaffAccessLevel !== null && venueStaffAccessLevel <= 2) ||
-          (productionStaffAccessLevel !== null && productionStaffAccessLevel <= 2);
-
-        if (!isOrganizerReviewer && !isApplicantReviewer && !isGigStaffReviewer) {
-          return new Response(
-            JSON.stringify({ error: "You are not allowed to submit this gig review." }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 },
-          );
+        const staffAccessLevel = await getStaffAccessForGig(supabaseAdmin, actorId, application.gig_id);
+        const isApplicant = actorRole === "musician" && (
+          application.applicant_id === actorId || application.submitted_by_user_id === actorId
+        );
+        const isOrganizer = actorRole === "venue-owner" && application.gig?.organizer_id === actorId;
+        const isStaffManager = actorRole === "staff" && staffAccessLevel !== null && staffAccessLevel <= 2;
+        const isRepresentedPerformer = await isUserRepresentedByGigApplication(supabaseAdmin, application, actorId);
+        if (isRepresentedPerformer && (isOrganizer || isStaffManager)) {
+          return new Response(JSON.stringify({ error: "You cannot review an application in which you are also a represented performer." }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
+          });
         }
+        if (isApplicant) {
+          reviewerRole = "applicant";
+          reviewData.gig_id = application.gig_id;
+        } else if (isOrganizer || isStaffManager) {
+          reviewerRole = "organizer";
+          if (application.group_id) {
+            reviewData.group_id = application.group_id;
+          } else {
+            let targetProfileId = application.applicant_id;
+            if (application.production_roster_id) {
+              const { data: rosterTarget, error: rosterTargetError } = await supabaseAdmin
+                .from("production_team_roster")
+                .select("profile_id, group_id")
+                .eq("id", application.production_roster_id)
+                .maybeSingle();
+              if (rosterTargetError) throw rosterTargetError;
+              if (rosterTarget?.group_id) {
+                reviewData.group_id = rosterTarget.group_id;
+              } else if (rosterTarget?.profile_id) {
+                targetProfileId = rosterTarget.profile_id;
+              }
+            }
+            if (!reviewData.group_id && (!targetProfileId || targetProfileId === actorId)) {
+              return new Response(JSON.stringify({ error: "Self-reviews are not allowed." }), {
+                headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
+              });
+            }
+            if (!reviewData.group_id) reviewData.user_id = targetProfileId;
+          }
+        } else {
+          return new Response(JSON.stringify({ error: "You are not allowed to review this gig application." }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
+          });
+        }
+        reviewData.gig_application_id = bookingId;
       }
 
-      // Check for duplicate review.
-      // Prefer booking-level duplicate detection so users can review the same entity
-      // across different bookings/applications.
-      let existingReview = null;
-      if (bookingId && bookingType === "studio_booking") {
-        const { data } = await supabaseClient
-          .from("reviews")
-          .select("id")
-          .eq("author_id", userId)
-          .eq("studio_booking_id", bookingId)
-          .maybeSingle();
-        existingReview = data;
-      } else if (bookingId && bookingType === "gig_application") {
-        const { data } = await supabaseClient
-          .from("reviews")
-          .select("id")
-          .eq("author_id", userId)
-          .eq("gig_application_id", bookingId)
-          .maybeSingle();
-        existingReview = data;
-      } else if (studioId) {
-        const { data } = await supabaseClient
-          .from("reviews")
-          .select("id")
-          .eq("author_id", userId)
-          .eq("studio_id", studioId)
-          .maybeSingle();
-        existingReview = data;
-      } else if (gigId) {
-        const { data } = await supabaseClient
-          .from("reviews")
-          .select("id")
-          .eq("author_id", userId)
-          .eq("gig_id", gigId)
-          .maybeSingle();
-        existingReview = data;
-      } else if (groupId) {
-        const { data } = await supabaseClient
-          .from("reviews")
-          .select("id")
-          .eq("author_id", userId)
-          .eq("group_id", groupId)
-          .maybeSingle();
-        existingReview = data;
-      } else if (targetUserId) {
-        const { data } = await supabaseClient
-          .from("reviews")
-          .select("id")
-          .eq("author_id", userId)
-          .eq("user_id", targetUserId)
-          .maybeSingle();
-        existingReview = data;
-      }
+      const duplicateColumn = bookingType === "studio_booking" ? "studio_booking_id" : "gig_application_id";
+      const { data: existingReview, error: existingReviewError } = await supabaseAdmin
+        .from("reviews")
+        .select("id")
+        .eq("author_id", actorId)
+        .eq(duplicateColumn, bookingId)
+        .maybeSingle();
+      if (existingReviewError) throw existingReviewError;
 
       if (existingReview) {
         return new Response(
@@ -4708,23 +4839,7 @@ serve(async (req: Request) => {
         );
       }
 
-      // Insert the review
-      const reviewData: any = {
-        author_id: userId,
-        rating,
-        content: content || null,
-      };
-
-      if (studioId) reviewData.studio_id = studioId;
-      if (gigId) reviewData.gig_id = gigId;
-      if (groupId) reviewData.group_id = groupId;
-      if (targetUserId) reviewData.user_id = targetUserId;
-      if (bookingId && bookingType === "studio_booking")
-        reviewData.studio_booking_id = bookingId;
-      if (bookingId && bookingType === "gig_application")
-        reviewData.gig_application_id = bookingId;
-
-      const { data: review, error: reviewError } = await supabaseClient
+      const { data: review, error: reviewError } = await supabaseAdmin
         .from("reviews")
         .insert(reviewData)
         .select()
@@ -4738,30 +4853,16 @@ serve(async (req: Request) => {
           reviewerRole === "customer"
             ? "reviewed_by_customer"
             : "reviewed_by_owner";
-        await supabaseClient
+        await supabaseAdmin
           .from("studio_bookings")
           .update({ [updateField]: true })
           .eq("id", bookingId);
-
-        // Check if BOTH have reviewed -> mark as completed
-        const { data: booking } = await supabaseClient
-          .from("studio_bookings")
-          .select("reviewed_by_customer, reviewed_by_owner")
-          .eq("id", bookingId)
-          .single();
-
-        if (booking?.reviewed_by_customer && booking?.reviewed_by_owner) {
-          await supabaseClient
-            .from("studio_bookings")
-            .update({ status: "completed" })
-            .eq("id", bookingId);
-        }
       } else if (bookingId && bookingType === "gig_application") {
         const updateField =
           reviewerRole === "applicant"
             ? "reviewed_by_applicant"
             : "reviewed_by_organizer";
-        await supabaseClient
+        await supabaseAdmin
           .from("gig_applications")
           .update({ [updateField]: true })
           .eq("id", bookingId);

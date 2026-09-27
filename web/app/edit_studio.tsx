@@ -952,7 +952,7 @@ export default function EditStudioScreen() {
 
       if (!canEditStudio && profile?.role === "staff") {
         const assignment = await fetchActiveStaffAssignment(supabase, user.id, 'studio', studioId);
-        const permissions = getStaffPermissions(assignment?.access_level);
+        const permissions = getStaffPermissions(assignment?.access_level, assignment);
         canEditStudio =
           assignment?.entity_type === "studio" &&
           assignment.studio_id === studioId &&

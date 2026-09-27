@@ -3,7 +3,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { StyleProp, StyleSheet, TextStyle, ViewStyle } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
-import { fetchActiveStaffAssignments, StaffEntityType } from "../utils/staffAccess";
+import {
+  fetchActiveStaffAssignments,
+  getCachedActiveStaffAssignments,
+  StaffEntityType,
+} from "../utils/staffAccess";
 import SlidingTabBar from "./SlidingTabBar";
 import { useTheme } from "../context/ThemeContext";
 
@@ -19,11 +23,24 @@ const STAFF_WORKSPACES = [
   { key: "production", label: "Productions", route: "/my_production" },
 ] as const;
 
+const getAssignedEntityTypes = (userId: string | null | undefined) => {
+  if (!userId) return [];
+  const assignments = getCachedActiveStaffAssignments(userId);
+  if (!assignments) return [];
+  const assignedTypes = new Set(assignments.map((assignment) => assignment.entity_type));
+  return STAFF_WORKSPACES.map((workspace) => workspace.key).filter((key) => assignedTypes.has(key));
+};
+
+const haveSameEntityTypes = (
+  current: StaffEntityType[],
+  next: StaffEntityType[],
+) => current.length === next.length && current.every((value, index) => value === next[index]);
+
 export default function StaffWorkspaceTabs({ activeKey, style, textStyle }: StaffWorkspaceTabsProps) {
   const { colors } = useTheme();
   const { userId, userRole } = useAuth();
   const pathname = usePathname();
-  const [entityTypes, setEntityTypes] = useState<StaffEntityType[]>([]);
+  const [entityTypes, setEntityTypes] = useState<StaffEntityType[]>(() => getAssignedEntityTypes(userId));
 
   useEffect(() => {
     let active = true;
@@ -36,10 +53,17 @@ export default function StaffWorkspaceTabs({ activeKey, style, textStyle }: Staf
       .then((assignments) => {
         if (!active) return;
         const assignedTypes = new Set(assignments.map((assignment) => assignment.entity_type));
-        setEntityTypes(STAFF_WORKSPACES.map((workspace) => workspace.key).filter((key) => assignedTypes.has(key)));
+        const nextEntityTypes = STAFF_WORKSPACES
+          .map((workspace) => workspace.key)
+          .filter((key) => assignedTypes.has(key));
+        setEntityTypes((current) => (
+          haveSameEntityTypes(current, nextEntityTypes) ? current : nextEntityTypes
+        ));
       })
       .catch(() => {
-        if (active) setEntityTypes([]);
+        if (active) {
+          setEntityTypes((current) => (current.length === 0 ? current : []));
+        }
       });
 
     return () => { active = false; };
@@ -53,6 +77,10 @@ export default function StaffWorkspaceTabs({ activeKey, style, textStyle }: Staf
     const activeTab = visibleTabs.find((tab) => pathname.includes(tab.route));
     return activeTab?.key ?? activeKey;
   }, [activeKey, pathname, visibleTabs]);
+  const tabItems = useMemo(
+    () => visibleTabs.map((tab) => ({ key: tab.key, label: tab.label })),
+    [visibleTabs],
+  );
 
   if (visibleTabs.length <= 1) return null;
 
@@ -68,9 +96,10 @@ export default function StaffWorkspaceTabs({ activeKey, style, textStyle }: Staf
         const nextTab = visibleTabs.find((tab) => tab.key === nextKey);
         if (nextTab && nextKey !== routeActiveKey) router.replace(nextTab.route as any);
       }}
-      optimisticPress={false}
+      deferOnChange
+      optimisticPress
       style={[styles.container, style]}
-      tabs={visibleTabs.map((tab) => ({ key: tab.key, label: tab.label }))}
+      tabs={tabItems}
       textStyle={[styles.label, textStyle]}
     />
   );

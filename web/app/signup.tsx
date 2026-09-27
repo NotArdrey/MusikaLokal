@@ -2055,9 +2055,25 @@ export default function SignupScreen() {
             }
 
             if (authData.user) {
+                const signupAccessToken = authData.session?.access_token || null;
+
                 // FORCE CREATE PROFILE (Via Edge Function to Bypass RLS)
                 // Use retry mechanism to handle race conditions with auth user propagation
                 const createProfileWithRetry = async (retries = 0): Promise<boolean> => {
+                    // Email-confirmation signups intentionally have no session yet. In
+                    // that case the auth/profile trigger or first-login repair owns
+                    // profile creation; never fall back to an unauthenticated service
+                    // role request.
+                    if (!signupAccessToken) {
+                        logDiditEmailFlow('profile.create.skipped_no_session', {
+                            userId: authData.user!.id,
+                            email: maskEmailForLog(email),
+                            diditSessionId: refToLink,
+                            platform: Platform.OS,
+                        });
+                        return false;
+                    }
+
                     const attempt = retries + 1;
                     try {
                         logDiditEmailFlow('profile.create.start', {
@@ -2072,6 +2088,7 @@ export default function SignupScreen() {
                         });
 
                         const { data: profileData, error: profileError } = await supabase.functions.invoke('manage-profile', {
+                            headers: { Authorization: `Bearer ${signupAccessToken}` },
                             body: {
                                 action: 'create',
                                 userId: authData.user!.id,

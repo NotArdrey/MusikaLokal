@@ -28,7 +28,11 @@ Deno.serve(async (req) => {
     // Fetch the HTML from storage and serve it directly with the correct Content-Type
     // This prevents the "Raw HTML" display issue and keeps the URL as 'verification-redirect'
     // which helps the app's interceptor catch it.
-    const storageUrl = "https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/public-assets/verification-v2.html";
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    if (!supabaseUrl) {
+        return new Response("SUPABASE_URL is not configured", { status: 500 });
+    }
+    const storageUrl = `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/public/public-assets/verification-v2.html`;
 
     try {
         const htmlResponse = await fetch(storageUrl);

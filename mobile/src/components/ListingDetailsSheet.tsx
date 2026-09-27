@@ -1185,7 +1185,7 @@ const ListingDetailsSheet = forwardRef<
         staffAssignment.production_team_id === group.id)
     );
   const assignedStaffPermissions = staffTargetMatchesListing
-    ? getStaffPermissions(staffAssignment?.access_level)
+    ? getStaffPermissions(staffAssignment?.access_level, staffAssignment)
     : null;
   const isAssignedStaffListing = userRole === "staff" && staffTargetMatchesListing;
   const showReportButton = !!group && !isOwnListing && !isGuest && !isAssignedStaffListing;
@@ -1206,6 +1206,31 @@ const ListingDetailsSheet = forwardRef<
       pathname: mode === "edit" ? "/edit_production" : "/production_team",
       params: mode === "edit" ? { id: group.id } : { teamId: group.id },
     });
+  };
+  const openAssignedStaffAdd = () => {
+    if (!listingOwnerId || !staffAssignment) return;
+    (ref as any)?.current?.dismiss();
+
+    if (staffAssignment.entity_type === "studio") {
+      router.push({ pathname: "/add_studio", params: { ownerId: listingOwnerId } });
+      return;
+    }
+    if (staffAssignment.entity_type === "venue") {
+      router.push({ pathname: "/add_gig", params: { ownerId: listingOwnerId } });
+      return;
+    }
+    router.push({ pathname: "/add_production", params: { ownerId: listingOwnerId } });
+  };
+  const openAssignedStaffDelete = () => {
+    if (!group?.id || !staffAssignment) return;
+    (ref as any)?.current?.dismiss();
+
+    const pathname = staffAssignment.entity_type === "studio"
+      ? "/my_studio"
+      : staffAssignment.entity_type === "venue"
+        ? "/my_venue"
+        : "/my_production";
+    router.push({ pathname: pathname as any, params: { deleteId: group.id } });
   };
 
   const submitReport = async (reason: string, details?: string) => {
@@ -1293,7 +1318,7 @@ const ListingDetailsSheet = forwardRef<
         url: shareUrl,
       });
     } catch {
-      // user cancelled or share failed — no action needed
+      // user cancelled or share failed â€” no action needed
     }
   };
 
@@ -4644,7 +4669,12 @@ const ListingDetailsSheet = forwardRef<
         onChat={isGuest || isFan || isAssignedStaffListing ? undefined : openListingChat}
       />
 
-      {isAssignedStaffListing && (assignedStaffPermissions?.canManageBookings || assignedStaffPermissions?.canEditListing) ? (
+      {isAssignedStaffListing && (
+        assignedStaffPermissions?.canManageBookings ||
+        assignedStaffPermissions?.canEditListing ||
+        assignedStaffPermissions?.canAddListing ||
+        assignedStaffPermissions?.canDeleteListing
+      ) ? (
         <View style={[styles.staffActionBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
           {assignedStaffPermissions?.canManageBookings ? (
             <TouchableOpacity
@@ -4664,6 +4694,26 @@ const ListingDetailsSheet = forwardRef<
             >
               <Ionicons name="pencil-outline" size={17} color={colors.text} />
               <Text style={[styles.staffSecondaryActionText, { color: colors.text }]}>Edit</Text>
+            </TouchableOpacity>
+          ) : null}
+          {assignedStaffPermissions?.canAddListing ? (
+            <TouchableOpacity
+              activeOpacity={0.82}
+              onPress={openAssignedStaffAdd}
+              style={[styles.staffSecondaryAction, { borderColor: colors.border }]}
+            >
+              <Ionicons name="add-outline" size={17} color={colors.text} />
+              <Text style={[styles.staffSecondaryActionText, { color: colors.text }]}>Add</Text>
+            </TouchableOpacity>
+          ) : null}
+          {assignedStaffPermissions?.canDeleteListing ? (
+            <TouchableOpacity
+              activeOpacity={0.82}
+              onPress={openAssignedStaffDelete}
+              style={[styles.staffSecondaryAction, { borderColor: "#EF4444" }]}
+            >
+              <Ionicons name="trash-outline" size={17} color="#EF4444" />
+              <Text style={[styles.staffSecondaryActionText, { color: "#EF4444" }]}>Delete</Text>
             </TouchableOpacity>
           ) : null}
         </View>
@@ -4994,6 +5044,7 @@ const ListingDetailsSheet = forwardRef<
 const styles = StyleSheet.create({
   staffActionBar: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
     marginHorizontal: 16,
     marginTop: 14,
@@ -5004,6 +5055,7 @@ const styles = StyleSheet.create({
   },
   staffPrimaryAction: {
     flex: 1,
+    minWidth: 104,
     minHeight: 42,
     borderRadius: 11,
     flexDirection: "row",
@@ -5018,6 +5070,7 @@ const styles = StyleSheet.create({
   },
   staffSecondaryAction: {
     flex: 1,
+    minWidth: 104,
     minHeight: 42,
     borderRadius: 11,
     borderWidth: 1,

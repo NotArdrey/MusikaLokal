@@ -37,23 +37,34 @@ export default function OrdersScreen() {
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { session, userRole, isGuest } = useAuth();
-  const isSeller = userRole === "producer" || userRole === "musician";
+  const normalizedUserRole = String(userRole || "").trim().toLowerCase();
+  const isMarketplaceOwner = ["producer", "venue-owner", "studio-owner"].includes(normalizedUserRole);
 
   const [tab, setTab] = useState<OrderTab>("my_orders");
   const [myOrders, setMyOrders] = useState<any[]>([]);
   const [sellerOrders, setSellerOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [canManageMarketplace, setCanManageMarketplace] = useState(isMarketplaceOwner);
 
   const fetchOrders = useCallback(async () => {
     if (!session) return;
     try {
+      let canManageSales = isMarketplaceOwner;
+      if (normalizedUserRole === "staff") {
+        const { data: accessData, error: accessError } = await supabase.functions.invoke("manage-marketplace", {
+          body: { action: "get_marketplace_access" },
+        });
+        canManageSales = !accessError && accessData?.data?.can_manage === true;
+      }
+      setCanManageMarketplace(canManageSales);
+
       const { data: myData } = await supabase.functions.invoke("manage-marketplace", {
         body: { action: "list_my_orders" },
       });
       if (myData?.data) setMyOrders(myData.data);
 
-      if (isSeller) {
+      if (canManageSales) {
         const { data: sellerData } = await supabase.functions.invoke("manage-marketplace", {
           body: { action: "list_seller_orders" },
         });
@@ -65,7 +76,7 @@ export default function OrdersScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [session, isSeller]);
+  }, [isMarketplaceOwner, normalizedUserRole, session]);
 
   useFocusEffect(useCallback(() => {
     let isActive = true;
@@ -139,7 +150,7 @@ export default function OrdersScreen() {
 
   const tabs: { key: OrderTab; label: string }[] = [
     { key: "my_orders", label: "My Orders" },
-    ...(isSeller ? [{ key: "seller_orders" as OrderTab, label: "Sales" }] : []),
+    ...(canManageMarketplace ? [{ key: "seller_orders" as OrderTab, label: "Sales" }] : []),
   ];
 
   return (

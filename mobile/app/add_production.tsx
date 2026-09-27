@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
@@ -39,6 +39,8 @@ export default function AddProductionScreen() {
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
   const { session, userRole } = useAuth();
+  const params = useLocalSearchParams<{ ownerId?: string }>();
+  const delegatedOwnerId = Array.isArray(params.ownerId) ? params.ownerId[0] : params.ownerId;
 
   const [teamName, setTeamName] = useState('');
   const [description, setDescription] = useState('');
@@ -52,11 +54,11 @@ export default function AddProductionScreen() {
   const hasIncompleteRequiredFields = !logoImages.length || !teamName.trim() || !description.trim();
 
   useEffect(() => {
-    if (!authLoading && isAuthenticated && userRole && userRole !== 'producer') {
-      setAlert({ type: 'warning', title: 'Production Only', message: 'Only production users can create a production team.' });
+    if (!authLoading && isAuthenticated && userRole && userRole !== 'producer' && !(userRole === 'staff' && delegatedOwnerId)) {
+      setAlert({ type: 'warning', title: 'Production Only', message: 'Only production users or full-access staff can create a production team.' });
       router.replace('/manage');
     }
-  }, [authLoading, isAuthenticated, userRole]);
+  }, [authLoading, delegatedOwnerId, isAuthenticated, userRole]);
 
   useEffect(() => {
     if (!isE2EFixtureMode()) return;
@@ -125,6 +127,7 @@ export default function AddProductionScreen() {
         name: teamName.trim(),
         description: description.trim() || null,
         logo_url: primaryLogo,
+        ...(userRole === 'staff' && delegatedOwnerId ? { owner_id: delegatedOwnerId } : {}),
       });
 
       if (!data?.success) {

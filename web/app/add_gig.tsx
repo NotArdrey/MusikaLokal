@@ -138,7 +138,8 @@ export default function AddGigScreen() {
       ? "#0A1224"
       : "#E9EEF8"
     : colors.background;
-  const params = useLocalSearchParams();
+  const params = useLocalSearchParams<{ ownerId?: string }>();
+  const delegatedOwnerId = Array.isArray(params.ownerId) ? params.ownerId[0] : params.ownerId;
   const [step, setStep] = useState(1);
   const [gigName, setGigName] = useState("");
   const [description, setDescription] = useState("");
@@ -284,9 +285,15 @@ export default function AddGigScreen() {
       if (profileError) throw profileError;
 
       if (profile?.role !== "venue-owner") {
-        showAlert("warning", "Unauthorized", "Only gig owners can create gigs.");
-        router.replace("/feed");
-        return;
+        const { data: canCreateAsStaff, error: staffAccessError } = await supabase.rpc(
+          'staff_can_create_listing_for_owner',
+          { p_entity_type: 'venue', p_owner_id: delegatedOwnerId || null },
+        );
+        if (profile?.role !== 'staff' || !delegatedOwnerId || staffAccessError || !canCreateAsStaff) {
+          showAlert("warning", "Unauthorized", "Only gig owners or full-access staff can create gigs.");
+          router.replace("/feed");
+          return;
+        }
       }
 
       setAuthorized(true);
@@ -531,7 +538,7 @@ export default function AddGigScreen() {
         router.replace("/");
         return;
       }
-      createdGigOwnerId = session.user.id;
+      createdGigOwnerId = delegatedOwnerId || session.user.id;
 
       const orderedImages = images.length > 0 && images[thumbnailIndex]
         ? [images[thumbnailIndex], ...images.filter((_, i) => i !== thumbnailIndex)]
@@ -609,7 +616,7 @@ export default function AddGigScreen() {
       const { data, error } = await supabase
         .from('gigs')
         .insert({
-          organizer_id: session.user.id,
+          organizer_id: createdGigOwnerId,
           name: payload.name,
           description: payload.description,
           location: payload.location,
@@ -677,11 +684,23 @@ export default function AddGigScreen() {
       console.log("? Gig Created successfully");
     } catch (e: any) {
       if (createdGigId && createdGigOwnerId) {
-        const { error: rollbackError } = await supabase
-          .from('gigs')
-          .delete()
-          .eq('id', createdGigId)
-          .eq('organizer_id', createdGigOwnerId);
+        let rollbackError: any = null;
+        if (delegatedOwnerId) {
+          const { data: rollbackResult, error } = await supabase.rpc('delete_gig_as_full_access_staff', {
+            p_gig_id: createdGigId,
+            p_reason: 'Rolled back an incomplete staff-created gig',
+          });
+          rollbackError = error || (rollbackResult?.success
+            ? null
+            : new Error(rollbackResult?.message || rollbackResult?.error || 'Staff gig rollback failed'));
+        } else {
+          const { error } = await supabase
+            .from('gigs')
+            .delete()
+            .eq('id', createdGigId)
+            .eq('organizer_id', createdGigOwnerId);
+          rollbackError = error;
+        }
 
         if (rollbackError) {
           console.error("Failed to roll back partial gig create", {

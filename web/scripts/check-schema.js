@@ -1,6 +1,7 @@
 // Check database schema without authentication
 import pg from 'pg';
 const { Client } = pg;
+const projectRef = process.env.SUPABASE_PROJECT_REF || 'your-project-ref';
 
 const client = new Client({
     host: '127.0.0.1',
@@ -64,7 +65,7 @@ async function checkSchema() {
             console.log('⚠️  Not checking local database (Docker not running)');
             console.log('   This is using REMOTE Supabase, so checking remote schema instead...\n');
             console.log('📋 TO FIX: Run this SQL in your Supabase Dashboard:');
-            console.log('   URL: https://supabase.com/dashboard/project/aefldxegsvzecshlayza/sql/new\n');
+            console.log(`   URL: https://supabase.com/dashboard/project/${projectRef}/sql/new\n`);
             console.log('   SQL:');
             console.log('   ALTER TABLE studios ADD COLUMN IF NOT EXISTS availability JSONB DEFAULT \'[]\'::jsonb;');
             console.log('   ALTER TABLE studios ADD COLUMN IF NOT EXISTS contract_url TEXT;');

@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
-import { router } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
@@ -35,13 +34,15 @@ export default function OrdersScreen() {
   const { session, userRole, isGuest } = useAuth();
   const { width } = useWindowDimensions();
   const isWebDesktop = Platform.OS === "web" && width >= 768;
-  const isSeller = userRole === "producer" || userRole === "musician";
+  const normalizedUserRole = String(userRole || "").trim().toLowerCase();
+  const isMarketplaceOwner = ["producer", "venue-owner", "studio-owner"].includes(normalizedUserRole);
 
   const [tab, setTab] = useState<Tab>("my_orders");
   const [myOrders, setMyOrders] = useState<any[]>([]);
   const [sellerOrders, setSellerOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [canManageMarketplace, setCanManageMarketplace] = useState(isMarketplaceOwner);
 
   const bg = isWebDesktop ? (isDark ? '#0A1224' : '#E9EEF8') : colors.background;
   const cardBg = isWebDesktop ? (isDark ? "#1E293B" : "#FFFFFF") : colors.surface;
@@ -62,12 +63,21 @@ export default function OrdersScreen() {
 
     setLoading(true);
     try {
+      let canManageSales = isMarketplaceOwner;
+      if (normalizedUserRole === "staff") {
+        const { data: accessData, error: accessError } = await supabase.functions.invoke("manage-marketplace", {
+          body: { action: "get_marketplace_access" },
+        });
+        canManageSales = !accessError && accessData?.data?.can_manage === true;
+      }
+      setCanManageMarketplace(canManageSales);
+
       const { data: myData } = await supabase.functions.invoke("manage-marketplace", {
         body: { action: "list_my_orders" },
       });
       setMyOrders(Array.isArray(myData?.data) ? myData.data : []);
 
-      if (isSeller) {
+      if (canManageSales) {
         const { data: sellerData } = await supabase.functions.invoke("manage-marketplace", {
           body: { action: "list_seller_orders" },
         });
@@ -83,7 +93,7 @@ export default function OrdersScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [session, isSeller]);
+  }, [isMarketplaceOwner, normalizedUserRole, session]);
 
   useFocusEffect(
     useCallback(() => {
@@ -109,7 +119,7 @@ export default function OrdersScreen() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "my_orders", label: "My Orders" },
-    ...(isSeller ? [{ key: "sales" as Tab, label: "Sales" }] : []),
+    ...(canManageMarketplace ? [{ key: "sales" as Tab, label: "Sales" }] : []),
   ];
 
   const activeOrders = tab === "my_orders" ? myOrders : sellerOrders;

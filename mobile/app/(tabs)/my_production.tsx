@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { runAfterUIIdle } from '../../src/utils/idleTask';
@@ -18,7 +18,7 @@ import { useAuth, useRequireAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../../src/utils/actionError';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
-import { getStaffPermissions } from '../../src/utils/staffAccess';
+import { fetchActiveStaffAssignments, getStaffPermissions, StaffEntityType } from '../../src/utils/staffAccess';
 import { palette, radius, typography } from '../../src/theme/tokens';
 
 type TeamRecord = {
@@ -29,6 +29,9 @@ type TeamRecord = {
   owner_id: string;
   member_role: string;
   staff_access_level?: number | null;
+  staff_can_edit_listing?: boolean;
+  staff_can_add_listing?: boolean;
+  staff_can_delete_listing?: boolean;
   created_at: string;
 };
 
@@ -38,10 +41,17 @@ export default function MyProductionScreen() {
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
   const { userRole } = useAuth();
   const isMusicianView = userRole === 'musician';
-  const params = useLocalSearchParams<{ refresh?: string }>();
+  const params = useLocalSearchParams<{ refresh?: string; deleteId?: string }>();
   const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
+  const requestedDeleteId = Array.isArray(params.deleteId) ? params.deleteId[0] : params.deleteId;
+  const processedDeleteIdRef = useRef<string | null>(null);
 
   const [teams, setTeams] = useState<TeamRecord[]>([]);
+  const [staffAddOwnerState, setStaffAddOwnerState] = useState<{
+    userId: string;
+    entityTypes: StaffEntityType[];
+    ownerIds: string[];
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -84,9 +94,54 @@ export default function MyProductionScreen() {
     setLoadError(null);
 
     try {
+      const allActiveStaffAssignments = userRole === 'staff'
+        ? await fetchActiveStaffAssignments(supabase, userId)
+        : [];
+      const activeProductionAssignments = allActiveStaffAssignments.filter(
+        (assignment) => assignment.entity_type === 'production',
+      );
+      const activeWorkspaceTypes = Array.from(new Set(
+        allActiveStaffAssignments.map((assignment) => assignment.entity_type),
+      ));
       const data = await invokeProduction({ action: 'list_my_teams' });
-      setTeams((data?.teams || []) as TeamRecord[]);
+      const nextTeams = (data?.teams || []) as TeamRecord[];
+      setTeams(nextTeams);
+
+      const addableTeamIds = activeProductionAssignments
+        .filter((assignment) => getStaffPermissions(assignment.access_level, assignment).canAddListing)
+        .map((assignment) => assignment.production_team_id)
+        .filter((teamId): teamId is string => typeof teamId === 'string' && teamId.length > 0);
+      const teamOwnersFromResponse = nextTeams
+        .filter((team) => addableTeamIds.includes(team.id))
+        .map((team) => String(team.owner_id || '').trim())
+        .filter((ownerId) => ownerId.length > 0);
+
+      let staffAddOwnerIds = teamOwnersFromResponse;
+      if (userRole === 'staff' && addableTeamIds.length > 0 && teamOwnersFromResponse.length === 0) {
+        const { data: assignedTeamOwners, error: assignedTeamOwnersError } = await supabase
+          .from('production_teams')
+          .select('id, owner_id')
+          .in('id', addableTeamIds);
+
+        if (assignedTeamOwnersError) {
+          logActionError('MyProduction', 'fetch staff production add owners', assignedTeamOwnersError, { userId });
+        } else {
+          staffAddOwnerIds = [
+            ...staffAddOwnerIds,
+            ...(assignedTeamOwners || [])
+              .map((team: any) => String(team.owner_id || '').trim())
+              .filter((ownerId: string) => ownerId.length > 0),
+          ];
+        }
+      }
+
+      setStaffAddOwnerState({
+        userId,
+        entityTypes: activeWorkspaceTypes,
+        ownerIds: userRole === 'staff' ? Array.from(new Set(staffAddOwnerIds)) : [],
+      });
     } catch (error: any) {
+      setStaffAddOwnerState({ userId, entityTypes: [], ownerIds: [] });
       const message = getActionErrorMessage(error, 'Failed to fetch production teams.');
       logActionError('MyProduction', 'fetchTeams', error, { userId });
       setLoadError(message);
@@ -97,7 +152,7 @@ export default function MyProductionScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [invokeProduction, showAlert, userId]);
+  }, [invokeProduction, showAlert, userId, userRole]);
 
   useFocusEffect(
     useCallback(() => {
@@ -138,6 +193,32 @@ export default function MyProductionScreen() {
     setModalVisible(true);
   };
 
+  useEffect(() => {
+    if (!requestedDeleteId || loading || processedDeleteIdRef.current === requestedDeleteId) return;
+    const timer = setTimeout(() => {
+      if (processedDeleteIdRef.current === requestedDeleteId) return;
+      processedDeleteIdRef.current = requestedDeleteId;
+
+      const team = teams.find((item) => item.id === requestedDeleteId);
+      if (!team) return;
+      const staffPermissions = team.staff_access_level ? getStaffPermissions(team.staff_access_level, team) : null;
+      const canDelete = userRole === 'staff'
+        ? Boolean(staffPermissions?.canDeleteListing)
+        : team.member_role === 'owner';
+      if (!canDelete) {
+        setAlertConfig({ type: 'warning', title: 'Delete Not Allowed', message: 'You do not have permission to delete this production team.' });
+        setAlertVisible(true);
+        return;
+      }
+
+      setSelectedTeamId(team.id);
+      setSelectedTeamName(team.name || '');
+      setDeleteConfirmationText('');
+      setModalVisible(true);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [loading, requestedDeleteId, teams, userRole]);
+
   const isDeleteConfirmed =
     normalizeConfirmationInput(deleteConfirmationText) ===
     normalizeConfirmationInput(selectedTeamName);
@@ -174,10 +255,28 @@ export default function MyProductionScreen() {
     void fetchTeams({ showAlertOnError: true });
   };
 
+  const staffAddOwnerIds = staffAddOwnerState?.userId === userId
+    ? staffAddOwnerState.ownerIds
+    : [];
+  const isMultiRoleStaff = userRole === 'staff' && (staffAddOwnerState?.entityTypes.length || 0) > 1;
+  const staffHeaderAddOwnerId = isMultiRoleStaff && staffAddOwnerIds.length === 1
+    ? staffAddOwnerIds[0]
+    : null;
+  const openStaffAddProduction = useCallback(() => {
+    if (!staffHeaderAddOwnerId) return;
+    router.push({ pathname: '/add_production', params: { ownerId: staffHeaderAddOwnerId } });
+  }, [staffHeaderAddOwnerId]);
+
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Productions" overline="MusikaLokal" showTitle={false} />
+        <Header
+          title="Productions"
+          overline="MusikaLokal"
+          showTitle={false}
+          onAddPress={staffHeaderAddOwnerId ? openStaffAddProduction : undefined}
+          addButtonAccessibilityLabel="Add production team"
+        />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -224,13 +323,16 @@ export default function MyProductionScreen() {
           ) : (
             teams.map((team) => {
               const isOwnerTeam = team.member_role === 'owner';
-              const staffPermissions = team.staff_access_level ? getStaffPermissions(team.staff_access_level) : null;
+              const staffPermissions = team.staff_access_level ? getStaffPermissions(team.staff_access_level, team) : null;
               const canEdit = !isMusicianView && (
                 team.member_role === 'owner' ||
                 team.member_role === 'manager' ||
                 Boolean(staffPermissions?.canEditListing)
               );
-              const canDelete = !isMusicianView && !staffPermissions && team.member_role === 'owner';
+              const canDelete = !isMusicianView && (
+                (!staffPermissions && team.member_role === 'owner') ||
+                Boolean(staffPermissions?.canDeleteListing)
+              );
               const canOnlyViewAndChat = isMusicianView && !isOwnerTeam;
               const showManageAsView = canOnlyViewAndChat || Boolean(staffPermissions && staffPermissions.canViewOnly);
 
@@ -313,6 +415,17 @@ export default function MyProductionScreen() {
                             style={[styles.editBtn, { borderColor: colors.border }]}
                           >
                             <Ionicons name="pencil-outline" size={20} color={colors.text} style={styles.editBtnIcon} />
+                          </TouchableOpacity>
+                        ) : null}
+                        {staffPermissions?.canAddListing && !staffHeaderAddOwnerId ? (
+                          <TouchableOpacity
+                            activeOpacity={1}
+                            testID={`mobile-production-add-for-owner-${team.id}`}
+                            accessibilityLabel={`Add production team for ${team.name}`}
+                            onPress={() => router.push({ pathname: '/add_production', params: { ownerId: team.owner_id } })}
+                            style={[styles.editBtn, { borderColor: colors.border }]}
+                          >
+                            <Ionicons name="add-outline" size={20} color={colors.text} />
                           </TouchableOpacity>
                         ) : null}
                       </View>

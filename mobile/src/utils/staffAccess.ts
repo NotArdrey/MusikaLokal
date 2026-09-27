@@ -9,11 +9,17 @@ export type StaffAssignment = {
   gig_id: string | null;
   production_team_id: string | null;
   access_level: StaffAccessLevel;
+  can_edit_listing: boolean;
+  can_add_listing: boolean;
+  can_delete_listing: boolean;
+  can_manage_marketplace: boolean;
   target_id: string | null;
   target_name?: string | null;
 };
 
 export type StaffPermissions = {
+  canAddListing: boolean;
+  canDeleteListing: boolean;
   canEditListing: boolean;
   canManageBookings: boolean;
   canViewOnly: boolean;
@@ -30,6 +36,11 @@ const staffAssignmentsCache = new Map<string, { assignments: StaffAssignment[]; 
 const staffAssignmentsInFlight = new Map<string, Promise<StaffAssignment[]>>();
 const staffAssignmentCache = new Map<string, { assignment: StaffAssignment | null; expiresAt: number }>();
 const staffAssignmentInFlight = new Map<string, Promise<StaffAssignment | null>>();
+
+export const getCachedActiveStaffAssignments = (userId: string): StaffAssignment[] | null => {
+  const cached = staffAssignmentsCache.get(userId);
+  return cached?.assignments ?? null;
+};
 
 export const STAFF_ENTITY_LABELS: Record<StaffEntityType, string> = {
   studio: 'Studio',
@@ -60,10 +71,34 @@ export const getStaffTargetId = (assignment?: Partial<StaffAssignment> | null): 
   return assignment.target_id || null;
 };
 
-export const getStaffPermissions = (accessLevel: unknown): StaffPermissions => {
+type StaffListingPermissionSource = {
+  can_edit_listing?: unknown;
+  can_add_listing?: unknown;
+  can_delete_listing?: unknown;
+  staff_can_edit_listing?: unknown;
+  staff_can_add_listing?: unknown;
+  staff_can_delete_listing?: unknown;
+};
+
+const getExplicitPermission = (
+  source: StaffListingPermissionSource | null | undefined,
+  key: 'edit' | 'add' | 'delete',
+): boolean | null => {
+  const direct = source?.[`can_${key}_listing`];
+  if (typeof direct === 'boolean') return direct;
+  const staffValue = source?.[`staff_can_${key}_listing`];
+  return typeof staffValue === 'boolean' ? staffValue : null;
+};
+
+export const getStaffPermissions = (
+  accessLevel: unknown,
+  source?: StaffListingPermissionSource | null,
+): StaffPermissions => {
   const level = normalizeStaffAccessLevel(accessLevel);
   return {
-    canEditListing: level === 1,
+    canAddListing: getExplicitPermission(source, 'add') ?? level === 1,
+    canDeleteListing: getExplicitPermission(source, 'delete') ?? level === 1,
+    canEditListing: getExplicitPermission(source, 'edit') ?? level === 1,
     canManageBookings: level === 1 || level === 2,
     canViewOnly: level === 3,
   };
@@ -85,6 +120,10 @@ const normalizeStaffAssignment = (row: any): StaffAssignment | null => {
     gig_id: row.gig_id || null,
     production_team_id: row.production_team_id || null,
     access_level: accessLevel,
+    can_edit_listing: typeof row.can_edit_listing === 'boolean' ? row.can_edit_listing : accessLevel === 1,
+    can_add_listing: typeof row.can_add_listing === 'boolean' ? row.can_add_listing : accessLevel === 1,
+    can_delete_listing: typeof row.can_delete_listing === 'boolean' ? row.can_delete_listing : accessLevel === 1,
+    can_manage_marketplace: row.can_manage_marketplace === true,
     target_id:
       entityType === 'studio'
         ? row.studio_id || null
@@ -140,7 +179,7 @@ export const fetchActiveStaffAssignment = async (
   const request = (async () => {
     let query = supabase
       .from('staff_listing_access')
-      .select('id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level')
+      .select('id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level, can_edit_listing, can_add_listing, can_delete_listing, can_manage_marketplace')
       .eq('staff_user_id', userId)
       .is('revoked_at', null);
 
@@ -194,7 +233,7 @@ export const fetchActiveStaffAssignments = async (
     const { data, error } = await withStaffAssignmentTimeout<any>(
       supabase
         .from('staff_listing_access')
-        .select('id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level')
+        .select('id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level, can_edit_listing, can_add_listing, can_delete_listing, can_manage_marketplace')
         .eq('staff_user_id', userId)
         .is('revoked_at', null)
         .order('created_at', { ascending: true }),

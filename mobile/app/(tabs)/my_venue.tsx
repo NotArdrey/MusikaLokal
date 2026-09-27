@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { runAfterUIIdle } from '../../src/utils/idleTask';
@@ -151,14 +151,17 @@ export default function MyVenueScreen() {
     const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
     const { userRole } = useAuth();
     const isMusicianView = userRole === 'musician';
-    const params = useLocalSearchParams<{ refresh?: string }>();
+    const params = useLocalSearchParams<{ refresh?: string; deleteId?: string }>();
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
+    const requestedDeleteId = Array.isArray(params.deleteId) ? params.deleteId[0] : params.deleteId;
+    const processedDeleteIdRef = useRef<string | null>(null);
     const [modalVisible, setModalVisible] = useState(false);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [selectedName, setSelectedName] = useState('');
     const [cancellationReason, setCancellationReason] = useState('');
     const [gigs, setGigs] = useState<any[]>([]);
     const [staffAssignments, setStaffAssignments] = useState<StaffAssignment[]>([]);
+    const [staffAddOwnerState, setStaffAddOwnerState] = useState<{ userId: string; ownerIds: string[] } | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -192,6 +195,7 @@ export default function MyVenueScreen() {
 
             if (userRole === 'staff' && activeStaffAssignments.length === 0) {
                 setGigs([]);
+                setStaffAddOwnerState({ userId, ownerIds: [] });
                 return;
             }
 
@@ -306,6 +310,23 @@ export default function MyVenueScreen() {
                 baseGigs = data || [];
             }
 
+            const addableAssignedGigIds = new Set(
+                activeStaffAssignments
+                    .filter((assignment) => getStaffPermissions(assignment.access_level, assignment).canAddListing)
+                    .map((assignment) => assignment.gig_id)
+                    .filter((gigId): gigId is string => typeof gigId === 'string' && gigId.length > 0),
+            );
+            const staffAddOwnerIds = Array.from(new Set(
+                baseGigs
+                    .filter((gig: any) => addableAssignedGigIds.has(gig.id))
+                    .map((gig: any) => String(gig.organizer_id || '').trim())
+                    .filter((ownerId: string) => ownerId.length > 0),
+            ));
+            setStaffAddOwnerState({
+                userId,
+                ownerIds: userRole === 'staff' ? staffAddOwnerIds : [],
+            });
+
             const gigIds = (baseGigs || []).map((gig: any) => gig.id);
 
             if (gigIds.length === 0) {
@@ -395,6 +416,17 @@ export default function MyVenueScreen() {
         }
     }, [isMusicianView, showAlert, userId, userRole]);
 
+    const staffAddOwnerIds = staffAddOwnerState?.userId === userId
+        ? staffAddOwnerState.ownerIds
+        : [];
+    const staffHeaderAddOwnerId = userRole === 'staff' && staffAddOwnerIds.length === 1
+        ? staffAddOwnerIds[0]
+        : null;
+    const openStaffAddGig = useCallback(() => {
+        if (!staffHeaderAddOwnerId) return;
+        router.push({ pathname: '/add_gig', params: { ownerId: staffHeaderAddOwnerId } });
+    }, [staffHeaderAddOwnerId]);
+
     useFocusEffect(
         useCallback(() => {
             if (!isAuthenticated || !userId) return;
@@ -463,12 +495,34 @@ export default function MyVenueScreen() {
         setModalVisible(true);
     };
 
+    useEffect(() => {
+        if (!requestedDeleteId || loading || processedDeleteIdRef.current === requestedDeleteId) return;
+        const timer = setTimeout(() => {
+            if (processedDeleteIdRef.current === requestedDeleteId) return;
+            processedDeleteIdRef.current = requestedDeleteId;
+
+            const gig = gigs.find((item) => item.id === requestedDeleteId);
+            if (!gig) return;
+            const assignment = staffAssignments.find((item) => item.gig_id === gig.id);
+            const canDelete = userRole === 'staff'
+                ? getStaffPermissions(assignment?.access_level, assignment).canDeleteListing
+                : gig.is_owner === true || gig.organizer_id === userId;
+            if (!canDelete) {
+                setAlertConfig({ type: 'warning', title: 'Delete Not Allowed', message: 'You do not have permission to delete this gig.' });
+                setAlertVisible(true);
+                return;
+            }
+
+            setSelectedId(gig.id);
+            setSelectedName(gig.name || '');
+            setCancellationReason('');
+            setModalVisible(true);
+        }, 0);
+        return () => clearTimeout(timer);
+    }, [gigs, loading, requestedDeleteId, staffAssignments, userId, userRole]);
+
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;
-        if (userRole === 'staff') {
-            showAlert('warning', 'Action blocked', 'Staff accounts cannot delete gigs.');
-            return;
-        }
         const reason = normalizeVisibleInput(cancellationReason);
         if (!reason) {
             showAlert('warning', 'Cancellation Reason Required', 'Please provide a cancellation reason before deleting this gig.');
@@ -476,10 +530,13 @@ export default function MyVenueScreen() {
         }
         setDeleting(true);
         try {
-            const { data, error } = await supabase.rpc('delete_gig_safely', {
+            const { data, error } = await supabase.rpc(
+                userRole === 'staff' ? 'delete_gig_as_full_access_staff' : 'delete_gig_safely',
+                {
                 p_gig_id: selectedId,
                 p_reason: reason,
-            });
+                },
+            );
 
             if (error) throw error;
 
@@ -546,7 +603,13 @@ export default function MyVenueScreen() {
     return (
         <>
             <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header title="My Gigs" overline="MusikaLokal" showTitle={false} />
+                <Header
+                    title="My Gigs"
+                    overline="MusikaLokal"
+                    showTitle={false}
+                    onAddPress={staffHeaderAddOwnerId ? openStaffAddGig : undefined}
+                    addButtonAccessibilityLabel="Add gig"
+                />
 
                 <ScrollView
                     showsVerticalScrollIndicator={false}
@@ -612,11 +675,14 @@ export default function MyVenueScreen() {
                                     const isRejected = normalizedPermitStatus === 'rejected';
                                     const isApproved = normalizedPermitStatus === 'approved';
                                     const isResubmitted = normalizedPermitStatus === 'resubmitted';
+                                    const staffAssignment = staffAssignments.find((assignment) => assignment.gig_id === gig.id);
                                     const staffPermissions = userRole === 'staff'
-                                        ? getStaffPermissions(staffAssignments.find((assignment) => assignment.gig_id === gig.id)?.access_level)
+                                        ? getStaffPermissions(staffAssignment?.access_level, staffAssignment)
                                         : null;
                                     const canManageBookings = !staffPermissions || staffPermissions.canManageBookings;
-                                    const canEditVenue = gig.is_owner === true && (!staffPermissions || staffPermissions.canEditListing);
+                                    const canEditVenue = staffPermissions
+                                        ? staffPermissions.canEditListing
+                                        : gig.is_owner === true;
                                     const canManageGig = (!isMusicianView || gig.is_owner === true) && canManageBookings;
 
                                     const permitStatusLabel = isRejected
@@ -743,9 +809,20 @@ export default function MyVenueScreen() {
                                                     <Ionicons name="chatbubble-outline" size={20} color={colors.text} style={styles.editBtnIcon} />
                                                 </TouchableOpacity>
                                             ) : null}
+                                            {staffPermissions?.canAddListing && !staffHeaderAddOwnerId ? (
+                                                <TouchableOpacity
+                                                    activeOpacity={1}
+                                                    testID={`mobile-gig-add-for-owner-${gig.id}`}
+                                                    accessibilityLabel={`Add gig for ${gig.name}`}
+                                                    onPress={() => router.push({ pathname: '/add_gig', params: { ownerId: gig.organizer_id } })}
+                                                    style={[styles.editBtn, { borderColor: colors.border }]}
+                                                >
+                                                    <Ionicons name="add-outline" size={20} color={colors.text} />
+                                                </TouchableOpacity>
+                                            ) : null}
                                         </View>
 
-                                        {canManageGig && !staffPermissions ? (
+                                        {canManageGig && (!staffPermissions || staffPermissions.canDeleteListing) ? (
                                             <TouchableOpacity
                                                 activeOpacity={1}
                                                 testID={`mobile-gig-delete-${gig.id}`}

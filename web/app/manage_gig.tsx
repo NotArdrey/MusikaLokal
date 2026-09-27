@@ -296,7 +296,7 @@ export default function GigDetailsScreen() {
 
       if (!canManageAssignedGig && profile?.role === "staff") {
         const assignment = await fetchActiveStaffAssignment(supabase, user.id, 'venue', gigId);
-        const permissions = getStaffPermissions(assignment?.access_level);
+        const permissions = getStaffPermissions(assignment?.access_level, assignment);
         canViewAssignedGig =
           assignment?.entity_type === "venue" &&
           assignment.gig_id === gigId;

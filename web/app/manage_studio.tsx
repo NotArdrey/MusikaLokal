@@ -293,7 +293,7 @@ export default function StudioDetailsScreen() {
 
       if (!mayViewStudio && profile?.role === "staff") {
         const assignment = await fetchActiveStaffAssignment(supabase, user.id, 'studio', studioId);
-        const permissions = getStaffPermissions(assignment?.access_level);
+        const permissions = getStaffPermissions(assignment?.access_level, assignment);
         const isAssignedStudio =
           assignment?.entity_type === "studio" &&
           assignment.studio_id === studioId;

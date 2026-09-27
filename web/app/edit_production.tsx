@@ -44,6 +44,9 @@ type TeamRecord = {
   owner_id: string;
   member_role: string;
   staff_access_level?: number | null;
+  staff_can_edit_listing?: boolean;
+  staff_can_add_listing?: boolean;
+  staff_can_delete_listing?: boolean;
   created_at: string;
 };
 
@@ -134,7 +137,7 @@ export default function EditProductionScreen() {
       }
 
       const staffPermissions = existingTeam.staff_access_level
-        ? getStaffPermissions(existingTeam.staff_access_level)
+        ? getStaffPermissions(existingTeam.staff_access_level, existingTeam)
         : null;
       if (
         existingTeam.member_role !== 'owner' &&

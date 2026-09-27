@@ -81,10 +81,45 @@ export default function MarketplaceScreen() {
   const resolvedUserId = session?.user?.id ?? userId ?? null;
   const normalizedUserRole = (userRole || "").toLowerCase();
   const isFan = normalizedUserRole === "fan";
+  const [staffMarketplaceAccess, setStaffMarketplaceAccess] = useState<{
+    userId: string | null;
+    allowed: boolean;
+    sellerId: string | null;
+  }>({ userId: null, allowed: false, sellerId: null });
+  const isMarketplaceOwner = ["producer", "venue-owner", "studio-owner"].includes(normalizedUserRole);
+  const hasStaffMarketplaceAccess = normalizedUserRole === "staff"
+    && staffMarketplaceAccess.userId === resolvedUserId
+    && staffMarketplaceAccess.allowed;
+  const marketplaceSellerId = isMarketplaceOwner ? resolvedUserId : staffMarketplaceAccess.sellerId;
   const canSell =
     Boolean(session && resolvedUserId) &&
     roleResolved &&
-    ["producer", "venue-owner", "studio-owner"].includes(normalizedUserRole);
+    (isMarketplaceOwner || (normalizedUserRole === "staff" && hasStaffMarketplaceAccess));
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!session || !roleResolved || normalizedUserRole !== "staff" || !resolvedUserId) {
+      return () => { cancelled = true; };
+    }
+
+    void supabase.functions.invoke("manage-marketplace", {
+      body: { action: "get_marketplace_access" },
+    }).then(({ data, error }) => {
+      if (cancelled) return;
+      const allowed = !error && data?.data?.can_manage === true;
+      setStaffMarketplaceAccess({
+        userId: resolvedUserId,
+        allowed,
+        sellerId: allowed ? data?.data?.seller_id || null : null,
+      });
+    }).catch(() => {
+      if (!cancelled) {
+        setStaffMarketplaceAccess({ userId: resolvedUserId, allowed: false, sellerId: null });
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [normalizedUserRole, resolvedUserId, roleResolved, session]);
   const productCardWidth = Math.max(
     0,
     (viewportWidth - (PAGE_HORIZONTAL_PADDING * 2) - PRODUCT_GRID_GAP) / 2,
@@ -342,7 +377,7 @@ export default function MarketplaceScreen() {
       setAlert({
         type: "warning",
         title: "Selling Unavailable",
-        message: "Only producer, gig owner, and studio-owner accounts can create marketplace listings.",
+        message: "Only marketplace owners or authorized staff can create marketplace listings.",
       });
       return;
     }
@@ -432,7 +467,7 @@ export default function MarketplaceScreen() {
       setAlert({
         type: "warning",
         title: "Selling Unavailable",
-        message: "Only producer, gig owner, and studio-owner accounts can create marketplace listings.",
+        message: "Only marketplace owners or authorized staff can create marketplace listings.",
       });
       return;
     }
@@ -452,7 +487,7 @@ export default function MarketplaceScreen() {
     setAdding(true);
     try {
       const { error } = await supabase.from("products").insert({
-        seller_id: resolvedUserId,
+        seller_id: marketplaceSellerId || resolvedUserId,
         title: newTitle.trim(),
         description: newDescription.trim() || null,
         product_type: "merch",

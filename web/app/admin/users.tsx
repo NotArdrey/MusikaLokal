@@ -52,6 +52,19 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
     if (typeof value === 'string' && value.trim()) return value.trim();
 
     if (typeof value === 'object') {
+      const code = String(value.code || '').trim().toUpperCase();
+      if (code.startsWith('STAFF_')) {
+        const message = typeof value.message === 'string' ? value.message.trim() : '';
+        const reason = typeof value.reason === 'string' ? value.reason.trim() : '';
+        const resolution = typeof value.resolution === 'string' ? value.resolution.trim() : '';
+        const parts = [
+          message,
+          reason ? `Reason: ${reason}` : '',
+          resolution ? `Next step: ${resolution}` : '',
+        ].filter(Boolean);
+        if (parts.length > 0) return parts.join('\n\n');
+      }
+
       const maybe = [value.error, value.message, value.details, value.hint].find(
         (item) => typeof item === 'string' && item.trim().length > 0,
       );
@@ -170,12 +183,32 @@ type StaffTargetOption = {
   ownerId?: string | null;
 };
 
+type StaffTargetConflict = {
+  id: string;
+  name: string;
+  entityType: StaffEntityType;
+  reason: string;
+  resolution: string;
+  canAutoResolve: boolean;
+};
+
 type StaffFormAssignments = Record<StaffEntityType, Record<string, StaffAccessLevel>>;
+type StaffFormListingPermissions = Record<StaffEntityType, {
+  edit: boolean;
+  add: boolean;
+  delete: boolean;
+}>;
 
 const createEmptyStaffFormAssignments = (): StaffFormAssignments => ({
   studio: {},
   venue: {},
   production: {},
+});
+
+const createDefaultStaffFormListingPermissions = (): StaffFormListingPermissions => ({
+  studio: { edit: true, add: true, delete: true },
+  venue: { edit: true, add: true, delete: true },
+  production: { edit: true, add: true, delete: true },
 });
 
 const userRoleOptions: UserRole[] = ['fan', 'musician', 'studio-owner', 'venue-owner', 'producer', 'admin', 'staff'];
@@ -195,6 +228,16 @@ const staffPermissionOptions = [
     key: 'edit',
     title: 'Edit listing',
     description: 'Change the assigned studio, gig, or production listing.',
+  },
+  {
+    key: 'add',
+    title: 'Add listing',
+    description: 'Create a new studio, gig, or production listing for the assigned owner.',
+  },
+  {
+    key: 'delete',
+    title: 'Delete listing',
+    description: 'Permanently delete an assigned studio, gig, or production listing.',
   },
 ] as const;
 const managedListingRoleConfig: Partial<Record<UserRole, { entityType: StaffEntityType; label: string }>> = {
@@ -328,12 +371,38 @@ const getErrorMessage = async (error: unknown, fallback: string) => {
 
   if (!baseMessage) return fallback;
 
-  const status = Number(err.status || 0);
-  if (status && !baseMessage.toLowerCase().includes('status')) {
-    return `${baseMessage} (status ${status})`;
+  return baseMessage;
+};
+
+const getUserSaveFeedback = (message: string): { type: AlertType; title: string; message: string } => {
+  const normalized = String(message || '').trim();
+  const lower = normalized.toLowerCase();
+
+  if (
+    (lower.includes('reason:') && lower.includes('next step:')) ||
+    lower.includes('cannot assign staff access') ||
+    lower.includes('cannot manage it as staff')
+  ) {
+    return {
+      type: 'warning',
+      title: 'Staff assignment conflict',
+      message: normalized,
+    };
   }
 
-  return baseMessage;
+  if (lower.includes('marketplace access requires')) {
+    return {
+      type: 'warning',
+      title: 'Marketplace assignment conflict',
+      message: normalized,
+    };
+  }
+
+  return {
+    type: 'error',
+    title: 'Failed to save user',
+    message: normalized || 'Unable to save user changes.',
+  };
 };
 
 const isUnsupportedActionMessage = (message: string, action: string) => {
@@ -449,6 +518,10 @@ const normalizeStaffAssignmentFromRecord = (record: Record<string, unknown>): St
     gig_id: gigId,
     production_team_id: productionTeamId,
     access_level: accessLevel,
+    can_edit_listing: getBooleanField(assignment, 'can_edit_listing', accessLevel === 1),
+    can_add_listing: getBooleanField(assignment, 'can_add_listing', accessLevel === 1),
+    can_delete_listing: getBooleanField(assignment, 'can_delete_listing', accessLevel === 1),
+    can_manage_marketplace: getBooleanField(assignment, 'can_manage_marketplace'),
     target_id: targetId || null,
     target_name: getOptionalStringField(assignment, 'target_name'),
   };
@@ -795,6 +868,39 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Poppins_600SemiBold',
   },
+  staffTargetNotice: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 3,
+  },
+  staffConflictList: {
+    gap: 8,
+  },
+  staffConflictCard: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    gap: 6,
+  },
+  staffConflictAction: {
+    minHeight: 36,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  staffConflictActionText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontFamily: 'Poppins_600SemiBold',
+  },
   loadingText: {
     marginTop: 12,
     fontSize: 14,
@@ -1026,8 +1132,15 @@ export default function AdminUsersPage() {
     production: 1,
   });
   const [staffFormAssignments, setStaffFormAssignments] = useState<StaffFormAssignments>(createEmptyStaffFormAssignments);
+  const [staffFormListingPermissions, setStaffFormListingPermissions] = useState<StaffFormListingPermissions>(
+    createDefaultStaffFormListingPermissions,
+  );
+  const [staffFormMarketplaceAccess, setStaffFormMarketplaceAccess] = useState(false);
   const [roleFormTargetId, setRoleFormTargetId] = useState('');
   const [staffTargetOptions, setStaffTargetOptions] = useState<StaffTargetOption[]>([]);
+  const [staffTargetConflicts, setStaffTargetConflicts] = useState<StaffTargetConflict[]>([]);
+  const [hiddenOwnedTargetIds, setHiddenOwnedTargetIds] = useState<string[]>([]);
+  const [staffConflictResolvingId, setStaffConflictResolvingId] = useState<string | null>(null);
   const [staffTargetsLoading, setStaffTargetsLoading] = useState(false);
   const [staffTargetsError, setStaffTargetsError] = useState<string | null>(null);
   const staffTargetsRequestIdRef = useRef(0);
@@ -1146,6 +1259,8 @@ export default function AdminUsersPage() {
     if (userFormRole !== 'staff' && !(userModalMode === 'edit' && managedRoleConfig)) {
       staffTargetsRequestIdRef.current += 1;
       setStaffTargetOptions([]);
+      setStaffTargetConflicts([]);
+      setHiddenOwnedTargetIds([]);
       setStaffTargetsError(null);
       return;
     }
@@ -1155,12 +1270,15 @@ export default function AdminUsersPage() {
     setStaffTargetsError(null);
     try {
       let items: any[] = [];
+      let conflicts: any[] = [];
+      let hiddenOwnedIds: string[] = [];
       const entityType = userFormRole === 'staff' ? staffFormEntityType : managedRoleConfig?.entityType;
       const target = entityType === 'studio'
         ? { table: 'studios', ownerColumn: 'owner_id' }
         : entityType === 'venue'
           ? { table: 'gigs', ownerColumn: 'organizer_id' }
           : { table: 'production_teams', ownerColumn: 'owner_id' };
+      const shouldUseAdminFilteredTargets = userFormRole === 'staff' && Boolean(editingUserId);
       let directQuery = supabase
         .from(target.table)
         .select(`id, name, created_at, ${entityType === 'venue' ? 'event_date, ' : ''}${target.ownerColumn}`);
@@ -1174,27 +1292,40 @@ export default function AdminUsersPage() {
           .or(`event_date.is.null,event_date.gte.${getPhilippineTodayStartIso()}`);
       }
 
-      const { data: directItems, error: directError } = await directQuery
-        .order(entityType === 'venue' ? 'event_date' : 'created_at', {
-          ascending: entityType === 'venue',
-          nullsFirst: false,
-        })
-        .limit(300);
-
-      if (!directError) {
-        items = (directItems || []).map((item: any) => ({
-          ...item,
-          owner_id: item[target.ownerColumn] || null,
-        }));
-      } else {
-        // Fall back to the service-role endpoint if public listing policies are tightened later.
+      if (shouldUseAdminFilteredTargets) {
         const data = await invokeAdminUsersManagement({
           action: 'fetch_role_targets',
-          ...(userFormRole === 'staff'
-            ? { entity_type: staffFormEntityType }
-            : { role: userFormRole }),
+          entity_type: staffFormEntityType,
+          staff_user_id: editingUserId,
         });
         items = Array.isArray(data?.items) ? data.items : [];
+        conflicts = Array.isArray(data?.conflicts) ? data.conflicts : [];
+        hiddenOwnedIds = Array.isArray(data?.hidden_owned_ids)
+          ? data.hidden_owned_ids.map((id: unknown) => String(id || '')).filter(Boolean)
+          : [];
+      } else {
+        const { data: directItems, error: directError } = await directQuery
+          .order(entityType === 'venue' ? 'event_date' : 'created_at', {
+            ascending: entityType === 'venue',
+            nullsFirst: false,
+          })
+          .limit(300);
+
+        if (!directError) {
+          items = (directItems || []).map((item: any) => ({
+            ...item,
+            owner_id: item[target.ownerColumn] || null,
+          }));
+        } else {
+          // Fall back to the service-role endpoint if public listing policies are tightened later.
+          const data = await invokeAdminUsersManagement({
+            action: 'fetch_role_targets',
+            ...(userFormRole === 'staff'
+              ? { entity_type: staffFormEntityType }
+              : { role: userFormRole }),
+          });
+          items = Array.isArray(data?.items) ? data.items : [];
+        }
       }
 
       const options = items
@@ -1212,6 +1343,27 @@ export default function AdminUsersPage() {
 
       if (requestId !== staffTargetsRequestIdRef.current) return;
       setStaffTargetOptions(options);
+      setStaffTargetConflicts(conflicts.flatMap((item: any) => {
+        const conflictEntityType = normalizeStaffEntityType(item?.entity_type);
+        const id = String(item?.id || '').trim();
+        if (!conflictEntityType || !id) return [];
+        return [{
+          id,
+          name: String(item?.name || 'Untitled'),
+          entityType: conflictEntityType,
+          reason: String(item?.reason || 'This user already participates in this listing.'),
+          resolution: String(item?.resolution || 'Resolve the participation before assigning staff access.'),
+          canAutoResolve: item?.can_auto_resolve === true,
+        }];
+      }));
+      setHiddenOwnedTargetIds(hiddenOwnedIds);
+      if (shouldUseAdminFilteredTargets && hiddenOwnedIds.length > 0) {
+        setStaffFormAssignments((current) => {
+          const nextForType = { ...current[staffFormEntityType] };
+          hiddenOwnedIds.forEach((id) => delete nextForType[id]);
+          return { ...current, [staffFormEntityType]: nextForType };
+        });
+      }
       if (userFormRole !== 'staff' && editingUserId) {
         const currentlyOwned = options.find((item: StaffTargetOption) => item.ownerId === editingUserId);
         if (currentlyOwned) setRoleFormTargetId(currentlyOwned.id);
@@ -1220,6 +1372,8 @@ export default function AdminUsersPage() {
       console.warn('Failed to load staff target options', error);
       if (requestId !== staffTargetsRequestIdRef.current) return;
       setStaffTargetOptions([]);
+      setStaffTargetConflicts([]);
+      setHiddenOwnedTargetIds([]);
       setStaffTargetsError(await getErrorMessage(error, 'Unable to load assignable records.'));
     } finally {
       if (requestId === staffTargetsRequestIdRef.current) {
@@ -1227,6 +1381,62 @@ export default function AdminUsersPage() {
       }
     }
   }, [editingUserId, invokeAdminUsersManagement, staffFormEntityType, userFormRole, userModalMode]);
+
+  const resolveStaffTargetConflict = useCallback((conflict: StaffTargetConflict) => {
+    if (!editingUserId || conflict.entityType !== 'production' || !conflict.canAutoResolve) return;
+
+    const performResolve = async () => {
+      setStaffConflictResolvingId(conflict.id);
+      try {
+        await invokeAdminUsersManagement({
+          action: 'resolve_staff_production_conflict',
+          staff_user_id: editingUserId,
+          team_id: conflict.id,
+        });
+        setStaffFormAssignments((current) => ({
+          ...current,
+          production: {
+            ...current.production,
+            [conflict.id]: staffFormAccessLevels.production,
+          },
+        }));
+        await fetchStaffTargetOptions();
+        showAlert(
+          'success',
+          'Conflict resolved',
+          `${conflict.name} is now selected for staff access. Review the permissions, then save the user.`,
+        );
+      } catch (error) {
+        const message = await getErrorMessage(error, 'Unable to resolve this production participation conflict.');
+        showAlert('error', 'Could not resolve conflict', message);
+      } finally {
+        setStaffConflictResolvingId(null);
+      }
+    };
+
+    const message = `This will permanently remove this user as a production member and direct roster participant from ${conflict.name}. It will not delete the production.\n\n${conflict.reason}\n\nAfterward, the production will be selected for staff access.`;
+    const buttons: AdminAlertButton[] = [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Resolve conflict',
+        style: 'destructive',
+        onPress: () => void performResolve(),
+      },
+    ];
+
+    if (Platform.OS === 'web') {
+      setAlertState({
+        visible: true,
+        type: 'warning',
+        title: 'Resolve participation conflict?',
+        message,
+        buttons,
+      });
+      return;
+    }
+
+    Alert.alert('Resolve participation conflict?', message, buttons);
+  }, [editingUserId, fetchStaffTargetOptions, invokeAdminUsersManagement, showAlert, staffFormAccessLevels.production]);
 
   useEffect(() => {
     if (!userModalVisible || (userFormRole !== 'staff' && !(userModalMode === 'edit' && managedListingRoleConfig[userFormRole]))) {
@@ -1315,9 +1525,14 @@ export default function AdminUsersPage() {
     setStaffFormEntityType('studio');
     setStaffFormAccessLevels({ studio: 1, venue: 1, production: 1 });
     setStaffFormAssignments(createEmptyStaffFormAssignments());
+    setStaffFormListingPermissions(createDefaultStaffFormListingPermissions());
+    setStaffFormMarketplaceAccess(false);
     setRoleFormTargetId('');
     setEditingOriginalRole(null);
     setStaffTargetOptions([]);
+    setStaffTargetConflicts([]);
+    setHiddenOwnedTargetIds([]);
+    setStaffConflictResolvingId(null);
     setStaffTargetsError(null);
     staffTargetsRequestIdRef.current += 1;
     setStaffTargetsLoading(false);
@@ -1349,6 +1564,7 @@ export default function AdminUsersPage() {
     const staffAssignments = targetUser.staff_assignments || (targetUser.staff_assignment ? [targetUser.staff_assignment] : []);
     const nextAssignments = createEmptyStaffFormAssignments();
     const nextAccessLevels: Record<StaffEntityType, StaffAccessLevel> = { studio: 1, venue: 1, production: 1 };
+    const nextListingPermissions = createDefaultStaffFormListingPermissions();
     staffAssignments.forEach((assignment) => {
       const entityType = normalizeStaffEntityType(assignment.entity_type);
       const accessLevel = normalizeStaffAccessLevel(assignment.access_level);
@@ -1360,6 +1576,11 @@ export default function AdminUsersPage() {
       if (!entityType || !accessLevel || !targetId) return;
       nextAssignments[entityType][targetId] = accessLevel;
       nextAccessLevels[entityType] = accessLevel;
+      nextListingPermissions[entityType] = {
+        edit: assignment.can_edit_listing,
+        add: assignment.can_add_listing,
+        delete: assignment.can_delete_listing,
+      };
     });
     const firstEntityType = staffAssignments
       .map((assignment) => normalizeStaffEntityType(assignment.entity_type))
@@ -1367,6 +1588,8 @@ export default function AdminUsersPage() {
     setStaffFormEntityType(firstEntityType);
     setStaffFormAccessLevels(nextAccessLevels);
     setStaffFormAssignments(nextAssignments);
+    setStaffFormListingPermissions(nextListingPermissions);
+    setStaffFormMarketplaceAccess(staffAssignments.some((assignment) => assignment.can_manage_marketplace));
     setRoleFormTargetId('');
     setUserModalVisible(true);
   }, []);
@@ -1481,6 +1704,10 @@ export default function AdminUsersPage() {
         studio_id: entityType === 'studio' ? targetId : null,
         gig_id: entityType === 'venue' ? targetId : null,
         production_team_id: entityType === 'production' ? targetId : null,
+        can_edit_listing: staffFormListingPermissions[entityType].edit,
+        can_add_listing: staffFormListingPermissions[entityType].add,
+        can_delete_listing: staffFormListingPermissions[entityType].delete,
+        can_manage_marketplace: staffFormMarketplaceAccess,
       })))
       : [];
     const shouldSendStaffAssignments = userFormRole === 'staff' || editingOriginalRole === 'staff';
@@ -1584,7 +1811,8 @@ export default function AdminUsersPage() {
       await fetchUsers();
     } catch (error) {
       const message = await getErrorMessage(error, 'Unable to save user changes.');
-      showAlert('error', 'Failed to save user', message);
+      const feedback = getUserSaveFeedback(message);
+      showAlert(feedback.type, feedback.title, feedback.message);
     } finally {
       setUserFormSubmitting(false);
     }
@@ -1600,6 +1828,8 @@ export default function AdminUsersPage() {
     userFormPassword,
     userFormRole,
     staffFormAssignments,
+    staffFormListingPermissions,
+    staffFormMarketplaceAccess,
     roleFormTargetId,
     userFormIsVerified,
     userFormEmailConfirmed,
@@ -2263,9 +2493,12 @@ export default function AdminUsersPage() {
                       <View style={styles.staffPermissionList}>
                         {staffPermissionOptions.map((permission) => {
                           const staffFormAccessLevel = staffFormAccessLevels[staffFormEntityType];
+                          const listingPermissions = staffFormListingPermissions[staffFormEntityType];
                           const checked = permission.key === 'view'
                             || (permission.key === 'manage' && staffFormAccessLevel <= 2)
-                            || (permission.key === 'edit' && staffFormAccessLevel === 1);
+                            || (permission.key === 'edit' && listingPermissions.edit)
+                            || (permission.key === 'add' && listingPermissions.add)
+                            || (permission.key === 'delete' && listingPermissions.delete);
                           const isRequired = permission.key === 'view';
                           return (
                             <TouchableOpacity
@@ -2288,14 +2521,13 @@ export default function AdminUsersPage() {
                                   }));
                                   return;
                                 }
-                                if (permission.key === 'edit') {
-                                  const nextLevel: StaffAccessLevel = staffFormAccessLevel === 1 ? 2 : 1;
-                                  setStaffFormAccessLevels((current) => ({ ...current, [staffFormEntityType]: nextLevel }));
-                                  setStaffFormAssignments((current) => ({
+                                if (permission.key === 'edit' || permission.key === 'add' || permission.key === 'delete') {
+                                  setStaffFormListingPermissions((current) => ({
                                     ...current,
-                                    [staffFormEntityType]: Object.fromEntries(
-                                      Object.keys(current[staffFormEntityType]).map((id) => [id, nextLevel]),
-                                    ),
+                                    [staffFormEntityType]: {
+                                      ...current[staffFormEntityType],
+                                      [permission.key]: !current[staffFormEntityType][permission.key],
+                                    },
                                   }));
                                 }
                               }}
@@ -2320,9 +2552,31 @@ export default function AdminUsersPage() {
                           );
                         })}
                       </View>
-                      <Text style={[styles.staffLevelText, { color: colors.textSecondary }]}>
-                        These actions apply to the selected {STAFF_ENTITY_LABELS[staffFormEntityType].toLowerCase()} records. View access is required. Edit access also includes booking and application management.
-                      </Text>
+                      <TouchableOpacity
+                        testID="admin-user-staff-permission-marketplace"
+                        accessibilityLabel="Manage marketplace"
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: staffFormMarketplaceAccess }}
+                        activeOpacity={1}
+                        onPress={() => setStaffFormMarketplaceAccess((current) => !current)}
+                        style={[
+                          styles.staffPermissionRow,
+                          {
+                            backgroundColor: staffFormMarketplaceAccess ? `${colors.primary}12` : (isDark ? '#1E293B' : '#FFFFFF'),
+                            borderColor: staffFormMarketplaceAccess ? colors.primary : colors.border,
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name={staffFormMarketplaceAccess ? 'checkbox' : 'square-outline'}
+                          size={22}
+                          color={staffFormMarketplaceAccess ? colors.primary : colors.textSecondary}
+                        />
+                        <View style={styles.staffPermissionCopy}>
+                          <Text style={[styles.staffPermissionTitle, { color: colors.text }]}>Manage marketplace</Text>
+                          <Text style={[styles.staffLevelText, { color: colors.textSecondary }]}>Create, edit, publish, and remove the owner&apos;s products, and manage their sales and fulfillment.</Text>
+                        </View>
+                      </TouchableOpacity>
                     </View>
 
                     <View style={styles.fieldGroup}>
@@ -2330,7 +2584,7 @@ export default function AdminUsersPage() {
                         {STAFF_ENTITY_LABELS[staffFormEntityType]} <Text style={styles.requiredMark}>*</Text>
                       </Text>
                       <Text style={[styles.staffLevelText, { color: colors.textSecondary }]}>
-                        Only active {STAFF_ENTITY_LABELS[staffFormEntityType].toLowerCase()} records are shown. You can select more than one.
+                        Only active records are shown. Listings this user owns are hidden, and participation conflicts must be resolved before assignment.
                       </Text>
                       {staffTargetsLoading ? (
                         <View style={styles.inlineLoader}>
@@ -2343,72 +2597,125 @@ export default function AdminUsersPage() {
                             <Text style={[styles.staffTargetsRetryText, { color: colors.primary }]}>Try again</Text>
                           </TouchableOpacity>
                         </View>
-                      ) : staffTargetOptions.length === 0 ? (
-                        <Text style={[styles.detailsEmptyText, { color: colors.textSecondary }]}>
-                          No {STAFF_ENTITY_LABELS[staffFormEntityType].toLowerCase()} records found.
-                        </Text>
                       ) : (
-                        <ScrollView
-                          nestedScrollEnabled
-                          style={styles.staffTargetList}
-                          contentContainerStyle={styles.staffTargetListContent}
-                          showsVerticalScrollIndicator={false}
-                        >
-                          {Object.keys(staffFormAssignments[staffFormEntityType])
-                            .filter((id) => !staffTargetOptions.some((item) => item.id === id))
-                            .map((id) => (
-                              <TouchableOpacity
-                                key={id}
-                                activeOpacity={1}
-                                onPress={() => setStaffFormAssignments((current) => {
-                                  const nextForType = { ...current[staffFormEntityType] };
-                                  delete nextForType[id];
-                                  return { ...current, [staffFormEntityType]: nextForType };
-                                })}
-                                style={[styles.staffTargetOption, { borderColor: colors.primary, backgroundColor: `${colors.primary}14` }]}
-                              >
-                                <Text style={[styles.staffTargetTitle, { color: colors.text }]}>Current assignment</Text>
-                                <Text style={[styles.staffTargetMeta, { color: colors.textSecondary }]}>{id}</Text>
-                              </TouchableOpacity>
-                            ))}
-                          {staffTargetOptions.map((option) => {
-                            const active = Boolean(staffFormAssignments[staffFormEntityType][option.id]);
-                            return (
-                              <TouchableOpacity
-                                key={option.id}
-                                testID={`admin-user-staff-target-${option.id}`}
-                                accessibilityLabel={`admin-user-staff-target-${option.id}`}
-                                activeOpacity={1}
-                                accessibilityRole="checkbox"
-                                accessibilityState={{ checked: active }}
-                                onPress={() => setStaffFormAssignments((current) => {
-                                  const nextForType = { ...current[staffFormEntityType] };
-                                  if (nextForType[option.id]) {
-                                    delete nextForType[option.id];
-                                  } else {
-                                    nextForType[option.id] = staffFormAccessLevels[staffFormEntityType];
-                                  }
-                                  return { ...current, [staffFormEntityType]: nextForType };
-                                })}
-                                style={[
-                                  styles.staffTargetOption,
-                                  {
-                                    borderColor: active ? colors.primary : colors.border,
-                                    backgroundColor: active ? `${colors.primary}14` : (isDark ? '#0F172A' : '#F8FAFC'),
-                                  },
-                                ]}
-                              >
-                                <View style={styles.staffTargetSelectionRow}>
-                                  <Ionicons name={active ? 'checkbox' : 'square-outline'} size={20} color={active ? colors.primary : colors.textSecondary} />
-                                  <Text style={[styles.staffTargetTitle, { color: colors.text }]} numberOfLines={1}>{option.name}</Text>
+                        <View style={styles.staffConflictList}>
+                          {hiddenOwnedTargetIds.length > 0 ? (
+                            <View style={[styles.staffTargetNotice, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>
+                              <Text style={[styles.staffTargetTitle, { color: colors.text }]}>Owner listing hidden</Text>
+                              <Text style={[styles.staffTargetMeta, { color: colors.textSecondary }]}>
+                                {hiddenOwnedTargetIds.length} {hiddenOwnedTargetIds.length === 1 ? 'listing is' : 'listings are'} hidden because this user owns {hiddenOwnedTargetIds.length === 1 ? 'it' : 'them'}. Transfer ownership before assigning staff access.
+                              </Text>
+                            </View>
+                          ) : null}
+
+                          {staffTargetConflicts
+                            .filter((conflict) => conflict.entityType === staffFormEntityType)
+                            .map((conflict) => {
+                              const resolving = staffConflictResolvingId === conflict.id;
+                              return (
+                                <View
+                                  key={`conflict-${conflict.id}`}
+                                  style={[styles.staffConflictCard, { borderColor: '#F59E0B', backgroundColor: isDark ? '#2B2112' : '#FFFBEB' }]}
+                                >
+                                  <View style={styles.staffTargetSelectionRow}>
+                                    <Ionicons name="warning-outline" size={19} color="#D97706" />
+                                    <Text style={[styles.staffTargetTitle, { color: colors.text }]} numberOfLines={1}>{conflict.name}</Text>
+                                  </View>
+                                  <Text style={[styles.staffTargetMeta, { color: colors.textSecondary }]}>{conflict.reason}</Text>
+                                  <Text style={[styles.staffTargetMeta, { color: colors.textSecondary }]}>{conflict.resolution}</Text>
+                                  {conflict.canAutoResolve ? (
+                                    <TouchableOpacity
+                                      testID={`admin-user-resolve-staff-conflict-${conflict.id}`}
+                                      accessibilityLabel={`Resolve staff conflict for ${conflict.name}`}
+                                      accessibilityRole="button"
+                                      activeOpacity={0.8}
+                                      disabled={Boolean(staffConflictResolvingId)}
+                                      onPress={() => resolveStaffTargetConflict(conflict)}
+                                      style={[
+                                        styles.staffConflictAction,
+                                        { backgroundColor: colors.primary, opacity: staffConflictResolvingId && !resolving ? 0.55 : 1 },
+                                      ]}
+                                    >
+                                      {resolving ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="build-outline" size={15} color="#FFFFFF" />}
+                                      <Text style={styles.staffConflictActionText}>{resolving ? 'Resolving...' : 'Resolve conflict'}</Text>
+                                    </TouchableOpacity>
+                                  ) : null}
                                 </View>
-                                {option.meta ? (
-                                  <Text style={[styles.staffTargetMeta, { color: colors.textSecondary }]}>{option.meta}</Text>
-                                ) : null}
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </ScrollView>
+                              );
+                            })}
+
+                          {staffTargetOptions.length === 0 ? (
+                            <Text style={[styles.detailsEmptyText, { color: colors.textSecondary }]}>
+                              No eligible {STAFF_ENTITY_LABELS[staffFormEntityType].toLowerCase()} records found.
+                            </Text>
+                          ) : (
+                            <ScrollView
+                              nestedScrollEnabled
+                              style={styles.staffTargetList}
+                              contentContainerStyle={styles.staffTargetListContent}
+                              showsVerticalScrollIndicator={false}
+                            >
+                              {Object.keys(staffFormAssignments[staffFormEntityType])
+                                .filter((id) => (
+                                  !staffTargetOptions.some((item) => item.id === id)
+                                  && !staffTargetConflicts.some((item) => item.id === id && item.entityType === staffFormEntityType)
+                                  && !hiddenOwnedTargetIds.includes(id)
+                                ))
+                                .map((id) => (
+                                  <TouchableOpacity
+                                    key={id}
+                                    activeOpacity={1}
+                                    onPress={() => setStaffFormAssignments((current) => {
+                                      const nextForType = { ...current[staffFormEntityType] };
+                                      delete nextForType[id];
+                                      return { ...current, [staffFormEntityType]: nextForType };
+                                    })}
+                                    style={[styles.staffTargetOption, { borderColor: colors.primary, backgroundColor: `${colors.primary}14` }]}
+                                  >
+                                    <Text style={[styles.staffTargetTitle, { color: colors.text }]}>Current assignment</Text>
+                                    <Text style={[styles.staffTargetMeta, { color: colors.textSecondary }]}>{id}</Text>
+                                  </TouchableOpacity>
+                                ))}
+                              {staffTargetOptions.map((option) => {
+                                const active = Boolean(staffFormAssignments[staffFormEntityType][option.id]);
+                                return (
+                                  <TouchableOpacity
+                                    key={option.id}
+                                    testID={`admin-user-staff-target-${option.id}`}
+                                    accessibilityLabel={`admin-user-staff-target-${option.id}`}
+                                    activeOpacity={1}
+                                    accessibilityRole="checkbox"
+                                    accessibilityState={{ checked: active }}
+                                    onPress={() => setStaffFormAssignments((current) => {
+                                      const nextForType = { ...current[staffFormEntityType] };
+                                      if (nextForType[option.id]) {
+                                        delete nextForType[option.id];
+                                      } else {
+                                        nextForType[option.id] = staffFormAccessLevels[staffFormEntityType];
+                                      }
+                                      return { ...current, [staffFormEntityType]: nextForType };
+                                    })}
+                                    style={[
+                                      styles.staffTargetOption,
+                                      {
+                                        borderColor: active ? colors.primary : colors.border,
+                                        backgroundColor: active ? `${colors.primary}14` : (isDark ? '#0F172A' : '#F8FAFC'),
+                                      },
+                                    ]}
+                                  >
+                                    <View style={styles.staffTargetSelectionRow}>
+                                      <Ionicons name={active ? 'checkbox' : 'square-outline'} size={20} color={active ? colors.primary : colors.textSecondary} />
+                                      <Text style={[styles.staffTargetTitle, { color: colors.text }]} numberOfLines={1}>{option.name}</Text>
+                                    </View>
+                                    {option.meta ? (
+                                      <Text style={[styles.staffTargetMeta, { color: colors.textSecondary }]}>{option.meta}</Text>
+                                    ) : null}
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </ScrollView>
+                          )}
+                        </View>
                       )}
                       {userFormSubmitAttempted && userFormErrors.staffTarget ? (
                         <Text style={styles.fieldErrorText}>{userFormErrors.staffTarget}</Text>

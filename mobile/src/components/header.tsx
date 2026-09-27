@@ -51,9 +51,11 @@ interface HeaderProps {
     rightComponent?: React.ReactNode;
     rightIconName?: string;
     rightIconOnPress?: () => void;
+    onAddPress?: () => void;
+    addButtonAccessibilityLabel?: string;
 }
 
-function Header({ title, overline, compact = false, backgroundColor, showTitle = true, transparent, onBackPress, showBack, showMainActions, leftComponent, rightComponent, rightIconName, rightIconOnPress }: HeaderProps) {
+function Header({ title, overline, compact = false, backgroundColor, showTitle = true, transparent, onBackPress, showBack, showMainActions, leftComponent, rightComponent, rightIconName, rightIconOnPress, onAddPress, addButtonAccessibilityLabel = 'Add' }: HeaderProps) {
     const { colors, isDark } = useTheme();
     const surfaceColor = backgroundColor ?? colors.surface;
     const { isGuest, setGuestMode, userId, userRole } = useAuth();
@@ -84,6 +86,7 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
         () => routePathname === "/my_group" || routePathname === "/my_venue" || routePathname === "/my_studio" || routePathname === "/my_production",
         [routePathname],
     );
+    const isManageWorkspacePath = routePathname.startsWith('/manage') || isMyListingPath;
     const isMainActionHeader = Boolean(showMainActions);
     const computedBackVisible = !!onBackPress || !(isMainActionHeader || isMainNavPath || isSettingsOrProfile || isMyListingPath || isBrandMainHeader);
     const backVisible = showBack === false ? false : showBack === true ? true : computedBackVisible;
@@ -100,13 +103,16 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
         if (routePathname === "/my_production") return userRole === "producer";
         return false;
     }, [isMyListingPath, routePathname, staffCanUseAddButton, userRole]);
-    const notifVisible = !isGuest && (showMainActions || isMainNavPath || isBrandMainHeader || (isMyListingPath && !addbtnvisible));
+    const notifVisible = !isGuest && !isManageWorkspacePath && (showMainActions || isMainNavPath || isBrandMainHeader);
     const rightActionSlots = useMemo(() => {
         if (rightComponent) return -1;
-        if (rightIconName || isGuest || addbtnvisible) return 1;
+        if (rightIconName || isGuest) return 1;
+        if (onAddPress && notifVisible) return isFan ? 2 : 3;
+        if (onAddPress) return 1;
+        if (addbtnvisible) return 1;
         if (notifVisible) return isFan ? 1 : 2;
         return 0;
-    }, [addbtnvisible, isFan, isGuest, notifVisible, rightComponent, rightIconName]);
+    }, [addbtnvisible, isFan, isGuest, notifVisible, onAddPress, rightComponent, rightIconName]);
     const titleOverline = useMemo(() => {
         const explicitOverline = overline?.trim();
         if (explicitOverline) return explicitOverline;
@@ -473,7 +479,8 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
                         styles.rightContainer,
                         rightActionSlots === 0 && styles.rightContainerEmpty,
                         rightActionSlots === 1 && styles.rightContainerSingle,
-                        rightActionSlots >= 2 && styles.rightContainerDouble,
+                        rightActionSlots === 2 && styles.rightContainerDouble,
+                        rightActionSlots >= 3 && styles.rightContainerTriple,
                     ]}>
                         {rightComponent ? (
                             rightComponent
@@ -490,7 +497,7 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
                                 <AnimatedIcon name="menu-outline" size={22} animatedProps={iconAnimatedProps} />
                             </AnimatedTouchableOpacity>
                         ) : notifVisible ? (
-                            <View style={styles.iconRow}>
+                            <View style={[styles.iconRow, onAddPress && styles.iconRowWithAdd]}>
                                 {!isFan && (
                                     <AnimatedTouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, buttonAnimatedStyle]}>
                                         <AnimatedIcon name="chatbubble-ellipses-outline" size={23} animatedProps={iconAnimatedProps} />
@@ -506,10 +513,29 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
                                         <View style={[styles.badge, transparent && { borderColor: 'rgba(0,0,0,0.3)' }]} />
                                     )}
                                 </AnimatedTouchableOpacity>
+                                {onAddPress ? (
+                                    <AnimatedTouchableOpacity
+                                        activeOpacity={1}
+                                        onPress={onAddPress}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={addButtonAccessibilityLabel}
+                                        testID="mobile-header-add-button"
+                                        style={[
+                                            styles.addButton,
+                                            buttonAnimatedStyle,
+                                            { backgroundColor: isDark ? '#111827' : '#F8FAFC', borderColor: colors.border },
+                                        ]}
+                                    >
+                                        <AnimatedIcon name="add" size={22} animatedProps={iconAnimatedProps} />
+                                    </AnimatedTouchableOpacity>
+                                ) : null}
                             </View>
-                        ) : addbtnvisible ? (
+                        ) : onAddPress || addbtnvisible ? (
                             <AnimatedTouchableOpacity activeOpacity={1}
-                                onPress={() => router.push(btn)}
+                                onPress={onAddPress ?? (() => router.push(btn))}
+                                accessibilityRole="button"
+                                accessibilityLabel={addButtonAccessibilityLabel}
+                                testID={onAddPress ? "mobile-header-add-button" : undefined}
                                 style={[
                                     styles.addButton,
                                     buttonAnimatedStyle,
@@ -625,10 +651,16 @@ const styles = StyleSheet.create({
     rightContainerDouble: {
         width: 98,
     },
+    rightContainerTriple: {
+        width: 140,
+    },
     iconRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
+    },
+    iconRowWithAdd: {
+        gap: 4,
     },
     backButton: {
         width: 44,

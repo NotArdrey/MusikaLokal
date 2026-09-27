@@ -414,8 +414,9 @@ const normalizeWeeklySessionType = (
 export default function AddStudioScreen() {
   const { colors, isDark } = useTheme();
   const { isSystemLocked, showLockAlert } = useAuth();
-  const params = useLocalSearchParams<{ refresh?: string }>();
+  const params = useLocalSearchParams<{ refresh?: string; ownerId?: string }>();
   const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
+  const delegatedOwnerId = Array.isArray(params.ownerId) ? params.ownerId[0] : params.ownerId;
   const [step, setStep] = useState(1);
   const [studioName, setStudioName] = useState("");
   const [description, setDescription] = useState("");
@@ -791,9 +792,15 @@ export default function AddStudioScreen() {
       if (profileError) throw profileError;
 
       if (profile?.role !== "studio-owner") {
-        showAlert("warning", "Unauthorized", "Only studio owners can create studios.");
-        router.replace("/home");
-        return;
+        const { data: canCreateAsStaff, error: staffAccessError } = await supabase.rpc(
+          'staff_can_create_listing_for_owner',
+          { p_entity_type: 'studio', p_owner_id: delegatedOwnerId || null },
+        );
+        if (profile?.role !== 'staff' || !delegatedOwnerId || staffAccessError || !canCreateAsStaff) {
+          showAlert("warning", "Unauthorized", "Only studio owners or full-access staff can create studios.");
+          router.replace("/home");
+          return;
+        }
       }
 
       // Check if user's identity is verified
@@ -1422,7 +1429,7 @@ export default function AddStudioScreen() {
       const { data, error } = await supabase
         .from('studios')
         .insert({
-          owner_id: session.user.id,
+          owner_id: delegatedOwnerId || session.user.id,
           name: payload.name,
           description: payload.description,
           address: payload.address,
@@ -1443,7 +1450,7 @@ export default function AddStudioScreen() {
 
       if (error) {
         logActionError("add_studio.create_base_failed", error, {
-          ownerId: session.user.id,
+          ownerId: delegatedOwnerId || session.user.id,
           studioType: payload.type,
         });
 

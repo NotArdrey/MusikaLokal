@@ -3,8 +3,12 @@
  * Run: node scripts/smoke_test.mjs
  */
 
-const SUPABASE_URL = 'https://aefldxegsvzecshlayza.supabase.co';
-const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFlZmxkeGVnc3Z6ZWNzaGxheXphIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg2NTgyOTUsImV4cCI6MjA4NDIzNDI5NX0._BKyxjyqHKHaheMWkBk8mMalzSPy_gm1ImsT_RQaOB0';
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+
+if (!SUPABASE_URL || !ANON_KEY) {
+  throw new Error('Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in the environment before running this smoke test.');
+}
 
 const EDGE_FUNCTION_URL = `${SUPABASE_URL}/functions/v1/manage-details`;
 

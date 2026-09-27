@@ -658,7 +658,7 @@ const ProductionTeamDetailsSheet = forwardRef<
       ? "Open Team Workspace"
       : "Open Team Page";
   const staffPermissions = staffAssignment
-    ? getStaffPermissions(staffAssignment.access_level)
+    ? getStaffPermissions(staffAssignment.access_level, staffAssignment)
     : null;
   const isAssignedStaffTeam = userRole === "staff" && staffAssignment?.production_team_id === team?.id;
 
@@ -1350,7 +1350,12 @@ const ProductionTeamDetailsSheet = forwardRef<
               </View>
             </View>
 
-            {isAssignedStaffTeam && (staffPermissions?.canManageBookings || staffPermissions?.canEditListing) ? (
+            {isAssignedStaffTeam && (
+              staffPermissions?.canManageBookings ||
+              staffPermissions?.canEditListing ||
+              staffPermissions?.canAddListing ||
+              staffPermissions?.canDeleteListing
+            ) ? (
               <View style={[styles.staffActionBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 {staffPermissions?.canManageBookings ? (
                   <TouchableOpacity
@@ -1376,6 +1381,32 @@ const ProductionTeamDetailsSheet = forwardRef<
                   >
                     <Ionicons name="pencil-outline" size={17} color={colors.text} />
                     <Text style={[styles.staffSecondaryActionText, { color: colors.text }]}>Edit</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {staffPermissions?.canAddListing ? (
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    onPress={() => {
+                      closeSheet();
+                      router.push({ pathname: "/add_production", params: { ownerId: team.owner_id } });
+                    }}
+                    style={[styles.staffSecondaryAction, { borderColor: colors.border }]}
+                  >
+                    <Ionicons name="add-outline" size={17} color={colors.text} />
+                    <Text style={[styles.staffSecondaryActionText, { color: colors.text }]}>Add</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {staffPermissions?.canDeleteListing ? (
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    onPress={() => {
+                      closeSheet();
+                      router.push({ pathname: "/my_production", params: { deleteId: team.id } });
+                    }}
+                    style={[styles.staffSecondaryAction, { borderColor: "#EF4444" }]}
+                  >
+                    <Ionicons name="trash-outline" size={17} color="#EF4444" />
+                    <Text style={[styles.staffSecondaryActionText, { color: "#EF4444" }]}>Delete</Text>
                   </TouchableOpacity>
                 ) : null}
               </View>
@@ -1420,6 +1451,7 @@ const ProductionTeamDetailsSheet = forwardRef<
 const styles = StyleSheet.create({
   staffActionBar: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
     marginHorizontal: 16,
     marginTop: 14,
@@ -1430,6 +1462,7 @@ const styles = StyleSheet.create({
   },
   staffPrimaryAction: {
     flex: 1,
+    minWidth: 104,
     minHeight: 42,
     borderRadius: 11,
     flexDirection: "row",
@@ -1444,6 +1477,7 @@ const styles = StyleSheet.create({
   },
   staffSecondaryAction: {
     flex: 1,
+    minWidth: 104,
     minHeight: 42,
     borderRadius: 11,
     borderWidth: 1,

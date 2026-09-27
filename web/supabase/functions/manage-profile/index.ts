@@ -8,6 +8,27 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
+function extractBearerToken(authHeader: string | null): string | null {
+    const trimmed = String(authHeader || '').trim()
+    if (!trimmed) return null
+
+    const token = trimmed.replace(/^Bearer\s+/i, '').trim()
+    return token || null
+}
+
+function jsonError(message: string, status: number) {
+    return new Response(JSON.stringify({ error: message }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status,
+    })
+}
+
+function isMissingTableError(error: any, tableName: string) {
+    const code = String(error?.code || '').toUpperCase()
+    const message = String(error?.message || '').toLowerCase()
+    return (code === '42P01' || code === 'PGRST205') && message.includes(tableName.toLowerCase())
+}
+
 const replaceProfileSkills = async (client: any, profileId: string, skills: string[]) => {
     const { error: deleteError } = await client.from('profile_skills').delete().eq('profile_id', profileId)
     if (deleteError) throw deleteError
@@ -65,38 +86,36 @@ serve(async (req: Request) => {
     try {
         const { action, ...params } = await req.json()
 
-        // Log authorization header for debugging (remove in production)
         const authHeader = req.headers.get('Authorization')
+        const accessToken = extractBearerToken(authHeader)
+        if (!accessToken) return jsonError('No authorization header provided', 401)
 
-        // Allow 'create' action without auth header (for signup flow)
-        // The create action uses service role key anyway
-        if (action !== 'create' && !authHeader) {
-            return new Response(JSON.stringify({ error: 'No authorization header provided' }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 401,
-            })
+        const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+        const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+        const supabaseClient = createClient(
+            supabaseUrl,
+            supabaseAnonKey,
+            { global: { headers: { Authorization: `Bearer ${accessToken}` } } },
+        )
+
+        // The gateway intentionally has verify_jwt=false, so verify the bearer
+        // token here and derive the identity only from Supabase Auth.
+        const { data: authData, error: authError } = await supabaseClient.auth.getUser(accessToken)
+        if (authError || !authData?.user?.id) return jsonError('Invalid token', 401)
+
+        const authenticatedUserId = authData.user.id
+        const requestedUserId = params.userId
+        if (['fetch', 'update', 'add_media', 'create'].includes(action)) {
+            if (!requestedUserId) return jsonError('userId is required', 400)
+            if (requestedUserId !== authenticatedUserId) return jsonError('Forbidden: userId mismatch', 403)
         }
-
-        // Only create supabaseClient if we have auth header (not needed for create action)
-        const supabaseClient = authHeader ? createClient(
-            // @ts-ignore
-            Deno.env.get('SUPABASE_URL') ?? '',
-            // @ts-ignore
-            Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-            { global: { headers: { Authorization: authHeader } } }
-        ) : null
 
         if (action === 'switch_role') {
             const normalizedRole = String(params.role || '').trim().toLowerCase()
             if (!['fan', 'musician'].includes(normalizedRole)) throw new Error('Only fan or musician roles can be selected.')
-            const { data: callerData, error: callerError } = await supabaseClient!.auth.getUser()
-            if (callerError || !callerData?.user) {
-                return new Response(JSON.stringify({ error: 'Authentication required' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401,
-                })
-            }
-            const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '')
-            const userId = callerData.user.id
+            const callerData = authData
+            const supabaseAdmin = createClient(supabaseUrl, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '')
+            const userId = authenticatedUserId
             const { data: membership, error: membershipError } = await supabaseAdmin.from('profile_roles')
                 .select('status').eq('profile_id', userId).eq('role', normalizedRole).maybeSingle()
             if (membershipError) throw membershipError
@@ -105,6 +124,25 @@ serve(async (req: Request) => {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403,
                 })
             }
+
+            const { data: currentProfile, error: currentProfileError } = await supabaseAdmin
+                .from('profiles')
+                .select('role')
+                .eq('id', userId)
+                .maybeSingle()
+            if (currentProfileError) throw currentProfileError
+
+            if (currentProfile?.role === 'staff') {
+                const { error: revokeError } = await supabaseAdmin
+                    .from('staff_listing_access')
+                    .update({ revoked_at: new Date().toISOString() })
+                    .eq('staff_user_id', userId)
+                    .is('revoked_at', null)
+                if (revokeError && !isMissingTableError(revokeError, 'staff_listing_access')) {
+                    throw revokeError
+                }
+            }
+
             const { error: profileError } = await supabaseAdmin.from('profiles').update({ role: normalizedRole }).eq('id', userId)
             if (profileError) throw profileError
             const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(userId, {

@@ -843,7 +843,7 @@ serve(async (req: Request) => {
 
       // Base URL for redirects
       const baseUrl =
-        Deno.env.get("APP_URL") || "https://aefldxegsvzecshlayza.supabase.co";
+        Deno.env.get("APP_URL") || Deno.env.get("SUPABASE_URL") || "";
 
       // Create PayMongo Checkout Session
       const checkoutData = await paymongoRequest("/checkout_sessions", "POST", {

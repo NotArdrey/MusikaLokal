@@ -345,26 +345,131 @@ const replaceStudioInstruments = async (client: any, studioId: string, instrumen
     }
 }
 
-// Helper to decode JWT payload without verification (for getting user ID)
-// Uses base64url decoding which is what JWT uses
-function decodeJwtPayload(token: string): { sub?: string; email?: string } | null {
-    try {
-        const parts = token.replace('Bearer ', '').split('.')
-        if (parts.length !== 3) return null
+function extractBearerToken(authHeader: string | null): string | null {
+    const trimmed = String(authHeader || '').trim()
+    if (!trimmed) return null
 
-        // Base64url to base64 conversion
-        let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
-        // Add padding if needed
-        while (base64.length % 4) {
-            base64 += '='
-        }
+    const token = trimmed.replace(/^Bearer\s+/i, '').trim()
+    return token || null
+}
 
-        const payload = JSON.parse(atob(base64))
-        return payload
-    } catch (e) {
-        console.error('JWT decode error:', e)
-        return null
+function isMissingTableError(error: any, tableName: string) {
+    const code = String(error?.code || '').toUpperCase()
+    const message = String(error?.message || '').toLowerCase()
+    return (code === '42P01' || code === 'PGRST205') && message.includes(tableName.toLowerCase())
+}
+
+async function getProfileRole(client: any, userId: string): Promise<string | null> {
+    const { data, error } = await client
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .maybeSingle()
+
+    if (error) throw error
+    return typeof data?.role === 'string' ? data.role : null
+}
+
+async function getStaffAccessLevel(
+    client: any,
+    userId: string,
+    entityType: 'studio' | 'venue',
+    targetId: string,
+): Promise<number | null> {
+    if (!userId || !targetId) return null
+    const { data: isActiveStaff, error: activeStaffError } = await client.rpc('is_active_staff', {
+        p_user_id: userId,
+    })
+    if (activeStaffError) throw activeStaffError
+    if (!isActiveStaff) return null
+
+    let query = client
+        .from('staff_listing_access')
+        .select('access_level')
+        .eq('staff_user_id', userId)
+        .eq('entity_type', entityType)
+        .is('revoked_at', null)
+        .order('access_level', { ascending: true })
+        .limit(1)
+
+    query = entityType === 'studio'
+        ? query.eq('studio_id', targetId)
+        : query.eq('gig_id', targetId)
+
+    const { data, error } = await query.maybeSingle()
+    if (error) {
+        if (isMissingTableError(error, 'staff_listing_access')) return null
+        throw error
     }
+
+    const level = Number(data?.access_level)
+    return [1, 2, 3].includes(level) ? level : null
+}
+
+async function authorizeStudioAccess(client: any, userId: string, studioId: string, canManage = false) {
+    const { data: studio, error } = await client
+        .from('studios')
+        .select('owner_id')
+        .eq('id', studioId)
+        .maybeSingle()
+    if (error) throw error
+    if (!studio) return { allowed: false, owner: false, staffLevel: null }
+
+    const role = await getProfileRole(client, userId)
+    const owner = studio.owner_id === userId && role === 'studio-owner'
+    const staffLevel = owner ? null : await getStaffAccessLevel(client, userId, 'studio', studioId)
+    const staffAllowed = staffLevel !== null && (!canManage || staffLevel <= 2)
+    return { allowed: owner || staffAllowed, owner, staffLevel }
+}
+
+async function authorizeGigAccess(client: any, userId: string, gigId: string, canManage = false) {
+    const { data: gig, error } = await client
+        .from('gigs')
+        .select('organizer_id')
+        .eq('id', gigId)
+        .maybeSingle()
+    if (error) throw error
+    if (!gig) return { allowed: false, owner: false, staffLevel: null }
+
+    const role = await getProfileRole(client, userId)
+    const owner = gig.organizer_id === userId && role === 'venue-owner'
+    const staffLevel = owner ? null : await getStaffAccessLevel(client, userId, 'venue', gigId)
+    const staffAllowed = staffLevel !== null && (!canManage || staffLevel <= 2)
+    return { allowed: owner || staffAllowed, owner, staffLevel }
+}
+
+async function authorizeGroupAccess(client: any, userId: string, groupId: string, ownerOnly = false) {
+    if ((await getProfileRole(client, userId)) !== 'musician') return false
+    const { data: group, error: groupError } = await client
+        .from('groups')
+        .select('owner_id')
+        .eq('id', groupId)
+        .maybeSingle()
+    if (groupError) throw groupError
+    if (!group) return false
+
+    if (group.owner_id === userId) {
+        return true
+    }
+
+    if (ownerOnly) return false
+
+    const { data: membership, error: membershipError } = await client
+        .from('group_members')
+        .select('id')
+        .eq('group_id', groupId)
+        .eq('user_id', userId)
+        .limit(1)
+        .maybeSingle()
+    if (membershipError) throw membershipError
+    return Boolean(membership)
+}
+
+function jsonError(message: string, status: number) {
+    return new Response(JSON.stringify({ error: message }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status,
+    })
 }
 
 serve(async (req: Request) => {
@@ -373,48 +478,49 @@ serve(async (req: Request) => {
     }
 
     try {
-        const authHeader = req.headers.get('Authorization');
+        const authHeader = req.headers.get('Authorization')
+        const accessToken = extractBearerToken(authHeader)
 
-        if (!authHeader) {
-            return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 401,
-            })
+        if (!accessToken) {
+            return jsonError('Missing authorization header', 401)
         }
 
-        // Decode JWT to get user info
-        const jwtPayload = decodeJwtPayload(authHeader)
+        const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+        const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+        const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 
-        if (!jwtPayload || !jwtPayload.sub) {
-            return new Response(JSON.stringify({ error: 'Invalid token' }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 401,
-            })
+        // Keep the service-role client for narrowly scoped server-side writes, but
+        // always verify the bearer token through an auth-bound client first.
+        const supabaseClient = createClient(supabaseUrl, serviceRoleKey)
+        const supabaseAuthClient = createClient(supabaseUrl, supabaseAnonKey, {
+            global: { headers: { Authorization: `Bearer ${accessToken}` } },
+        })
+        const { data: authData, error: authError } = await supabaseAuthClient.auth.getUser(accessToken)
+
+        if (authError || !authData?.user?.id) {
+            return jsonError('Invalid token', 401)
         }
 
-        const authenticatedUserId = jwtPayload.sub
-
-        // Create supabase client with service role for database operations
-        const supabaseClient = createClient(
-            // @ts-ignore
-            Deno.env.get('SUPABASE_URL') ?? '',
-            // @ts-ignore
-            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-        )
-
+        const authenticatedUserId = authData.user.id
         const { action, ...params } = await req.json()
-        const { userId } = params
+        const { userId: requestedUserId } = params
 
-        // Verify userId matches authenticated user from JWT
-        if (userId && userId !== authenticatedUserId) {
-            return new Response(JSON.stringify({ error: 'Forbidden: userId mismatch' }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 403,
-            })
+        if (requestedUserId && requestedUserId !== authenticatedUserId) {
+            return jsonError('Forbidden: userId mismatch', 403)
         }
 
-        // Use the authenticated user ID for all operations
-        const effectiveUserId = userId || authenticatedUserId
+        // Do not let a body field become the caller identity. Existing handlers
+        // use userId, so bind that local alias to the verified auth user.
+        const userId = authenticatedUserId
+        const effectiveUserId = authenticatedUserId
+        const retiredManagementActions = new Set([
+            'update_booking_status',
+            'partial_slot_approval',
+            'update_application_status',
+        ])
+        if (retiredManagementActions.has(action)) {
+            return jsonError('This legacy action is retired. Use manage-bookings or gig-applications.', 410)
+        }
 
         // CREATE SINGLE NOTIFICATION (server-side)
         if (action === 'create_notification') {
@@ -426,6 +532,11 @@ serve(async (req: Request) => {
                     status: 400,
                 })
             }
+
+            // This legacy endpoint writes through the service-role client. It
+            // may only create a notification for the verified caller; cross-
+            // user notification fan-out belongs in the dedicated functions.
+            if (targetUserId !== userId) return jsonError('Forbidden', 403)
 
             const payload = {
                 user_id: targetUserId,
@@ -454,6 +565,10 @@ serve(async (req: Request) => {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 400,
                 })
+            }
+
+            if (notifications.some((notification: any) => notification?.user_id !== userId)) {
+                return jsonError('Forbidden', 403)
             }
 
             const payload = notifications
@@ -667,13 +782,47 @@ serve(async (req: Request) => {
         if (action === 'create') {
             const { type, payload } = params
             const table = type + 's'
-            const ownerField = type === 'gig' ? 'organizer_id' : 'owner_id'
+            const ownerField = type === 'gig'
+                ? 'organizer_id'
+                : type === 'gig_application'
+                    ? 'applicant_id'
+                    : 'owner_id'
+
+            const requiredRoleByType: Record<string, string> = {
+                studio: 'studio-owner',
+                gig: 'venue-owner',
+                group: 'musician',
+                gig_application: 'musician',
+            }
+            const requiredRole = requiredRoleByType[type]
+            if (!requiredRole) {
+                return jsonError('Unsupported listing type', 400)
+            }
+
+            const callerRole = await getProfileRole(supabaseClient, authenticatedUserId)
+            if (callerRole !== requiredRole) {
+                return jsonError(`Only ${requiredRole} accounts can create ${type} records`, 403)
+            }
 
             // Extract availability only if type is studio, to prevent it from being sent to studios table insert
             let studioAvailability = null;
             let calendarAvailability = null;
             let bookingSettings = null;
             let insertPayload = { ...payload };
+
+            if (type === 'gig_application') {
+                // Never honor identity fields supplied by the caller. The
+                // verified bearer user is the applicant and submitter.
+                delete insertPayload.owner_id
+                delete insertPayload.user_id
+                delete insertPayload.applicant_id
+                delete insertPayload.submitted_by_user_id
+                insertPayload = {
+                    ...insertPayload,
+                    applicant_id: authenticatedUserId,
+                    submitted_by_user_id: authenticatedUserId,
+                }
+            }
 
             // For studios, only allow valid columns to prevent PGRST204 errors
             // This filters out any extra fields that don't exist in the studios table
@@ -1101,7 +1250,14 @@ serve(async (req: Request) => {
                         : Number(filteredPayload.reapplication_cooldown_days);
                 delete filteredPayload.reapplication_cooldown_days;
 
-                const { data: rpcData, error: rpcError } = await supabaseClient.rpc('update_gig_safely', {
+                // The RPC enforces the same owner/Level-1 staff rule using
+                // auth.uid(). Check it before any follow-up service-role write.
+                const gigAccess = await authorizeGigAccess(supabaseClient, userId, id, true)
+                if (!gigAccess.allowed || (!gigAccess.owner && gigAccess.staffLevel !== 1)) {
+                    return jsonError('Forbidden', 403)
+                }
+
+                const { data: rpcData, error: rpcError } = await supabaseAuthClient.rpc('update_gig_safely', {
                     p_gig_id: id,
                     p_payload: filteredPayload,
                     p_reason: 'Updated via manage-listings edge function',
@@ -1451,6 +1607,11 @@ serve(async (req: Request) => {
         // FETCH STUDIO BOOKINGS
         if (action === 'fetch_studio_bookings') {
             const { studioId } = params;
+            if (!studioId) return jsonError('Missing studioId', 400)
+
+            const studioAccess = await authorizeStudioAccess(supabaseClient, userId, studioId)
+            if (!studioAccess.allowed) return jsonError('Forbidden', 403)
+
             // Join with profiles to get user info
             const { data, error } = await supabaseClient
                 .from('studio_bookings')
@@ -1462,12 +1623,19 @@ serve(async (req: Request) => {
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
-            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            // A studio owner/staff member must not review their own booking.
+            const conflictFreeData = (data || []).filter((booking: any) => booking.user_id !== userId)
+            return new Response(JSON.stringify(conflictFreeData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
         // FETCH GIG APPLICATIONS
         if (action === 'fetch_gig_applications') {
             const { gigId } = params;
+            if (!gigId) return jsonError('Missing gigId', 400)
+
+            const gigAccess = await authorizeGigAccess(supabaseClient, userId, gigId)
+            if (!gigAccess.allowed) return jsonError('Forbidden', 403)
+
             const { data, error } = await supabaseClient
                 .from('gig_applications')
                 .select(`
@@ -1480,13 +1648,21 @@ serve(async (req: Request) => {
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
-            const hydratedData = await hydrateGigApplicationLegacy(supabaseClient, data || []);
+            // Do not expose an application to its own applicant/submitter when
+            // that account also owns or staffs the gig.
+            const conflictFreeData = (data || []).filter((application: any) =>
+                application.applicant_id !== userId && application.submitted_by_user_id !== userId,
+            )
+            const hydratedData = await hydrateGigApplicationLegacy(supabaseClient, conflictFreeData);
             return new Response(JSON.stringify(hydratedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
         // FETCH GROUP APPLICATIONS (My applications as a group/musician)
         if (action === 'fetch_group_applications') {
             const { groupId } = params;
+            if (groupId && !(await authorizeGroupAccess(supabaseClient, userId, groupId, true))) {
+                return jsonError('Forbidden', 403)
+            }
             // Fetch applications where group_id matches OR applicant_id matches the user (if personal)
             // Prioritize group_id if provided
             let query = supabaseClient.from('gig_applications').select(`
@@ -1503,7 +1679,7 @@ serve(async (req: Request) => {
             const { data, error } = await query.order('created_at', { ascending: false });
 
             if (error) throw error;
-            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            return new Response(JSON.stringify(data || []), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
         // UPDATE BOOKING STATUS (Studio Bookings)
@@ -1522,6 +1698,11 @@ serve(async (req: Request) => {
                 .single();
 
             if (bookingError) throw bookingError;
+
+            const studioAccess = await authorizeStudioAccess(supabaseClient, userId, bookingDetails.studio_id, true)
+            if (!studioAccess.allowed || bookingDetails.user_id === userId) {
+                return jsonError('Forbidden', 403)
+            }
 
             // Update the booking status (and cancellation reason if provided)
             const updateData: any = { status };
@@ -1592,6 +1773,11 @@ serve(async (req: Request) => {
                 .single();
 
             if (bookingError) throw bookingError;
+
+            const studioAccess = await authorizeStudioAccess(supabaseClient, userId, bookingDetails.studio_id, true)
+            if (!studioAccess.allowed || bookingDetails.user_id === userId) {
+                return jsonError('Forbidden', 403)
+            }
 
             const studioName = bookingDetails.studio?.name || 'the studio';
             const bookingDate = bookingDetails.booking_date;
@@ -1726,6 +1912,11 @@ serve(async (req: Request) => {
                 .single();
 
             if (appError) throw appError;
+
+            const gigAccess = await authorizeGigAccess(supabaseClient, userId, appDetails.gig_id, true)
+            if (!gigAccess.allowed || appDetails.applicant_id === userId || appDetails.submitted_by_user_id === userId) {
+                return jsonError('Forbidden', 403)
+            }
 
             // Update the application status
             const { data, error } = await supabaseClient
@@ -1928,6 +2119,10 @@ serve(async (req: Request) => {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 400,
                 });
+            }
+
+            if (!(await authorizeGroupAccess(supabaseClient, userId, groupId))) {
+                return jsonError('Forbidden', 403)
             }
 
             const { data, error } = await supabaseClient

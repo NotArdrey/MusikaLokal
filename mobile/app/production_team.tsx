@@ -48,6 +48,9 @@ interface Team {
   open_production_applications?: boolean;
   staff_access_level?: number | null;
   staff_can_edit?: boolean;
+  staff_can_edit_listing?: boolean;
+  staff_can_add_listing?: boolean;
+  staff_can_delete_listing?: boolean;
   staff_can_manage_bookings?: boolean;
   created_at: string;
 }
@@ -305,7 +308,7 @@ export default function ProductionTeamScreen() {
         staffAssignment?.entity_type === "production" &&
         staffAssignment.production_team_id === teamId;
       const staffPermissions = isAssignedStaff
-        ? getStaffPermissions(staffAssignment?.access_level)
+        ? getStaffPermissions(staffAssignment?.access_level, staffAssignment)
         : null;
 
       const resolvedMemberRole = data.owner_id === userId
@@ -316,6 +319,9 @@ export default function ProductionTeamScreen() {
         member_role: resolvedMemberRole,
         staff_access_level: isAssignedStaff ? staffAssignment?.access_level || null : null,
         staff_can_edit: Boolean(staffPermissions?.canEditListing),
+        staff_can_edit_listing: Boolean(staffPermissions?.canEditListing),
+        staff_can_add_listing: Boolean(staffPermissions?.canAddListing),
+        staff_can_delete_listing: Boolean(staffPermissions?.canDeleteListing),
         staff_can_manage_bookings: Boolean(staffPermissions?.canManageBookings),
         open_production_applications:
           typeof data.open_production_applications === "boolean"
@@ -685,7 +691,7 @@ export default function ProductionTeamScreen() {
   // Team detail view
   if (selectedTeam) {
     const selectedStaffPermissions = selectedTeam.staff_access_level
-      ? getStaffPermissions(selectedTeam.staff_access_level)
+      ? getStaffPermissions(selectedTeam.staff_access_level, selectedTeam)
       : null;
     const canManage =
       selectedTeam.member_role === "owner" ||

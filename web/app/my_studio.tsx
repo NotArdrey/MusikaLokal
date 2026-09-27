@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform, useWindowDimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
@@ -49,8 +49,10 @@ export default function MyStudioScreen() {
         : colors.border;
     const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
     const { userRole } = useAuth();
-    const params = useLocalSearchParams<{ refresh?: string }>();
+    const params = useLocalSearchParams<{ refresh?: string; deleteId?: string }>();
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
+    const requestedDeleteId = Array.isArray(params.deleteId) ? params.deleteId[0] : params.deleteId;
+    const processedDeleteIdRef = useRef<string | null>(null);
     const [modalVisible, setModalVisible] = useState(false);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [selectedName, setSelectedName] = useState('');
@@ -228,6 +230,32 @@ export default function MyStudioScreen() {
         setModalVisible(true);
     };
 
+    useEffect(() => {
+        if (!requestedDeleteId || loading || processedDeleteIdRef.current === requestedDeleteId) return;
+        const timer = setTimeout(() => {
+            if (processedDeleteIdRef.current === requestedDeleteId) return;
+            processedDeleteIdRef.current = requestedDeleteId;
+
+            const studio = studios.find((item) => item.id === requestedDeleteId);
+            if (!studio) return;
+            const assignment = staffAssignments.find((item) => item.studio_id === studio.id);
+            const canDelete = userRole === 'staff'
+                ? getStaffPermissions(assignment?.access_level, assignment).canDeleteListing
+                : studio.owner_id === userId;
+            if (!canDelete) {
+                setAlertConfig({ type: 'warning', title: 'Delete Not Allowed', message: 'You do not have permission to delete this studio.' });
+                setAlertVisible(true);
+                return;
+            }
+
+            setSelectedId(studio.id);
+            setSelectedName(studio.name || '');
+            setDeleteConfirmationText('');
+            setModalVisible(true);
+        }, 0);
+        return () => clearTimeout(timer);
+    }, [loading, requestedDeleteId, staffAssignments, studios, userId, userRole]);
+
     const isDeleteConfirmed =
         normalizeConfirmationInput(deleteConfirmationText) ===
         normalizeConfirmationInput(selectedName);
@@ -287,6 +315,15 @@ export default function MyStudioScreen() {
     }, [mapDeleteConflictBooking]);
 
     const performStudioDelete = useCallback(async (studioId: string, reason: string) => {
+        if (userRole === 'staff') {
+            const { data, error } = await supabase.rpc('delete_studio_as_full_access_staff', {
+                p_studio_id: studioId,
+                p_reason: reason,
+            });
+            if (error) throw error;
+            return data;
+        }
+
         let result: any = null;
         let invokeError: any = null;
         const {
@@ -325,7 +362,7 @@ export default function MyStudioScreen() {
         }
 
         return result;
-    }, []);
+    }, [userRole]);
 
     const handleDeleteSuccess = useCallback((studioId: string) => {
         setStudios(prev => prev.filter(s => s.id !== studioId));
@@ -375,10 +412,6 @@ export default function MyStudioScreen() {
 
     const handleDelete = async (skipConflictCheck = false) => {
         if (!selectedId || !userId || deleting) return;
-        if (userRole === 'staff') {
-            showAlert('warning', 'Action blocked', 'Staff accounts cannot delete studios.');
-            return;
-        }
         if (!isDeleteConfirmed) {
             showAlert('warning', 'Confirmation Needed', `Please type "${selectedName}" exactly to confirm deletion.`);
             return;
@@ -399,7 +432,9 @@ export default function MyStudioScreen() {
                 }
             }
 
-            const result = await performStudioDelete(selectedId, 'Deleted from My Studio screen by owner');
+            const result = await performStudioDelete(selectedId, userRole === 'staff'
+                ? 'Deleted from My Studio screen by full-access staff'
+                : 'Deleted from My Studio screen by owner');
             await handleDeleteResult(selectedId, result);
         } catch (e) {
             console.log('Error deleting studio:', e);
@@ -520,8 +555,9 @@ export default function MyStudioScreen() {
                         ) : (
                             <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
                                 {studios.map((studio) => {
+                                    const staffAssignment = staffAssignments.find((assignment) => assignment.studio_id === studio.id);
                                     const staffPermissions = userRole === 'staff'
-                                        ? getStaffPermissions(staffAssignments.find((assignment) => assignment.studio_id === studio.id)?.access_level)
+                                        ? getStaffPermissions(staffAssignment?.access_level, staffAssignment)
                                         : null;
                                 const canManageBookings = !staffPermissions || staffPermissions.canManageBookings;
                                 const canEditListing = !staffPermissions || staffPermissions.canEditListing;
@@ -610,9 +646,18 @@ export default function MyStudioScreen() {
                                                                     </TouchableOpacity>
                                                                 </>
                                                             ) : null}
+                                                            {staffPermissions?.canAddListing ? (
+                                                                <TouchableOpacity activeOpacity={1}
+                                                                    onPress={() => router.push({ pathname: '/add_studio', params: { ownerId: studio.owner_id } })}
+                                                                    style={[styles.editBtn, { borderColor: colors.border }]}
+                                                                    accessibilityLabel={`Add studio for ${studio.name}`}
+                                                                >
+                                                                    <Ionicons name="add-outline" size={18} color={colors.text} />
+                                                                </TouchableOpacity>
+                                                            ) : null}
                                                         </View>
 
-                                                        {!staffPermissions ? (
+                                                        {!staffPermissions || staffPermissions.canDeleteListing ? (
                                                             <TouchableOpacity activeOpacity={1}
                                                                 onPress={() => confirmDelete(studio.id, studio.name)}
                                                                 style={styles.deleteBtn}

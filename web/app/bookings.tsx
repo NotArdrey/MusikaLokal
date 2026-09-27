@@ -959,7 +959,6 @@ const getGigApplicationCancelStatusForViewer = (item: any, role: unknown) => {
 };
 
 type Tab =
-  | "Applicants"
   | "Active Musicians"
   | "Pending"
   | "Upcoming"
@@ -968,7 +967,7 @@ type Tab =
   | "History";
 
 // Gig owner specific tabs for managing gig applications
-type VenueOwnerTab = "Applicants" | "Active Musicians" | "Review" | "History";
+type VenueOwnerTab = "Pending" | "Active Musicians" | "Review" | "History";
 
 // Application-specific tabs for musician's gig application flow
 type ApplicationTab = "Applied" | "Accepted" | "Completed";
@@ -1136,7 +1135,6 @@ export default function BookingsScreen() {
   useEffect(() => {
     if (params.tab) {
       const validTabs: Tab[] = [
-        "Applicants",
         "Active Musicians",
         "Pending",
         "Upcoming",
@@ -1144,8 +1142,9 @@ export default function BookingsScreen() {
         "Review",
         "History",
       ];
-      if (validTabs.includes(params.tab as Tab)) {
-        setActiveTab(params.tab as Tab);
+      const requestedTab = params.tab === "Applicants" ? "Pending" : params.tab;
+      if (validTabs.includes(requestedTab as Tab)) {
+        setActiveTab(requestedTab as Tab);
       }
     }
 
@@ -2040,7 +2039,7 @@ export default function BookingsScreen() {
         setUserRole(role);
         // If gig owner, default to Applicants tab only once (avoid tab reset on auto-refresh)
         if (role === "venue-owner" && !venueTabInitializedRef.current) {
-          setActiveTab("Applicants");
+          setActiveTab("Pending");
           venueTabInitializedRef.current = true;
         } else if (role !== "venue-owner") {
           venueTabInitializedRef.current = false;
@@ -2107,7 +2106,7 @@ export default function BookingsScreen() {
         (role === "venue-owner" || (role === "staff" && hasVenueStaffAccess)) &&
         !hasNonVenueStaffAccess;
       if (shouldUseVenueOwnerTabs && !venueTabInitializedRef.current) {
-        setActiveTab("Applicants");
+        setActiveTab("Pending");
         venueTabInitializedRef.current = true;
       } else if (!shouldUseVenueOwnerTabs) {
         venueTabInitializedRef.current = false;
@@ -2495,18 +2494,14 @@ export default function BookingsScreen() {
           ? groupPendingStudioBookingItems(studioPending)
           : studioPending;
 
-      const pendingItems =
-        role === "venue-owner" && !hasNonVenueStaffAccess
-          ? []
-          : returnedStaffContexts.length > 0
-            ? [
-                ...pendingGigApplications.filter((item: any) => item?.staff_entity_type !== "venue"),
-                ...pendingConnectionRequests,
-                ...groupedStudioPending,
-              ]
-          : role === "musician" || isProducerActivityRole(role)
-            ? [...pendingGigApplications, ...pendingConnectionRequests, ...groupedStudioPending]
-            : [...pendingConnectionRequests, ...groupedStudioPending];
+      // Pending is the single inbox for every incoming activity type. Visibility is
+      // already enforced by manage-bookings, so do not split venue applications into
+      // a separate presentation bucket here.
+      const pendingItems = mergeUniqueActivityItems(
+        pendingGigApplications,
+        pendingConnectionRequests,
+        groupedStudioPending,
+      );
 
       pendingItems.sort(
         (a: any, b: any) =>
@@ -4312,7 +4307,7 @@ export default function BookingsScreen() {
     (userRole === "venue-owner" || (userRole === "staff" && hasVenueStaffWorkspace)) &&
     !hasNonVenueStaffWorkspace;
   const visiblePendingPermitListings = pendingPermitStudios.filter((listing: any) => (
-    (activeTab === "Applicants" && listing?.entity_type === "gig") ||
+    (activeTab === "Pending" && listing?.entity_type === "gig") ||
     (activeTab === "Pending" && listing?.entity_type === "studio")
   ));
 
@@ -4401,8 +4396,8 @@ export default function BookingsScreen() {
     // Map tab to actual data key
     const getTabData = (): any[] => {
       switch (tab) {
-        case "Applicants":
-          return data.Applicants;
+        case "Pending":
+          return data.Pending;
         case "Active Musicians":
           return data.ActiveMusicians;
         case "Review":
@@ -4438,7 +4433,7 @@ export default function BookingsScreen() {
             },
           ]}
         >
-          {tab === "Applicants" ? "Pending" : tab}
+          {tab === "Pending" ? "Pending" : tab}
         </Text>
 
         {/* Badge count if > 0 */}
@@ -4468,16 +4463,6 @@ export default function BookingsScreen() {
   };
 
   const renderTab = (tab: Tab) => {
-    // Hide Applicants tab if not gig owner AND empty
-    if (
-      tab === "Applicants" &&
-      userRole !== "venue-owner" &&
-      !hasVenueStaffWorkspace &&
-      data.Applicants.length === 0
-    ) {
-      return null;
-    }
-
     return (
       <TouchableOpacity activeOpacity={1}
         key={tab}
@@ -4498,15 +4483,11 @@ export default function BookingsScreen() {
             },
           ]}
         >
-          {tab === "Applicants"
-            ? usesVenueOwnerTabs
-              ? "Pending"
-              : "Applications"
-            : tab}
+          {tab}
         </Text>
 
-        {/* Badge count for Applicants if > 0 */}
-        {tab === "Applicants" && data.Applicants.length > 0 && (
+        {/* Badge count for pending activity if > 0 */}
+        {tab === "Pending" && data.Pending.length > 0 && (
           <View
             style={{
               marginLeft: 6,
@@ -4523,7 +4504,7 @@ export default function BookingsScreen() {
                 color: activeTab === tab ? colors.primary : "white",
               }}
             >
-              {data.Applicants.length}
+              {data.Pending.length}
             </Text>
           </View>
         )}
@@ -4567,14 +4548,12 @@ export default function BookingsScreen() {
           >
             {usesVenueOwnerTabs ? (
               // Gig owner specific tabs for managing gig applications
-              (["Applicants", "Active Musicians", "Review", "History"] as VenueOwnerTab[]).map(
+              (["Pending", "Active Musicians", "Review", "History"] as VenueOwnerTab[]).map(
                 (tab) => renderVenueOwnerTab(tab),
               )
             ) : (
               // Default tabs for other users (musicians, studio-owners)
-              (hasVenueStaffWorkspace
-                ? ["Applicants", "Pending", "Upcoming", "Ongoing", "Review", "History"]
-                : ["Pending", "Upcoming", "Ongoing", "Review", "History"]).map(
+              (["Pending", "Upcoming", "Ongoing", "Review", "History"]).map(
                 (tab) => renderTab(tab as Tab),
               )
             )}
@@ -4592,7 +4571,7 @@ export default function BookingsScreen() {
           <SmoothTabTransition activeKey={`${activeTab}-${activeAppTab}`}>
           {!loading &&
             ((activeTab === "Pending" && (userRole === "studio-owner" || staffBookingContexts.some((context) => context?.entity_type === "studio"))) ||
-              (activeTab === "Applicants" && (userRole === "venue-owner" || hasVenueStaffWorkspace))) &&
+              (activeTab === "Pending" && (userRole === "venue-owner" || hasVenueStaffWorkspace))) &&
             visiblePendingPermitListings.length > 0 && (
               <View style={{ paddingHorizontal: scale(16), marginBottom: moderateScale(12), gap: moderateScale(8) }}>
                 {visiblePendingPermitListings.map((listing: any) => {
@@ -4844,7 +4823,7 @@ export default function BookingsScreen() {
                 style={[styles.emptyTitle, { color: colors.textSecondary }]}
               >
                 {userRole === "venue-owner"
-                  ? activeTab === "Applicants"
+                  ? activeTab === "Pending"
                     ? "No pending applications"
                     : activeTab === "Active Musicians"
                       ? "No active musicians"
@@ -4864,7 +4843,7 @@ export default function BookingsScreen() {
                     Permit review items are listed above. New booking requests will appear here.
                   </Text>
                 )}
-              {(userRole === "venue-owner" || hasVenueStaffWorkspace) && activeTab === "Applicants" && (
+              {(userRole === "venue-owner" || hasVenueStaffWorkspace) && activeTab === "Pending" && (
                 <Text
                   style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
                 >
@@ -5502,7 +5481,7 @@ export default function BookingsScreen() {
                         </View>
                       )}
 
-                      {!isMusicianView && activeTab === "Applicants" ? (
+                      {!isMusicianView && activeTab === "Pending" && isVenueManagerItem(item) ? (
                         <ManagerRecommendationSummary item={item} colors={colors} isDark={isDark} />
                       ) : null}
 
@@ -5682,8 +5661,7 @@ export default function BookingsScreen() {
                                 View Details
                               </Text>
                             </TouchableOpacity>
-                          ) : activeTab === "Applicants" ? (
-                            isVenueManagerItem(item) ? (
+                          ) : activeTab === "Pending" && isVenueManagerItem(item) ? (
                               <>
                                 {/* View Details Button for Gig Owners */}
                                 <TouchableOpacity activeOpacity={1}
@@ -5774,67 +5752,6 @@ export default function BookingsScreen() {
                                   </TouchableOpacity>
                                 </View>
                               </>
-                            ) : (
-                              // Musician View: View Details + Withdraw Button
-                              <View
-                                style={{ flexDirection: "row", gap: 8, flex: 1 }}
-                              >
-                                <TouchableOpacity activeOpacity={1}
-                                  onPress={() => handleDetailsPress(item)}
-                                  style={{
-                                    flex: 1,
-                                    borderColor: colors.border,
-                                    borderWidth: 1,
-                                    padding: 10,
-                                    borderRadius: 100,
-                                    alignItems: "center",
-                                    flexDirection: "row",
-                                    justifyContent: "center",
-                                    gap: 6,
-                                  }}
-                                >
-                                  <Ionicons
-                                    name="eye-outline"
-                                    size={16}
-                                    color={colors.textSecondary}
-                                  />
-                                  <Text
-                                    style={{
-                                      color: colors.textSecondary,
-                                      fontFamily: "Poppins_500Medium",
-                                      fontSize: 12,
-                                    }}
-                                  >
-                                    View Details
-                                  </Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity activeOpacity={1}
-                                  onPress={() => {
-                                    setSelectedItem(item);
-                                    handleCancelBooking(item.id);
-                                  }}
-                                  style={{
-                                    flex: 1,
-                                    backgroundColor: isDark
-                                      ? "rgba(239, 68, 68, 0.2)"
-                                      : "#FEF2F2",
-                                    padding: 10,
-                                    borderRadius: 100,
-                                    alignItems: "center",
-                                  }}
-                                >
-                                  <Text
-                                    style={{
-                                      color: "#EF4444",
-                                      fontFamily: "Poppins_600SemiBold",
-                                      fontSize: 12,
-                                    }}
-                                  >
-                                    Withdraw
-                                  </Text>
-                                </TouchableOpacity>
-                              </View>
-                            )
                           ) : (activeTab === "Pending" || (viewMode === "applications" && activeAppTab === "Applied")) && isMusicianView && item.type_id === "gig_application" && !isLeaderConfirmation ? (
                             <View
                               style={{ flexDirection: "row", gap: 8, flex: 1 }}

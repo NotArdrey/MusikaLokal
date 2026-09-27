@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Modal as RNModal,
@@ -42,6 +42,9 @@ interface Team {
   open_production_applications?: boolean;
   staff_access_level?: number | null;
   staff_can_edit?: boolean;
+  staff_can_edit_listing?: boolean;
+  staff_can_add_listing?: boolean;
+  staff_can_delete_listing?: boolean;
   staff_can_manage_bookings?: boolean;
   created_at: string;
 }
@@ -95,13 +98,16 @@ export default function ProductionTeamScreen() {
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
   const { userRole } = useAuth();
-  const params = useLocalSearchParams<{ teamId?: string; tab?: string }>();
+  const params = useLocalSearchParams<{ teamId?: string; tab?: string; create?: string; ownerId?: string }>();
   const routeTeamId = Array.isArray(params.teamId) ? params.teamId[0] : params.teamId;
   const routeTab = Array.isArray(params.tab) ? params.tab[0] : params.tab;
+  const createRequested = (Array.isArray(params.create) ? params.create[0] : params.create) === '1';
+  const delegatedOwnerId = Array.isArray(params.ownerId) ? params.ownerId[0] : params.ownerId;
   const requestedTab = PRODUCTION_TABS.includes(routeTab as any)
     ? routeTab as "About" | "Members" | "Reviews"
     : "About";
   const isProducer = userRole === "producer";
+  const canCreateTeam = isProducer || (userRole === 'staff' && Boolean(delegatedOwnerId));
 
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,6 +118,10 @@ export default function ProductionTeamScreen() {
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamDescription, setNewTeamDescription] = useState("");
   const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    if (createRequested && canCreateTeam) setCreateModalVisible(true);
+  }, [canCreateTeam, createRequested]);
 
   // Team detail view
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
@@ -376,7 +386,7 @@ export default function ProductionTeamScreen() {
         staffAssignment?.entity_type === "production" &&
         staffAssignment.production_team_id === teamId;
       const staffPermissions = isAssignedStaff
-        ? getStaffPermissions(staffAssignment?.access_level)
+        ? getStaffPermissions(staffAssignment?.access_level, staffAssignment)
         : null;
 
       setSelectedTeam({
@@ -386,6 +396,9 @@ export default function ProductionTeamScreen() {
           : membershipData?.role || (isAssignedStaff ? "staff" : "viewer"),
         staff_access_level: isAssignedStaff ? staffAssignment?.access_level || null : null,
         staff_can_edit: Boolean(staffPermissions?.canEditListing),
+        staff_can_edit_listing: Boolean(staffPermissions?.canEditListing),
+        staff_can_add_listing: Boolean(staffPermissions?.canAddListing),
+        staff_can_delete_listing: Boolean(staffPermissions?.canDeleteListing),
         staff_can_manage_bookings: Boolean(staffPermissions?.canManageBookings),
         open_production_applications:
           typeof data.open_production_applications === "boolean"
@@ -416,8 +429,8 @@ export default function ProductionTeamScreen() {
   );
 
   const handleCreateTeam = async () => {
-    if (!isProducer) {
-      showAlert("warning", "Production Only", "Only production users can create a production team.");
+    if (!canCreateTeam) {
+      showAlert("warning", "Production Only", "Only production users or full-access staff can create a production team.");
       return;
     }
 
@@ -439,6 +452,7 @@ export default function ProductionTeamScreen() {
         action: "create_production_team",
         name: teamName,
         description: teamDescription,
+        ...(userRole === 'staff' && delegatedOwnerId ? { owner_id: delegatedOwnerId } : {}),
       });
 
       setCreateModalVisible(false);
@@ -673,7 +687,7 @@ export default function ProductionTeamScreen() {
   if (selectedTeam) {
     const tabs = PRODUCTION_TABS;
     const selectedStaffPermissions = selectedTeam.staff_access_level
-      ? getStaffPermissions(selectedTeam.staff_access_level)
+      ? getStaffPermissions(selectedTeam.staff_access_level, selectedTeam)
       : null;
     const canManage =
       selectedTeam.member_role === "owner" ||
@@ -1101,7 +1115,7 @@ export default function ProductionTeamScreen() {
         </View>
       </ScrollView>
 
-      {isProducer ? (
+      {canCreateTeam ? (
         <TouchableOpacity activeOpacity={1}
           style={[styles.fab, { backgroundColor: colors.primary }]}
           onPress={() => setCreateModalVisible(true)}

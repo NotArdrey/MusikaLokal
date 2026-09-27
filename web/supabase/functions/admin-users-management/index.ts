@@ -36,6 +36,7 @@ const allowedRoles = new Set([
   "admin",
   "staff",
 ]);
+const verificationRequiredRoles = new Set(["studio-owner", "venue-owner", "producer", "admin", "staff"]);
 
 const roleAliases: Record<string, string> = {
   manager: "musician",
@@ -56,26 +57,6 @@ function jsonResponse(payload: unknown, status = 200) {
   });
 }
 
-function extractUserIdFromJwt(authHeader: string): string | null {
-  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-  if (!token) return null;
-
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-
-  try {
-    const normalizedPayload = parts[1]
-      .replace(/-/g, "+")
-      .replace(/_/g, "/");
-    const paddedPayload = normalizedPayload + "=".repeat((4 - (normalizedPayload.length % 4)) % 4);
-    const payload = JSON.parse(atob(paddedPayload));
-    const sub = String(payload?.sub || "").trim();
-    return sub || null;
-  } catch {
-    return null;
-  }
-}
-
 async function getAuthenticatedUserId(
   authHeader: string,
   supabaseUrl: string,
@@ -83,9 +64,6 @@ async function getAuthenticatedUserId(
 ) {
   const token = authHeader.replace(/^Bearer\s+/i, "");
   if (!token) return null;
-
-  const userIdFromJwt = extractUserIdFromJwt(authHeader);
-  if (userIdFromJwt) return userIdFromJwt;
 
   const authClient = createClient(supabaseUrl, anonKey, {
     global: {
@@ -105,17 +83,18 @@ async function getAuthenticatedUserId(
 }
 
 async function assertAdmin(client: any, userId: string) {
-  const { data, error } = await client
-    .from("profiles")
-    .select("id, role")
-    .eq("id", userId)
-    .maybeSingle();
+  const [{ data: profile, error: profileError }, { data: membership, error: membershipError }] = await Promise.all([
+    client.from("profiles").select("id, role").eq("id", userId).maybeSingle(),
+    client
+      .from("profile_roles")
+      .select("profile_id")
+      .eq("profile_id", userId)
+      .eq("role", "admin")
+      .eq("status", "ACTIVE")
+      .maybeSingle(),
+  ]);
 
-  if (error || !data || data.role !== "admin") {
-    return false;
-  }
-
-  return true;
+  return !profileError && !membershipError && profile?.role === "admin" && !!membership;
 }
 
 function parseRole(rawRole: unknown) {
@@ -515,7 +494,7 @@ async function attachStaffAssignments(client: any, profiles: any[]) {
 
   const { data, error } = await client
     .from("staff_listing_access")
-    .select("id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level, created_at, updated_at")
+    .select("id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level, can_edit_listing, can_add_listing, can_delete_listing, can_manage_marketplace, created_at, updated_at")
     .in("staff_user_id", staffIds)
     .is("revoked_at", null);
 
@@ -705,7 +684,52 @@ type NormalizedStaffAssignment = {
   studio_id: string | null;
   gig_id: string | null;
   production_team_id: string | null;
+  can_edit_listing: boolean;
+  can_add_listing: boolean;
+  can_delete_listing: boolean;
+  can_manage_marketplace: boolean;
 };
+
+class StaffAssignmentConflictError extends Error {
+  code: string;
+  reason: string;
+  resolution: string;
+  entityType: StaffEntityType;
+  targetName: string;
+
+  constructor(options: {
+    code: string;
+    entityType: StaffEntityType;
+    targetName: string;
+    reason: string;
+    resolution: string;
+  }) {
+    super(`Cannot assign staff access to "${options.targetName}".`);
+    this.name = "StaffAssignmentConflictError";
+    this.code = options.code;
+    this.reason = options.reason;
+    this.resolution = options.resolution;
+    this.entityType = options.entityType;
+    this.targetName = options.targetName;
+  }
+}
+
+function staffAssignmentErrorResponse(error: unknown) {
+  if (error instanceof StaffAssignmentConflictError) {
+    return jsonResponse({
+      error: "Staff assignment conflict",
+      code: error.code,
+      message: error.message,
+      reason: error.reason,
+      resolution: error.resolution,
+      entity_type: error.entityType,
+      target_name: error.targetName,
+    }, 409);
+  }
+
+  const message = error instanceof Error ? error.message : "Unable to validate the staff assignment.";
+  return jsonResponse({ error: message }, 400);
+}
 
 const staffEntityTypes = new Set(["studio", "venue", "production"]);
 
@@ -730,6 +754,12 @@ function normalizeStaffAccessLevel(raw: unknown): StaffAccessLevel | null {
   return level === 1 || level === 2 || level === 3 ? level as StaffAccessLevel : null;
 }
 
+function normalizeStaffPermission(raw: any, snakeKey: string, camelKey: string, fallback: boolean) {
+  if (typeof raw?.[snakeKey] === "boolean") return raw[snakeKey];
+  if (typeof raw?.[camelKey] === "boolean") return raw[camelKey];
+  return fallback;
+}
+
 function normalizeStaffAssignment(raw: any): NormalizedStaffAssignment | null {
   if (!raw || typeof raw !== "object") return null;
 
@@ -742,19 +772,30 @@ function normalizeStaffAssignment(raw: any): NormalizedStaffAssignment | null {
   const studioId = String(raw.studio_id || raw.studioId || "").trim();
   const gigId = String(raw.gig_id || raw.gigId || "").trim();
   const productionTeamId = String(raw.production_team_id || raw.productionTeamId || "").trim();
+  const canEditListing = normalizeStaffPermission(raw, "can_edit_listing", "canEditListing", accessLevel === 1);
+  const canAddListing = normalizeStaffPermission(raw, "can_add_listing", "canAddListing", accessLevel === 1);
+  const canDeleteListing = normalizeStaffPermission(raw, "can_delete_listing", "canDeleteListing", accessLevel === 1);
+  const canManageMarketplace = raw.can_manage_marketplace === true || raw.canManageMarketplace === true;
+
+  const permissions = {
+    can_edit_listing: canEditListing,
+    can_add_listing: canAddListing,
+    can_delete_listing: canDeleteListing,
+    can_manage_marketplace: canManageMarketplace,
+  };
 
   if (entityType === "studio") {
     const id = studioId || targetId;
-    return id ? { entity_type: entityType, access_level: accessLevel, studio_id: id, gig_id: null, production_team_id: null } : null;
+    return id ? { entity_type: entityType, access_level: accessLevel, studio_id: id, gig_id: null, production_team_id: null, ...permissions } : null;
   }
 
   if (entityType === "venue") {
     const id = gigId || targetId;
-    return id ? { entity_type: entityType, access_level: accessLevel, studio_id: null, gig_id: id, production_team_id: null } : null;
+    return id ? { entity_type: entityType, access_level: accessLevel, studio_id: null, gig_id: id, production_team_id: null, ...permissions } : null;
   }
 
   const id = productionTeamId || targetId;
-  return id ? { entity_type: entityType, access_level: accessLevel, studio_id: null, gig_id: null, production_team_id: id } : null;
+  return id ? { entity_type: entityType, access_level: accessLevel, studio_id: null, gig_id: null, production_team_id: id, ...permissions } : null;
 }
 
 function getStaffAssignmentTargetId(assignment: any): string | null {
@@ -774,12 +815,12 @@ function getStaffAssignmentLabel(assignment: any) {
   if (!entityType || !targetId || !level) return null;
 
   const entityLabel = entityType === "venue" ? "Gig" : entityType === "production" ? "Production" : "Studio";
-  const permissionLabel = level === 1
-    ? "View, manage, and edit"
-    : level === 2
-      ? "View and manage"
-      : "View only";
-  return `${entityLabel}: ${targetName || targetId} (${permissionLabel})`;
+  const permissions = ["View"];
+  if (level <= 2) permissions.push("manage bookings");
+  if (assignment?.can_edit_listing === true) permissions.push("edit");
+  if (assignment?.can_add_listing === true) permissions.push("add");
+  if (assignment?.can_delete_listing === true) permissions.push("delete");
+  return `${entityLabel}: ${targetName || targetId} (${permissions.join(", ")})`;
 }
 
 function normalizeStaffAssignments(raw: any): NormalizedStaffAssignment[] {
@@ -826,10 +867,10 @@ async function validateStaffAssignmentTarget(
   }
 
   const targetSelect = assignment.entity_type === "studio"
-    ? "id, name, permit_status"
+    ? "id, name, permit_status, owner_id"
     : assignment.entity_type === "venue"
-      ? "id, name, status, permit_status, event_date"
-      : "id, name";
+      ? "id, name, status, permit_status, event_date, organizer_id"
+      : "id, name, owner_id";
   const { data, error } = await client
     .from(target.table)
     .select(targetSelect)
@@ -863,6 +904,292 @@ async function validateStaffAssignmentTarget(
   return data;
 }
 
+async function assertNoStaffAssignmentConflict(
+  client: any,
+  staffUserId: string,
+  assignment: NormalizedStaffAssignment,
+  target: any,
+) {
+  const targetName = String(target?.name || "the selected listing").trim() || "the selected listing";
+
+  if (assignment.entity_type === "studio" && assignment.studio_id) {
+    const [{ data: bookings, error: bookingsError }, { data: requests, error: requestsError }] = await Promise.all([
+      client
+        .from("studio_bookings")
+        .select("id")
+        .eq("studio_id", assignment.studio_id)
+        .eq("user_id", staffUserId)
+        .not("status", "in", '("completed","cancelled","declined","rejected")')
+        .limit(1),
+      client
+        .from("booking_requests")
+        .select("id")
+        .eq("studio_id", assignment.studio_id)
+        .eq("sender_id", staffUserId)
+        .not("status", "in", '("completed","cancelled","declined","rejected")')
+        .limit(1),
+    ]);
+    if (bookingsError) throw bookingsError;
+    if (requestsError) throw requestsError;
+    if (bookings?.length || requests?.length) {
+      throw new StaffAssignmentConflictError({
+        code: "STAFF_STUDIO_ACTIVE_BOOKING",
+        entityType: "studio",
+        targetName,
+        reason: "This user has an active booking or booking request at this studio.",
+        resolution: "Complete, cancel, decline, or reject that booking first, then save again - or choose a different studio.",
+      });
+    }
+    return;
+  }
+
+  if (assignment.entity_type === "venue" && assignment.gig_id) {
+    const { data: directApplications, error: directError } = await client
+      .from("gig_applications")
+      .select("id")
+      .eq("gig_id", assignment.gig_id)
+      .or(`applicant_id.eq.${staffUserId},submitted_by_user_id.eq.${staffUserId}`)
+      .in("status", ["pending", "accepted", "approved"])
+      .limit(1);
+    if (directError) throw directError;
+    if (directApplications?.length) {
+      throw new StaffAssignmentConflictError({
+        code: "STAFF_GIG_ACTIVE_APPLICATION",
+        entityType: "venue",
+        targetName,
+        reason: "This user has an active application for this gig.",
+        resolution: "Resolve or withdraw the application first, then save again - or choose a different gig.",
+      });
+    }
+
+    const [{ data: ownedGroups, error: ownedGroupsError }, { data: memberships, error: membershipsError }] = await Promise.all([
+      client.from("groups").select("id").eq("owner_id", staffUserId),
+      client.from("group_members").select("group_id").eq("user_id", staffUserId),
+    ]);
+    if (ownedGroupsError) throw ownedGroupsError;
+    if (membershipsError) throw membershipsError;
+    const groupIds = Array.from(new Set([
+      ...(ownedGroups || []).map((row: any) => row.id),
+      ...(memberships || []).map((row: any) => row.group_id),
+    ].filter(Boolean)));
+    if (groupIds.length > 0) {
+      const { data: groupApplications, error: groupApplicationsError } = await client
+        .from("gig_applications")
+        .select("id")
+        .eq("gig_id", assignment.gig_id)
+        .in("group_id", groupIds)
+        .in("status", ["pending", "accepted", "approved"])
+        .limit(1);
+      if (groupApplicationsError) throw groupApplicationsError;
+      if (groupApplications?.length) {
+        throw new StaffAssignmentConflictError({
+          code: "STAFF_GIG_GROUP_APPLICATION",
+          entityType: "venue",
+          targetName,
+          reason: "A group this user owns or belongs to has an active application for this gig.",
+          resolution: "Resolve or withdraw the group application first, then save again - or choose a different gig.",
+        });
+      }
+    }
+    return;
+  }
+
+  if (assignment.entity_type === "production" && assignment.production_team_id) {
+    const [
+      { data: membership, error: membershipError },
+      { data: ownedTeam, error: ownedTeamError },
+      { data: directRoster, error: directRosterError },
+      { data: ownedGroups, error: ownedGroupsError },
+      { data: memberships, error: membershipsError },
+    ] = await Promise.all([
+      client
+        .from("production_team_members")
+        .select("id")
+        .eq("team_id", assignment.production_team_id)
+        .eq("user_id", staffUserId)
+        .limit(1),
+      client
+        .from("production_teams")
+        .select("id")
+        .eq("id", assignment.production_team_id)
+        .eq("owner_id", staffUserId)
+        .limit(1),
+      client
+        .from("production_team_roster")
+        .select("id")
+        .eq("team_id", assignment.production_team_id)
+        .eq("profile_id", staffUserId)
+        .limit(1),
+      client.from("groups").select("id").eq("owner_id", staffUserId),
+      client.from("group_members").select("group_id").eq("user_id", staffUserId),
+    ]);
+    if (membershipError) throw membershipError;
+    if (ownedTeamError) throw ownedTeamError;
+    if (directRosterError) throw directRosterError;
+    if (ownedGroupsError) throw ownedGroupsError;
+    if (membershipsError) throw membershipsError;
+
+    const groupIds = Array.from(new Set([
+      ...(ownedGroups || []).map((row: any) => row.id),
+      ...(memberships || []).map((row: any) => row.group_id),
+    ].filter(Boolean)));
+    let hasGroupRosterConflict = false;
+    if (groupIds.length > 0) {
+      const { data: groupRoster, error: groupRosterError } = await client
+        .from("production_team_roster")
+        .select("id")
+        .eq("team_id", assignment.production_team_id)
+        .in("group_id", groupIds)
+        .limit(1);
+      if (groupRosterError) throw groupRosterError;
+      hasGroupRosterConflict = Boolean(groupRoster?.length);
+    }
+
+    const reasons: string[] = [];
+    const requiredActions: string[] = [];
+    if (membership?.length || ownedTeam?.length) {
+      reasons.push("the user is an owner or member of this production team");
+      requiredActions.push("team ownership or membership");
+    }
+    if (directRoster?.length) {
+      reasons.push("the user is listed as talent on this production roster");
+      requiredActions.push("their roster entry");
+    }
+    if (hasGroupRosterConflict) {
+      reasons.push("a group they own or belong to is listed on this production roster");
+      requiredActions.push("the group's roster entry");
+    }
+
+    if (reasons.length > 0) {
+      throw new StaffAssignmentConflictError({
+        code: "STAFF_PRODUCTION_PARTICIPATION",
+        entityType: "production",
+        targetName,
+        reason: `This assignment conflicts because ${reasons.join(" and ")}.`,
+        resolution: `Remove ${requiredActions.join(" and ")} first, then save again - or choose a different production team.`,
+      });
+    }
+  }
+}
+
+async function validateStaffAssignments(
+  client: any,
+  staffUserId: string,
+  assignments: NormalizedStaffAssignment[],
+) {
+  await assertStaffAccessTableReady(client);
+  const targets = await Promise.all(assignments.map((assignment) => validateStaffAssignmentTarget(client, assignment)));
+  await Promise.all(assignments.map((assignment, index) => (
+    assertNoStaffAssignmentConflict(client, staffUserId, assignment, targets[index])
+  )));
+
+  const marketplaceOwnerIds = new Set(assignments.flatMap((assignment, index) => {
+    if (!assignment.can_manage_marketplace) return [];
+    const ownerId = assignment.entity_type === "venue"
+      ? targets[index]?.organizer_id
+      : targets[index]?.owner_id;
+    return ownerId ? [String(ownerId)] : [];
+  }));
+  if (marketplaceOwnerIds.size > 1) {
+    throw new Error("Marketplace access requires all selected listings to belong to the same owner. Disable Manage marketplace or select listings from one owner only.");
+  }
+
+  return targets;
+}
+
+async function getProductionTargetConflicts(client: any, staffUserId: string, items: any[]) {
+  const teamIds = items.map((item) => String(item?.id || "")).filter(Boolean);
+  if (!staffUserId || teamIds.length === 0) return new Map<string, any>();
+
+  const [
+    { data: memberRows, error: memberError },
+    { data: directRosterRows, error: directRosterError },
+    { data: ownedGroups, error: ownedGroupsError },
+    { data: groupMemberships, error: groupMembershipsError },
+  ] = await Promise.all([
+    client
+      .from("production_team_members")
+      .select("team_id, role")
+      .eq("user_id", staffUserId)
+      .in("team_id", teamIds),
+    client
+      .from("production_team_roster")
+      .select("id, team_id")
+      .eq("profile_id", staffUserId)
+      .in("team_id", teamIds),
+    client.from("groups").select("id").eq("owner_id", staffUserId),
+    client.from("group_members").select("group_id").eq("user_id", staffUserId),
+  ]);
+  if (memberError) throw memberError;
+  if (directRosterError) throw directRosterError;
+  if (ownedGroupsError) throw ownedGroupsError;
+  if (groupMembershipsError) throw groupMembershipsError;
+
+  const groupIds = Array.from(new Set([
+    ...(ownedGroups || []).map((row: any) => row.id),
+    ...(groupMemberships || []).map((row: any) => row.group_id),
+  ].filter(Boolean)));
+  const { data: groupRosterRows, error: groupRosterError } = groupIds.length > 0
+    ? await client
+      .from("production_team_roster")
+      .select("team_id")
+      .in("team_id", teamIds)
+      .in("group_id", groupIds)
+    : { data: [], error: null };
+  if (groupRosterError) throw groupRosterError;
+
+  const directRosterIds = (directRosterRows || []).map((row: any) => row.id).filter(Boolean);
+  const { data: linkedApplications, error: linkedApplicationsError } = directRosterIds.length > 0
+    ? await client
+      .from("gig_applications")
+      .select("production_roster_id")
+      .in("production_roster_id", directRosterIds)
+    : { data: [], error: null };
+  if (linkedApplicationsError) throw linkedApplicationsError;
+
+  const memberRoleByTeam = new Map((memberRows || []).map((row: any) => [String(row.team_id), String(row.role || "member")]));
+  const directRosterIdsByTeam = new Map<string, string[]>();
+  for (const row of directRosterRows || []) {
+    const teamId = String(row.team_id || "");
+    if (!directRosterIdsByTeam.has(teamId)) directRosterIdsByTeam.set(teamId, []);
+    directRosterIdsByTeam.get(teamId)?.push(String(row.id));
+  }
+  const linkedRosterIds = new Set((linkedApplications || []).map((row: any) => String(row.production_roster_id || "")));
+  const groupRosterTeamIds = new Set((groupRosterRows || []).map((row: any) => String(row.team_id || "")));
+  const conflicts = new Map<string, any>();
+
+  for (const item of items) {
+    const teamId = String(item?.id || "");
+    const memberRole = memberRoleByTeam.get(teamId) || null;
+    const rosterIds = directRosterIdsByTeam.get(teamId) || [];
+    const hasDirectRoster = rosterIds.length > 0;
+    const hasLinkedApplication = rosterIds.some((id) => linkedRosterIds.has(id));
+    const hasGroupRoster = groupRosterTeamIds.has(teamId);
+    if (!memberRole && !hasDirectRoster && !hasGroupRoster) continue;
+
+    const reasons: string[] = [];
+    if (memberRole) reasons.push(`team ${memberRole}`);
+    if (hasDirectRoster) reasons.push("direct roster talent");
+    if (hasGroupRoster) reasons.push("represented through a group roster entry");
+
+    const canAutoResolve = memberRole !== "owner" && !hasGroupRoster && !hasLinkedApplication;
+    conflicts.set(teamId, {
+      id: teamId,
+      name: String(item?.name || "Untitled"),
+      entity_type: "production",
+      reason: `This user already participates as ${reasons.join(" and ")}.`,
+      resolution: canAutoResolve
+        ? "Remove the user's direct team membership and roster entry, then keep this staff assignment selected."
+        : hasLinkedApplication
+          ? "Resolve the linked gig application from the production team before removing the roster entry."
+          : "Resolve the ownership or group roster participation from the production team.",
+      can_auto_resolve: canAutoResolve,
+    });
+  }
+
+  return conflicts;
+}
+
 async function revokeStaffAssignments(client: any, staffUserId: string) {
   await assertStaffAccessTableReady(client);
 
@@ -880,9 +1207,9 @@ async function replaceStaffAssignments(
   staffUserId: string,
   assignments: NormalizedStaffAssignment[],
   actorId: string,
+  validatedTargets?: any[],
 ) {
-  await assertStaffAccessTableReady(client);
-  const targets = await Promise.all(assignments.map((assignment) => validateStaffAssignmentTarget(client, assignment)));
+  const targets = validatedTargets || await validateStaffAssignments(client, staffUserId, assignments);
   await revokeStaffAssignments(client, staffUserId);
 
   if (assignments.length === 0) return [];
@@ -896,9 +1223,13 @@ async function replaceStaffAssignments(
       gig_id: assignment.gig_id,
       production_team_id: assignment.production_team_id,
       access_level: assignment.access_level,
+      can_edit_listing: assignment.can_edit_listing,
+      can_add_listing: assignment.can_add_listing,
+      can_delete_listing: assignment.can_delete_listing,
+      can_manage_marketplace: assignment.can_manage_marketplace,
       created_by: actorId,
     })))
-    .select("id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level, created_at, updated_at");
+    .select("id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level, can_edit_listing, can_add_listing, can_delete_listing, can_manage_marketplace, created_at, updated_at");
 
   if (error) throw error;
 
@@ -2708,6 +3039,10 @@ serve(async (req: Request) => {
         return jsonResponse({ error: "Manual identity review not found" }, 404);
       }
 
+      if (String(review.user_id || "") === actorId) {
+        return jsonResponse({ error: "Administrators cannot review their own identity submission" }, 403);
+      }
+
       if (String(review.status || "").toUpperCase() !== "PENDING_REVIEW") {
         return jsonResponse({ error: "This review is already finalized" }, 400);
       }
@@ -3415,6 +3750,7 @@ serve(async (req: Request) => {
     if (action === "fetch_role_targets") {
       const requestedRole = parseRole(body?.role);
       const requestedEntityType = normalizeStaffEntityType(body?.entity_type || body?.entityType);
+      const candidateStaffUserId = String(body?.staff_user_id || body?.staffUserId || "").trim();
       const target = requestedRole && managedRoleTargets[requestedRole]
         ? managedRoleTargets[requestedRole]
         : requestedEntityType === "studio"
@@ -3448,8 +3784,23 @@ serve(async (req: Request) => {
         .limit(300);
       if (error) return jsonResponse({ error: error.message }, 400);
 
+      const allItems = data || [];
+      const ownedTargetIds = new Set(
+        candidateStaffUserId
+          ? allItems
+            .filter((item: any) => String(item?.[target.ownerColumn] || "") === candidateStaffUserId)
+            .map((item: any) => String(item.id))
+          : [],
+      );
+      const productionConflicts = candidateStaffUserId && target.entityType === "production"
+        ? await getProductionTargetConflicts(client, candidateStaffUserId, allItems)
+        : new Map<string, any>();
+      const eligibleItems = allItems.filter((item: any) => (
+        !ownedTargetIds.has(String(item.id)) && !productionConflicts.has(String(item.id))
+      ));
+
       return jsonResponse({
-        items: (data || []).map((item: any) => ({
+        items: eligibleItems.map((item: any) => ({
           id: item.id,
           name: item.name || "Untitled",
           created_at: item.created_at || null,
@@ -3457,7 +3808,28 @@ serve(async (req: Request) => {
           owner_id: item[target.ownerColumn] || null,
           entity_type: target.entityType,
         })),
+        conflicts: Array.from(productionConflicts.entries())
+          .filter(([teamId]) => !ownedTargetIds.has(teamId))
+          .map(([, conflict]) => conflict),
+        hidden_owned_count: ownedTargetIds.size,
+        hidden_owned_ids: Array.from(ownedTargetIds),
       });
+    }
+
+    if (action === "resolve_staff_production_conflict") {
+      const staffUserId = String(body?.staff_user_id || body?.staffUserId || "").trim();
+      const teamId = String(body?.team_id || body?.teamId || "").trim();
+      if (!staffUserId || !teamId) {
+        return jsonResponse({ error: "staff_user_id and team_id are required" }, 400);
+      }
+
+      const { data, error } = await client.rpc("admin_resolve_staff_production_conflict", {
+        p_actor_user_id: actorId,
+        p_staff_user_id: staffUserId,
+        p_team_id: teamId,
+      });
+      if (error) return jsonResponse({ error: error.message }, 409);
+      return jsonResponse({ result: data || null });
     }
 
     if (action === "create_user") {
@@ -3482,6 +3854,10 @@ serve(async (req: Request) => {
 
       if (!email || !password || !role) {
         return jsonResponse({ error: "Missing required fields" }, 400);
+      }
+
+      if (verificationRequiredRoles.has(role) && !isVerified) {
+        return jsonResponse({ error: "Verify this user's identity before assigning a privileged role." }, 409);
       }
 
       if (role === "staff" && staffAssignments.length === 0) {
@@ -3546,6 +3922,16 @@ serve(async (req: Request) => {
         await Promise.all([
           replaceProfileList(client, "profile_skills", "skill", userId, skills),
           replaceProfileList(client, "profile_genres", "genre", userId, genres),
+          client.from("profile_roles").upsert({
+            profile_id: userId,
+            role,
+            status: "ACTIVE",
+            source: "ADMIN_CREATE_USER",
+            activated_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "profile_id,role" }).then(({ error }: any) => {
+            if (error) throw error;
+          }),
         ]);
 
         if (staffAssignments.length > 0) {
@@ -3561,8 +3947,7 @@ serve(async (req: Request) => {
         }
         await client.from("profiles").delete().eq("id", userId);
         await client.auth.admin.deleteUser(userId);
-        const message = listError instanceof Error ? listError.message : "Unable to save profile details";
-        return jsonResponse({ error: message }, 400);
+        return staffAssignmentErrorResponse(listError);
       }
 
       const [item] = await attachProfileLists(client, [profile || profilePayload]);
@@ -3685,12 +4070,42 @@ serve(async (req: Request) => {
       const hasListUpdates = maybeSkills !== undefined || maybeGenres !== undefined;
       const targetRole = String(profileUpdates.role ?? existingProfileForUpdate?.["role"] ?? "").trim().toLowerCase();
 
+      if ((maybeRole !== undefined || maybeIsVerified !== undefined) && verificationRequiredRoles.has(targetRole)) {
+        const willBeVerified = profileUpdates.is_verified !== undefined
+          ? profileUpdates.is_verified === true
+          : existingProfileForUpdate?.["is_verified"] === true;
+        const nextVerificationStatus = String(
+          profileUpdates.verification_status ?? existingProfileForUpdate?.["verification_status"] ?? "",
+        ).trim().toUpperCase();
+        if (!willBeVerified || nextVerificationStatus !== "APPROVED") {
+          return jsonResponse({ error: "Verify this user's identity before assigning a privileged role." }, 409);
+        }
+      }
+
+      if (
+        roleChanged &&
+        verificationRequiredRoles.has(targetRole) &&
+        (existingProfileForUpdate?.["is_verified"] !== true ||
+          String(existingProfileForUpdate?.["verification_status"] || "").trim().toUpperCase() !== "APPROVED")
+      ) {
+        return jsonResponse({ error: "Approve the user's identity before changing them to a privileged role." }, 409);
+      }
+
       if (targetRole === "staff" && (maybeRole !== undefined || hasStaffAssignmentUpdate) && normalizedStaffAssignments.length === 0) {
         return jsonResponse({ error: "Select at least one staff target and allowed actions." }, 400);
       }
 
       if (Object.keys(profileUpdates).length === 0 && !hasListUpdates && !hasPasswordUpdate && !hasStaffAssignmentUpdate) {
         return jsonResponse({ error: "No updates provided" }, 400);
+      }
+
+      let validatedStaffTargets: any[] | undefined;
+      if (targetRole === "staff" && hasStaffAssignmentUpdate && normalizedStaffAssignments.length > 0) {
+        try {
+          validatedStaffTargets = await validateStaffAssignments(client, userId, normalizedStaffAssignments);
+        } catch (assignmentError) {
+          return staffAssignmentErrorResponse(assignmentError);
+        }
       }
 
       const { data: existingAuth, error: existingAuthError } = await client.auth.admin.getUserById(userId);
@@ -3734,33 +4149,47 @@ serve(async (req: Request) => {
       }
 
       let updatedProfile: any = null;
+      const databaseProfileUpdates = { ...profileUpdates };
+      if (roleChanged) delete databaseProfileUpdates.role;
 
-      if (Object.keys(profileUpdates).length > 0) {
-        const { data, error: profileUpdateError } = await client
+      if (Object.keys(databaseProfileUpdates).length > 0) {
+        const { error: profileUpdateError } = await client
           .from("profiles")
-          .update(profileUpdates)
-          .eq("id", userId)
-          .select(userListProfileSelectLegacy)
-          .maybeSingle();
+          .update(databaseProfileUpdates)
+          .eq("id", userId);
 
         if (profileUpdateError) {
           return jsonResponse({ error: profileUpdateError.message }, 400);
         }
-
-        updatedProfile = data;
-      } else {
-        const { data, error: profileFetchError } = await client
-          .from("profiles")
-          .select(userListProfileSelectLegacy)
-          .eq("id", userId)
-          .maybeSingle();
-
-        if (profileFetchError) {
-          return jsonResponse({ error: profileFetchError.message }, 400);
-        }
-
-        updatedProfile = data;
       }
+
+      if (roleChanged) {
+        const { error: roleTransitionError } = await client.rpc("admin_transition_user_role", {
+          p_actor_user_id: actorId,
+          p_user_id: userId,
+          p_expected_old_role: String(existingProfileForUpdate?.["role"] || ""),
+          p_new_role: targetRole,
+          p_metadata: {
+            staff_assignments_requested: normalizedStaffAssignments.length,
+            listing_assignment_target_id: listingAssignmentTargetId,
+          },
+        });
+        if (roleTransitionError) {
+          await client.rpc("revoke_user_auth_sessions", { p_user_id: userId });
+          return jsonResponse({ error: roleTransitionError.message }, 409);
+        }
+      }
+
+      const { data: refreshedProfile, error: profileFetchError } = await client
+        .from("profiles")
+        .select(userListProfileSelectLegacy)
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (profileFetchError) {
+        return jsonResponse({ error: profileFetchError.message }, 400);
+      }
+      updatedProfile = refreshedProfile;
 
       if (!updatedProfile) {
         return jsonResponse({ error: "Profile not found" }, 404);
@@ -3774,22 +4203,10 @@ serve(async (req: Request) => {
           maybeGenres !== undefined
             ? replaceProfileList(client, "profile_genres", "genre", userId, normalizeStringList(maybeGenres))
             : Promise.resolve(),
-          roleChanged
-            ? client.from("profile_roles").upsert({
-              profile_id: userId,
-              role: targetRole,
-              status: "ACTIVE",
-              source: "ADMIN_ROLE_CHANGE",
-              activated_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            }, { onConflict: "profile_id,role" }).then(({ error }: any) => {
-              if (error) throw error;
-            })
-            : Promise.resolve(),
         ]);
 
         if (targetRole === "staff" && hasStaffAssignmentUpdate && normalizedStaffAssignments.length > 0) {
-          await replaceStaffAssignments(client, userId, normalizedStaffAssignments, actorId);
+          await replaceStaffAssignments(client, userId, normalizedStaffAssignments, actorId, validatedStaffTargets);
         } else if (targetRole !== "staff" && (hasStaffAssignmentUpdate || profileUpdates.role !== undefined)) {
           await revokeStaffAssignments(client, userId);
         }
@@ -3803,8 +4220,7 @@ serve(async (req: Request) => {
           // related assignment failed, do not leave the old session active.
           await client.rpc("revoke_user_auth_sessions", { p_user_id: userId });
         }
-        const message = listError instanceof Error ? listError.message : "Unable to save profile details";
-        return jsonResponse({ error: message }, 400);
+        return staffAssignmentErrorResponse(listError);
       }
 
       const [item] = await attachProfileLists(client, [updatedProfile]);

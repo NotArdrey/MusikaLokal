@@ -120,25 +120,70 @@ const SELLER_ONLY_ACTIONS = new Set([
   "get_seller_dashboard",
 ]);
 
-async function requireMarketplaceSeller(supabaseAdmin: any, userId: string | null) {
-  if (!userId) {
-    return jsonResponse({ error: "Missing authenticated user" }, 401);
-  }
+const MARKETPLACE_ACCESS_ACTIONS = new Set([
+  ...SELLER_ONLY_ACTIONS,
+  "get_marketplace_access",
+  "get_order_details",
+  "update_order_status",
+]);
 
-  const { data: profile, error } = await supabaseAdmin
+async function loadMarketplaceOwnerIds(
+  supabaseAdmin: any,
+  table: string,
+  ownerColumn: string,
+  ids: string[],
+) {
+  if (ids.length === 0) return [];
+  const { data, error } = await supabaseAdmin
+    .from(table)
+    .select(`id, ${ownerColumn}`)
+    .in("id", ids);
+  if (error) throw error;
+  return (data || []).map((row: any) => String(row?.[ownerColumn] || "").trim()).filter(Boolean);
+}
+
+async function getMarketplaceSellerAccess(supabaseAdmin: any, userId: string) {
+  const { data: profile, error: profileError } = await supabaseAdmin
     .from("profiles")
     .select("role")
     .eq("id", userId)
     .single();
 
-  if (error || !profile || !MARKETPLACE_SELLER_ROLES.has(profile.role)) {
-    return jsonResponse(
-      { error: "Only producer, gig owner, and studio-owner accounts can sell in marketplace." },
-      403,
-    );
+  if (profileError || !profile) throw profileError || new Error("Profile not found");
+  const role = String(profile.role || "").trim().toLowerCase();
+  if (MARKETPLACE_SELLER_ROLES.has(role)) {
+    return { role, sellerIds: [userId] };
+  }
+  if (role !== "staff") return { role, sellerIds: [] as string[] };
+  const { data: isActiveStaff, error: activeStaffError } = await supabaseAdmin.rpc("is_active_staff", {
+    p_user_id: userId,
+  });
+  if (activeStaffError) throw activeStaffError;
+  if (!isActiveStaff) return { role, sellerIds: [] as string[] };
+
+  const { data: assignments, error: assignmentsError } = await supabaseAdmin
+    .from("staff_listing_access")
+    .select("entity_type, studio_id, gig_id, production_team_id")
+    .eq("staff_user_id", userId)
+    .eq("can_manage_marketplace", true)
+    .is("revoked_at", null);
+
+  if (assignmentsError) {
+    const missingColumn = assignmentsError.code === "42703" || assignmentsError.code === "PGRST204";
+    if (missingColumn) throw new Error("Staff marketplace access migration is not applied yet.");
+    throw assignmentsError;
   }
 
-  return null;
+  const studioIds = (assignments || []).map((item: any) => item?.studio_id).filter(Boolean);
+  const gigIds = (assignments || []).map((item: any) => item?.gig_id).filter(Boolean);
+  const productionIds = (assignments || []).map((item: any) => item?.production_team_id).filter(Boolean);
+  const ownerIds = await Promise.all([
+    loadMarketplaceOwnerIds(supabaseAdmin, "studios", "owner_id", studioIds),
+    loadMarketplaceOwnerIds(supabaseAdmin, "gigs", "organizer_id", gigIds),
+    loadMarketplaceOwnerIds(supabaseAdmin, "production_teams", "owner_id", productionIds),
+  ]);
+
+  return { role, sellerIds: Array.from(new Set(ownerIds.flat())) };
 }
 
 async function insertNotification(
@@ -217,10 +262,43 @@ Deno.serve(async (req: Request) => {
     }
 
     const uid = authUser?.id ?? null;
+    let marketplaceSellerIds: string[] = [];
+    let marketplaceSellerId: string | null = null;
+
+    if (uid && MARKETPLACE_ACCESS_ACTIONS.has(action)) {
+      try {
+        const access = await getMarketplaceSellerAccess(supabaseAdmin, uid);
+        marketplaceSellerIds = access.sellerIds;
+      } catch (accessError: any) {
+        return jsonResponse({ error: accessError?.message || "Unable to verify marketplace access." }, 500);
+      }
+    }
 
     if (SELLER_ONLY_ACTIONS.has(action)) {
-      const sellerErrorResponse = await requireMarketplaceSeller(supabaseAdmin, uid);
-      if (sellerErrorResponse) return sellerErrorResponse;
+      if (marketplaceSellerIds.length === 0) {
+        return jsonResponse(
+          { error: "Only marketplace owners or authorized staff can manage marketplace listings and sales." },
+          403,
+        );
+      }
+      if (marketplaceSellerIds.length > 1) {
+        return jsonResponse(
+          { error: "Marketplace access is linked to multiple owners. Ask an administrator to keep marketplace-enabled assignments under one owner." },
+          409,
+        );
+      }
+      marketplaceSellerId = marketplaceSellerIds[0];
+    }
+
+    if (action === "get_marketplace_access") {
+      return jsonResponse({
+        success: true,
+        data: {
+          can_manage: marketplaceSellerIds.length === 1,
+          seller_id: marketplaceSellerIds.length === 1 ? marketplaceSellerIds[0] : null,
+          has_conflict: marketplaceSellerIds.length > 1,
+        },
+      });
     }
 
     // ── create_product ──────────────────────────────────────────────
@@ -231,7 +309,7 @@ Deno.serve(async (req: Request) => {
       const { data: product, error: prodErr } = await supabaseAdmin
         .from("products")
         .insert({
-          seller_id: uid,
+          seller_id: marketplaceSellerId,
           group_id: group_id || null,
           title,
           description: description || null,
@@ -289,7 +367,7 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (!existing) return jsonResponse({ error: "Product not found" }, 404);
-      if (existing.seller_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (existing.seller_id !== marketplaceSellerId) return jsonResponse({ error: "Forbidden" }, 403);
 
       const allowed = ["title", "description", "product_type", "category", "base_price", "currency", "status", "is_limited_edition", "limited_quantity"];
       const patch: Record<string, any> = {};
@@ -301,10 +379,28 @@ Deno.serve(async (req: Request) => {
         .from("products")
         .update(patch)
         .eq("id", product_id)
+        .eq("seller_id", marketplaceSellerId)
         .select()
         .single();
 
       if (error) return jsonResponse({ error: error.message }, 500);
+
+      if (Array.isArray(updates.media)) {
+        const mediaRows = normalizeUniqueMedia(updates.media);
+        const { error: deleteMediaError } = await supabaseAdmin
+          .from("product_media")
+          .delete()
+          .eq("product_id", product_id);
+        if (deleteMediaError) return jsonResponse({ error: deleteMediaError.message }, 500);
+
+        if (mediaRows.length > 0) {
+          const { error: insertMediaError } = await supabaseAdmin
+            .from("product_media")
+            .insert(mediaRows.map((item) => ({ ...item, product_id })));
+          if (insertMediaError) return jsonResponse({ error: insertMediaError.message }, 500);
+        }
+      }
+
       return jsonResponse({ success: true, data: normalizeProductRecord(data) });
     }
 
@@ -320,7 +416,7 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (!prod) return jsonResponse({ error: "Product not found" }, 404);
-      if (prod.seller_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (prod.seller_id !== marketplaceSellerId) return jsonResponse({ error: "Forbidden" }, 403);
       if (prod.status !== "draft") return jsonResponse({ error: "Only draft products can be published" }, 400);
 
       const { data, error } = await supabaseAdmin
@@ -346,7 +442,7 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (!prod) return jsonResponse({ error: "Product not found" }, 404);
-      if (prod.seller_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (prod.seller_id !== marketplaceSellerId) return jsonResponse({ error: "Forbidden" }, 403);
       if (prod.status !== "active") {
         return jsonResponse({ error: "Only live products can be marked sold" }, 400);
       }
@@ -374,7 +470,7 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (!prod) return jsonResponse({ error: "Product not found" }, 404);
-      if (prod.seller_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (prod.seller_id !== marketplaceSellerId) return jsonResponse({ error: "Forbidden" }, 403);
       if (!["sold_out", "archived"].includes(prod.status)) {
         return jsonResponse({ error: "Only sold or archived products can be relisted" }, 400);
       }
@@ -387,25 +483,6 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (error) return jsonResponse({ error: error.message }, 500);
-
-      if (Array.isArray(updates.media)) {
-        const mediaRows = normalizeUniqueMedia(updates.media);
-
-        const { error: deleteMediaError } = await supabaseAdmin
-          .from("product_media")
-          .delete()
-          .eq("product_id", product_id);
-
-        if (deleteMediaError) return jsonResponse({ error: deleteMediaError.message }, 500);
-
-        if (mediaRows.length > 0) {
-          const { error: insertMediaError } = await supabaseAdmin
-            .from("product_media")
-            .insert(mediaRows.map((item) => ({ ...item, product_id })));
-
-          if (insertMediaError) return jsonResponse({ error: insertMediaError.message }, 500);
-        }
-      }
 
       return jsonResponse({ success: true, data: normalizeProductRecord(data) });
     }
@@ -422,7 +499,7 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (!existing) return jsonResponse({ error: "Product not found" }, 404);
-      if (existing.seller_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (existing.seller_id !== marketplaceSellerId) return jsonResponse({ error: "Forbidden" }, 403);
 
       const { count: orderItemCount, error: orderCountError } = await supabaseAdmin
         .from("order_items")
@@ -455,7 +532,7 @@ Deno.serve(async (req: Request) => {
         .from("products")
         .delete()
         .eq("id", product_id)
-        .eq("seller_id", uid);
+        .eq("seller_id", marketplaceSellerId);
 
       if (deleteProductError) return jsonResponse({ error: deleteProductError.message }, 500);
 
@@ -511,7 +588,7 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await supabaseAdmin
         .from("products_with_summary")
         .select("*")
-        .eq("seller_id", uid)
+        .eq("seller_id", marketplaceSellerId)
         .order("created_at", { ascending: false });
 
       if (error) return jsonResponse({ error: error.message }, 500);
@@ -692,7 +769,7 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (ordErr || !order) return jsonResponse({ error: "Order not found" }, 404);
-      if (order.buyer_id !== uid && order.seller_id !== uid) {
+      if (order.buyer_id !== uid && order.seller_id !== uid && !marketplaceSellerIds.includes(order.seller_id)) {
         const { data: profile } = await supabaseAdmin.from("profiles").select("role").eq("id", uid).single();
         if (profile?.role !== "admin") return jsonResponse({ error: "Forbidden" }, 403);
       }
@@ -731,7 +808,7 @@ Deno.serve(async (req: Request) => {
       let query = supabaseAdmin
         .from("orders_with_summary")
         .select("*")
-        .eq("seller_id", uid)
+        .eq("seller_id", marketplaceSellerId)
         .order("created_at", { ascending: false });
 
       if (filterStatus) query = query.eq("status", filterStatus);
@@ -766,7 +843,7 @@ Deno.serve(async (req: Request) => {
       if (!order) return jsonResponse({ error: "Order not found" }, 404);
 
       // Seller can manage, buyer can cancel pending, admin can do anything
-      const isSeller = order.seller_id === uid;
+      const isSeller = order.seller_id === uid || marketplaceSellerIds.includes(order.seller_id);
       const isBuyer = order.buyer_id === uid;
       const { data: profile } = await supabaseAdmin.from("profiles").select("role").eq("id", uid).single();
       const isAdmin = profile?.role === "admin";
@@ -819,7 +896,7 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (!order) return jsonResponse({ error: "Order not found" }, 404);
-      if (order.seller_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (order.seller_id !== marketplaceSellerId) return jsonResponse({ error: "Forbidden" }, 403);
 
       const { data, error } = await supabaseAdmin
         .from("order_fulfillments")
@@ -866,7 +943,7 @@ Deno.serve(async (req: Request) => {
         .eq("id", fulfillment.order_id)
         .single();
 
-      if (!order || order.seller_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (!order || order.seller_id !== marketplaceSellerId) return jsonResponse({ error: "Forbidden" }, 403);
 
       const patch: Record<string, any> = {};
       if (newStatus) {
@@ -897,7 +974,7 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await supabaseAdmin
         .from("shipping_profiles")
         .insert({
-          seller_id: uid,
+          seller_id: marketplaceSellerId,
           name,
           shipping_type: shipping_type || "standard",
           base_fee: base_fee || 0,
@@ -917,7 +994,7 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await supabaseAdmin
         .from("shipping_profiles")
         .select("*")
-        .eq("seller_id", uid)
+        .eq("seller_id", marketplaceSellerId)
         .order("created_at");
 
       if (error) return jsonResponse({ error: error.message }, 500);
@@ -929,12 +1006,12 @@ Deno.serve(async (req: Request) => {
       const { data: products } = await supabaseAdmin
         .from("products")
         .select("id, status, total_sold, base_price")
-        .eq("seller_id", uid);
+        .eq("seller_id", marketplaceSellerId);
 
       const { data: orders } = await supabaseAdmin
         .from("orders")
         .select("id, status, total_amount, created_at")
-        .eq("seller_id", uid)
+        .eq("seller_id", marketplaceSellerId)
         .order("created_at", { ascending: false });
 
       const activeProducts = (products || []).filter((p: any) => p.status === "active").length;

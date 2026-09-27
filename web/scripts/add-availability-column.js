@@ -12,6 +12,7 @@ const __dirname = dirname(__filename);
 dotenv.config({ path: join(__dirname, '..', '..', '.env') });
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const projectRef = process.env.SUPABASE_PROJECT_REF || new URL(supabaseUrl).hostname.split('.')[0];
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
@@ -38,7 +39,7 @@ async function addAvailabilityColumn() {
     console.log(readFileSync(join(__dirname, '..', 'add-availability-column.sql'), 'utf8'));
     console.log('-----------------------------------------------------------\n');
     console.log('📍 Steps:');
-    console.log('   1. Go to: https://supabase.com/dashboard/project/aefldxegsvzecshlayza/sql/new');
+    console.log(`   1. Go to: https://supabase.com/dashboard/project/${projectRef}/sql/new`);
     console.log('   2. Paste the SQL above');
     console.log('   3. Click "Run" button');
     console.log('   4. Wait 2-3 minutes for schema cache to refresh');

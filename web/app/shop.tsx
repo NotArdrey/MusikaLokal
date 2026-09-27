@@ -73,10 +73,30 @@ export default function ShopScreen() {
   const createListingSheetRef = useRef<BottomSheetModal>(null);
   const normalizedUserRole = (userRole || "").toLowerCase();
   const isFan = normalizedUserRole === "fan";
+  const [hasStaffMarketplaceAccess, setHasStaffMarketplaceAccess] = useState(false);
+  const isMarketplaceOwner = ["producer", "venue-owner", "studio-owner"].includes(normalizedUserRole);
   const canSell =
     Boolean(session) &&
     roleResolved &&
-    ["producer", "venue-owner", "studio-owner"].includes(normalizedUserRole);
+    (isMarketplaceOwner || (normalizedUserRole === "staff" && hasStaffMarketplaceAccess));
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!session || !roleResolved || normalizedUserRole !== "staff") {
+      setHasStaffMarketplaceAccess(false);
+      return () => { cancelled = true; };
+    }
+
+    void supabase.functions.invoke("manage-marketplace", {
+      body: { action: "get_marketplace_access" },
+    }).then(({ data, error }) => {
+      if (!cancelled) setHasStaffMarketplaceAccess(!error && data?.data?.can_manage === true);
+    }).catch(() => {
+      if (!cancelled) setHasStaffMarketplaceAccess(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [normalizedUserRole, roleResolved, session]);
 
   const pageBackground = isWebDesktop ? (isDark ? "#0A1224" : "#E9EEF8") : colors.background;
   const cardBg = isWebDesktop ? (isDark ? "#0F172A" : "#FFFFFF") : colors.surface;
@@ -169,7 +189,7 @@ export default function ShopScreen() {
       return;
     }
     try {
-      const data = await invokeMarketplace({ action: "list_seller_products", seller_id: userId });
+      const data = await invokeMarketplace({ action: "list_my_products" });
       setSellerProducts(Array.isArray(data?.data) ? data.data : []);
     } catch {
       setSellerProducts([]);

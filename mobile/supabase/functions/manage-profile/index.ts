@@ -8,6 +8,21 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
+function extractBearerToken(authHeader: string | null): string | null {
+    const trimmed = String(authHeader || '').trim()
+    if (!trimmed) return null
+
+    const token = trimmed.replace(/^Bearer\s+/i, '').trim()
+    return token || null
+}
+
+function jsonError(message: string, status: number) {
+    return new Response(JSON.stringify({ error: message }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status,
+    })
+}
+
 const replaceProfileSkills = async (client: any, profileId: string, skills: string[]) => {
     const { error: deleteError } = await client.from('profile_skills').delete().eq('profile_id', profileId)
     if (deleteError) throw deleteError
@@ -65,26 +80,29 @@ serve(async (req: Request) => {
     try {
         const { action, ...params } = await req.json()
 
-        // Log authorization header for debugging (remove in production)
         const authHeader = req.headers.get('Authorization')
+        const accessToken = extractBearerToken(authHeader)
+        if (!accessToken) return jsonError('No authorization header provided', 401)
 
-        // Allow 'create' action without auth header (for signup flow)
-        // The create action uses service role key anyway
-        if (action !== 'create' && !authHeader) {
-            return new Response(JSON.stringify({ error: 'No authorization header provided' }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 401,
-            })
+        const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+        const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+        const supabaseClient = createClient(
+            supabaseUrl,
+            supabaseAnonKey,
+            { global: { headers: { Authorization: `Bearer ${accessToken}` } } },
+        )
+
+        // The gateway intentionally has verify_jwt=false, so verify the bearer
+        // token here and derive the identity only from Supabase Auth.
+        const { data: authData, error: authError } = await supabaseClient.auth.getUser(accessToken)
+        if (authError || !authData?.user?.id) return jsonError('Invalid token', 401)
+
+        const authenticatedUserId = authData.user.id
+        const requestedUserId = params.userId
+        if (['fetch', 'update', 'add_media', 'create'].includes(action)) {
+            if (!requestedUserId) return jsonError('userId is required', 400)
+            if (requestedUserId !== authenticatedUserId) return jsonError('Forbidden: userId mismatch', 403)
         }
-
-        // Only create supabaseClient if we have auth header (not needed for create action)
-        const supabaseClient = authHeader ? createClient(
-            // @ts-ignore
-            Deno.env.get('SUPABASE_URL') ?? '',
-            // @ts-ignore
-            Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-            { global: { headers: { Authorization: authHeader } } }
-        ) : null
 
         // 1. FETCH PROFILE (using view with computed stats)
         if (action === 'fetch') {
@@ -196,14 +214,20 @@ serve(async (req: Request) => {
 
         // 4. CREATE PROFILE (Bypass RLS for signup)
         if (action === 'create') {
-            const { userId, email, full_name, role, is_verified, verification_status, didit_session_id } = params
+            const { userId, email, full_name, role } = params
+            const normalizedEmail = String(email || '').trim().toLowerCase()
+            const normalizedRole = String(role || '').trim().toLowerCase()
 
             // Validate required parameters
-            if (!userId || !email || !role) {
+            if (!userId || !normalizedEmail || !normalizedRole) {
                 return new Response(JSON.stringify({ error: 'Missing required parameters: userId, email, role' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 400,
                 })
+            }
+
+            if (!['fan', 'musician'].includes(normalizedRole)) {
+                return jsonError('Invalid signup role', 400)
             }
 
             // Initialize Admin Client to bypass RLS
@@ -229,12 +253,12 @@ serve(async (req: Request) => {
                 .from('profiles')
                 .upsert({
                     id: userId,
-                    email,
+                    email: normalizedEmail,
                     full_name,
-                    role,
-                    is_verified,
-                    verification_status,
-                    didit_session_id
+                    role: normalizedRole,
+                    is_verified: false,
+                    verification_status: 'PENDING',
+                    didit_session_id: null
                 })
                 .select()
                 .single()

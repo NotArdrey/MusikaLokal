@@ -1,11 +1,12 @@
 $ErrorActionPreference = 'Stop'
 
-$projectRef = 'aefldxegsvzecshlayza'
+$projectRef = $env:SUPABASE_PROJECT_REF
+$pat = $env:SUPABASE_ACCESS_TOKEN
+if (-not $projectRef -or -not $pat) { throw 'Set SUPABASE_PROJECT_REF and SUPABASE_ACCESS_TOKEN before running this script.' }
 $base = "https://$projectRef.supabase.co/rest/v1"
 $authBase = "https://$projectRef.supabase.co/auth/v1"
-$pat = 'sbp_8e8439a1bdf2c0ea6de848d0572cbba5fdbe308e'
 
-Set-Location 'c:\Users\Neila\MusikaLokal\mobile'
+Set-Location (Join-Path $PSScriptRoot '..')
 $env:SUPABASE_ACCESS_TOKEN = $pat
 $keys = npx supabase projects api-keys --project-ref $projectRef -o json | ConvertFrom-Json
 $serviceKey = ($keys | Where-Object { $_.id -eq 'service_role' -or $_.name -eq 'service_role' } | Select-Object -First 1).api_key

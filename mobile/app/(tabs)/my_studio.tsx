@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { runAfterUIIdle } from '../../src/utils/idleTask';
@@ -19,7 +19,7 @@ import StaffWorkspaceTabs from '../../src/components/StaffWorkspaceTabs';
 import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
-import { StaffAssignment, fetchActiveStaffAssignments, getStaffPermissions } from '../../src/utils/staffAccess';
+import { StaffAssignment, StaffEntityType, fetchActiveStaffAssignments, getStaffPermissions } from '../../src/utils/staffAccess';
 import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../../src/utils/actionError';
 import { isE2EFixtureMode } from '../../src/utils/e2eFixtures';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
@@ -42,14 +42,21 @@ export default function MyStudioScreen() {
     const { contentBottomPadding } = useBottomBarClearance(24);
     const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
     const { userRole } = useAuth();
-    const params = useLocalSearchParams<{ refresh?: string }>();
+    const params = useLocalSearchParams<{ refresh?: string; deleteId?: string }>();
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
+    const requestedDeleteId = Array.isArray(params.deleteId) ? params.deleteId[0] : params.deleteId;
+    const processedDeleteIdRef = useRef<string | null>(null);
     const [modalVisible, setModalVisible] = useState(false);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [selectedName, setSelectedName] = useState('');
     const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
     const [studios, setStudios] = useState<any[]>([]);
     const [staffAssignments, setStaffAssignments] = useState<StaffAssignment[]>([]);
+    const [staffAddOwnerState, setStaffAddOwnerState] = useState<{
+        userId: string;
+        entityTypes: StaffEntityType[];
+        ownerIds: string[];
+    } | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -77,13 +84,16 @@ export default function MyStudioScreen() {
         if (!userId) return;
         setLoadError(null);
         try {
-            const activeStaffAssignments = userRole === 'staff'
-                ? (await fetchActiveStaffAssignments(supabase, userId)).filter((assignment) => assignment.entity_type === 'studio')
+            const allActiveStaffAssignments = userRole === 'staff'
+                ? await fetchActiveStaffAssignments(supabase, userId)
                 : [];
+            const activeStaffAssignments = allActiveStaffAssignments.filter((assignment) => assignment.entity_type === 'studio');
+            const activeWorkspaceTypes = Array.from(new Set(allActiveStaffAssignments.map((assignment) => assignment.entity_type)));
             setStaffAssignments(activeStaffAssignments);
 
             if (userRole === 'staff' && activeStaffAssignments.length === 0) {
                 setStudios([]);
+                setStaffAddOwnerState({ userId, entityTypes: activeWorkspaceTypes, ownerIds: [] });
                 return;
             }
 
@@ -100,6 +110,24 @@ export default function MyStudioScreen() {
             const { data: baseStudios, error: baseError } = await studioQuery;
 
             if (baseError) throw baseError;
+
+            const addableStudioIds = new Set(
+                activeStaffAssignments
+                    .filter((assignment) => getStaffPermissions(assignment.access_level, assignment).canAddListing)
+                    .map((assignment) => assignment.studio_id)
+                    .filter((studioId): studioId is string => typeof studioId === 'string' && studioId.length > 0),
+            );
+            const staffAddOwnerIds = Array.from(new Set(
+                (baseStudios || [])
+                    .filter((studio: any) => addableStudioIds.has(studio.id))
+                    .map((studio: any) => String(studio.owner_id || '').trim())
+                    .filter((ownerId: string) => ownerId.length > 0),
+            ));
+            setStaffAddOwnerState({
+                userId,
+                entityTypes: activeWorkspaceTypes,
+                ownerIds: userRole === 'staff' ? staffAddOwnerIds : [],
+            });
 
             const studioIds = (baseStudios || []).map((studio: any) => studio.id);
 
@@ -161,6 +189,7 @@ export default function MyStudioScreen() {
                 };
             }));
         } catch (e) {
+            setStaffAddOwnerState({ userId, entityTypes: [], ownerIds: [] });
             const message = getActionErrorMessage(e, 'Failed to load studios.');
             logActionError('MyStudio', 'fetchStudios', e, { userId });
             setLoadError(message);
@@ -227,6 +256,18 @@ export default function MyStudioScreen() {
         void fetchStudios({ showAlertOnError: true });
     };
 
+    const staffAddOwnerIds = staffAddOwnerState?.userId === userId
+        ? staffAddOwnerState.ownerIds
+        : [];
+    const isMultiRoleStaff = userRole === 'staff' && (staffAddOwnerState?.entityTypes.length || 0) > 1;
+    const staffHeaderAddOwnerId = isMultiRoleStaff && staffAddOwnerIds.length === 1
+        ? staffAddOwnerIds[0]
+        : null;
+    const openStaffAddStudio = useCallback(() => {
+        if (!staffHeaderAddOwnerId) return;
+        router.push({ pathname: '/add_studio', params: { ownerId: staffHeaderAddOwnerId } });
+    }, [staffHeaderAddOwnerId]);
+
     const closeDeleteModal = () => {
         setModalVisible(false);
         setSelectedId(null);
@@ -240,6 +281,32 @@ export default function MyStudioScreen() {
         setDeleteConfirmationText('');
         setModalVisible(true);
     };
+
+    useEffect(() => {
+        if (!requestedDeleteId || loading || processedDeleteIdRef.current === requestedDeleteId) return;
+        const timer = setTimeout(() => {
+            if (processedDeleteIdRef.current === requestedDeleteId) return;
+            processedDeleteIdRef.current = requestedDeleteId;
+
+            const studio = studios.find((item) => item.id === requestedDeleteId);
+            if (!studio) return;
+            const assignment = staffAssignments.find((item) => item.studio_id === studio.id);
+            const canDelete = userRole === 'staff'
+                ? getStaffPermissions(assignment?.access_level, assignment).canDeleteListing
+                : studio.owner_id === userId;
+            if (!canDelete) {
+                setAlertConfig({ type: 'warning', title: 'Delete Not Allowed', message: 'You do not have permission to delete this studio.' });
+                setAlertVisible(true);
+                return;
+            }
+
+            setSelectedId(studio.id);
+            setSelectedName(studio.name || '');
+            setDeleteConfirmationText('');
+            setModalVisible(true);
+        }, 0);
+        return () => clearTimeout(timer);
+    }, [loading, requestedDeleteId, staffAssignments, studios, userId, userRole]);
 
     const isDeleteConfirmed =
         normalizeConfirmationInput(deleteConfirmationText) ===
@@ -300,6 +367,15 @@ export default function MyStudioScreen() {
     }, [mapDeleteConflictBooking]);
 
     const performStudioDelete = useCallback(async (studioId: string, reason: string) => {
+        if (userRole === 'staff') {
+            const { data, error } = await supabase.rpc('delete_studio_as_full_access_staff', {
+                p_studio_id: studioId,
+                p_reason: reason,
+            });
+            if (error) throw error;
+            return data;
+        }
+
         let result: any = null;
         let invokeError: any = null;
 
@@ -350,7 +426,7 @@ export default function MyStudioScreen() {
         }
 
         return result;
-    }, [userId]);
+    }, [userId, userRole]);
 
     const handleDeleteSuccess = useCallback((studioId: string) => {
         setStudios(prev => prev.filter(s => s.id !== studioId));
@@ -403,10 +479,6 @@ export default function MyStudioScreen() {
 
     const handleDelete = async (skipConflictCheck = false) => {
         if (!selectedId || !userId || deleting) return;
-        if (userRole === 'staff') {
-            showAlert('warning', 'Action blocked', 'Staff accounts cannot delete studios.');
-            return;
-        }
         if (!isDeleteConfirmed) {
             showAlert('warning', 'Confirmation Needed', `Please type "${selectedName}" exactly to confirm deletion.`);
             return;
@@ -429,7 +501,9 @@ export default function MyStudioScreen() {
 
             const result = await performStudioDelete(
                 selectedId,
-                'Deleted from My Studio screen by owner',
+                userRole === 'staff'
+                    ? 'Deleted from My Studio screen by full-access staff'
+                    : 'Deleted from My Studio screen by owner',
             );
 
             await handleDeleteResult(selectedId, result);
@@ -539,7 +613,13 @@ export default function MyStudioScreen() {
     return (
         <>
             <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header title="My Studios" overline="MusikaLokal" showTitle={false} />
+                <Header
+                    title="My Studios"
+                    overline="MusikaLokal"
+                    showTitle={false}
+                    onAddPress={staffHeaderAddOwnerId ? openStaffAddStudio : undefined}
+                    addButtonAccessibilityLabel="Add studio"
+                />
 
                 <ScrollView
                     showsVerticalScrollIndicator={false}
@@ -598,8 +678,9 @@ export default function MyStudioScreen() {
                                 ]}
                             >
                             {(() => {
+                                const staffAssignment = staffAssignments.find((assignment) => assignment.studio_id === studio.id);
                                 const staffPermissions = userRole === 'staff'
-                                    ? getStaffPermissions(staffAssignments.find((assignment) => assignment.studio_id === studio.id)?.access_level)
+                                    ? getStaffPermissions(staffAssignment?.access_level, staffAssignment)
                                     : null;
                                 const canManageBookings = !staffPermissions || staffPermissions.canManageBookings;
                                 const canEditListing = !staffPermissions || staffPermissions.canEditListing;
@@ -712,9 +793,20 @@ export default function MyStudioScreen() {
                                             )}
                                             </>
                                             ) : null}
+                                            {staffPermissions?.canAddListing && !staffHeaderAddOwnerId ? (
+                                                <TouchableOpacity
+                                                    activeOpacity={1}
+                                                    testID={`mobile-studio-add-for-owner-${studio.id}`}
+                                                    accessibilityLabel={`Add studio for ${studio.name}`}
+                                                    onPress={() => router.push({ pathname: '/add_studio', params: { ownerId: studio.owner_id } })}
+                                                    style={[styles.editBtn, { borderColor: colors.border }]}
+                                                >
+                                                    <Ionicons name="add-outline" size={20} color={colors.text} />
+                                                </TouchableOpacity>
+                                            ) : null}
                                         </View>
 
-                                        {!staffPermissions ? (
+                                        {!staffPermissions || staffPermissions.canDeleteListing ? (
                                         <TouchableOpacity
                                             activeOpacity={1}
                                             testID={`mobile-studio-delete-${studio.id}`}

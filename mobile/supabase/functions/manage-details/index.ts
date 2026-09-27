@@ -442,18 +442,10 @@ serve(async (req: Request) => {
 
         // 3. SUBMIT REVIEW
         if (action === 'review') {
-            const { rating, content } = params
-            const payload: any = {
-                author_id: userId,
-                rating,
-                content
-            }
-            payload[type + '_id'] = id
-
-            const { data, error } = await supabaseClient.from('reviews').insert(payload).select()
-            if (error) throw error
-
-            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+            return new Response(
+                JSON.stringify({ error: 'Listing reviews are retired. Submit a review from a completed booking.' }),
+                { status: 410, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+            )
         }
 
         // 4. REPORT

@@ -816,8 +816,10 @@ serve(async (req) => {
       }
     }
 
-    // Fallback anon key if not in env
-    const anonKey = SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFlZmxkeGVnc3Z6ZWNzaGxheXphIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg2NTgyOTUsImV4cCI6MjA4NDIzNDI5NX0._BKyxjyqHKHaheMWkBk8mMalzSPy_gm1ImsT_RQaOB0';
+    const anonKey = SUPABASE_ANON_KEY;
+    if (!SUPABASE_URL || !anonKey) {
+      return jsonResponse({ error: "Supabase environment is not configured", success: false }, 500);
+    }
 
     // Build the redirect URL that Didit will use after verification
     // This is where the user's browser goes after completing verification

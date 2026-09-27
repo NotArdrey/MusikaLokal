@@ -10,6 +10,7 @@ const __dirname = dirname(__filename);
 dotenv.config({ path: join(__dirname, '..', '..', '.env') });
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const projectRef = process.env.SUPABASE_PROJECT_REF || (supabaseUrl ? new URL(supabaseUrl).hostname.split('.')[0] : 'your-project-ref');
 const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -142,7 +143,7 @@ async function diagnose() {
     if (studioError && studioError.message.includes('availability')) {
         console.log('❌ PRIMARY ISSUE: availability column does not exist');
         console.log('   👉 SOLUTION: Run the SQL in Supabase Dashboard');
-        console.log('   👉 URL: https://supabase.com/dashboard/project/aefldxegsvzecshlayza/sql/new');
+        console.log(`   👉 URL: https://supabase.com/dashboard/project/${projectRef}/sql/new`);
         console.log('   👉 SQL: ALTER TABLE studios ADD COLUMN IF NOT EXISTS availability JSONB DEFAULT \'[]\'::jsonb;');
     } else if (!userStudios || userStudios.length === 0) {
         console.log('⚠️  No studios found for your account');

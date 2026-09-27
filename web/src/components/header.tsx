@@ -1,13 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname, useSegments } from "expo-router";
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { isFanUserRole, resolveRoleManageRoute } from '../utils/roleRouting';
-import { fetchActiveStaffAssignments, isStaffRole } from '../utils/staffAccess';
+import { isStaffRole } from '../utils/staffAccess';
 import ThemeModeToggle from './ThemeModeToggle';
 
 interface HeaderProps {
@@ -44,7 +44,7 @@ const normalizeHeaderPathname = (value: string, segments: readonly string[] = []
 
 function Header({ title, overline, transparent, onBackPress, hideBackButton = false, leftComponent, rightComponent, cardStyle }: HeaderProps) {
     const { colors, isDark } = useTheme();
-    const { isGuest, setGuestMode, userId, userRole } = useAuth();
+    const { isGuest, setGuestMode, userRole } = useAuth();
     const insets = useSafeAreaInsets();
     const { width } = useWindowDimensions();
     const isWebDesktop = Platform.OS === 'web' && width >= 768;
@@ -55,7 +55,6 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
     const routePathname = useMemo(() => normalizeHeaderPathname(pathname, segments), [pathname, segments]);
     const [hasUnread, setHasUnread] = useState(false);
     const [guestMenuVisible, setGuestMenuVisible] = useState(false);
-    const [staffAccessLevel, setStaffAccessLevel] = useState<1 | 2 | 3 | null>(null);
     const isStaff = isStaffRole(userRole);
     const isAdminPath = useMemo(
         () => routePathname === "/admin" || routePathname.startsWith("/admin/"),
@@ -81,7 +80,9 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
     const useMainTitleStyle = !backVisible;
     const useCompactMainTitleStyle = useMainTitleStyle && isRoundedMainHeader;
     const notifVisible = isMainNavPath && !isGuest && !isWebDesktop;
-    const addbtnvisible = isMyListingPath && (!isStaff || staffAccessLevel === 1);
+    // Staff need an assigned owner's ID when creating a listing, so their Add
+    // action lives on each assigned card and details sheet instead.
+    const addbtnvisible = isMyListingPath && !isStaff;
 
     const btn = useMemo<'/add_gig' | '/add_studio' | '/add_group' | '/add_production'>(() => {
         if (routePathname === "/my_venue") return '/add_gig';
@@ -89,47 +90,6 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
         if (routePathname === "/my_production") return '/add_production';
         return '/add_group';
     }, [routePathname]);
-
-    useEffect(() => {
-        let cancelled = false;
-
-        const loadStaffAccessLevel = async () => {
-            if (!isStaff || !userId) {
-                setStaffAccessLevel(null);
-                return;
-            }
-
-            const routeEntityType = routePathname === '/my_studio'
-                ? 'studio'
-                : routePathname === '/my_venue'
-                    ? 'venue'
-                    : routePathname === '/my_production'
-                        ? 'production'
-                        : null;
-            if (!routeEntityType) {
-                setStaffAccessLevel(null);
-                return;
-            }
-
-            try {
-                const assignments = await fetchActiveStaffAssignments(supabase, userId);
-                const assignment = assignments.find((item) => item.entity_type === routeEntityType);
-                if (!cancelled) {
-                    setStaffAccessLevel(assignment?.access_level || null);
-                }
-            } catch {
-                if (!cancelled) {
-                    setStaffAccessLevel(null);
-                }
-            }
-        };
-
-        void loadStaffAccessLevel();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [isStaff, routePathname, userId]);
 
     const defaultBackRoute = useMemo(() => {
         if (routePathname === "/edit_profile") return "/profile";
