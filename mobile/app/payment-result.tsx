@@ -92,7 +92,7 @@ export default function PaymentResultScreen() {
     ? "We are checking your payment status. Please wait a moment."
     : isSuccess
       ? isDeposit
-        ? `₱${params.amount || "0"} has been added to your wallet.`
+        ? `PHP ${params.amount || "0"} has been added to your wallet.`
         : verificationState === "delayed"
           ? "Your payment was received. The booking may take a few more seconds to update."
           : verificationState === "failed"

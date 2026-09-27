@@ -171,9 +171,9 @@ export const EXPERIENCE_OPTIONS = [
 
 export const STARTER_BUDGET_OPTIONS = [
   { value: 'none' as StarterBudget, label: 'No budget yet', description: 'Start with free practice paths first' },
-  { value: 'below_3000' as StarterBudget, label: 'Below \u20b13,000', description: 'Prioritize voice, apps, ukulele, or used gear' },
-  { value: '3000_7000' as StarterBudget, label: '\u20b13,000-\u20b17,000', description: 'Good for affordable acoustic or starter rhythm gear' },
-  { value: '7000_15000' as StarterBudget, label: '\u20b17,000-\u20b115,000', description: 'Enough for many beginner instrument setups' },
-  { value: '15000_plus' as StarterBudget, label: '\u20b115,000+', description: 'Can consider amplified or recording-ready setups' },
+  { value: 'below_3000' as StarterBudget, label: 'Below PHP 3,000', description: 'Prioritize voice, apps, ukulele, or used gear' },
+  { value: '3000_7000' as StarterBudget, label: 'PHP 3,000-PHP 7,000', description: 'Good for affordable acoustic or starter rhythm gear' },
+  { value: '7000_15000' as StarterBudget, label: 'PHP 7,000-PHP 15,000', description: 'Enough for many beginner instrument setups' },
+  { value: '15000_plus' as StarterBudget, label: 'PHP 15,000+', description: 'Can consider amplified or recording-ready setups' },
   { value: 'not_sure' as StarterBudget, label: 'Not sure', description: 'Show flexible options with price ranges' },
 ] as const;

@@ -517,7 +517,6 @@ const PENDING_REOPEN_LISTING_STORAGE_KEY = "pending_reopen_listing_id";
 const PENDING_REOPEN_LISTING_TYPE_STORAGE_KEY = "pending_reopen_listing_type";
 const SOCIAL_MEDIA_ASPECT_RATIO = 16 / 9;
 const SOCIAL_MEDIA_MAX_HEIGHT = 260;
-const PESO_SIGN = "\u20B1";
 const KNOWN_FEED_MEDIA_BUCKETS = ["post-media", "posts", "images", "listings", "documents", "avatars"];
 const FEED_ACTIVITY_VIEWABILITY_CONFIG = {
   itemVisiblePercentThreshold: 70,
@@ -938,7 +937,7 @@ const formatCompactPostType = (value: unknown) => {
 };
 
 const formatFeedPrice = (amount: number, suffix = "", label = "") =>
-  `${PESO_SIGN}${amount.toLocaleString()}${suffix}${label ? ` ${label}` : ""}`;
+  `PHP ${amount.toLocaleString()}${suffix}${label ? ` ${label}` : ""}`;
 
 const formatFeedCountLabel = (count: number, singular: string, plural = `${singular}s`) =>
   `${count} ${count === 1 ? singular : plural}`;

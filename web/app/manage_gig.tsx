@@ -778,9 +778,9 @@ export default function GigDetailsScreen() {
                 : "Date TBA"}
               {gig?.requirements?.event_start_time &&
                 gig?.requirements?.event_end_time
-                ? ` � ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
+                ? ` | ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
                 : ""}
-              {" � "}
+              {" | "}
               {gig?.location || "Location N/A"}
             </Text>
             {hasValidCoordinates(gig?.latitude, gig?.longitude) && (
@@ -1447,7 +1447,7 @@ export default function GigDetailsScreen() {
                               app.applicant?.genres?.join(", ") ||
                               "Musician"}
                             {(app.group?.location || app.applicant?.location) &&
-                              ` � ${app.group?.location || app.applicant?.location}`}
+                              ` | ${app.group?.location || app.applicant?.location}`}
                           </Text>
                         </View>
                       </View>

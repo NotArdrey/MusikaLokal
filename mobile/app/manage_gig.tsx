@@ -1483,7 +1483,7 @@ export default function GigDetailsScreen() {
                 </View>
 
                 <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, marginBottom: 10 }}>
-                  {applicationCounts["Pending"]} pending • {applicationCounts["Accepted"]} accepted • {applicationCounts["Declined"]} declined
+                  {applicationCounts["Pending"]} pending | {applicationCounts["Accepted"]} accepted | {applicationCounts["Declined"]} declined
                 </Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 14 }}>
                   {APPLICATION_FILTERS.map((filter) => {
@@ -1586,13 +1586,13 @@ export default function GigDetailsScreen() {
                               </Text>
                               <View style={styles.compactStatusRow}>
                                 <Text style={[styles.compactMeta, { color: statusMeta.color }]}>{statusMeta.label}</Text>
-                                {verified ? <Text style={[styles.compactMeta, { color: "#10B981" }]}>• Verified</Text> : null}
+                                {verified ? <Text style={[styles.compactMeta, { color: "#10B981" }]}>Verified</Text> : null}
                               </View>
                             </View>
                           </View>
 
                           <Text numberOfLines={1} style={[styles.compactMeta, { color: colors.textSecondary }]}>
-                            {role} • {primarySpecialty}
+                            {role} | {primarySpecialty}
                           </Text>
                           <View style={styles.compactLocationRow}>
                             <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
@@ -1618,7 +1618,7 @@ export default function GigDetailsScreen() {
                                 {priorApplicationCounts.owner_gigs === 0 ? "time" : "times"} to your gigs
                               </Text>
                               <Text style={[styles.aiMatchReviewScoreValue, { color: colors.primary }]}>
-                                {priorApplicationCounts.this_gig + 1}× here
+                                {priorApplicationCounts.this_gig + 1} application{priorApplicationCounts.this_gig + 1 === 1 ? "" : "s"} here
                               </Text>
                             </View>
                           ) : null}
@@ -1627,7 +1627,7 @@ export default function GigDetailsScreen() {
                               <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
                               <Text style={[styles.aiMatchReviewScoreLabel, { color: colors.text }]}>AI Match Review Score</Text>
                               <Text style={[styles.aiMatchReviewScoreValue, { color: colors.primary }]}>
-                                {aiRecommendation.score == null ? "—" : `${Math.round(Number(aiRecommendation.score))}%`}
+                                {aiRecommendation.score == null ? "N/A" : `${Math.round(Number(aiRecommendation.score))}%`}
                               </Text>
                             </View>
                           ) : null}

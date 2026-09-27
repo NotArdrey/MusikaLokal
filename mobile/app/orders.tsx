@@ -95,8 +95,8 @@ export default function OrdersScreen() {
   const onRefresh = () => { setRefreshing(true); fetchOrders(); };
 
   const formatPrice = (price: number | null) => {
-    if (!price) return "₱0";
-    return `₱${price.toLocaleString()}`;
+    if (!price) return "PHP 0";
+    return `PHP ${price.toLocaleString()}`;
   };
 
   const getStatusColor = (status: string) => {

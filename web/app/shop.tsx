@@ -61,7 +61,7 @@ const getProductImage = (product: any) =>
 const formatPrice = (price: number | string | null | undefined) => {
   const amount = Number(price ?? 0);
   if (!Number.isFinite(amount) || amount <= 0) return "Free";
-  return `₱${amount.toLocaleString()}`;
+  return `PHP ${amount.toLocaleString()}`;
 };
 
 export default function ShopScreen() {
@@ -741,7 +741,7 @@ export default function ShopScreen() {
             multiline
           />
 
-          <Text style={[styles.inputLabel, { color: colors.text }]}>Price (₱)</Text>
+          <Text style={[styles.inputLabel, { color: colors.text }]}>Price (PHP)</Text>
           <TextInput
             style={[styles.input, { color: colors.text, borderColor: borderSoft, backgroundColor: pageBackground }]}
             placeholder="0.00"

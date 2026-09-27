@@ -430,7 +430,7 @@ async function creditOwnerWallet(
     }
 
     // Prefer the booking's actual payment_amount from DB over the PayMongo-charged amount.
-    // In TEST MODE PayMongo always charges ₱1 (100 centavos), but the booking records the
+    // In TEST MODE PayMongo always charges PHP 1 (100 centavos), but the booking records the
     // real agreed price — that is what the studio owner should receive in their wallet.
     const finalPrice = getNumericAmount(booking.final_price);
     const storedPaymentAmount = getNumericAmount(booking.payment_amount);
@@ -1408,7 +1408,7 @@ serve(async (req: Request) => {
                   // Notify musician with appropriate message
                   const musicianTitle = isDownpayment ? "Downpayment Received!" : "Payment Successful!";
                   const musicianMessage = isDownpayment
-                    ? `Your downpayment for ${fullBooking.studio?.name} has been received. Remaining balance: ₱${bookingRemainingBalance.toLocaleString()}`
+                    ? `Your downpayment for ${fullBooking.studio?.name} has been received. Remaining balance: PHP ${bookingRemainingBalance.toLocaleString()}`
                     : `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`;
 
                   await insertNotification(supabaseAdmin, {
@@ -1429,7 +1429,7 @@ serve(async (req: Request) => {
                   if (fullBooking.studio?.owner_id) {
                     const ownerTitle = isDownpayment ? "Downpayment Received" : "Booking Payment Received";
                     const ownerMessage = isDownpayment
-                      ? `Downpayment received for booking at ${fullBooking.studio?.name} on ${fullBooking.booking_date}. Remaining balance: ₱${bookingRemainingBalance.toLocaleString()}`
+                      ? `Downpayment received for booking at ${fullBooking.studio?.name} on ${fullBooking.booking_date}. Remaining balance: PHP ${bookingRemainingBalance.toLocaleString()}`
                       : `Payment received for booking at ${fullBooking.studio?.name} on ${fullBooking.booking_date}.`;
 
                     await insertNotification(supabaseAdmin, {
@@ -1856,7 +1856,7 @@ serve(async (req: Request) => {
               user_id: bookingWithLegacy.user_id,
               type: "success",
               title: "Refund Completed",
-              message: `Your refund of ₱${refundAmount.toLocaleString()} for ${bookingWithLegacy.studio?.name} has been processed.`,
+              message: `Your refund of PHP ${refundAmount.toLocaleString()} for ${bookingWithLegacy.studio?.name} has been processed.`,
               image: bookingWithLegacy.studio?.images?.[0] || null,
               meta: {
                 booking_id: bookingId,
@@ -2125,7 +2125,7 @@ serve(async (req: Request) => {
             user_id: booking.studio.owner_id,
             type: "warning",
             title: "Manual Refund Required",
-            message: `A booking at ${booking.studio?.name} requires a manual refund of ₱${refundAmount.toLocaleString()}.`,
+            message: `A booking at ${booking.studio?.name} requires a manual refund of PHP ${refundAmount.toLocaleString()}.`,
             meta: {
               booking_id: booking.id,
               refund_amount: refundAmount,
@@ -2142,7 +2142,7 @@ serve(async (req: Request) => {
             refund_percentage: refundPercentage,
             refund_amount: refundAmount,
             status: "pending",
-            message: `Refund of ₱${refundAmount.toLocaleString()} (${refundPercentage}%) is being processed manually.`,
+            message: `Refund of PHP ${refundAmount.toLocaleString()} (${refundPercentage}%) is being processed manually.`,
           }),
           {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -2187,7 +2187,7 @@ serve(async (req: Request) => {
           user_id: booking.user_id,
           type: "success",
           title: "Refund Processed",
-          message: `Your refund of ₱${refundAmount.toLocaleString()} (${refundPercentage}%) for ${booking.studio?.name} has been processed.`,
+          message: `Your refund of PHP ${refundAmount.toLocaleString()} (${refundPercentage}%) for ${booking.studio?.name} has been processed.`,
           meta: {
             booking_id: booking.id,
             refund_amount: refundAmount,
@@ -2203,7 +2203,7 @@ serve(async (req: Request) => {
             user_id: booking.studio.owner_id,
             type: "info",
             title: "Booking Cancelled & Refunded",
-            message: `A booking at ${booking.studio?.name} was cancelled. Refund of ₱${refundAmount.toLocaleString()} processed.`,
+            message: `A booking at ${booking.studio?.name} was cancelled. Refund of PHP ${refundAmount.toLocaleString()} processed.`,
             meta: {
               booking_id: booking.id,
               refund_amount: refundAmount,
@@ -2220,7 +2220,7 @@ serve(async (req: Request) => {
             refund_id: refundData.data.id,
             refund_percentage: refundPercentage,
             refund_amount: refundAmount,
-            message: `Refund of ₱${refundAmount.toLocaleString()} (${refundPercentage}%) processed successfully!`,
+            message: `Refund of PHP ${refundAmount.toLocaleString()} (${refundPercentage}%) processed successfully!`,
           }),
           {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -2247,7 +2247,7 @@ serve(async (req: Request) => {
             refund_percentage: refundPercentage,
             refund_amount: refundAmount,
             status: "pending",
-            message: `Booking cancelled. Refund of ₱${refundAmount.toLocaleString()} is being processed.`,
+            message: `Booking cancelled. Refund of PHP ${refundAmount.toLocaleString()} is being processed.`,
           }),
           {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -2477,7 +2477,7 @@ serve(async (req: Request) => {
         user_id,
         type: "success",
         title: "Wallet Topped Up!",
-        message: `₱${depositAmount.toLocaleString()} has been added to your wallet.`,
+        message: `PHP ${depositAmount.toLocaleString()} has been added to your wallet.`,
         meta: { type: "wallet_deposit", amount: depositAmount },
       }).catch(() => {});
 

@@ -193,7 +193,7 @@ export default function ProductDetailsScreen() {
   const formatPrice = (price: number | string | null | undefined) => {
     const amount = Number(price ?? 0);
     if (!Number.isFinite(amount) || amount <= 0) return "Free";
-    return `₱${amount.toLocaleString()}`;
+    return `PHP ${amount.toLocaleString()}`;
   };
 
   if (loading) {

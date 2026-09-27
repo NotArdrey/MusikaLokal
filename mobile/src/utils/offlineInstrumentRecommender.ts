@@ -310,7 +310,7 @@ interface StarterBudgetEstimate {
   searchBasis: string[];
 }
 
-const PHP = "\u20b1";
+const PHP = "PHP ";
 const BUDGET_ESTIMATE_NOTE =
   "Prices are estimates from online PH music-store and marketplace results; brand, sale price, and used condition can change the range.";
 

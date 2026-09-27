@@ -674,7 +674,7 @@ const StudioBookTab = ({
     if (discountType === "percentage") {
       return `${discountValue}% off`;
     }
-    return `₱${discountValue} / hr off`;
+    return `PHP ${discountValue} / hr off`;
   };
 
   const formatPromotionWindow = (promo: any) => {
@@ -766,7 +766,7 @@ const StudioBookTab = ({
       );
     }
     if (metadata.minimumSpend !== null) {
-      conditionLabels.push(`Min spend ₱${metadata.minimumSpend.toLocaleString()}`);
+      conditionLabels.push(`Min spend PHP ${metadata.minimumSpend.toLocaleString()}`);
     }
 
     return conditionLabels.length > 0 ? conditionLabels.join(" • ") : null;
@@ -1555,7 +1555,7 @@ const StudioBookTab = ({
                         fontFamily: "Poppins_600SemiBold",
                       }}
                     >
-                      ₱{cost.toLocaleString()}
+                      PHP {cost.toLocaleString()}
                     </Text>
                     <Text
                       style={{
@@ -1581,7 +1581,7 @@ const StudioBookTab = ({
                         <Text style={{ color: colors.primary, fontSize: 10 }}>
                           {`${appliedPromotion?.name || "Promo Applied"}${
                             Number(appliedPromotion?.discount_amount || 0) > 0
-                              ? ` • -₱${Number(appliedPromotion.discount_amount).toLocaleString()}`
+                              ? ` • -PHP ${Number(appliedPromotion.discount_amount).toLocaleString()}`
                               : ""
                           }`}
                         </Text>
@@ -2271,8 +2271,8 @@ const StudioBookTab = ({
               {hasMixedBookingTypes
                 ? "Mixed rates"
                 : hasOnlyRecordingBookings
-                  ? `₱${displayRate} / song`
-                  : `₱${displayRate} / hr`}
+                  ? `PHP ${displayRate} / song`
+                  : `PHP ${displayRate} / hr`}
             </Text>
           </View>
           <View style={styles.summaryRow}>
@@ -2296,7 +2296,7 @@ const StudioBookTab = ({
                 fontSize: 18,
               }}
             >
-              ₱{totalBookingsCost.toLocaleString()}
+              PHP {totalBookingsCost.toLocaleString()}
             </Text>
           </View>
         </View>
@@ -2870,8 +2870,8 @@ const StudioBookTab = ({
                 },
                 hasOnlyRecordingBookings ? "Confirm Recording Booking" : "Confirm Session Booking",
                 hasOnlyRecordingBookings
-                  ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nRecording uses time slots and is priced per song. The studio owner will review and approve your booking request.`
-                  : `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
+                  ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: PHP ${totalBookingsCost.toLocaleString()}\n\nRecording uses time slots and is priced per song. The studio owner will review and approve your booking request.`
+                  : `Book ${bookings.length} session(s) at ${group.name}\nTotal: PHP ${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
                 { requireTerms: true, contractUrl: group?.contract_url ?? null, contractName: group?.name },
               );
               }

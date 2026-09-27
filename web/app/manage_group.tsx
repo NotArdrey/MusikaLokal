@@ -1250,7 +1250,7 @@ export default function GroupDetailsScreen() {
                         <Text
                           style={{ color: colors.textSecondary, marginBottom: 8 }}
                         >
-                          Payout: ₱{Number(app.gig?.budget || 0).toLocaleString()}
+                          Payout: PHP {Number(app.gig?.budget || 0).toLocaleString()}
                         </Text>
                         <Text style={{ color: colors.textSecondary }}>
                           Applied on:{" "}

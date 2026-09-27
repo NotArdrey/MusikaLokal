@@ -4041,7 +4041,7 @@ serve(async (req: Request) => {
                   const refundAmount = toMoneyNumber(studioCancellationRefundResult?.refund_amount);
                   if (refundAmount > 0) {
                     notificationTitle = "Booking Refunded";
-                    notificationMessage = `Your booking at ${bookingInfoWithLegacy.studio.name} has been refunded. A full refund of ₱${refundAmount.toLocaleString()} has been credited to your wallet.${reasonSuffix}`;
+                    notificationMessage = `Your booking at ${bookingInfoWithLegacy.studio.name} has been refunded. A full refund of PHP ${refundAmount.toLocaleString()} has been credited to your wallet.${reasonSuffix}`;
                     notificationType = "success";
                   } else {
                     notificationTitle = "Booking Cancelled";
@@ -5445,7 +5445,7 @@ serve(async (req: Request) => {
         user_id: booking.user_id,
         type: "success",
         title: "Balance Cleared! ✅",
-        message: `Your remaining balance of ₱${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
+        message: `Your remaining balance of PHP ${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
         read: false,
         meta: buildNotificationRouteMeta("/bookings", undefined, {
           type: "balance_cleared",
@@ -5469,7 +5469,7 @@ serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           success: true,
-          message: `Balance of ₱${balanceAmount.toLocaleString()} cleared successfully`,
+          message: `Balance of PHP ${balanceAmount.toLocaleString()} cleared successfully`,
           amount: balanceAmount,
           booking_id,
         }),

@@ -448,7 +448,7 @@ const getBookingPaidAmount = (item: any) => {
 };
 
 const formatPesoAmount = (value: unknown) =>
-  `\u20B1${toPaymentAmount(value).toLocaleString()}`;
+  `PHP ${toPaymentAmount(value).toLocaleString()}`;
 
 const getBookingDisplayPaidAmount = (item: any) => {
   const paidAmount = getBookingPaidAmount(item);
@@ -5787,7 +5787,7 @@ export default function BookingsScreen() {
       debugLog(`Balance cleared: ${clearedAmount} for booking ${bookingId}`);
       Alert.alert(
         "Balance Cleared",
-        `₱${clearedAmount?.toLocaleString()} has been marked as paid and credited to your wallet.`,
+        `PHP ${clearedAmount?.toLocaleString()} has been marked as paid and credited to your wallet.`,
       );
       setModalVisible(false);
       if (userId) fetchBookings(userId);
@@ -8742,7 +8742,7 @@ export default function BookingsScreen() {
                                   { color: "#0EA5E9" },
                                 ]}
                               >
-                                Refunded amount ₱{getBookingRefundAmount(item).toLocaleString()}
+                                Refunded amount PHP {getBookingRefundAmount(item).toLocaleString()}
                               </Text>
                             </View>
                           )}
@@ -8811,7 +8811,7 @@ export default function BookingsScreen() {
                                   { color: "#F59E0B" },
                                 ]}
                               >
-                                Downpayment paid · Balance ₱
+                                Downpayment paid · Balance PHP{" "}
                                 {item.remaining_balance?.toLocaleString()}
                               </Text>
                             </View>
@@ -9404,7 +9404,7 @@ export default function BookingsScreen() {
                                             },
                                           ]}
                                         >
-                                          Pay Remaining ₱{item.remaining_balance?.toLocaleString()}
+                                          Pay Remaining PHP {item.remaining_balance?.toLocaleString()}
                                         </Text>
                                       )}
                                     </TouchableOpacity>
@@ -9436,7 +9436,7 @@ export default function BookingsScreen() {
                                           },
                                         ]}
                                       >
-                                        Clear Balance ₱{item.remaining_balance?.toLocaleString()} (F2F)
+                                        Clear Balance PHP {item.remaining_balance?.toLocaleString()} (F2F)
                                       </Text>
                                     </TouchableOpacity>
                                   ) : null}
@@ -9597,7 +9597,7 @@ export default function BookingsScreen() {
                         : "Mark this studio booking as completed?"
                       : "Confirm efficient completion of this gig?"
                     : modalMode === "clear_balance"
-                      ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
+                      ? `Mark PHP ${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
                       : modalMode === "late_confirm"
                         ? `Send this late-arrival reason to the studio owner?\n\n${normalizeVisibleInput(cancellationReason)}`
                       : modalMode === "late"
@@ -9634,7 +9634,7 @@ export default function BookingsScreen() {
                                   ? "downpayment"
                                   : "paid amount";
 
-                              return `Cancellation Policy: Booking cancellations are non-refundable. Your ${paidLabel} of ₱${paidAmount.toLocaleString()} is non-refundable.`;
+                              return `Cancellation Policy: Booking cancellations are non-refundable. Your ${paidLabel} of PHP ${paidAmount.toLocaleString()} is non-refundable.`;
                             }
 
                             return "Cancellation Policy: Booking cancellations are non-refundable. No paid amount has been recorded for this booking yet.";
@@ -9663,7 +9663,7 @@ export default function BookingsScreen() {
                     ? "Complete & Mark Paid"
                     : "Complete"
                     : modalMode === "clear_balance"
-                        ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
+                        ? `Mark PHP ${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
                         : modalMode === "late_confirm"
                           ? "Send Report"
                         : modalMode === "late"
@@ -10158,7 +10158,7 @@ export default function BookingsScreen() {
                 { color: colors.textSecondary },
               ]}
             >
-              Total booking amount: ₱
+              Total booking amount: PHP{" "}
               {getPaymentItemTotalAmount(paymentItem).toLocaleString()}
             </Text>
             <Text style={[styles.paymentOptionHint, { color: colors.textSecondary }]}>
@@ -10194,7 +10194,7 @@ export default function BookingsScreen() {
                       { color: colors.primary },
                     ]}
                   >
-                    ₱
+                    PHP{" "}
                     {(
                       getPaymentItemTotalAmount(paymentItem)
                     ).toLocaleString()}
@@ -10240,7 +10240,7 @@ export default function BookingsScreen() {
                       { color: colors.primary },
                     ]}
                   >
-                    ₱
+                    PHP{" "}
                     {Math.round(
                       getPaymentItemTotalAmount(paymentItem) / 2,
                     ).toLocaleString()}
@@ -10253,7 +10253,7 @@ export default function BookingsScreen() {
                   { color: colors.textSecondary },
                 ]}
               >
-                Pay half today. Remaining balance: ₱
+                Pay half today. Remaining balance: PHP{" "}
                 {Math.round(
                   getPaymentItemTotalAmount(paymentItem) / 2,
                 ).toLocaleString()}{" "}
@@ -10274,7 +10274,7 @@ export default function BookingsScreen() {
                 ]}
               >
                 <Text style={styles.paymentOptionConfirmText}>
-                  Pay ₱
+                  Pay PHP{" "}
                   {(selectedPaymentType === "downpayment"
                     ? Math.round(getPaymentItemTotalAmount(paymentItem) / 2)
                     : getPaymentItemTotalAmount(paymentItem)

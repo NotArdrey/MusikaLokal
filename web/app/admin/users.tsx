@@ -2813,16 +2813,18 @@ export default function AdminUsersPage() {
                 ) : null}
 
                 {userModalMode === 'edit' && editingOriginalRole && ownershipRoleConfig[editingOriginalRole] && userFormRole !== editingOriginalRole ? (
-                  <View style={[styles.staffAccessPanel, { borderColor: '#F59E0B', backgroundColor: isDark ? '#2B2112' : '#FFFBEB' }]}>
-                    <View style={styles.formSectionHeader}>
-                      <View style={[styles.formSectionIcon, { backgroundColor: '#F59E0B20' }]}>
-                        <Ionicons name="swap-horizontal-outline" size={16} color="#D97706" />
+                  <View style={[styles.staffAccessPanel, { borderColor: isDark ? '#78350F' : '#FDE68A', backgroundColor: isDark ? '#2B2112' : '#FFFBEB', gap: 16 }]}>
+                    <View style={{ gap: 8 }}>
+                      <View style={styles.formSectionHeader}>
+                        <View style={[styles.formSectionIcon, { backgroundColor: '#F59E0B20' }]}>
+                          <Ionicons name="swap-horizontal-outline" size={16} color="#D97706" />
+                        </View>
+                        <Text style={[styles.formSectionTitle, { color: colors.text }]}>Reassign owned {ownershipRoleConfig[editingOriginalRole]?.plural}</Text>
                       </View>
-                      <Text style={[styles.formSectionTitle, { color: colors.text }]}>Reassign owned {ownershipRoleConfig[editingOriginalRole]?.plural}</Text>
+                      <Text style={[styles.staffLevelText, { color: colors.textSecondary }]}>
+                        Choose a new {formatRoleLabel(editingOriginalRole)} for each owned listing before changing this account to {formatRoleLabel(userFormRole)}.
+                      </Text>
                     </View>
-                    <Text style={[styles.staffLevelText, { color: colors.textSecondary }]}>
-                      Choose a new {formatRoleLabel(editingOriginalRole)} for each owned listing before changing this account to {formatRoleLabel(userFormRole)}.
-                    </Text>
 
                     {ownershipOptionsLoading ? (
                       <View style={styles.inlineLoader}><ActivityIndicator size="small" color={colors.primary} /></View>
@@ -2842,24 +2844,26 @@ export default function AdminUsersPage() {
                     ) : (
                       <View style={styles.staffConflictList}>
                         {ownedRoleListings.map((item) => (
-                          <View key={item.id} style={[styles.staffTargetOption, { borderColor: colors.border, backgroundColor: isDark ? '#111827' : '#FFFFFF' }]}>
-                            <Text style={[styles.staffTargetTitle, { color: colors.text }]}>{item.name}</Text>
-                            <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>New owner</Text>
-                            <View style={{ borderWidth: 1, borderRadius: 10, borderColor: colors.inputBorder, backgroundColor: colors.inputBackground, overflow: 'hidden' }}>
-                              <Picker
-                                selectedValue={ownershipReassignments[item.id] || ''}
-                                onValueChange={(value) => setOwnershipReassignments((current) => ({ ...current, [item.id]: String(value || '') }))}
-                                style={{ color: colors.text, backgroundColor: colors.inputBackground }}
-                              >
-                                <Picker.Item label="Select a replacement owner" value="" />
-                                {ownershipCandidates.map((candidate) => (
-                                  <Picker.Item
-                                    key={candidate.id}
-                                    label={`${candidate.fullName}${candidate.email ? ` (${candidate.email})` : ''}`}
-                                    value={candidate.id}
-                                  />
-                                ))}
-                              </Picker>
+                          <View key={item.id} style={{ borderWidth: 1, borderRadius: 12, padding: 14, gap: 12, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }}>
+                            <Text style={[styles.staffTargetTitle, { color: colors.text, fontSize: 14, fontFamily: 'Poppins_700Bold' }]}>{item.name}</Text>
+                            <View style={{ gap: 6 }}>
+                              <Text style={[styles.fieldLabel, { color: colors.textSecondary, fontSize: 11 }]}>New owner</Text>
+                              <View style={{ borderWidth: 1, borderRadius: 10, borderColor: isDark ? '#334155' : '#E2E8F0', backgroundColor: isDark ? '#1E293B' : '#F1F5F9', overflow: 'hidden' }}>
+                                <Picker
+                                  selectedValue={ownershipReassignments[item.id] || ''}
+                                  onValueChange={(value) => setOwnershipReassignments((current) => ({ ...current, [item.id]: String(value || '') }))}
+                                  style={{ color: colors.text, backgroundColor: 'transparent', height: 44, paddingHorizontal: 12, borderWidth: 0 }}
+                                >
+                                  <Picker.Item label="Select a replacement owner" value="" color={isDark ? '#94A3B8' : '#64748B'} />
+                                  {ownershipCandidates.map((candidate) => (
+                                    <Picker.Item
+                                      key={candidate.id}
+                                      label={`${candidate.fullName}${candidate.email ? ` (${candidate.email})` : ''}`}
+                                      value={candidate.id}
+                                    />
+                                  ))}
+                                </Picker>
+                              </View>
                             </View>
                           </View>
                         ))}

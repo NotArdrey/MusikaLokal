@@ -696,17 +696,17 @@ export default function WalletScreen() {
               <View style={styles.decoBottomLeft} />
 
               <Text style={styles.balanceLabel}>Current Balance</Text>
-              <Text style={styles.balanceValue}>₱ {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+              <Text style={styles.balanceValue}>PHP {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
 
               <View style={styles.balanceRow}>
                 <View>
                   <Text style={styles.balanceSubLabel}>Pending</Text>
-                  <Text style={styles.balanceSubValue}>₱ {pendingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  <Text style={styles.balanceSubValue}>PHP {pendingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
                 <View style={[styles.balanceDivider, { backgroundColor: 'rgba(255,255,255,0.2)' }]} />
                 <View>
                   <Text style={styles.balanceSubLabel}>Available</Text>
-                  <Text style={styles.balanceSubValue}>₱ {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  <Text style={styles.balanceSubValue}>PHP {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
               </View>
             </View>
@@ -924,7 +924,7 @@ export default function WalletScreen() {
                       </View>
                     </View>
                     <Text style={[styles.transactionAmount, { color: tx.is_credit ? '#10B981' : '#EF4444' }]}>
-                      {tx.is_credit ? '+' : '-'}₱{txAmount.toFixed(2)}
+                      {tx.is_credit ? '+' : '-'}PHP {txAmount.toFixed(2)}
                     </Text>
                   </View>
                   );
@@ -972,7 +972,7 @@ export default function WalletScreen() {
               <View style={styles.inputSection}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Amount to Withdraw</Text>
                 <View style={[styles.amountInputContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>₱</Text>
+                  <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>PHP</Text>
                   <TextInput
                     style={[styles.amountInput, { color: colors.text }]}
                     placeholder="0.00"

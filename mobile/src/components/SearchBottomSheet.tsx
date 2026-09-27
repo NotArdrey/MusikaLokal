@@ -86,9 +86,9 @@ const RATING_OPTIONS = [
 ];
 const PRICE_OPTIONS = [
   { label: "All", value: "all" },
-  { label: "₱0-5K", value: "low" },
-  { label: "₱5K-15K", value: "mid" },
-  { label: "₱15K+", value: "high" },
+  { label: "PHP 0-5K", value: "low" },
+  { label: "PHP 5K-15K", value: "mid" },
+  { label: "PHP 15K+", value: "high" },
 ];
 const SORT_OPTIONS = [
   { label: "Newest", value: "newest", icon: "time-outline" },

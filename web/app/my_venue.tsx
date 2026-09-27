@@ -584,7 +584,7 @@ export default function MyVenueScreen() {
                                                     <Text style={[styles.statusText, { color: colors.primary }]}>{gig.status || 'Active'}</Text>
                                                 </View>
                                                 <View style={styles.budgetBadge}>
-                                                    <Text style={styles.budgetText}>₱{gig.budget?.toLocaleString()}</Text>
+                                                    <Text style={styles.budgetText}>PHP {gig.budget?.toLocaleString()}</Text>
                                                 </View>
                                             </View>
 

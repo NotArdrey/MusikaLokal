@@ -350,7 +350,7 @@ const formatCurrencyInputAmount = (value?: number | null) => {
 
 const formatCurrency = (value?: number | null) => {
   const safeValue = Number(value || 0);
-  return `₱${safeValue.toLocaleString('en-PH', {
+  return `PHP ${safeValue.toLocaleString('en-PH', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -2601,7 +2601,7 @@ export default function AdminDashboardPage() {
           <View style={styles.adminWithdrawSection}>
             <Text style={[styles.adminWithdrawLabel, { color: colors.text }]}>Amount to Withdraw</Text>
             <View style={[styles.adminWithdrawInputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Text style={[styles.adminWithdrawCurrency, { color: colors.textSecondary }]}>₱</Text>
+              <Text style={[styles.adminWithdrawCurrency, { color: colors.textSecondary }]}>PHP</Text>
               <TextInput
                 testID="admin-platform-withdrawal-amount-input"
                 accessibilityLabel="admin-platform-withdrawal-amount-input"

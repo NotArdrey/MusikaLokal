@@ -184,7 +184,7 @@ export default function ProductDetailsModal({ productId, visible, onClose }: Pro
 
                   <Text style={{ color: colors.text, fontSize: 20, fontFamily: "Poppins_700Bold", marginTop: 16 }}>{product.title}</Text>
                   <Text style={{ color: colors.primary, fontSize: 22, fontFamily: "Poppins_700Bold", marginTop: 8 }}>
-                    ₱{Number(currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    PHP {Number(currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </Text>
                   {product.description ? (
                     <Text style={{ color: colors.textSecondary, fontSize: 14, lineHeight: 22, marginTop: 10 }}>{product.description}</Text>
@@ -239,7 +239,7 @@ export default function ProductDetailsModal({ productId, visible, onClose }: Pro
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Total</Text>
                     <Text style={{ color: colors.primary, fontSize: 18, fontFamily: "Poppins_700Bold" }}>
-                      ₱{Number(currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      PHP {Number(currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </Text>
                   </View>
                   <TouchableOpacity

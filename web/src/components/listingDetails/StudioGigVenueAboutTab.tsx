@@ -203,7 +203,7 @@ const StudioGigVenueAboutTab = ({
             numberOfLines={1}
             adjustsFontSizeToFit
           >
-            ₱{group.budget || "5,000"}
+            PHP {group.budget || "5,000"}
           </Text>
         </View>
         <View
@@ -306,7 +306,7 @@ const StudioGigVenueAboutTab = ({
                   numberOfLines={1}
                   adjustsFontSizeToFit
                 >
-                  {`₱${rehearsalRate}/hr`}
+                  {`PHP ${rehearsalRate}/hr`}
                 </Text>
               </View>
               <View
@@ -321,7 +321,7 @@ const StudioGigVenueAboutTab = ({
                   numberOfLines={1}
                   adjustsFontSizeToFit
                 >
-                  {`₱${recordingRate}/song`}
+                  {`PHP ${recordingRate}/song`}
                 </Text>
               </View>
             </>
@@ -347,8 +347,8 @@ const StudioGigVenueAboutTab = ({
                 adjustsFontSizeToFit
               >
                 {recordingRate && !rehearsalRate
-                  ? `₱${recordingRate}/song`
-                  : `₱${displayRate}/hr`}
+                  ? `PHP ${recordingRate}/song`
+                  : `PHP ${displayRate}/hr`}
               </Text>
             </View>
           )}

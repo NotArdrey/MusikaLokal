@@ -648,7 +648,7 @@ const StudioBookTab = ({
     if (discountType === "percentage") {
       return `${discountValue}% off`;
     }
-    return `₱${discountValue} off`;
+    return `PHP ${discountValue} off`;
   };
 
   const formatPromotionWindow = (promo: any) => {
@@ -1376,7 +1376,7 @@ const StudioBookTab = ({
                         fontFamily: "Poppins_600SemiBold",
                       }}
                     >
-                      ₱{cost.toLocaleString()}
+                      PHP {cost.toLocaleString()}
                     </Text>
                     <Text
                       style={{
@@ -2073,7 +2073,7 @@ const StudioBookTab = ({
           <View style={styles.summaryRow}>
             <Text style={{ color: colors.textSecondary }}>Rate</Text>
             <Text style={{ color: colors.text }}>
-              {isRecordingMode ? `₱${displayRate} / song` : `₱${displayRate} / hr`}
+              {isRecordingMode ? `PHP ${displayRate} / song` : `PHP ${displayRate} / hr`}
             </Text>
           </View>
           <View style={styles.summaryRow}>
@@ -2097,7 +2097,7 @@ const StudioBookTab = ({
                 fontSize: 18,
               }}
             >
-              ₱{totalBookingsCost.toLocaleString()}
+              PHP {totalBookingsCost.toLocaleString()}
             </Text>
           </View>
         </View>
@@ -2527,8 +2527,8 @@ const StudioBookTab = ({
                 },
                 hasOnlyRecordingBookings ? "Confirm Recording Booking" : "Confirm Session Booking",
                 hasOnlyRecordingBookings
-                  ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nRecording uses time slots and is priced per song. The studio owner will review and approve your booking request.`
-                  : `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
+                  ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: PHP ${totalBookingsCost.toLocaleString()}\n\nRecording uses time slots and is priced per song. The studio owner will review and approve your booking request.`
+                  : `Book ${bookings.length} session(s) at ${group.name}\nTotal: PHP ${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
                 { requireTerms: true, contractUrl: group?.contract_url ?? null, contractName: group?.name },
               );
               }

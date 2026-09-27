@@ -1091,6 +1091,7 @@ export default function ProfileScreen() {
     refresh?: string;
     returnToHome?: string;
     returnListingId?: string;
+    returnToProfileId?: string;
   }>();
   const normalizedParamUserId = useMemo(() => {
     return Array.isArray(params.userId) ? params.userId[0] : params.userId;
@@ -1447,7 +1448,17 @@ export default function ProfileScreen() {
 
       if (favoritesError) throw favoritesError;
 
-      const favorites = favoritesData || [];
+      const seenFavoriteTargets = new Set<string>();
+      const favorites = (favoritesData || []).filter((entry: any) => {
+        const targetField = ["group_id", "profile_id", "studio_id", "gig_id", "production_team_id"]
+          .find((field) => typeof entry?.[field] === "string" && entry[field].length > 0);
+        if (!targetField) return false;
+
+        const targetKey = `${targetField}:${entry[targetField]}`;
+        if (seenFavoriteTargets.has(targetKey)) return false;
+        seenFavoriteTargets.add(targetKey);
+        return true;
+      });
       const groupIds = favorites
         .map((entry: any) => entry.group_id)
         .filter((value: any): value is string => typeof value === "string");
@@ -2410,6 +2421,17 @@ export default function ProfileScreen() {
   }, []);
 
   const handleHeaderBack = useCallback(() => {
+    const returnToProfileId = Array.isArray(params.returnToProfileId)
+      ? params.returnToProfileId[0]
+      : params.returnToProfileId;
+    if (returnToProfileId) {
+      router.replace({
+        pathname: "/profile",
+        params: { userId: returnToProfileId },
+      });
+      return;
+    }
+
     const shouldReturnHome =
       (Array.isArray(params.returnToHome)
         ? params.returnToHome[0]
@@ -2428,7 +2450,7 @@ export default function ProfileScreen() {
     }
 
     navigateBackToPreviousOrHome();
-  }, [navigateBackToPreviousOrHome, params.returnListingId, params.returnToHome]);
+  }, [navigateBackToPreviousOrHome, params.returnListingId, params.returnToHome, params.returnToProfileId]);
 
   const openBookmarkedListing = (item: any) => {
     const itemId = item?.id;
@@ -2438,7 +2460,10 @@ export default function ProfileScreen() {
     if (listingType === "profile") {
       router.push({
         pathname: "/profile",
-        params: { userId: itemId },
+        params: {
+          userId: itemId,
+          returnToProfileId: viewedProfileId || currentUserId || undefined,
+        },
       });
       return;
     }
@@ -2453,7 +2478,10 @@ export default function ProfileScreen() {
 
     router.push({
       pathname: "/feed",
-      params: { reopenListingId: itemId },
+      params: {
+        reopenListingId: itemId,
+        returnToProfileId: viewedProfileId || currentUserId || undefined,
+      },
     });
   };
 
@@ -2902,7 +2930,10 @@ export default function ProfileScreen() {
 
     router.push({
       pathname: "/profile",
-      params: { userId: item.id },
+      params: {
+        userId: item.id,
+        returnToProfileId: viewedProfileId || currentUserId || undefined,
+      },
     });
   };
 

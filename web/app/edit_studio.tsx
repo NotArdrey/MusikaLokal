@@ -4737,7 +4737,7 @@ export default function EditStudioScreen() {
                       marginRight: 4,
                     }}
                   >
-                    ₱
+                    PHP 
                   </Text>
                   <TextInput
                     value={rehearsalRate}
@@ -4809,7 +4809,7 @@ export default function EditStudioScreen() {
                       marginRight: 4,
                     }}
                   >
-                    ₱
+                    PHP 
                   </Text>
                   <TextInput
                     value={recordingRate}
@@ -5031,7 +5031,7 @@ export default function EditStudioScreen() {
                       </Text>
                     </View>
                     <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
-                      {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
+                      {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `PHP ${promo.discount_value}/hr off`}
                       {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
                     </Text>
                     {(promo.criteria || promo.minimum_booking_hours || promo.minimum_spend) && (
@@ -5039,16 +5039,16 @@ export default function EditStudioScreen() {
                         {[
                           promo.criteria ? `How to get promo: ${promo.criteria}` : null,
                           promo.minimum_booking_hours ? `Min ${promo.minimum_booking_hours} hr(s)` : null,
-                          promo.minimum_spend ? `Min spend ₱${promo.minimum_spend}` : null,
+                          promo.minimum_spend ? `Min spend PHP ${promo.minimum_spend}` : null,
                         ]
                           .filter(Boolean)
-                          .join(" � ")}
+                          .join(" | ")}
                       </Text>
                     )}
                     <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                       {promo.is_permanent
                         ? "Always available"
-                        : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} � ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
+                        : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} | ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
                     </Text>
                   </View>
                   <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
@@ -5241,7 +5241,7 @@ export default function EditStudioScreen() {
                           color: promotionForm.discount_type === dt ? colors.primary : colors.textSecondary,
                         }}
                       >
-                        {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (₱)"}
+                        {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (PHP)"}
                       </Text>
                     </TouchableOpacity>
                   ))}
@@ -5264,7 +5264,7 @@ export default function EditStudioScreen() {
                   }}
                 >
                   {promotionForm.discount_type === "fixed_amount" && (
-                    <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>₱</Text>
+                    <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>PHP</Text>
                   )}
                   <TextInput
                     value={promotionForm.discount_value}

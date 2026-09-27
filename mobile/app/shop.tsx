@@ -82,7 +82,7 @@ export default function ShopScreen() {
 
   const formatPrice = (price: number | null) => {
     if (!price) return "Free";
-    return `₱${price.toLocaleString()}`;
+    return `PHP ${price.toLocaleString()}`;
   };
 
   const renderProductSkeletonGrid = () => (

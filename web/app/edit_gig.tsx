@@ -1654,7 +1654,7 @@ export default function EditGigScreen() {
               </View>
             </TouchableOpacity>
           </View>
-          {renderInput("Payout (₱)", cost, setCost, "e.g. 5000", false, true)}
+          {renderInput("Payout (PHP)", cost, setCost, "e.g. 5000", false, true)}
 
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>

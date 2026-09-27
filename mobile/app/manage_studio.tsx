@@ -1955,7 +1955,7 @@ export default function StudioDetailsScreen() {
                                   ["confirmed", "checked_in"].includes(
                                     normalizeBookingStatus(booking.status),
                                   )
-                                  ? `Active • ${statusLabel}`
+                                  ? `Active - ${statusLabel}`
                                   : statusLabel;
                               const slots = getBookingSlots(booking);
                               const notes =

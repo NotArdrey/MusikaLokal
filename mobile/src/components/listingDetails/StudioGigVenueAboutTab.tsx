@@ -279,7 +279,7 @@ const StudioGigVenueAboutTab = ({
             numberOfLines={1}
             adjustsFontSizeToFit
           >
-            ₱{group.budget || "5,000"}
+            PHP {group.budget || "5,000"}
           </Text>
         </View>
         <View
@@ -382,7 +382,7 @@ const StudioGigVenueAboutTab = ({
                   numberOfLines={1}
                   adjustsFontSizeToFit
                 >
-                  {`₱${rehearsalRate}/hr`}
+                  {`PHP ${rehearsalRate}/hr`}
                 </Text>
               </View>
               <View
@@ -397,7 +397,7 @@ const StudioGigVenueAboutTab = ({
                   numberOfLines={1}
                   adjustsFontSizeToFit
                 >
-                  {`₱${recordingRate}/song`}
+                  {`PHP ${recordingRate}/song`}
                 </Text>
               </View>
             </>
@@ -423,8 +423,8 @@ const StudioGigVenueAboutTab = ({
                 adjustsFontSizeToFit
               >
                 {recordingRate && !rehearsalRate
-                  ? `₱${recordingRate}/song`
-                  : `₱${displayRate}/hr`}
+                  ? `PHP ${recordingRate}/song`
+                  : `PHP ${displayRate}/hr`}
               </Text>
             </View>
           )}
@@ -586,7 +586,7 @@ const StudioGigVenueAboutTab = ({
             );
           }
           if (metadata.minimumSpend !== null) {
-            conditionLabels.push(`Min spend ₱${metadata.minimumSpend.toLocaleString()}`);
+            conditionLabels.push(`Min spend PHP ${metadata.minimumSpend.toLocaleString()}`);
           }
 
           return (
@@ -634,7 +634,7 @@ const StudioGigVenueAboutTab = ({
               >
                 {promo.discount_type === "percentage"
                   ? `${promo.discount_value}% off`
-                  : `₱${promo.discount_value}/hr off`}
+                  : `PHP ${promo.discount_value}/hr off`}
                 {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
               </Text>
               {metadata.description ? (

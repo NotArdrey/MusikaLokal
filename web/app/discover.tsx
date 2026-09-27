@@ -373,15 +373,15 @@ export default function DiscoverScreen() {
 		}
 
 		if (hourly > 0) {
-			return `₱${hourly.toLocaleString()} / hr`;
+			return `PHP ${hourly.toLocaleString()} / hr`;
 		}
 
 		if (budget > 0) {
-			return `₱${budget.toLocaleString()}${item.type === "Gig" ? " Talent Fee" : ""}`;
+			return `PHP ${budget.toLocaleString()}${item.type === "Gig" ? " Talent Fee" : ""}`;
 		}
 
 		if (rate > 0) {
-			return `₱${rate.toLocaleString()}`;
+			return `PHP ${rate.toLocaleString()}`;
 		}
 
 		return "";
@@ -569,9 +569,9 @@ export default function DiscoverScreen() {
 								{(
 									[
 										["all", "Any"],
-										["low", "Under ₱1k"],
-										["mid", "₱1k–3k"],
-										["high", "Over ₱3k"],
+										["low", "Under PHP 1k"],
+										["mid", "PHP 1k–3k"],
+										["high", "Over PHP 3k"],
 									] as const
 								).map(([val, label]) => {
 									const active = priceRange === val;

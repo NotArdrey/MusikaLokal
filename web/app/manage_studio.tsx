@@ -1725,7 +1725,7 @@ export default function StudioDetailsScreen() {
                                 { color: colors.primary },
                               ]}
                             >
-                              ₱
+                              PHP{" "}
                               {(
                                 booking.total_price ||
                                 booking.final_price ||

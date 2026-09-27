@@ -197,7 +197,7 @@ const sanitizePhpBudgetAmount = (value: unknown) => {
 
 const formatPhpBudgetAmount = (value: unknown) => {
   const amount = sanitizePhpBudgetAmount(value);
-  return amount ? `\u20b1${amount.toLocaleString("en-US")}` : "";
+  return amount ? `PHP ${amount.toLocaleString("en-US")}` : "";
 };
 
 const formatStartingBudgetForPrompt = (

@@ -727,7 +727,7 @@ export default function MyVenueScreen() {
                                         {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` · ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''}
                                     </Text>
                                     {!!gig.location && <Text style={[styles.cardLocation, { color: colors.textSecondary }]}>{gig.location}</Text>}
-                                    {gig.budget != null && <Text style={[styles.cardBudget, { color: colors.text }]}>₱{gig.budget.toLocaleString()} talent fee</Text>}
+                                    {gig.budget != null && <Text style={[styles.cardBudget, { color: colors.text }]}>PHP {gig.budget.toLocaleString()} talent fee</Text>}
 
                                     <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
                                         {String(gig.description || '').replace(/^\[role_accurate_demo_seed_v\d+\]\s*/i, '')}

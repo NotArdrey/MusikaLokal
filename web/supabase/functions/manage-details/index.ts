@@ -404,19 +404,22 @@ serve(async (req: Request) => {
 
             const favoriteColumn = getFavoriteTargetColumn(normalizedType)
 
-            // Check if exists
-            const { data: existing, error: existingError } = await supabaseClient
+            // Read all matches so existing duplicate favorites can still be removed.
+            const { data: existingRows, error: existingError } = await supabaseClient
                 .from('favorites')
                 .select('id')
                 .eq('user_id', userId)
                 .eq(favoriteColumn, id)
-                .maybeSingle()
 
             if (existingError) throw existingError
 
-            if (existing) {
-                // Remove
-                const { error: deleteError } = await supabaseClient.from('favorites').delete().eq('id', existing.id)
+            if (existingRows?.length) {
+                // Remove every matching row so older duplicate data cannot keep the item bookmarked.
+                const { error: deleteError } = await supabaseClient
+                    .from('favorites')
+                    .delete()
+                    .eq('user_id', userId)
+                    .eq(favoriteColumn, id)
                 if (deleteError) throw deleteError
 
                 const favoritesCount = await getFavoritesCount(supabaseClient, normalizedType, id)
@@ -430,7 +433,19 @@ serve(async (req: Request) => {
                 payload[favoriteColumn] = id
 
                 const { error: insertError } = await supabaseClient.from('favorites').insert(payload)
-                if (insertError) throw insertError
+                if (insertError) {
+                    if (insertError.code !== '23505') throw insertError
+
+                    // A concurrent request may have inserted this favorite after the read above.
+                    const { data: concurrentRows, error: concurrentReadError } = await supabaseClient
+                        .from('favorites')
+                        .select('id')
+                        .eq('user_id', userId)
+                        .eq(favoriteColumn, id)
+                        .limit(1)
+                    if (concurrentReadError) throw concurrentReadError
+                    if (!concurrentRows?.length) throw insertError
+                }
 
                 const favoritesCount = await getFavoritesCount(supabaseClient, normalizedType, id)
                 return new Response(

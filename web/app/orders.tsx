@@ -126,7 +126,7 @@ export default function OrdersScreen() {
 
   const formatTotal = (order: any) => {
     const amount = Number(order?.total_amount ?? order?.total ?? 0);
-    return `₱${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+    return `PHP ${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
   };
 
   const renderOrder = (item: any, isSelling = false) => (

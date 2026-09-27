@@ -1608,7 +1608,7 @@ export default function AddGigScreen() {
 
 
               {renderInput(
-                "Payout (₱)",
+                "Payout (PHP)",
                 cost,
                 setCost,
                 "e.g. 5000",
@@ -3022,7 +3022,7 @@ export default function AddGigScreen() {
                       marginTop: 4,
                     }}
                   >
-                    Payout: ₱{cost}
+                    Payout: PHP {cost}
                   </Text>
                 </View>
 

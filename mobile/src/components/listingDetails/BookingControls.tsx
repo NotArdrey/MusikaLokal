@@ -560,7 +560,7 @@ const BookingControls = ({
                         </View>
                         <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
                           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular" }}>Rate</Text>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>₱{displayRate}/song</Text>
+                          <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>PHP {displayRate}/song</Text>
                         </View>
                         <Text
                           style={{

@@ -1199,13 +1199,13 @@ const BookingDetailsSheet = forwardRef<
                         ]}
                       >
                         {isRecordingSession
-                          ? `Base Rate (${effectiveSongCount || 1} song${(effectiveSongCount || 1) > 1 ? "s" : ""} × ₱${baseRateValue.toLocaleString()})`
-                          : `Base Rate (${effectiveDurationHours} hrs × ₱${baseRateValue.toLocaleString()})`}
+                          ? `Base Rate (${effectiveSongCount || 1} song${(effectiveSongCount || 1) > 1 ? "s" : ""} × PHP ${baseRateValue.toLocaleString()})`
+                          : `Base Rate (${effectiveDurationHours} hrs × PHP ${baseRateValue.toLocaleString()})`}
                       </Text>
                       <Text
                         style={[styles.pricingValue, { color: colors.text }]}
                       >
-                        ₱
+                        PHP{" "}
                         {(isRecordingSession
                           ? baseRateValue * (effectiveSongCount || 1)
                           : baseRateValue * effectiveDurationHours
@@ -1364,7 +1364,7 @@ const BookingDetailsSheet = forwardRef<
                       <Text
                         style={[styles.pricingValue, { color: colors.text }]}
                       >
-                        ₱{normalizedTotalCost.toLocaleString()}
+                        PHP {normalizedTotalCost.toLocaleString()}
                       </Text>
                     </View>
                   )}
@@ -1380,7 +1380,7 @@ const BookingDetailsSheet = forwardRef<
                     <Text
                       style={[styles.totalValue, { color: colors.primary }]}
                     >
-                      ₱{normalizedTotalCost.toLocaleString()}
+                      PHP {normalizedTotalCost.toLocaleString()}
                     </Text>
                   </View>
                 </View>

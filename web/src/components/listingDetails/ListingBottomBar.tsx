@@ -27,7 +27,7 @@ const ListingBottomBar = ({
   >
     <View style={styles.priceContainer}>
       <Text style={[styles.priceText, { color: colors.text }]}>
-        {`₱${displayRate} `}
+        {`PHP ${displayRate} `}
         <Text
           style={{
             fontSize: 14,

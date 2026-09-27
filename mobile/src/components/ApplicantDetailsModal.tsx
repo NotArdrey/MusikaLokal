@@ -618,7 +618,7 @@ export default function ApplicantDetailsModal({
                 <DetailRow icon="people-circle-outline" label="Group type" value={titleCase(group.group_type)} colors={colors} />
               ) : null}
               {group?.rate !== null && group?.rate !== undefined ? (
-                <DetailRow icon="cash-outline" label="Listed rate" value={`₱${Number(group.rate).toLocaleString()}`} colors={colors} />
+                <DetailRow icon="cash-outline" label="Listed rate" value={`PHP ${Number(group.rate).toLocaleString()}`} colors={colors} />
               ) : null}
               <Text style={[styles.label, { color: colors.text }]}>About</Text>
               <Text style={[styles.body, { color: colors.textSecondary }]}>

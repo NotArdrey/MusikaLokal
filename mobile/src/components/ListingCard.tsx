@@ -71,7 +71,7 @@ type PriceDisplayItem = {
   label?: string;
 };
 
-const PESO_SIGN = "\u20B1";
+const LEGACY_PESO_SIGN = "\u20B1";
 
 const getPositiveInteger = (value: unknown) => {
   if (value === null || value === undefined || value === "") return 0;
@@ -90,7 +90,7 @@ const buildPriceItem = (
 
   return {
     key,
-    amount: `${PESO_SIGN}${amount.toLocaleString()}`,
+    amount: `PHP ${amount.toLocaleString()}`,
     unit,
     label,
   };
@@ -388,30 +388,30 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
     if (!nextIsGroup && item.type === "Studio") {
       if (hasRehearsalRate && hasRecordingRate) {
-        nextPriceLabel = `₱${rehearsalRateValue.toLocaleString()} / hr (Rehearsal)`;
-        nextSecondaryPriceLabel = `₱${recordingRateValue.toLocaleString()} / song (Recording)`;
+        nextPriceLabel = `PHP ${rehearsalRateValue.toLocaleString()} / hr (Rehearsal)`;
+        nextSecondaryPriceLabel = `PHP ${recordingRateValue.toLocaleString()} / song (Recording)`;
       } else if (hasRehearsalRate) {
-        nextPriceLabel = `₱${rehearsalRateValue.toLocaleString()} / hr`;
+        nextPriceLabel = `PHP ${rehearsalRateValue.toLocaleString()} / hr`;
       } else if (hasRecordingRate) {
-        nextPriceLabel = `₱${recordingRateValue.toLocaleString()} / song`;
+        nextPriceLabel = `PHP ${recordingRateValue.toLocaleString()} / song`;
       } else if (item.hourly_rate && item.hourly_rate !== "0") {
-        nextPriceLabel = `₱${parseInt(item.hourly_rate).toLocaleString()} / hr`;
+        nextPriceLabel = `PHP ${parseInt(item.hourly_rate).toLocaleString()} / hr`;
       } else {
         nextPriceLabel = "";
       }
     } else if (item.hourly_rate && item.hourly_rate !== "0") {
-      nextPriceLabel = `₱${parseInt(item.hourly_rate).toLocaleString()} / hr`;
+      nextPriceLabel = `PHP ${parseInt(item.hourly_rate).toLocaleString()} / hr`;
     } else if (item.rehearsal_rate && item.rehearsal_rate !== "0") {
-      nextPriceLabel = `₱${parseInt(item.rehearsal_rate).toLocaleString()} / hr`;
+      nextPriceLabel = `PHP ${parseInt(item.rehearsal_rate).toLocaleString()} / hr`;
     } else if (item.recording_rate && item.recording_rate !== "0") {
-      nextPriceLabel = `₱${parseInt(item.recording_rate).toLocaleString()} / song`;
+      nextPriceLabel = `PHP ${parseInt(item.recording_rate).toLocaleString()} / song`;
     } else if (item.budget && item.budget !== "0") {
-      nextPriceLabel = `₱${parseInt(item.budget).toLocaleString()}`;
+      nextPriceLabel = `PHP ${parseInt(item.budget).toLocaleString()}`;
     } else if (item.rate && item.rate !== "0") {
       if (typeof item.rate === "string" && item.rate.includes("/")) {
-        nextPriceLabel = `₱${item.rate}`;
+        nextPriceLabel = `PHP ${item.rate}`;
       } else {
-        nextPriceLabel = `₱${parseInt(item.rate).toLocaleString()}`;
+        nextPriceLabel = `PHP ${parseInt(item.rate).toLocaleString()}`;
       }
     } else {
       nextPriceLabel = "";
@@ -452,9 +452,12 @@ const ListingCard: React.FC<ListingCardProps> = ({
         nextPriceItems.push(budgetPrice);
       } else if (typeof item.rate === "string" && item.rate.trim() && item.rate !== "0") {
         const rawRate = item.rate.trim();
+        const normalizedRate = rawRate.startsWith(LEGACY_PESO_SIGN)
+          ? rawRate.slice(LEGACY_PESO_SIGN.length).trim()
+          : rawRate.replace(/^PHP\s*/i, "").trim();
         nextPriceItems.push({
           key: "rate",
-          amount: rawRate.startsWith(PESO_SIGN) ? rawRate : `${PESO_SIGN}${rawRate}`,
+          amount: `PHP ${normalizedRate}`,
           label: "Rate",
         });
       } else if (numericRatePrice) {

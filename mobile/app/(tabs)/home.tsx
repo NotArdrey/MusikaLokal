@@ -1904,28 +1904,28 @@ export default function HomeScreen() {
         const hasRecordingRate = recordingRate > 0 && !isRehearsalOnlyStudio;
 
         if (hasRehearsalRate && hasRecordingRate) {
-          return `₱${rehearsalRate.toLocaleString()}/hr | ₱${recordingRate.toLocaleString()}/song`;
+          return `PHP ${rehearsalRate.toLocaleString()}/hr | PHP ${recordingRate.toLocaleString()}/song`;
         }
         if (hasRecordingRate) {
-          return `₱${recordingRate.toLocaleString()}/song`;
+          return `PHP ${recordingRate.toLocaleString()}/song`;
         }
         if (hasRehearsalRate) {
-          return `₱${rehearsalRate.toLocaleString()}/hr`;
+          return `PHP ${rehearsalRate.toLocaleString()}/hr`;
         }
         if (item.hourly_rate && item.hourly_rate !== "0") {
-          return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+          return `PHP ${parseInt(item.hourly_rate).toLocaleString()}/hr`;
         }
         return null;
       }
 
       if (item.hourly_rate && item.hourly_rate !== "0") {
-        return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+        return `PHP ${parseInt(item.hourly_rate).toLocaleString()}/hr`;
       }
       if (item.budget && item.budget !== "0") {
-        return `₱${parseInt(item.budget).toLocaleString()}${item.type === "Gig" ? " Talent Fee" : ""}`;
+        return `PHP ${parseInt(item.budget).toLocaleString()}${item.type === "Gig" ? " Talent Fee" : ""}`;
       }
       if (item.rate && item.rate !== "0") {
-        return `₱${parseInt(item.rate).toLocaleString()}`;
+        return `PHP ${parseInt(item.rate).toLocaleString()}`;
       }
       return null;
     };
@@ -2191,31 +2191,31 @@ export default function HomeScreen() {
 
         // Both rates available
         if (hasRehearsalRate && hasRecordingRate) {
-          return `₱${rehearsalRate.toLocaleString()}/hr | ₱${recordingRate.toLocaleString()}/song`;
+          return `PHP ${rehearsalRate.toLocaleString()}/hr | PHP ${recordingRate.toLocaleString()}/song`;
         }
         // Recording only
         if (hasRecordingRate) {
-          return `₱${recordingRate.toLocaleString()}/song`;
+          return `PHP ${recordingRate.toLocaleString()}/song`;
         }
         // Rehearsal only
         if (hasRehearsalRate) {
-          return `₱${rehearsalRate.toLocaleString()}/hr`;
+          return `PHP ${rehearsalRate.toLocaleString()}/hr`;
         }
         // Fallback to hourly_rate
         if (item.hourly_rate && item.hourly_rate !== "0") {
-          return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+          return `PHP ${parseInt(item.hourly_rate).toLocaleString()}/hr`;
         }
         return null;
       }
 
       if (item.hourly_rate && item.hourly_rate !== "0") {
-        return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+        return `PHP ${parseInt(item.hourly_rate).toLocaleString()}/hr`;
       }
       if (item.budget && item.budget !== "0") {
-        return `₱${parseInt(item.budget).toLocaleString()}${item.type === "Gig" ? " Talent Fee" : ""}`;
+        return `PHP ${parseInt(item.budget).toLocaleString()}${item.type === "Gig" ? " Talent Fee" : ""}`;
       }
       if (item.rate && item.rate !== "0") {
-        return `₱${parseInt(item.rate).toLocaleString()}`;
+        return `PHP ${parseInt(item.rate).toLocaleString()}`;
       }
       return null;
     };
@@ -2546,7 +2546,7 @@ export default function HomeScreen() {
                   <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
                     {uniqueItems[0].hourly_rate && (
                       <Text style={styles.featuredPrice}>
-                        ₱{parseInt(uniqueItems[0].hourly_rate).toLocaleString()}
+                        PHP {parseInt(uniqueItems[0].hourly_rate).toLocaleString()}
                         /hr
                       </Text>
                     )}
@@ -2722,13 +2722,13 @@ export default function HomeScreen() {
 
                       let priceText = null;
                       if (hasRehearsalRate && hasRecordingRate) {
-                        priceText = `₱${rehearsalRate.toLocaleString()}/hr | ₱${recordingRate.toLocaleString()}/song`;
+                        priceText = `PHP ${rehearsalRate.toLocaleString()}/hr | PHP ${recordingRate.toLocaleString()}/song`;
                       } else if (hasRecordingRate) {
-                        priceText = `₱${recordingRate.toLocaleString()}/song`;
+                        priceText = `PHP ${recordingRate.toLocaleString()}/song`;
                       } else if (hasRehearsalRate) {
-                        priceText = `₱${rehearsalRate.toLocaleString()}/hr`;
+                        priceText = `PHP ${rehearsalRate.toLocaleString()}/hr`;
                       } else if (item.hourly_rate && item.hourly_rate !== "0") {
-                        priceText = `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+                        priceText = `PHP ${parseInt(item.hourly_rate).toLocaleString()}/hr`;
                       }
 
                       return priceText ? (
@@ -2753,10 +2753,10 @@ export default function HomeScreen() {
                           ]}
                         >
                           {item.hourly_rate
-                            ? `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`
+                            ? `PHP ${parseInt(item.hourly_rate).toLocaleString()}/hr`
                             : item.budget
-                              ? `₱${parseInt(item.budget).toLocaleString()}${item.type === "Gig" ? " Talent Fee" : ""}`
-                              : `₱${parseInt(item.rate || "0").toLocaleString()}`}
+                              ? `PHP ${parseInt(item.budget).toLocaleString()}${item.type === "Gig" ? " Talent Fee" : ""}`
+                              : `PHP ${parseInt(item.rate || "0").toLocaleString()}`}
                         </Text>
                       );
                     }

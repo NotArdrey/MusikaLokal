@@ -217,7 +217,7 @@ const TALENT_CARD_LIMIT = 32;
 const FEED_FOCUS_REFRESH_COOLDOWN_MS = 15_000;
 const FEED_BACKGROUND_PREFETCH_DELAY_MS = 1_000;
 const FEED_BACKGROUND_PREFETCH_GAP_MS = 650;
-const PESO_SIGN = "\u20B1";
+const LEGACY_PESO_SIGN = "\u20B1";
 const POST_MEDIA_BUCKET = "post-media";
 const MAX_POST_MEDIA_ITEMS = 10;
 const MAX_POST_MEDIA_BYTES = 50 * 1024 * 1024;
@@ -1421,7 +1421,7 @@ const shouldHideFeedPostTypeLabel = (value: unknown) => {
 };
 
 const formatFeedPrice = (amount: number, unit = "", label = "") => {
-  const formatted = `${PESO_SIGN}${amount.toLocaleString()}`;
+  const formatted = `PHP ${amount.toLocaleString()}`;
   return `${formatted}${unit}${label ? ` ${label}` : ""}`;
 };
 
@@ -1566,7 +1566,10 @@ const getFeedPriceChips = (item: any) => {
     chips.push(formatFeedPrice(numericRate));
   } else if (typeof item?.rate === "string" && item.rate.trim() && item.rate !== "0") {
     const rawRate = item.rate.trim();
-    chips.push(rawRate.startsWith(PESO_SIGN) ? rawRate : `${PESO_SIGN}${rawRate}`);
+    const normalizedRate = rawRate.startsWith(LEGACY_PESO_SIGN)
+      ? rawRate.slice(LEGACY_PESO_SIGN.length).trim()
+      : rawRate.replace(/^PHP\s*/i, "").trim();
+    chips.push(`PHP ${normalizedRate}`);
   }
 
   const productPrice = getPositiveInteger(item?.linked_product?.price || item?.linked_product?.amount);
@@ -3537,7 +3540,7 @@ export default function FeedScreen() {
   const { session, userId, isGuest, loading: authLoading, roleResolved, userRole } = useAuth();
   const resolvedUserId = session?.user?.id ?? userId ?? null;
   const canUseSocialActions = Boolean(session?.access_token && resolvedUserId && !isGuest);
-  const params = useLocalSearchParams<{ reopenListingId?: string }>();
+  const params = useLocalSearchParams<{ reopenListingId?: string; returnToProfileId?: string }>();
   const { clearBottomOverlays } = useBottomOverlayActions();
   const { activeStation } = useRadioPlayerPresence();
   const insets = useSafeAreaInsets();
@@ -3630,6 +3633,7 @@ export default function FeedScreen() {
   const [selectedListingPreview, setSelectedListingPreview] = useState<any | null>(null);
   const [selectedProductionTeamId, setSelectedProductionTeamId] = useState<string | null>(null);
   const [pendingReopenListingId, setPendingReopenListingId] = useState<string | null>(null);
+  const pendingReturnToProfileIdRef = React.useRef<string | null>(null);
   const markFeedFetching = useCallback((feedTab: FeedTab, isFetching: boolean) => {
     setFetchingByTab((current) => (
       current[feedTab] === isFetching
@@ -4055,6 +4059,14 @@ export default function FeedScreen() {
     setSelectedListingId(null);
     setSelectedListingPreview(null);
     setPendingReopenListingId(null);
+    const returnToProfileId = pendingReturnToProfileIdRef.current;
+    pendingReturnToProfileIdRef.current = null;
+    if (returnToProfileId) {
+      router.replace({
+        pathname: "/profile",
+        params: { userId: returnToProfileId },
+      });
+    }
   }, [clearBottomOverlays]);
 
   const handleProductionTeamSheetDismiss = useCallback(() => {
@@ -4101,18 +4113,22 @@ export default function FeedScreen() {
     const reopenListingId = Array.isArray(params.reopenListingId)
       ? params.reopenListingId[0]
       : params.reopenListingId;
+    const returnToProfileId = Array.isArray(params.returnToProfileId)
+      ? params.returnToProfileId[0]
+      : params.returnToProfileId;
 
     if (!reopenListingId || reopenListingId.length === 0) return;
 
+    pendingReturnToProfileIdRef.current = returnToProfileId || null;
     setSelectedListingId(reopenListingId);
     setPendingReopenListingId(reopenListingId);
 
     try {
-      router.setParams({ reopenListingId: undefined as any });
+      router.setParams({ reopenListingId: undefined as any, returnToProfileId: undefined as any });
     } catch {
       // Older router states may not accept clearing params here; the listing still opens.
     }
-  }, [params.reopenListingId]);
+  }, [params.reopenListingId, params.returnToProfileId]);
 
   const fetchTalentCardsFromFeedEdge = useCallback(async (): Promise<FeedAiCardsResult> => {
     const { data, error } = await supabase.functions.invoke("manage-social-feed", {
