@@ -1684,6 +1684,9 @@ const ListingDetailsSheet = forwardRef<
         .select("id, rejected_at, created_at")
         .eq("gig_id", listingId)
         .eq("status", "rejected")
+        .or(
+          "system_status_reason.is.null,system_status_reason.neq.system_requirements_changed",
+        )
         .order("rejected_at", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false })
         .limit(1);
@@ -1694,8 +1697,15 @@ const ListingDetailsSheet = forwardRef<
           return;
         }
         query = query.eq("production_team_id", selectedProductionTeamId);
+      } else if (selectedGroupId) {
+        query = query
+          .eq("group_id", selectedGroupId)
+          .is("production_team_id", null);
       } else {
-        query = query.eq("applicant_id", userId);
+        query = query
+          .eq("applicant_id", userId)
+          .is("group_id", null)
+          .is("production_team_id", null);
       }
 
       const { data, error } = await query.maybeSingle();
@@ -1728,6 +1738,7 @@ const ListingDetailsSheet = forwardRef<
     group,
     listingId,
     resetReapplicationCooldown,
+    selectedGroupId,
     selectedProductionTeamId,
     userId,
     userRole,
@@ -4886,7 +4897,7 @@ const ListingDetailsSheet = forwardRef<
                   { color: colors.textSecondary },
                 ]}
               >
-                Total booking amount: ?{paymentModalTotalAmount.toLocaleString()}
+                Total booking amount: ₱{paymentModalTotalAmount.toLocaleString()}
               </Text>
               <Text style={[styles.paymentOptionHint, { color: colors.textSecondary }]}>
                 Full payment settles the booking. Downpayment leaves the other half as Balance Due.
@@ -4930,7 +4941,7 @@ const ListingDetailsSheet = forwardRef<
                         { color: colors.primary },
                       ]}
                     >
-                      ?{paymentModalTotalAmount.toLocaleString()}
+                      ₱{paymentModalTotalAmount.toLocaleString()}
                     </Text>
                   </View>
                 </View>
@@ -4982,7 +4993,7 @@ const ListingDetailsSheet = forwardRef<
                         { color: colors.primary },
                       ]}
                     >
-                      ?
+                      ₱
                       {paymentModalHalfAmount.toLocaleString()}
                     </Text>
                   </View>
@@ -4993,7 +5004,7 @@ const ListingDetailsSheet = forwardRef<
                     { color: colors.textSecondary },
                   ]}
                 >
-                  Pay half today. Remaining balance: ?
+                  Pay half today. Remaining balance: ₱
                   {paymentModalHalfAmount.toLocaleString()} shown in Pending.
                 </Text>
               </TouchableOpacity>

@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Dimensions,
   ScrollView,
@@ -27,6 +27,13 @@ const moderateScale = (size: number, factor = 0.3) => {
 };
 
 export default function CreateStationScreen() {
+  const formScrollViewRef = useRef<ScrollView>(null);
+  useFocusEffect(
+    useCallback(() => {
+      formScrollViewRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+    }, []),
+  );
+
   const { colors } = useTheme();
   const { session, userRole } = useAuth();
   const { edit_id, profile_id } = useLocalSearchParams();
@@ -152,7 +159,7 @@ export default function CreateStationScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header title={isEditing ? "Edit Station" : "Create Station"} onBackPress={() => router.back()} />
 
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
+      <ScrollView ref={formScrollViewRef} style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
         <View style={styles.heroSection}>
           <View style={[styles.heroIcon, { backgroundColor: colors.primary + "15" }]}>
             <Ionicons name="radio" size={40} color={colors.primary} />

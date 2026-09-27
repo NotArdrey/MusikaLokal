@@ -30,9 +30,11 @@ const DOCUMENT_EXTENSIONS = [
   "xlsx",
   "csv",
   "txt",
+  "md",
   "rtf",
+  "odt",
 ];
-const PREVIEWABLE_DOCUMENT_EXTENSIONS = ["pdf", "csv", "txt", "rtf"];
+const PREVIEWABLE_DOCUMENT_EXTENSIONS = ["pdf", "csv", "txt", "md", "rtf"];
 let activeFeedVideoPlayers = 0;
 
 const getUrlPath = (url: string) => {

@@ -8,7 +8,7 @@ import {
     queueGigPortfolioReview,
     scheduleGigPortfolioReview,
 } from '../_shared/gigPortfolioReview.ts'
-import { resolveApprovedIdentityDocumentReference } from '../_shared/identityDocumentReference.ts'
+import { matchGigMemberRequirements, normalizeGigRosterMembers } from '../_shared/gigMemberRequirementMatching.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -89,89 +89,6 @@ async function getVenueStaffAccessLevel(client: any, userId: string, gigId: stri
     return level === 1 || level === 2 || level === 3 ? level : null
 }
 
-async function getConsentedIdentityDocumentReview(client: any, application: any) {
-    const isOwnSoloApplication =
-        application?.identity_document_review_consent === true &&
-        !application?.group_id &&
-        !application?.production_roster_id &&
-        application?.applicant_id === application?.submitted_by_user_id
-
-    if (!isOwnSoloApplication) {
-        return {
-            available: false,
-            url: null,
-            document_type: null,
-            source: 'unavailable',
-            limitation: application?.identity_document_review_consent === true
-                ? 'Group identity documents are provided in the consented lineup review.'
-                : 'The applicant did not consent to show an approved ID in this application review.',
-        }
-    }
-
-    const { data: profile, error } = await client
-        .from('profiles')
-        .select('id, is_verified, verification_status, didit_session_id')
-        .eq('id', application.applicant_id)
-        .maybeSingle()
-    if (error || !profile) {
-        return { available: false, url: null, document_type: null, source: 'unavailable', limitation: 'The approved ID image could not be loaded.' }
-    }
-
-    const reference = await resolveApprovedIdentityDocumentReference(client, profile)
-    return {
-        available: Boolean(reference.url),
-        url: reference.url,
-        document_type: reference.document_type,
-        source: reference.source,
-        limitation: reference.limitation,
-        consented_at: application.identity_document_review_consented_at || null,
-    }
-}
-
-async function getConsentedGroupIdentityDocumentReviews(client: any, application: any) {
-    if (!application?.group_id || application?.identity_document_review_consent !== true) return []
-
-    const memberIds = uniqueStrings(
-        Array.isArray(application?.ai_review_group_member_ids)
-            ? application.ai_review_group_member_ids
-            : []
-    )
-    if (memberIds.length === 0) return []
-
-    const { data: profiles, error } = await client
-        .from('profiles')
-        .select('id, full_name, is_verified, verification_status, didit_session_id')
-        .in('id', memberIds)
-    if (error) throw error
-
-    const profilesById = new Map((profiles || []).map((profile: any) => [String(profile.id), profile]))
-    return await Promise.all(memberIds.map(async (profileId) => {
-        const profile: any = profilesById.get(profileId)
-        if (!profile) {
-            return {
-                profile_id: profileId,
-                display_name: 'Group member',
-                available: false,
-                url: null,
-                document_type: null,
-                source: 'unavailable',
-                limitation: 'The group-member profile is unavailable.',
-            }
-        }
-        const reference = await resolveApprovedIdentityDocumentReference(client, profile)
-        return {
-            profile_id: profile.id,
-            display_name: profile.full_name || 'Group member',
-            available: Boolean(reference.url),
-            url: reference.url,
-            document_type: reference.document_type,
-            source: reference.source,
-            limitation: reference.limitation,
-            consented_at: application.identity_document_review_consented_at || null,
-        }
-    }))
-}
-
 const GIG_APPLICATION_SELECT = `
     *,
     applicant:profiles!applicant_id(id, full_name, avatar_url, role, bio, location, latitude, longitude, is_verified, verification_status),
@@ -199,7 +116,6 @@ const GIG_APPLICATION_SUMMARY_SELECT = `
     slot_type,
     created_at,
     ai_portfolio_review_consent,
-    identity_document_review_consent,
     performer_snapshot,
     cv_url,
     video_url,
@@ -253,7 +169,6 @@ function toApplicationSummary(application: any) {
         slot_type: application.slot_type,
         created_at: application.created_at,
         ai_portfolio_review_consent: application.ai_portfolio_review_consent === true,
-        identity_document_review_consent: application.identity_document_review_consent === true,
         performer_snapshot: application.performer_snapshot || {},
         applicant: pickProfile(application.applicant),
         group: pickGroup(application.group),
@@ -680,7 +595,6 @@ type RecommendationCriterionMode = 'required' | 'preferred' | 'ignore'
 
 const DEFAULT_RECOMMENDATION_SETTINGS = {
     enabled: false,
-    minimum_score: 75,
     location_radius_km: null as number | null,
     criteria: {
         genres: 'preferred' as RecommendationCriterionMode,
@@ -690,7 +604,7 @@ const DEFAULT_RECOMMENDATION_SETTINGS = {
     },
 }
 
-const RECOMMENDATION_MODEL_VERSION = 'gig-fit-v7'
+const RECOMMENDATION_MODEL_VERSION = 'gig-fit-v9-member-slot-coverage'
 
 function normalizeCriterionMode(value: unknown, fallback: RecommendationCriterionMode) {
     const normalized = String(value || '')
@@ -703,14 +617,10 @@ function normalizeCriterionMode(value: unknown, fallback: RecommendationCriterio
 
 function normalizeRecommendationSettings(value: any) {
     const criteria = value?.criteria && typeof value.criteria === 'object' ? value.criteria : {}
-    const parsedMinimum = Number(value?.minimum_score)
     const parsedRadius = Number(value?.location_radius_km)
 
     return {
         enabled: value?.enabled === true,
-        minimum_score: Number.isFinite(parsedMinimum)
-            ? Math.max(0, Math.min(100, Math.round(parsedMinimum)))
-            : DEFAULT_RECOMMENDATION_SETTINGS.minimum_score,
         location_radius_km:
             value?.location_radius_km === null || value?.location_radius_km === 'any'
                 ? null
@@ -828,6 +738,11 @@ function getApplicationPerformer(application: any) {
                   : [member?.instrument, member?.instruments, member?.role, member?.roles, member?.member_role, member?.skills]
           )
         : []
+    const detailedGroupType = Array.isArray(group?.members)
+        ? group.members
+              .map((member: any) => member?.group_type_ui || member?.raw_member?.group_type_ui)
+              .find((value: unknown) => typeof value === 'string' && value.trim())
+        : null
     const snapshot = application?.performer_snapshot || {}
 
     return {
@@ -855,6 +770,8 @@ function getApplicationPerformer(application: any) {
         location: String(group?.location || profile?.location || '').trim(),
         coordinates: readCoordinates(group) || readCoordinates(profile),
         hasPortfolio: Boolean(application?.video_url || application?.cv_url),
+        members: normalizeGigRosterMembers(group?.members),
+        matchingGroupType: String(detailedGroupType || group?.group_type || ''),
     }
 }
 
@@ -894,6 +811,7 @@ function getRequirementValues(requirements: any, application: any) {
             slot?.required_roles,
         ]),
         location: String(requirements?.location || '').trim(),
+        specific_requirements: Array.isArray(slot?.specific_requirements) ? slot.specific_requirements : [],
     }
 }
 
@@ -909,6 +827,11 @@ function evaluateGigApplication(
     let possiblePoints = 0
     let earnedPoints = 0
     let missingRequired = false
+    const memberRequirementCoverage = matchGigMemberRequirements(
+        expected.specific_requirements,
+        performer.members,
+        performer.matchingGroupType,
+    )
 
     const applyValueCriterion = (
         key: keyof typeof settings.criteria,
@@ -937,13 +860,26 @@ function evaluateGigApplication(
         }
     }
 
-    applyValueCriterion(
-        'instruments',
-        'Instrument or role fit',
-        30,
-        expected.instruments,
-        performer.instruments
-    )
+    if (settings.criteria.instruments !== 'ignore' && memberRequirementCoverage) {
+        possiblePoints += 30
+        earnedPoints += 30 * memberRequirementCoverage.coverage_ratio
+        if (memberRequirementCoverage.matched_count === memberRequirementCoverage.total_count) {
+            matched.push('Member instrument and role coverage')
+        } else {
+            missing.push(
+                `Member instrument and role coverage (${memberRequirementCoverage.matched_count} of ${memberRequirementCoverage.total_count} confirmed)`
+            )
+            if (settings.criteria.instruments === 'required') missingRequired = true
+        }
+    } else {
+        applyValueCriterion(
+            'instruments',
+            'Instrument or role fit',
+            30,
+            expected.instruments,
+            performer.instruments
+        )
+    }
     applyValueCriterion(
         'genres',
         'Genre fit',
@@ -991,16 +927,12 @@ function evaluateGigApplication(
     const isEligible = hasApplicableCriteria && !missingRequired
     const recommendationStatus = !hasApplicableCriteria
         ? 'insufficient_data'
-        : isEligible && Number(score) >= settings.minimum_score
-        ? 'recommended'
         : isEligible
-        ? 'possible_match'
+        ? 'recommended'
         : 'not_eligible'
     const explanation =
         recommendationStatus === 'recommended'
-            ? `${score}% advisory fit based on the gig's saved requirements.`
-            : recommendationStatus === 'possible_match'
-            ? `${score}% advisory fit; review the unmatched preferences before deciding.`
+            ? `Meets the required gig criteria. Review the ${score}% advisory fit and details before deciding.`
             : recommendationStatus === 'insufficient_data'
             ? 'No applicable AI Match Review criteria are configured for this gig.'
             : 'Not recommended because a required gig criterion is missing.'
@@ -1032,6 +964,7 @@ function evaluateGigApplication(
                 instruments: performer.instruments,
                 has_portfolio: performer.hasPortfolio,
             },
+            member_requirement_coverage: memberRequirementCoverage,
             distance_km: distanceKm,
             score_breakdown: {
                 earned_points: earnedPoints,
@@ -1139,7 +1072,7 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
 
     const { data, error } = await supabaseClient
         .from('gig_application_ai_reviews')
-        .select('application_id, status, source_summary, face_similarity, evidence')
+        .select('application_id, status, source_summary, evidence')
         .in('application_id', applicationIds)
 
     if (error) {
@@ -1168,6 +1101,7 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
         const portfolioResult = String(portfolioEvidence?.result || 'unclear')
         const instrumentResult = String(instrumentEvidence?.result || 'unclear')
         const genreResult = String(genreEvidence?.result || 'unclear')
+        const memberRequirementCoverage = item?.criteria_snapshot?.member_requirement_coverage || null
         let matchedCriteria = Array.isArray(item.matched_criteria) ? item.matched_criteria : []
         let missingCriteria = Array.isArray(item.missing_criteria) ? item.missing_criteria : []
         const applySupportingEvidence = (label: string, result: string) => {
@@ -1175,7 +1109,9 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
             missingCriteria = missingCriteria.filter((itemLabel: string) => !itemLabel.startsWith(label))
             if (!matchedCriteria.includes(label)) matchedCriteria = [...matchedCriteria, label]
         }
-        applySupportingEvidence('Instrument or role fit', instrumentResult)
+        if (!memberRequirementCoverage) {
+            applySupportingEvidence('Instrument or role fit', instrumentResult)
+        }
         applySupportingEvidence('Genre fit', genreResult)
         const portfolioLabel = 'Submitted performance evidence fits the gig'
         const portfolioMissingLabels = [
@@ -1222,12 +1158,27 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
             else if (mode === 'required') missingRequired = true
         }
 
-        addScoredCriterion(
-            String(criteria.instruments || ''),
-            Array.isArray(expected.instruments) && expected.instruments.length > 0,
-            hasMatched('Instrument or role fit'),
-            30
-        )
+        if (criteria.instruments !== 'ignore' && memberRequirementCoverage?.total_count > 0) {
+            possiblePoints += 30
+            const matchedMemberCount = Math.max(0, Math.min(
+                Number(memberRequirementCoverage.total_count),
+                Number(memberRequirementCoverage.matched_count) || 0,
+            ))
+            earnedPoints += 30 * (matchedMemberCount / Number(memberRequirementCoverage.total_count))
+            if (
+                criteria.instruments === 'required' &&
+                matchedMemberCount < Number(memberRequirementCoverage.total_count)
+            ) {
+                missingRequired = true
+            }
+        } else {
+            addScoredCriterion(
+                String(criteria.instruments || ''),
+                Array.isArray(expected.instruments) && expected.instruments.length > 0,
+                hasMatched('Instrument or role fit'),
+                30
+            )
+        }
         addScoredCriterion(
             String(criteria.genres || ''),
             Array.isArray(expected.genres) && expected.genres.length > 0,
@@ -1253,10 +1204,8 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
         const isEligible = hasApplicableCriteria && !missingRequired
         const recommendationStatus = !hasApplicableCriteria
             ? 'insufficient_data'
-            : isEligible && Number(score) >= Number(settings.minimum_score || 75)
-            ? 'recommended'
             : isEligible
-            ? 'possible_match'
+            ? 'recommended'
             : 'not_eligible'
         const notes: string[] = []
         const cvStatus = String(review?.source_summary?.cv_document_classification?.status || '')
@@ -1271,22 +1220,13 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
             notes.push('The performance evidence still needs a manual review.')
         }
 
-        const faceStatus = String(review?.face_similarity?.status || '')
-        if (faceStatus === 'likely_same_person') {
-            notes.push('The performer appears to match the approved ID portrait.')
-        } else if (faceStatus === 'likely_different_person') {
-            notes.push('The performer may not match the approved ID portrait, so please check the video.')
-        } else if (faceStatus === 'unclear') {
-            notes.push('The approved ID and video comparison was unclear.')
-        } else if (faceStatus === 'not_run') {
-            notes.push('The approved ID and video were not compared.')
-        }
-
         const missingRequiredItems = [
             criteria.instruments === 'required' &&
-            Array.isArray(expected.instruments) &&
-            expected.instruments.length > 0 &&
-            !hasMatched('Instrument or role fit')
+            (memberRequirementCoverage?.total_count > 0
+                ? Number(memberRequirementCoverage.matched_count) < Number(memberRequirementCoverage.total_count)
+                : Array.isArray(expected.instruments) &&
+                  expected.instruments.length > 0 &&
+                  !hasMatched('Instrument or role fit'))
                 ? 'instrument_or_role'
                 : '',
             criteria.genres === 'required' &&
@@ -1316,9 +1256,7 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
                 : 'The required performance experience could not be confirmed.'
         const baseExplanation =
             recommendationStatus === 'recommended'
-                ? 'This applicant appears to be a strong match for the gig.'
-                : recommendationStatus === 'possible_match'
-                ? 'This applicant meets some of the gig requirements. Review the remaining items before deciding.'
+                ? 'This applicant meets the required gig criteria. Review the advisory score and details before deciding.'
                 : recommendationStatus === 'insufficient_data'
                 ? 'There is not enough configured information to calculate a reliable match.'
                 : Number(score) >= 70
@@ -1680,23 +1618,14 @@ Deno.serve(async (req: Request) => {
                 supabaseClient.from('gig_application_ai_reviews').select('*').eq('application_id', applicationId).maybeSingle(),
                 supabaseClient.from('gig_application_recommendations').select('*').eq('application_id', applicationId).maybeSingle(),
             ])
-            const identityDocumentReview = await getConsentedIdentityDocumentReview(supabaseClient, applicationRecord)
-            const identityDocumentReviews = await getConsentedGroupIdentityDocumentReviews(supabaseClient, applicationRecord)
             if (reviewResult.error) console.warn('gig_application_ai_review_read_failed', { message: reviewResult.error.message })
             if (recommendationResult.error) console.warn('gig_application_recommendation_read_failed', { message: recommendationResult.error.message })
             let reviewData = reviewResult.error ? null : reviewResult.data || null
             const reviewStatus = String(reviewData?.status || '')
             const reviewPipelineVersion = String(reviewData?.source_summary?.review_pipeline_version || '')
-            const storedFaceError = String(reviewData?.face_similarity?.error || '').toLowerCase()
-            const storedFaceSummary = String(reviewData?.face_similarity?.summary || '').toLowerCase()
-            const hasStaleFaceConfigurationFailure =
-                storedFaceError === 'missing_face_service_url' ||
-                storedFaceError === 'missing_facepp_credentials' ||
-                storedFaceSummary.includes('not configured')
             const shouldRefreshReview = applicationRecord.ai_portfolio_review_consent === true && (
                 !reviewData ||
                 reviewStatus === 'failed' ||
-                hasStaleFaceConfigurationFailure ||
                 (['completed', 'partial'].includes(reviewStatus) &&
                     reviewPipelineVersion !== GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION)
             )
@@ -1710,8 +1639,7 @@ Deno.serve(async (req: Request) => {
                         source_summary: { review_pipeline_version: GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION },
                         evidence: [],
                         overall_summary: '',
-                        face_similarity: {},
-                        group_face_similarity: [],
+                        limitations: [],
                     }
                 } catch (reviewRefreshError) {
                     console.warn('gig_application_ai_review_refresh_failed', {
@@ -1744,8 +1672,6 @@ Deno.serve(async (req: Request) => {
                 ...applicationWithHistory,
                 ai_portfolio_review: reviewData,
                 ai_recommendation: recommendationData,
-                identity_document_review: identityDocumentReview,
-                identity_document_reviews: identityDocumentReviews,
             }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 

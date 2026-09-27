@@ -77,9 +77,14 @@ export default function TermsAndConditionsScreen() {
             You retain ownership of any music or media you upload. However, you grant Musika Lokal a non-exclusive license to display this content on the platform for promotional and operational purposes.
           </Text>
 
-          {/* 5. PROHIBITED CONDUCT */}
+          <Text style={[styles.subHeader, { color: colors.text }]}>5. Gig Application Review</Text>
+          <Text style={[styles.text, { color: colors.textSecondary }]}>
+            By agreeing to these terms when applying for a gig, you authorize Musika Lokal to send your CV/resume and performance media to configured review providers. Identity documents and profile photos are not used for application-video matching. Any AI review is advisory and does not make the application decision by itself.
+          </Text>
+
+          {/* 6. PROHIBITED CONDUCT */}
           <Text style={[styles.subHeader, { color: colors.text }]}>
-            5. Prohibited Conduct
+            6. Prohibited Conduct
           </Text>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
             Users are strictly prohibited from:{"\n"}
@@ -89,9 +94,9 @@ export default function TermsAndConditionsScreen() {
             - Submitting repetitive, duplicate, misleading, or abusive applications, booking requests, production-team requests, gig applications, or studio bookings. Musika Lokal may block duplicate active requests, restrict repeated cancellations or reapplications, reject invalid or overlapping studio bookings, and require unpaid bookings to be settled before new bookings are made.
           </Text>
 
-          {/* 6. GOVERNING LAW */}
+          {/* 7. GOVERNING LAW */}
           <Text style={[styles.subHeader, { color: colors.text }]}>
-            6. Governing Law
+            7. Governing Law
           </Text>
           <Text style={[styles.textLargeMarginBottom, { color: colors.textSecondary }]}>
             These terms are governed by the laws of the Republic of the Philippines. Any legal disputes shall be settled exclusively in the courts of Metro Manila.

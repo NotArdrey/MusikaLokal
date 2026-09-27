@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Image,
@@ -76,6 +76,13 @@ const DESCRIPTION_MAX_LENGTH = 1000;
 const IS_WEB = Platform.OS === "web";
 
 export default function AddGroupScreen() {
+  const formScrollViewRef = useRef<ScrollView>(null);
+  useFocusEffect(
+    useCallback(() => {
+      formScrollViewRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+    }, []),
+  );
+
   const { colors, isDark } = useTheme();
   const { width: viewportWidth } = useWindowDimensions();
   const isWebDesktop = Platform.OS === "web" && viewportWidth >= 768;
@@ -88,6 +95,9 @@ export default function AddGroupScreen() {
   const isDuoMode = params.mode === "duo";
   const { isSystemLocked, showLockAlert } = useAuth();
   const [step, setStep] = useState(1);
+  useEffect(() => {
+    formScrollViewRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+  }, [step]);
   const [groupName, setGroupName] = useState("");
   const [address, setAddress] = useState("");
   const [latitude, setLatitude] = useState<number | null>(null);
@@ -887,6 +897,7 @@ export default function AddGroupScreen() {
           keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
         >
           <ScrollView
+            ref={formScrollViewRef}
             style={[
               styles.formContainer,
               {

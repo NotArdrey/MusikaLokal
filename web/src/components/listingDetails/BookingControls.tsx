@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
-import { Calendar } from "react-native-calendars";
+import { Calendar } from "../CenteredCalendar";
 import styles from "../ListingDetailsSheet.styles";
 import { normalizeStudioType } from "./availability";
 

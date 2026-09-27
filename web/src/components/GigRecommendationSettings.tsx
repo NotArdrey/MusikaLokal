@@ -3,7 +3,6 @@ import React from "react";
 import {
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -15,7 +14,6 @@ export type GigRecommendationCriterionMode =
 
 export type GigRecommendationSettingsValue = {
   enabled: boolean;
-  minimum_score: number;
   location_radius_km: number | null;
   criteria: {
     genres: GigRecommendationCriterionMode;
@@ -28,7 +26,6 @@ export type GigRecommendationSettingsValue = {
 export const DEFAULT_GIG_RECOMMENDATION_SETTINGS: GigRecommendationSettingsValue =
   {
     enabled: false,
-    minimum_score: 75,
     location_radius_km: null,
     criteria: {
       genres: "required",
@@ -50,14 +47,10 @@ export const normalizeGigRecommendationSettings = (
       : candidate === "required" || candidate === "ignore"
       ? candidate
       : fallback;
-  const minimumScore = Number(value?.minimum_score);
   const locationRadius = Number(value?.location_radius_km);
 
   return {
     enabled: value?.enabled === true,
-    minimum_score: Number.isFinite(minimumScore)
-      ? Math.max(0, Math.min(100, Math.round(minimumScore)))
-      : DEFAULT_GIG_RECOMMENDATION_SETTINGS.minimum_score,
     location_radius_km:
       value?.location_radius_km === null || value?.location_radius_km === "any"
         ? null
@@ -125,21 +118,6 @@ const LOCATION_RANGES: (number | null)[] = [5, 10, 25, 50, 100, null];
 
 export default function GigRecommendationSettings({ value, onChange }: Props) {
   const { colors, isDark } = useTheme();
-  const [minimumScoreInput, setMinimumScoreInput] = React.useState(
-    String(value.minimum_score)
-  );
-  React.useEffect(
-    () => setMinimumScoreInput(String(value.minimum_score)),
-    [value.minimum_score]
-  );
-  const commitMinimumScore = (candidate: unknown) => {
-    const parsed = Number(candidate);
-    const normalized = Number.isFinite(parsed)
-      ? Math.max(0, Math.min(100, Math.round(parsed)))
-      : 75;
-    setMinimumScoreInput(String(normalized));
-    onChange({ ...value, minimum_score: normalized });
-  };
   const updateCriterion = (
     key: keyof GigRecommendationSettingsValue["criteria"],
     mode: GigRecommendationCriterionMode
@@ -192,81 +170,6 @@ export default function GigRecommendationSettings({ value, onChange }: Props) {
 
       {value.enabled ? (
         <View style={styles.settingsBody}>
-          <Text style={[styles.sectionLabel, { color: colors.text }]}>
-            Minimum recommendation score
-          </Text>
-          <View style={styles.stepperRow}>
-            <TouchableOpacity
-              accessibilityLabel="Decrease minimum recommendation score"
-              onPress={() => commitMinimumScore(value.minimum_score - 5)}
-              style={[
-                styles.stepperButton,
-                { borderColor: colors.border, backgroundColor: colors.surface },
-              ]}
-            >
-              <Ionicons name="remove" size={18} color={colors.text} />
-            </TouchableOpacity>
-            <TextInput
-              accessibilityLabel="Minimum recommendation score percentage"
-              testID="gig-ai-minimum-score-input"
-              keyboardType="number-pad"
-              maxLength={3}
-              value={minimumScoreInput}
-              onChangeText={(text) =>
-                setMinimumScoreInput(text.replace(/[^0-9]/g, ""))
-              }
-              onBlur={() => commitMinimumScore(minimumScoreInput)}
-              style={[
-                styles.scoreInput,
-                {
-                  color: colors.text,
-                  borderColor: colors.border,
-                  backgroundColor: colors.surface,
-                },
-              ]}
-            />
-            <Text style={[styles.percentLabel, { color: colors.text }]}>%</Text>
-            <TouchableOpacity
-              accessibilityLabel="Increase minimum recommendation score"
-              onPress={() => commitMinimumScore(value.minimum_score + 5)}
-              style={[
-                styles.stepperButton,
-                { borderColor: colors.border, backgroundColor: colors.surface },
-              ]}
-            >
-              <Ionicons name="add" size={18} color={colors.text} />
-            </TouchableOpacity>
-          </View>
-          <View style={styles.optionRow}>
-            {[60, 75, 85].map((score) => {
-              const selected = value.minimum_score === score;
-              return (
-                <TouchableOpacity
-                  key={score}
-                  testID={`gig-ai-minimum-score-${score}`}
-                  onPress={() => onChange({ ...value, minimum_score: score })}
-                  style={[
-                    styles.scoreOption,
-                    {
-                      backgroundColor: selected
-                        ? colors.primary
-                        : colors.surface,
-                      borderColor: selected ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.scoreText,
-                      { color: selected ? "#FFFFFF" : colors.text },
-                    ]}
-                  >
-                    {score}%
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
           <Text style={[styles.sectionLabel, { color: colors.text }]}>
             Applicant location range
           </Text>
@@ -405,44 +308,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 16,
     marginBottom: 8,
-  },
-  optionRow: { flexDirection: "row", gap: 8 },
-  scoreOption: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 9,
-    alignItems: "center",
-  },
-  scoreText: { fontFamily: "Poppins_600SemiBold", fontSize: 12 },
-  stepperRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 10,
-  },
-  stepperButton: {
-    width: 38,
-    height: 38,
-    borderWidth: 1,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  scoreInput: {
-    width: 64,
-    height: 38,
-    borderWidth: 1,
-    borderRadius: 10,
-    textAlign: "center",
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 14,
-    paddingVertical: 0,
-  },
-  percentLabel: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 14,
-    marginLeft: -4,
   },
   rangeRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 9 },
   rangeOption: {

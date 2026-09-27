@@ -339,6 +339,10 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   const preferredBandTypeBadges = useMemo(() => {
     const types = item?.requirements?.slots?.band?.preferred_group_types;
+    const bandRequirements = item?.requirements?.slots?.band?.specific_requirements;
+    const hasPerSlotTypes = Array.isArray(bandRequirements)
+      && bandRequirements.some((requirement: any) => typeof requirement?.group_type === "string" && requirement.group_type.trim());
+    if (hasPerSlotTypes) return [] as string[];
     if (!Array.isArray(types) || types.length === 0) return [] as string[];
 
     const counts = new Map<string, number>();
@@ -352,11 +356,12 @@ const ListingCard: React.FC<ListingCardProps> = ({
       const label = type?.label || "Group";
       return count > 1 ? `${label} (${count})` : label;
     });
-  }, [item?.requirements?.slots?.band?.preferred_group_types]);
+  }, [item?.requirements?.slots?.band?.preferred_group_types, item?.requirements?.slots?.band?.specific_requirements]);
 
   const specificSlotRequirementBadges = [
     ...getSpecificSlotRequirementLines(item?.requirements?.slots?.solo),
     ...getSpecificSlotRequirementLines(item?.requirements?.slots?.duo),
+    ...getSpecificSlotRequirementLines(item?.requirements?.slots?.band),
   ];
 
   // Determine "Subtitle" (Location or Genre)

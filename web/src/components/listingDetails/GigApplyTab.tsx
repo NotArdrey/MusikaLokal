@@ -13,7 +13,7 @@ import {
 import { PH_MUSIC_GROUP_TYPES } from "../../constants/groupTypes";
 import type { UploadSafetyFileDecision } from "../../services/uploadSafetyScreen";
 import { getGigApplicationDeadlineInfo } from "../../utils/gigApplication";
-import { getSharedSlotRequirements } from "../../utils/gigSlotRequirements";
+import { getSharedSlotRequirements, getSpecificSlotRequirementLines } from "../../utils/gigSlotRequirements";
 import DocumentUploader from "../DocumentUploader";
 import InAppMediaViewer from "../InAppMediaViewer";
 import styles from "../ListingDetailsSheet.styles";
@@ -127,6 +127,9 @@ const GigApplyTab = ({
   const [termsVisible, setTermsVisible] = React.useState(false);
   const isGroupApplicationFlow = applicationContext === "group";
   const isProducerFlow = !isGroupApplicationFlow && userRole === "producer";
+  const isAiMatchReviewEnabled =
+    !isGroupApplicationFlow &&
+    group?.requirements?.ai_recommendation_settings?.enabled === true;
   const hasCustomContract = !isGroupApplicationFlow && Boolean(group?.contract_url);
   const musicianTypeRequired = group?.requirements?.musician_type || "both";
   const hasGroups = userGroups.length > 0;
@@ -187,22 +190,10 @@ const GigApplyTab = ({
     const preferredGenres = shared.preferred_genres;
     const preferredInstruments = shared.preferred_instruments;
     const specificRequirements = Array.isArray(slot.specific_requirements)
-      ? slot.specific_requirements.filter((item: unknown) => {
-          if (!item || typeof item !== "object") return false;
-
-          const requirement = item as Record<string, unknown>;
-          return [
-            requirement.roles,
-            requirement.preferred_genres,
-            requirement.preferred_instruments,
-          ].some(
-            (values) =>
-              Array.isArray(values) &&
-              values.some((value) => typeof value === "string" && value.trim().length > 0),
-          );
-        })
+      ? slot.specific_requirements.filter((item: unknown) => getSpecificSlotRequirementLines({ specific_requirements: [item] }).length > 0)
       : [];
-    const preferredGroupTypesRaw = selectedSlotType === "band" && Array.isArray(slot.preferred_group_types)
+    const hasSpecificGroupTypes = specificRequirements.some((item: any) => typeof item?.group_type === "string" && item.group_type.trim());
+    const preferredGroupTypesRaw = selectedSlotType === "band" && !hasSpecificGroupTypes && Array.isArray(slot.preferred_group_types)
       ? slot.preferred_group_types.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
       : [];
 
@@ -470,6 +461,7 @@ const GigApplyTab = ({
                   <View
                     style={[
                       styles.infoBox,
+                      gigApplyStyles.slotRequirementsCard,
                       {
                         backgroundColor: isDark ? "#374151" : "#F9FAFB",
                         borderColor: colors.border,
@@ -478,32 +470,34 @@ const GigApplyTab = ({
                     ]}
                   >
                     {selectedSlotRequirements.preferredGroupTypeLabels.length > 0 && (
-                      <Text style={[styles.infoText, { color: colors.text }]}>
+                      <Text style={[styles.infoText, gigApplyStyles.slotRequirementText, { color: colors.text }]}>
                         <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Preferred group types: </Text>
                         {selectedSlotRequirements.preferredGroupTypeLabels.join(", ")}
                       </Text>
                     )}
                     {selectedSlotRequirements.specificRequirements.map((item: any, index: number) => {
-                      const details = [
-                        ...(Array.isArray(item.roles) ? item.roles : []),
-                        ...(Array.isArray(item.preferred_genres) ? item.preferred_genres.map((value: string) => `Genre: ${value}`) : []),
-                        ...(Array.isArray(item.preferred_instruments) ? item.preferred_instruments.map((value: string) => `Instrument: ${value}`) : []),
-                      ].filter(Boolean);
-                      return details.length > 0 ? (
-                        <Text key={item.slot_id || index} style={[styles.infoText, { color: colors.text }]}>
-                          <Text style={{ fontFamily: "Poppins_600SemiBold" }}>{item.label || `Slot ${index + 1}`}: </Text>
-                          {details.join(", ")}
+                      const line = getSpecificSlotRequirementLines({ specific_requirements: [item] })[0];
+                      if (!line) return null;
+                      const labelEnd = line.indexOf(": ");
+                      return (
+                        <Text key={item.slot_id || index} style={[styles.infoText, gigApplyStyles.slotRequirementText, { color: colors.text }]}>
+                          {labelEnd >= 0 ? (
+                            <>
+                              <Text style={{ fontFamily: "Poppins_600SemiBold" }}>{line.slice(0, labelEnd + 2)}</Text>
+                              {line.slice(labelEnd + 2)}
+                            </>
+                          ) : line}
                         </Text>
-                      ) : null;
+                      );
                     })}
                     {selectedSlotRequirements.preferredGenres.length > 0 && (
-                      <Text style={[styles.infoText, { color: colors.text }]}>
+                      <Text style={[styles.infoText, gigApplyStyles.slotRequirementText, { color: colors.text }]}>
                         <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Shared genres: </Text>
                         {selectedSlotRequirements.preferredGenres.join(", ")}
                       </Text>
                     )}
                     {selectedSlotRequirements.preferredInstruments.length > 0 && (
-                      <Text style={[styles.infoText, { color: colors.text }]}>
+                      <Text style={[styles.infoText, gigApplyStyles.slotRequirementText, { color: colors.text }]}>
                         <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Shared instruments: </Text>
                         {selectedSlotRequirements.preferredInstruments.join(", ")}
                       </Text>
@@ -880,7 +874,7 @@ const GigApplyTab = ({
         folder="performance-videos"
         maxSizeMB={50}
         maxDurationMinutes={5}
-        enableReviewFrame={aiPortfolioReviewConsent}
+        enableReviewFrame={isAiMatchReviewEnabled}
         onReviewFrameChange={(url) => setVideoReviewFrameUrl(url || "")}
         onReviewFramesChange={setVideoReviewFrameUrls}
         enableCopyrightScreening={!isGroupApplicationFlow}
@@ -888,28 +882,6 @@ const GigApplyTab = ({
         onCopyrightDecisionChange={setVideoCopyrightDecision}
       />
 
-      {!isGroupApplicationFlow ? (
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={() => setAiPortfolioReviewConsent(!aiPortfolioReviewConsent)}
-          style={[gigApplyStyles.consentCard, { borderColor: colors.border, backgroundColor: isDark ? "#1F2937" : "#F9FAFB" }]}
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked: aiPortfolioReviewConsent }}
-        >
-          <View style={[gigApplyStyles.checkbox, {
-            borderColor: aiPortfolioReviewConsent ? colors.primary : colors.border,
-            backgroundColor: aiPortfolioReviewConsent ? colors.primary : "transparent",
-          }]}>
-            {aiPortfolioReviewConsent ? <Text style={gigApplyStyles.checkboxTick}>✓</Text> : null}
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[gigApplyStyles.termsText, { color: colors.text }]}>Allow optional AI application review</Text>
-            <Text style={[gigApplyStyles.consentHelp, { color: colors.textSecondary }]}>{!selectedGroupId && !selectedProductionRosterId
-              ? "This sends your CV and performance media to the configured review providers. It also lets the authorized gig manager view your approved ID front and lets Face++ compare its portrait with sampled video frames. The result is advisory only."
-              : "As the submitting leader or representative, you authorize the approved ID fronts of the snapshotted duo or group lineup to be compared with sampled video frames and shown to the authorized gig manager. The result is advisory only."}</Text>
-          </View>
-        </TouchableOpacity>
-      ) : null}
 
       {!isGroupApplicationFlow && recognizedAudioGenres.length > 0 && (
         <View style={[styles.infoBox, { backgroundColor: `${colors.primary}14`, borderColor: colors.primary, marginBottom: 16 }]}>
@@ -949,7 +921,18 @@ const GigApplyTab = ({
           <View style={gigApplyStyles.termsRow}>
             <TouchableOpacity
               activeOpacity={1}
-              onPress={() => setIsSystemTermsAccepted((prev) => !prev)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: isSystemTermsAccepted }}
+              accessibilityLabel={
+                isAiMatchReviewEnabled
+                  ? "Agree to Musika Lokal's Terms and Conditions, including AI Match Review terms"
+                  : "Agree to Musika Lokal's Terms and Conditions"
+              }
+              onPress={() => {
+                const accepted = !isSystemTermsAccepted;
+                setIsSystemTermsAccepted(accepted);
+                setAiPortfolioReviewConsent(isAiMatchReviewEnabled && accepted);
+              }}
               style={[gigApplyStyles.checkbox, {
               borderColor: isSystemTermsAccepted ? colors.primary : colors.border,
               backgroundColor: isSystemTermsAccepted ? colors.primary : 'transparent',
@@ -963,7 +946,10 @@ const GigApplyTab = ({
                 style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary, textDecorationLine: 'underline' }}
               >
                 Terms and Conditions
-              </Text>. *
+              </Text>
+              {isAiMatchReviewEnabled
+                ? ", including AI Match Review of the submitted performance (no ID or profile-photo comparison). *"
+                : ". *"}
             </Text>
           </View>
         </View>
@@ -1064,10 +1050,13 @@ const GigApplyTab = ({
               <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>3. User Conduct</Text>
               <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>Users must not bypass platform payments, harass others, submit fraudulent information, upload content they do not have permission to use, or submit repetitive, duplicate, misleading, or abusive applications, booking requests, production-team requests, gig applications, or studio bookings. Musika Lokal may block duplicate active requests, restrict repeated cancellations or reapplications, reject invalid or overlapping studio bookings, and require unpaid bookings to be settled before new bookings are made.</Text>
 
-              <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>4. Liability</Text>
+              <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>4. Gig Application Review</Text>
+              <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>By agreeing to these terms for a gig application, you authorize Musika Lokal to send your CV/resume and performance media to configured review providers. Identity documents and profile photos are not used for application-video matching. Any AI review is advisory and does not make the application decision by itself.</Text>
+
+              <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>5. Liability</Text>
               <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>Musika Lokal acts as a facilitator and is not liable for personal injury, property damage, external payment network failures, or loss of income due to app downtime.</Text>
 
-              <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>5. Governing Law</Text>
+              <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>6. Governing Law</Text>
               <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>These terms are governed by the laws of the Republic of the Philippines.</Text>
             </ScrollView>
           </View>
@@ -1078,20 +1067,14 @@ const GigApplyTab = ({
 };
 
 const gigApplyStyles = StyleSheet.create({
-  consentCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
+  slotRequirementsCard: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 6,
   },
-  consentHelp: {
-    fontSize: 11,
-    lineHeight: 17,
-    fontFamily: 'Poppins_400Regular',
-    marginTop: 3,
+  slotRequirementText: {
+    flex: 0,
+    width: '100%',
   },
   termsRow: {
     flexDirection: 'row',

@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -157,6 +157,13 @@ const logCreatePlaylistMp3Error = (
 };
 
 export default function CreatePlaylistScreen() {
+  const formScrollViewRef = useRef<ScrollView>(null);
+  useFocusEffect(
+    useCallback(() => {
+      formScrollViewRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+    }, []),
+  );
+
   const { colors, isDark } = useTheme();
   const { loading: authLoading, isGuest, userId } = useAuth();
   const params = useLocalSearchParams<{
@@ -642,7 +649,7 @@ export default function CreatePlaylistScreen() {
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
       <Header title={screenTitle} onBackPress={() => router.back()} />
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={isWebDesktop ? { alignItems: "center" } : undefined}>
+      <ScrollView ref={formScrollViewRef} style={{ flex: 1 }} contentContainerStyle={isWebDesktop ? { alignItems: "center" } : undefined}>
         <View style={isWebDesktop ? { width: "100%", maxWidth: 600, paddingHorizontal: 16 } : { paddingHorizontal: 16 }}>
           <Text style={[styles.label, { color: colors.text }]}>Album Cover</Text>
           {userId ? (

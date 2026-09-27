@@ -28,7 +28,6 @@ export type RecommendationCriterionMode = "required" | "ignore";
 
 export type RecommendationSettings = {
   enabled: boolean;
-  minimum_score: number;
   location_radius_km: number | null;
   criteria: {
     genres: RecommendationCriterionMode;
@@ -113,7 +112,6 @@ export type ApplicationFormValue = {
 
 export const DEFAULT_RECOMMENDATION_SETTINGS: RecommendationSettings = {
   enabled: false,
-  minimum_score: 75,
   location_radius_km: null,
   criteria: {
     genres: "required",

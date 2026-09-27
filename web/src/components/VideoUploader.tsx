@@ -528,7 +528,7 @@ export default function VideoUploader({
       return [];
     }
 
-    setUploadMessage('Preparing representative review frames...');
+    setUploadMessage('Preparing performance evidence for AI Match Review...');
     const frameUrls: string[] = [];
     for (const [frameIndex, timeMs] of [0, 5000, 10000].entries()) {
       try {
@@ -763,7 +763,7 @@ export default function VideoUploader({
         setUploadProgress(100);
         if (enableReviewFrame && onReviewFrameChange) {
           try {
-            setUploadMessage('Preparing representative review frames...');
+            setUploadMessage('Preparing performance evidence for AI Match Review...');
             const frameResults = await Promise.allSettled(
               getReviewFrameTimes(asset).map((timeMs, frameIndex) =>
                 uploadReviewFrame({
@@ -913,16 +913,13 @@ export default function VideoUploader({
         <View style={styles.loadingOverlay}>
           <View
             accessible
-            accessibilityLabel={`${uploadMessage} Keep this screen open while your video is checked and uploaded.`}
+            accessibilityLabel={uploadMessage}
             accessibilityLiveRegion="polite"
             accessibilityRole="progressbar"
             style={[styles.loadingCard, { backgroundColor: colors.surface }]}
           >
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={[styles.loadingTitle, { color: colors.text }]}>{uploadMessage}</Text>
-            <Text style={[styles.loadingSubtitle, { color: colors.textSecondary }]}>
-              Keep this screen open while your video is checked and uploaded.
-            </Text>
           </View>
         </View>
       </Modal>
@@ -1116,13 +1113,6 @@ const styles = StyleSheet.create({
     marginTop: 14,
     fontSize: 15,
     fontFamily: 'Poppins_600SemiBold',
-    textAlign: 'center',
-  },
-  loadingSubtitle: {
-    marginTop: 6,
-    fontSize: 12,
-    lineHeight: 18,
-    fontFamily: 'Poppins_400Regular',
     textAlign: 'center',
   },
 });

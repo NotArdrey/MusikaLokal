@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -153,6 +153,13 @@ const logCreatePlaylistMp3Error = (
 };
 
 export default function CreatePlaylistScreen() {
+  const formScrollViewRef = useRef<ScrollView>(null);
+  useFocusEffect(
+    useCallback(() => {
+      formScrollViewRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+    }, []),
+  );
+
   const { colors } = useTheme();
   const { loading: authLoading, isGuest, userId } = useAuth();
   const params = useLocalSearchParams<{
@@ -738,7 +745,7 @@ export default function CreatePlaylistScreen() {
     >
       <Header title={screenTitle} onBackPress={() => router.back()} />
 
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
+      <ScrollView ref={formScrollViewRef} style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
         <Text style={[styles.label, { color: colors.text }]}>Album Cover</Text>
         {userId ? (
           <ImageUploader

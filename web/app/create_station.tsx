@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Dimensions,
   Platform,
@@ -28,6 +28,13 @@ const moderateScale = (size: number, factor = 0.3) => {
 };
 
 export default function CreateStationScreen() {
+  const formScrollViewRef = useRef<ScrollView>(null);
+  useFocusEffect(
+    useCallback(() => {
+      formScrollViewRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+    }, []),
+  );
+
   const { colors, isDark } = useTheme();
   const { session, userRole } = useAuth();
   const { edit_id, profile_id } = useLocalSearchParams();
@@ -155,7 +162,7 @@ export default function CreateStationScreen() {
     <View style={[styles.container, { backgroundColor: bg }]}>
       <Header title={isEditing ? "Edit Station" : "Create Station"} onBackPress={() => router.back()} />
 
-      <ScrollView style={styles.content} contentContainerStyle={isWebDesktop ? styles.webContent : styles.mobileContent}>
+      <ScrollView ref={formScrollViewRef} style={styles.content} contentContainerStyle={isWebDesktop ? styles.webContent : styles.mobileContent}>
         <View style={[styles.formShell, isWebDesktop && { backgroundColor: cardBg, borderColor: borderCol }]}>
           {!canManageStations ? (
             <View style={styles.lockedBox}>

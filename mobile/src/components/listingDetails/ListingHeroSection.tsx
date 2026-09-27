@@ -55,7 +55,7 @@ const ListingHeroSection = ({
   } as const;
 
   return (
-  <View style={styles.imageContainer}>
+  <View style={[styles.imageContainer, { backgroundColor: colors.border }]}>
     <CachedImage
       uri={(group.images && group.images[0]) || group.image || null}
       fallbackUri={getGigFallbackImage(group)}

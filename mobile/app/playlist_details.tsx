@@ -28,6 +28,7 @@ import ReportModal from "../src/components/ReportModal";
 import Skeleton from "../src/components/Skeleton";
 import { resolveRadioMediaUrl } from "../src/audio/radioTrackPlayer";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import ConfirmationModal, { normalizeConfirmationInput } from "../src/components/modal";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
@@ -58,6 +59,11 @@ type PlaylistAlert = {
   title: string;
   message: string;
   forceModal?: boolean;
+};
+
+type TrackRemovalTarget = {
+  id: string;
+  title: string;
 };
 
 const COPYRIGHT_MATCH_PATTERN = /this (?:audio|track) appears to match|appears to be copyrighted|ownership request|identity review|admin approval|permission to share/i;
@@ -232,6 +238,9 @@ export default function PlaylistDetailsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [alert, setAlert] = useState<PlaylistAlert | null>(null);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const [removeTrackTarget, setRemoveTrackTarget] = useState<TrackRemovalTarget | null>(null);
+  const [removeTrackConfirmationText, setRemoveTrackConfirmationText] = useState("");
+  const [removingTrackId, setRemovingTrackId] = useState<string | null>(null);
 
   // Add track modal state
   const [addTrackVisible, setAddTrackVisible] = useState(false);
@@ -651,9 +660,36 @@ export default function PlaylistDetailsScreen() {
     }
   }, [playlist?.id, recordPlaylistEvent]);
 
-  const handleRemoveItem = async (itemId: string) => {
+  const openRemoveTrackConfirmation = (item: any) => {
+    const itemId = String(item?.id || "").trim();
+    if (!itemId) return;
+
+    setRemoveTrackConfirmationText("");
+    setRemoveTrackTarget({
+      id: itemId,
+      title: String(item?.title || "Untitled").trim() || "Untitled",
+    });
+  };
+
+  const closeRemoveTrackConfirmation = () => {
+    if (removingTrackId) return;
+    setRemoveTrackTarget(null);
+    setRemoveTrackConfirmationText("");
+  };
+
+  const handleRemoveItem = async () => {
+    const target = removeTrackTarget;
+    if (!target?.id || !playlist?.id || removingTrackId) return;
+    if (
+      normalizeConfirmationInput(removeTrackConfirmationText) !==
+      normalizeConfirmationInput(target.title)
+    ) {
+      return;
+    }
+
+    setRemovingTrackId(target.id);
     try {
-      const body = { action: "remove_playlist_item", item_id: itemId, playlist_id: playlist?.id };
+      const body = { action: "remove_playlist_item", item_id: target.id, playlist_id: playlist.id };
       const { data, error } = await supabase.functions.invoke("manage-playlists", {
         body,
       });
@@ -664,14 +700,20 @@ export default function PlaylistDetailsScreen() {
       }
 
       if (data?.success) {
+        setRemoveTrackTarget(null);
+        setRemoveTrackConfirmationText("");
         emitToast({ type: "info", title: "Removed", message: "Track removed from playlist." });
-        fetchPlaylist();
+        await fetchPlaylist();
         return;
       }
 
       throw new Error(data?.error || "Failed to remove track.");
     } catch (e: any) {
+      setRemoveTrackTarget(null);
+      setRemoveTrackConfirmationText("");
       setAlert({ type: "error", title: "Error", message: e.message });
+    } finally {
+      setRemovingTrackId(null);
     }
   };
 
@@ -1043,6 +1085,11 @@ export default function PlaylistDetailsScreen() {
     !link?.linked_item_id || playableItemIds.has(link.linked_item_id)
   ));
   const isEditingTrack = editingTrackId !== null;
+  const isRemoveTrackConfirmed = Boolean(
+    removeTrackTarget &&
+    normalizeConfirmationInput(removeTrackConfirmationText) ===
+      normalizeConfirmationInput(removeTrackTarget.title),
+  );
   const isTrackFormReady = newTrackTitle.trim().length > 0;
   const isSelectedAudioPubliclyAvailable = newTrackAudioFile
     ? isPlaylistItemPubliclyAvailable({ copyright_status: newTrackAudioFile.copyrightStatus })
@@ -1081,16 +1128,25 @@ export default function PlaylistDetailsScreen() {
 
   const renderTrackRow = (item: any, idx: number, options: { restricted?: boolean } = {}) => {
     const restricted = Boolean(options.restricted);
+    const artistName = typeof item.artist_name === "string" ? item.artist_name.trim() : "";
 
     return (
       <View key={item.id} style={[styles.trackRow, { borderColor: colors.border }]}>
-        <Text style={[styles.trackNum, { color: colors.textSecondary }]}>{idx + 1}</Text>
+        <Text
+          style={[
+            styles.trackNum,
+            restricted && !artistName && styles.trackNumTopAligned,
+            { color: colors.textSecondary },
+          ]}
+        >
+          {idx + 1}
+        </Text>
         {item.cover_image_url ? (
           <CachedImage uri={resolveRadioMediaUrl(item.cover_image_url)} style={styles.trackCoverThumb} />
         ) : null}
         <View style={{ flex: 1, marginLeft: 12 }}>
           <Text style={[styles.trackTitle, { color: colors.text }]} numberOfLines={1}>{item.title || "Untitled"}</Text>
-          <Text style={[styles.trackArtist, { color: colors.textSecondary }]}>{item.artist_name || ""}</Text>
+          {artistName ? <Text style={[styles.trackArtist, { color: colors.textSecondary }]}>{artistName}</Text> : null}
           {restricted ? (
             <View style={[styles.reviewStatusPill, { backgroundColor: colors.primary + "12" }]}>
               <Text style={[styles.reviewStatusText, { color: colors.textSecondary }]}>
@@ -1117,7 +1173,7 @@ export default function PlaylistDetailsScreen() {
             <TouchableOpacity activeOpacity={1} hitSlop={8} onPress={() => openEditTrackModal(item)}>
               <Ionicons name="create-outline" size={18} color={colors.primary} />
             </TouchableOpacity>
-            <TouchableOpacity activeOpacity={1} hitSlop={8} onPress={() => handleRemoveItem(item.id)}>
+            <TouchableOpacity activeOpacity={1} hitSlop={8} onPress={() => openRemoveTrackConfirmation(item)}>
               <Ionicons name="remove-circle-outline" size={20} color="#ef4444" />
             </TouchableOpacity>
           </View>
@@ -1322,6 +1378,25 @@ export default function PlaylistDetailsScreen() {
         />
       )}
 
+      <ConfirmationModal
+        visible={Boolean(removeTrackTarget)}
+        onClose={closeRemoveTrackConfirmation}
+        title="Remove Track"
+        message={`Type "${removeTrackTarget?.title || ""}" to confirm removing this track from the playlist.`}
+        buttonText="Remove"
+        onConfirm={handleRemoveItem}
+        danger
+        showInput
+        inputMultiline={false}
+        inputPlaceholder="Type track title"
+        inputValue={removeTrackConfirmationText}
+        onInputChange={setRemoveTrackConfirmationText}
+        requiredInputValue={removeTrackTarget?.title || ""}
+        confirmDisabled={!isRemoveTrackConfirmed}
+        loading={Boolean(removingTrackId)}
+        loadingMessage="Removing track..."
+      />
+
       {alert && (
         <CustomAlert
           visible
@@ -1472,6 +1547,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: moderateScale(16), fontWeight: "700", marginBottom: 12 },
   trackRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, borderBottomWidth: 0.5 },
   trackNum: { fontSize: moderateScale(13), width: 24, textAlign: "center" },
+  trackNumTopAligned: { alignSelf: "flex-start", marginTop: 2 },
   trackCoverThumb: { width: 40, height: 40, borderRadius: 8, marginLeft: 8 },
   trackTitle: { fontSize: moderateScale(14), fontWeight: "600" },
   trackArtist: { fontSize: moderateScale(12), marginTop: 2 },

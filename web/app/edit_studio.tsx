@@ -15,7 +15,7 @@ import {
     View,
     useWindowDimensions,
 } from "react-native";
-import { Calendar } from "react-native-calendars";
+import { Calendar } from "../src/components/CenteredCalendar";
 import ConflictResolutionModal, {
     ConflictingBooking,
     ConflictResolution,

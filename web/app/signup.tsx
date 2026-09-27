@@ -9,7 +9,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Dimensions, Image, KeyboardAvoidingView, Modal as RNModal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { Calendar } from 'react-native-calendars';
+import { Calendar } from '../src/components/CenteredCalendar';
 import type { DateData } from 'react-native-calendars';
 import { WebView } from 'react-native-webview';
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabase';

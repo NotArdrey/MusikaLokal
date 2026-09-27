@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 
 const IS_WEB = Platform.OS === 'web';
@@ -35,6 +35,13 @@ const readFunctionErrorBody = async (error: any) => {
 };
 
 export default function AddProductionScreen() {
+  const formScrollViewRef = useRef<ScrollView>(null);
+  useFocusEffect(
+    useCallback(() => {
+      formScrollViewRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+    }, []),
+  );
+
   const { colors, isDark } = useTheme();
   const { width: viewportWidth } = useWindowDimensions();
   const isWebDesktop = Platform.OS === 'web' && viewportWidth >= 768;
@@ -183,7 +190,7 @@ export default function AddProductionScreen() {
     <View style={[styles.container, { backgroundColor: pageBackground }]}>
       <Header title="New Production" cardStyle onBackPress={() => router.replace('/my_production')} />
 
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={formScrollViewRef} contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]} showsVerticalScrollIndicator={false}>
         <View style={styles.contentFrame}>
         <View style={[styles.heroCard, { backgroundColor: colors.surface, borderColor: isDark ? '#334155' : '#E2E8F0' }]}>
           <View style={[styles.heroIcon, { backgroundColor: colors.primary + '14' }]}>

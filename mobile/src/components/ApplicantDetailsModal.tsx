@@ -103,61 +103,6 @@ const friendlyRecommendationSummary = (recommendation: any, matchPercentage: num
   return recommendation?.explanation || "Review the application details below before deciding.";
 };
 
-const faceMatchLabel = (value: unknown) => {
-  const status = String(value || "").toLowerCase();
-  if (status === "likely_same_person") return "Possible match";
-  if (status === "likely_different_person") return "Possible mismatch";
-  return status === "not_run" ? "Not checked" : "Needs review";
-};
-
-const faceMatchColor = (value: unknown, fallback: string) => {
-  const status = String(value || "").toLowerCase();
-  if (status === "likely_same_person") return "#10B981";
-  if (status === "likely_different_person") return "#EF4444";
-  return fallback;
-};
-
-const faceMatchIcon = (value: unknown): keyof typeof Ionicons.glyphMap => {
-  const status = String(value || "").toLowerCase();
-  if (status === "likely_same_person") return "checkmark-circle-outline";
-  if (status === "likely_different_person") return "alert-circle-outline";
-  return "warning-outline";
-};
-
-const effectiveFaceMatchStatus = (result: any) => {
-  const storedStatus = String(result?.status || "").toLowerCase();
-  const usableFrames = Math.max(0, Number(result?.usable_frames ?? result?.frames_compared) || 0);
-  const matchedFrames = Math.max(0, Number(result?.matched_frames) || 0);
-  if (storedStatus === "unclear" && usableFrames === 1 && matchedFrames === 1) {
-    return "likely_same_person";
-  }
-  return storedStatus;
-};
-
-const faceMatchSummary = (result: any) => {
-  const status = effectiveFaceMatchStatus(result);
-  if (status === "likely_same_person") return "The applicant may appear in the performance video.";
-  if (status === "likely_different_person") return "The applicant may not appear in the performance video.";
-  return "There wasn't enough clear information to confirm a match.";
-};
-
-const faceMatchDetails = (result: any) => {
-  const usable = Math.max(0, Number(result?.usable_frames ?? result?.frames_compared) || 0);
-  const matched = Math.max(0, Number(result?.matched_frames) || 0);
-  if (usable === 0) return null;
-  if (usable === 1) return "Only one clear frame was found. Please verify manually.";
-  return `${matched} of ${usable} clear frames appeared to match.`;
-};
-
-const unavailableFaceMatchMessage = (result: any) => {
-  const error = String(result?.error || "").toLowerCase();
-  const summary = String(result?.summary || "").toLowerCase();
-  if (["missing_face_service_url", "missing_facepp_credentials"].includes(error) || summary.includes("not configured")) {
-    return "Approved ID and video comparison is temporarily unavailable.";
-  }
-  return "The approved ID portrait and performance video could not be compared.";
-};
-
 const shortLocation = (value: unknown) => {
   const parts = String(value || "")
     .split(",")
@@ -398,6 +343,7 @@ export default function ApplicantDetailsModal({
   const cvDocumentStatus = String(cvDocumentClassification?.status || "").toLowerCase();
   const cvTextExtracted = aiReview?.source_summary?.cv_text_extracted === true;
   const cvExtractionMethod = String(aiReview?.source_summary?.cv_extraction_method || "");
+  const cvExtractionLimitation = String(aiReview?.source_summary?.cv_extraction_limitation || "");
   const cvNameCheck = aiReview?.source_summary?.cv_name_check || null;
   const cvNameCheckStatus = String(cvNameCheck?.status || "not_run").toLowerCase();
   const cvEvidence = storedCvReview.length
@@ -419,12 +365,6 @@ export default function ApplicantDetailsModal({
       }
     : screeningMeta(application.video_copyright_status);
   const portfolio = list(profile.portfolio_urls);
-  const faceSimilarity = aiReview?.face_similarity || null;
-  const groupFaceSimilarity = list(aiReview?.group_face_similarity);
-  const identityDocumentReview = application.identity_document_review || null;
-  const identityDocumentReviews = Array.isArray(application.identity_document_reviews)
-    ? application.identity_document_reviews
-    : [];
   const isPending = String(application.status || "pending").toLowerCase() === "pending";
   const priorApplicationCounts = application.prior_application_counts || null;
   const hasPriorApplicationCounts =
@@ -442,6 +382,8 @@ export default function ApplicantDetailsModal({
       String(profile?.verification_status || "").toUpperCase() === "APPROVED");
   const applicationStatus = titleCase(application.status || "pending");
   const matchedCriteriaCount = list(recommendation?.matched_criteria).length;
+  const memberRequirementCoverage = recommendation?.criteria_snapshot?.member_requirement_coverage || null;
+  const memberCoverageItems = list(memberRequirementCoverage?.members);
   const viewedProfileId = profile?.id || application.applicant_id || application.submitted_by_user_id;
   const audioGenreStatus = hasRecognizedRecording
     ? requiredGenres.length === 0
@@ -542,6 +484,36 @@ export default function ApplicantDetailsModal({
                     <BulletList values={list(recommendation.matched_criteria)} colors={colors} empty="No matched requirements were recorded." />
                     <Text style={[styles.label, { color: "#F59E0B" }]}>Missing or unclear requirements</Text>
                     <BulletList values={list(recommendation.missing_criteria)} colors={colors} empty="No missing requirements were recorded." />
+                    {memberCoverageItems.length > 0 ? (
+                      <View style={[styles.memberCoverage, { borderTopColor: colors.border }]}>
+                        <Text style={[styles.label, { color: colors.text }]}>Member requirement coverage</Text>
+                        <Text style={[styles.memberCoverageSummary, { color: colors.textSecondary }]}>
+                          {memberRequirementCoverage.slot_label || "Selected performer slot"}: {memberRequirementCoverage.matched_count || 0} of {memberRequirementCoverage.total_count || memberCoverageItems.length} roles covered by distinct members
+                        </Text>
+                        {memberCoverageItems.map((item, index) => {
+                          const required = [...list(item?.required_roles), ...list(item?.required_instruments)].join(" + ") || "Configured role";
+                          const memberSkills = [...list(item?.member_roles), ...list(item?.member_instruments)].join(", ");
+                          const confirmed = item?.status === "confirmed" && item?.member_name;
+                          return (
+                            <View key={`${item?.requirement_label || "member"}-${index}`} style={styles.memberCoverageRow}>
+                              <Ionicons
+                                name={confirmed ? "checkmark-circle" : "alert-circle-outline"}
+                                size={16}
+                                color={confirmed ? "#10B981" : "#F59E0B"}
+                              />
+                              <View style={styles.memberCoverageCopy}>
+                                <Text style={[styles.memberCoverageTitle, { color: colors.text }]}>
+                                  {item?.requirement_label || `Member ${index + 1}`}: {required}
+                                </Text>
+                                <Text style={[styles.memberCoverageDetail, { color: colors.textSecondary }]}>
+                                  {confirmed ? `${item.member_name}${memberSkills ? ` — ${memberSkills}` : ""}` : "No distinct roster member matched this requirement."}
+                                </Text>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    ) : null}
                   </>
                 )}
                 <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>Advisory only. All applicants remain accessible and require an organizer decision.</Text>
@@ -707,7 +679,7 @@ export default function ApplicantDetailsModal({
                       <Text style={[styles.body, { color: colors.textSecondary }]}>{"The CV couldn't be reviewed automatically."}</Text>
                       {cvDocumentClassification?.summary ? (
                         <ReviewDetails colors={colors}>
-                          <Text style={[styles.body, { color: colors.textSecondary }]}>{cvDocumentClassification.summary}</Text>
+                          <Text style={[styles.body, { color: colors.textSecondary }]}>{cvExtractionLimitation || cvDocumentClassification.summary}</Text>
                         </ReviewDetails>
                       ) : null}
                     </View>
@@ -715,7 +687,7 @@ export default function ApplicantDetailsModal({
                     <View style={styles.stackMedium}>
                       <StatusRow icon="checkmark-circle-outline" label="CV check complete" color="#10B981" />
                       {cvTextExtracted ? (
-                        <Text style={[styles.body, { color: colors.textSecondary }]}>The text in the uploaded {cvExtractionMethod === "pdf_text" ? "PDF" : cvExtractionMethod === "docx_text" || cvExtractionMethod === "doc_text" ? "Word document" : "document"} was read successfully.</Text>
+                        <Text style={[styles.body, { color: colors.textSecondary }]}>The uploaded {cvExtractionMethod.startsWith("pdf_") ? "PDF" : cvExtractionMethod.startsWith("doc") ? "Word document" : cvExtractionMethod.startsWith("image_") ? "image" : "document"} was read successfully{cvExtractionMethod.includes("vision_ocr") ? " using visual text recognition" : ""}.</Text>
                       ) : null}
                        <Text style={[styles.body, { color: colors.textSecondary }]}>CV match: {cvResult.fitPercent}% ({cvResult.matched.length} of {cvEvidence.length} requirements confirmed)</Text>
                        <ReviewDetails colors={colors}>
@@ -767,106 +739,6 @@ export default function ApplicantDetailsModal({
                   <Text style={[styles.outlineButtonText, { color: colors.primary }]}>Watch performance</Text>
                 </TouchableOpacity>
               ) : <EmptyState colors={colors}>No performance video was uploaded.</EmptyState>}
-              </Subsection>
-
-              <View style={[styles.reviewDivider, { backgroundColor: colors.border }]} />
-
-              <Subsection title="Approved ID & Video Check" icon="person-circle-outline" colors={colors}>
-              {identityDocumentReviews.length > 0 ? (
-                <View style={styles.stackMedium}>
-                  {identityDocumentReviews.map((member: any, index: number) => (
-                    <View key={member?.profile_id || index} style={[styles.memberSignal, { borderColor: colors.border }]}>
-                      <Text style={[styles.label, { color: colors.text }]}>{member?.display_name || `Group member ${index + 1}`}</Text>
-                      {member?.available && member?.url ? (
-                        <View style={styles.stackMedium}>
-                          <Image
-                            source={{ uri: member.url }}
-                            resizeMode="contain"
-                            style={[styles.identityDocumentPreview, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}
-                            accessibilityLabel={`${member?.display_name || "Group member"} approved government ID front`}
-                          />
-                          <TouchableOpacity
-                            onPress={() => onOpenMedia(member.url, `${member?.display_name || "Group member"} approved ID`)}
-                            style={[styles.outlineButton, { borderColor: colors.primary }]}
-                          >
-                            <Ionicons name="id-card-outline" size={18} color={colors.primary} />
-                            <Text style={[styles.outlineButtonText, { color: colors.primary }]}>View approved ID</Text>
-                          </TouchableOpacity>
-                        </View>
-                      ) : (
-                        <Text style={[styles.body, { color: colors.textSecondary }]}>{member?.limitation || "The approved ID image is unavailable."}</Text>
-                      )}
-                    </View>
-                  ))}
-                  <Text style={[styles.advisory, { color: colors.textSecondary }]}>The submitting representative authorized the snapshotted lineup for this application. Do not download or redistribute these identity documents.</Text>
-                </View>
-              ) : null}
-              {identityDocumentReview?.available && identityDocumentReview?.url ? (
-                <View style={styles.stackMedium}>
-                  <Image
-                    source={{ uri: identityDocumentReview.url }}
-                    resizeMode="contain"
-                    style={[styles.identityDocumentPreview, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}
-                    accessibilityLabel="Applicant approved government ID front"
-                  />
-                  <TouchableOpacity
-                    onPress={() => onOpenMedia(identityDocumentReview.url, "Approved applicant ID")}
-                    style={[styles.outlineButton, { borderColor: colors.primary }]}
-                  >
-                    <Ionicons name="id-card-outline" size={18} color={colors.primary} />
-                    <Text style={[styles.outlineButtonText, { color: colors.primary }]}>View approved ID</Text>
-                  </TouchableOpacity>
-                  <Text style={[styles.advisory, { color: colors.textSecondary }]}>Private identity document shared for this application with the applicant's consent. Do not download or redistribute it.</Text>
-                </View>
-              ) : application.identity_document_review_consent === true && groupFaceSimilarity.length === 0 ? (
-                <Text style={[styles.body, { color: colors.textSecondary }]}>{identityDocumentReview?.limitation || "The approved ID image is unavailable."}</Text>
-              ) : null}
-              {!application.ai_portfolio_review_consent ? (
-                <View style={styles.stackMedium}>
-                  <StatusRow icon="information-circle-outline" label="Not checked" color={colors.textSecondary} />
-                  <Text style={[styles.body, { color: colors.textSecondary }]}>The applicant did not authorize this optional check.</Text>
-                </View>
-              ) : groupFaceSimilarity.length > 0 ? (
-                <View style={styles.stackMedium}>
-                  {groupFaceSimilarity.map((member, index) => (
-                    <View key={member?.profile_id || index} style={[styles.memberSignal, { borderColor: colors.border }]}>
-                      <Text style={[styles.label, { color: colors.text }]}>{member?.display_name || `Group member ${index + 1}`}</Text>
-                      <StatusRow
-                        icon={faceMatchIcon(effectiveFaceMatchStatus(member))}
-                        label={faceMatchLabel(effectiveFaceMatchStatus(member))}
-                        color={faceMatchColor(effectiveFaceMatchStatus(member), colors.textSecondary)}
-                      />
-                      <Text style={[styles.body, { color: colors.textSecondary }]}>{faceMatchSummary(member)}</Text>
-                      {Math.max(0, Number(member?.usable_frames ?? member?.frames_compared) || 0) === 1 ? (
-                        <Text style={[styles.manualPrompt, { color: colors.text }]}>{faceMatchDetails(member)}</Text>
-                      ) : null}
-                    </View>
-                  ))}
-                  <Text style={[styles.advisory, { color: colors.textSecondary }]}>Advisory only. Compare each approved member ID with the original video yourself.</Text>
-                </View>
-              ) : ["queued", "processing"].includes(aiReviewStatus) ? (
-                <View style={styles.stackMedium}>
-                  <StatusRow icon="time-outline" label="Check in progress" color="#F59E0B" />
-                  <Text style={[styles.body, { color: colors.textSecondary }]}>Approved ID and video comparison is still processing.</Text>
-                </View>
-              ) : !faceSimilarity?.status || faceSimilarity.status === "not_run" ? (
-                <View style={styles.stackMedium}>
-                  <StatusRow icon="warning-outline" label="Manual review needed" color="#F59E0B" />
-                  <Text style={[styles.body, { color: colors.textSecondary }]}>{unavailableFaceMatchMessage(faceSimilarity)}</Text>
-                </View>
-              ) : (
-                <View style={styles.stackMedium}>
-                  <StatusRow
-                    icon={faceMatchIcon(effectiveFaceMatchStatus(faceSimilarity))}
-                    label={faceMatchLabel(effectiveFaceMatchStatus(faceSimilarity))}
-                    color={faceMatchColor(effectiveFaceMatchStatus(faceSimilarity), colors.textSecondary)}
-                  />
-                  <Text style={[styles.body, { color: colors.textSecondary }]}>{faceMatchSummary(faceSimilarity)}</Text>
-                  {Math.max(0, Number(faceSimilarity?.usable_frames ?? faceSimilarity?.frames_compared) || 0) === 1 ? (
-                    <Text style={[styles.manualPrompt, { color: colors.text }]}>{faceMatchDetails(faceSimilarity)}</Text>
-                  ) : null}
-                </View>
-              )}
               </Subsection>
 
               <View style={[styles.reviewDivider, { backgroundColor: colors.border }]} />
@@ -990,6 +862,12 @@ const styles = StyleSheet.create({
   progressTrack: { height: 7, borderRadius: 999, overflow: "hidden" },
   progressFill: { height: "100%", borderRadius: 999 },
   matchSummary: { fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15 },
+  memberCoverage: { borderTopWidth: 1, marginTop: 3, paddingTop: 7, gap: 7 },
+  memberCoverageSummary: { fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15 },
+  memberCoverageRow: { flexDirection: "row", alignItems: "flex-start", gap: 7 },
+  memberCoverageCopy: { flex: 1, minWidth: 0 },
+  memberCoverageTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 10, lineHeight: 15 },
+  memberCoverageDetail: { fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14 },
   quickStats: { borderTopWidth: 1, paddingTop: 13, flexDirection: "row", alignItems: "center" },
   quickStat: { flex: 1, alignItems: "center" },
   quickStatValue: { fontFamily: "Poppins_700Bold", fontSize: 16, lineHeight: 21 },
@@ -1029,8 +907,6 @@ const styles = StyleSheet.create({
   bulletRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   bulletDot: { width: 5, height: 5, borderRadius: 3, marginTop: 7 },
   bulletText: { flex: 1 },
-  memberSignal: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 3 },
-  identityDocumentPreview: { width: "100%", height: 190, borderWidth: 1, borderRadius: 12 },
   historySummary: { borderRadius: 11, padding: 12, gap: 3, marginBottom: 3 },
   outlineButton: { minHeight: 44, borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 8 },
   outlineButtonText: { flex: 1, fontFamily: "Poppins_600SemiBold", fontSize: 12 },

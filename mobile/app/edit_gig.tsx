@@ -12,7 +12,7 @@ import {
     TouchableOpacity,
     View
 } from "react-native";
-import { Calendar } from "react-native-calendars";
+import { Calendar } from "../src/components/CenteredCalendar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import LoadingState from "../src/components/LoadingState";
 import GigReapplicationCooldownField, {
@@ -26,7 +26,6 @@ import GigRecommendationSettings, {
 import GigPresetDropdown, {
   GIG_GENRE_OPTIONS,
   GIG_INSTRUMENT_OPTIONS,
-  GIG_ROLE_OPTIONS,
 } from "../src/components/GigPresetDropdown";
 import GigSpecificSlotRequirements from "../src/components/GigSpecificSlotRequirements";
 import Header from "../src/components/header";
@@ -34,7 +33,6 @@ import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
-import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
 import { editFormStyles } from "../src/theme/formStyles";
 import { radius, typography } from "../src/theme/tokens";
@@ -51,6 +49,7 @@ import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/st
 import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
 import {
   aggregateSpecificSlotRequirements,
+  getSharedSlotRequirements,
   normalizeSpecificSlotRequirements,
   type GigSpecificSlotRequirement,
 } from "../src/utils/gigSlotRequirements";
@@ -276,6 +275,7 @@ export default function EditGigScreen() {
   const [musicianType, setMusicianType] = useState<"solo" | "group" | "both">(
     "both",
   );
+  const [experienceLevel, setExperienceLevel] = useState("");
   const [requiredGenres, setRequiredGenres] = useState<string[]>([]);
   const [newGenre, setNewGenre] = useState("");
   const [requiredInstruments, setRequiredInstruments] = useState<string[]>([]);
@@ -286,31 +286,10 @@ export default function EditGigScreen() {
   const [duoSlotsNeeded, setDuoSlotsNeeded] = useState<number>(0);
   const [bandSlotsNeeded, setBandSlotsNeeded] = useState<number>(0);
 
-  // Specific roles/instruments needed
-  const [soloRolesNeeded, setSoloRolesNeeded] = useState<string[]>([]);
-  const [newSoloRole, setNewSoloRole] = useState("");
-  const [soloPreferredGenres, setSoloPreferredGenres] = useState<string[]>([]);
-  const [newSoloPreferredGenre, setNewSoloPreferredGenre] = useState("");
-  const [soloPreferredInstruments, setSoloPreferredInstruments] = useState<string[]>([]);
-  const [newSoloPreferredInstrument, setNewSoloPreferredInstrument] = useState("");
-  const [duoRolesNeeded, setDuoRolesNeeded] = useState<string[]>([]);
-  const [newDuoRole, setNewDuoRole] = useState("");
-  const [duoPreferredGenres, setDuoPreferredGenres] = useState<string[]>([]);
-  const [newDuoPreferredGenre, setNewDuoPreferredGenre] = useState("");
-  const [duoPreferredInstruments, setDuoPreferredInstruments] = useState<string[]>([]);
-  const [newDuoPreferredInstrument, setNewDuoPreferredInstrument] = useState("");
+    // Requirements for each performer slot
   const [soloSpecificRequirements, setSoloSpecificRequirements] = useState<GigSpecificSlotRequirement[]>([]);
   const [duoSpecificRequirements, setDuoSpecificRequirements] = useState<GigSpecificSlotRequirement[]>([]);
-  const [bandRolesNeeded, setBandRolesNeeded] = useState<string[]>([]);
-  const [newBandRole, setNewBandRole] = useState("");
-  const [bandPreferredGenres, setBandPreferredGenres] = useState<string[]>([]);
-  const [newBandPreferredGenre, setNewBandPreferredGenre] = useState("");
-  const [bandPreferredInstruments, setBandPreferredInstruments] = useState<string[]>([]);
-  const [newBandPreferredInstrument, setNewBandPreferredInstrument] = useState("");
-
-  // Preferred group types for band slots
-  const [preferredGroupTypes, setPreferredGroupTypes] = useState<string[]>([]);
-  const [newGroupType, setNewGroupType] = useState("");
+  const [bandSpecificRequirements, setBandSpecificRequirements] = useState<GigSpecificSlotRequirement[]>([]);
 
   // Anti-spam settings
   const [reapplicationCooldownHours, setReapplicationCooldownHours] = useState<number>(30 * 24);
@@ -324,6 +303,7 @@ export default function EditGigScreen() {
   const [contractUrl, setContractUrl] = useState<string>("");
   const [contractFileName, setContractFileName] = useState<string>("");
   const [uploadingContract, setUploadingContract] = useState(false);
+  const contractPickerInProgressRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Business Permit state
@@ -521,50 +501,22 @@ export default function EditGigScreen() {
     setMusicianType("both");
   }, [soloSlotsNeeded, duoSlotsNeeded, bandSlotsNeeded]);
 
-  const updateSoloSlotCount = (next: number) => {
+    const updateSoloSlotCount = (next: number) => {
     const count = Math.max(0, next);
     setSoloSlotsNeeded(count);
-    setSoloSpecificRequirements((current) => normalizeSpecificSlotRequirements(current, count, "solo", {
-      roles: soloRolesNeeded, preferred_genres: soloPreferredGenres, preferred_instruments: soloPreferredInstruments,
-    }));
+    setSoloSpecificRequirements((current) => normalizeSpecificSlotRequirements(current, count, "solo"));
   };
 
   const updateDuoSlotCount = (next: number) => {
     const count = Math.max(0, next);
     setDuoSlotsNeeded(count);
-    setDuoSpecificRequirements((current) => normalizeSpecificSlotRequirements(current, count, "duo", {
-      roles: duoRolesNeeded, preferred_genres: duoPreferredGenres, preferred_instruments: duoPreferredInstruments,
-    }));
+    setDuoSpecificRequirements((current) => normalizeSpecificSlotRequirements(current, count, "duo"));
   };
 
-  const addPreferredGroupType = (value: string) => {
-    if (preferredGroupTypes.length >= bandSlotsNeeded) {
-      showAlert(
-        "warning",
-        "All Group Slots Assigned",
-        "Add another group slot before choosing another group type.",
-      );
-      return;
-    }
-
-    setPreferredGroupTypes((current) => [...current, value]);
-  };
-
-  const removePreferredGroupType = (value: string) => {
-    setPreferredGroupTypes((current) => {
-      const lastIndex = current.lastIndexOf(value);
-      return lastIndex < 0
-        ? current
-        : current.filter((_, index) => index !== lastIndex);
-    });
-  };
-
-  const decrementGroupSlots = () => {
-    setBandSlotsNeeded((current) => {
-      const next = Math.max(0, current - 1);
-      setPreferredGroupTypes((types) => types.slice(0, next));
-      return next;
-    });
+  const updateBandSlotCount = (next: number) => {
+    const count = Math.max(0, next);
+    setBandSlotsNeeded(count);
+    setBandSpecificRequirements((current) => normalizeSpecificSlotRequirements(current, count, "band"));
   };
 
   const fetchGigDetails = async () => {
@@ -734,6 +686,7 @@ export default function EditGigScreen() {
         setEventSchedules([]);
       }
       setMusicianType(data.requirements?.musician_type || "both");
+      setExperienceLevel(data.requirements?.experience_level || "");
       setRequiredGenres(
         Array.isArray(data.requirements?.genres)
           ? data.requirements.genres
@@ -744,44 +697,40 @@ export default function EditGigScreen() {
           ? data.requirements.instruments
           : [],
       );
-      // Load detailed slot data
+            // Load detailed slot data and lift legacy shared requirements into each slot.
       const slots = data.requirements?.slots;
       if (slots) {
         const soloCount = Number(slots.solo?.needed || 0);
         const duoCount = Number(slots.duo?.needed || 0);
+        const bandCount = Number(slots.band?.needed || 0);
+        const preferredGroupTypes = Array.isArray(slots.band?.preferred_group_types)
+          ? slots.band.preferred_group_types
+          : [];
+
         setSoloSlotsNeeded(soloCount);
-        setSoloRolesNeeded(Array.isArray(slots.solo?.roles) ? slots.solo.roles : []);
-        setSoloPreferredGenres(Array.isArray(slots.solo?.preferred_genres) ? slots.solo.preferred_genres : []);
-        setSoloPreferredInstruments(Array.isArray(slots.solo?.preferred_instruments) ? slots.solo.preferred_instruments : []);
         setSoloSpecificRequirements(normalizeSpecificSlotRequirements(
           slots.solo?.specific_requirements,
           soloCount,
           "solo",
-          {
-            roles: Array.isArray(slots.solo?.roles) ? slots.solo.roles : [],
-            preferred_genres: Array.isArray(slots.solo?.preferred_genres) ? slots.solo.preferred_genres : [],
-            preferred_instruments: Array.isArray(slots.solo?.preferred_instruments) ? slots.solo.preferred_instruments : [],
-          },
+          getSharedSlotRequirements(slots.solo),
         ));
         setDuoSlotsNeeded(duoCount);
-        setDuoRolesNeeded(Array.isArray(slots.duo?.roles) ? slots.duo.roles : []);
-        setDuoPreferredGenres(Array.isArray(slots.duo?.preferred_genres) ? slots.duo.preferred_genres : []);
-        setDuoPreferredInstruments(Array.isArray(slots.duo?.preferred_instruments) ? slots.duo.preferred_instruments : []);
         setDuoSpecificRequirements(normalizeSpecificSlotRequirements(
           slots.duo?.specific_requirements,
           duoCount,
           "duo",
+          getSharedSlotRequirements(slots.duo),
+        ));
+        setBandSlotsNeeded(bandCount);
+        setBandSpecificRequirements(normalizeSpecificSlotRequirements(
+          slots.band?.specific_requirements,
+          bandCount,
+          "band",
           {
-            roles: Array.isArray(slots.duo?.roles) ? slots.duo.roles : [],
-            preferred_genres: Array.isArray(slots.duo?.preferred_genres) ? slots.duo.preferred_genres : [],
-            preferred_instruments: Array.isArray(slots.duo?.preferred_instruments) ? slots.duo.preferred_instruments : [],
+            ...getSharedSlotRequirements(slots.band),
+            group_types: preferredGroupTypes,
           },
         ));
-        setBandSlotsNeeded(slots.band?.needed || 0);
-        setBandRolesNeeded(Array.isArray(slots.band?.roles) ? slots.band.roles : []);
-        setPreferredGroupTypes(Array.isArray(slots.band?.preferred_group_types) ? slots.band.preferred_group_types : []);
-        setBandPreferredGenres(Array.isArray(slots.band?.preferred_genres) ? slots.band.preferred_genres : []);
-        setBandPreferredInstruments(Array.isArray(slots.band?.preferred_instruments) ? slots.band.preferred_instruments : []);
       }
 
       // Load anti-spam settings
@@ -883,7 +832,7 @@ export default function EditGigScreen() {
     images.length > 0 &&
     getNormalizedEventSchedules().length > 0;
 
-  const performSave = async () => {
+  const performSave = async (confirmedPendingCloseCount?: number) => {
     if (saving) return;
     setSaving(true);
 
@@ -912,16 +861,13 @@ export default function EditGigScreen() {
       const primarySchedule = normalizedSchedules[0];
       const normalizedSoloRequirements = normalizeSpecificSlotRequirements(soloSpecificRequirements, soloSlotsNeeded, "solo");
       const normalizedDuoRequirements = normalizeSpecificSlotRequirements(duoSpecificRequirements, duoSlotsNeeded, "duo");
-      const soloAggregate = aggregateSpecificSlotRequirements(normalizedSoloRequirements, {
-        roles: soloRolesNeeded,
-        preferred_genres: soloPreferredGenres,
-        preferred_instruments: soloPreferredInstruments,
-      });
-      const duoAggregate = aggregateSpecificSlotRequirements(normalizedDuoRequirements, {
-        roles: duoRolesNeeded,
-        preferred_genres: duoPreferredGenres,
-        preferred_instruments: duoPreferredInstruments,
-      });
+      const normalizedBandRequirements = normalizeSpecificSlotRequirements(bandSpecificRequirements, bandSlotsNeeded, "band");
+      const soloAggregate = aggregateSpecificSlotRequirements(normalizedSoloRequirements);
+      const duoAggregate = aggregateSpecificSlotRequirements(normalizedDuoRequirements);
+      const bandAggregate = aggregateSpecificSlotRequirements(normalizedBandRequirements);
+      const preferredGroupTypes = normalizedBandRequirements
+        .map((slot) => slot.group_type || "")
+        .filter(Boolean);
 
       const payload = {
         name: gigName,
@@ -942,6 +888,7 @@ export default function EditGigScreen() {
           event_end_time: primarySchedule?.end_time || eventEndTime,
           event_schedules: normalizedSchedules,
           musician_type: musicianType,
+          experience_level: experienceLevel || null,
           // Detailed slots with counts
           slots: {
             solo: {
@@ -956,10 +903,9 @@ export default function EditGigScreen() {
             },
             band: {
               needed: bandSlotsNeeded,
-              roles: bandRolesNeeded,
+              ...bandAggregate,
               preferred_group_types: preferredGroupTypes,
-              preferred_genres: bandPreferredGenres,
-              preferred_instruments: bandPreferredInstruments,
+              specific_requirements: normalizedBandRequirements,
             },
           },
           total_slots_needed: soloSlotsNeeded + duoSlotsNeeded + bandSlotsNeeded,
@@ -985,6 +931,10 @@ export default function EditGigScreen() {
             longitude: payload.longitude,
             event_date: payload.event_date,
             requirements: payload.requirements,
+            request_pending_close_confirmation: true,
+            ...(typeof confirmedPendingCloseCount === "number"
+              ? { confirmed_pending_close_count: confirmedPendingCloseCount }
+              : {}),
           },
           p_reason: 'Updated from Edit Gig screen by organizer',
         },
@@ -1004,6 +954,31 @@ export default function EditGigScreen() {
 
       const rpcResult: any = responseData;
       if (!rpcResult?.success) {
+        if (rpcResult?.code === 'PENDING_APPLICATION_CLOSURE_CONFIRMATION_REQUIRED') {
+          const pendingApplicationCount = Number(rpcResult?.pending_application_count || 0);
+          const applicationLabel = pendingApplicationCount === 1
+            ? 'pending application'
+            : 'pending applications';
+          const isRequirementClosure = rpcResult?.closure_reason !== 'slots_filled';
+
+          showAlert(
+            'warning',
+            isRequirementClosure ? 'Update gig requirements?' : 'Close pending applications?',
+            isRequirementClosure
+              ? `Changing these requirements will close ${pendingApplicationCount} ${applicationLabel}.`
+              : `All available slots are filled. Saving these changes will close ${pendingApplicationCount} ${applicationLabel}.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Update Gig',
+                style: 'default',
+                onPress: () => { void performSave(pendingApplicationCount); },
+              },
+            ],
+          );
+          return;
+        }
+
         if (
           rpcResult?.code === 'SLOT_CONFLICT_TOTAL' ||
           rpcResult?.code === 'SLOT_CONFLICT_SOLO' ||
@@ -1076,14 +1051,12 @@ export default function EditGigScreen() {
       }
 
       const reconfirmRequired = Number(rpcResult?.reconfirmation?.required_count || 0);
-      const systemRejectedPending = Number(rpcResult?.system_rejected_pending_count || 0);
       const softClosed = Boolean(rpcResult?.soft_closed);
-      const softClosedRejected = Number(rpcResult?.soft_closed_rejected_count || 0);
 
       let successMessage =
         isReapplyAction
           ? 'Gig updated and permit resubmitted for permit review.'
-          : 'Gig updated successfully!';
+          : 'Your changes have been saved successfully.';
       const updateNotes: string[] = [];
 
       if (reconfirmRequired > 0) {
@@ -1091,15 +1064,8 @@ export default function EditGigScreen() {
         updateNotes.push(`${reconfirmRequired} accepted applicant(s) moved to reconfirmation with a ${hours}-hour response window.`);
       }
 
-      if (systemRejectedPending > 0) {
-        updateNotes.push(`${systemRejectedPending} pending applicant(s) were system-closed because requirements changed.`);
-      }
-
       if (softClosed) {
         updateNotes.push('Gig was soft-closed because accepted/approved applicants now fill all available slots.');
-        if (softClosedRejected > 0) {
-          updateNotes.push(`${softClosedRejected} pending applicant(s) were notified that slots are full.`);
-        }
       }
 
       if (reapplyLimitReached) {
@@ -1117,7 +1083,7 @@ export default function EditGigScreen() {
       setInitialBusinessPermitUrl(payload.business_permit_url || "");
       invalidateListingCaches(user.id, ["bookings", "details", "feed", "home", "search"]);
 
-      showAlert("success", "Success", successMessage, [
+      showAlert("success", "Gig Updated", successMessage, [
         {
           text: "OK",
           onPress: () => {
@@ -1137,34 +1103,12 @@ export default function EditGigScreen() {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (!validateForm()) {
       return;
     }
 
-    const isReapplyAction = isReapplyRequested && canReapplyPermit;
-    const reapplyLimitReached =
-      permitStatus === "rejected" &&
-      isReapplyRequested &&
-      !hasPermitResubmissionRemaining;
-
-    showAlert(
-      "warning",
-      isReapplyAction ? "Save & Reapply" : "Save Changes",
-      reapplyLimitReached
-        ? "Save your updates now? Permit resubmission is no longer available because the one allowed retry was already used."
-        : isReapplyAction
-        ? "Save your updates and resubmit this gig permit for permit review?"
-        : "Are you sure you want to update this gig profile?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: isReapplyAction ? "Save & Reapply" : "Save & Update",
-          style: "default",
-          onPress: () => performSave(),
-        },
-      ],
-    );
+    void performSave();
   };
 
   const renderSectionHeader = (
@@ -1242,6 +1186,7 @@ export default function EditGigScreen() {
 
   const handleContractUpload = async () => {
     try {
+      if (uploadingContract || contractPickerInProgressRef.current) return;
       setUploadingContract(true);
 
       if (Platform.OS === "web") {
@@ -1253,20 +1198,29 @@ export default function EditGigScreen() {
       }
 
       // Dynamic import for native platforms only
+      contractPickerInProgressRef.current = true;
       const DocumentPicker = await import("expo-document-picker");
       const result = await DocumentPicker.getDocumentAsync({
         type: "application/pdf",
         copyToCacheDirectory: DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
+        base64: false,
       });
 
-      if (result.canceled) {
-        setUploadingContract(false);
-        return;
-      }
+      if (result.canceled) return;
 
-      const file = result.assets[0];
+      const file = result.assets?.[0];
+      if (!file) throw new Error("No contract file was selected.");
       const fileName = file.name;
       const fileUri = file.uri;
+      const fileSizeBytes = Number(file.size || 0);
+      if (!/\.pdf$/i.test(fileName) && file.mimeType?.toLowerCase() !== "application/pdf") {
+        showAlert("warning", "PDF Required", "Please select a PDF contract.");
+        return;
+      }
+      if (fileSizeBytes > 20 * 1024 * 1024) {
+        showAlert("warning", "File Too Large", "Contract PDFs must be 20 MB or smaller.");
+        return;
+      }
 
       const {
         data: { session },
@@ -1304,6 +1258,7 @@ export default function EditGigScreen() {
         "Failed to upload contract. Please try again.",
       );
     } finally {
+      contractPickerInProgressRef.current = false;
       setUploadingContract(false);
     }
   };
@@ -1445,6 +1400,17 @@ export default function EditGigScreen() {
   const handleWebFileSelect = async (event: any) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    if (!/\.pdf$/i.test(file.name) && file.type?.toLowerCase() !== "application/pdf") {
+      showAlert("warning", "PDF Required", "Please select a PDF contract.");
+      event.target.value = "";
+      return;
+    }
+    if (Number(file.size || 0) > 20 * 1024 * 1024) {
+      showAlert("warning", "File Too Large", "Contract PDFs must be 20 MB or smaller.");
+      event.target.value = "";
+      return;
+    }
 
     try {
       setUploadingContract(true);
@@ -1674,7 +1640,14 @@ export default function EditGigScreen() {
                       alignItems: "center",
                       justifyContent: "center",
                     },
-                    selected: { borderRadius: 16 },
+                    selected: {
+                      width: 32,
+                      height: 32,
+                      borderRadius: 16,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      alignSelf: "center",
+                    },
                     text: {
                       marginTop: 0,
                       includeFontPadding: false,
@@ -1903,707 +1876,37 @@ export default function EditGigScreen() {
           </View>
 
           {renderSectionHeader("Looking For", "people")}
-          <View style={styles.inputContainer}>
-            <Text style={[styles.inputSubLabel, { color: colors.textSecondary, marginBottom: 8 }]}>
-              Configure Solo, Duo, and Group slots separately below.
-            </Text>
-          </View>
-
           {/* Detailed Slots Configuration */}
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
               How many performers do you need?
             </Text>
             <Text style={[styles.inputSubLabel, { color: colors.textSecondary, marginBottom: 12, fontSize: 12 }]}>
-              Set limits per category. Applicants cannot apply more than once per gig.
+              Set the number of slots needed in each category.
             </Text>
 
-            {/* Solo Artists Slots */}
-            <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
-              <View style={styles.slotHeader}>
-                <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-                  <Ionicons name="person" size={20} color="#EC4899" />
-                  <Text style={[styles.slotTitle, { color: colors.text }]}>Solo Artists</Text>
-                </View>
-                <View style={styles.counterContainer}>
-                  <TouchableOpacity activeOpacity={1}
-                        onPress={() => updateSoloSlotCount(soloSlotsNeeded - 1)}
-                    style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
-                  >
-                    <Ionicons name="remove" size={18} color={colors.text} />
-                  </TouchableOpacity>
-                  <Text style={[styles.counterValue, { color: colors.text }]}>{soloSlotsNeeded}</Text>
-                  <TouchableOpacity activeOpacity={1}
-                        onPress={() => updateSoloSlotCount(soloSlotsNeeded + 1)}
-                    style={[styles.counterBtn, { backgroundColor: colors.primary }]}
-                  >
-                    <Ionicons name="add" size={18} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-              {soloSlotsNeeded > 0 && (
-                <GigSpecificSlotRequirements
-                  slotType="solo"
-                  value={soloSpecificRequirements}
-                  onChange={setSoloSpecificRequirements}
-                />
-              )}
-              {soloSlotsNeeded > 0 && (
-                <View style={{ marginTop: 12 }}>
-                  <Text style={[styles.slotSubLabel, { color: colors.textSecondary }]}>
-                    Shared requirements for every solo slot (optional):
-                  </Text>
-                  <GigPresetDropdown options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS]} selectedValues={soloRolesNeeded} onSelect={(value) => setSoloRolesNeeded((current) => [...current, value])} placeholder="Choose a role or instrument" />
-                  <View style={[styles.addMemberRow, { marginTop: 8 }]}>
-                    <View
-                      style={[
-                        styles.inputWrapper,
-                        styles.flex1,
-                        { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" },
-                      ]}
-                    >
-                      <TextInput
-                        value={newSoloRole}
-                        onChangeText={setNewSoloRole}
-                        placeholder="e.g., Acoustic Guitarist, Singer..."
-                        placeholderTextColor={colors.textSecondary}
-                        style={[styles.textInput, { color: colors.text }]}
-                        onSubmitEditing={() => {
-                          if (newSoloRole.trim()) {
-                            setSoloRolesNeeded([...soloRolesNeeded, newSoloRole.trim()]);
-                            setNewSoloRole("");
-                          }
-                        }}
-                      />
-                    </View>
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => {
-                        if (newSoloRole.trim()) {
-                          setSoloRolesNeeded([...soloRolesNeeded, newSoloRole.trim()]);
-                          setNewSoloRole("");
-                        }
-                      }}
-                      style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="add" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  {soloRolesNeeded.length > 0 && (
-                    <View style={[styles.chipContainer, { marginTop: 8 }]}>
-                      {soloRolesNeeded.map((role, index) => (
-                        <View key={index} style={[styles.chip, { backgroundColor: "#EC489920" }]}>
-                          <Text style={[styles.chipText, { color: "#EC4899" }]}>{role}</Text>
-                          <TouchableOpacity activeOpacity={1} onPress={() => setSoloRolesNeeded(soloRolesNeeded.filter((_, i) => i !== index))}>
-                            <Ionicons name="close-circle" size={16} color="#EC4899" />
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-                    </View>
-                  )}
+            <GigSpecificSlotRequirements
+              slotType="solo"
+              count={soloSlotsNeeded}
+              onCountChange={updateSoloSlotCount}
+              value={soloSpecificRequirements}
+              onChange={setSoloSpecificRequirements}
+            />
+            <GigSpecificSlotRequirements
+              slotType="duo"
+              count={duoSlotsNeeded}
+              onCountChange={updateDuoSlotCount}
+              value={duoSpecificRequirements}
+              onChange={setDuoSpecificRequirements}
+            />
+            <GigSpecificSlotRequirements
+              slotType="band"
+              count={bandSlotsNeeded}
+              onCountChange={updateBandSlotCount}
+              value={bandSpecificRequirements}
+              onChange={setBandSpecificRequirements}
+            />
 
-                  <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
-                    Genres (optional):
-                  </Text>
-                  <GigPresetDropdown options={GIG_GENRE_OPTIONS} selectedValues={soloPreferredGenres} onSelect={(value) => setSoloPreferredGenres((current) => [...current, value])} placeholder="Choose a genre" />
-                  <View style={[styles.addMemberRow, { marginTop: 8 }]}>
-                    <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
-                      <TextInput
-                        value={newSoloPreferredGenre}
-                        onChangeText={setNewSoloPreferredGenre}
-                        placeholder="e.g., Pop, Acoustic..."
-                        placeholderTextColor={colors.textSecondary}
-                        style={[styles.textInput, { color: colors.text }]}
-                        onSubmitEditing={() => {
-                          const trimmed = newSoloPreferredGenre.trim();
-                          if (!trimmed) return;
-                          if (soloPreferredGenres.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
-                            setNewSoloPreferredGenre("");
-                            return;
-                          }
-                          setSoloPreferredGenres([...soloPreferredGenres, trimmed]);
-                          setNewSoloPreferredGenre("");
-                        }}
-                      />
-                    </View>
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => {
-                        const trimmed = newSoloPreferredGenre.trim();
-                        if (!trimmed) return;
-                        if (soloPreferredGenres.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
-                          setNewSoloPreferredGenre("");
-                          return;
-                        }
-                        setSoloPreferredGenres([...soloPreferredGenres, trimmed]);
-                        setNewSoloPreferredGenre("");
-                      }}
-                      style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="add" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  {soloPreferredGenres.length > 0 && (
-                    <View style={[styles.chipContainer, { marginTop: 8 }]}>
-                      {soloPreferredGenres.map((genre, index) => (
-                        <View key={index} style={[styles.chip, { backgroundColor: "#EC489920" }]}>
-                          <Text style={[styles.chipText, { color: "#EC4899" }]}>{genre}</Text>
-                          <TouchableOpacity activeOpacity={1} onPress={() => setSoloPreferredGenres(soloPreferredGenres.filter((_, i) => i !== index))}>
-                            <Ionicons name="close-circle" size={16} color="#EC4899" />
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
-                  <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
-                    Instruments (optional):
-                  </Text>
-                  <GigPresetDropdown options={GIG_INSTRUMENT_OPTIONS} selectedValues={soloPreferredInstruments} onSelect={(value) => setSoloPreferredInstruments((current) => [...current, value])} placeholder="Choose an instrument" />
-                  <View style={[styles.addMemberRow, { marginTop: 8 }]}>
-                    <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
-                      <TextInput
-                        value={newSoloPreferredInstrument}
-                        onChangeText={setNewSoloPreferredInstrument}
-                        placeholder="e.g., Acoustic Guitar, Cajon..."
-                        placeholderTextColor={colors.textSecondary}
-                        style={[styles.textInput, { color: colors.text }]}
-                        onSubmitEditing={() => {
-                          const trimmed = newSoloPreferredInstrument.trim();
-                          if (!trimmed) return;
-                          if (soloPreferredInstruments.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
-                            setNewSoloPreferredInstrument("");
-                            return;
-                          }
-                          setSoloPreferredInstruments([...soloPreferredInstruments, trimmed]);
-                          setNewSoloPreferredInstrument("");
-                        }}
-                      />
-                    </View>
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => {
-                        const trimmed = newSoloPreferredInstrument.trim();
-                        if (!trimmed) return;
-                        if (soloPreferredInstruments.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
-                          setNewSoloPreferredInstrument("");
-                          return;
-                        }
-                        setSoloPreferredInstruments([...soloPreferredInstruments, trimmed]);
-                        setNewSoloPreferredInstrument("");
-                      }}
-                      style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="add" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  {soloPreferredInstruments.length > 0 && (
-                    <View style={[styles.chipContainer, { marginTop: 8 }]}>
-                      {soloPreferredInstruments.map((instrument, index) => (
-                        <View key={index} style={[styles.chip, { backgroundColor: "#EC489920" }]}>
-                          <Text style={[styles.chipText, { color: "#EC4899" }]}>{instrument}</Text>
-                          <TouchableOpacity activeOpacity={1} onPress={() => setSoloPreferredInstruments(soloPreferredInstruments.filter((_, i) => i !== index))}>
-                            <Ionicons name="close-circle" size={16} color="#EC4899" />
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                </View>
-              )}
-            </View>
-
-            {/* Duo Slots */}
-            <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB", marginTop: 12 }]}>
-              <View style={styles.slotHeader}>
-                <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-                  <Ionicons name="people" size={20} color="#8B5CF6" />
-                  <Text style={[styles.slotTitle, { color: colors.text }]}>Duos (2 members)</Text>
-                </View>
-                <View style={styles.counterContainer}>
-                  <TouchableOpacity activeOpacity={1}
-                        onPress={() => updateDuoSlotCount(duoSlotsNeeded - 1)}
-                    style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
-                  >
-                    <Ionicons name="remove" size={18} color={colors.text} />
-                  </TouchableOpacity>
-                  <Text style={[styles.counterValue, { color: colors.text }]}>{duoSlotsNeeded}</Text>
-                  <TouchableOpacity activeOpacity={1}
-                        onPress={() => updateDuoSlotCount(duoSlotsNeeded + 1)}
-                    style={[styles.counterBtn, { backgroundColor: colors.primary }]}
-                  >
-                    <Ionicons name="add" size={18} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-              {duoSlotsNeeded > 0 && (
-                <GigSpecificSlotRequirements
-                  slotType="duo"
-                  value={duoSpecificRequirements}
-                  onChange={setDuoSpecificRequirements}
-                />
-              )}
-              {duoSlotsNeeded > 0 && (
-                <View style={{ marginTop: 12 }}>
-                  <Text style={[styles.slotSubLabel, { color: colors.textSecondary }]}>
-                    Shared requirements for every duo slot (optional):
-                  </Text>
-                  <GigPresetDropdown options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS]} selectedValues={duoRolesNeeded} onSelect={(value) => setDuoRolesNeeded((current) => [...current, value])} placeholder="Choose a role or instrument" />
-                  <View style={[styles.addMemberRow, { marginTop: 8 }]}>
-                    <View
-                      style={[
-                        styles.inputWrapper,
-                        styles.flex1,
-                        { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" },
-                      ]}
-                    >
-                      <TextInput
-                        value={newDuoRole}
-                        onChangeText={setNewDuoRole}
-                        placeholder="e.g., Vocalist + Guitarist..."
-                        placeholderTextColor={colors.textSecondary}
-                        style={[styles.textInput, { color: colors.text }]}
-                        onSubmitEditing={() => {
-                          if (newDuoRole.trim()) {
-                            setDuoRolesNeeded([...duoRolesNeeded, newDuoRole.trim()]);
-                            setNewDuoRole("");
-                          }
-                        }}
-                      />
-                    </View>
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => {
-                        if (newDuoRole.trim()) {
-                          setDuoRolesNeeded([...duoRolesNeeded, newDuoRole.trim()]);
-                          setNewDuoRole("");
-                        }
-                      }}
-                      style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="add" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  {duoRolesNeeded.length > 0 && (
-                    <View style={[styles.chipContainer, { marginTop: 8 }]}>
-                      {duoRolesNeeded.map((role, index) => (
-                        <View key={index} style={[styles.chip, { backgroundColor: "#8B5CF620" }]}>
-                          <Text style={[styles.chipText, { color: "#8B5CF6" }]}>{role}</Text>
-                          <TouchableOpacity activeOpacity={1} onPress={() => setDuoRolesNeeded(duoRolesNeeded.filter((_, i) => i !== index))}>
-                            <Ionicons name="close-circle" size={16} color="#8B5CF6" />
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
-                  <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
-                    Genres (optional):
-                  </Text>
-                  <GigPresetDropdown options={GIG_GENRE_OPTIONS} selectedValues={duoPreferredGenres} onSelect={(value) => setDuoPreferredGenres((current) => [...current, value])} placeholder="Choose a genre" />
-                  <View style={[styles.addMemberRow, { marginTop: 8 }]}>
-                    <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
-                      <TextInput
-                        value={newDuoPreferredGenre}
-                        onChangeText={setNewDuoPreferredGenre}
-                        placeholder="e.g., OPM, Pop..."
-                        placeholderTextColor={colors.textSecondary}
-                        style={[styles.textInput, { color: colors.text }]}
-                        onSubmitEditing={() => {
-                          const trimmed = newDuoPreferredGenre.trim();
-                          if (!trimmed) return;
-                          if (duoPreferredGenres.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
-                            setNewDuoPreferredGenre("");
-                            return;
-                          }
-                          setDuoPreferredGenres([...duoPreferredGenres, trimmed]);
-                          setNewDuoPreferredGenre("");
-                        }}
-                      />
-                    </View>
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => {
-                        const trimmed = newDuoPreferredGenre.trim();
-                        if (!trimmed) return;
-                        if (duoPreferredGenres.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
-                          setNewDuoPreferredGenre("");
-                          return;
-                        }
-                        setDuoPreferredGenres([...duoPreferredGenres, trimmed]);
-                        setNewDuoPreferredGenre("");
-                      }}
-                      style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="add" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  {duoPreferredGenres.length > 0 && (
-                    <View style={[styles.chipContainer, { marginTop: 8 }]}>
-                      {duoPreferredGenres.map((genre, index) => (
-                        <View key={index} style={[styles.chip, { backgroundColor: "#8B5CF620" }]}>
-                          <Text style={[styles.chipText, { color: "#8B5CF6" }]}>{genre}</Text>
-                          <TouchableOpacity activeOpacity={1} onPress={() => setDuoPreferredGenres(duoPreferredGenres.filter((_, i) => i !== index))}>
-                            <Ionicons name="close-circle" size={16} color="#8B5CF6" />
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
-                  <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
-                    Instruments (optional):
-                  </Text>
-                  <GigPresetDropdown options={GIG_INSTRUMENT_OPTIONS} selectedValues={duoPreferredInstruments} onSelect={(value) => setDuoPreferredInstruments((current) => [...current, value])} placeholder="Choose an instrument" />
-                  <View style={[styles.addMemberRow, { marginTop: 8 }]}>
-                    <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
-                      <TextInput
-                        value={newDuoPreferredInstrument}
-                        onChangeText={setNewDuoPreferredInstrument}
-                        placeholder="e.g., Keyboard, Violin..."
-                        placeholderTextColor={colors.textSecondary}
-                        style={[styles.textInput, { color: colors.text }]}
-                        onSubmitEditing={() => {
-                          const trimmed = newDuoPreferredInstrument.trim();
-                          if (!trimmed) return;
-                          if (duoPreferredInstruments.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
-                            setNewDuoPreferredInstrument("");
-                            return;
-                          }
-                          setDuoPreferredInstruments([...duoPreferredInstruments, trimmed]);
-                          setNewDuoPreferredInstrument("");
-                        }}
-                      />
-                    </View>
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => {
-                        const trimmed = newDuoPreferredInstrument.trim();
-                        if (!trimmed) return;
-                        if (duoPreferredInstruments.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
-                          setNewDuoPreferredInstrument("");
-                          return;
-                        }
-                        setDuoPreferredInstruments([...duoPreferredInstruments, trimmed]);
-                        setNewDuoPreferredInstrument("");
-                      }}
-                      style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="add" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  {duoPreferredInstruments.length > 0 && (
-                    <View style={[styles.chipContainer, { marginTop: 8 }]}>
-                      {duoPreferredInstruments.map((instrument, index) => (
-                        <View key={index} style={[styles.chip, { backgroundColor: "#8B5CF620" }]}>
-                          <Text style={[styles.chipText, { color: "#8B5CF6" }]}>{instrument}</Text>
-                          <TouchableOpacity activeOpacity={1} onPress={() => setDuoPreferredInstruments(duoPreferredInstruments.filter((_, i) => i !== index))}>
-                            <Ionicons name="close-circle" size={16} color="#8B5CF6" />
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                </View>
-              )}
-            </View>
-
-            {/* Preferred Group Type Slots */}
-            <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB", marginTop: 12 }]}>
-              <View style={styles.slotHeader}>
-                <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-                  <Ionicons name="musical-notes" size={20} color="#3B82F6" />
-                  <Text style={[styles.slotTitle, { color: colors.text }]}>Group Type</Text>
-                </View>
-                <View style={styles.counterContainer}>
-                  <TouchableOpacity
-                    activeOpacity={1}
-                    accessibilityLabel="Remove group slot"
-                    disabled={bandSlotsNeeded === 0}
-                    onPress={decrementGroupSlots}
-                    style={[
-                      styles.counterBtn,
-                      {
-                        backgroundColor: isDark ? "#374151" : "#E5E7EB",
-                        opacity: bandSlotsNeeded === 0 ? 0.45 : 1,
-                      },
-                    ]}
-                  >
-                    <Ionicons name="remove" size={20} color={colors.text} />
-                  </TouchableOpacity>
-                  <Text style={[styles.counterValue, { color: colors.text }]}>{bandSlotsNeeded}</Text>
-                  <TouchableOpacity
-                    activeOpacity={1}
-                    accessibilityLabel="Add group slot"
-                    onPress={() => setBandSlotsNeeded((current) => current + 1)}
-                    style={[styles.counterBtn, { backgroundColor: colors.primary }]}
-                  >
-                    <Ionicons name="add" size={20} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-              {bandSlotsNeeded > 0 && (
-              <View style={{ marginTop: 12 }}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular", marginBottom: 12 }}>
-                    Choose a type for each group slot ({preferredGroupTypes.length}/{bandSlotsNeeded} assigned).
-                  </Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: "Poppins_400Regular", marginBottom: 12 }}>
-                    Use + and − to set how many slots need each type.
-                  </Text>
-                  <GigPresetDropdown options={PH_MUSIC_GROUP_TYPES.map((type) => ({ label: type.label, value: type.id }))} selectedValues={preferredGroupTypes} onSelect={addPreferredGroupType} placeholder="Choose a group type" allowDuplicates />
-                  <View style={[styles.addMemberRow, { marginTop: 8, marginBottom: 12 }]}>
-                    <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
-                      <TextInput value={newGroupType} onChangeText={setNewGroupType} placeholder="Enter another group type..." placeholderTextColor={colors.textSecondary} style={[styles.textInput, { color: colors.text }]} />
-                    </View>
-                    <TouchableOpacity onPress={() => { const trimmed = newGroupType.trim(); if (!trimmed) return; addPreferredGroupType(trimmed); setNewGroupType(""); }} style={[styles.addBtn, { backgroundColor: colors.primary }]}>
-                      <Ionicons name="add" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  {preferredGroupTypes.length > 0 && (
-                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-                      <TouchableOpacity
-                        activeOpacity={1}
-                        onPress={() => setPreferredGroupTypes([])}
-                        style={{
-                          paddingHorizontal: 10,
-                          paddingVertical: 6,
-                          borderRadius: 14,
-                          backgroundColor: isDark ? "#374151" : "#E5E7EB",
-                        }}
-                      >
-                        <Text style={{ color: colors.text, fontSize: 12, fontFamily: "Poppins_500Medium" }}>Clear all</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                  <View style={[styles.chipContainer, { marginTop: 0 }]}>
-                    {PH_MUSIC_GROUP_TYPES.map((type) => {
-                      const typeCount = preferredGroupTypes.filter((id) => id === type.id).length;
-                      const isSelected = typeCount > 0;
-                      return (
-                        <TouchableOpacity
-                          key={type.id}
-                          activeOpacity={1}
-                          onPress={() => addPreferredGroupType(type.id)}
-                          style={[
-                            styles.chip,
-                            {
-                              backgroundColor: isSelected ? "rgba(59, 130, 246, 0.2)" : (isDark ? "#374151" : "#F3F4F6"),
-                              borderWidth: isSelected ? 1 : 0,
-                              borderColor: "#3B82F6",
-                              flexDirection: "row",
-                              alignItems: "center",
-                              gap: 6,
-                            }
-                          ]}
-                        >
-                          <Text style={[styles.chipText, { color: isSelected ? "#3B82F6" : colors.textSecondary }]}>
-                            {type.label}
-                          </Text>
-                          {typeCount > 0 && (
-                            <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
-                              <View
-                                style={{
-                                  minWidth: 20,
-                                  height: 20,
-                                  borderRadius: 10,
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  backgroundColor: "#3B82F6",
-                                  paddingHorizontal: 6,
-                                }}
-                              >
-                                <Text style={{ color: "#fff", fontSize: 11, fontFamily: "Poppins_600SemiBold" }}>
-                                  {typeCount}
-                                </Text>
-                              </View>
-                              <TouchableOpacity
-                                activeOpacity={1}
-                                onPress={(event) => {
-                                  event.stopPropagation();
-                                  removePreferredGroupType(type.id);
-                                }}
-                                style={{
-                                  width: 20,
-                                  height: 20,
-                                  borderRadius: 10,
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  backgroundColor: isDark ? "#1F2937" : "#E5E7EB",
-                                }}
-                              >
-                                <Ionicons name="remove" size={13} color="#EF4444" />
-                              </TouchableOpacity>
-                            </View>
-                          )}
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-
-                  {preferredGroupTypes
-                    .filter((value, index, values) => !PH_MUSIC_GROUP_TYPES.some((type) => type.id === value) && values.indexOf(value) === index)
-                    .map((value) => (
-                      <TouchableOpacity key={value} onPress={() => removePreferredGroupType(value)} style={[styles.chip, { alignSelf: "flex-start", backgroundColor: "rgba(59, 130, 246, 0.2)", marginBottom: 8 }]}>
-                        <Text style={[styles.chipText, { color: "#3B82F6" }]}>{value} ({preferredGroupTypes.filter((item) => item === value).length})</Text>
-                        <Ionicons name="close-circle" size={16} color="#3B82F6" />
-                      </TouchableOpacity>
-                    ))}
-
-                  <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 16 }]}>
-                    Any other specific requirements/genres (optional):
-                  </Text>
-                  <GigPresetDropdown options={[...GIG_ROLE_OPTIONS, ...GIG_INSTRUMENT_OPTIONS, ...GIG_GENRE_OPTIONS]} selectedValues={bandRolesNeeded} onSelect={(value) => setBandRolesNeeded((current) => [...current, value])} placeholder="Choose a requirement" />
-                  <View style={[styles.addMemberRow, { marginTop: 8 }]}>
-                    <View
-                      style={[
-                        styles.inputWrapper,
-                        styles.flex1,
-                        { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" },
-                      ]}
-                    >
-                      <TextInput
-                        value={newBandRole}
-                        onChangeText={setNewBandRole}
-                        placeholder="e.g., specific instruments..."
-                        placeholderTextColor={colors.textSecondary}
-                        style={[styles.textInput, { color: colors.text }]}
-                        onSubmitEditing={() => {
-                          if (newBandRole.trim()) {
-                            setBandRolesNeeded([...bandRolesNeeded, newBandRole.trim()]);
-                            setNewBandRole("");
-                          }
-                        }}
-                      />
-                    </View>
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => {
-                        if (newBandRole.trim()) {
-                          setBandRolesNeeded([...bandRolesNeeded, newBandRole.trim()]);
-                          setNewBandRole("");
-                        }
-                      }}
-                      style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="add" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  {bandRolesNeeded.length > 0 && (
-                    <View style={[styles.chipContainer, { marginTop: 8 }]}>
-                      {bandRolesNeeded.map((role, index) => (
-                        <View key={index} style={[styles.chip, { backgroundColor: "#3B82F620" }]}>
-                          <Text style={[styles.chipText, { color: "#3B82F6" }]}>{role}</Text>
-                          <TouchableOpacity activeOpacity={1} onPress={() => setBandRolesNeeded(bandRolesNeeded.filter((_, i) => i !== index))}>
-                            <Ionicons name="close-circle" size={16} color="#3B82F6" />
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
-                  <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
-                    Genres (optional):
-                  </Text>
-                  <GigPresetDropdown options={GIG_GENRE_OPTIONS} selectedValues={bandPreferredGenres} onSelect={(value) => setBandPreferredGenres((current) => [...current, value])} placeholder="Choose a genre" />
-                  <View style={[styles.addMemberRow, { marginTop: 8 }]}>
-                    <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
-                      <TextInput
-                        value={newBandPreferredGenre}
-                        onChangeText={setNewBandPreferredGenre}
-                        placeholder="e.g., Funk, R&B..."
-                        placeholderTextColor={colors.textSecondary}
-                        style={[styles.textInput, { color: colors.text }]}
-                        onSubmitEditing={() => {
-                          const trimmed = newBandPreferredGenre.trim();
-                          if (!trimmed) return;
-                          if (bandPreferredGenres.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
-                            setNewBandPreferredGenre("");
-                            return;
-                          }
-                          setBandPreferredGenres([...bandPreferredGenres, trimmed]);
-                          setNewBandPreferredGenre("");
-                        }}
-                      />
-                    </View>
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => {
-                        const trimmed = newBandPreferredGenre.trim();
-                        if (!trimmed) return;
-                        if (bandPreferredGenres.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
-                          setNewBandPreferredGenre("");
-                          return;
-                        }
-                        setBandPreferredGenres([...bandPreferredGenres, trimmed]);
-                        setNewBandPreferredGenre("");
-                      }}
-                      style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="add" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  {bandPreferredGenres.length > 0 && (
-                    <View style={[styles.chipContainer, { marginTop: 8 }]}>
-                      {bandPreferredGenres.map((genre, index) => (
-                        <View key={index} style={[styles.chip, { backgroundColor: "#3B82F620" }]}>
-                          <Text style={[styles.chipText, { color: "#3B82F6" }]}>{genre}</Text>
-                          <TouchableOpacity activeOpacity={1} onPress={() => setBandPreferredGenres(bandPreferredGenres.filter((_, i) => i !== index))}>
-                            <Ionicons name="close-circle" size={16} color="#3B82F6" />
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
-                  <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
-                    Instruments (optional):
-                  </Text>
-                  <GigPresetDropdown options={GIG_INSTRUMENT_OPTIONS} selectedValues={bandPreferredInstruments} onSelect={(value) => setBandPreferredInstruments((current) => [...current, value])} placeholder="Choose an instrument" />
-                  <View style={[styles.addMemberRow, { marginTop: 8 }]}>
-                    <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
-                      <TextInput
-                        value={newBandPreferredInstrument}
-                        onChangeText={setNewBandPreferredInstrument}
-                        placeholder="e.g., Brass section, Synths..."
-                        placeholderTextColor={colors.textSecondary}
-                        style={[styles.textInput, { color: colors.text }]}
-                        onSubmitEditing={() => {
-                          const trimmed = newBandPreferredInstrument.trim();
-                          if (!trimmed) return;
-                          if (bandPreferredInstruments.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
-                            setNewBandPreferredInstrument("");
-                            return;
-                          }
-                          setBandPreferredInstruments([...bandPreferredInstruments, trimmed]);
-                          setNewBandPreferredInstrument("");
-                        }}
-                      />
-                    </View>
-                    <TouchableOpacity activeOpacity={1}
-                      onPress={() => {
-                        const trimmed = newBandPreferredInstrument.trim();
-                        if (!trimmed) return;
-                        if (bandPreferredInstruments.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
-                          setNewBandPreferredInstrument("");
-                          return;
-                        }
-                        setBandPreferredInstruments([...bandPreferredInstruments, trimmed]);
-                        setNewBandPreferredInstrument("");
-                      }}
-                      style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="add" size={20} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  {bandPreferredInstruments.length > 0 && (
-                    <View style={[styles.chipContainer, { marginTop: 8 }]}>
-                      {bandPreferredInstruments.map((instrument, index) => (
-                        <View key={index} style={[styles.chip, { backgroundColor: "#3B82F620" }]}>
-                          <Text style={[styles.chipText, { color: "#3B82F6" }]}>{instrument}</Text>
-                          <TouchableOpacity activeOpacity={1} onPress={() => setBandPreferredInstruments(bandPreferredInstruments.filter((_, i) => i !== index))}>
-                            <Ionicons name="close-circle" size={16} color="#3B82F6" />
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                </View>
-              )}
-            </View>
-
-            {/* Total Summary */}
             {(soloSlotsNeeded + duoSlotsNeeded + bandSlotsNeeded) > 0 && (
               <View style={[styles.totalSummary, { backgroundColor: colors.primary + "15", marginTop: 16 }]}>
                 <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
@@ -2612,10 +1915,12 @@ export default function EditGigScreen() {
                 </Text>
               </View>
             )}
-
           </View>
 
-          <View style={styles.inputContainer} onLayout={(event) => setAiSectionY(event.nativeEvent.layout.y)}>
+          <View
+            style={styles.inputContainer}
+            onLayout={(event) => setAiSectionY(event.nativeEvent.layout.y)}
+          >
             <GigRecommendationSettings
               value={aiRecommendationSettings}
               onChange={setAiRecommendationSettings}
@@ -2900,7 +2205,7 @@ export default function EditGigScreen() {
                         { color: colors.textSecondary },
                       ]}
                     >
-                      Tap to browse files
+                      PDF only • Max 20 MB
                     </Text>
                   </>
                 )}

@@ -14,7 +14,7 @@ import {
     useWindowDimensions,
     View,
 } from "react-native";
-import { Calendar } from "react-native-calendars";
+import { Calendar } from "../src/components/CenteredCalendar";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
@@ -679,13 +679,13 @@ export default function StudioDetailsScreen() {
             : "Rate";
   const studioRateDisplay =
     hasRehearsalRate && hasRecordingRate
-      ? `?${rehearsalRateValue.toLocaleString()}/hr | ?${recordingRateValue.toLocaleString()}/song`
+      ? `₱${rehearsalRateValue.toLocaleString()}/hr | ₱${recordingRateValue.toLocaleString()}/song`
       : hasRecordingRate
-        ? `?${recordingRateValue.toLocaleString()}/song`
+        ? `₱${recordingRateValue.toLocaleString()}/song`
         : hasRehearsalRate
-          ? `?${rehearsalRateValue.toLocaleString()}/hr`
+          ? `₱${rehearsalRateValue.toLocaleString()}/hr`
           : hourlyRateValue > 0
-            ? `?${hourlyRateValue.toLocaleString()}/hr`
+            ? `₱${hourlyRateValue.toLocaleString()}/hr`
             : "N/A";
   const studioEquipment = Array.isArray(studio?.instruments)
     ? studio.instruments.filter((item: any) => {

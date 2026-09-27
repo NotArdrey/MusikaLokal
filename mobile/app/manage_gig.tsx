@@ -821,13 +821,15 @@ export default function GigDetailsScreen() {
     return groups
       .map((group) => {
         const shared = getSharedSlotRequirements(group.data);
+        const hasPerSlotGroupTypes = Array.isArray(group.data?.specific_requirements)
+          && group.data.specific_requirements.some((item: any) => typeof item?.group_type === "string" && item.group_type.trim());
         return {
           ...group,
           needed: Number(group.data?.needed || 0),
           roles: shared.roles,
           genres: shared.preferred_genres,
           instruments: shared.preferred_instruments,
-          groupTypes: Array.isArray(group.data?.preferred_group_types)
+          groupTypes: hasPerSlotGroupTypes ? [] : Array.isArray(group.data?.preferred_group_types)
             ? group.data.preferred_group_types
             : [],
           specificRequirements: getSpecificSlotRequirementLines(group.data),
@@ -1240,7 +1242,7 @@ export default function GigDetailsScreen() {
                       <Text
                         style={[styles.payoutAmount, { color: colors.primary }]}
                       >
-                        ?{(gig?.budget || 0).toLocaleString()}
+                        ₱{(gig?.budget || 0).toLocaleString()}
                       </Text>
                     </View>
                   </View>

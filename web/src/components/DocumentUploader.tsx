@@ -8,7 +8,16 @@ import CustomAlert, { AlertType } from './CustomAlert';
 
 const ACCEPTED_DOCUMENT_TYPES = [
     'application/pdf',
+    'application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.oasis.opendocument.text',
+    'application/rtf',
+    'text/rtf',
+    'text/plain',
+    'text/markdown',
+    'image/jpeg',
+    'image/png',
+    'image/webp',
 ];
 
 interface DocumentUploaderProps {
@@ -86,7 +95,7 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
                 >
                     <Ionicons name="cloud-upload-outline" size={24} color={colors.primary} />
                     <Text style={[styles.uploadText, { color: colors.text }]}>
-                        {checking ? 'Opening documents...' : 'Select PDF or DOCX Document'}
+                        {checking ? 'Opening documents...' : 'Select CV or Resume'}
                     </Text>
                 </TouchableOpacity>
             ) : (

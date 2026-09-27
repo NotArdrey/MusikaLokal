@@ -385,7 +385,13 @@ const GigFormEditor = ({ value, onChange, busy, onImages, onContract, allowPermi
 
     <Text style={styles.sectionTitle}>Musician slots</Text>
     <SlotCounter title="Solo" count={slotCount("soloSlots")} onChange={(count) => setSlotCount("soloSlots", count)}>
-      <GigSpecificSlotRequirements slotType="solo" value={value.soloSpecificRequirements} onChange={(items) => set("soloSpecificRequirements", items)} />
+      <GigSpecificSlotRequirements
+        slotType="solo"
+        count={slotCount("soloSlots")}
+        onCountChange={(count) => setSlotCount("soloSlots", count)}
+        value={value.soloSpecificRequirements}
+        onChange={(items) => set("soloSpecificRequirements", items)}
+      />
       <View style={styles.grid}>
         <Field label="Shared roles" value={value.soloRoles} onChange={(text) => set("soloRoles", text)} />
         <Field label="Shared preferred genres" value={value.soloGenres} onChange={(text) => set("soloGenres", text)} />
@@ -393,7 +399,13 @@ const GigFormEditor = ({ value, onChange, busy, onImages, onContract, allowPermi
       </View>
     </SlotCounter>
     <SlotCounter title="Duos (2 members)" count={slotCount("duoSlots")} onChange={(count) => setSlotCount("duoSlots", count)}>
-      <GigSpecificSlotRequirements slotType="duo" value={value.duoSpecificRequirements} onChange={(items) => set("duoSpecificRequirements", items)} />
+      <GigSpecificSlotRequirements
+        slotType="duo"
+        count={slotCount("duoSlots")}
+        onCountChange={(count) => setSlotCount("duoSlots", count)}
+        value={value.duoSpecificRequirements}
+        onChange={(items) => set("duoSpecificRequirements", items)}
+      />
       <View style={styles.grid}>
         <Field label="Shared roles" value={value.duoRoles} onChange={(text) => set("duoRoles", text)} />
         <Field label="Shared preferred genres" value={value.duoGenres} onChange={(text) => set("duoGenres", text)} />
@@ -445,7 +457,6 @@ const GigFormEditor = ({ value, onChange, busy, onImages, onContract, allowPermi
     <Checkbox label="Enable applicant recommendations" checked={value.recommendation.enabled} onPress={() => onChange((current) => ({ ...current, recommendation: { ...current.recommendation, enabled: !current.recommendation.enabled } }))} />
     <Text style={styles.hint}>Required criteria must match. Ignored criteria are not checked.</Text>
     <View style={styles.grid}>
-      <Field label="Minimum score" value={String(value.recommendation.minimum_score)} onChange={(text) => onChange((current) => ({ ...current, recommendation: { ...current.recommendation, minimum_score: Number(text) || 0 } }))} />
       <Field label="Location radius km" value={value.recommendation.location_radius_km == null ? "" : String(value.recommendation.location_radius_km)} onChange={(text) => onChange((current) => ({ ...current, recommendation: { ...current.recommendation, location_radius_km: text ? Number(text) : null } }))} hint="Allowed mobile values: 5, 10, 25, 50, 100, or blank for any." />
     </View>
     <View style={styles.grid}>{(["genres", "instruments", "location", "portfolio"] as const).map(criterion)}</View>
@@ -671,7 +682,7 @@ export default function GigTestingPage() {
           label="AI portfolio review (optional)"
           checked={applicationForm.aiPortfolioReviewConsent}
           onPress={() => setApplicationForm((current) => ({ ...current, aiPortfolioReviewConsent: !current.aiPortfolioReviewConsent }))}
-          hint="Allows Groq text/vision/Whisper and Face++ Compare to review redacted application evidence. Advisory only; it does not accept or reject the application."
+          hint="Allows Groq text, vision, and Whisper to review submitted application evidence. Identity documents and profile photos are excluded. Advisory only; it does not accept or reject the application."
         />
         <View style={styles.grid}>
           <View style={styles.field}><Text style={styles.label}>CV / resume *</Text><WebFileInput accept="application/pdf,.doc,.docx,text/plain" disabled={busy} onFiles={(files) => setCvFile(files[0] || null)} /><Text style={styles.hint}>{cvFile?.name || "No CV selected."}</Text></View>
@@ -710,7 +721,6 @@ export default function GigTestingPage() {
         <Text style={styles.sectionTitle}>CV ANALYSIS</Text><JsonBlock value={{ classification: result.aiReview.source_summary?.cv_document_classification, name_check: result.aiReview.source_summary?.cv_name_check, criteria: result.aiReview.source_summary?.cv_requirement_review }} />
         <Text style={styles.sectionTitle}>PORTFOLIO / VISION</Text><JsonBlock value={{ frames_analyzed: result.aiReview.source_summary?.video_frames_reviewed, portfolio_images_reviewed: result.aiReview.source_summary?.portfolio_images_reviewed, evidence: result.aiReview.evidence }} />
         <Text style={styles.sectionTitle}>ACRCLOUD</Text><JsonBlock value={result.aiReview.source_summary?.recognized_audio_genre || { status: "No trusted catalog genre evidence" }} />
-        <Text style={styles.sectionTitle}>FACE VERIFICATION · DEEPFACE / ARCFACE</Text><JsonBlock value={{ solo: result.aiReview.face_similarity, group: result.aiReview.group_face_similarity }} />
       </View> : null}
 
       {result?.recommendation ? <View style={styles.card}><Text style={styles.cardTitle}>Recommendation</Text><JsonBlock value={result.recommendation} /></View> : null}

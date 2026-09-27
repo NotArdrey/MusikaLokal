@@ -30,7 +30,7 @@ export default function PrivacyPolicyScreen() {
           </Text>
 
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            When a musician explicitly enables optional AI review for a gig application, approved ID fronts may be shown to that gig&apos;s authorized manager through temporary access and may be compared with sampled performance-video frames by our face-comparison provider. For duo or group applications, the submitting leader or representative grants this application-specific permission for the snapshotted lineup. This is advisory only and is never used to accept or reject an application automatically.
+            When a musician enables AI review for a gig application, the submitted CV/resume and performance media may be processed by configured review providers. Identity documents and profile photos are not shared with gig managers or used for application-video matching.
           </Text>
 
           <Text style={[styles.text, { color: colors.textSecondary }]}>

@@ -27,15 +27,6 @@ function loadGenreHelpers(relativePath) {
     AbortSignal,
     Deno: { env: { get: () => undefined } },
     require: (specifier) => {
-      if (String(specifier).includes("faceRecognitionClient")) {
-        return {
-          compareApplicantFacesWithFacePlusPlus: async () => new Map(),
-          unavailableFaceMatch: () => ({ status: "not_run", limitation: "" }),
-        };
-      }
-      if (String(specifier).includes("identityDocumentReference")) {
-        return { resolveApprovedIdentityDocumentReference: async () => ({ url: null, source: "unavailable", document_type: null, limitation: "" }) };
-      }
       throw new Error("Unexpected import while loading genre helpers");
     },
   });
@@ -47,6 +38,27 @@ for (const relativePath of [
   "../mobile/supabase/functions/_shared/gigPortfolioReview.ts",
   "../web/supabase/functions/_shared/gigPortfolioReview.ts",
 ]) {
+  test(`${relativePath} detects CV formats from signatures before filenames`, () => {
+    const helpers = loadGenreHelpers(relativePath);
+    assert.equal(helpers.detectDocumentFormat(new Uint8Array([0x25, 0x50, 0x44, 0x46]), "application/octet-stream", "/resume.bin"), "pdf");
+    assert.equal(helpers.detectDocumentFormat(new Uint8Array([0xd0, 0xcf, 0x11, 0xe0]), "application/octet-stream", "/resume.bin"), "doc");
+    assert.equal(helpers.detectDocumentFormat(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), "application/octet-stream", "/resume.bin"), "image");
+    assert.equal(helpers.detectDocumentFormat(new TextEncoder().encode("{\\rtf1 resume}"), "application/octet-stream", "/resume.bin"), "rtf");
+    assert.equal(helpers.detectDocumentFormat(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), "application/vnd.oasis.opendocument.text", "/resume.bin"), "odt");
+  });
+
+  test(`${relativePath} rejects token text but accepts substantive CV text`, () => {
+    const helpers = loadGenreHelpers(relativePath);
+    assert.equal(helpers.hasUsableDocumentText("Resume Page 1"), false);
+    assert.equal(helpers.hasUsableDocumentText("Jared Cariaso is a musician, vocalist, guitarist, and live performer with experience playing private events, local venues, acoustic sets, rehearsals, and community performances in Pampanga."), true);
+  });
+
+  test(`${relativePath} reads normal and drawing-layer text from Word XML`, () => {
+    const helpers = loadGenreHelpers(relativePath);
+    const xml = '<w:document><w:body><w:p><w:r><w:t>Jared Cariaso</w:t></w:r></w:p><w:p><w:r><a:t>Lead vocalist and guitarist</a:t></w:r></w:p></w:body></w:document>';
+    assert.equal(helpers.extractTextFromXml(xml, "docx"), "Jared Cariaso\nLead vocalist and guitarist");
+  });
+
   test(`${relativePath} uses recognized ACRCloud genres as advisory genre evidence`, () => {
     const helpers = loadGenreHelpers(relativePath);
     const evidence = helpers.buildRecognizedAudioGenreEvidence(

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
@@ -35,6 +35,13 @@ const readFunctionErrorBody = async (error: any) => {
 };
 
 export default function AddProductionScreen() {
+  const formScrollViewRef = useRef<ScrollView>(null);
+  useFocusEffect(
+    useCallback(() => {
+      formScrollViewRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+    }, []),
+  );
+
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
@@ -189,7 +196,7 @@ export default function AddProductionScreen() {
     >
       <Header title="New Production" onBackPress={() => router.replace('/my_production')} />
 
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={formScrollViewRef} contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]} showsVerticalScrollIndicator={false}>
         <View style={[styles.heroCard, { backgroundColor: colors.surface, borderColor: isDark ? '#334155' : '#E2E8F0' }]}>
           <View style={[styles.heroIcon, { backgroundColor: colors.primary + '14' }]}>
             <Ionicons name="people-outline" size={24} color={colors.primary} />

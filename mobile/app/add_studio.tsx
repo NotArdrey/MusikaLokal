@@ -1,8 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Linking from "expo-linking";
-import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -14,7 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Calendar } from "react-native-calendars";
+import { Calendar } from "../src/components/CenteredCalendar";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import GigPresetDropdown from "../src/components/GigPresetDropdown";
@@ -412,12 +412,22 @@ const normalizeWeeklySessionType = (
 ): WeeklySessionType => normalizeDateOverrideSessionType(value, fallback);
 
 export default function AddStudioScreen() {
+  const formScrollViewRef = useRef<ScrollView>(null);
+  useFocusEffect(
+    useCallback(() => {
+      formScrollViewRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+    }, []),
+  );
+
   const { colors, isDark } = useTheme();
   const { isSystemLocked, showLockAlert } = useAuth();
   const params = useLocalSearchParams<{ refresh?: string; ownerId?: string }>();
   const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
   const delegatedOwnerId = Array.isArray(params.ownerId) ? params.ownerId[0] : params.ownerId;
   const [step, setStep] = useState(1);
+  useEffect(() => {
+    formScrollViewRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+  }, [step]);
   const [studioName, setStudioName] = useState("");
   const [description, setDescription] = useState("");
   const [address, setAddress] = useState("");
@@ -2436,6 +2446,7 @@ export default function AddStudioScreen() {
         <Header title="List Studio" onBackPress={handleBack} />
 
         <ScrollView
+          ref={formScrollViewRef}
           style={styles.formContainer}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}

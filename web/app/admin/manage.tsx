@@ -15,7 +15,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { Calendar } from 'react-native-calendars';
+import { Calendar } from '../../src/components/CenteredCalendar';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
 import LoadingState from '../../src/components/LoadingState';

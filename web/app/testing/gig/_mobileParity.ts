@@ -171,11 +171,9 @@ export const validateGigForm = (form: GigFormValue): string | null => {
 const normalizeRecommendationSettings = (value: any): RecommendationSettings => {
   const mode = (candidate: unknown, fallback: "required" | "ignore") =>
     candidate === "ignore" ? "ignore" : candidate === "required" || candidate === "preferred" ? "required" : fallback;
-  const score = Number(value?.minimum_score);
   const radius = Number(value?.location_radius_km);
   return {
     enabled: value?.enabled === true,
-    minimum_score: Number.isFinite(score) ? Math.max(0, Math.min(100, Math.round(score))) : 75,
     location_radius_km: value?.location_radius_km === null || value?.location_radius_km === "any"
       ? null
       : [5, 10, 25, 50, 100].includes(radius) ? radius : null,
@@ -892,7 +890,7 @@ export const pollApplicationDebug = async (
     if (!recommendationResult.error) recommendation = recommendationResult.data;
     if (aiReview) {
       const state: StageState = aiReview.status === "failed" ? "failed" : ["completed", "partial"].includes(aiReview.status) ? (aiReview.status === "partial" ? "warning" : "success") : "processing";
-      reporter({ id: "ai-review", group: "TRANSCRIPTION / CV / VISION / FACE", label: "Consent-gated portfolio review", state, startedAt: aiReview.started_at || aiReview.created_at, finishedAt: aiReview.completed_at || undefined, message: aiReview.error_message || aiReview.overall_summary || `Review is ${aiReview.status}.`, details: aiReview });
+      reporter({ id: "ai-review", group: "TRANSCRIPTION / CV / VISION", label: "Consent-gated portfolio review", state, startedAt: aiReview.started_at || aiReview.created_at, finishedAt: aiReview.completed_at || undefined, message: aiReview.error_message || aiReview.overall_summary || `Review is ${aiReview.status}.`, details: aiReview });
       if (["completed", "partial", "failed", "consent_revoked"].includes(aiReview.status)) {
         const source = aiReview.source_summary || {};
         const reviewFailed = aiReview.status === "failed";
@@ -919,12 +917,6 @@ export const pollApplicationDebug = async (
           state: reviewFailed ? "failed" : visualCount > 0 ? "success" : "warning",
           message: `${Number(source.video_frames_reviewed || 0)} video frame(s) and ${Number(source.portfolio_images_reviewed || 0)} portfolio image(s) produced stored observations.`,
         });
-        const face = aiReview.face_similarity || {};
-        reporter({
-          id: "face-verification", group: "FACE VERIFICATION", label: "Face++ Compare similarity",
-          state: reviewFailed ? "failed" : face.status && face.status !== "not_run" ? "success" : "warning",
-          message: face.summary || "Face similarity was not run.", details: { solo: face, group: aiReview.group_face_similarity || [] },
-        });
         reporter({
           id: "evidence-store", group: "APPLICATION", label: "Evidence stored",
           state: reviewFailed ? "failed" : "success", databaseOperation: "UPDATE gig_application_ai_reviews",
@@ -935,7 +927,7 @@ export const pollApplicationDebug = async (
     }
     await delay(2000);
   }
-  if (!aiReview) reporter({ id: "ai-review", group: "TRANSCRIPTION / CV / VISION / FACE", label: "Consent-gated portfolio review", state: "warning", message: "No AI review row is visible yet. Consent may be off, group-leader approval may be pending, or RLS may hide it." });
+  if (!aiReview) reporter({ id: "ai-review", group: "TRANSCRIPTION / CV / VISION", label: "Consent-gated portfolio review", state: "warning", message: "No AI review row is visible yet. Consent may be off, group-leader approval may be pending, or RLS may hide it." });
   if (!recommendation) reporter({ id: "recommendation", group: "RECOMMENDATION", label: "Stored recommendation", state: "warning", message: "No stored recommendation is visible. Mobile materializes recommendations through organizer fetch actions; applicant RLS does not expose manager-only recommendation data." });
   else reporter({ id: "recommendation", group: "RECOMMENDATION", label: "Stored recommendation", state: "success", message: `${recommendation.recommendation_status || "Generated"} · score ${recommendation.score ?? "n/a"}`, details: recommendation });
   return { aiReview, recommendation };

@@ -284,6 +284,9 @@ export const useApplicationSubmissionAction = ({
       .select("id, rejected_at, created_at")
       .eq("gig_id", listingId)
       .eq("status", "rejected")
+      .or(
+        "system_status_reason.is.null,system_status_reason.neq.system_requirements_changed",
+      )
       .order("rejected_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
       .limit(1);
@@ -293,8 +296,15 @@ export const useApplicationSubmissionAction = ({
         return inactive;
       }
       query = query.eq("production_team_id", selectedProductionTeamId);
+    } else if (selectedGroupId) {
+      query = query
+        .eq("group_id", selectedGroupId)
+        .is("production_team_id", null);
     } else {
-      query = query.eq("applicant_id", userId);
+      query = query
+        .eq("applicant_id", userId)
+        .is("group_id", null)
+        .is("production_team_id", null);
     }
 
     const { data, error } = await query.maybeSingle();
@@ -316,6 +326,7 @@ export const useApplicationSubmissionAction = ({
     group?.requirements?.event_start_time,
     group?.type,
     listingId,
+    selectedGroupId,
     selectedProductionTeamId,
     userId,
     userRole,
@@ -675,7 +686,6 @@ export const useApplicationSubmissionAction = ({
         video_url: videoUrl || null,
         cv_url: uploadedCvUrl,
         ai_portfolio_review_consent: aiPortfolioReviewConsent,
-        identity_document_review_consent: aiPortfolioReviewConsent && !selectedProductionRosterId,
         ai_review_frame_url: aiPortfolioReviewConsent ? videoReviewFrameUrl || null : null,
         ai_review_frame_urls: aiPortfolioReviewConsent ? videoReviewFrameUrls.slice(0, 3) : [],
         video_copyright_acknowledged: videoCopyrightAcknowledged,

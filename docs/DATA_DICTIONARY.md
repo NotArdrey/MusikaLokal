@@ -33,9 +33,9 @@ Legend: **PK** = primary key; **FK** = foreign key; **UQ** = single-column uniqu
 | Listings & Bookings | [`favorites`](#favorites) | Stores favorites records used by the MusikaLokal platform. | 8 | Yes |
 | Social | [`feed_posts`](#feed-posts) | Social-feed posts authored by profiles, groups, or production teams. | 18 | Yes |
 | Social | [`follows`](#follows) | Stores follows records used by the MusikaLokal platform. | 5 | Yes |
-| Listings & Bookings | [`gig_application_ai_reviews`](#gig-application-ai-reviews) | Stores gig application ai reviews records used by the MusikaLokal platform. | 18 | Yes |
+| Listings & Bookings | [`gig_application_ai_reviews`](#gig-application-ai-reviews) | Stores gig application ai reviews records used by the MusikaLokal platform. | 16 | Yes |
 | Listings & Bookings | [`gig_application_recommendations`](#gig-application-recommendations) | Stores gig application recommendations records used by the MusikaLokal platform. | 17 | Yes |
-| Listings & Bookings | [`gig_applications`](#gig-applications) | Applications from musicians, groups, or production teams to gigs, including acceptance and completion lifecycle. | 46 | Yes |
+| Listings & Bookings | [`gig_applications`](#gig-applications) | Applications from musicians, groups, or production teams to gigs, including acceptance and completion lifecycle. | 43 | Yes |
 | Listings & Bookings | [`gig_availability_slots`](#gig-availability-slots) | Stores gig availability slots records used by the MusikaLokal platform. | 8 | Yes |
 | Listings & Bookings | [`gig_deletion_audit`](#gig-deletion-audit) | Audit history for gig deletion operations. | 10 | Yes |
 | Listings & Bookings | [`gig_media`](#gig-media) | Media assets attached to gig records. | 6 | Yes |
@@ -430,7 +430,7 @@ Advisory evidence extracted from consented application media. This table must no
 | `gig_id` | `uuid` | Yes | FK | -- | `gigs.id` | -- | References `gigs.id`. |
 | `status` | `text` | Yes |  | `'queued'` | -- | `(     status in ('queued', 'processing', 'completed', 'partial', 'failed', 'consent_revoked')   )` | Current lifecycle state of this record. |
 | `consented_at` | `timestamptz` | No |  | -- | -- | -- | Timestamp for the consented event. |
-| `source_summary` | `jsonb` | Yes |  | `'{}'::jsonb` | -- | -- | Structured advisory source-processing results, including CV classification and face-review counts. |
+| `source_summary` | `jsonb` | Yes |  | `'{}'::jsonb` | -- | -- | Structured advisory source-processing results, including CV classification and media-review counts. |
 | `evidence` | `jsonb` | Yes |  | `'[]'::jsonb` | -- | -- | Stores the evidence value for this record. |
 | `overall_summary` | `text` | Yes |  | `''` | -- | -- | Stores the overall summary value for this record. |
 | `limitations` | `jsonb` | Yes |  | `'[]'::jsonb` | -- | -- | Stores the limitations value for this record. |
@@ -441,8 +441,6 @@ Advisory evidence extracted from consented application media. This table must no
 | `started_at` | `timestamptz` | No |  | -- | -- | -- | Timestamp for the started event. |
 | `completed_at` | `timestamptz` | No |  | -- | -- | -- | Timestamp for the completed event. |
 | `updated_at` | `timestamptz` | Yes |  | `now()` | -- | -- | Timestamp when the row was last updated. |
-| `face_similarity` | `jsonb` | Yes |  | `'{}'::jsonb` | -- | -- | Consent-gated advisory comparison of approved ID images with representative video frames. Group and duo member results are stored in `group_face_similarity`. Never identity verification or an automated decision. |
-| `group_face_similarity` | `jsonb` | Yes |  | `'[]'::jsonb` | -- | -- | Per-member advisory visual similarity results for the snapshotted group lineup. Never identity verification or an automated decision. |
 
 ### gig_application_recommendations
 
@@ -508,8 +506,6 @@ Applications from musicians, groups, or production teams to gigs, including acce
 | `feature_consent_responded_at` | `timestamptz` | No |  | -- | -- | -- | Timestamp for the feature consent responded event. |
 | `ai_portfolio_review_consent` | `boolean` | Yes |  | `false` | -- | -- | Explicit applicant consent to send application CV text, video audio, and representative portfolio images to the configured AI provider for advisory evidence review. |
 | `ai_portfolio_review_consented_at` | `timestamptz` | No |  | -- | -- | -- | Time at which the applicant granted AI portfolio review consent for this application. |
-| `identity_document_review_consent` | `boolean` | Yes |  | `false` | -- | -- | Explicit applicant or group-representative consent to use approved front-of-ID images for advisory face comparison and show them to the authorized gig manager. Group consent covers only the immutable lineup snapshot. Forced false for represented-performer applications. |
-| `identity_document_review_consented_at` | `timestamptz` | No |  | -- | -- | -- | Time at which the applicant or submitting group representative granted identity-document application-review consent. |
 | `ai_review_frame_url` | `text` | No |  | -- | -- | -- | A client-generated representative frame from the submitted performance video. It is reviewed only when AI portfolio review consent is true. |
 | `video_copyright_acknowledged` | `boolean` | Yes |  | `false` | -- | -- | Stores the video copyright acknowledged value for this record. |
 | `video_copyright_acknowledged_at` | `timestamptz` | No |  | -- | -- | -- | Timestamp for the video copyright acknowledged event. |
@@ -517,7 +513,6 @@ Applications from musicians, groups, or production teams to gigs, including acce
 | `video_copyright_review_id` | `uuid` | No | FK | -- | `manual_identity_reviews.id` | -- | Identity Review case used to review the applicant ownership, license, or permission claim for a matched recording. |
 | `video_copyright_metadata` | `jsonb` | Yes |  | `'{}'::jsonb` | -- | -- | Structured supplemental metadata. |
 | `ai_review_frame_urls` | `jsonb` | Yes |  | `'[]'::jsonb` | -- | -- | Stores the ai review frame urls value for this record. |
-| `ai_review_group_member_ids` | `uuid[]` | Yes |  | `'{}'::uuid[]` | -- | -- | Immutable-at-submission snapshot of group profile IDs covered by the submitter authorization for advisory face similarity. |
 | `fired_at` | `timestamptz` | No |  | -- | -- | -- | UTC timestamp when an accepted performer assignment was terminated. |
 | `fired_by_user_id` | `uuid` | No | FK | -- | `profiles.id` | -- | Organizer or authorized venue staff user who terminated the performer assignment. |
 

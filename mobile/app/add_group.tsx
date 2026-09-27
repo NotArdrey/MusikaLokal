@@ -171,6 +171,13 @@ const mergeInviteTargets = (targets: GroupInviteTarget[]) => {
 };
 
 export default function AddGroupScreen() {
+  const formScrollViewRef = useRef<ScrollView>(null);
+  useFocusEffect(
+    useCallback(() => {
+      formScrollViewRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+    }, []),
+  );
+
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const groupTypeSheetRef = useRef<BottomSheetModal>(null);
@@ -180,6 +187,9 @@ export default function AddGroupScreen() {
   const isDuoMode = params.mode === "duo";
   const { isSystemLocked, showLockAlert } = useAuth();
   const [step, setStep] = useState(1);
+  useEffect(() => {
+    formScrollViewRef.current?.scrollTo({ x: 0, y: 0, animated: false });
+  }, [step]);
   const [groupName, setGroupName] = useState("");
   const [address, setAddress] = useState("");
   const [latitude, setLatitude] = useState<number | null>(null);
@@ -1076,6 +1086,7 @@ export default function AddGroupScreen() {
           keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
         >
           <ScrollView
+            ref={formScrollViewRef}
             style={styles.formContainer}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[

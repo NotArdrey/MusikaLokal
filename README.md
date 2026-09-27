@@ -74,44 +74,19 @@ identity-review Edge Functions.
 ## Consent-gated gig portfolio review
 
 Gig applicants can optionally consent to an advisory review of redacted CV text,
-video speech, and up to three client-generated video frames. For a solo
-application, the same explicit consent allows the authorized gig manager to view
-the applicant's approved front-of-ID image and allows the Supabase Edge Function
-to send that image directly to the Face++ Compare API as the reference for up to
-three sampled video frames. For a duo or group application, the submitting leader
-or representative grants the same application-specific consent for the immutable
-lineup snapshot; each verified member's approved ID is compared with the submitted
-group video and may be viewed by the authorized gig manager. Manual-upload IDs stay
-in the private identity bucket and are exposed only through a ten-minute signed URL.
-Didit-backed IDs are fetched server-side from approved verification sessions.
-Results remain limited to
-`likely_same_person`, `likely_different_person`, or `unclear`; they do not identify
-any person. The stored result also includes similarity, confidence, sampled,
-usable and matched frame counts, match rate, and multi-person frame counts. The
-review is processed in the background and does not change verification,
-eligibility, deterministic recommendation scores, or an application decision.
+video speech, and up to three client-generated video frames. Identity documents
+and profile photos are not fetched, shown to gig managers, or compared with the
+submitted video. The review is processed in the background and does not change
+identity verification or make the final application decision.
 
 Deploy `20260719010000_add_consent_gated_gig_portfolio_reviews.sql` followed by
-`20260719030000_add_gig_face_similarity_review.sql`, then
-`20260719040000_add_group_member_face_similarity_review.sql`, and finally
-`20260927150000_add_gig_identity_document_review_consent.sql`, then
-`20260927160000_enable_group_representative_identity_document_consent.sql` before deploying
-the `gig-applications` Edge Function. Configure `GROQ_API_KEY`,
-`FACEPP_API_KEY` and `FACEPP_API_SECRET` as Supabase Edge Function secrets.
-`FACEPP_API_BASE_URL` is optional and defaults to the Face++ US endpoint;
-`FACEPP_THRESHOLD_TIER` defaults to `1e-5`, `FACEPP_TIMEOUT_MS` defaults to
-20000, `FACEPP_MAX_CONCURRENCY_RETRIES` defaults to 3, and
-`FACEPP_RETRY_BASE_DELAY_MS` defaults to 1000. The client retries only Face++
-concurrency-limit responses with capped exponential backoff and jitter. The
-comparison uses the threshold returned by Face++ for the configured
-tier. Never put these settings in Expo variables or client code.
+`20260927180000_remove_gig_identity_video_matching.sql` before deploying the
+updated `gig-applications` Edge Function. Configure `GROQ_API_KEY` as a Supabase
+Edge Function secret. Never put server-side provider keys in Expo variables or
+client code.
 Optional model overrides are documented in `mobile/.env.example`; enable Groq
 Zero Data Retention in GroqCloud Data Controls when required by the deployment's
 privacy policy.
-
-Face comparison remains advisory and excluded from automated application
-decisions. Authorized gig managers should compare the approved ID and original
-performance video manually whenever Face++ returns unclear or insufficient evidence.
 
 ## Gig performance video recording screening
 

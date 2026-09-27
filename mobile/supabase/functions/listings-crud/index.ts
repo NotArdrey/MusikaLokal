@@ -477,7 +477,7 @@ serve(async (req: Request) => {
 
             // SPAM PREVENTION for Gig Applications
             if (type === 'gig_application') {
-                const { gig_id, slot_type } = insertPayload;
+                const { gig_id, group_id, production_team_id, slot_type } = insertPayload;
 
                 const { data: gigData, error: gigError } = await supabaseClient
                     .from('gigs')
@@ -533,13 +533,26 @@ serve(async (req: Request) => {
                     }
                 }
 
-                const { data: existingApp, error: existingError } = await supabaseClient
+                let existingApplicationQuery = supabaseClient
                     .from('gig_applications')
                     .select('id, status')
-                    .eq('applicant_id', effectiveUserId)
                     .eq('gig_id', gig_id)
-                    .in('status', ['pending', 'accepted'])
-                    .maybeSingle();
+                    .in('status', ['pending', 'accepted', 'approved'])
+
+                if (production_team_id) {
+                    existingApplicationQuery = existingApplicationQuery.eq('production_team_id', production_team_id)
+                } else if (group_id) {
+                    existingApplicationQuery = existingApplicationQuery
+                        .eq('group_id', group_id)
+                        .is('production_team_id', null)
+                } else {
+                    existingApplicationQuery = existingApplicationQuery
+                        .eq('applicant_id', effectiveUserId)
+                        .is('group_id', null)
+                        .is('production_team_id', null)
+                }
+
+                const { data: existingApp, error: existingError } = await existingApplicationQuery.maybeSingle();
 
                 if (existingError) throw existingError;
 
@@ -553,15 +566,29 @@ serve(async (req: Request) => {
                 const cooldownDays = Number(gigData.reapplication_cooldown_days ?? 30);
 
                 if (cooldownDays > 0) {
-                    const { data: rejectedApp, error: rejectedError } = await supabaseClient
+                    let rejectedApplicationQuery = supabaseClient
                         .from('gig_applications')
                         .select('id, rejected_at, created_at')
-                        .eq('applicant_id', effectiveUserId)
                         .eq('gig_id', gig_id)
                         .eq('status', 'rejected')
+                        .or('system_status_reason.is.null,system_status_reason.neq.system_requirements_changed')
                         .order('rejected_at', { ascending: false, nullsFirst: false })
                         .limit(1)
-                        .maybeSingle();
+
+                    if (production_team_id) {
+                        rejectedApplicationQuery = rejectedApplicationQuery.eq('production_team_id', production_team_id)
+                    } else if (group_id) {
+                        rejectedApplicationQuery = rejectedApplicationQuery
+                            .eq('group_id', group_id)
+                            .is('production_team_id', null)
+                    } else {
+                        rejectedApplicationQuery = rejectedApplicationQuery
+                            .eq('applicant_id', effectiveUserId)
+                            .is('group_id', null)
+                            .is('production_team_id', null)
+                    }
+
+                    const { data: rejectedApp, error: rejectedError } = await rejectedApplicationQuery.maybeSingle();
 
                     if (rejectedError) throw rejectedError;
 

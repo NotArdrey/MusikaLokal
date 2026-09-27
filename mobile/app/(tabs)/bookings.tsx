@@ -5,7 +5,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ExpoLinking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Calendar } from "react-native-calendars";
+import { Calendar } from "../../src/components/CenteredCalendar";
 import {
     ActivityIndicator,
     AppState,
