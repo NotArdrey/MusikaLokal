@@ -37,6 +37,7 @@ interface GigApplyTabProps {
   videoUrl: string;
   setVideoUrl: (value: string) => void;
   aiPortfolioReviewConsent: boolean;
+  setAiPortfolioReviewConsent: (value: boolean) => void;
   setVideoReviewFrameUrl: (value: string) => void;
   setVideoReviewFrameUrls: (value: string[]) => void;
   videoCopyrightDecision: UploadSafetyFileDecision | null;
@@ -83,6 +84,7 @@ const GigApplyTab = ({
   videoUrl,
   setVideoUrl,
   aiPortfolioReviewConsent,
+  setAiPortfolioReviewConsent,
   setVideoReviewFrameUrl,
   setVideoReviewFrameUrls,
   videoCopyrightDecision,
@@ -859,6 +861,29 @@ const GigApplyTab = ({
         onCopyrightDecisionChange={setVideoCopyrightDecision}
       />
 
+      {!isGroupApplicationFlow ? (
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() => setAiPortfolioReviewConsent(!aiPortfolioReviewConsent)}
+          style={[gigApplyStyles.consentCard, { borderColor: colors.border, backgroundColor: isDark ? "#1F2937" : "#F9FAFB" }]}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: aiPortfolioReviewConsent }}
+        >
+          <View style={[gigApplyStyles.checkbox, {
+            borderColor: aiPortfolioReviewConsent ? colors.primary : colors.border,
+            backgroundColor: aiPortfolioReviewConsent ? colors.primary : "transparent",
+          }]}>
+            {aiPortfolioReviewConsent ? <Text style={gigApplyStyles.checkboxTick}>✓</Text> : null}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[gigApplyStyles.termsText, { color: colors.text }]}>Allow optional AI application review</Text>
+            <Text style={[gigApplyStyles.consentHelp, { color: colors.textSecondary }]}>{!selectedGroupId && !selectedProductionRosterId
+              ? "This sends your CV and performance media to the configured review providers. It also lets the authorized gig manager view your approved ID front and lets Face++ compare its portrait with sampled video frames. The result is advisory only."
+              : "As the submitting leader or representative, you authorize the approved ID fronts of the snapshotted duo or group lineup to be compared with sampled video frames and shown to the authorized gig manager. The result is advisory only."}</Text>
+          </View>
+        </TouchableOpacity>
+      ) : null}
+
       {!isGroupApplicationFlow && recognizedAudioGenres.length > 0 && (
         <View style={[styles.infoBox, { backgroundColor: `${colors.primary}14`, borderColor: colors.primary, marginBottom: 16 }]}>
           <Ionicons name="musical-notes-outline" size={22} color={colors.primary} />
@@ -1080,6 +1105,21 @@ const GigApplyTab = ({
 };
 
 const gigApplyStyles = StyleSheet.create({
+  consentCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  consentHelp: {
+    fontSize: 11,
+    lineHeight: 17,
+    fontFamily: 'Poppins_400Regular',
+    marginTop: 3,
+  },
   termsRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

@@ -8,6 +8,7 @@ import {
     queueGigPortfolioReview,
     scheduleGigPortfolioReview,
 } from '../_shared/gigPortfolioReview.ts'
+import { resolveApprovedIdentityDocumentReference } from '../_shared/identityDocumentReference.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -88,6 +89,89 @@ async function getVenueStaffAccessLevel(client: any, userId: string, gigId: stri
     return level === 1 || level === 2 || level === 3 ? level : null
 }
 
+async function getConsentedIdentityDocumentReview(client: any, application: any) {
+    const isOwnSoloApplication =
+        application?.identity_document_review_consent === true &&
+        !application?.group_id &&
+        !application?.production_roster_id &&
+        application?.applicant_id === application?.submitted_by_user_id
+
+    if (!isOwnSoloApplication) {
+        return {
+            available: false,
+            url: null,
+            document_type: null,
+            source: 'unavailable',
+            limitation: application?.identity_document_review_consent === true
+                ? 'Group identity documents are provided in the consented lineup review.'
+                : 'The applicant did not consent to show an approved ID in this application review.',
+        }
+    }
+
+    const { data: profile, error } = await client
+        .from('profiles')
+        .select('id, is_verified, verification_status, didit_session_id')
+        .eq('id', application.applicant_id)
+        .maybeSingle()
+    if (error || !profile) {
+        return { available: false, url: null, document_type: null, source: 'unavailable', limitation: 'The approved ID image could not be loaded.' }
+    }
+
+    const reference = await resolveApprovedIdentityDocumentReference(client, profile)
+    return {
+        available: Boolean(reference.url),
+        url: reference.url,
+        document_type: reference.document_type,
+        source: reference.source,
+        limitation: reference.limitation,
+        consented_at: application.identity_document_review_consented_at || null,
+    }
+}
+
+async function getConsentedGroupIdentityDocumentReviews(client: any, application: any) {
+    if (!application?.group_id || application?.identity_document_review_consent !== true) return []
+
+    const memberIds = uniqueStrings(
+        Array.isArray(application?.ai_review_group_member_ids)
+            ? application.ai_review_group_member_ids
+            : []
+    )
+    if (memberIds.length === 0) return []
+
+    const { data: profiles, error } = await client
+        .from('profiles')
+        .select('id, full_name, is_verified, verification_status, didit_session_id')
+        .in('id', memberIds)
+    if (error) throw error
+
+    const profilesById = new Map((profiles || []).map((profile: any) => [String(profile.id), profile]))
+    return await Promise.all(memberIds.map(async (profileId) => {
+        const profile: any = profilesById.get(profileId)
+        if (!profile) {
+            return {
+                profile_id: profileId,
+                display_name: 'Group member',
+                available: false,
+                url: null,
+                document_type: null,
+                source: 'unavailable',
+                limitation: 'The group-member profile is unavailable.',
+            }
+        }
+        const reference = await resolveApprovedIdentityDocumentReference(client, profile)
+        return {
+            profile_id: profile.id,
+            display_name: profile.full_name || 'Group member',
+            available: Boolean(reference.url),
+            url: reference.url,
+            document_type: reference.document_type,
+            source: reference.source,
+            limitation: reference.limitation,
+            consented_at: application.identity_document_review_consented_at || null,
+        }
+    }))
+}
+
 const GIG_APPLICATION_SELECT = `
     *,
     applicant:profiles!applicant_id(id, full_name, avatar_url, role, bio, location, latitude, longitude, is_verified, verification_status),
@@ -114,6 +198,8 @@ const GIG_APPLICATION_SUMMARY_SELECT = `
     status,
     slot_type,
     created_at,
+    ai_portfolio_review_consent,
+    identity_document_review_consent,
     performer_snapshot,
     cv_url,
     video_url,
@@ -166,6 +252,8 @@ function toApplicationSummary(application: any) {
         status: application.status,
         slot_type: application.slot_type,
         created_at: application.created_at,
+        ai_portfolio_review_consent: application.ai_portfolio_review_consent === true,
+        identity_document_review_consent: application.identity_document_review_consent === true,
         performer_snapshot: application.performer_snapshot || {},
         applicant: pickProfile(application.applicant),
         group: pickGroup(application.group),
@@ -1185,13 +1273,13 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
 
         const faceStatus = String(review?.face_similarity?.status || '')
         if (faceStatus === 'likely_same_person') {
-            notes.push('The performer appears to match the profile photo.')
+            notes.push('The performer appears to match the approved ID portrait.')
         } else if (faceStatus === 'likely_different_person') {
-            notes.push('The performer may not match the profile photo, so please check the video.')
+            notes.push('The performer may not match the approved ID portrait, so please check the video.')
         } else if (faceStatus === 'unclear') {
-            notes.push('The profile photo and video comparison was unclear.')
+            notes.push('The approved ID and video comparison was unclear.')
         } else if (faceStatus === 'not_run') {
-            notes.push('The profile photo and video were not compared.')
+            notes.push('The approved ID and video were not compared.')
         }
 
         const missingRequiredItems = [
@@ -1592,6 +1680,8 @@ Deno.serve(async (req: Request) => {
                 supabaseClient.from('gig_application_ai_reviews').select('*').eq('application_id', applicationId).maybeSingle(),
                 supabaseClient.from('gig_application_recommendations').select('*').eq('application_id', applicationId).maybeSingle(),
             ])
+            const identityDocumentReview = await getConsentedIdentityDocumentReview(supabaseClient, applicationRecord)
+            const identityDocumentReviews = await getConsentedGroupIdentityDocumentReviews(supabaseClient, applicationRecord)
             if (reviewResult.error) console.warn('gig_application_ai_review_read_failed', { message: reviewResult.error.message })
             if (recommendationResult.error) console.warn('gig_application_recommendation_read_failed', { message: recommendationResult.error.message })
             let reviewData = reviewResult.error ? null : reviewResult.data || null
@@ -1654,6 +1744,8 @@ Deno.serve(async (req: Request) => {
                 ...applicationWithHistory,
                 ai_portfolio_review: reviewData,
                 ai_recommendation: recommendationData,
+                identity_document_review: identityDocumentReview,
+                identity_document_reviews: identityDocumentReviews,
             }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 

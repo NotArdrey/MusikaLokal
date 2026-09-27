@@ -248,6 +248,19 @@ async function findAuthUserByEmail(supabaseAdmin: any, email: string) {
   return null;
 }
 
+async function upsertProfileRoleMembership(client: any, profileId: string, role: string, status: string, source: string) {
+  const nowIso = new Date().toISOString();
+  const { error } = await client.from("profile_roles").upsert({
+    profile_id: profileId,
+    role,
+    status,
+    source,
+    activated_at: status === "ACTIVE" ? nowIso : null,
+    updated_at: nowIso,
+  }, { onConflict: "profile_id,role" });
+  if (error) throw new Error(`Unable to save account role: ${error.message}`);
+}
+
 async function ensurePendingReviewProfile(
   supabaseAdmin: any,
   authUser: any,
@@ -334,6 +347,10 @@ async function ensurePendingReviewAuthUser(
 
     const existingRole = String(existingProfile?.role || existingUser.user_metadata?.role || "").trim().toLowerCase();
     const existingStatus = String(existingProfile?.verification_status || existingUser.user_metadata?.verification_status || "").trim().toUpperCase();
+
+    if (existingUser.email_confirmed_at) {
+      throw new Error("This email is already registered. Use a different email for a separate account.");
+    }
 
     if (existingRole && existingRole !== role) {
       throw new Error("This email is already registered with another account type. Please log in to continue.");
@@ -622,15 +639,33 @@ serve(async (req: Request) => {
       birthDate: body?.birthDate || body?.birth_date || body?.dateOfBirth || body?.date_of_birth,
     });
 
-    const duplicateIdentity = documentFingerprint
+    const duplicateIdentity = documentFingerprint || identityNameBirthDate.hasNameBirthDate
       ? await findSameRoleIdentityDuplicate(supabaseAdmin, {
         documentFingerprint,
         role,
+        userId: userId || null,
         email,
+        normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+        birthDate: identityNameBirthDate.birthDate,
       })
       : { hasDuplicate: false, matches: [] };
 
-    const duplicateReason = duplicateIdentity.hasDuplicate ? getDuplicateIdentityReviewReason(role) : null;
+    if (duplicateIdentity.hasDuplicate) {
+      const error = getDuplicateIdentityReviewReason(role);
+      await markRegistrationAttempt(supabaseAdmin, registrationAttemptId, {
+        success: false,
+        error_message: error,
+        metadata: {
+          role,
+          source,
+          duplicate_identity_rejected: true,
+          duplicate_match_count: duplicateIdentity.matches?.length || 1,
+        },
+      });
+      return jsonResponse({ error, duplicateIdentityRejected: true }, 409);
+    }
+
+    const duplicateReason = null;
 
     const authUser = await ensurePendingReviewAuthUser(supabaseAdmin, {
       userId,
@@ -792,6 +827,8 @@ serve(async (req: Request) => {
       }
     }
 
+    await upsertProfileRoleMembership(supabaseAdmin, userId, role, "PENDING_REVIEW", "SIGNUP_MANUAL");
+
     await supabaseAdmin
       .from("profiles")
       .update({
@@ -867,6 +904,7 @@ serve(async (req: Request) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
-    return jsonResponse({ error: message }, getRegistrationRateLimitStatus(error) || 500);
+    const conflictStatus = /already registered|already has an account/i.test(message) ? 409 : null;
+    return jsonResponse({ error: message }, getRegistrationRateLimitStatus(error) || conflictStatus || 500);
   }
 });

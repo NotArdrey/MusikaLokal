@@ -2566,6 +2566,7 @@ export default function SignupScreen() {
                 body: {
                     action: 'check_account_status',
                     email: normalizedSignupEmail,
+                    role: selectedRole,
                 },
             });
 
@@ -2583,7 +2584,18 @@ export default function SignupScreen() {
                 exists: Boolean(accountStatus?.exists),
                 emailConfirmed: Boolean(accountStatus?.emailConfirmed),
                 identityStatus: accountStatus?.identityStatus ?? null,
+                accountRole: accountStatus?.accountRole ?? null,
             });
+
+            const existingAccountRole = String(accountStatus?.accountRole || '').trim().toLowerCase();
+            if (accountStatus?.exists && existingAccountRole && existingAccountRole !== selectedRole) {
+                Alert.alert(
+                    'Different Email Required',
+                    'Fan and Musician accounts are separate. Use a different email to create this account.',
+                );
+                setLoading(false);
+                return;
+            }
 
             const existingIdentityStatus = String(accountStatus?.identityStatus || '').trim().toUpperCase();
             const canRetryExistingIdentity = ['DECLINED', 'ABANDONED'].includes(existingIdentityStatus);
@@ -2591,7 +2603,7 @@ export default function SignupScreen() {
             if (accountStatus?.exists && accountStatus?.emailConfirmed) {
                 Alert.alert(
                     'Account Exists',
-                    'This email is already registered and verified. Please sign in.',
+                    'This email is already registered. Use a different email for a separate account, or sign in.',
                     [{ text: 'Sign In', onPress: () => router.replace('/') }],
                 );
                 setLoading(false);
@@ -3433,7 +3445,7 @@ export default function SignupScreen() {
                 <View style={styles.documentSectionContainer}>
                     <Text style={[styles.documentSectionTitle, themeStyles.text]}>Choose verification method</Text>
                     <Text style={[styles.documentSectionSubtitle, themeStyles.textSecondary]}>
-                        Auto verification supports National ID card, Passport, and Driver's license. Other government IDs go to manual review.
+                        Auto verification supports National ID card, Passport, and Driver&apos;s license. Other government IDs go to manual review.
                     </Text>
 
                     <TouchableOpacity

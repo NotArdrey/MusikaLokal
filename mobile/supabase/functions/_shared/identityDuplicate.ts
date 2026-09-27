@@ -413,7 +413,7 @@ export async function revokeOrphanSameRoleIdentityClaims(
 
 export function getDuplicateIdentityReviewReason(role: string) {
   const label = normalizeIdentityRole(role) === "fan" ? "fan" : "musician";
-  return `This ID appears to match another ${label} account. We will review it manually so the account is handled correctly.`;
+  return `This identity is already used by another ${label} account. Each verified identity can have only one ${label} account.`;
 }
 
 export async function recordIdentityDocumentClaim(

@@ -3,6 +3,7 @@ import {
     unavailableFaceMatch,
     type FaceMatchSubject,
 } from './faceRecognitionClient.ts'
+import { resolveApprovedIdentityDocumentReference } from './identityDocumentReference.ts'
 
 type ReviewCriterionResult = 'supported' | 'not_supported' | 'unclear'
 
@@ -36,12 +37,11 @@ const DEFAULT_TEXT_FALLBACK_MODELS = ['qwen/qwen3.8-27b', 'openai/gpt-oss-20b']
 const DEFAULT_VISION_MODEL = 'qwen/qwen3.8-27b'
 const DEFAULT_SPEECH_MODEL = 'whisper-large-v3-turbo'
 const DEFAULT_SPEECH_FALLBACK_MODEL = 'whisper-large-v3'
-export const GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION = 'gig-portfolio-v7-document-and-genre-evidence'
+export const GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION = 'gig-portfolio-v9-approved-id-lineup-reference'
 const MAX_CV_BYTES = 10 * 1024 * 1024
 const MAX_CV_TEXT_CHARS = 16_000
 const MAX_TRANSCRIPT_CHARS = 16_000
 const MAX_VISION_IMAGES_PER_REQUEST = 3
-const DEFAULT_MAX_GROUP_FACE_MEMBERS = 8
 
 const uniqueStrings = (values: unknown[]) => Array.from(new Set(
     values
@@ -839,7 +839,7 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
         if (apiKeys.length === 0) throw new Error('No Groq API key is configured')
         const { data: application, error: applicationError } = await client
             .from('gig_applications')
-            .select('id, gig_id, applicant_id, submitted_by_user_id, group_id, production_roster_id, slot_type, cv_url, video_url, ai_review_frame_url, ai_review_frame_urls, ai_review_group_member_ids, ai_portfolio_review_consent, ai_portfolio_review_consented_at, video_copyright_status, video_copyright_review_id, video_copyright_metadata')
+            .select('id, gig_id, applicant_id, submitted_by_user_id, group_id, production_roster_id, slot_type, cv_url, video_url, ai_review_frame_url, ai_review_frame_urls, ai_review_group_member_ids, ai_portfolio_review_consent, ai_portfolio_review_consented_at, identity_document_review_consent, identity_document_review_consented_at, video_copyright_status, video_copyright_review_id, video_copyright_metadata')
             .eq('id', applicationId)
             .maybeSingle()
         if (applicationError) throw applicationError
@@ -870,25 +870,21 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
             groupId = roster?.group_id || groupId
         }
 
-        const configuredGroupFaceLimit = Math.floor(Number(
-            Deno.env.get('FACE_GROUP_MAX_MEMBERS') || Deno.env.get('GROQ_GROUP_FACE_MAX_MEMBERS')
-        ) || DEFAULT_MAX_GROUP_FACE_MEMBERS)
-        const maxGroupFaceMembers = Math.max(1, Math.min(12, configuredGroupFaceLimit))
         const groupMemberIds = groupId
             ? uniqueStrings(Array.isArray(application.ai_review_group_member_ids) ? application.ai_review_group_member_ids : [])
             : []
-        const reviewedGroupMemberIds = groupMemberIds.slice(0, maxGroupFaceMembers)
+        const reviewedGroupMemberIds = groupMemberIds
 
         const [gigResult, requirementResult, profileResult, skillsResult, genresResult, groupResult, groupRosterResult, groupMemberProfilesResult] = await Promise.all([
             client.from('gigs').select('name, description, location').eq('id', application.gig_id).maybeSingle(),
             client.from('gig_requirements').select('requirement_key, requirement_value').eq('gig_id', application.gig_id),
-            profileId ? client.from('profiles').select('full_name, bio, location, avatar_url').eq('id', profileId).maybeSingle() : Promise.resolve({ data: null, error: null }),
+            profileId ? client.from('profiles').select('id, full_name, bio, location, avatar_url, is_verified, verification_status, didit_session_id').eq('id', profileId).maybeSingle() : Promise.resolve({ data: null, error: null }),
             profileId ? client.from('profile_skills').select('skill').eq('profile_id', profileId) : Promise.resolve({ data: [], error: null }),
             profileId ? client.from('profile_genres').select('genre').eq('profile_id', profileId) : Promise.resolve({ data: [], error: null }),
             groupId ? client.from('groups').select('name, description, genre, location, group_type').eq('id', groupId).maybeSingle() : Promise.resolve({ data: null, error: null }),
             groupId ? client.from('group_roster_members').select('member_role, instrument').eq('group_id', groupId) : Promise.resolve({ data: [], error: null }),
             reviewedGroupMemberIds.length > 0
-                ? client.from('profiles').select('id, full_name, avatar_url').in('id', reviewedGroupMemberIds)
+                ? client.from('profiles').select('id, full_name, is_verified, verification_status, didit_session_id').in('id', reviewedGroupMemberIds)
                 : Promise.resolve({ data: [], error: null }),
         ])
         if (gigResult.error) throw gigResult.error
@@ -927,25 +923,44 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
             url,
             timestamp_seconds: index === 0 ? 1 : null,
         }))
-        const profilePhotoUrl = safeStorageUrl(profileResult.data?.avatar_url, supabaseUrl)
         const faceComparisonEligible = Boolean(profileId && !groupId)
+        const identityDocumentReference = faceComparisonEligible && application.identity_document_review_consent === true
+            ? await resolveApprovedIdentityDocumentReference(client, profileResult.data)
+            : {
+                url: null,
+                source: 'unavailable' as const,
+                document_type: null,
+                limitation: 'The applicant did not consent to use the approved ID image for this application review.',
+            }
         const groupProfilesById = new Map((groupMemberProfilesResult.data || []).map((profile: any) => [String(profile.id), profile]))
         const groupMemberProfiles = reviewedGroupMemberIds
             .map((memberId) => groupProfilesById.get(memberId))
             .filter(Boolean)
+        const groupIdentityDocumentReferences = new Map<string, Awaited<ReturnType<typeof resolveApprovedIdentityDocumentReference>>>()
+        if (groupId && application.identity_document_review_consent === true) {
+            const references = await Promise.all(groupMemberProfiles.map(async (member: any) => ({
+                profileId: String(member.id),
+                reference: await resolveApprovedIdentityDocumentReference(client, member),
+            })))
+            references.forEach(({ profileId: memberProfileId, reference }) => {
+                groupIdentityDocumentReferences.set(memberProfileId, reference)
+            })
+        }
 
         const faceSubjects: FaceMatchSubject[] = [
-            ...(faceComparisonEligible && profilePhotoUrl
-                ? [{ id: 'solo-applicant', reference_image_url: profilePhotoUrl }]
+            ...(faceComparisonEligible && identityDocumentReference.url
+                ? [{ id: 'solo-applicant', reference_image_url: identityDocumentReference.url }]
                 : []),
             ...groupMemberProfiles
                 .map((member: any) => ({
                     id: String(member.id),
-                    reference_image_url: safeStorageUrl(member.avatar_url, supabaseUrl),
+                    reference_image_url: groupIdentityDocumentReferences.get(String(member.id))?.url || null,
                 }))
                 .filter((subject: any): subject is FaceMatchSubject => Boolean(subject.reference_image_url)),
         ]
-        // Face++ handles only the optional 1:1 profile-photo/video-frame comparison.
+        // Face++ uses approved ID images only. For a duo or group, the submitting
+        // representative's explicit consent covers the immutable lineup snapshot.
+        // Private objects stay private; only short-lived URLs are used here.
         // Groq handles only the submitted CV, video transcription, and video-frame observations.
         // Profile and group portfolio media are intentionally excluded from application scoring.
         // ACRCloud catalog genre evidence and recommendation behavior are unchanged.
@@ -965,23 +980,45 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
         ])
         const faceSimilarity = !faceComparisonEligible
             ? unavailableFaceMatch('Face matching is limited to solo applicants with a single applicant profile.')
-            : !profilePhotoUrl
+            : !identityDocumentReference.url
+              ? unavailableFaceMatch(
+                    identityDocumentReference.limitation || 'No approved applicant ID image was available.',
+                    'ID-to-video face matching was not run.',
+                )
+              : {
+                    ...(facePlusPlusResults.get('solo-applicant') || unavailableFaceMatch(
+                        'Face++ face matching did not return a result.',
+                        'The Face++ response was incomplete.',
+                    )),
+                    reference_source: 'approved_identity_document',
+                    identity_document_source: identityDocumentReference.source,
+                }
+        const groupFaceSimilarity = groupMemberProfiles.map((member: any) => {
+            const reference = groupIdentityDocumentReferences.get(String(member.id))
+            const result = application.identity_document_review_consent !== true
                 ? unavailableFaceMatch(
-                    'No approved applicant profile photo was available.',
-                    'Face matching was not run because the applicant profile photo was unavailable.',
+                    'The submitting representative did not consent to use approved group-member IDs.',
+                    'ID-to-video face matching was not run for this group member.',
                 )
-                : facePlusPlusResults.get('solo-applicant') || unavailableFaceMatch(
-                    'Face++ face matching did not return a result.',
-                    'The Face++ response was incomplete.',
-                )
-        const groupFaceSimilarity = groupMemberProfiles.map((member: any) => ({
-            profile_id: member.id,
-            display_name: cleanText(member.full_name, 120) || 'Group member',
-            ...(facePlusPlusResults.get(String(member.id)) || unavailableFaceMatch(
-                'No approved group-member profile photo was available.',
-                'Face++ face matching was not run for this group member.',
-            )),
-        }))
+                : !reference?.url
+                  ? unavailableFaceMatch(
+                        reference?.limitation || 'No approved group-member ID image was available.',
+                        'ID-to-video face matching was not run for this group member.',
+                    )
+                  : {
+                        ...(facePlusPlusResults.get(String(member.id)) || unavailableFaceMatch(
+                            'Face++ face matching did not return a result.',
+                            'The Face++ response was incomplete.',
+                        )),
+                        reference_source: 'approved_identity_document',
+                        identity_document_source: reference.source,
+                    }
+            return {
+                profile_id: member.id,
+                display_name: cleanText(member.full_name, 120) || 'Group member',
+                ...result,
+            }
+        })
         const cvDocumentClassification = await classifyCvDocument(cv.text, apiKeys, textModels)
         const cvNameCheck = cvDocumentClassification.status === 'cv'
             ? compareCvApplicantName(
@@ -1008,9 +1045,6 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
                 : '',
             reviewedGroupMemberIds.length > groupMemberProfiles.length
                 ? 'One or more snapshotted group-member profiles were unavailable for face similarity.'
-                : '',
-            groupMemberIds.length > reviewedGroupMemberIds.length
-                ? `Face similarity was limited to the first ${reviewedGroupMemberIds.length} snapshotted group members.`
                 : '',
         ]
         const limitations = uniqueStrings([
@@ -1149,14 +1183,16 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
                 portfolio_images_reviewed: 0,
                 portfolio_documents_found: 0,
                 portfolio_documents_reviewed: 0,
-                profile_photo_compared: Boolean(profilePhotoUrl && faceSimilarity.status !== 'not_run'),
+                identity_document_compared: Boolean(identityDocumentReference.url && faceSimilarity.status !== 'not_run'),
+                face_reference_source: faceSimilarity.reference_source || null,
                 face_match_provider: 'faceplusplus_compare',
                 face_match_model: 'Face++ Compare API',
                 face_match_threshold_tier: faceSimilarity.threshold_tier,
                 face_match_threshold: faceSimilarity.threshold,
                 face_match_aggregation: faceSimilarity.aggregation_strategy,
                 group_members_snapshotted: groupMemberIds.length,
-                group_profile_photos_compared: groupFaceSimilarity.filter((item: any) => item.status !== 'not_run').length,
+                group_profile_photos_compared: 0,
+                group_identity_documents_compared: groupFaceSimilarity.filter((item: any) => item.status !== 'not_run').length,
                 recognized_audio_genre: recognizedAudioGenre,
                 cv_requirement_review: cvRequirementReview,
             },

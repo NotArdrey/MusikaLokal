@@ -89,6 +89,16 @@ function loadPortfolioReviewHarness() {
       },
     },
     require: (specifier) => {
+      if (String(specifier).includes("identityDocumentReference")) {
+        return {
+          resolveApprovedIdentityDocumentReference: async () => ({
+            url: "https://fixture.supabase.co/storage/v1/object/sign/identity-manual/profile-1/front.jpg?token=fixture",
+            source: "manual_upload",
+            document_type: "Government ID",
+            limitation: "",
+          }),
+        };
+      }
       if (!String(specifier).includes("faceRecognitionClient")) throw new Error(`Unexpected import: ${specifier}`);
       return {
         unavailableFaceMatch,
@@ -123,6 +133,8 @@ function mockReviewClient() {
     ai_review_group_member_ids: [],
     ai_portfolio_review_consent: true,
     ai_portfolio_review_consented_at: "2026-09-23T00:00:00.000Z",
+    identity_document_review_consent: true,
+    identity_document_review_consented_at: "2026-09-23T00:00:00.000Z",
     video_copyright_status: "not_found",
     video_copyright_review_id: null,
     video_copyright_metadata: {},
@@ -131,7 +143,7 @@ function mockReviewClient() {
     gig_applications: [application],
     gigs: [{ id: "gig-1", name: "Fixture Gig", description: "", location: "Bulacan" }],
     gig_requirements: [],
-    profiles: [{ id: "profile-1", full_name: "Fixture Artist", bio: "", location: "Bulacan", avatar_url: "https://fixture.supabase.co/storage/v1/object/public/avatars/profile.jpg" }],
+    profiles: [{ id: "profile-1", full_name: "Fixture Artist", bio: "", location: "Bulacan", avatar_url: "https://fixture.supabase.co/storage/v1/object/public/avatars/profile.jpg", is_verified: true, verification_status: "APPROVED", didit_session_id: null }],
     profile_skills: [],
     profile_genres: [],
     profile_portfolio_urls: [],
@@ -192,7 +204,7 @@ function loadRecommendationHarness() {
   return exports;
 }
 
-test("production client sends the profile photo and representative JPEG URLs to Face++ Compare", async () => {
+test("production client sends the reference image and representative JPEG URLs to Face++ Compare", async () => {
   const requests = [];
   const fetchImpl = async (url, init) => {
     const body = init.body;
@@ -303,7 +315,10 @@ for (const relativePath of portfolioReviewPaths) {
     assert.match(source, /inspectImages/);
     assert.match(source, /MAX_VISION_IMAGES_PER_REQUEST = 3/);
     assert.match(source, /profile_portfolio_used: false/);
-    assert.match(source, /gig-portfolio-v7-document-and-genre-evidence/);
+    assert.match(source, /gig-portfolio-v9-approved-id-lineup-reference/);
+    assert.match(source, /groupIdentityDocumentReferences/);
+    assert.match(source, /group_identity_documents_compared/);
+    assert.doesNotMatch(source, /reference_image_url:\s*safeStorageUrl\(member\.avatar_url/);
     assert.match(source, /candidate_name/);
     assert.match(source, /cv_name_check:\s*cvNameCheck/);
     assert.doesNotMatch(source, /from\('profile_portfolio_urls'\)/);
@@ -413,7 +428,7 @@ test("stored Face++ result still flows through the existing rules-based recommen
   assert.equal(result.recommendation_status, "recommended");
   assert.equal(result.criteria_snapshot.score_breakdown.earned_points, 15);
   assert.equal(result.criteria_snapshot.score_breakdown.possible_points, 15);
-  assert.match(result.explanation, /appears to match the profile photo/i);
+  assert.match(result.explanation, /appears to match the approved ID portrait/i);
 });
 
 test("an unrelated reviewed upload no longer earns portfolio match points", async () => {
@@ -496,7 +511,7 @@ test("an unclear media review does not preserve unverified portfolio points", as
   assert.ok(result.missing_criteria.includes("Performance evidence could not be confirmed"));
 });
 
-test("AI review is enabled by default without a checkbox and applicant review sections start collapsed", () => {
+test("AI and approved-ID review require explicit consent and applicant review sections start collapsed", () => {
   const applySource = readFileSync(new URL(
     "../mobile/src/components/listingDetails/GigApplyTab.tsx",
     import.meta.url,
@@ -509,16 +524,18 @@ test("AI review is enabled by default without a checkbox and applicant review se
     "../mobile/src/components/ListingDetailsSheet.tsx",
     import.meta.url,
   ), "utf8");
-  assert.doesNotMatch(applySource, /Allow optional AI application review/);
-  assert.doesNotMatch(applySource, /setAiPortfolioReviewConsent/);
-  assert.match(listingSource, /useState\(true\)/);
+  assert.match(applySource, /Allow optional AI application review/);
+  assert.match(applySource, /setAiPortfolioReviewConsent/);
+  assert.match(applySource, /approved ID front/);
+  assert.match(listingSource, /aiPortfolioReviewConsent, setAiPortfolioReviewConsent\] = useState\(false\)/);
   assert.doesNotMatch(reviewSource, /colors=\{colors\} defaultOpen/);
   assert.equal((reviewSource.match(/<Section title=/g) || []).length, 3);
   assert.doesNotMatch(reviewSource, /Weighted score|median distance|Match rate/);
   assert.match(reviewSource, /did not authorize optional AI file review/);
   assert.match(reviewSource, /title="CV Check"/);
   assert.match(reviewSource, /title="Song & Genre Check"/);
-  assert.match(reviewSource, /title="Profile & Video Check"/);
+  assert.match(reviewSource, /Approved ID & Video Check/);
+  assert.match(reviewSource, /View approved ID/);
   assert.match(reviewSource, /Possible match/);
   assert.match(reviewSource, /View details/);
   assert.match(reviewSource, /We couldn't identify the song or genre\./);
@@ -564,6 +581,49 @@ test("application queue, stored face result, and recommendation recalculation pa
   assert.match(applicationSource, /latitude === 0 && longitude === 0/);
   assert.match(applicationSource, /hasPortfolio: Boolean\(application\?\.video_url \|\| application\?\.cv_url\)/);
   assert.doesNotMatch(applicationSource, /hasPortfolio:[\s\S]{0,250}profile\?\.portfolio_urls/);
+});
+
+test("approved ID review is consent-gated, private, and organizer-authorized", () => {
+  for (const root of ["mobile", "web"]) {
+    const migration = readFileSync(new URL(
+      `../${root}/supabase/migrations/20260927150000_add_gig_identity_document_review_consent.sql`,
+      import.meta.url,
+    ), "utf8");
+    const groupMigration = readFileSync(new URL(
+      `../${root}/supabase/migrations/20260927160000_enable_group_representative_identity_document_consent.sql`,
+      import.meta.url,
+    ), "utf8");
+    const identityReference = readFileSync(new URL(
+      `../${root}/supabase/functions/_shared/identityDocumentReference.ts`,
+      import.meta.url,
+    ), "utf8");
+    const applications = readFileSync(new URL(
+      `../${root}/supabase/functions/gig-applications/index.ts`,
+      import.meta.url,
+    ), "utf8");
+    const submission = readFileSync(new URL(
+      `../${root}/src/hooks/useApplicationSubmissionAction.ts`,
+      import.meta.url,
+    ), "utf8");
+    const summaryFunction = applications.slice(
+      applications.indexOf("function toApplicationSummary"),
+      applications.indexOf("async function attachPriorApplicationCounts"),
+    );
+
+    assert.match(migration, /identity_document_review_consent boolean not null default false/i);
+    assert.match(groupMigration, /if new\.production_roster_id is not null/i);
+    assert.doesNotMatch(groupMigration, /new\.group_id is not null or/i);
+    assert.match(groupMigration, /immutable snapshotted lineup/i);
+    assert.match(identityReference, /\.eq\('status', 'APPROVED'\)/);
+    assert.match(identityReference, /\.from\(IDENTITY_BUCKET\)[\s\S]*\.createSignedUrl\([^,]+, IDENTITY_URL_TTL_SECONDS\)/);
+    assert.match(identityReference, /const IDENTITY_URL_TTL_SECONDS = 10 \* 60/);
+    assert.match(applications, /getVenueStaffAccessLevel[\s\S]*getConsentedIdentityDocumentReview/);
+    assert.match(applications, /identity_document_review: identityDocumentReview/);
+    assert.match(applications, /identity_document_reviews: identityDocumentReviews/);
+    assert.match(applications, /getConsentedGroupIdentityDocumentReviews/);
+    assert.doesNotMatch(summaryFunction, /identity_document_review:/);
+    assert.match(submission, /identity_document_review_consent:\s*aiPortfolioReviewConsent/);
+  }
 });
 
 test("benchmark imports the production Face++ client and cannot rewrite the production threshold tier", () => {

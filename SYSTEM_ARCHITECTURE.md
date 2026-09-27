@@ -133,6 +133,17 @@ Auth state is not just signed-in versus signed-out. The auth contexts across she
 
 That makes `AuthContext` the main policy gate for navigation and feature access across the repo. In the mobile shell, `roleResolved` is now part of route readiness, and the `fan` role is treated as a lightweight signed-in role rather than as a guest alias. Fans are redirected away from management, commerce, booking, wallet, chat, and producer/studio/venue operational routes into `/feed`, with profile, settings, account, identity, help, and legal screens allowed.
 
+Fan and Musician roles use a separate-account identity model:
+
+- each account has one active role and one Supabase Auth user ID
+- a second role requires a different email address and a separate account
+- the same verified identity may own one Fan account and one Musician account
+- a verified identity cannot own two accounts with the same role
+- signup and manual review reject same-role duplicates, while a partial unique
+  database index provides the final constraint for approved identity claims
+- `profile_roles` remains a single-role membership ledger; it is not a
+  role-switching mechanism
+
 ### Realtime and notification model
 
 Supabase Realtime is used directly from the clients for:

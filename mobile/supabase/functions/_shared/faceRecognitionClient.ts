@@ -248,7 +248,7 @@ function aggregateResult(frames: FaceFrameResult[], thresholdTier: string): Face
     const summary = status === 'likely_same_person'
         ? `Face++ matched ${matched.length} of ${usable.length} clear representative video frames.`
         : status === 'likely_different_person'
-            ? `Face++ did not match the profile photo in ${usable.length} clear representative video frames.`
+            ? `Face++ did not match the reference image in ${usable.length} clear representative video frames.`
             : usable.length === 1 && matched.length === 1
                 ? 'Face++ matched the only clear representative video frame, so the evidence is limited.'
                 : usable.length === 0

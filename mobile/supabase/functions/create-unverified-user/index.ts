@@ -5,7 +5,6 @@ import { sendEmailWithGmail } from '../_shared/gmailEmail.ts'
 import {
     buildIdentityDocumentFingerprint,
     DIDIT_PENDING_SOURCE,
-    DUPLICATE_REVIEW_SOURCE,
     findSameRoleIdentityDuplicate,
     getDuplicateIdentityReviewReason,
     prepareIdentityNameBirthDateDuplicateInput,
@@ -90,6 +89,12 @@ async function cleanupStaleSignupUserRelations(client: any, userId: string) {
     }
 }
 
+async function cleanupRejectedSignupAccount(client: any, userId: string) {
+    await client.from('identity_document_claims').delete().eq('user_id', userId)
+    await client.auth.admin.deleteUser(userId)
+    await client.from('profiles').delete().eq('id', userId)
+}
+
 async function findAuthUserByEmail(client: any, email: string) {
     const perPage = 1000
 
@@ -104,6 +109,19 @@ async function findAuthUserByEmail(client: any, email: string) {
     }
 
     throw new Error('Unable to complete account lookup. Please contact support.')
+}
+
+async function upsertProfileRoleMembership(client: any, profileId: string, role: string, status: string, source: string) {
+    const nowIso = new Date().toISOString()
+    const { error } = await client.from('profile_roles').upsert({
+        profile_id: profileId,
+        role,
+        status,
+        source,
+        activated_at: status === 'ACTIVE' ? nowIso : null,
+        updated_at: nowIso,
+    }, { onConflict: 'profile_id,role' })
+    if (error) throw new Error(`Unable to save account role: ${error.message}`)
 }
 
 function getDefaultDisplayNameForRole(role: unknown) {
@@ -332,19 +350,6 @@ function buildDeferredEmailDelivery(identityStatus: string) {
     }
 }
 
-function getApprovalClaimReviewReason(approvalClaim: any, role: string) {
-    return String(approvalClaim?.review_reason || approvalClaim?.reason || '').trim() || getDuplicateIdentityReviewReason(role)
-}
-
-function getApprovalClaimMatchedOn(approvalClaim: any, fallback = 'DOCUMENT_FINGERPRINT') {
-    return String(approvalClaim?.matched_on || approvalClaim?.match_type || fallback).trim().toUpperCase()
-}
-
-function getApprovalClaimMatchCount(approvalClaim: any, fallback = 1) {
-    const count = Number(approvalClaim?.duplicate_count || approvalClaim?.match_count || approvalClaim?.matches?.length || fallback)
-    return Number.isFinite(count) ? count : fallback
-}
-
 async function getEmailConfirmationGate(supabaseAdmin: any, user: any) {
     const metadataStatus = normalizeVerificationStatus(user?.user_metadata?.verification_status)
     const { data: profile, error } = await supabaseAdmin
@@ -530,10 +535,17 @@ serve(async (req) => {
             const confirmationGate = existingUser && !existingUser.email_confirmed_at
                 ? await getEmailConfirmationGate(supabaseAdmin, existingUser)
                 : null
+            let accountRole: string | null = null
+            if (existingUser) {
+                const { data: existingProfile } = await supabaseAdmin.from('profiles')
+                    .select('role').eq('id', existingUser.id).maybeSingle()
+                accountRole = String(existingProfile?.role || existingUser.user_metadata?.role || '').trim().toLowerCase() || null
+            }
             return new Response(JSON.stringify({
                 exists: Boolean(existingUser),
                 emailConfirmed: Boolean(existingUser?.email_confirmed_at),
                 identityStatus: confirmationGate?.status || null,
+                accountRole,
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
@@ -831,15 +843,28 @@ serve(async (req) => {
             }
         }
 
-        const diditDuplicateFlag = Boolean(diditVerificationData?.duplicate_identity_review_required)
         const sameRoleDuplicateDetected = Boolean(duplicateIdentityReview?.hasDuplicate)
-        const diditDuplicateFlagRequiresReview = diditDuplicateFlag && sameRoleDuplicateDetected
-        const requiresDuplicateIdentityReview = Boolean(sameRoleDuplicateDetected || diditDuplicateFlagRequiresReview)
+        if (sameRoleDuplicateDetected) {
+            const error = getDuplicateIdentityReviewReason(normalizedRole)
+            await markRegistrationAttempt(supabaseAdmin, registrationAttemptId, {
+                success: false,
+                didit_session_id: diditSessionId || null,
+                error_message: error,
+                metadata: {
+                    role: normalizedRole,
+                    duplicate_identity_rejected: true,
+                    duplicate_match_count: duplicateIdentityReview?.matches?.length || 1,
+                },
+            })
+            return new Response(JSON.stringify({ error, duplicateIdentityRejected: true }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409,
+            })
+        }
         const effectiveVerificationStatus = requiresMusicianVideoReview
             ? 'PENDING_REVIEW'
-            : approvedByDidit && !requiresDuplicateIdentityReview
+            : approvedByDidit
             ? 'APPROVED'
-            : (pendingByDidit || requiresDuplicateIdentityReview) ? 'PENDING_REVIEW' : 'PENDING'
+            : pendingByDidit ? 'PENDING_REVIEW' : 'PENDING'
         const effectiveIsVerified = effectiveVerificationStatus === 'APPROVED'
 
         // 1. Check if user already exists in Auth
@@ -849,10 +874,23 @@ serve(async (req) => {
 
             // If they are already confirmed, STOP.
             if (existingUser.email_confirmed_at) {
-                return new Response(JSON.stringify({ error: 'This email is already registered and verified. Please login.' }), {
+                return new Response(JSON.stringify({
+                    error: 'This email is already registered. Use a different email for a separate account.',
+                    accountAlreadyExists: true,
+                }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 400,
+                    status: 409,
                 })
+            }
+
+            const { data: existingProfile } = await supabaseAdmin.from('profiles')
+                .select('role').eq('id', existingUser.id).maybeSingle()
+            const existingRole = String(existingProfile?.role || existingUser.user_metadata?.role || '').trim().toLowerCase()
+            if (existingRole && existingRole !== normalizedRole) {
+                return new Response(JSON.stringify({
+                    error: 'This email is already registered for another account type. Use a different email for a separate account.',
+                    accountAlreadyExists: true,
+                }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409 })
             }
 
             // If they are NOT confirmed, this is a stalled/failed signup.
@@ -936,56 +974,18 @@ serve(async (req) => {
             throw new Error('Failed to create profile: ' + profileError.message)
         }
 
+        await upsertProfileRoleMembership(
+            supabaseAdmin,
+            userId,
+            normalizedRole,
+            effectiveVerificationStatus === 'APPROVED' ? 'ACTIVE' : 'PENDING_REVIEW',
+            'SIGNUP',
+        )
+
         let identityReviewRecord = null
         let finalVerificationStatus = effectiveVerificationStatus
-        let finalDuplicateIdentityReview = requiresDuplicateIdentityReview
-        if (requiresDuplicateIdentityReview) {
-            const duplicateReason = getDuplicateIdentityReviewReason(normalizedRole)
-            const matchedOn = duplicateIdentityReview?.matches?.[0]?.matched_on || diditVerificationData?.matched_on || (identityNameBirthDate.hasNameBirthDate ? 'NAME_BIRTHDATE' : 'DOCUMENT_FINGERPRINT')
-            identityReviewRecord = await queueIdentityReview(supabaseAdmin, {
-                userId,
-                email: normalizedEmail,
-                role: normalizedRole,
-                documentType: selectedDocumentType,
-                documentTypeKey: selectedDocumentTypeKey,
-                documentCountry: diditVerificationData?.document_country || 'PHL',
-                source: DUPLICATE_REVIEW_SOURCE,
-                diditSessionId,
-                documentFingerprint,
-                duplicateReason,
-                duplicateMatchCount: duplicateIdentityReview?.matches?.length || diditVerificationData?.duplicate_match_count || 1,
-                verifiedFullLegalName: identityNameBirthDate.fullLegalName,
-                normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
-                birthDate: identityNameBirthDate.birthDate,
-                reviewReason: duplicateReason,
-                matchedOn,
-                metadata: {
-                    didit_duplicate_flag: diditDuplicateFlag,
-                    source_session_status: normalizedVerificationStatus,
-                    matched_on: matchedOn,
-                    missing_document_fingerprint: !documentFingerprint,
-                    duplicate_matches: duplicateIdentityReview?.matches || [],
-                },
-            })
-            await recordIdentityDocumentClaim(supabaseAdmin, {
-                userId,
-                role: normalizedRole,
-                documentFingerprint,
-                documentType: selectedDocumentType,
-                documentTypeKey: selectedDocumentTypeKey,
-                documentCountry: diditVerificationData?.document_country || 'PHL',
-                source: DUPLICATE_REVIEW_SOURCE,
-                status: 'PENDING_REVIEW',
-                diditSessionId,
-                manualReviewId: identityReviewRecord?.id || null,
-                email: normalizedEmail,
-                verifiedFullLegalName: identityNameBirthDate.fullLegalName,
-                normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
-                birthDate: identityNameBirthDate.birthDate,
-                reviewReason: duplicateReason,
-                matchedOn,
-            })
-        } else if (pendingByDidit) {
+        let finalDuplicateIdentityReview = false
+        if (pendingByDidit) {
             identityReviewRecord = await queueIdentityReview(supabaseAdmin, {
                 userId,
                 email: normalizedEmail,
@@ -1020,99 +1020,47 @@ serve(async (req) => {
                 birthDate: identityNameBirthDate.birthDate,
             })
         } else if (approvedByDidit) {
-            const approvalClaim = await recordIdentityDocumentClaim(supabaseAdmin, {
-                userId,
-                role: normalizedRole,
-                documentFingerprint,
-                documentType: selectedDocumentType,
-                documentTypeKey: selectedDocumentTypeKey,
-                documentCountry: diditVerificationData?.document_country || 'PHL',
-                source: 'DIDIT',
-                status: 'APPROVED',
-                diditSessionId,
-                email: normalizedEmail,
-                verifiedFullLegalName: identityNameBirthDate.fullLegalName,
-                normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
-                birthDate: identityNameBirthDate.birthDate,
-            })
+            let approvalClaim: any = null
+            try {
+                approvalClaim = await recordIdentityDocumentClaim(supabaseAdmin, {
+                    userId,
+                    role: normalizedRole,
+                    documentFingerprint,
+                    documentType: selectedDocumentType,
+                    documentTypeKey: selectedDocumentTypeKey,
+                    documentCountry: diditVerificationData?.document_country || 'PHL',
+                    source: 'DIDIT',
+                    status: 'APPROVED',
+                    diditSessionId,
+                    email: normalizedEmail,
+                    verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+                    normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+                    birthDate: identityNameBirthDate.birthDate,
+                })
+            } catch (claimError) {
+                await cleanupRejectedSignupAccount(supabaseAdmin, userId)
+                const claimMessage = claimError instanceof Error ? claimError.message : String(claimError)
+                if (/duplicate|live_fingerprint_role_unique|approved_fingerprint_role_unique/i.test(claimMessage)) {
+                    const error = getDuplicateIdentityReviewReason(normalizedRole)
+                    return new Response(JSON.stringify({ error, duplicateIdentityRejected: true }), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409,
+                    })
+                }
+                throw claimError
+            }
 
             if (approvalClaim?.decision === 'PENDING_REVIEW' || approvalClaim?.decision === 'EXISTING_ACCOUNT') {
-                const duplicateReason = getApprovalClaimReviewReason(approvalClaim, normalizedRole)
-                const missingIdentityKeyReason = duplicateReason === 'MISSING_DOCUMENT_FINGERPRINT' || duplicateReason === 'MISSING_IDENTITY_DUPLICATE_KEY'
-                const matchedOn = getApprovalClaimMatchedOn(
-                    approvalClaim,
-                    missingIdentityKeyReason ? '' : 'NAME_BIRTHDATE',
-                )
-                identityReviewRecord = await queueIdentityReview(supabaseAdmin, {
-                    userId,
-                    email: normalizedEmail,
-                    role: normalizedRole,
-                    documentType: selectedDocumentType,
-                    documentTypeKey: selectedDocumentTypeKey,
-                    documentCountry: diditVerificationData?.document_country || 'PHL',
-                    source: DUPLICATE_REVIEW_SOURCE,
-                    diditSessionId,
-                    documentFingerprint,
-                    duplicateReason,
-                    duplicateMatchCount: getApprovalClaimMatchCount(approvalClaim, missingIdentityKeyReason ? 0 : 1),
-                    verifiedFullLegalName: identityNameBirthDate.fullLegalName,
-                    normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
-                    birthDate: identityNameBirthDate.birthDate,
-                    reviewReason: duplicateReason,
-                    matchedOn,
-                    metadata: {
-                        didit_duplicate_flag: diditDuplicateFlag,
-                        source_session_status: normalizedVerificationStatus,
-                        matched_on: matchedOn,
-                        approval_claim_result: approvalClaim,
-                    },
+                await cleanupRejectedSignupAccount(supabaseAdmin, userId)
+                const error = getDuplicateIdentityReviewReason(normalizedRole)
+                await markRegistrationAttempt(supabaseAdmin, registrationAttemptId, {
+                    success: false,
+                    didit_session_id: diditSessionId || null,
+                    error_message: error,
+                    metadata: { role: normalizedRole, duplicate_identity_rejected: true },
                 })
-
-                await recordIdentityDocumentClaim(supabaseAdmin, {
-                    userId,
-                    role: normalizedRole,
-                    documentFingerprint,
-                    documentType: selectedDocumentType,
-                    documentTypeKey: selectedDocumentTypeKey,
-                    documentCountry: diditVerificationData?.document_country || 'PHL',
-                    source: DUPLICATE_REVIEW_SOURCE,
-                    status: 'PENDING_REVIEW',
-                    diditSessionId,
-                    manualReviewId: identityReviewRecord?.id || null,
-                    email: normalizedEmail,
-                    verifiedFullLegalName: identityNameBirthDate.fullLegalName,
-                    normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
-                    birthDate: identityNameBirthDate.birthDate,
-                    reviewReason: duplicateReason,
-                    matchedOn,
-                    metadata: {
-                        matched_on: matchedOn,
-                        approval_claim_result: approvalClaim,
-                    },
+                return new Response(JSON.stringify({ error, duplicateIdentityRejected: true }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409,
                 })
-
-                finalVerificationStatus = 'PENDING_REVIEW'
-                finalDuplicateIdentityReview = true
-
-                await supabaseAdmin
-                    .from('profiles')
-                    .update({
-                        verification_status: 'PENDING_REVIEW',
-                        is_verified: false,
-                        id_verified_at: null,
-                    })
-                    .eq('id', userId)
-
-                const { data: demotedUser } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-                    user_metadata: {
-                        ...(user.user.user_metadata || {}),
-                        is_verified: false,
-                        verification_status: 'PENDING_REVIEW',
-                    },
-                })
-                if (demotedUser?.user) {
-                    user.user = demotedUser.user
-                }
             }
         }
 
@@ -1209,6 +1157,9 @@ serve(async (req) => {
                 user.user = demotedUser.user
             }
         }
+
+        const finalRoleStatus = finalVerificationStatus === 'APPROVED' ? 'ACTIVE' : 'PENDING_REVIEW'
+        await upsertProfileRoleMembership(supabaseAdmin, userId, normalizedRole, finalRoleStatus, 'SIGNUP')
 
         const emailConfirmationRequired = finalVerificationStatus === 'APPROVED'
         const emailDelivery = emailConfirmationRequired

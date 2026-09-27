@@ -532,13 +532,6 @@ const requiresIdentityDuplicateOverride = (review?: ManualIdentityReviewEntry | 
   return getIdentityMatchCounts(warning).activeCount > 0;
 };
 
-const isE2EManualIdentityReview = (review?: ManualIdentityReviewEntry | null) => {
-  if (!review) return false;
-  const fingerprint = String(review.document_fingerprint || '').trim().toLowerCase();
-  const submittedEmail = String(review.submitted_by_email || '').trim().toLowerCase();
-  return fingerprint.startsWith('e2e-') || submittedEmail.startsWith('e2e+');
-};
-
 const needsIdentityVerificationRetry = (review?: ManualIdentityReviewEntry | null) => (
   Boolean(review) &&
   !isCopyrightOwnershipReview(review) &&
@@ -711,15 +704,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     fontFamily: 'Poppins_600SemiBold',
-  },
-  overrideConfirmRow: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
   },
   overrideConfirmText: {
     flex: 1,
@@ -899,7 +883,6 @@ export default function AdminIdentityReviewsPage() {
   const [manualReviewModalVisible, setManualReviewModalVisible] = useState(false);
   const [manualReviewDecision, setManualReviewDecision] = useState<'APPROVED' | 'DECLINED'>('APPROVED');
   const [manualReviewNotes, setManualReviewNotes] = useState('');
-  const [duplicateOverrideConfirmed, setDuplicateOverrideConfirmed] = useState(false);
   const [manualReviewSubmitting, setManualReviewSubmitting] = useState(false);
   const [manualReviewAssetLoading, setManualReviewAssetLoading] = useState<{ reviewId: string; asset: ManualReviewAssetKind } | null>(null);
   const [identityMatchAssetLoading, setIdentityMatchAssetLoading] = useState<{ key: string; asset: ManualReviewAssetKind } | null>(null);
@@ -1130,7 +1113,6 @@ export default function AdminIdentityReviewsPage() {
     setManualReviewTarget(targetReview);
     setManualReviewDecision(decision);
     setManualReviewNotes(initialNotes);
-    setDuplicateOverrideConfirmed(false);
     setManualReviewModalVisible(true);
   }, []);
 
@@ -1139,7 +1121,6 @@ export default function AdminIdentityReviewsPage() {
     setManualReviewModalVisible(false);
     setManualReviewTarget(null);
     setManualReviewNotes('');
-    setDuplicateOverrideConfirmed(false);
     setManualReviewDecision('APPROVED');
   }, [manualReviewSubmitting]);
 
@@ -1149,8 +1130,6 @@ export default function AdminIdentityReviewsPage() {
       return;
     }
 
-    const e2eDuplicateOverride = manualReviewDecision === 'APPROVED' && isE2EManualIdentityReview(manualReviewTarget);
-    const effectiveDuplicateOverrideConfirmed = duplicateOverrideConfirmed || e2eDuplicateOverride;
     const requiresDuplicateOverride = manualReviewDecision === 'APPROVED' && requiresIdentityDuplicateOverride(manualReviewTarget);
     const requiresIdentityRetry = manualReviewDecision === 'APPROVED' && needsIdentityVerificationRetry(manualReviewTarget);
     const isRetryRequest = manualReviewDecision === 'DECLINED' && needsIdentityVerificationRetry(manualReviewTarget);
@@ -1166,8 +1145,8 @@ export default function AdminIdentityReviewsPage() {
       return;
     }
 
-    if (requiresDuplicateOverride && (!effectiveDuplicateOverrideConfirmed || !manualReviewNotes.trim())) {
-      showAlert('warning', 'Duplicate override required', 'Confirm the duplicate override and add admin notes before approving this review.');
+    if (requiresDuplicateOverride) {
+      showAlert('warning', 'Duplicate identity blocked', 'This identity already belongs to another account with the same role. Decline this review instead.');
       return;
     }
 
@@ -1180,7 +1159,6 @@ export default function AdminIdentityReviewsPage() {
         reviewId: manualReviewTarget.id,
         decision: manualReviewDecision,
         reviewNotes: manualReviewNotes.trim() || null,
-        duplicateOverrideConfirmed: effectiveDuplicateOverrideConfirmed,
       });
 
       const reviewedItem = data?.item || {};
@@ -1231,7 +1209,6 @@ export default function AdminIdentityReviewsPage() {
         setManualReviewModalVisible(false);
         setManualReviewTarget(null);
         setManualReviewNotes('');
-        setDuplicateOverrideConfirmed(false);
         setManualReviewDecision('APPROVED');
 
         invalidateAdminPageCache();
@@ -1272,7 +1249,6 @@ export default function AdminIdentityReviewsPage() {
       setManualReviewModalVisible(false);
       setManualReviewTarget(null);
       setManualReviewNotes('');
-      setDuplicateOverrideConfirmed(false);
       setManualReviewDecision('APPROVED');
 
       invalidateAdminPageCache();
@@ -1288,7 +1264,6 @@ export default function AdminIdentityReviewsPage() {
     manualReviewTarget,
     manualReviewDecision,
     manualReviewNotes,
-    duplicateOverrideConfirmed,
     invokeAdminUsersManagement,
     showAlert,
     fetchManualReviews,
@@ -1899,22 +1874,9 @@ export default function AdminIdentityReviewsPage() {
             ) : null}
 
             {manualReviewDecision === 'APPROVED' && manualReviewRequiresDuplicateOverride ? (
-              <TouchableOpacity
-                testID="admin-identity-review-duplicate-override"
-                accessibilityLabel="admin-identity-review-duplicate-override"
-                activeOpacity={1}
-                onPress={() => setDuplicateOverrideConfirmed((current) => !current)}
-                style={[styles.overrideConfirmRow, { borderColor: duplicateOverrideConfirmed ? (isDark ? '#FBBF24' : '#D97706') : colors.border }]}
-              >
-                <Ionicons
-                  name={duplicateOverrideConfirmed ? 'checkbox-outline' : 'square-outline'}
-                  size={20}
-                  color={duplicateOverrideConfirmed ? (isDark ? '#FBBF24' : '#D97706') : colors.textSecondary}
-                />
-                <Text style={[styles.overrideConfirmText, { color: colors.text }]}>
-                  I reviewed the matched account context and want to approve this matched identity case.
-                </Text>
-              </TouchableOpacity>
+              <Text style={[styles.overrideConfirmText, { color: isDark ? '#FBBF24' : '#B45309' }]}>
+                This identity is already used by another account with the same role and cannot be approved. Select Decline instead.
+              </Text>
             ) : null}
 
             <TextInput
@@ -1924,7 +1886,7 @@ export default function AdminIdentityReviewsPage() {
               onChangeText={setManualReviewNotes}
               multiline
               numberOfLines={4}
-              placeholder={manualReviewDecision === 'APPROVED' && manualReviewRequiresDuplicateOverride ? 'Required notes for matched identity approval' : 'Optional admin notes'}
+              placeholder="Optional admin notes"
               placeholderTextColor={colors.textSecondary}
               style={[
                 styles.modalInputCompact,

@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   Modal,
   SafeAreaView,
   ScrollView,
@@ -152,9 +153,9 @@ const unavailableFaceMatchMessage = (result: any) => {
   const error = String(result?.error || "").toLowerCase();
   const summary = String(result?.summary || "").toLowerCase();
   if (["missing_face_service_url", "missing_facepp_credentials"].includes(error) || summary.includes("not configured")) {
-    return "Profile and video comparison is temporarily unavailable.";
+    return "Approved ID and video comparison is temporarily unavailable.";
   }
-  return "The profile photo and performance video could not be compared.";
+  return "The approved ID portrait and performance video could not be compared.";
 };
 
 const shortLocation = (value: unknown) => {
@@ -420,6 +421,10 @@ export default function ApplicantDetailsModal({
   const portfolio = list(profile.portfolio_urls);
   const faceSimilarity = aiReview?.face_similarity || null;
   const groupFaceSimilarity = list(aiReview?.group_face_similarity);
+  const identityDocumentReview = application.identity_document_review || null;
+  const identityDocumentReviews = Array.isArray(application.identity_document_reviews)
+    ? application.identity_document_reviews
+    : [];
   const isPending = String(application.status || "pending").toLowerCase() === "pending";
   const priorApplicationCounts = application.prior_application_counts || null;
   const hasPriorApplicationCounts =
@@ -766,7 +771,56 @@ export default function ApplicantDetailsModal({
 
               <View style={[styles.reviewDivider, { backgroundColor: colors.border }]} />
 
-              <Subsection title="Profile & Video Check" icon="person-circle-outline" colors={colors}>
+              <Subsection title="Approved ID & Video Check" icon="person-circle-outline" colors={colors}>
+              {identityDocumentReviews.length > 0 ? (
+                <View style={styles.stackMedium}>
+                  {identityDocumentReviews.map((member: any, index: number) => (
+                    <View key={member?.profile_id || index} style={[styles.memberSignal, { borderColor: colors.border }]}>
+                      <Text style={[styles.label, { color: colors.text }]}>{member?.display_name || `Group member ${index + 1}`}</Text>
+                      {member?.available && member?.url ? (
+                        <View style={styles.stackMedium}>
+                          <Image
+                            source={{ uri: member.url }}
+                            resizeMode="contain"
+                            style={[styles.identityDocumentPreview, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}
+                            accessibilityLabel={`${member?.display_name || "Group member"} approved government ID front`}
+                          />
+                          <TouchableOpacity
+                            onPress={() => onOpenMedia(member.url, `${member?.display_name || "Group member"} approved ID`)}
+                            style={[styles.outlineButton, { borderColor: colors.primary }]}
+                          >
+                            <Ionicons name="id-card-outline" size={18} color={colors.primary} />
+                            <Text style={[styles.outlineButtonText, { color: colors.primary }]}>View approved ID</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <Text style={[styles.body, { color: colors.textSecondary }]}>{member?.limitation || "The approved ID image is unavailable."}</Text>
+                      )}
+                    </View>
+                  ))}
+                  <Text style={[styles.advisory, { color: colors.textSecondary }]}>The submitting representative authorized the snapshotted lineup for this application. Do not download or redistribute these identity documents.</Text>
+                </View>
+              ) : null}
+              {identityDocumentReview?.available && identityDocumentReview?.url ? (
+                <View style={styles.stackMedium}>
+                  <Image
+                    source={{ uri: identityDocumentReview.url }}
+                    resizeMode="contain"
+                    style={[styles.identityDocumentPreview, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}
+                    accessibilityLabel="Applicant approved government ID front"
+                  />
+                  <TouchableOpacity
+                    onPress={() => onOpenMedia(identityDocumentReview.url, "Approved applicant ID")}
+                    style={[styles.outlineButton, { borderColor: colors.primary }]}
+                  >
+                    <Ionicons name="id-card-outline" size={18} color={colors.primary} />
+                    <Text style={[styles.outlineButtonText, { color: colors.primary }]}>View approved ID</Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.advisory, { color: colors.textSecondary }]}>Private identity document shared for this application with the applicant's consent. Do not download or redistribute it.</Text>
+                </View>
+              ) : application.identity_document_review_consent === true && groupFaceSimilarity.length === 0 ? (
+                <Text style={[styles.body, { color: colors.textSecondary }]}>{identityDocumentReview?.limitation || "The approved ID image is unavailable."}</Text>
+              ) : null}
               {!application.ai_portfolio_review_consent ? (
                 <View style={styles.stackMedium}>
                   <StatusRow icon="information-circle-outline" label="Not checked" color={colors.textSecondary} />
@@ -788,11 +842,12 @@ export default function ApplicantDetailsModal({
                       ) : null}
                     </View>
                   ))}
+                  <Text style={[styles.advisory, { color: colors.textSecondary }]}>Advisory only. Compare each approved member ID with the original video yourself.</Text>
                 </View>
               ) : ["queued", "processing"].includes(aiReviewStatus) ? (
                 <View style={styles.stackMedium}>
                   <StatusRow icon="time-outline" label="Check in progress" color="#F59E0B" />
-                  <Text style={[styles.body, { color: colors.textSecondary }]}>Profile and video comparison is still processing.</Text>
+                  <Text style={[styles.body, { color: colors.textSecondary }]}>Approved ID and video comparison is still processing.</Text>
                 </View>
               ) : !faceSimilarity?.status || faceSimilarity.status === "not_run" ? (
                 <View style={styles.stackMedium}>
@@ -975,6 +1030,7 @@ const styles = StyleSheet.create({
   bulletDot: { width: 5, height: 5, borderRadius: 3, marginTop: 7 },
   bulletText: { flex: 1 },
   memberSignal: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 3 },
+  identityDocumentPreview: { width: "100%", height: 190, borderWidth: 1, borderRadius: 12 },
   historySummary: { borderRadius: 11, padding: 12, gap: 3, marginBottom: 3 },
   outlineButton: { minHeight: 44, borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 8 },
   outlineButtonText: { flex: 1, fontFamily: "Poppins_600SemiBold", fontSize: 12 },

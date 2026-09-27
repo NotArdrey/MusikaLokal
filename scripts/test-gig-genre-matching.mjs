@@ -33,6 +33,9 @@ function loadGenreHelpers(relativePath) {
           unavailableFaceMatch: () => ({ status: "not_run", limitation: "" }),
         };
       }
+      if (String(specifier).includes("identityDocumentReference")) {
+        return { resolveApprovedIdentityDocumentReference: async () => ({ url: null, source: "unavailable", document_type: null, limitation: "" }) };
+      }
       throw new Error("Unexpected import while loading genre helpers");
     },
   });

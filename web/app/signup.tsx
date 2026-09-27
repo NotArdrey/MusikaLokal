@@ -1406,7 +1406,7 @@ export default function SignupScreen() {
 
         try {
             const emailRedirectTo = createEmailConfirmationRedirectUrl();
-            const { data: pendingSignupData, error: pendingSignupError } = await supabase.functions.invoke('create-unverified-user', {
+            const { error: pendingSignupError } = await supabase.functions.invoke('create-unverified-user', {
                 body: {
                     email: email.trim(),
                     password,
@@ -1454,10 +1454,6 @@ export default function SignupScreen() {
                     accountCreated: 'true',
                     email,
                     diditPendingReview: 'true',
-                    ...((pendingSignupData as any)?.roleAddedToExistingAccount ? {
-                        roleAdded: 'true', addedRole: selectedRole,
-                        addedRoleStatus: String((pendingSignupData as any)?.roleStatus || 'PENDING_REVIEW'),
-                    } : {}),
                 },
             } as any);
         } catch (authErr: any) {
@@ -1542,7 +1538,7 @@ export default function SignupScreen() {
         setLoading(true);
 
         try {
-            const { data: manualSubmitData, error: manualSubmitError } = await supabase.functions.invoke('manual-identity-review', {
+            const { error: manualSubmitError } = await supabase.functions.invoke('manual-identity-review', {
                 body: {
                     action: 'submit_manual_review_signup',
                     email: email.trim(),
@@ -1586,10 +1582,6 @@ export default function SignupScreen() {
                     accountCreated: 'true',
                     email,
                     verificationPendingReview: 'true',
-                    ...((manualSubmitData as any)?.roleAddedToExistingAccount ? {
-                        roleAdded: 'true', addedRole: selectedRole,
-                        addedRoleStatus: String((manualSubmitData as any)?.roleStatus || 'PENDING_REVIEW'),
-                    } : {}),
                 },
             } as any);
         } catch (authErr: any) {
@@ -1673,22 +1665,21 @@ export default function SignupScreen() {
             }
 
             const existingAccountRole = String(accountStatus?.accountRole || '').trim().toLowerCase();
-            const requestedRoleStatus = String(accountStatus?.requestedRoleStatus || '').trim().toUpperCase();
-            const canAddRoleToConfirmedAccount = Boolean(
-                accountStatus?.exists &&
-                accountStatus?.emailConfirmed &&
-                isAllowedSignupRole(existingAccountRole) &&
-                existingAccountRole !== selectedRole &&
-                !['ACTIVE', 'PENDING_REVIEW'].includes(requestedRoleStatus)
-            );
+            if (accountStatus?.exists && existingAccountRole && existingAccountRole !== selectedRole) {
+                Alert.alert(
+                    'Different Email Required',
+                    'Fan and Musician accounts are separate. Use a different email to create this account.',
+                );
+                setLoading(false);
+                return;
+            }
 
-            if (accountStatus?.exists && accountStatus?.emailConfirmed && !canAddRoleToConfirmedAccount) {
-                const message = requestedRoleStatus === 'PENDING_REVIEW'
-                    ? `The ${selectedRole} role is already pending review for this account.`
-                    : requestedRoleStatus === 'ACTIVE' || existingAccountRole === selectedRole
-                        ? `This account already has the ${selectedRole} role. Please sign in.`
-                        : 'This account type cannot add another role through signup.';
-                Alert.alert('Account Exists', message, [{ text: 'Sign In', onPress: () => router.replace('/') }]);
+            if (accountStatus?.exists && accountStatus?.emailConfirmed) {
+                Alert.alert(
+                    'Account Exists',
+                    'This email is already registered. Use a different email to create a separate Fan or Musician account.',
+                    [{ text: 'Sign In', onPress: () => router.replace('/') }],
+                );
                 setLoading(false);
                 return;
             }
@@ -1743,7 +1734,7 @@ export default function SignupScreen() {
                 return;
             }
 
-            if (profile && !canAddRoleToConfirmedAccount) {
+            if (profile) {
                 const existingStatus = String((profile as any).verification_status || '').trim().toUpperCase();
                 const canRetryVerification = ['DECLINED', 'ABANDONED'].includes(existingStatus);
 
@@ -1942,8 +1933,6 @@ export default function SignupScreen() {
 
             const edgeSignupUser = (edgeSignupData as any)?.user;
             const duplicateIdentityReview = Boolean((edgeSignupData as any)?.duplicateIdentityReview);
-            const roleAddedToExistingAccount = Boolean((edgeSignupData as any)?.roleAddedToExistingAccount);
-            const roleStatus = String((edgeSignupData as any)?.roleStatus || '');
 
             logDiditEmailFlow('auth.edgeSignup.result', {
                 email: maskEmailForLog(email),
@@ -1975,9 +1964,6 @@ export default function SignupScreen() {
                     params: {
                         accountCreated: 'true',
                         email,
-                        ...(roleAddedToExistingAccount ? {
-                            roleAdded: 'true', addedRole: selectedRole, addedRoleStatus: roleStatus,
-                        } : {}),
                         ...(duplicateIdentityReview ? { diditPendingReview: 'true' } : { diditVerified: 'true' }),
                     }
                 } as any);
@@ -2587,7 +2573,7 @@ export default function SignupScreen() {
                     </View>
                     <Text style={[styles.documentSectionTitle, authTextStyle]}>Choose verification method</Text>
                     <Text style={[styles.documentSectionSubtitle, authSecondaryTextStyle]}>
-                        Auto verification supports National ID card, Passport, and Driver's license. Other government IDs go to manual review.
+                        Auto verification supports National ID card, Passport, and Driver&apos;s license. Other government IDs go to manual review.
                     </Text>
 
                     <TouchableOpacity

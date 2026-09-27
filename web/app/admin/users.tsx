@@ -1,5 +1,6 @@
 
 import { Ionicons } from '@expo/vector-icons';
+import { Picker } from '@react-native-picker/picker';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -180,7 +181,6 @@ type StaffTargetOption = {
   id: string;
   name: string;
   meta?: string | null;
-  ownerId?: string | null;
 };
 
 type StaffTargetConflict = {
@@ -190,6 +190,18 @@ type StaffTargetConflict = {
   reason: string;
   resolution: string;
   canAutoResolve: boolean;
+};
+
+type OwnedRoleListing = {
+  id: string;
+  name: string;
+  entityType: StaffEntityType;
+};
+
+type OwnershipCandidate = {
+  id: string;
+  fullName: string;
+  email?: string | null;
 };
 
 type StaffFormAssignments = Record<StaffEntityType, Record<string, StaffAccessLevel>>;
@@ -240,12 +252,11 @@ const staffPermissionOptions = [
     description: 'Permanently delete an assigned studio, gig, or production listing.',
   },
 ] as const;
-const managedListingRoleConfig: Partial<Record<UserRole, { entityType: StaffEntityType; label: string }>> = {
-  'studio-owner': { entityType: 'studio', label: 'Studio' },
-  'venue-owner': { entityType: 'venue', label: 'Gig' },
-  producer: { entityType: 'production', label: 'Production team' },
+const ownershipRoleConfig: Partial<Record<UserRole, { entityType: StaffEntityType; singular: string; plural: string }>> = {
+  'studio-owner': { entityType: 'studio', singular: 'studio', plural: 'studios' },
+  'venue-owner': { entityType: 'venue', singular: 'gig', plural: 'gigs' },
+  producer: { entityType: 'production', singular: 'production team', plural: 'production teams' },
 };
-
 const normalizeDelimitedList = (value: string) => {
   const seen = new Set<string>();
   const items: string[] = [];
@@ -1136,7 +1147,6 @@ export default function AdminUsersPage() {
     createDefaultStaffFormListingPermissions,
   );
   const [staffFormMarketplaceAccess, setStaffFormMarketplaceAccess] = useState(false);
-  const [roleFormTargetId, setRoleFormTargetId] = useState('');
   const [staffTargetOptions, setStaffTargetOptions] = useState<StaffTargetOption[]>([]);
   const [staffTargetConflicts, setStaffTargetConflicts] = useState<StaffTargetConflict[]>([]);
   const [hiddenOwnedTargetIds, setHiddenOwnedTargetIds] = useState<string[]>([]);
@@ -1144,6 +1154,12 @@ export default function AdminUsersPage() {
   const [staffTargetsLoading, setStaffTargetsLoading] = useState(false);
   const [staffTargetsError, setStaffTargetsError] = useState<string | null>(null);
   const staffTargetsRequestIdRef = useRef(0);
+  const [ownedRoleListings, setOwnedRoleListings] = useState<OwnedRoleListing[]>([]);
+  const [ownershipCandidates, setOwnershipCandidates] = useState<OwnershipCandidate[]>([]);
+  const [ownershipReassignments, setOwnershipReassignments] = useState<Record<string, string>>({});
+  const [ownershipOptionsLoading, setOwnershipOptionsLoading] = useState(false);
+  const [ownershipOptionsReady, setOwnershipOptionsReady] = useState(false);
+  const [ownershipOptionsError, setOwnershipOptionsError] = useState<string | null>(null);
   const [userDetailsTarget, setUserDetailsTarget] = useState<UserDetailsEntry | null>(null);
   const [alertState, setAlertState] = useState<{
     visible: boolean;
@@ -1194,13 +1210,16 @@ export default function AdminUsersPage() {
       errors.staffTarget = 'Select at least one studio, gig, or production team this staff member can access.';
     }
 
-    if (
-      userModalMode === 'edit' &&
-      editingOriginalRole !== userFormRole &&
-      managedListingRoleConfig[userFormRole] &&
-      !roleFormTargetId
-    ) {
-      errors.roleTarget = `Select an existing ${managedListingRoleConfig[userFormRole]?.label.toLowerCase()} for this role.`;
+    const ownershipTransferRequired = userModalMode === 'edit'
+      && Boolean(editingOriginalRole && ownershipRoleConfig[editingOriginalRole])
+      && userFormRole !== editingOriginalRole;
+    const missingOwnershipAssignments = ownedRoleListings.filter((item) => !ownershipReassignments[item.id]);
+    if (ownershipTransferRequired && (!ownershipOptionsReady || ownershipOptionsLoading)) {
+      errors.ownershipReassignment = 'Wait for the owned listings to finish loading.';
+    } else if (ownershipTransferRequired && ownershipOptionsError) {
+      errors.ownershipReassignment = 'Reload the ownership options before saving.';
+    } else if (missingOwnershipAssignments.length > 0) {
+      errors.ownershipReassignment = `Choose a new owner for every ${ownershipRoleConfig[editingOriginalRole || 'fan']?.singular || 'listing'}.`;
     }
 
     return errors;
@@ -1211,7 +1230,11 @@ export default function AdminUsersPage() {
     userFormConfirmPassword,
     userFormRole,
     editingOriginalRole,
-    roleFormTargetId,
+    ownedRoleListings,
+    ownershipReassignments,
+    ownershipOptionsError,
+    ownershipOptionsLoading,
+    ownershipOptionsReady,
     staffFormAssignments,
     userModalMode,
   ]);
@@ -1254,9 +1277,62 @@ export default function AdminUsersPage() {
     return data;
   }, []);
 
+  const fetchOwnershipReassignmentOptions = useCallback(async () => {
+    const config = editingOriginalRole ? ownershipRoleConfig[editingOriginalRole] : null;
+    if (!editingUserId || !config || userFormRole === editingOriginalRole) {
+      setOwnedRoleListings([]);
+      setOwnershipCandidates([]);
+      setOwnershipReassignments({});
+      setOwnershipOptionsError(null);
+      setOwnershipOptionsLoading(false);
+      setOwnershipOptionsReady(true);
+      return;
+    }
+
+    setOwnershipOptionsLoading(true);
+    setOwnershipOptionsReady(false);
+    setOwnershipOptionsError(null);
+    try {
+      const data = await invokeAdminUsersManagement({
+        action: 'fetch_owned_role_listings',
+        userId: editingUserId,
+      });
+      const items: OwnedRoleListing[] = (Array.isArray(data?.items) ? data.items : []).flatMap((item: any) => {
+        const id = String(item?.id || '').trim();
+        if (!id) return [];
+        return [{
+          id,
+          name: String(item?.name || 'Untitled'),
+          entityType: config.entityType,
+        }];
+      });
+      const candidates: OwnershipCandidate[] = (Array.isArray(data?.candidates) ? data.candidates : []).flatMap((candidate: any) => {
+        const id = String(candidate?.id || '').trim();
+        if (!id) return [];
+        return [{
+          id,
+          fullName: String(candidate?.full_name || candidate?.email || 'Unnamed owner'),
+          email: candidate?.email ? String(candidate.email) : null,
+        }];
+      });
+      setOwnedRoleListings(items);
+      setOwnershipCandidates(candidates);
+      setOwnershipReassignments((current) => Object.fromEntries(
+        items.flatMap((item) => current[item.id] ? [[item.id, current[item.id]]] : []),
+      ));
+    } catch (error) {
+      setOwnedRoleListings([]);
+      setOwnershipCandidates([]);
+      setOwnershipReassignments({});
+      setOwnershipOptionsError(await getErrorMessage(error, 'Unable to load owned listings and replacement owners.'));
+    } finally {
+      setOwnershipOptionsLoading(false);
+      setOwnershipOptionsReady(true);
+    }
+  }, [editingOriginalRole, editingUserId, invokeAdminUsersManagement, userFormRole]);
+
   const fetchStaffTargetOptions = useCallback(async () => {
-    const managedRoleConfig = managedListingRoleConfig[userFormRole];
-    if (userFormRole !== 'staff' && !(userModalMode === 'edit' && managedRoleConfig)) {
+    if (userFormRole !== 'staff') {
       staffTargetsRequestIdRef.current += 1;
       setStaffTargetOptions([]);
       setStaffTargetConflicts([]);
@@ -1272,13 +1348,13 @@ export default function AdminUsersPage() {
       let items: any[] = [];
       let conflicts: any[] = [];
       let hiddenOwnedIds: string[] = [];
-      const entityType = userFormRole === 'staff' ? staffFormEntityType : managedRoleConfig?.entityType;
+      const entityType = staffFormEntityType;
       const target = entityType === 'studio'
         ? { table: 'studios', ownerColumn: 'owner_id' }
         : entityType === 'venue'
           ? { table: 'gigs', ownerColumn: 'organizer_id' }
           : { table: 'production_teams', ownerColumn: 'owner_id' };
-      const shouldUseAdminFilteredTargets = userFormRole === 'staff' && Boolean(editingUserId);
+      const shouldUseAdminFilteredTargets = Boolean(editingUserId);
       let directQuery = supabase
         .from(target.table)
         .select(`id, name, created_at, ${entityType === 'venue' ? 'event_date, ' : ''}${target.ownerColumn}`);
@@ -1320,9 +1396,7 @@ export default function AdminUsersPage() {
           // Fall back to the service-role endpoint if public listing policies are tightened later.
           const data = await invokeAdminUsersManagement({
             action: 'fetch_role_targets',
-            ...(userFormRole === 'staff'
-              ? { entity_type: staffFormEntityType }
-              : { role: userFormRole }),
+            entity_type: staffFormEntityType,
           });
           items = Array.isArray(data?.items) ? data.items : [];
         }
@@ -1337,7 +1411,6 @@ export default function AdminUsersPage() {
             : item?.created_at
               ? `Created ${formatDateTime(item.created_at)}`
               : null,
-          ownerId: item?.owner_id ? String(item.owner_id) : null,
         }))
         .filter((item: StaffTargetOption) => item.id.length > 0);
 
@@ -1364,10 +1437,6 @@ export default function AdminUsersPage() {
           return { ...current, [staffFormEntityType]: nextForType };
         });
       }
-      if (userFormRole !== 'staff' && editingUserId) {
-        const currentlyOwned = options.find((item: StaffTargetOption) => item.ownerId === editingUserId);
-        if (currentlyOwned) setRoleFormTargetId(currentlyOwned.id);
-      }
     } catch (error) {
       console.warn('Failed to load staff target options', error);
       if (requestId !== staffTargetsRequestIdRef.current) return;
@@ -1380,7 +1449,7 @@ export default function AdminUsersPage() {
         setStaffTargetsLoading(false);
       }
     }
-  }, [editingUserId, invokeAdminUsersManagement, staffFormEntityType, userFormRole, userModalMode]);
+  }, [editingUserId, invokeAdminUsersManagement, staffFormEntityType, userFormRole]);
 
   const resolveStaffTargetConflict = useCallback((conflict: StaffTargetConflict) => {
     if (!editingUserId || conflict.entityType !== 'production' || !conflict.canAutoResolve) return;
@@ -1439,12 +1508,24 @@ export default function AdminUsersPage() {
   }, [editingUserId, fetchStaffTargetOptions, invokeAdminUsersManagement, showAlert, staffFormAccessLevels.production]);
 
   useEffect(() => {
-    if (!userModalVisible || (userFormRole !== 'staff' && !(userModalMode === 'edit' && managedListingRoleConfig[userFormRole]))) {
+    if (!userModalVisible || userFormRole !== 'staff') {
       return;
     }
 
     void fetchStaffTargetOptions();
   }, [fetchStaffTargetOptions, userFormRole, userModalMode, userModalVisible]);
+
+  useEffect(() => {
+    if (!userModalVisible || userModalMode !== 'edit') {
+      setOwnedRoleListings([]);
+      setOwnershipCandidates([]);
+      setOwnershipReassignments({});
+      setOwnershipOptionsError(null);
+      setOwnershipOptionsReady(false);
+      return;
+    }
+    void fetchOwnershipReassignmentOptions();
+  }, [fetchOwnershipReassignmentOptions, userModalMode, userModalVisible]);
 
   const fetchUsers = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
@@ -1527,7 +1608,6 @@ export default function AdminUsersPage() {
     setStaffFormAssignments(createEmptyStaffFormAssignments());
     setStaffFormListingPermissions(createDefaultStaffFormListingPermissions());
     setStaffFormMarketplaceAccess(false);
-    setRoleFormTargetId('');
     setEditingOriginalRole(null);
     setStaffTargetOptions([]);
     setStaffTargetConflicts([]);
@@ -1536,6 +1616,12 @@ export default function AdminUsersPage() {
     setStaffTargetsError(null);
     staffTargetsRequestIdRef.current += 1;
     setStaffTargetsLoading(false);
+    setOwnedRoleListings([]);
+    setOwnershipCandidates([]);
+    setOwnershipReassignments({});
+    setOwnershipOptionsLoading(false);
+    setOwnershipOptionsReady(false);
+    setOwnershipOptionsError(null);
   }, []);
 
   const openCreateUserModal = useCallback(() => {
@@ -1590,7 +1676,6 @@ export default function AdminUsersPage() {
     setStaffFormAssignments(nextAssignments);
     setStaffFormListingPermissions(nextListingPermissions);
     setStaffFormMarketplaceAccess(staffAssignments.some((assignment) => assignment.can_manage_marketplace));
-    setRoleFormTargetId('');
     setUserModalVisible(true);
   }, []);
 
@@ -1712,10 +1797,11 @@ export default function AdminUsersPage() {
       : [];
     const shouldSendStaffAssignments = userFormRole === 'staff' || editingOriginalRole === 'staff';
     const legacyStaffAssignmentPayload = staffAssignmentsPayload[0] || null;
-    const listingAssignmentPayload = roleFormTargetId && managedListingRoleConfig[userFormRole]
-      ? { target_id: roleFormTargetId }
-      : null;
-
+    const ownershipReassignmentsPayload = ownedRoleListings.map((item) => ({
+      entity_type: item.entityType,
+      target_id: item.id,
+      new_owner_id: ownershipReassignments[item.id],
+    }));
     if (userFormHasErrors) {
       const missingFields = Object.values(userFormErrors);
       showAlert(
@@ -1791,7 +1877,9 @@ export default function AdminUsersPage() {
                 staffAssignment: legacyStaffAssignmentPayload,
               }
             : {}),
-          ...(listingAssignmentPayload ? { listingAssignment: listingAssignmentPayload } : {}),
+          ...(ownershipReassignmentsPayload.length > 0
+            ? { ownershipReassignments: ownershipReassignmentsPayload }
+            : {}),
           ...(nextPassword ? { password: nextPassword } : {}),
         });
 
@@ -1830,7 +1918,8 @@ export default function AdminUsersPage() {
     staffFormAssignments,
     staffFormListingPermissions,
     staffFormMarketplaceAccess,
-    roleFormTargetId,
+    ownedRoleListings,
+    ownershipReassignments,
     userFormIsVerified,
     userFormEmailConfirmed,
     editingUserId,
@@ -2427,7 +2516,6 @@ export default function AdminUsersPage() {
                           activeOpacity={1}
                           onPress={() => {
                             setUserFormRole(role);
-                            setRoleFormTargetId('');
                             if (role !== 'staff') setStaffFormAssignments(createEmptyStaffFormAssignments());
                           }}
                           style={[
@@ -2724,68 +2812,65 @@ export default function AdminUsersPage() {
                   </View>
                 ) : null}
 
-                {userModalMode === 'edit' && managedListingRoleConfig[userFormRole] ? (
-                  <View style={[styles.staffAccessPanel, { borderColor: colors.border, backgroundColor: isDark ? '#111827' : '#FFFFFF' }]}>
+                {userModalMode === 'edit' && editingOriginalRole && ownershipRoleConfig[editingOriginalRole] && userFormRole !== editingOriginalRole ? (
+                  <View style={[styles.staffAccessPanel, { borderColor: '#F59E0B', backgroundColor: isDark ? '#2B2112' : '#FFFBEB' }]}>
                     <View style={styles.formSectionHeader}>
-                      <View style={[styles.formSectionIcon, { backgroundColor: `${colors.primary}18` }]}>
-                        <Ionicons name="business-outline" size={16} color={colors.primary} />
+                      <View style={[styles.formSectionIcon, { backgroundColor: '#F59E0B20' }]}>
+                        <Ionicons name="swap-horizontal-outline" size={16} color="#D97706" />
                       </View>
-                      <Text style={[styles.formSectionTitle, { color: colors.text }]}>Role listing</Text>
+                      <Text style={[styles.formSectionTitle, { color: colors.text }]}>Reassign owned {ownershipRoleConfig[editingOriginalRole]?.plural}</Text>
                     </View>
                     <Text style={[styles.staffLevelText, { color: colors.textSecondary }]}>
-                      Assign an existing {managedListingRoleConfig[userFormRole]?.label.toLowerCase()} so it appears in this user&apos;s Manage page.
+                      Choose a new {formatRoleLabel(editingOriginalRole)} for each owned listing before changing this account to {formatRoleLabel(userFormRole)}.
                     </Text>
-                    <View style={styles.fieldGroup}>
-                      <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>
-                        {managedListingRoleConfig[userFormRole]?.label}
-                        {editingOriginalRole !== userFormRole ? <Text style={styles.requiredMark}> *</Text> : null}
+
+                    {ownershipOptionsLoading ? (
+                      <View style={styles.inlineLoader}><ActivityIndicator size="small" color={colors.primary} /></View>
+                    ) : ownershipOptionsError ? (
+                      <View style={styles.staffTargetsError}>
+                        <Text style={styles.fieldErrorText}>{ownershipOptionsError}</Text>
+                        <TouchableOpacity onPress={() => void fetchOwnershipReassignmentOptions()} activeOpacity={0.8}>
+                          <Text style={[styles.staffTargetsRetryText, { color: colors.primary }]}>Try again</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : ownedRoleListings.length === 0 ? (
+                      <Text style={[styles.detailsEmptyText, { color: colors.textSecondary }]}>No owned listings need to be reassigned.</Text>
+                    ) : ownershipCandidates.length === 0 ? (
+                      <Text style={styles.fieldErrorText}>
+                        No other verified {formatRoleLabel(editingOriginalRole)} account is available. Create or verify a replacement owner first.
                       </Text>
-                      {staffTargetsLoading ? (
-                        <View style={styles.inlineLoader}><ActivityIndicator size="small" color={colors.primary} /></View>
-                      ) : staffTargetsError ? (
-                        <View style={styles.staffTargetsError}>
-                          <Text style={styles.fieldErrorText}>{staffTargetsError}</Text>
-                          <TouchableOpacity onPress={() => void fetchStaffTargetOptions()} activeOpacity={0.8}>
-                            <Text style={[styles.staffTargetsRetryText, { color: colors.primary }]}>Try again</Text>
-                          </TouchableOpacity>
-                        </View>
-                      ) : staffTargetOptions.length === 0 ? (
-                        <Text style={[styles.detailsEmptyText, { color: colors.textSecondary }]}>No existing records found.</Text>
-                      ) : (
-                        <ScrollView nestedScrollEnabled style={styles.staffTargetList} contentContainerStyle={styles.staffTargetListContent}>
-                          {staffTargetOptions.map((option) => {
-                            const active = roleFormTargetId === option.id;
-                            return (
-                              <TouchableOpacity
-                                key={option.id}
-                                testID={`admin-user-role-target-${option.id}`}
-                                accessibilityLabel={`admin-user-role-target-${option.id}`}
-                                activeOpacity={1}
-                                onPress={() => setRoleFormTargetId(option.id)}
-                                style={[
-                                  styles.staffTargetOption,
-                                  {
-                                    borderColor: active ? colors.primary : colors.border,
-                                    backgroundColor: active ? `${colors.primary}14` : (isDark ? '#0F172A' : '#F8FAFC'),
-                                  },
-                                ]}
+                    ) : (
+                      <View style={styles.staffConflictList}>
+                        {ownedRoleListings.map((item) => (
+                          <View key={item.id} style={[styles.staffTargetOption, { borderColor: colors.border, backgroundColor: isDark ? '#111827' : '#FFFFFF' }]}>
+                            <Text style={[styles.staffTargetTitle, { color: colors.text }]}>{item.name}</Text>
+                            <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>New owner</Text>
+                            <View style={{ borderWidth: 1, borderRadius: 10, borderColor: colors.inputBorder, backgroundColor: colors.inputBackground, overflow: 'hidden' }}>
+                              <Picker
+                                selectedValue={ownershipReassignments[item.id] || ''}
+                                onValueChange={(value) => setOwnershipReassignments((current) => ({ ...current, [item.id]: String(value || '') }))}
+                                style={{ color: colors.text, backgroundColor: colors.inputBackground }}
                               >
-                                <View style={styles.staffTargetSelectionRow}>
-                                  <Ionicons name={active ? 'checkbox' : 'square-outline'} size={20} color={active ? colors.primary : colors.textSecondary} />
-                                  <Text style={[styles.staffTargetTitle, { color: colors.text }]} numberOfLines={1}>{option.name}</Text>
-                                </View>
-                                {option.meta ? <Text style={[styles.staffTargetMeta, { color: colors.textSecondary }]}>{option.meta}</Text> : null}
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </ScrollView>
-                      )}
-                      {userFormSubmitAttempted && userFormErrors.roleTarget ? (
-                        <Text style={styles.fieldErrorText}>{userFormErrors.roleTarget}</Text>
-                      ) : null}
-                    </View>
+                                <Picker.Item label="Select a replacement owner" value="" />
+                                {ownershipCandidates.map((candidate) => (
+                                  <Picker.Item
+                                    key={candidate.id}
+                                    label={`${candidate.fullName}${candidate.email ? ` (${candidate.email})` : ''}`}
+                                    value={candidate.id}
+                                  />
+                                ))}
+                              </Picker>
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                    {userFormSubmitAttempted && userFormErrors.ownershipReassignment ? (
+                      <Text style={styles.fieldErrorText}>{userFormErrors.ownershipReassignment}</Text>
+                    ) : null}
                   </View>
                 ) : null}
+
               </View>
 
               <View style={[styles.formSection, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}>

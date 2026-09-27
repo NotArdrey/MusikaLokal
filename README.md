@@ -57,16 +57,33 @@ local IDE metadata are intentionally ignored.
 
 For the detailed system design, see [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md).
 
+## Account and identity policy
+
+Fan and Musician profiles are separate accounts. A person who needs both roles
+must register with two different email addresses, producing two independent
+Supabase Auth user IDs. A verified identity may be associated with at most one
+Fan account and at most one Musician account, so the same identity can own one
+account of each role but cannot create a second account for either role.
+
+The signup and manual-review functions reject reused email addresses and
+same-role identity duplicates. Postgres also enforces the verified-identity
+rule per role. Deploy `20260927133000_enforce_separate_role_accounts.sql` from
+the applicable Supabase workspace before deploying the updated account and
+identity-review Edge Functions.
+
 ## Consent-gated gig portfolio review
 
 Gig applicants can optionally consent to an advisory review of redacted CV text,
-video speech, up to three client-generated video frames, and stored portfolio
-images. Groq continues to handle CV classification, transcription, neutral visual
-observations, and criteria evidence. Face matching alone is sent by the Supabase
-Edge Function directly to the Face++ Compare API. It compares the profile photo
-with up to three frames already sampled by the Expo client. For group
-applications, the database snapshots the authorized lineup and Face++ compares
-each available member reference image against the sampled video frames.
+video speech, and up to three client-generated video frames. For a solo
+application, the same explicit consent allows the authorized gig manager to view
+the applicant's approved front-of-ID image and allows the Supabase Edge Function
+to send that image directly to the Face++ Compare API as the reference for up to
+three sampled video frames. For a duo or group application, the submitting leader
+or representative grants the same application-specific consent for the immutable
+lineup snapshot; each verified member's approved ID is compared with the submitted
+group video and may be viewed by the authorized gig manager. Manual-upload IDs stay
+in the private identity bucket and are exposed only through a ten-minute signed URL.
+Didit-backed IDs are fetched server-side from approved verification sessions.
 Results remain limited to
 `likely_same_person`, `likely_different_person`, or `unclear`; they do not identify
 any person. The stored result also includes similarity, confidence, sampled,
@@ -76,7 +93,9 @@ eligibility, deterministic recommendation scores, or an application decision.
 
 Deploy `20260719010000_add_consent_gated_gig_portfolio_reviews.sql` followed by
 `20260719030000_add_gig_face_similarity_review.sql`, then
-`20260719040000_add_group_member_face_similarity_review.sql` before deploying
+`20260719040000_add_group_member_face_similarity_review.sql`, and finally
+`20260927150000_add_gig_identity_document_review_consent.sql`, then
+`20260927160000_enable_group_representative_identity_document_consent.sql` before deploying
 the `gig-applications` Edge Function. Configure `GROQ_API_KEY`,
 `FACEPP_API_KEY` and `FACEPP_API_SECRET` as Supabase Edge Function secrets.
 `FACEPP_API_BASE_URL` is optional and defaults to the Face++ US endpoint;
@@ -91,8 +110,8 @@ Zero Data Retention in GroqCloud Data Controls when required by the deployment's
 privacy policy.
 
 Face comparison remains advisory and excluded from automated application
-decisions. Keep the original profile photo and performance video available for
-manual review whenever Face++ returns unclear or insufficient evidence.
+decisions. Authorized gig managers should compare the approved ID and original
+performance video manually whenever Face++ returns unclear or insufficient evidence.
 
 ## Gig performance video recording screening
 

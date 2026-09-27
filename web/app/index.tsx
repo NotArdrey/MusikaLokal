@@ -101,9 +101,6 @@ export default function LoginScreen() {
     verificationPendingReview,
     diditPendingReview,
     diditVerified,
-    roleAdded,
-    addedRole,
-    addedRoleStatus,
     banned,
     banned_until,
     ban_reason,
@@ -327,15 +324,6 @@ export default function LoginScreen() {
   // Check for Account Created success (New User)
   useEffect(() => {
     if (accountCreated === 'true') {
-      if (roleAdded === 'true') {
-        const roleLabel = String(addedRole || 'fan').toLowerCase() === 'musician' ? 'Musician' : 'Fan';
-        const roleIsActive = String(addedRoleStatus || '').toUpperCase() === 'ACTIVE';
-        showAlert('success', roleIsActive ? `${roleLabel} Role Added` : `${roleLabel} Role In Review`,
-          roleIsActive
-            ? `Your existing account now also has the ${roleLabel} role. Sign in with the same email and password to continue.`
-            : `Your ${roleLabel} role request is under review. Your existing account and its current role remain active while you wait.`);
-        return;
-      }
       if (diditPendingReview === 'true') {
         showAlert(
           'success',
@@ -376,7 +364,7 @@ export default function LoginScreen() {
       );
       return;
     }
-  }, [verified, accountCreated, createdEmail, verificationPendingReview, diditPendingReview, diditVerified, roleAdded, addedRole, addedRoleStatus]);
+  }, [verified, accountCreated, createdEmail, verificationPendingReview, diditPendingReview, diditVerified]);
 
   const signInWithCredentials = async (loginEmail: string, loginPassword: string) => {
     setLoading(true);

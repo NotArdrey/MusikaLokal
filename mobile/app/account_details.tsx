@@ -38,9 +38,26 @@ export default function AccountDetailsScreen() {
         body: { action: 'fetch', userId: user.id }
       });
 
-      if (error) throw error;
-      setProfile(data);
+      if (error) {
+        console.warn('Account details profile lookup failed; falling back to the profile row.', error);
+      }
+
+      let resolvedProfile = error ? null : data;
+      if (!resolvedProfile?.created_at || !resolvedProfile?.full_name) {
+        const { data: profileRow, error: profileRowError } = await supabase
+          .from('profiles')
+          .select('id, full_name, role, avatar_url, created_at, is_verified, verification_status, id_document_expiry')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (profileRowError) throw profileRowError;
+        if (profileRow) resolvedProfile = { ...resolvedProfile, ...profileRow };
+      }
+
+      if (!resolvedProfile) throw error || new Error('Profile details are unavailable.');
+      setProfile(resolvedProfile);
     } catch (e) {
+      console.error('Account details could not load the profile.', e);
     } finally {
       setLoading(false);
     }

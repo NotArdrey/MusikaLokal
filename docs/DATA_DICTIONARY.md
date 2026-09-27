@@ -35,7 +35,7 @@ Legend: **PK** = primary key; **FK** = foreign key; **UQ** = single-column uniqu
 | Social | [`follows`](#follows) | Stores follows records used by the MusikaLokal platform. | 5 | Yes |
 | Listings & Bookings | [`gig_application_ai_reviews`](#gig-application-ai-reviews) | Stores gig application ai reviews records used by the MusikaLokal platform. | 18 | Yes |
 | Listings & Bookings | [`gig_application_recommendations`](#gig-application-recommendations) | Stores gig application recommendations records used by the MusikaLokal platform. | 17 | Yes |
-| Listings & Bookings | [`gig_applications`](#gig-applications) | Applications from musicians, groups, or production teams to gigs, including acceptance and completion lifecycle. | 44 | Yes |
+| Listings & Bookings | [`gig_applications`](#gig-applications) | Applications from musicians, groups, or production teams to gigs, including acceptance and completion lifecycle. | 46 | Yes |
 | Listings & Bookings | [`gig_availability_slots`](#gig-availability-slots) | Stores gig availability slots records used by the MusikaLokal platform. | 8 | Yes |
 | Listings & Bookings | [`gig_deletion_audit`](#gig-deletion-audit) | Audit history for gig deletion operations. | 10 | Yes |
 | Listings & Bookings | [`gig_media`](#gig-media) | Media assets attached to gig records. | 6 | Yes |
@@ -441,7 +441,7 @@ Advisory evidence extracted from consented application media. This table must no
 | `started_at` | `timestamptz` | No |  | -- | -- | -- | Timestamp for the started event. |
 | `completed_at` | `timestamptz` | No |  | -- | -- | -- | Timestamp for the completed event. |
 | `updated_at` | `timestamptz` | Yes |  | `now()` | -- | -- | Timestamp when the row was last updated. |
-| `face_similarity` | `jsonb` | Yes |  | `'{}'::jsonb` | -- | -- | Consent-gated advisory comparison of a solo applicant profile photo with representative video frames. Never identity verification or an automated decision. |
+| `face_similarity` | `jsonb` | Yes |  | `'{}'::jsonb` | -- | -- | Consent-gated advisory comparison of approved ID images with representative video frames. Group and duo member results are stored in `group_face_similarity`. Never identity verification or an automated decision. |
 | `group_face_similarity` | `jsonb` | Yes |  | `'[]'::jsonb` | -- | -- | Per-member advisory visual similarity results for the snapshotted group lineup. Never identity verification or an automated decision. |
 
 ### gig_application_recommendations
@@ -508,6 +508,8 @@ Applications from musicians, groups, or production teams to gigs, including acce
 | `feature_consent_responded_at` | `timestamptz` | No |  | -- | -- | -- | Timestamp for the feature consent responded event. |
 | `ai_portfolio_review_consent` | `boolean` | Yes |  | `false` | -- | -- | Explicit applicant consent to send application CV text, video audio, and representative portfolio images to the configured AI provider for advisory evidence review. |
 | `ai_portfolio_review_consented_at` | `timestamptz` | No |  | -- | -- | -- | Time at which the applicant granted AI portfolio review consent for this application. |
+| `identity_document_review_consent` | `boolean` | Yes |  | `false` | -- | -- | Explicit applicant or group-representative consent to use approved front-of-ID images for advisory face comparison and show them to the authorized gig manager. Group consent covers only the immutable lineup snapshot. Forced false for represented-performer applications. |
+| `identity_document_review_consented_at` | `timestamptz` | No |  | -- | -- | -- | Time at which the applicant or submitting group representative granted identity-document application-review consent. |
 | `ai_review_frame_url` | `text` | No |  | -- | -- | -- | A client-generated representative frame from the submitted performance video. It is reviewed only when AI portfolio review consent is true. |
 | `video_copyright_acknowledged` | `boolean` | Yes |  | `false` | -- | -- | Stores the video copyright acknowledged value for this record. |
 | `video_copyright_acknowledged_at` | `timestamptz` | No |  | -- | -- | -- | Timestamp for the video copyright acknowledged event. |

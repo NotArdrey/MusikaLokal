@@ -676,7 +676,7 @@ export const useApplicationSubmissionAction = ({
 
         setPitchMessage("");
         setVideoUrl("");
-        setAiPortfolioReviewConsent(true);
+        setAiPortfolioReviewConsent(false);
         setVideoReviewFrameUrl("");
         setVideoReviewFrameUrls([]);
         setVideoCopyrightAcknowledged(false);
@@ -707,6 +707,7 @@ export const useApplicationSubmissionAction = ({
         video_url: videoUrl || null,
         cv_url: uploadedCvUrl,
         ai_portfolio_review_consent: aiPortfolioReviewConsent,
+        identity_document_review_consent: aiPortfolioReviewConsent && !selectedProductionRosterId,
         ai_review_frame_url: aiPortfolioReviewConsent ? videoReviewFrameUrl || null : null,
         ai_review_frame_urls: aiPortfolioReviewConsent ? videoReviewFrameUrls.slice(0, 3) : [],
         video_copyright_acknowledged: videoCopyrightAcknowledged,
@@ -910,7 +911,7 @@ export const useApplicationSubmissionAction = ({
 
       setPitchMessage("");
       setVideoUrl("");
-      setAiPortfolioReviewConsent(true);
+      setAiPortfolioReviewConsent(false);
       setVideoReviewFrameUrl("");
       setVideoReviewFrameUrls([]);
       setVideoCopyrightAcknowledged(false);

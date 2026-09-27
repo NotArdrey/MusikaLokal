@@ -115,6 +115,8 @@ export default function GigDetailsScreen() {
   const [groupPreviewVisible, setGroupPreviewVisible] = useState(false);
   const [groupPreview, setGroupPreview] = useState<any>(null);
   const [groupPreviewLoading, setGroupPreviewLoading] = useState(false);
+  const [identityDocumentViewer, setIdentityDocumentViewer] = useState<any>(null);
+  const [identityDocumentLoadingId, setIdentityDocumentLoadingId] = useState<string | null>(null);
 
   useEffect(() => {
     const availableTabs = canManageGig ? OWNER_GIG_TABS : VIEWER_GIG_TABS;
@@ -171,6 +173,36 @@ export default function GigDetailsScreen() {
   };
 
   const Alert = { alert: showAlertNative };
+
+  const openApplicantIdentityDocument = async (applicationId: string) => {
+    if (!applicationId || identityDocumentLoadingId) return;
+    setIdentityDocumentLoadingId(applicationId);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session || !currentUserId) throw new Error("Your session has expired. Please sign in again.");
+      const { data, error } = await supabase.functions.invoke("gig-applications", {
+        body: { action: "fetch_gig_application_details", applicationId, userId: currentUserId },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (error) throw error;
+      const memberReviews = Array.isArray(data?.identity_document_reviews)
+        ? data.identity_document_reviews
+        : [];
+      if (memberReviews.length > 0) {
+        setIdentityDocumentViewer({ members: memberReviews });
+        return;
+      }
+      const review = data?.identity_document_review;
+      if (!review?.available || !review?.url) {
+        throw new Error(review?.limitation || "The approved ID image is unavailable.");
+      }
+      setIdentityDocumentViewer(review);
+    } catch (error: any) {
+      showAlert("warning", "ID Unavailable", error?.message || "The approved ID image could not be loaded.");
+    } finally {
+      setIdentityDocumentLoadingId(null);
+    }
+  };
 
   const fetchApplicationsFallback = async (gigId: string) => {
     const { data, error } = await supabase
@@ -1458,6 +1490,21 @@ export default function GigDetailsScreen() {
                             <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 13, flex: 1 }}>Performance video rights</Text>
                             <Text style={{ color: videoCopyrightColor, fontFamily: "Poppins_600SemiBold", fontSize: 10, textTransform: "uppercase" }}>{videoCopyrightLabel}</Text>
                           </View>
+                          {app.identity_document_review_consent === true ? (
+                            <TouchableOpacity
+                              activeOpacity={0.8}
+                              disabled={identityDocumentLoadingId === app.id}
+                              onPress={() => openApplicantIdentityDocument(app.id)}
+                              style={{ marginTop: 9, minHeight: 40, borderWidth: 1, borderColor: colors.primary, borderRadius: 10, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 }}
+                            >
+                              {identityDocumentLoadingId === app.id ? (
+                                <ActivityIndicator size="small" color={colors.primary} />
+                              ) : (
+                                <Ionicons name="id-card-outline" size={17} color={colors.primary} />
+                              )}
+                              <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 11 }}>{app.group_id ? "View lineup IDs used for matching" : "View approved ID used for matching"}</Text>
+                            </TouchableOpacity>
+                          ) : null}
                           {videoCopyrightMeta.copyright_title ? (
                             <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 6 }}>
                               Match: {videoCopyrightMeta.copyright_title}{videoCopyrightMeta.copyright_artist_label ? ` by ${videoCopyrightMeta.copyright_artist_label}` : ""}
@@ -1549,7 +1596,7 @@ export default function GigDetailsScreen() {
                                         Match rate {Math.round(Number(faceSimilarity.match_rate || 0) * 100)}% | {Number(faceSimilarity.matched_frames || 0)}/{Number(faceSimilarity.usable_frames || faceSimilarity.frames_compared || 0)} matched clear frames | {Number(faceSimilarity.sampled_frames || 0)} sampled{faceSimilarity.confidence != null && faceSimilarity.threshold != null ? ` | confidence ${Number(faceSimilarity.confidence).toFixed(2)} (threshold ${Number(faceSimilarity.threshold).toFixed(2)})` : ""}
                                       </Text>
                                     ) : null}
-                                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 4 }}>Not identity verification. Compare the original profile photo and video yourself; never decide from this signal alone.</Text>
+                                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 4 }}>Not identity verification. Compare the approved ID and original video yourself; never decide from this signal alone.</Text>
                                   </View>
                                 );
                               })() : null}
@@ -1570,7 +1617,7 @@ export default function GigDetailsScreen() {
                                         Match rate {Math.round(Number(memberResult.match_rate || 0) * 100)}% | {Number(memberResult.matched_frames || 0)}/{Number(memberResult.usable_frames || memberResult.frames_compared || 0)} matched clear frames | {Number(memberResult.sampled_frames || 0)} sampled{memberResult.confidence != null && memberResult.threshold != null ? ` | confidence ${Number(memberResult.confidence).toFixed(2)} (threshold ${Number(memberResult.threshold).toFixed(2)})` : ""}
                                       </Text>
                                     ) : null}
-                                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 4 }}>Advisory group-member similarity only. Inspect the member profile and original video yourself.</Text>
+                                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, marginTop: 4 }}>Advisory group-member similarity only. Compare the approved member ID and original video yourself.</Text>
                                   </View>
                                 );
                               })}
@@ -2396,6 +2443,42 @@ export default function GigDetailsScreen() {
       </RNModal>
       <RNModal
         transparent
+        visible={Boolean(identityDocumentViewer?.url || identityDocumentViewer?.members?.length)}
+        animationType="fade"
+        onRequestClose={() => setIdentityDocumentViewer(null)}
+      >
+        <View style={styles.groupPreviewOverlay}>
+          <TouchableOpacity activeOpacity={1} onPress={() => setIdentityDocumentViewer(null)} style={StyleSheet.absoluteFill} />
+          <View style={[styles.groupPreviewModal, { backgroundColor: colors.background, borderColor: borderSoft }]}>
+            <View style={[styles.groupPreviewHeader, { borderBottomColor: borderSoft }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.groupPreviewEyebrow, { color: colors.textSecondary }]}>Private application evidence</Text>
+                <Text style={[styles.groupPreviewTitle, { color: colors.text }]}>{identityDocumentViewer?.members?.length ? "Approved lineup IDs" : "Approved applicant ID"}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setIdentityDocumentViewer(null)} style={[styles.groupPreviewClose, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Ionicons name="close" size={18} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.groupPreviewBody} contentContainerStyle={{ gap: 14 }}>
+              {identityDocumentViewer?.members?.length ? identityDocumentViewer.members.map((member: any, index: number) => (
+                <View key={member?.profile_id || index} style={{ gap: 7 }}>
+                  <Text style={[styles.groupPreviewTitle, { color: colors.text, fontSize: 14 }]}>{member?.display_name || `Group member ${index + 1}`}</Text>
+                  {member?.available && member?.url ? (
+                    <Image source={{ uri: member.url }} resizeMode="contain" style={[styles.identityDocumentImage, { backgroundColor: colors.surface }]} />
+                  ) : (
+                    <Text style={[styles.groupPreviewText, { color: colors.textSecondary }]}>{member?.limitation || "The approved ID image is unavailable."}</Text>
+                  )}
+                </View>
+              )) : (
+                <Image source={{ uri: identityDocumentViewer?.url }} resizeMode="contain" style={[styles.identityDocumentImage, { backgroundColor: colors.surface }]} />
+              )}
+              <Text style={[styles.groupPreviewText, { color: colors.textSecondary }]}>Shown only because the applicant or group representative consented for this application. Do not download or redistribute these identity documents.</Text>
+            </ScrollView>
+          </View>
+        </View>
+      </RNModal>
+      <RNModal
+        transparent
         visible={groupPreviewVisible}
         animationType="fade"
         onRequestClose={closeGroupPreview}
@@ -3035,6 +3118,12 @@ const styles = StyleSheet.create({
   groupPreviewImage: {
     width: "100%",
     height: 180,
+    borderRadius: 14,
+    marginBottom: 14,
+  },
+  identityDocumentImage: {
+    width: "100%",
+    height: 320,
     borderRadius: 14,
     marginBottom: 14,
   },

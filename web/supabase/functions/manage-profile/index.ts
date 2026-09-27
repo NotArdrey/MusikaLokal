@@ -111,46 +111,10 @@ serve(async (req: Request) => {
         }
 
         if (action === 'switch_role') {
-            const normalizedRole = String(params.role || '').trim().toLowerCase()
-            if (!['fan', 'musician'].includes(normalizedRole)) throw new Error('Only fan or musician roles can be selected.')
-            const callerData = authData
-            const supabaseAdmin = createClient(supabaseUrl, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '')
-            const userId = authenticatedUserId
-            const { data: membership, error: membershipError } = await supabaseAdmin.from('profile_roles')
-                .select('status').eq('profile_id', userId).eq('role', normalizedRole).maybeSingle()
-            if (membershipError) throw membershipError
-            if (membership?.status !== 'ACTIVE') {
-                return new Response(JSON.stringify({ error: 'This role is not active for your account.' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403,
-                })
-            }
-
-            const { data: currentProfile, error: currentProfileError } = await supabaseAdmin
-                .from('profiles')
-                .select('role')
-                .eq('id', userId)
-                .maybeSingle()
-            if (currentProfileError) throw currentProfileError
-
-            if (currentProfile?.role === 'staff') {
-                const { error: revokeError } = await supabaseAdmin
-                    .from('staff_listing_access')
-                    .update({ revoked_at: new Date().toISOString() })
-                    .eq('staff_user_id', userId)
-                    .is('revoked_at', null)
-                if (revokeError && !isMissingTableError(revokeError, 'staff_listing_access')) {
-                    throw revokeError
-                }
-            }
-
-            const { error: profileError } = await supabaseAdmin.from('profiles').update({ role: normalizedRole }).eq('id', userId)
-            if (profileError) throw profileError
-            const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-                user_metadata: { ...(callerData.user.user_metadata || {}), role: normalizedRole },
-            })
-            if (authError) throw authError
-            return new Response(JSON.stringify({ role: normalizedRole }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
+            return new Response(JSON.stringify({
+                error: 'Role switching is disabled. Fan and Musician roles require separate accounts and different email addresses.',
+            }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409,
             })
         }
 

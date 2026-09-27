@@ -3015,7 +3015,6 @@ serve(async (req: Request) => {
       const decision = String(body?.decision || "").trim().toUpperCase();
       const reviewNotesRaw = String(body?.reviewNotes || "").trim();
       const reviewNotes = reviewNotesRaw ? reviewNotesRaw : null;
-      const duplicateOverrideConfirmed = Boolean(body?.duplicateOverrideConfirmed);
 
       if (!reviewId) {
         return jsonResponse({ error: "Missing reviewId" }, 400);
@@ -3340,10 +3339,10 @@ serve(async (req: Request) => {
           ))
         ));
 
-        if (duplicateMatchesForApproval.length > 0 && (!duplicateOverrideConfirmed || !reviewNotes)) {
+        if (duplicateMatchesForApproval.length > 0) {
           return jsonResponse({
-            error: "This identity matches another approved same-role account. Confirm the duplicate override and add admin notes before approval.",
-          }, 400);
+            error: "This identity already belongs to another approved same-role account and cannot be approved. Decline this review instead.",
+          }, 409);
         }
 
         if (!isMusicianVideoOnlyReview && !documentFingerprintForDecision && !reviewNameBirth.hasNameBirthDate) {
@@ -3415,15 +3414,6 @@ serve(async (req: Request) => {
               didit_status_sync_skipped_at: diditStatusSyncSkipped.skipped_at,
               didit_status_sync_skipped_reason: diditStatusSyncSkipped.reason,
               didit_status: diditStatusSyncSkipped.status || existingReviewMetadata.didit_status || existingReviewMetadata.source_session_status || null,
-            }
-          : {}),
-        ...(duplicateOverrideConfirmed && duplicateMatchesForApproval.length > 0
-          ? {
-              duplicate_override_confirmed: true,
-              duplicate_override_confirmed_by: actorId,
-              duplicate_override_confirmed_at: nowIso,
-              duplicate_override_match_count: duplicateMatchesForApproval.length,
-              duplicate_override_matched_on: Array.from(new Set(duplicateMatchesForApproval.map((match: any) => match.matched_on).filter(Boolean))),
             }
           : {}),
         ...(musicianVideoPortfolio
@@ -3512,17 +3502,14 @@ serve(async (req: Request) => {
             diditSessionId: review.didit_session_id || null,
             manualReviewId: reviewId,
             email: reviewProfile?.email || review.submitted_by_email || null,
-            duplicateOverride: duplicateOverrideConfirmed,
+            duplicateOverride: false,
             verifiedFullLegalName: reviewNameBirthForClaim.fullLegalName,
             normalizedFullLegalName: reviewNameBirthForClaim.normalizedFullLegalName,
             birthDate: reviewNameBirthForClaim.birthDate,
             metadata: {
               approved_by: actorId,
               review_notes: reviewNotes,
-              duplicate_override_confirmed: duplicateOverrideConfirmed,
-              duplicate_override_matched_on: duplicateOverrideConfirmed
-                ? Array.from(new Set(duplicateMatchesForApproval.map((match: any) => match.matched_on).filter(Boolean)))
-                : [],
+              separate_account_identity_policy: true,
             },
           }));
 
@@ -3744,6 +3731,58 @@ serve(async (req: Request) => {
 
       return jsonResponse({
         item: item || null,
+      });
+    }
+
+    if (action === "fetch_owned_role_listings") {
+      const userId = String(body?.userId || "").trim();
+      if (!userId) return jsonResponse({ error: "Missing userId" }, 400);
+
+      const { data: ownerProfile, error: ownerProfileError } = await client
+        .from("profiles")
+        .select("id, role")
+        .eq("id", userId)
+        .maybeSingle();
+      if (ownerProfileError) return jsonResponse({ error: ownerProfileError.message }, 400);
+
+      const ownerRole = String(ownerProfile?.role || "").trim().toLowerCase();
+      const target = managedRoleTargets[ownerRole];
+      if (!target) return jsonResponse({ items: [], candidates: [], owner_role: ownerRole });
+
+      const [{ data: ownedItems, error: ownedItemsError }, { data: candidates, error: candidatesError }] = await Promise.all([
+        client
+          .from(target.table)
+          .select(`id, name, created_at, ${target.entityType === "venue" ? "event_date, " : ""}${target.ownerColumn}`)
+          .eq(target.ownerColumn, userId)
+          .order("created_at", { ascending: true }),
+        client
+          .from("profiles")
+          .select("id, full_name, email, role, is_verified, verification_status")
+          .eq("role", ownerRole)
+          .eq("is_verified", true)
+          .eq("verification_status", "APPROVED")
+          .neq("id", userId)
+          .order("full_name", { ascending: true }),
+      ]);
+
+      if (ownedItemsError) return jsonResponse({ error: ownedItemsError.message }, 400);
+      if (candidatesError) return jsonResponse({ error: candidatesError.message }, 400);
+
+      return jsonResponse({
+        owner_role: ownerRole,
+        entity_type: target.entityType,
+        items: (ownedItems || []).map((item: any) => ({
+          id: item.id,
+          name: item.name || "Untitled",
+          created_at: item.created_at || null,
+          event_date: item.event_date || null,
+          entity_type: target.entityType,
+        })),
+        candidates: (candidates || []).map((candidate: any) => ({
+          id: candidate.id,
+          full_name: candidate.full_name || candidate.email || "Unnamed owner",
+          email: candidate.email || null,
+        })),
       });
     }
 
@@ -3971,6 +4010,13 @@ serve(async (req: Request) => {
         Object.prototype.hasOwnProperty.call(body || {}, "staffAssignments") ||
         Object.prototype.hasOwnProperty.call(body || {}, "staffAssignment");
       const listingAssignmentTargetId = getListingAssignmentTargetId(body?.listingAssignment);
+      const ownershipReassignments = Array.isArray(body?.ownershipReassignments)
+        ? body.ownershipReassignments.map((item: any) => ({
+            entity_type: String(item?.entity_type || item?.entityType || "").trim().toLowerCase(),
+            target_id: String(item?.target_id || item?.targetId || "").trim(),
+            new_owner_id: String(item?.new_owner_id || item?.newOwnerId || "").trim(),
+          })).filter((item: any) => item.entity_type && item.target_id && item.new_owner_id)
+        : [];
       const normalizedStaffAssignments = hasStaffAssignmentUpdate
         ? (Array.isArray(body?.staffAssignments)
           ? normalizeStaffAssignments(body.staffAssignments)
@@ -3992,7 +4038,7 @@ serve(async (req: Request) => {
       if (maybeIsVerified !== undefined || maybeRole !== undefined || hasStaffAssignmentUpdate) {
         const { data: existingProfile, error: existingProfileError } = await client
           .from("profiles")
-          .select("role, email, is_verified, verification_status")
+          .select("role, email, full_name, is_verified, verification_status")
           .eq("id", userId)
           .maybeSingle();
 
@@ -4010,7 +4056,9 @@ serve(async (req: Request) => {
         if (!parsedRole) {
           return jsonResponse({ error: "Invalid role" }, 400);
         }
-        profileUpdates.role = parsedRole;
+        if (parsedRole !== String(existingProfileForUpdate?.["role"] || "").trim().toLowerCase()) {
+          profileUpdates.role = parsedRole;
+        }
       }
 
       if (maybeFullName !== undefined) {
@@ -4018,7 +4066,9 @@ serve(async (req: Request) => {
         if (!nextFullName) {
           return jsonResponse({ error: "Full name is required" }, 400);
         }
-        profileUpdates.full_name = nextFullName;
+        if (nextFullName !== String(existingProfileForUpdate?.["full_name"] || "").trim()) {
+          profileUpdates.full_name = nextFullName;
+        }
       }
 
       if (maybeEmail !== undefined) {
@@ -4026,7 +4076,9 @@ serve(async (req: Request) => {
         if (!email) {
           return jsonResponse({ error: "Email cannot be empty" }, 400);
         }
-        profileUpdates.email = email;
+        if (email !== String(existingProfileForUpdate?.["email"] || "").trim().toLowerCase()) {
+          profileUpdates.email = email;
+        }
       }
 
       if (maybeContactNumber !== undefined) {
@@ -4048,16 +4100,15 @@ serve(async (req: Request) => {
         if (parsed === null) {
           return jsonResponse({ error: "Invalid isVerified value" }, 400);
         }
-        profileUpdates.is_verified = parsed;
-        if (parsed) {
-          profileUpdates.verification_status = "APPROVED";
-          profileUpdates.id_verified_at = new Date().toISOString();
-        } else {
-          const existingStatus = String(existingProfileForUpdate?.["verification_status"] || "").trim().toUpperCase();
-          profileUpdates.verification_status = ["PENDING_REVIEW", "DECLINED", "ABANDONED"].includes(existingStatus)
-            ? existingStatus
-            : "PENDING";
-          profileUpdates.id_verified_at = null;
+        const existingVerified = existingProfileForUpdate?.["is_verified"] === true;
+        const existingStatus = String(existingProfileForUpdate?.["verification_status"] || "").trim().toUpperCase();
+        const nextStatus = parsed
+          ? "APPROVED"
+          : (["PENDING_REVIEW", "DECLINED", "ABANDONED"].includes(existingStatus) ? existingStatus : "PENDING");
+        if (parsed !== existingVerified || nextStatus !== existingStatus) {
+          profileUpdates.is_verified = parsed;
+          profileUpdates.verification_status = nextStatus;
+          profileUpdates.id_verified_at = parsed ? new Date().toISOString() : null;
         }
       }
 
@@ -4114,26 +4165,28 @@ serve(async (req: Request) => {
       }
 
       const existingMetadata = (existingAuth.user.user_metadata || {}) as Record<string, unknown>;
-      const nextMetadata = {
-        ...existingMetadata,
-      } as Record<string, unknown>;
+      const nextMetadata = { ...existingMetadata } as Record<string, unknown>;
+      let metadataChanged = false;
 
       if (profileUpdates.role !== undefined) {
         nextMetadata.role = profileUpdates.role;
+        metadataChanged = true;
       }
       if (profileUpdates.is_verified !== undefined) {
         nextMetadata.is_verified = profileUpdates.is_verified;
+        metadataChanged = true;
       }
       if (profileUpdates.verification_status !== undefined) {
         nextMetadata.verification_status = profileUpdates.verification_status;
+        metadataChanged = true;
       }
       if (profileUpdates.full_name !== undefined) {
         nextMetadata.full_name = profileUpdates.full_name;
+        metadataChanged = true;
       }
 
-      const authUpdatePayload: Record<string, unknown> = {
-        user_metadata: nextMetadata,
-      };
+      const authUpdatePayload: Record<string, unknown> = {};
+      if (metadataChanged) authUpdatePayload.user_metadata = nextMetadata;
 
       if (profileUpdates.email !== undefined) {
         authUpdatePayload.email = String(profileUpdates.email);
@@ -4143,9 +4196,11 @@ serve(async (req: Request) => {
         authUpdatePayload.password = nextPassword;
       }
 
-      const { error: authUpdateError } = await client.auth.admin.updateUserById(userId, authUpdatePayload);
-      if (authUpdateError) {
-        return jsonResponse({ error: authUpdateError.message }, 400);
+      if (Object.keys(authUpdatePayload).length > 0) {
+        const { error: authUpdateError } = await client.auth.admin.updateUserById(userId, authUpdatePayload);
+        if (authUpdateError) {
+          return jsonResponse({ error: authUpdateError.message }, 400);
+        }
       }
 
       let updatedProfile: any = null;
@@ -4172,6 +4227,7 @@ serve(async (req: Request) => {
           p_metadata: {
             staff_assignments_requested: normalizedStaffAssignments.length,
             listing_assignment_target_id: listingAssignmentTargetId,
+            ownership_reassignments: ownershipReassignments,
           },
         });
         if (roleTransitionError) {

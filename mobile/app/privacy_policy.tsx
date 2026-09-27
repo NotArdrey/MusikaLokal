@@ -30,6 +30,10 @@ export default function PrivacyPolicyScreen() {
           </Text>
 
           <Text style={[styles.text, { color: colors.textSecondary }]}>
+            When a musician explicitly enables optional AI review for a gig application, approved ID fronts may be shown to that gig&apos;s authorized manager through temporary access and may be compared with sampled performance-video frames by our face-comparison provider. For duo or group applications, the submitting leader or representative grants this application-specific permission for the snapshotted lineup. This is advisory only and is never used to accept or reject an application automatically.
+          </Text>
+
+          <Text style={[styles.text, { color: colors.textSecondary }]}>
             For booking cancellations, Musika Lokal records the cancellation actor, reason, payment status, and related wallet activity where applicable. Cancelled booking payments are treated as non-refundable according to our Terms and Conditions.
           </Text>
 

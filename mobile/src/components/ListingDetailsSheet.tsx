@@ -554,7 +554,7 @@ const ListingDetailsSheet = forwardRef<
   // Application State (for Gig applications)
   const [pitchMessage, setPitchMessage] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
-  const [aiPortfolioReviewConsent, setAiPortfolioReviewConsent] = useState(true);
+  const [aiPortfolioReviewConsent, setAiPortfolioReviewConsent] = useState(false);
   const [videoReviewFrameUrl, setVideoReviewFrameUrl] = useState("");
   const [videoReviewFrameUrls, setVideoReviewFrameUrls] = useState<string[]>([]);
   const [videoCopyrightAcknowledged, setVideoCopyrightAcknowledged] = useState(false);
@@ -2117,7 +2117,7 @@ const ListingDetailsSheet = forwardRef<
       // Reset application state
       setPitchMessage("");
       setVideoUrl("");
-      setAiPortfolioReviewConsent(true);
+      setAiPortfolioReviewConsent(false);
       setVideoReviewFrameUrl("");
       setVideoReviewFrameUrls([]);
       setVideoCopyrightAcknowledged(false);
@@ -3833,6 +3833,7 @@ const ListingDetailsSheet = forwardRef<
       videoUrl={videoUrl}
       setVideoUrl={setVideoUrl}
       aiPortfolioReviewConsent={aiPortfolioReviewConsent}
+      setAiPortfolioReviewConsent={setAiPortfolioReviewConsent}
       setVideoReviewFrameUrl={setVideoReviewFrameUrl}
       setVideoReviewFrameUrls={setVideoReviewFrameUrls}
       videoCopyrightDecision={videoCopyrightDecision}
@@ -3881,6 +3882,7 @@ const ListingDetailsSheet = forwardRef<
       videoUrl={videoUrl}
       setVideoUrl={setVideoUrl}
       aiPortfolioReviewConsent={aiPortfolioReviewConsent}
+      setAiPortfolioReviewConsent={setAiPortfolioReviewConsent}
       setVideoReviewFrameUrl={setVideoReviewFrameUrl}
       setVideoReviewFrameUrls={setVideoReviewFrameUrls}
       videoCopyrightDecision={null}
