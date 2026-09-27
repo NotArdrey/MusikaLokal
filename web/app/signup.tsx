@@ -460,6 +460,15 @@ const getJsonPayloadFromInvokeError = async (error: any) => {
     return null;
 };
 
+const isDuplicateIdentityRejection = (error: any, responsePayload: any) => {
+    if (responsePayload?.duplicateIdentityRejected === true) return true;
+
+    const status = Number(error?.status ?? error?.context?.status);
+    const message = String(error?.message || '');
+    return status === 409 &&
+        /This identity is already used by another (?:musician|fan) account\.\s*Each verified identity can have only one (?:musician|fan) account\./i.test(message);
+};
+
 const logDiditEmailFlow = (stage: string, payload: Record<string, unknown> = {}) => {
     console.log(`${DIDIT_EMAIL_FLOW_LOG_PREFIX} ${stage}`, {
         debugVersion: DIDIT_EMAIL_FLOW_DEBUG_VERSION,
@@ -2178,12 +2187,21 @@ export default function SignupScreen() {
             }
 
         } catch (authErr: any) {
-            logDiditEmailFlowError('finishAccountCreation.catch', authErr, {
-                email: maskEmailForLog(email),
-                diditSessionId: refToLink,
-                platform: Platform.OS,
-            });
             const retryPayload = await getJsonPayloadFromInvokeError(authErr);
+            if (isDuplicateIdentityRejection(authErr, retryPayload)) {
+                logDiditEmailFlow('finishAccountCreation.duplicateIdentityRejected', {
+                    email: maskEmailForLog(email),
+                    diditSessionId: refToLink,
+                    status: authErr?.status ?? authErr?.context?.status ?? 409,
+                    platform: Platform.OS,
+                });
+            } else {
+                logDiditEmailFlowError('finishAccountCreation.catch', authErr, {
+                    email: maskEmailForLog(email),
+                    diditSessionId: refToLink,
+                    platform: Platform.OS,
+                });
+            }
             const retryMessage = getVerificationRetryMessage(retryPayload);
             if (retryMessage) {
                 setVerificationUrl('');

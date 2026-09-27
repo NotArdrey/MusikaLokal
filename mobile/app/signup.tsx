@@ -426,6 +426,34 @@ const getEmailDeliveryFromInvokeError = (error: any) => {
     return null;
 };
 
+const getFunctionsErrorPayload = (error: any) => {
+    const responseBody = error?.responseBody;
+    if (responseBody && typeof responseBody === 'object' && !Array.isArray(responseBody)) {
+        return responseBody;
+    }
+
+    if (typeof responseBody === 'string') {
+        try {
+            return JSON.parse(responseBody);
+        } catch {
+            return null;
+        }
+    }
+
+    return null;
+};
+
+const isDuplicateIdentityRejection = (error: unknown) => {
+    const err = error as any;
+    const responsePayload = getFunctionsErrorPayload(err);
+    if (responsePayload?.duplicateIdentityRejected === true) return true;
+
+    const status = Number(err?.status ?? err?.context?.status);
+    const message = String(err?.message || '');
+    return status === 409 &&
+        /This identity is already used by another (?:musician|fan) account\.\s*Each verified identity can have only one (?:musician|fan) account\./i.test(message);
+};
+
 const logDiditEmailFlow = (stage: string, payload: Record<string, unknown> = {}) => {
     console.log(`${DIDIT_EMAIL_FLOW_LOG_PREFIX} ${stage}`, {
         debugVersion: DIDIT_EMAIL_FLOW_DEBUG_VERSION,
@@ -3016,12 +3044,15 @@ export default function SignupScreen() {
             const signupUser = (signupData as any)?.user;
             const emailDelivery = (signupData as any)?.emailDelivery;
             const duplicateIdentityReview = Boolean((signupData as any)?.duplicateIdentityReview);
+            const duplicateIdentityRejected = isDuplicateIdentityRejection(signupError);
 
             logDiditEmailFlow('auth.edgeSignup.result', {
                 email: maskEmailForLog(email),
                 diditSessionId: refToLink,
                 hasError: Boolean(signupError),
-                error: summarizeErrorForDiditEmailLog(signupError),
+                error: duplicateIdentityRejected
+                    ? { status: 409, duplicateIdentityRejected: true }
+                    : summarizeErrorForDiditEmailLog(signupError),
                 user: summarizeAuthUserForDiditEmailLog(signupUser),
                 duplicateIdentityReview,
                 emailDelivery: emailDelivery
@@ -3043,12 +3074,14 @@ export default function SignupScreen() {
                     return;
                 }
 
-                logDiditEmailFlowError('auth.edgeSignup.error', signupError, {
-                    email: maskEmailForLog(email),
-                    diditSessionId: refToLink,
-                    redirectTo: emailRedirectTo,
-                    platform: Platform.OS,
-                });
+                if (!duplicateIdentityRejected) {
+                    logDiditEmailFlowError('auth.edgeSignup.error', signupError, {
+                        email: maskEmailForLog(email),
+                        diditSessionId: refToLink,
+                        redirectTo: emailRedirectTo,
+                        platform: Platform.OS,
+                    });
+                }
                 throw signupError;
             }
 
@@ -3113,11 +3146,20 @@ export default function SignupScreen() {
                 return;
             }
 
-            logDiditEmailFlowError('finishAccountCreation.catch', authErr, {
-                email: maskEmailForLog(email),
-                diditSessionId: refToLink,
-                platform: Platform.OS,
-            });
+            if (isDuplicateIdentityRejection(authErr)) {
+                logDiditEmailFlow('finishAccountCreation.duplicateIdentityRejected', {
+                    email: maskEmailForLog(email),
+                    diditSessionId: refToLink,
+                    status: authErr?.status ?? authErr?.context?.status ?? 409,
+                    platform: Platform.OS,
+                });
+            } else {
+                logDiditEmailFlowError('finishAccountCreation.catch', authErr, {
+                    email: maskEmailForLog(email),
+                    diditSessionId: refToLink,
+                    platform: Platform.OS,
+                });
+            }
             // Handle "User already registered" specifically
             if (/already registered and verified/i.test(String(authErr?.message || ''))) {
                 Alert.alert(
