@@ -21,10 +21,12 @@ const tableScopes: Record<string, InvalidateScope[]> = {
   booking_requests: ["bookings", "details"],
   feed_posts: ["feed"],
   follows: ["feed", "search"],
-  gig_applications: ["bookings", "details", "home"],
+  // A withdrawal can free the final slot and reopen a gig, affecting every
+  // surface that recommends or searches for open gigs.
+  gig_applications: ["bookings", "details", "feed", "home", "search"],
   gig_requirements: ["details", "home", "search"],
   gig_media: ["details", "home", "search"],
-  gigs: ["bookings", "details", "home", "search"],
+  gigs: ["bookings", "details", "feed", "home", "search"],
   group_availability_slots: ["details", "home", "search"],
   group_media: ["details", "home", "search"],
   group_roster_members: ["details", "home", "search"],

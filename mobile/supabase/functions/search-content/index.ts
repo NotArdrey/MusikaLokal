@@ -11,6 +11,23 @@ const corsHeaders = {
 
 const DEFAULT_PAGE_SIZE = 20;
 const PROFILE_SKILL_DISPLAY_EXCLUSIONS = new Set(["producer"]);
+const MANILA_TIME_ZONE = "Asia/Manila";
+
+const getManilaDayStart = (now = new Date()) => {
+  const dateParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: MANILA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const getPart = (type: Intl.DateTimeFormatPartTypes) =>
+    dateParts.find((part) => part.type === type)?.value;
+  const year = getPart("year");
+  const month = getPart("month");
+  const day = getPart("day");
+
+  return year && month && day ? `${year}-${month}-${day}T00:00:00+08:00` : now.toISOString();
+};
 
 const isVisibleProfileSkill = (value: unknown) =>
   typeof value === "string" &&
@@ -214,7 +231,10 @@ serve(async (req: Request) => {
         query = query
           .eq("status", "open")
           .eq("permit_status", "approved")
-          .or(`event_date.is.null,event_date.gte.${new Date().toISOString()}`);
+          // An event stored as a date-only timestamp must remain discoverable
+          // throughout its Manila calendar day, rather than disappearing at
+          // midnight UTC.
+          .or(`event_date.is.null,event_date.gte.${getManilaDayStart()}`);
       }
 
       if (table === "studios_with_stats") {

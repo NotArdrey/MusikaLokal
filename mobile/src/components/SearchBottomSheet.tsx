@@ -99,6 +99,23 @@ const SORT_OPTIONS = [
 
 const PAGE_SIZE = 10;
 const PROFILE_SKILL_DISPLAY_EXCLUSIONS = new Set(["producer"]);
+const MANILA_TIME_ZONE = "Asia/Manila";
+
+const getManilaDateKey = (now = new Date()) => {
+  const dateParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: MANILA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const getPart = (type: Intl.DateTimeFormatPartTypes) =>
+    dateParts.find((part) => part.type === type)?.value;
+  const year = getPart("year");
+  const month = getPart("month");
+  const day = getPart("day");
+
+  return year && month && day ? `${year}-${month}-${day}` : now.toISOString().slice(0, 10);
+};
 
 const filterVisibleProfileSkills = (skills: unknown) =>
   Array.isArray(skills)
@@ -156,8 +173,8 @@ const isOpenSearchResult = (item: any) => {
   }
   if (type === "gig") {
     const statusOpen = String(item?.status || "").trim().toLowerCase() === "open";
-    const eventTime = item?.event_date ? new Date(item.event_date).getTime() : Number.POSITIVE_INFINITY;
-    return statusOpen && (!Number.isFinite(eventTime) || eventTime >= Date.now());
+    const eventDateKey = typeof item?.event_date === "string" ? item.event_date.slice(0, 10) : null;
+    return statusOpen && (!eventDateKey || eventDateKey >= getManilaDateKey());
   }
   return true;
 };

@@ -38,7 +38,6 @@ export const resolveRecordingRule = (
     fallback.songsPerBlock;
   const hoursPerBlock =
     toPositiveDecimal(source?.recording_hours_per_block) ??
-    toPositiveDecimal(source?.min_booking_duration_hours) ??
     fallback.hoursPerBlock;
 
   return {

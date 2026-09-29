@@ -46,6 +46,15 @@ verify_jwt = false
 [functions.gig-applications]
 verify_jwt = false
 
+[functions.gig-cv-review]
+verify_jwt = false
+
+[functions.gig-video-review]
+verify_jwt = false
+
+[functions.gig-member-verification]
+verify_jwt = false
+
 [functions.manual-identity-review]
 verify_jwt = false
 

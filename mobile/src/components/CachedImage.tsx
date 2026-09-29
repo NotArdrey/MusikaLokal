@@ -45,6 +45,7 @@ const CachedImage = ({
   uri,
   fallbackUri,
   style,
+  transform = false,
   width,
   height,
   quality = 72,
@@ -75,6 +76,7 @@ const CachedImage = ({
 
   const transformedPrimaryUri = useMemo(() => {
     return optimizeSupabaseImageUrl(primarySourceUri, {
+      transform,
       width: targetWidth,
       height: targetHeight,
       quality,
@@ -82,10 +84,11 @@ const CachedImage = ({
       format,
       cacheVersion,
     });
-  }, [cacheVersion, format, primarySourceUri, quality, resize, targetHeight, targetWidth]);
+  }, [cacheVersion, format, primarySourceUri, quality, resize, targetHeight, targetWidth, transform]);
 
   const transformedBackupUri = useMemo(() => {
     return optimizeSupabaseImageUrl(backupSourceUri, {
+      transform,
       width: targetWidth,
       height: targetHeight,
       quality,
@@ -93,7 +96,7 @@ const CachedImage = ({
       format,
       cacheVersion,
     });
-  }, [backupSourceUri, cacheVersion, format, quality, resize, targetHeight, targetWidth]);
+  }, [backupSourceUri, cacheVersion, format, quality, resize, targetHeight, targetWidth, transform]);
 
   const [resolvedUri, setResolvedUri] = useState<string | null>(transformedPrimaryUri || transformedBackupUri);
 

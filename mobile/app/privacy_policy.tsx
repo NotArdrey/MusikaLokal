@@ -34,7 +34,7 @@ export default function PrivacyPolicyScreen() {
           </Text>
 
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            For booking cancellations, Musika Lokal records the cancellation actor, reason, payment status, and related wallet activity where applicable. Cancelled booking payments are treated as non-refundable according to our Terms and Conditions.
+            For booking cancellations and reports, Musika Lokal records the actor, reason, payment status, admin review, and related wallet activity where applicable. Normal customer cancellations are non-refundable; approved owner-cancellation and admin-review refunds are credited according to our Terms and Conditions.
           </Text>
 
           <Text style={[styles.text, { color: colors.textSecondary }]}>

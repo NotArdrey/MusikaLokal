@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { deleteMemberReferenceFaces } from '../_shared/gigMemberVerificationService.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -67,6 +68,9 @@ serve(async (req) => {
                 })
             }
         }
+
+        // Remove biometric reference faces before the database cascade removes their identifiers.
+        await deleteMemberReferenceFaces(supabaseAdmin, user.id)
 
         // Delete the user from Auth (this usually cascades to tables if set up, or we delete manually)
         // We already checked logic above, so we proceed.

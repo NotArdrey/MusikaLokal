@@ -1,986 +1,217 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, Dimensions } from 'react-native';
-import { supabase } from '../lib/supabase';
-import AuthMusicHero from '../src/components/AuthMusicHero';
-import CustomAlert, { AlertType } from '../src/components/CustomAlert';
-import { useAuth } from '../src/context/AuthContext';
-import { useTheme } from '../src/context/ThemeContext';
+import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
+import { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
+} from "react-native";
+import { supabase } from "../lib/supabase";
+import AuthMusicHero from "../src/components/AuthMusicHero";
+import { useAuth } from "../src/context/AuthContext";
+import { useTheme } from "../src/context/ThemeContext";
 
+const normalizeRole = (value: unknown) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
 
-
-interface AlertState {
-  visible: boolean;
-  type: AlertType;
-  title: string;
-  message: string;
-  buttons: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
-}
-
-type LoginBanStatus = {
-  permanent: boolean;
-  bannedUntil: string | null;
-  reason: string | null;
-};
-
-const getStringParam = (value: unknown): string => {
-  if (Array.isArray(value)) return String(value[0] || '');
-  return String(value || '');
-};
-
-const isMissingBanColumnError = (errorLike: unknown) => {
-  const error = errorLike as { code?: string; message?: string; details?: string; hint?: string } | null;
-  const text = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
-  return error?.code === 'PGRST204' || error?.code === '42703' || text.includes('is_banned') || text.includes('schema cache');
-};
-
-const getActiveLoginBan = (profile: any): LoginBanStatus | null => {
-  const isBanned = profile?.is_banned === true || String(profile?.is_banned || '').toLowerCase() === 'true';
-  if (!isBanned) return null;
-
-  const bannedUntil = typeof profile?.banned_until === 'string' ? profile.banned_until : null;
-  const reason = typeof profile?.ban_reason === 'string' && profile.ban_reason.trim()
-    ? profile.ban_reason.trim()
-    : typeof profile?.ban_action === 'string' && profile.ban_action.trim()
-      ? profile.ban_action.trim().replace(/_/g, ' ')
-      : null;
-
-  if (!bannedUntil) return { permanent: true, bannedUntil: null, reason };
-
-  const expiry = new Date(bannedUntil);
-  if (Number.isNaN(expiry.getTime())) return { permanent: true, bannedUntil: null, reason };
-  if (expiry <= new Date()) return null;
-
-  return { permanent: false, bannedUntil, reason };
-};
-
-const formatBanDuration = (ban: LoginBanStatus) => {
-  if (ban.permanent) return 'permanently';
-  if (!ban.bannedUntil) return 'temporarily';
-
-  const expiry = new Date(ban.bannedUntil);
-  if (Number.isNaN(expiry.getTime())) return 'permanently';
-
-  const remainingHours = Math.max(1, Math.ceil((expiry.getTime() - Date.now()) / (60 * 60 * 1000)));
-  if (remainingHours >= 48) {
-    const days = Math.ceil(remainingHours / 24);
-    return `${days} day${days === 1 ? '' : 's'}`;
-  }
-  if (remainingHours >= 24) return '1 day';
-  return `${remainingHours} hour${remainingHours === 1 ? '' : 's'}`;
-};
-
-const buildBanMessage = (ban: LoginBanStatus) => {
-  const reasonText = ban.reason ? `\n\nReason: ${ban.reason}` : '';
-  if (ban.permanent) {
-    return `Your account has been banned permanently.${reasonText}`;
-  }
-
-  if (!ban.bannedUntil) {
-    return `Your account is currently banned. Please check with an administrator for the ban duration.${reasonText}`;
-  }
-
-  return `Your account is currently banned. Please try again in about ${formatBanDuration(ban)}.\n\nBan ends: ${new Date(ban.bannedUntil).toLocaleString('en-PH', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })}.${reasonText}`;
-};
-
-export default function LoginScreen() {
+export default function AdminLoginScreen() {
   const { colors, isDark } = useTheme();
-  const { session, loading: authLoading, roleResolved, userRole, identityRequired, identityChecked } = useAuth();
-  const {
-    verified,
-    accountCreated,
-    email: createdEmail,
-    verification_error,
-    verificationPendingReview,
-    diditPendingReview,
-    diditVerified,
-    banned,
-    banned_until,
-    ban_reason,
-    ban_permanent,
-    role_changed,
-  } = useLocalSearchParams();
-  const shownRouteBanRef = useRef(false);
-  const { width } = Dimensions.get('window');
-  const isWebDesktop = Platform.OS === 'web' && width >= 768;
+  const { session, loading: authLoading, roleResolved, isAdmin } = useAuth();
+  const { width } = useWindowDimensions();
+  const showHero = Platform.OS === "web" && width >= 900;
 
-  const resolvePostLoginRoute = (role: unknown) => {
-    const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
-    if (normalizedRole === 'admin') return '/admin';
-    return '/feed';
-  };
-
-  useEffect(() => {
-    if (!authLoading && session) {
-      if (!roleResolved || !identityChecked) return;
-
-      const route = identityRequired ? '/identity_verification' : resolvePostLoginRoute(
-        userRole ||
-        session.user?.user_metadata?.role ||
-        session.user?.app_metadata?.role,
-      );
-      router.replace(route as any);
-    }
-  }, [authLoading, identityChecked, identityRequired, roleResolved, session, userRole]);
-
-  const isSchemaQueryError = (errorLike: unknown) => {
-    const error = errorLike as { message?: string; details?: string; hint?: string; code?: string } | null;
-    const text = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
-
-    return (
-      error?.code === '42P17' ||
-      text.includes('database error querying schema') ||
-      text.includes('infinite recursion detected in policy')
-    );
-  };
-
-  const schemaErrorLoginMessage =
-    'Database schema/policies are out of sync. Apply the latest Supabase migrations, then try logging in again.';
-
-  // ... (existing initializeAuth is fine)
-
-  // Check for verification success from deep link
-  useEffect(() => {
-    if (verified === 'true') {
-      const checkPendingSignup = async () => {
-        try {
-          const savedState = await import('@react-native-async-storage/async-storage').then(m => m.default.getItem('signup_current_session'));
-          if (savedState) {
-            console.log('Pending signup detected, redirecting to signup flow...');
-            router.replace({ pathname: '/signup', params: { verified: 'true' } } as any);
-            return;
-          }
-        } catch (e) {
-          console.log('Error checking pending signup:', e);
-        }
-      };
-      checkPendingSignup();
-    }
-  }, [verified]);
-
-  // Handle verification errors redirected from signup
-  useEffect(() => {
-    if (verification_error) {
-      let title = 'Verification Failed';
-      let message = 'Your identity could not be verified. Please try again.';
-
-      if (verification_error === 'invalid_id') {
-        title = 'Invalid I.D.';
-        message = 'Your I.D. was declined or does not match. Please try again with a valid government-issued I.D.';
-      } else if (verification_error === 'abandoned') {
-        title = 'Verification Incomplete';
-        message = 'You did not complete the verification process. Please try signing up again.';
-      } else if (verification_error === 'pending_review') {
-        title = 'Verification Pending';
-        message = 'Your verification is under manual review. Please check your email later for updates.';
-      } else if (verification_error === 'timeout') {
-        title = 'Verification Timeout';
-        message = 'We could not confirm your verification status in time. Please try signing up again.';
-      }
-
-      showAlert('warning', title, message, [{ text: 'OK' }]);
-
-      // Clear the param to prevent re-showing the alert
-      router.setParams({ verification_error: '' });
-    }
-  }, [verification_error]);
-
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
-
-  const [loginMessage, setLoginMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
-
-  // Custom Alert State
-  const [alertState, setAlertState] = useState<AlertState>({
-    visible: false,
-    type: 'info',
-    title: '',
-    message: '',
-    buttons: [{ text: 'OK' }],
-  });
-
-  // Helper function to show alert
-  const showAlert = (
-    type: AlertType,
-    title: string,
-    message: string,
-    buttons?: AlertState['buttons']
-  ) => {
-    setAlertState({
-      visible: true,
-      type,
-      title,
-      message,
-      buttons: buttons || [{ text: 'OK' }],
-    });
-  };
-
-  const closeAlert = () => {
-    setAlertState(prev => ({ ...prev, visible: false }));
-  };
-
-  const showValidationAlert = (nextErrors: { email?: string; password?: string }) => {
-    const issues: string[] = [];
-
-    if (nextErrors.email) {
-      issues.push(nextErrors.email === 'Email is required.' ? 'Enter your email address.' : nextErrors.email);
-    }
-
-    if (nextErrors.password) {
-      issues.push(nextErrors.password === 'Password is required.' ? 'Enter your password.' : nextErrors.password);
-    }
-
-    const title = issues.length > 1
-      ? 'Complete Required Fields'
-      : nextErrors.email
-        ? 'Check Your Email'
-        : 'Password Required';
-
-    const message = issues.length > 1
-      ? `We need a few details before you can sign in:\n- ${issues.join('\n- ')}`
-      : issues[0] || 'Please review your login details and try again.';
-
-    showAlert('warning', title, message, [{ text: 'OK', style: 'default' }]);
-  };
-
-  const showLoginError = (title: string, message: string) => {
-    setLoginMessage({ type: 'error', text: message });
-    showAlert('error', title, message, [{ text: 'OK', style: 'default' }]);
-  };
-
-  const showBannedAccountError = (ban: LoginBanStatus) => {
-    const message = buildBanMessage(ban);
-    setLoginMessage({ type: 'error', text: message });
-    showAlert('error', 'Account Banned', message, [{ text: 'OK', style: 'default' }]);
-  };
-
-  const fetchActiveBanForEmail = async (loginEmail: string): Promise<LoginBanStatus | null> => {
-    const normalizedEmail = String(loginEmail || '').trim().toLowerCase();
-    if (!normalizedEmail) return null;
-
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('is_banned, banned_until, ban_reason, ban_action')
-      .eq('email', normalizedEmail)
-      .maybeSingle();
-
-    if (error) {
-      if (isMissingBanColumnError(error)) return null;
-      return null;
-    }
-
-    return getActiveLoginBan(data);
-  };
-
-  const fetchLoginProfile = async (userId: string) => {
-    const withBan = await supabase
-      .from('profiles')
-      .select('is_verified, id_document_expiry, role, is_banned, banned_until, ban_reason, ban_action')
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (!withBan.error || !isMissingBanColumnError(withBan.error)) {
-      return withBan;
-    }
-
-    return await supabase
-      .from('profiles')
-      .select('is_verified, id_document_expiry, role')
-      .eq('id', userId)
-      .maybeSingle();
-  };
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (shownRouteBanRef.current || getStringParam(banned) !== 'true') return;
-
-    shownRouteBanRef.current = true;
-    showBannedAccountError({
-      permanent: getStringParam(ban_permanent) === 'true',
-      bannedUntil: getStringParam(banned_until) || null,
-      reason: getStringParam(ban_reason) || null,
-    });
-  }, [banned, banned_until, ban_reason, ban_permanent]);
-
-  useEffect(() => {
-    if (getStringParam(role_changed) !== 'true') return;
-    showAlert(
-      'info',
-      'Role Updated',
-      'An administrator changed your account role. Please sign in again to continue with your new access.',
-    );
-    router.setParams({ role_changed: '' });
-  }, [role_changed]);
-
-  // Check for Account Created success (New User)
-  useEffect(() => {
-    if (accountCreated === 'true') {
-      if (diditPendingReview === 'true') {
-        showAlert(
-          'success',
-          'Verification In Review',
-          `Your identity is now under manual review for admin approval. This usually takes 5 to 7 business days.\n\nWe will send the email confirmation link to ${createdEmail || 'your email'} after the review is approved.`
-        );
-        return;
-      }
-
-      if (verificationPendingReview === 'true') {
-        showAlert(
-          'success',
-          'Manual Review Submitted',
-          `Your requirements were submitted and your account is under manual review for admin approval. This usually takes 5 to 7 business days.\n\nWe will send the email confirmation link to ${createdEmail || 'you'} after the review is approved.`
-        );
-        return;
-      }
-
-      if (diditVerified === 'true') {
-        showAlert(
-          'success',
-          'Check Your Inbox',
-          `Your identity has been verified.\n\nPlease confirm the email link we sent to ${createdEmail || 'your email'} before logging in.`
-        );
-        return;
-      }
-
-      showAlert(
-        'success',
-        'Check Your Inbox',
-        `We have sent a verification link to ${createdEmail || 'your email'}.\n\nPlease confirm your email address to log in.`
-      );
-    } else if (verified === 'true') {
-      showAlert(
-        'success',
-        'Account Ready',
-        'Your email has been confirmed and your identity is verified. You can now log in.'
-      );
-      return;
+    if (!authLoading && session && roleResolved && isAdmin) {
+      router.replace("/admin");
     }
-  }, [verified, accountCreated, createdEmail, verificationPendingReview, diditPendingReview, diditVerified]);
-
-  const signInWithCredentials = async (loginEmail: string, loginPassword: string) => {
-    setLoading(true);
-    try {
-      // Clear any stale session first to prevent refresh token errors
-      console.log('Clearing any existing session...');
-      await supabase.auth.signOut({ scope: 'local' });
-
-      const activeBanBeforeLogin = await fetchActiveBanForEmail(loginEmail);
-      if (activeBanBeforeLogin) {
-        showBannedAccountError(activeBanBeforeLogin);
-        return;
-      }
-
-      console.log('Attempting login for:', loginEmail);
-      const { error } = await supabase.auth.signInWithPassword({
-        email: loginEmail,
-        password: loginPassword,
-      });
-
-      if (error) {
-        console.log('Login error:', error.message);
-        const activeBanAfterError = await fetchActiveBanForEmail(loginEmail);
-        if (activeBanAfterError) {
-          showBannedAccountError(activeBanAfterError);
-        } else if (/bann?ed/i.test(error.message || '')) {
-          showBannedAccountError({ permanent: false, bannedUntil: null, reason: null });
-        } else {
-          // Handle specific error cases
-          if (error.message.includes('Invalid login credentials')) {
-            showLoginError('Invalid Login', 'Invalid email or password.');
-          } else if (error.message.includes('Email not confirmed')) {
-            showLoginError('Email Not Confirmed', 'Email not confirmed. Check your inbox.');
-          } else if (error.message.includes('rate') || error.status === 429) {
-            showLoginError('Too Many Attempts', 'Too many attempts. Please wait before trying again.');
-          } else if (error.message.includes('refresh') || error.message.includes('token')) {
-            // Clear storage and retry once
-            console.log('Token error detected, clearing storage and retrying...');
-            await supabase.auth.signOut({ scope: 'local' });
-            showLoginError('Session Expired', 'Session expired. Please try again.');
-          } else if (isSchemaQueryError(error)) {
-            showLoginError('Database Setup Required', schemaErrorLoginMessage);
-          } else {
-            showLoginError('Sign In Failed', error.message);
-          }
-        }
-      } else {
-        // Login succeeded - VALIDATE VERIFICATION STATUS
-        console.log('Auth success. Validating verification status...');
-        const { data: { user }, error: getUserError } = await supabase.auth.getUser();
-
-        if (!user) {
-          console.error('Failed to retrieve user after login:', getUserError?.message || 'user is null');
-          showLoginError('Verification Failed', 'Unable to verify your account. Please try again.');
-        } else if (user) {
-          // 1. Check Metadata (Fastest)
-          const metaVerified = user.user_metadata?.is_verified;
-          console.log('Metadata check:', { metaVerified });
-
-          if (metaVerified === false) {
-            console.log('Blocked by metadata check.');
-            setLoginMessage({ type: 'error', text: 'Account not verified. Please complete verification.' });
-            showAlert(
-              'warning',
-              'Verification Required',
-              'Your account is not verified. Please complete verification to continue.',
-              [
-                { text: 'Verify Now', onPress: () => router.replace('/identity_verification') },
-                { text: 'Cancel', style: 'cancel' }
-              ]
-            );
-            return;
-          }
-
-          // 2. Check Profile (Source of Truth)
-          let { data: profile, error: profileError } = await fetchLoginProfile(user.id);
-
-          console.log('Profile check:', { profile, profileError });
-
-          const activeBanAfterLogin = getActiveLoginBan(profile);
-          if (activeBanAfterLogin) {
-            await supabase.auth.signOut({ scope: 'local' });
-            showBannedAccountError(activeBanAfterLogin);
-            return;
-          }
-
-          if (profileError) {
-            if (isSchemaQueryError(profileError)) {
-              await supabase.auth.signOut({ scope: 'local' });
-              setLoginMessage({ type: 'error', text: schemaErrorLoginMessage });
-              showAlert('error', 'Database Setup Required', schemaErrorLoginMessage);
-              return;
-            }
-
-            console.error('Profile check failed:', profileError);
-          }
-
-          // SELF-HEALING: After the email confirmation link creates a valid auth session,
-          // promote the Didit-approved profile from pending to verified.
-          if ((!profile || !profile.is_verified) && metaVerified) {
-            console.log('Profile pending/missing but Metadata Verified. Attempting to repair profile...');
-            const { error: upsertError } = await supabase
-              .from('profiles')
-              .upsert({
-                id: user.id,
-                email: user.email,
-                full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
-                role: profile?.role || user.user_metadata?.role || 'musician',
-                is_verified: true,
-                verification_status: 'APPROVED',
-                didit_session_id: user.user_metadata?.didit_session_id
-              });
-
-            if (upsertError) {
-              console.error('Failed to repair profile:', upsertError);
-              if (isSchemaQueryError(upsertError)) {
-                await supabase.auth.signOut({ scope: 'local' });
-                setLoginMessage({ type: 'error', text: schemaErrorLoginMessage });
-                showAlert('error', 'Database Setup Required', schemaErrorLoginMessage);
-                return;
-              }
-            } else {
-              console.log('Profile repaired successfully. Re-fetching...');
-              const { data: newProfile } = await fetchLoginProfile(user.id);
-              profile = newProfile;
-            }
-          }
-
-          const activeBanAfterRepair = getActiveLoginBan(profile);
-          if (activeBanAfterRepair) {
-            await supabase.auth.signOut({ scope: 'local' });
-            showBannedAccountError(activeBanAfterRepair);
-            return;
-          }
-
-          // If profile is STILL missing OR unverified -> BLOCK
-          if (!profile || !profile.is_verified) {
-            console.log('Blocked by profile check. Profile Missing:', !profile, 'Verified:', profile?.is_verified);
-            setLoginMessage({ type: 'error', text: !profile ? 'Account setup incomplete. Verify identity.' : 'Identity verification required.' });
-
-            showAlert(
-              'warning',
-              'Verification Required',
-              !profile ? 'Account setup incomplete. Please verify your identity.' : 'You need to verify your identity before accessing the app.',
-              [
-                {
-                  text: 'Verify Now',
-                  onPress: () => router.replace('/identity_verification'),
-                  style: 'default'
-                },
-                {
-                  text: 'Cancel',
-                  style: 'cancel'
-                }
-              ]
-            );
-          } else if (profile?.id_document_expiry && new Date(profile.id_document_expiry) < new Date()) {
-            // Check for expired ID
-            setLoginMessage({ type: 'error', text: 'ID expired. Please upload a new document to continue.' });
-            router.replace('/identity_verification' as any);
-            return;
-          } else {
-            const route = resolvePostLoginRoute(
-              profile?.role ||
-              user.user_metadata?.role ||
-              user.app_metadata?.role,
-            );
-            console.log('Verification passed. Redirecting to:', route);
-            router.replace(route as any);
-          }
-        }
-      }
-    } catch (e) {
-      showAlert(
-        'error',
-        'Connection Error',
-        'Unable to connect to the server. Please check your internet connection and try again.',
-        [{ text: 'OK', style: 'default' }]
-      );
-      console.log(e);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [authLoading, isAdmin, roleResolved, session]);
 
   const handleLogin = async () => {
-    setErrors({});
-    setLoginMessage(null);
-    const newErrors: { email?: string; password?: string } = {};
-
-    if (!email) {
-      newErrors.email = 'Email is required.';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      newErrors.email = 'Please enter a valid email address.';
-    }
-
-    if (!password) {
-      newErrors.password = 'Password is required.';
-    }
-
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
-      showValidationAlert(newErrors);
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || !password) {
+      setErrorMessage("Enter your admin email and password.");
       return;
     }
 
-    await signInWithCredentials(email, password);
-  };
+    setSubmitting(true);
+    setErrorMessage(null);
 
-  const logoSource = isDark
-    ? require('../assets/images/musika-lokal-logo-modern-wordmark-dark.png')
-    : require('../assets/images/musika-lokal-logo-modern-wordmark.png');
+    try {
+      await supabase.auth.signOut({ scope: "local" });
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
 
-  // Derived styles based on theme
-  const themeStyles = {
-    container: { backgroundColor: colors.background },
-    text: { color: colors.text },
-    textSecondary: { color: colors.textSecondary },
-    inputContainer: {
-      backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
-      borderColor: isDark ? '#374151' : '#E5E7EB',
-    },
-    primaryButton: { backgroundColor: colors.primary },
-    primaryText: { color: colors.primary },
+      if (error || !data.user) {
+        setErrorMessage(
+          error?.message === "Invalid login credentials"
+            ? "Invalid email or password."
+            : error?.message || "Unable to sign in.",
+        );
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", data.user.id)
+        .maybeSingle();
+
+      const role = normalizeRole(profile?.role || data.user.app_metadata?.role);
+      if (profileError || role !== "admin") {
+        await supabase.auth.signOut({ scope: "local" });
+        setErrorMessage("This portal is restricted to administrator accounts.");
+        return;
+      }
+
+      router.replace("/admin");
+    } catch {
+      setErrorMessage("Unable to sign in right now. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={[styles.flex1, themeStyles.container]}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      style={[styles.screen, { backgroundColor: colors.background }]}
     >
-      <ScrollView contentContainerStyle={isWebDesktop ? styles.webScrollContent : styles.scrollContent}>
-        <View style={isWebDesktop ? styles.webContainer : styles.contentContainer}>
-          {/* Left Side Branding (Web Desktop Only) */}
-          {isWebDesktop && (
-            <View style={styles.webLeftPanel}>
-              <AuthMusicHero
-                title={`Welcome back\nto MusikaLokal.`}
-                subtitle="Discover, connect, and collaborate with the local music scene."
-              />
-            </View>
-          )}
+      {showHero ? (
+        <View style={styles.heroColumn}>
+          <AuthMusicHero
+            title="Manage Musika Lokal"
+            subtitle="A secure workspace for platform administrators."
+          />
+        </View>
+      ) : null}
 
-          {/* Right Side Form */}
-          <View style={isWebDesktop ? [styles.webRightPanel, { backgroundColor: isDark ? 'rgba(31, 41, 55, 0.85)' : 'rgba(255, 255, 255, 0.85)' }] : null}>
-            <View style={isWebDesktop ? styles.webFormWrapper : null}>
-              {/* Logo Section (Mobile Only) */}
-              {!isWebDesktop && (
-                <View style={styles.logoSection}>
-                  <View style={styles.logoWrapper}>
-                    <Image
-                      source={logoSource}
-                      style={styles.logoImage}
-                      resizeMode="contain"
-                    />
-                  </View>
-                  <Text style={[styles.appTagline, themeStyles.textSecondary]}>
-                    Connect with the local music scene
-                  </Text>
-                </View>
-              )}
+      <View style={styles.formColumn}>
+        <View style={styles.formShell}>
+          <Image
+            source={
+              isDark
+                ? require("../assets/images/musika-lokal-logo-modern-wordmark-dark.png")
+                : require("../assets/images/musika-lokal-logo-modern-wordmark.png")
+            }
+            resizeMode="contain"
+            style={styles.logo}
+          />
 
-              {/* Form Section */}
-              <View style={styles.formContainer}>
+          <Text style={[styles.eyebrow, { color: colors.primary }]}>ADMIN PORTAL</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Welcome back</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Sign in with your administrator credentials.</Text>
 
-                {isWebDesktop && (
-                  <View style={styles.webFormHeader}>
-                    <View style={styles.webFormLogoFrame}>
-                      <Image
-                        source={logoSource}
-                        style={styles.webFormLogo}
-                        resizeMode="contain"
-                      />
-                    </View>
-                    <Text style={[styles.appName, themeStyles.text, { textAlign: 'left', fontSize: 36, marginBottom: 8 }]}>Sign In</Text>
-                    <Text style={[themeStyles.textSecondary, { fontFamily: 'Poppins_400Regular', fontSize: 18 }]}>Please enter your details to continue.</Text>
-                  </View>
-                )}
-
-
-                <View>
-                  <Text style={[styles.label, themeStyles.textSecondary]}>
-                    Email Address
-                  </Text>
-                  <View style={[
-                    styles.inputContainer,
-                    themeStyles.inputContainer,
-                    errors.email ? { borderColor: '#EF4444' } : null
-                  ]}>
-                    <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
-                    <TextInput
-                      testID="auth-email-input"
-                      accessibilityLabel="auth-email-input"
-                      style={[styles.input, themeStyles.text]}
-                      placeholder="name@email.com"
-                      placeholderTextColor={colors.textSecondary}
-                      value={email}
-                      onChangeText={(text) => {
-                        setEmail(text);
-                        if (errors.email) setErrors({ ...errors, email: undefined });
-                      }}
-                      autoCapitalize="none"
-                      keyboardType="email-address"
-                    />
-                  </View>
-                  {errors.email && (
-                    <Text style={styles.errorText}>{errors.email}</Text>
-                  )}
-                </View>
-
-                <View>
-                  <Text style={[styles.label, themeStyles.textSecondary]}>
-                    Password
-                  </Text>
-                  <View style={[
-                    styles.inputContainer,
-                    themeStyles.inputContainer,
-                    errors.password ? { borderColor: '#EF4444' } : null
-                  ]}>
-                    <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
-                    <TextInput
-                      testID="auth-password-input"
-                      accessibilityLabel="auth-password-input"
-                      style={[styles.input, themeStyles.text]}
-                      placeholder="Enter your password"
-                      placeholderTextColor={colors.textSecondary}
-                      value={password}
-                      onChangeText={(text) => {
-                        setPassword(text);
-                        if (errors.password) setErrors({ ...errors, password: undefined });
-                      }}
-                      secureTextEntry={!showPassword}
-                    />
-                    <TouchableOpacity
-                      activeOpacity={1}
-                      testID="auth-toggle-password-button"
-                      accessibilityLabel="auth-toggle-password-button"
-                      onPress={() => setShowPassword(!showPassword)}
-                    >
-                      <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
-                    </TouchableOpacity>
-                  </View>
-                  {errors.password ? (
-                    <Text style={styles.errorText}>{errors.password}</Text>
-                  ) : (
-                    <TouchableOpacity
-                      activeOpacity={1}
-                      testID="auth-forgot-password-link"
-                      accessibilityLabel="auth-forgot-password-link"
-                      onPress={() => router.push('/forget_password' as any)}
-                      style={styles.forgotPasswordButton}
-                    >
-                      <Text style={[styles.forgotPasswordText, themeStyles.primaryText]}>
-                        Forgot Password?
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-                <TouchableOpacity
-                  testID="auth-sign-in-button"
-                  accessibilityLabel={loading ? "Signing you in" : "Sign in"}
-                  accessibilityLiveRegion="polite"
-                  onPress={handleLogin}
-                  disabled={loading}
-                  activeOpacity={loading ? 1 : 0.78}
-                  style={[styles.loginButton, themeStyles.primaryButton, styles.shadow, { opacity: loading ? 0.6 : 1 }]}
-                >
-                  {loading ? (
-                    <View style={styles.loadingButtonContent}>
-                      <ActivityIndicator color="white" size="small" />
-                      <Text style={styles.loginButtonText}>Signing you in...</Text>
-                    </View>
-                  ) : (
-                    <Text style={styles.loginButtonText}>
-                      Sign In
-                    </Text>
-                  )}
-                </TouchableOpacity>
-
-                {loginMessage && (
-                  <View style={{ marginTop: 16, backgroundColor: loginMessage.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)', padding: 12, borderRadius: 8 }}>
-                    <Text style={{ color: loginMessage.type === 'error' ? '#EF4444' : '#10B981', textAlign: 'center', fontFamily: 'Poppins_500Medium' }}>
-                      {loginMessage.text}
-                    </Text>
-                  </View>
-                )}
-
-                <View style={styles.signupLinkContainer}>
-                  <Text style={[styles.signupLinkText, themeStyles.textSecondary]}>
-                    Don&apos;t have an account?{' '}
-                  </Text>
-                  <TouchableOpacity
-                    activeOpacity={0.65}
-                    testID="auth-register-link"
-                    accessibilityLabel="auth-register-link"
-                    onPress={() => router.push('/signup' as any)}
-                    style={styles.signupLinkPressable}
-                  >
-                    <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>Register here</Text>
-                  </TouchableOpacity>
-                </View>
+          <View style={styles.form}>
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.label, { color: colors.text }]}>Email</Text>
+              <View style={[styles.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Ionicons name="mail-outline" size={19} color={colors.textSecondary} />
+                <TextInput
+                  testID="admin-email-input"
+                  accessibilityLabel="Admin email"
+                  autoCapitalize="none"
+                  autoComplete="email"
+                  keyboardType="email-address"
+                  onChangeText={setEmail}
+                  placeholder="admin@example.com"
+                  placeholderTextColor={colors.textSecondary}
+                  style={[styles.input, { color: colors.text }]}
+                  value={email}
+                />
               </View>
             </View>
-          </View>
-        </View>
-      </ScrollView>
 
-      <CustomAlert
-        visible={alertState.visible}
-        type={alertState.type}
-        title={alertState.title}
-        message={alertState.message}
-        buttons={alertState.buttons}
-        onClose={closeAlert}
-      />
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.label, { color: colors.text }]}>Password</Text>
+              <View style={[styles.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Ionicons name="lock-closed-outline" size={19} color={colors.textSecondary} />
+                <TextInput
+                  testID="admin-password-input"
+                  accessibilityLabel="Admin password"
+                  autoCapitalize="none"
+                  autoComplete="current-password"
+                  onChangeText={setPassword}
+                  onSubmitEditing={() => void handleLogin()}
+                  placeholder="Enter your password"
+                  placeholderTextColor={colors.textSecondary}
+                  secureTextEntry={!showPassword}
+                  style={[styles.input, { color: colors.text }]}
+                  value={password}
+                />
+                <TouchableOpacity
+                  accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+                  onPress={() => setShowPassword((current) => !current)}
+                  style={styles.visibilityButton}
+                >
+                  <Ionicons
+                    name={showPassword ? "eye-off-outline" : "eye-outline"}
+                    size={20}
+                    color={colors.textSecondary}
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {errorMessage ? (
+              <View style={styles.errorBox}>
+                <Ionicons name="alert-circle-outline" size={18} color="#DC2626" />
+                <Text style={styles.errorText}>{errorMessage}</Text>
+              </View>
+            ) : null}
+
+            <TouchableOpacity
+              testID="admin-login-button"
+              accessibilityLabel="Sign in to admin portal"
+              activeOpacity={0.85}
+              disabled={submitting}
+              onPress={() => void handleLogin()}
+              style={[styles.submitButton, { backgroundColor: colors.primary, opacity: submitting ? 0.7 : 1 }]}
+            >
+              {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Ionicons name="log-in-outline" size={20} color="#FFFFFF" />}
+              <Text style={styles.submitText}>{submitting ? "Signing in..." : "Sign in"}</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={[styles.restrictedNote, { color: colors.textSecondary }]}>Authorized administrators only</Text>
+        </View>
+      </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex1: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
-  webScrollContent: {
-    flexGrow: 1,
-    height: '100%',
-  },
-  contentContainer: {
-    flex: 1,
-    paddingHorizontal: 32, // px-8
-    justifyContent: 'center',
-    paddingVertical: 48, // py-12
-  },
-  webContainer: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-  webLeftPanel: {
-    flex: 1,
-    display: 'flex',
-  },
-  webHeroImage: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  webHeroOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    padding: 64,
-    justifyContent: 'center',
-  },
-  webHeroTitle: {
-    color: 'white',
-    fontSize: 48,
-    fontFamily: 'Poppins_700Bold',
-    lineHeight: 56,
-    marginBottom: 16,
-  },
-  webHeroSubtitle: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 18,
-    fontFamily: 'Poppins_400Regular',
-    maxWidth: 400,
-    lineHeight: 28,
-  },
-  webRightPanel: {
-    flex: 1,
-    maxWidth: 800,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 64,
-  },
-  webFormWrapper: {
-    width: '100%',
-    maxWidth: 500,
-  },
-  webFormHeader: {
-    alignItems: 'flex-start',
-    marginBottom: 32,
-  },
-  webFormLogoFrame: {
-    width: 86,
-    height: 112,
-    overflow: 'hidden',
-    alignSelf: 'center',
-    marginBottom: 18,
-  },
-  webFormLogo: {
-    // Crop the transparent padding baked into the wordmark asset.
-    width: 132,
-    height: 132,
-    marginLeft: -29,
-  },
-  logoSection: {
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  logoWrapper: {
-    width: 196,
-    height: 196,
-    borderRadius: 24, // rounded-3xl
-    backgroundColor: 'transparent',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-    // Shadow props
-  },
-  logoImage: {
-    width: 196,
-    height: 196,
-  },
-  appName: {
-    fontSize: 30, // text-3xl
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 8, // mb-2
-    fontFamily: 'Poppins_700Bold',
-  },
-  appTagline: {
-    textAlign: 'center',
-    fontFamily: 'Poppins_400Regular',
-  },
-  formContainer: {
-    gap: 20, // gap-5 (approx)
-  },
-  label: {
-    marginBottom: 8,
-    fontSize: 14,
-    textTransform: 'uppercase',
-    fontWeight: 'bold',
-    letterSpacing: 1,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    height: 64,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  input: {
-    flex: 1,
-    marginLeft: 16,
-    height: '100%',
-    fontFamily: 'Poppins_400Regular',
-    fontSize: 16,
-    includeFontPadding: false,
-    textAlignVertical: 'center',
-    paddingVertical: 0,
-  },
-  forgotPasswordButton: {
-    alignItems: 'flex-end',
-    marginTop: 8, // mt-2
-  },
-  forgotPasswordText: {
-    fontFamily: 'Poppins_500Medium',
-    fontSize: 12,
-  },
-  loginButton: {
-    height: 64,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 20,
-  },
-  loadingButtonContent: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    justifyContent: 'center',
-  },
-  loginButtonText: {
-    fontFamily: 'Poppins_600SemiBold',
-    color: 'white',
-    fontSize: 18,
-  },
-  shadow: {
-    shadowColor: "#4F46E5", // shadow-primary
-    shadowOffset: {
-      width: 0,
-      height: 10,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 10,
-  },
-  signupLinkContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexWrap: 'wrap',
-    marginTop: 24, // mt-6
-  },
-  signupLinkText: {
-    fontFamily: 'Poppins_400Regular',
-    fontSize: 14,
-  },
-  signupLinkPressable: {
-    paddingVertical: 4,
-    paddingHorizontal: 2,
-  },
-  signupLinkHighlight: {
-    fontFamily: 'Poppins_600SemiBold',
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  errorText: {
-    color: '#EF4444',
-    fontSize: 12,
-    marginTop: 4,
-    marginLeft: 4,
-    fontFamily: 'Poppins_400Regular',
-  },
+  screen: { flex: 1, flexDirection: "row" },
+  heroColumn: { flex: 1.05, minWidth: 0 },
+  formColumn: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, paddingVertical: 40 },
+  formShell: { width: "100%", maxWidth: 430 },
+  logo: { width: 190, height: 58, marginBottom: 28 },
+  eyebrow: { fontFamily: "Poppins_700Bold", fontSize: 12, letterSpacing: 1.7, marginBottom: 8 },
+  title: { fontFamily: "Poppins_700Bold", fontSize: 34, lineHeight: 42 },
+  subtitle: { fontFamily: "Poppins_400Regular", fontSize: 14, lineHeight: 22, marginTop: 6 },
+  form: { gap: 18, marginTop: 30 },
+  fieldGroup: { gap: 8 },
+  label: { fontFamily: "Poppins_600SemiBold", fontSize: 13 },
+  inputWrap: { alignItems: "center", borderRadius: 12, borderWidth: 1, flexDirection: "row", minHeight: 52, paddingHorizontal: 15 },
+  input: { flex: 1, fontFamily: "Poppins_400Regular", fontSize: 14, paddingHorizontal: 11, paddingVertical: 12, outlineStyle: "none" } as any,
+  visibilityButton: { alignItems: "center", justifyContent: "center", padding: 6 },
+  errorBox: { alignItems: "flex-start", backgroundColor: "#FEF2F2", borderColor: "#FECACA", borderRadius: 10, borderWidth: 1, flexDirection: "row", gap: 9, padding: 12 },
+  errorText: { color: "#B91C1C", flex: 1, fontFamily: "Poppins_400Regular", fontSize: 13, lineHeight: 19 },
+  submitButton: { alignItems: "center", borderRadius: 12, flexDirection: "row", gap: 9, justifyContent: "center", minHeight: 52, paddingHorizontal: 18 },
+  submitText: { color: "#FFFFFF", fontFamily: "Poppins_600SemiBold", fontSize: 15 },
+  restrictedNote: { fontFamily: "Poppins_400Regular", fontSize: 12, marginTop: 22, textAlign: "center" },
 });

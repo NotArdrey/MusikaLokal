@@ -14,16 +14,17 @@ import {
   View,
 } from 'react-native';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
+import { AdminFilterBar, FilterDropdown } from '../../src/components/admin/filters';
 import Header from '../../src/components/header';
 import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
-import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from './_cache';
+import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from '../../src/admin/cache';
 import {
   fetchAdminPaymentTransactions,
   normalizePaymentActionLabel,
-} from './_payments';
+} from '../../src/admin/payments';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -132,7 +133,6 @@ interface AuditEntry {
 }
 
 const baseAuditEntityTypes: AuditEntityFilter[] = [
-  'all',
   'studio',
   'gig',
   'group',
@@ -146,7 +146,6 @@ const baseAuditEntityTypes: AuditEntityFilter[] = [
 ];
 
 const baseAuditActions: AuditActionFilter[] = [
-  'all',
   'create',
   'update',
   'delete',
@@ -161,6 +160,18 @@ const baseAuditActions: AuditActionFilter[] = [
   'payment_cancelled',
   'payment_refunded',
   'payment_refund_pending',
+];
+
+const auditDateOptions = [
+  { value: 'all', label: 'Any time' },
+  { value: 'today', label: 'Today' },
+  { value: '7d', label: 'Last 7 days' },
+  { value: '30d', label: 'Last 30 days' },
+];
+
+const auditSortOptions = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
 ];
 
 const auditActionLabels: Record<string, string> = {
@@ -468,6 +479,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Poppins_400Regular',
   },
+  pageTitle: {
+    fontSize: 22,
+    fontFamily: 'Poppins_700Bold',
+  },
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 20,
@@ -525,8 +540,10 @@ export default function AdminAuditPage() {
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
   const [auditSearch, setAuditSearch] = useState('');
-  const [auditActionFilter, setAuditActionFilter] = useState<AuditActionFilter>('all');
-  const [auditEntityFilter, setAuditEntityFilter] = useState<AuditEntityFilter>('all');
+  const [auditActionFilter, setAuditActionFilter] = useState<AuditActionFilter[]>([]);
+  const [auditEntityFilter, setAuditEntityFilter] = useState<AuditEntityFilter[]>([]);
+  const [auditDateFilter, setAuditDateFilter] = useState('all');
+  const [auditSort, setAuditSort] = useState('newest');
   const [alertState, setAlertState] = useState<{
     visible: boolean;
     type: AlertType;
@@ -745,12 +762,28 @@ export default function AdminAuditPage() {
       const friendlyNotes = formatAuditNotes(entry.admin_notes).toLowerCase();
       const friendlyEntityTitle = getAuditEntityTitle(entry).toLowerCase();
 
-      if (auditActionFilter !== 'all' && action !== auditActionFilter) {
+      if (auditActionFilter.length > 0 && !auditActionFilter.includes(action)) {
         return false;
       }
 
-      if (auditEntityFilter !== 'all' && entityType !== auditEntityFilter) {
+      if (auditEntityFilter.length > 0 && !auditEntityFilter.includes(entityType)) {
         return false;
+      }
+
+      if (auditDateFilter !== 'all') {
+        const entryTime = new Date(entry.created_at).getTime();
+        const now = new Date();
+        let earliestTime = 0;
+
+        if (auditDateFilter === 'today') {
+          earliestTime = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        } else if (auditDateFilter === '7d') {
+          earliestTime = now.getTime() - (7 * 24 * 60 * 60 * 1000);
+        } else if (auditDateFilter === '30d') {
+          earliestTime = now.getTime() - (30 * 24 * 60 * 60 * 1000);
+        }
+
+        if (!Number.isFinite(entryTime) || entryTime < earliestTime) return false;
       }
 
       if (!query) return true;
@@ -776,8 +809,11 @@ export default function AdminAuditPage() {
         String(entry.amount || '').toLowerCase().includes(query) ||
         String(entry.created_at || '').toLowerCase().includes(query)
       );
+    }).sort((left, right) => {
+      const difference = new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+      return auditSort === 'newest' ? difference : -difference;
     });
-  }, [auditEntries, auditSearch, auditActionFilter, auditEntityFilter]);
+  }, [auditEntries, auditSearch, auditActionFilter, auditEntityFilter, auditDateFilter, auditSort]);
 
   const auditActions = useMemo(() => {
     const actions = new Set(baseAuditActions);
@@ -850,6 +886,7 @@ export default function AdminAuditPage() {
         )}
 
         <View style={styles.sectionGap}>
+          <Text style={[styles.pageTitle, { color: colors.text }]}>Audit Logs</Text>
           <TextInput
             value={auditSearch}
             onChangeText={setAuditSearch}
@@ -865,53 +902,58 @@ export default function AdminAuditPage() {
             ]}
           />
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-            {auditActions.map((status) => {
-              const active = auditActionFilter === status;
-              return (
-                <TouchableOpacity
-                  key={status}
-                  activeOpacity={1}
-                  onPress={() => setAuditActionFilter(status)}
-                  style={[
-                    styles.filterChip,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {formatAuditAction(status)}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-            {auditEntityTypes.map((entity) => {
-              const active = auditEntityFilter === entity;
-              return (
-                <TouchableOpacity
-                  key={entity}
-                  activeOpacity={1}
-                  onPress={() => setAuditEntityFilter(entity)}
-                  style={[
-                    styles.filterChip,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {formatAuditEntityType(entity)}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+          <AdminFilterBar
+            filters={[
+              {
+                key: 'activity',
+                label: 'Activity',
+                type: 'multi-select',
+                searchable: true,
+                searchPlaceholder: 'Search activities...',
+                emptyLabel: 'All activity',
+                options: auditActions.map((action) => ({ value: action, label: formatAuditAction(action) })),
+              },
+              {
+                key: 'area',
+                label: 'Area',
+                type: 'multi-select',
+                searchable: true,
+                searchPlaceholder: 'Search areas...',
+                emptyLabel: 'All areas',
+                options: auditEntityTypes.map((entity) => ({ value: entity, label: formatAuditEntityType(entity) })),
+              },
+              {
+                key: 'date',
+                label: 'Date',
+                type: 'date-range',
+                emptyValue: 'all',
+                emptyLabel: 'Any time',
+                options: auditDateOptions,
+              },
+            ]}
+            values={{
+              activity: auditActionFilter,
+              area: auditEntityFilter,
+              date: auditDateFilter,
+            }}
+            onChange={(key, value) => {
+              if (key === 'activity' && Array.isArray(value)) setAuditActionFilter(value);
+              if (key === 'area' && Array.isArray(value)) setAuditEntityFilter(value);
+              if (key === 'date' && !Array.isArray(value)) setAuditDateFilter(value);
+            }}
+            sortElement={(
+              <FilterDropdown
+                label="Sort"
+                options={auditSortOptions}
+                value={auditSort}
+                onChange={(value) => {
+                  if (!Array.isArray(value)) setAuditSort(value);
+                }}
+                emptyValue="newest"
+                emptyLabel="Newest first"
+              />
+            )}
+          />
 
           {auditLoading ? (
             <View style={styles.inlineLoader}>

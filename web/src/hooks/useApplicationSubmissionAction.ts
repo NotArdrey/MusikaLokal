@@ -4,6 +4,7 @@ import type { UploadSafetyFileDecision } from "../services/uploadSafetyScreen";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
 import { getGigReapplicationCooldownInfo } from "../utils/gigReapplicationCooldown";
 import { buildNotificationRouteMeta } from "../utils/notificationNavigation";
+import { sanitizeStorageFileName, uploadStorageObject } from "../utils/storageUpload";
 
 interface AlertConfig {
   type: "success" | "error" | "warning" | "info";
@@ -44,6 +45,7 @@ interface UseApplicationSubmissionActionParams {
   cvUrl: string;
   videoUrl: string;
   aiPortfolioReviewConsent: boolean;
+  memberVerificationConsent: boolean;
   videoReviewFrameUrl: string;
   videoReviewFrameUrls: string[];
   videoCopyrightAcknowledged: boolean;
@@ -65,6 +67,7 @@ interface UseApplicationSubmissionActionParams {
   setPitchMessage: (value: string) => void;
   setVideoUrl: (value: string) => void;
   setAiPortfolioReviewConsent: (value: boolean) => void;
+  setMemberVerificationConsent: (value: boolean) => void;
   setVideoReviewFrameUrl: (value: string) => void;
   setVideoReviewFrameUrls: (value: string[]) => void;
   setVideoCopyrightAcknowledged: (value: boolean) => void;
@@ -80,6 +83,19 @@ const GROUP_UNAVAILABLE_MESSAGE =
   "This group is no longer available. It may have been deleted by the owner. Please refresh and choose another group.";
 const GIG_CONFIRMATION_ESTIMATE =
   "Estimated confirmation time: 3–7 days.";
+
+const getFunctionErrorMessage = async (error: any, fallback: string) => {
+  try {
+    if (error?.context && typeof error.context.json === "function") {
+      const body = await error.context.json();
+      if (typeof body?.error === "string" && body.error.trim()) return body.error;
+    }
+  } catch {
+    // Use the regular function error below.
+  }
+  const message = typeof error?.message === "string" ? error.message.trim() : "";
+  return message && !message.includes("non-2xx status code") ? message : fallback;
+};
 
 const isDeletedGigApplicationError = (error: any) => {
   const errorText = [
@@ -117,6 +133,7 @@ export const useApplicationSubmissionAction = ({
   cvUrl,
   videoUrl,
   aiPortfolioReviewConsent,
+  memberVerificationConsent,
   videoReviewFrameUrl,
   videoReviewFrameUrls,
   videoCopyrightAcknowledged,
@@ -131,6 +148,7 @@ export const useApplicationSubmissionAction = ({
   setPitchMessage,
   setVideoUrl,
   setAiPortfolioReviewConsent,
+  setMemberVerificationConsent,
   setVideoReviewFrameUrl,
   setVideoReviewFrameUrls,
   setVideoCopyrightAcknowledged,
@@ -418,6 +436,24 @@ export const useApplicationSubmissionAction = ({
     }
   }, [userId]);
 
+  const uploadGroupMemberDocument = useCallback(async (file: any) => {
+    const fileExt = file.name?.split(".").pop() || "pdf";
+    const safeFileName = sanitizeStorageFileName(
+      file.name || `cv.${fileExt}`,
+      `cv.${fileExt}`,
+    );
+    const path = `${userId}/gig-applications/${Date.now()}_${safeFileName}`;
+    const { data, error } = await uploadStorageObject({
+      bucket: "application-cvs",
+      path,
+      uri: file.uri,
+      contentType: file.mimeType || "application/pdf",
+      upsert: false,
+    });
+    if (error) throw error;
+    return { path: data.path, filename: safeFileName };
+  }, [userId]);
+
   const processApplicationSubmission = useCallback(async () => {
     if (submissionInFlightRef.current) {
       return;
@@ -434,6 +470,7 @@ export const useApplicationSubmissionAction = ({
         !!selectedProductionTeamId &&
         !!selectedProductionRosterId;
       let uploadedCvUrl = null;
+      let uploadedMemberCv: { path: string; filename: string } | null = null;
       const selectedGroup = selectedGroupId
         ? userGroups.find((g) => g.id === selectedGroupId)
         : null;
@@ -462,7 +499,11 @@ export const useApplicationSubmissionAction = ({
 
       if (cvFile) {
         try {
-          uploadedCvUrl = await uploadDocument(cvFile);
+          if (selectedGroupId && !isGroupListing && !isProducerGigFlow) {
+            uploadedMemberCv = await uploadGroupMemberDocument(cvFile);
+          } else {
+            uploadedCvUrl = await uploadDocument(cvFile);
+          }
         } catch (e) {
           console.error("Failed to upload CV", e);
           setAlertConfig({
@@ -605,13 +646,14 @@ export const useApplicationSubmissionAction = ({
           videoUrl: videoUrl || null,
           cvUrl: uploadedCvUrl,
           slotType: selectedSlotType || null,
-            aiPortfolioReviewConsent,
-            aiReviewFrameUrl: aiPortfolioReviewConsent ? videoReviewFrameUrl || null : null,
-            aiReviewFrameUrls: aiPortfolioReviewConsent ? videoReviewFrameUrls.slice(0, 3) : [],
-            videoCopyrightAcknowledged,
-            videoCopyrightStatus: videoCopyrightDecision?.copyrightStatus || "not_required",
-            videoCopyrightReviewId: videoCopyrightDecision?.copyrightReviewId || null,
-            videoCopyrightMetadata: videoCopyrightDecision?.copyrightMetadata || {},
+          aiPortfolioReviewConsent,
+          memberVerificationConsent,
+          aiReviewFrameUrl: aiPortfolioReviewConsent ? videoReviewFrameUrl || null : null,
+          aiReviewFrameUrls: aiPortfolioReviewConsent ? videoReviewFrameUrls.slice(0, 3) : [],
+          videoCopyrightAcknowledged,
+          videoCopyrightStatus: videoCopyrightDecision?.copyrightStatus || "not_required",
+          videoCopyrightReviewId: videoCopyrightDecision?.copyrightReviewId || null,
+          videoCopyrightMetadata: videoCopyrightDecision?.copyrightMetadata || {},
         };
         const { error } = await supabase.functions.invoke("gig-applications", {
           body,
@@ -656,6 +698,7 @@ export const useApplicationSubmissionAction = ({
         setPitchMessage("");
         setVideoUrl("");
         setAiPortfolioReviewConsent(false);
+        setMemberVerificationConsent(false);
         setVideoReviewFrameUrl("");
         setVideoReviewFrameUrls([]);
         setVideoCopyrightAcknowledged(false);
@@ -667,6 +710,74 @@ export const useApplicationSubmissionAction = ({
           closeSheet();
         }, 2500);
 
+        return;
+      }
+
+      if (selectedGroupId) {
+        if (!uploadedMemberCv) {
+          setAlertConfig({
+            type: "error",
+            title: "CV Required",
+            message: "Upload your own CV to start this group application.",
+          });
+          setAlertVisible(true);
+          return;
+        }
+
+        const body = {
+          action: "submit_group_gig_application",
+          userId,
+          gigId: listingId,
+          groupId: selectedGroupId,
+          pitchMessage,
+          videoUrl: videoUrl || null,
+          memberCvStoragePath: uploadedMemberCv.path,
+          memberCvFilename: uploadedMemberCv.filename,
+          slotType: selectedSlotType,
+          aiPortfolioReviewConsent,
+          memberVerificationConsent,
+          aiReviewFrameUrl: aiPortfolioReviewConsent ? videoReviewFrameUrl || null : null,
+          aiReviewFrameUrls: aiPortfolioReviewConsent ? videoReviewFrameUrls.slice(0, 3) : [],
+          videoCopyrightAcknowledged,
+          videoCopyrightStatus: videoCopyrightDecision?.copyrightStatus || "not_required",
+          videoCopyrightReviewId: videoCopyrightDecision?.copyrightReviewId || null,
+          videoCopyrightMetadata: videoCopyrightDecision?.copyrightMetadata || {},
+        };
+        const { data: groupApplication, error: groupApplicationError } =
+          await supabase.functions.invoke("gig-applications", { body });
+
+        if (groupApplicationError || groupApplication?.error) {
+          const message = groupApplication?.error || await getFunctionErrorMessage(
+            groupApplicationError,
+            "Failed to start the group application. Please try again.",
+          );
+          setAlertConfig({ type: "error", title: "Submission Failed", message });
+          setAlertVisible(true);
+          return;
+        }
+
+        setHasExistingApplication(true);
+        setExistingApplicationStatus("pending");
+        setAlertConfig({
+          type: "success",
+          title: "CV Collection Started",
+          message: `Your CV and the shared video were saved. The other ${Math.max(
+            0,
+            Number(groupApplication?.required_count || 1) - 1,
+          )} member(s) were notified to submit their own CV. The group leader can send the application when everyone is complete.`,
+        });
+        setAlertVisible(true);
+        setPitchMessage("");
+        setVideoUrl("");
+        setAiPortfolioReviewConsent(false);
+        setMemberVerificationConsent(false);
+        setVideoReviewFrameUrl("");
+        setVideoReviewFrameUrls([]);
+        setVideoCopyrightAcknowledged(false);
+        setVideoCopyrightDecision(null);
+        setCvFile(null);
+        setCvUrl("");
+        setTimeout(() => closeSheet(), 3000);
         return;
       }
 
@@ -686,6 +797,7 @@ export const useApplicationSubmissionAction = ({
         video_url: videoUrl || null,
         cv_url: uploadedCvUrl,
         ai_portfolio_review_consent: aiPortfolioReviewConsent,
+        member_verification_consent: memberVerificationConsent,
         ai_review_frame_url: aiPortfolioReviewConsent ? videoReviewFrameUrl || null : null,
         ai_review_frame_urls: aiPortfolioReviewConsent ? videoReviewFrameUrls.slice(0, 3) : [],
         video_copyright_acknowledged: videoCopyrightAcknowledged,
@@ -751,6 +863,19 @@ export const useApplicationSubmissionAction = ({
           }
         } catch (reviewQueueError) {
           console.warn("Application saved, but AI portfolio review queue failed:", reviewQueueError);
+        }
+      }
+
+      if (data?.id && memberVerificationConsent) {
+        try {
+          const { error: verificationQueueError } = await supabase.functions.invoke("gig-applications", {
+            body: { action: "request_member_verification", applicationId: data.id, userId },
+          });
+          if (verificationQueueError) {
+            console.warn("Application saved, but member verification could not be queued:", verificationQueueError.message);
+          }
+        } catch (verificationQueueError) {
+          console.warn("Application saved, but member verification queue failed:", verificationQueueError);
         }
       }
 
@@ -861,6 +986,7 @@ export const useApplicationSubmissionAction = ({
       setPitchMessage("");
       setVideoUrl("");
       setAiPortfolioReviewConsent(false);
+      setMemberVerificationConsent(false);
       setVideoReviewFrameUrl("");
       setVideoReviewFrameUrls([]);
       setVideoCopyrightAcknowledged(false);
@@ -888,6 +1014,7 @@ export const useApplicationSubmissionAction = ({
     cvFile,
     cvUrl,
     aiPortfolioReviewConsent,
+    memberVerificationConsent,
     ensureGigIsStillAvailable,
     ensureGroupListingIsStillAvailable,
     ensureReapplicationCooldownHasPassed,
@@ -902,6 +1029,7 @@ export const useApplicationSubmissionAction = ({
     setAlertConfig,
     setAlertVisible,
     setAiPortfolioReviewConsent,
+    setMemberVerificationConsent,
     setCvFile,
     setCvUrl,
     setExistingApplicationStatus,
@@ -911,6 +1039,7 @@ export const useApplicationSubmissionAction = ({
     setVideoUrl,
     showGigUnavailableAlert,
     uploadDocument,
+    uploadGroupMemberDocument,
     invokeListingsCrudAction,
     userGroups,
     userId,

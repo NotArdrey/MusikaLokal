@@ -26,11 +26,13 @@ import ApplicantDetailsModal from "../../src/components/ApplicantDetailsModal";
 import CachedImage from "../../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
 import GuestSignInGate from "../../src/components/GuestSignInGate";
+import GroupApplicationCvTaskList from "../../src/components/GroupApplicationCvTaskList";
 import Header from "../../src/components/header";
 import InAppMediaViewer, { isInAppMediaUrl } from "../../src/components/InAppMediaViewer";
 import BookingActionModal, { normalizeVisibleInput } from "../../src/components/modal";
 import Navbar from "../../src/components/navbar";
 import ProfileAvatar from "../../src/components/ProfileAvatar";
+import ReportModal from "../../src/components/ReportModal";
 import Skeleton from "../../src/components/Skeleton";
 import SlidingTabBar from "../../src/components/SlidingTabBar";
 import { palette, radius, typography } from "../../src/theme/tokens";
@@ -1037,7 +1039,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
           }}
         >
           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
-            AI Match Review is temporarily unavailable. Open Review Applicant to refresh it.
+            Requirements matching is temporarily unavailable. Open Review Applicant to refresh it.
           </Text>
         </View>
       );
@@ -1057,7 +1059,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
           }}
         >
           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
-            AI Match Review is not enabled for this gig. Open Review Applicant to configure it.
+            Requirements matching is not enabled for this gig. Open Review Applicant to configure it.
           </Text>
         </View>
       );
@@ -1078,6 +1080,13 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
   }
 
   const isRecommended = recommendation.recommendation_status === "recommended";
+  const needsReview = recommendation.recommendation_status === "needs_review";
+  const reasonCodes = Array.isArray(recommendation?.criteria_snapshot?.recommendation_reason_codes)
+    ? recommendation.criteria_snapshot.recommendation_reason_codes
+    : [];
+  const memberVerificationNeedsReview = reasonCodes.some((code: string) =>
+    ["member_verification_incomplete", "member_verification_unavailable"].includes(code),
+  );
   const matched = Array.isArray(recommendation.matched_criteria)
     ? recommendation.matched_criteria.slice(0, 3).join(", ")
     : "";
@@ -1091,11 +1100,15 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
       style={{
         marginBottom: 10,
         borderWidth: 1,
-        borderColor: isRecommended ? "#10B981" : colors.border,
+        borderColor: needsReview ? "#F59E0B" : isRecommended ? "#10B981" : colors.border,
         borderRadius: 12,
         padding: 11,
         gap: 6,
-        backgroundColor: isRecommended
+        backgroundColor: needsReview
+          ? isDark
+            ? "rgba(245,158,11,0.10)"
+            : "#FFFBEB"
+          : isRecommended
           ? isDark
             ? "rgba(16,185,129,0.10)"
             : "#F0FDF4"
@@ -1106,7 +1119,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
           <Ionicons name="sparkles" size={16} color={isRecommended ? "#10B981" : colors.primary} />
           <Text style={{ color: isRecommended ? "#10B981" : colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
-            AI Match Review
+            Match to gig requirements
           </Text>
           {recommendation.is_verified === true ? (
             <Ionicons name="shield-checkmark" size={15} color="#10B981" />
@@ -1116,6 +1129,13 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
           {recommendation.score == null ? "—" : `${Math.round(Number(recommendation.score))}%`}
         </Text>
       </View>
+      {needsReview ? (
+        <Text style={{ color: "#B45309", fontFamily: "Poppins_600SemiBold", fontSize: 10, lineHeight: 15 }}>
+          {memberVerificationNeedsReview
+            ? "Registered member verification needs manual review. The match score is unchanged."
+            : "Important document verification needs manual review. The match score is unchanged."}
+        </Text>
+      ) : null}
       {recommendation.explanation ? (
         <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 16 }}>
           {recommendation.explanation}
@@ -1133,7 +1153,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
       ) : null}
       {matched.includes("Application media provided") ? (
         <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14 }}>
-          Media points confirm an upload only. Open Review Applicant for CV/content analysis and the optional profile-video comparison.
+          Media points confirm an upload only. Open Review Applicant for CV/content analysis and the separate optional registered-member check.
         </Text>
       ) : null}
     </View>
@@ -1645,6 +1665,7 @@ export default function BookingsScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>("bookings");
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [bookingReportTarget, setBookingReportTarget] = useState<any | null>(null);
   const [cancellationReason, setCancellationReason] = useState("");
   const bookingDetailsRef =
     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
@@ -1740,6 +1761,39 @@ export default function BookingsScreen() {
   const bookingsSummaryQuery = useBookingsSummaryQuery(userId, {
     enabled: isAuthenticated && Boolean(userId),
   });
+
+  const openBookingProblemReport = useCallback((booking: any) => {
+    if (!booking?.id) {
+      setAlertConfig({
+        type: "error",
+        title: "Unable to Report",
+        message: "Booking details are missing.",
+      });
+      setAlertVisible(true);
+      return;
+    }
+
+    setBookingReportTarget(booking);
+  }, []);
+
+  const submitBookingProblemReport = useCallback(async (reason: string, details?: string) => {
+    if (!userId) throw new Error("You need to sign in to report a booking problem.");
+    if (!bookingReportTarget?.id) throw new Error("Booking details are missing.");
+
+    const { data: reportData, error } = await supabase.functions.invoke("manage-details", {
+      body: {
+        action: "report",
+        type: "booking",
+        id: bookingReportTarget.id,
+        userId,
+        reason,
+        details: details || null,
+      },
+    });
+
+    if (error) throw error;
+    if (reportData?.error) throw new Error(String(reportData.error));
+  }, [bookingReportTarget?.id, userId]);
   useEffect(() => {
     if (!ACTIVITY_PREVIEW_ENABLED || !userId || !userRole) return;
 
@@ -3571,12 +3625,12 @@ export default function BookingsScreen() {
       // Sort lists
       applicants.sort(
         (a: any, b: any) => {
-          const recommendationRank = (item: any) =>
-            item?.ai_recommendation?.recommendation_status === "recommended"
-              ? 2
-              : item?.ai_recommendation
-                ? 1
-                : 0;
+          const recommendationRank = (item: any) => {
+            const status = item?.ai_recommendation?.recommendation_status;
+            if (status === "recommended") return 3;
+            if (status === "needs_review") return 2;
+            return item?.ai_recommendation ? 1 : 0;
+          };
           const rankDifference = recommendationRank(b) - recommendationRank(a);
           if (rankDifference !== 0) return rankDifference;
           const scoreDifference =
@@ -3821,7 +3875,17 @@ export default function BookingsScreen() {
       // waiting for realtime/query stale timers.
       if (userId) {
         bookingsScreenCache.delete(userId);
-        await queryClient.invalidateQueries({ queryKey: queryKeys.bookings.summary(userId) });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: queryKeys.bookings.summary(userId) }),
+          // A gig application can reopen a full gig when it is withdrawn. Clear
+          // every discovery surface so it does not keep a stale closed-gig card.
+          typeId === "gig_application"
+            ? queryClient.invalidateQueries({ queryKey: ["search"] })
+            : Promise.resolve(),
+          typeId === "gig_application"
+            ? queryClient.invalidateQueries({ queryKey: ["feed"] })
+            : Promise.resolve(),
+        ]);
         await fetchBookings(userId, { showLoading: false });
       }
       setModalVisible(false);
@@ -3931,13 +3995,16 @@ export default function BookingsScreen() {
     );
   }
 
-  const loadApplicantDetails = async (application: any) => {
+  const loadApplicantDetails = async (application: any, options?: { silent?: boolean }) => {
     if (!application?.id) return;
 
-    setSelectedApplicantSummary(application);
-    setSelectedApplicantDetails(null);
-    setApplicantDetailsError(null);
-    setApplicantDetailsLoading(true);
+    const silent = options?.silent === true;
+    if (!silent) {
+      setSelectedApplicantSummary(application);
+      setSelectedApplicantDetails(null);
+      setApplicantDetailsError(null);
+      setApplicantDetailsLoading(true);
+    }
 
     try {
       const { data: { session: activeSession } } = await supabase.auth.getSession();
@@ -3981,11 +4048,13 @@ export default function BookingsScreen() {
           applicantDetails?.ai_recommendation || application.ai_recommendation || null,
       });
     } catch (detailsError: any) {
-      setApplicantDetailsError(
-        detailsError?.message || "Applicant details could not be loaded.",
-      );
+      if (!silent) {
+        setApplicantDetailsError(
+          detailsError?.message || "Applicant details could not be loaded.",
+        );
+      }
     } finally {
-      setApplicantDetailsLoading(false);
+      if (!silent) setApplicantDetailsLoading(false);
     }
   };
 
@@ -6416,6 +6485,12 @@ export default function BookingsScreen() {
           ListHeaderComponent={
             <>
               {bookingsControlsHeader}
+              <GroupApplicationCvTaskList
+                userId={userId}
+                visible={renderActiveTab === "Pending" && userRole === "musician"}
+                colors={colors}
+                isDark={isDark}
+              />
               {!loading &&
                 (userRole === "studio-owner" || staffBookingContexts.some((context) => context?.entity_type === "studio")) &&
                 renderActiveTab === "Pending" &&
@@ -7378,7 +7453,7 @@ export default function BookingsScreen() {
                         <View style={[styles.ownerApplicantRecommendationChip, { backgroundColor: `${colors.primary}12` }]}>
                           <Ionicons name="sparkles" size={12} color={colors.primary} />
                           <Text style={[styles.ownerApplicantRecommendationText, { color: colors.primary }]}>
-                            {matchPercentage}% Match
+                            {item?.ai_recommendation?.recommendation_status === "needs_review" ? "Needs review · " : ""}{matchPercentage}% gig match
                           </Text>
                         </View>
                       ) : null}
@@ -10077,6 +10152,15 @@ export default function BookingsScreen() {
         onClose={() => setAlertVisible(false)}
       />
 
+      <ReportModal
+        visible={Boolean(bookingReportTarget)}
+        onClose={() => setBookingReportTarget(null)}
+        onSubmit={submitBookingProblemReport}
+        targetName={bookingReportTarget?.name || "this booking"}
+        title="Report Booking Problem"
+        reportType="booking"
+      />
+
       {mediaViewerUrl ? (
         <InAppMediaViewer
           visible
@@ -10095,8 +10179,8 @@ export default function BookingsScreen() {
         colors={colors}
         readOnly={isReadOnlyBookingItem(selectedApplicantSummary)}
         onClose={closeApplicantDetails}
-        onRetry={() => {
-          if (selectedApplicantSummary) void loadApplicantDetails(selectedApplicantSummary);
+        onRetry={(options) => {
+          if (selectedApplicantSummary) void loadApplicantDetails(selectedApplicantSummary, options);
         }}
         onOpenMedia={openConnectionRequestLink}
         onAccept={() => openApplicantAction("confirm")}
@@ -10116,6 +10200,12 @@ export default function BookingsScreen() {
         }
         onLeaveReview={
           isReadOnlyBookingItem(selectedItem) ? undefined : handleLeaveReview
+        }
+        onReport={
+          selectedItem?.type_id === "studio_booking" &&
+          String(selectedItem?.user_id || "") === String(userId || "")
+            ? openBookingProblemReport
+            : undefined
         }
       />
 

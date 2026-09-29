@@ -121,7 +121,7 @@ async function loadGroupAudienceMembers(
 async function loadProductionManagerIds(
   supabaseAdmin: any,
   teamId: string | null,
-) {
+): Promise<string[]> {
   if (!teamId) return [];
 
   const { data, error } = await supabaseAdmin

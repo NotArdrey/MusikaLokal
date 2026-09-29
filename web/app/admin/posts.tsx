@@ -5,17 +5,16 @@ import {
   Alert,
   ActivityIndicator,
   FlatList,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import Header from '../../src/components/header';
 import LoadingState from '../../src/components/LoadingState';
+import { AdminFilterBar } from '../../src/components/admin/filters';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
@@ -45,8 +44,7 @@ type PostFilter = 'all' | 'reported' | 'hidden';
 
 export default function AdminPostsPage() {
   const { colors, isDark } = useTheme();
-  const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
-  const { width } = useWindowDimensions();
+  const { loading, isAdmin, roleResolved } = useAuth();
 
   const [posts, setPosts] = useState<any[]>([]);
   const [commentReviews, setCommentReviews] = useState<any[]>([]);
@@ -189,20 +187,26 @@ export default function AdminPostsPage() {
           placeholderTextColor={colors.textSecondary}
           style={[styles.searchInput, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
         />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-          {(['all', 'reported', 'hidden'] as PostFilter[]).map((f) => (
-            <TouchableOpacity
-              activeOpacity={1}
-              key={f}
-              testID={`admin-posts-filter-${f}`}
-              accessibilityLabel={`admin-posts-filter-${f}`}
-              onPress={() => setFilter(f)}
-              style={[styles.filterChip, { backgroundColor: filter === f ? colors.primary : colors.card, borderColor: filter === f ? colors.primary : colors.border }]}
-            >
-              <Text style={{ color: filter === f ? '#fff' : colors.text, fontSize: 13, fontFamily: 'Poppins_500Medium', textTransform: 'capitalize' }}>{f}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        <View style={styles.filterBarSpacing}>
+          <AdminFilterBar
+            filters={[
+              {
+                key: 'status',
+                label: 'Post status',
+                type: 'segmented',
+                options: [
+                  { value: 'all', label: 'All', testID: 'admin-posts-filter-all' },
+                  { value: 'reported', label: 'Reported', testID: 'admin-posts-filter-reported' },
+                  { value: 'hidden', label: 'Hidden', testID: 'admin-posts-filter-hidden' },
+                ],
+              },
+            ]}
+            values={{ status: filter }}
+            onChange={(key, value) => {
+              if (key === 'status' && !Array.isArray(value)) setFilter(value as PostFilter);
+            }}
+          />
+        </View>
       </View>
       {loadingPosts ? <LoadingState message="Loading posts..." style={{ flex: 1 }} /> : (
         <FlatList
@@ -297,7 +301,7 @@ const styles = StyleSheet.create({
   tabButton: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, gap: 6 },
   tabText: { fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
   searchInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, fontFamily: 'Poppins_400Regular' },
-  filterChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, borderWidth: 1, marginRight: 8 },
+  filterBarSpacing: { marginTop: 8 },
   card: { padding: 14, borderRadius: 12, borderWidth: 1, marginBottom: 10 },
   cardRow: { flexDirection: 'row', alignItems: 'flex-start' },
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginLeft: 8 },

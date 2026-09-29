@@ -245,6 +245,21 @@ export const resolveNotificationNavigationTarget = (
     || normalizeNotificationRouteParams(meta.params);
   const notificationType = readNotificationEventType(record, meta);
 
+  if (
+    notificationType === "group_application_member_cv_required" ||
+    notificationType === "group_application_ready_for_leader"
+  ) {
+    const applicationId = readStringId(
+      record.application_id,
+      record.applicationId,
+      meta.application_id,
+      meta.applicationId,
+    );
+    return applicationId
+      ? { pathname: "/group_application_cv", params: { applicationId } }
+      : { pathname: "/bookings", params: { tab: "Pending" } };
+  }
+
   const productionApplicationTarget = resolveProductionTeamApplicationTarget(notificationType, record, meta);
   if (productionApplicationTarget) {
     return productionApplicationTarget;

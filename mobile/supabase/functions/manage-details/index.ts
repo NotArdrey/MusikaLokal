@@ -8,7 +8,7 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
-type NormalizedReportTargetType = 'group' | 'studio' | 'gig' | 'profile' | 'product' | 'playlist' | 'feed_post'
+type NormalizedReportTargetType = 'group' | 'studio' | 'gig' | 'profile' | 'product' | 'playlist' | 'feed_post' | 'booking'
 type FavoriteTargetType = 'group' | 'studio' | 'gig' | 'profile' | 'production_team'
 
 const reportTargetTableMap: Record<NormalizedReportTargetType, string> = {
@@ -19,6 +19,7 @@ const reportTargetTableMap: Record<NormalizedReportTargetType, string> = {
     product: 'products',
     playlist: 'playlists',
     feed_post: 'feed_posts',
+    booking: 'studio_bookings',
 }
 
 const favoriteTargetColumnMap: Record<FavoriteTargetType, string> = {
@@ -496,6 +497,19 @@ serve(async (req: Request) => {
                 normalizedTargetType,
                 normalizedTargetId,
             )
+
+            if (normalizedTargetType === 'booking') {
+                const { data: booking, error: bookingError } = await supabaseClient
+                    .from('studio_bookings')
+                    .select('user_id')
+                    .eq('id', normalizedTargetId)
+                    .maybeSingle()
+
+                if (bookingError) throw bookingError
+                if (!booking || booking.user_id !== normalizedUserId) {
+                    throw new Error('You can only report your own booking.')
+                }
+            }
 
             const { data: existingPendingReport, error: existingPendingReportError } = await supabaseClient
                 .from('reports')

@@ -1,4 +1,8 @@
 {
+    "imports": {
+        "@aws-sdk/client-rekognition": "npm:@aws-sdk/client-rekognition@3",
+        "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@3"
+    },
     "compilerOptions": {
         "allowJs": true,
         "lib": [

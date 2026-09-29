@@ -952,7 +952,7 @@ export default function ProductionTeamScreen() {
                 <View style={styles.sectionHeader}>
                   <View>
                     <Text style={[styles.sectionTitle, { color: colors.text }]}>Production Applicants</Text>
-                    <Text style={[styles.applicationHelper, { color: colors.textSecondary }]}>AI scores are advisory; review every profile and attachment.</Text>
+                    <Text style={[styles.applicationHelper, { color: colors.textSecondary }]}>Match scores are advisory; review every profile and attachment.</Text>
                   </View>
                   <Text style={[styles.subsectionCount, { color: colors.textSecondary }]}>{teamApplications.length}</Text>
                 </View>

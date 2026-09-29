@@ -70,12 +70,13 @@ interface BookingDetailsSheetProps {
   onCancel?: (bookingId: string) => void;
   onConfirm?: (bookingId: string) => void;
   onLeaveReview?: (booking: any) => void;
+  onReport?: (booking: any) => void;
 }
 
 const BookingDetailsSheet = forwardRef<
   BottomSheetModal,
   BookingDetailsSheetProps
->(({ booking, readOnly = false, onCancel, onConfirm, onLeaveReview }, ref) => {
+>(({ booking, readOnly = false, onCancel, onConfirm, onLeaveReview, onReport }, ref) => {
   const { colors, isDark } = useTheme();
   const [loading, setLoading] = useState(false);
   const [studioDetails, setStudioDetails] = useState<any>(null);
@@ -1831,6 +1832,26 @@ const BookingDetailsSheet = forwardRef<
 
               {/* Action Buttons */}
               <View style={[styles.footerActions, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                {onReport ? (
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    testID={`booking-${booking.id}-report-problem`}
+                    accessibilityLabel={`booking-${booking.id}-report-problem`}
+                    style={[
+                      styles.actionBtn,
+                      styles.reportActionBtn,
+                      { borderColor: "#EF4444" },
+                    ]}
+                    onPress={() => {
+                      onReport(booking);
+                      (ref as any)?.current?.dismiss();
+                    }}
+                  >
+                    <Ionicons name="flag-outline" size={17} color="#EF4444" />
+                    <Text style={styles.cancelBtnText}>Report Booking Problem</Text>
+                  </TouchableOpacity>
+                ) : null}
+
                 {isReadOnly ? (
                   <TouchableOpacity
                     activeOpacity={1}
@@ -2125,6 +2146,7 @@ const styles = StyleSheet.create({
   },
   footerActions: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: moderateScale(10),
     borderWidth: 1,
     borderRadius: moderateScale(16),
@@ -2134,6 +2156,11 @@ const styles = StyleSheet.create({
   },
   footerActionBtn: {
     flex: 1,
+  },
+  reportActionBtn: {
+    flexBasis: "100%",
+    backgroundColor: "transparent",
+    borderWidth: 1.5,
   },
   actionBtn: {
     flexDirection: "row",

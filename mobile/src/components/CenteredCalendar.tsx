@@ -10,6 +10,7 @@ const CENTERED_DAY_STYLES = {
     height: 32,
     alignItems: "center" as const,
     justifyContent: "center" as const,
+    alignSelf: "center" as const,
   },
   selected: {
     width: 32,
@@ -45,13 +46,15 @@ export function CenteredCalendar(props: CalendarProps) {
     ...existingTheme,
     "stylesheet.day.basic": {
       ...existingDayStyles,
-      base: { ...CENTERED_DAY_STYLES.base, ...existingDayStyles.base },
+      // Keep caller-provided colors and typography, but never allow a calendar
+      // to move its day target away from the centre of its weekday column.
+      base: { ...existingDayStyles.base, ...CENTERED_DAY_STYLES.base },
       selected: {
-        ...CENTERED_DAY_STYLES.selected,
         ...existingDayStyles.selected,
+        ...CENTERED_DAY_STYLES.selected,
       },
-      today: { ...CENTERED_DAY_STYLES.today, ...existingDayStyles.today },
-      text: { ...CENTERED_DAY_STYLES.text, ...existingDayStyles.text },
+      today: { ...existingDayStyles.today, ...CENTERED_DAY_STYLES.today },
+      text: { ...existingDayStyles.text, ...CENTERED_DAY_STYLES.text },
     },
   } as any;
 

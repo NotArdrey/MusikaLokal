@@ -34,7 +34,7 @@ type Props = {
   colors: Colors;
   readOnly?: boolean;
   onClose: () => void;
-  onRetry: () => void;
+  onRetry: (options?: { silent?: boolean }) => void;
   onOpenMedia: (url: string, title: string) => void;
   onAccept: (applicationId: string) => void;
   onDecline: (applicationId: string) => void;
@@ -50,10 +50,11 @@ const list = (value: unknown): any[] => (Array.isArray(value) ? value : []);
 
 const criterionLabel = (value: unknown) => {
   const labels: Record<string, string> = {
-    instrument_requirement: "Required instruments or roles",
-    genre_requirement: "Required music genres",
-    location_requirement: "Preferred performance location",
-    portfolio_requirement: "Relevant performance experience",
+    instrument_requirement: "Role & instruments",
+    genre_requirement: "Music genres",
+    location_requirement: "Performance location",
+    portfolio_requirement: "Submitted performance evidence",
+    performance_experience: "Performance experience",
   };
   const key = String(value || "").trim();
   return labels[key] || titleCase(key);
@@ -97,6 +98,9 @@ const friendlyRecommendationSummary = (recommendation: any, matchPercentage: num
   if (status === "not_eligible") {
     return "One or more required items could not be confirmed. Review the checks below before deciding.";
   }
+  if (status === "needs_review") {
+    return "The gig-fit score is unchanged, but an important document issue must be verified before deciding.";
+  }
   if (status === "insufficient_data") {
     return "There is not enough configured information to calculate a reliable match. Review the application manually.";
   }
@@ -114,14 +118,31 @@ const shortLocation = (value: unknown) => {
 
 const screeningMeta = (statusValue: unknown) => {
   const status = String(statusValue || "not_screened").toLowerCase();
-  if (status === "not_required") return { label: "Genre not identified", color: "#F59E0B", message: "We couldn't identify the song or genre." };
+  if (status === "not_required") return { label: "Song or genre couldn't be confirmed", color: "#F59E0B", message: "We couldn't confirm the song or genre automatically." };
   if (status === "pending_review") return { label: "Song may have been recognized", color: "#F59E0B", message: "The possible song match still needs to be checked." };
   if (status === "approved") return { label: "Song match checked", color: "#10B981", message: "The possible song match and permission details were checked." };
   if (status === "declined") return { label: "Permission concern found", color: "#EF4444", message: "The possible song match was checked and the permission claim was not accepted." };
   if (status === "pending" || status === "processing") return { label: "Still checking", color: "#F59E0B", message: "The sound in the video is still being checked." };
-  if (status === "unavailable") return { label: "Could not check the audio", color: "#6B7280", message: "No audio result is available. Check the video yourself." };
-  if (status === "failed") return { label: "Audio check did not finish", color: "#EF4444", message: "The audio could not be checked. Check the video yourself." };
+  if (status === "unavailable") return { label: "Song or genre couldn't be confirmed", color: "#F59E0B", message: "We couldn't confirm the song or genre automatically." };
+  if (status === "failed") return { label: "Song or genre couldn't be confirmed", color: "#F59E0B", message: "We couldn't confirm the song or genre automatically." };
   return { label: "Audio not checked yet", color: "#6B7280", message: "The sound in this video has not been checked yet." };
+};
+
+const evidenceSourceLabel = (value: unknown) => {
+  const labels: Record<string, string> = {
+    cv: "CV",
+    video_transcript: "Performance video transcript",
+    video_frame: "Performance video",
+    profile: "Profile",
+    group_roster: "Group roster",
+    recognized_audio: "Song and genre check",
+    portfolio_image: "Portfolio image",
+    portfolio_document: "Portfolio document",
+    stored_coordinates: "Stored map location",
+    performance_video: "Submitted performance video",
+    application_evidence: "Submitted application evidence",
+  };
+  return labels[String(value || "")] || "Application";
 };
 
 function Section({
@@ -174,6 +195,43 @@ function StatusRow({
     <View style={styles.statusRow}>
       <Ionicons name={icon} size={18} color={color} />
       <Text style={[styles.statusRowText, { color }]}>{label}</Text>
+    </View>
+  );
+}
+
+function EvidenceFinding({ item, colors, sourceContext }: { item: any; colors: Colors; sourceContext?: "cv" | "application" }) {
+  const result = String(item?.result || "unclear").toLowerCase();
+  const status = result === "supported"
+    ? { label: "Confirmed", color: "#10B981", icon: "checkmark-circle-outline" as const }
+    : result === "not_supported"
+      ? { label: "Not found", color: "#EF4444", icon: "alert-circle-outline" as const }
+      : { label: sourceContext === "cv" ? "Couldn't confirm from CV" : "Couldn't confirm", color: "#F59E0B", icon: "warning-outline" as const };
+  const entries = list(item?.evidence);
+  const reason = String(item?.short_reason || "").trim() || (
+    result === "supported"
+      ? "The reviewed source contains evidence for this item."
+      : result === "not_supported"
+        ? "The reviewed source contains evidence that does not satisfy this item."
+        : "The reviewed source did not provide enough information to confirm this item."
+  );
+
+  return (
+    <View style={[styles.findingCard, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}>
+      <Text style={[styles.findingTitle, { color: colors.text }]}>{criterionLabel(item?.criterion)}</Text>
+      <StatusRow icon={status.icon} label={status.label} color={status.color} />
+      <Text style={[styles.body, { color: colors.textSecondary }]}>{reason}</Text>
+      {entries.length > 0 ? (
+        <ReviewDetails colors={colors}>
+          {entries.slice(0, 4).map((entry, index) => (
+            <View key={`${entry?.source || "source"}-${index}`} style={styles.stackSmall}>
+              <Text style={[styles.evidenceSource, { color: colors.text }]}>
+                Source: {evidenceSourceLabel(entry?.source || item?.source)}
+              </Text>
+              <Text style={[styles.body, { color: colors.textSecondary }]}>{entry?.observation}</Text>
+            </View>
+          ))}
+        </ReviewDetails>
+      ) : null}
     </View>
   );
 }
@@ -307,6 +365,8 @@ export default function ApplicantDetailsModal({
       );
   const recommendation = application.ai_recommendation || null;
   const aiReview = application.ai_portfolio_review || null;
+  const memberVerification = application.member_verification || null;
+  const memberVerificationMembers = list(memberVerification?.members);
   const aiReviewStatus = String(aiReview?.status || "").toLowerCase();
   const retryRef = useRef(onRetry);
   const refreshAttemptsRef = useRef(0);
@@ -332,7 +392,7 @@ export default function ApplicantDetailsModal({
 
     const refreshTimer = setTimeout(() => {
       refreshAttemptsRef.current += 1;
-      retryRef.current();
+      retryRef.current({ silent: true });
     }, 3500);
     return () => clearTimeout(refreshTimer);
   }, [aiReviewStatus, application.id, loading, visible]);
@@ -341,14 +401,28 @@ export default function ApplicantDetailsModal({
   const storedCvReview = list(aiReview?.source_summary?.cv_requirement_review);
   const cvDocumentClassification = aiReview?.source_summary?.cv_document_classification || null;
   const cvDocumentStatus = String(cvDocumentClassification?.status || "").toLowerCase();
+  const cvProcessingStatus = String(aiReview?.source_summary?.cv_processing_status || "").toLowerCase();
+  const videoProcessingStatus = String(aiReview?.source_summary?.video_processing_status || (application.video_url ? "" : "no_media")).toLowerCase();
   const cvTextExtracted = aiReview?.source_summary?.cv_text_extracted === true;
-  const cvExtractionMethod = String(aiReview?.source_summary?.cv_extraction_method || "");
   const cvExtractionLimitation = String(aiReview?.source_summary?.cv_extraction_limitation || "");
   const cvNameCheck = aiReview?.source_summary?.cv_name_check || null;
   const cvNameCheckStatus = String(cvNameCheck?.status || "not_run").toLowerCase();
-  const cvEvidence = storedCvReview.length
-    ? storedCvReview
-    : evidence.filter((item) => list(item?.evidence).some((entry) => entry?.source === "cv"));
+  const cvEvidence = (storedCvReview.length ? storedCvReview : evidence)
+    .filter((item) => String(item?.criterion || "") !== "portfolio_requirement")
+    .map((item) => ({
+      ...item,
+      source: "cv",
+      evidence: list(item?.evidence).filter((entry) => entry?.source === "cv"),
+    }))
+    .filter((item) => storedCvReview.length > 0 || item.evidence.length > 0);
+  const videoEvidence = evidence
+    .map((item) => ({
+      ...item,
+      evidence: list(item?.evidence).filter((entry) =>
+        ["performance_video", "video_transcript", "video_frame", "recognized_audio"].includes(String(entry?.source || "")),
+      ),
+    }))
+    .filter((item) => item.evidence.length > 0);
   const recognizedAudioGenres = application.video_copyright_metadata?.genre_evidence_receipt
     ? list(application.video_copyright_metadata?.recognized_audio_genres)
     : [];
@@ -365,6 +439,7 @@ export default function ApplicantDetailsModal({
       }
     : screeningMeta(application.video_copyright_status);
   const portfolio = list(profile.portfolio_urls);
+  const memberCvs = Array.isArray(application.member_cvs) ? application.member_cvs : [];
   const isPending = String(application.status || "pending").toLowerCase() === "pending";
   const priorApplicationCounts = application.prior_application_counts || null;
   const hasPriorApplicationCounts =
@@ -384,6 +459,38 @@ export default function ApplicantDetailsModal({
   const matchedCriteriaCount = list(recommendation?.matched_criteria).length;
   const memberRequirementCoverage = recommendation?.criteria_snapshot?.member_requirement_coverage || null;
   const memberCoverageItems = list(memberRequirementCoverage?.members);
+  const verification = recommendation?.criteria_snapshot?.verification || null;
+  const hasMajorVerificationIssue = verification?.status === "needs_verification" || recommendation?.criteria_snapshot?.identity_status === "needs_verification" || cvNameCheckStatus === "mismatch";
+  const requirementResults = list(recommendation?.criteria_snapshot?.requirement_results);
+  const metRequirementResults = requirementResults.filter((item) => item?.status === "met");
+  const notMetRequirementResults = requirementResults.filter((item) => item?.status === "not_met");
+  const unclearRequirementResults = requirementResults.filter((item) => item?.status === "unclear");
+  const recommendationSettings = recommendation?.criteria_snapshot?.settings || {};
+  const recommendationCriteria = recommendationSettings?.criteria || {};
+  const recommendationRequirements = recommendation?.criteria_snapshot?.requirements || {};
+  const matchedCriteria = list(recommendation?.matched_criteria).map(String);
+  const requiredCriteriaChecks = [
+    {
+      required: recommendationCriteria.instruments === "required" &&
+        (Number(memberRequirementCoverage?.total_count || 0) > 0 || list(recommendationRequirements?.instruments).length > 0),
+      confirmed: Number(memberRequirementCoverage?.total_count || 0) > 0
+        ? Number(memberRequirementCoverage?.matched_count || 0) === Number(memberRequirementCoverage?.total_count || 0)
+        : matchedCriteria.includes("Instrument or role fit"),
+    },
+    {
+      required: recommendationCriteria.genres === "required" && list(recommendationRequirements?.genres).length > 0,
+      confirmed: matchedCriteria.includes("Genre fit"),
+    },
+    {
+      required: recommendationCriteria.location === "required" && recommendationSettings?.location_radius_km != null,
+      confirmed: matchedCriteria.some((item) => item.startsWith("Within ")),
+    },
+    {
+      required: recommendationCriteria.portfolio === "required",
+      confirmed: matchedCriteria.includes("Submitted performance evidence fits the gig"),
+    },
+  ].filter((item) => item.required);
+  const confirmedRequiredCriteria = requiredCriteriaChecks.filter((item) => item.confirmed).length;
   const viewedProfileId = profile?.id || application.applicant_id || application.submitted_by_user_id;
   const audioGenreStatus = hasRecognizedRecording
     ? requiredGenres.length === 0
@@ -411,14 +518,6 @@ export default function ApplicantDetailsModal({
     router.push({ pathname: "/profile", params: { userId: String(viewedProfileId) } });
   };
 
-  const cvResult = (() => {
-    const matched = cvEvidence.filter((item) => item?.result === "supported");
-    const missing = cvEvidence.filter((item) => item?.result === "not_supported");
-    const unclear = cvEvidence.filter((item) => !["supported", "not_supported"].includes(item?.result));
-    const fitPercent = cvEvidence.length > 0 ? Math.round((matched.length / cvEvidence.length) * 100) : null;
-    return { matched, missing, unclear, fitPercent };
-  })();
-
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
@@ -441,7 +540,7 @@ export default function ApplicantDetailsModal({
           <View style={styles.centerState}>
             <Ionicons name="alert-circle-outline" size={30} color="#EF4444" />
             <Text style={[styles.body, { color: colors.textSecondary, textAlign: "center" }]}>{error}</Text>
-            <TouchableOpacity onPress={onRetry} style={[styles.primaryButton, { backgroundColor: colors.primary }]}>
+            <TouchableOpacity onPress={() => onRetry()} style={[styles.primaryButton, { backgroundColor: colors.primary }]}>
               <Text style={styles.primaryButtonText}>Retry</Text>
             </TouchableOpacity>
           </View>
@@ -457,10 +556,10 @@ export default function ApplicantDetailsModal({
                 <View style={styles.matchPanelHeader}>
                   <View style={styles.matchPanelLabelRow}>
                     <Ionicons name="sparkles" size={17} color={colors.primary} />
-                    <Text style={[styles.matchPanelLabel, { color: colors.text }]}>AI Match Review</Text>
+                    <Text style={[styles.matchPanelLabel, { color: colors.text }]}>Match to gig requirements</Text>
                   </View>
                   <Text style={[styles.matchPanelScore, { color: colors.primary }]}>
-                    {matchPercentage === null ? "Match unavailable" : `${matchPercentage}% Match`}
+                    {matchPercentage === null ? "Unavailable" : `${matchPercentage}%`}
                   </Text>
                 </View>
                 {matchPercentage !== null ? (
@@ -473,17 +572,47 @@ export default function ApplicantDetailsModal({
                     />
                   </View>
                 ) : null}
+                {hasMajorVerificationIssue ? (
+                  <View style={styles.majorVerificationBanner}>
+                    <Ionicons name="alert-circle" size={20} color="#B45309" />
+                    <View style={styles.flexOne}>
+                      <Text style={styles.majorVerificationTitle}>Important verification needed</Text>
+                      <Text style={styles.majorVerificationCopy}>The name on the CV does not match the application. Verify the document before making a decision.</Text>
+                    </View>
+                  </View>
+                ) : null}
                 {!recommendation ? (
-                  <EmptyState colors={colors}>AI Match Review result unavailable. The applicant remains manually reviewable.</EmptyState>
+                  <EmptyState colors={colors}>The requirements match is unavailable. The applicant remains manually reviewable.</EmptyState>
                 ) : (
                   <>
                     <Text style={[styles.matchSummary, { color: colors.textSecondary }]}>
                       {friendlyRecommendationSummary(recommendation, matchPercentage)}
                     </Text>
+                    {requiredCriteriaChecks.length > 0 ? (
+                      <Text style={[styles.requiredSummary, { color: colors.text }]}>{confirmedRequiredCriteria} of {requiredCriteriaChecks.length} required criteria confirmed</Text>
+                    ) : null}
                     <Text style={[styles.label, { color: "#10B981" }]}>Requirements met</Text>
-                    <BulletList values={list(recommendation.matched_criteria)} colors={colors} empty="No matched requirements were recorded." />
-                    <Text style={[styles.label, { color: "#F59E0B" }]}>Missing or unclear requirements</Text>
-                    <BulletList values={list(recommendation.missing_criteria)} colors={colors} empty="No missing requirements were recorded." />
+                    <BulletList
+                      values={requirementResults.length > 0
+                        ? metRequirementResults.map((item) => `${item.label}: ${item.detail}`)
+                        : list(recommendation.matched_criteria)}
+                      colors={colors}
+                      empty="No matched requirements were recorded."
+                    />
+                    <Text style={[styles.label, { color: "#EF4444" }]}>Requirements not met</Text>
+                    <BulletList
+                      values={notMetRequirementResults.map((item) => `${item.label}: ${item.detail}`)}
+                      colors={colors}
+                      empty="No definite requirement failures were recorded."
+                    />
+                    <Text style={[styles.label, { color: "#F59E0B" }]}>Couldn’t confirm</Text>
+                    <BulletList
+                      values={requirementResults.length > 0
+                        ? unclearRequirementResults.map((item) => `${item.label}: ${item.detail}`)
+                        : list(recommendation.missing_criteria)}
+                      colors={colors}
+                      empty="No requirements were left unconfirmed."
+                    />
                     {memberCoverageItems.length > 0 ? (
                       <View style={[styles.memberCoverage, { borderTopColor: colors.border }]}>
                         <Text style={[styles.label, { color: colors.text }]}>Member requirement coverage</Text>
@@ -549,7 +678,7 @@ export default function ApplicantDetailsModal({
                 <View style={[styles.quickStatDivider, { backgroundColor: colors.border }]} />
                 <View style={styles.quickStat}>
                   <Text style={[styles.quickStatValue, { color: colors.text }]}>
-                    {(application.cv_url ? 1 : 0) + (application.video_url ? 1 : 0) + portfolio.length}
+                    {(application.cv_url ? 1 : memberCvs.length) + (application.video_url ? 1 : 0) + portfolio.length}
                   </Text>
                   <Text style={[styles.quickStatLabel, { color: colors.textSecondary }]}>Files</Text>
                 </View>
@@ -637,8 +766,108 @@ export default function ApplicantDetailsModal({
             </Section>
 
             <Section title="Qualification Review" icon="checkmark-done-outline" colors={colors}>
+              {memberVerification ? (
+                <Subsection title="Registered Member Verification" icon="people-circle-outline" colors={colors}>
+                  <StatusRow
+                    icon={memberVerification.result === "verified" ? "checkmark-circle-outline" : ["queued", "processing"].includes(String(memberVerification.status)) ? "time-outline" : "warning-outline"}
+                    label={
+                      memberVerification.result === "verified"
+                        ? "All registered members found"
+                        : ["queued", "processing"].includes(String(memberVerification.status))
+                          ? "Verification in progress"
+                          : memberVerification.result === "no_video"
+                            ? "No performance video to verify"
+                            : memberVerification.status === "not_requested"
+                              ? "Verification was not authorized"
+                              : "Manual member review needed"
+                    }
+                    color={memberVerification.result === "verified" ? "#10B981" : ["queued", "processing"].includes(String(memberVerification.status)) ? colors.primary : "#F59E0B"}
+                  />
+                  <Text style={[styles.body, { color: colors.textSecondary }]}>
+                    {Number(memberVerification.verified_member_count || 0)} of {Number(memberVerification.expected_member_count || 0)} registered members were found in the submitted performance video. {"This is advisory and does not change the match score or make the organizer's decision."}
+                  </Text>
+                  {memberVerification.additional_people_detected ? (
+                    <Text style={[styles.advisory, { color: "#B45309" }]}>Additional people may appear in the video. Review the performance manually.</Text>
+                  ) : null}
+                  {memberVerificationMembers.map((member: any, index: number) => {
+                    const verified = member.status === "verified";
+                    const similarity = Number(member.best_similarity);
+                    return (
+                      <View key={`${member.member_id || "member"}-${index}`} style={[styles.messageCard, { backgroundColor: colors.inputBackground }]}>
+                        <StatusRow
+                          icon={verified ? "checkmark-circle-outline" : "warning-outline"}
+                          label={`Member ${index + 1}: ${verified ? "found" : member.status === "no_reference" ? "no reference photo" : member.status === "reference_unusable" ? "reference photo unusable" : member.status === "needs_review" ? "ambiguous match" : "not confirmed"}`}
+                          color={verified ? "#10B981" : "#F59E0B"}
+                        />
+                        {Number.isFinite(similarity) ? (
+                          <Text style={[styles.advisory, { color: colors.textSecondary }]}>Best similarity: {similarity.toFixed(1)}%</Text>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </Subsection>
+              ) : null}
+
+              {application.cv_url &&
+              application.ai_portfolio_review_consent === true &&
+              cvDocumentStatus === "cv" &&
+              cvProcessingStatus === "reviewed" ? (
+                <Subsection title="CV Name" icon="person-circle-outline" colors={colors}>
+                  <StatusRow
+                    icon={cvNameCheckStatus === "match" ? "checkmark-circle-outline" : "warning-outline"}
+                    label={cvNameCheckStatus === "match" ? "Name matches the application" : cvNameCheckStatus === "mismatch" ? "Major verification issue" : "Please verify this CV"}
+                    color={cvNameCheckStatus === "match" ? "#10B981" : cvNameCheckStatus === "mismatch" ? "#B45309" : "#F59E0B"}
+                  />
+                  <Text style={[styles.body, { color: colors.textSecondary }]}>
+                    {cvNameCheckStatus === "mismatch" && cvNameCheck?.extracted_name
+                      ? `The CV shows ${cvNameCheck.extracted_name}, while this application is under ${name}. Make sure the correct CV was submitted.`
+                      : cvNameCheck?.summary || "We couldn't confirm the name on the CV. Verify it manually."}
+                  </Text>
+                  {cvNameCheck?.extracted_name ? (
+                    <ReviewDetails colors={colors}>
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>CV name: {cvNameCheck.extracted_name}</Text>
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>Application name: {name}</Text>
+                    </ReviewDetails>
+                  ) : null}
+                  <Text style={[styles.advisory, { color: colors.textSecondary }]}>This issue does not change the match score, but it places the recommendation in Needs review until the document is verified.</Text>
+                </Subsection>
+              ) : null}
+
+              {memberCvs.length > 0 ? (
+                <Subsection title="Member CVs" icon="people-outline" colors={colors}>
+                  <Text style={[styles.body, { color: colors.textSecondary }]}>Each CV belongs to the named group member. The performance video is shared by the whole group.</Text>
+                  {memberCvs.map((member: any) => {
+                    const reviewStatus = String(member.ai_review_status || "not_requested");
+                    const reviewSummary = member.ai_review_result?.classification?.summary
+                      || member.ai_review_result?.reason
+                      || (member.ai_review_consent ? "Automatic review is pending." : "AI review was not authorized by this member.");
+                    return (
+                      <View key={member.id} style={[styles.messageCard, { backgroundColor: colors.inputBackground }]}>
+                        <Text style={[styles.label, { color: colors.text }]}>{member.member_name || "Group member"}</Text>
+                        <Text style={[styles.body, { color: colors.textSecondary }]}>
+                          {[member.role, member.instrument].filter(Boolean).join(" · ") || "Group member"}
+                        </Text>
+                        <StatusRow
+                          icon={reviewStatus === "completed" ? "checkmark-circle-outline" : "information-circle-outline"}
+                          label={reviewStatus === "completed" ? "CV reviewed" : reviewStatus === "failed" ? "Manual review needed" : reviewStatus === "skipped" ? "AI review not authorized" : "CV submitted"}
+                          color={reviewStatus === "completed" ? "#10B981" : reviewStatus === "failed" ? "#F59E0B" : colors.primary}
+                        />
+                        <Text style={[styles.body, { color: colors.textSecondary }]}>{reviewSummary}</Text>
+                        {member.cv_url ? (
+                          <TouchableOpacity onPress={() => onOpenMedia(member.cv_url, `${member.member_name || "Member"} CV`)} style={[styles.outlineButton, { borderColor: colors.primary }]}>
+                            <Ionicons name="open-outline" size={17} color={colors.primary} />
+                            <Text style={[styles.outlineButtonText, { color: colors.primary }]}>View {member.member_name || "Member"} CV</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </Subsection>
+              ) : null}
               <Subsection title="CV Check" icon="document-text-outline" colors={colors}>
-              {!application.cv_url ? (
+              {memberCvs.length > 0 ? (
+                <Text style={[styles.body, { color: colors.textSecondary }]}>Individual findings and documents are listed under Member CVs above.</Text>
+              ) : !application.cv_url ? (
                 <EmptyState colors={colors}>No CV was uploaded.</EmptyState>
               ) : (
                 <>
@@ -652,10 +881,15 @@ export default function ApplicantDetailsModal({
                       <StatusRow icon="warning-outline" label="Manual review needed" color="#F59E0B" />
                       <Text style={[styles.body, { color: colors.textSecondary }]}>{"The CV couldn't be reviewed automatically."}</Text>
                     </View>
-                  ) : ["queued", "processing"].includes(String(aiReview.status)) ? (
+                  ) : ["queued", "processing"].includes(cvProcessingStatus) ? (
                     <View style={styles.stackMedium}>
                       <StatusRow icon="time-outline" label="Check in progress" color="#F59E0B" />
                       <Text style={[styles.body, { color: colors.textSecondary }]}>The CV is still being checked.</Text>
+                    </View>
+                  ) : cvProcessingStatus === "processing_failed" ? (
+                    <View style={styles.stackMedium}>
+                      <StatusRow icon="warning-outline" label="Automatic review unavailable" color="#F59E0B" />
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>The CV was submitted, but its automatic review could not be completed. Review it manually.</Text>
                     </View>
                   ) : cvDocumentStatus === "not_a_cv" ? (
                     <View style={styles.stackMedium}>
@@ -673,7 +907,7 @@ export default function ApplicantDetailsModal({
                         <Text style={[styles.body, { color: colors.textSecondary }]}>{cvDocumentClassification?.summary || "The file could not be confidently identified as a CV."}</Text>
                       </ReviewDetails>
                     </View>
-                  ) : cvDocumentStatus === "not_run" || ["failed", "consent_revoked"].includes(String(aiReview.status)) || cvEvidence.length === 0 ? (
+                  ) : cvDocumentStatus === "not_run" || cvProcessingStatus === "consent_revoked" || cvEvidence.length === 0 ? (
                     <View style={styles.stackMedium}>
                       <StatusRow icon="warning-outline" label="Manual review needed" color="#F59E0B" />
                       <Text style={[styles.body, { color: colors.textSecondary }]}>{"The CV couldn't be reviewed automatically."}</Text>
@@ -685,44 +919,15 @@ export default function ApplicantDetailsModal({
                     </View>
                   ) : (
                     <View style={styles.stackMedium}>
-                      <StatusRow icon="checkmark-circle-outline" label="CV check complete" color="#10B981" />
+                      <StatusRow icon="checkmark-circle-outline" label="CV reviewed" color="#10B981" />
                       {cvTextExtracted ? (
-                        <Text style={[styles.body, { color: colors.textSecondary }]}>The uploaded {cvExtractionMethod.startsWith("pdf_") ? "PDF" : cvExtractionMethod.startsWith("doc") ? "Word document" : cvExtractionMethod.startsWith("image_") ? "image" : "document"} was read successfully{cvExtractionMethod.includes("vision_ocr") ? " using visual text recognition" : ""}.</Text>
+                        <Text style={[styles.body, { color: colors.textSecondary }]}>The document was read successfully.</Text>
                       ) : null}
-                       <Text style={[styles.body, { color: colors.textSecondary }]}>CV match: {cvResult.fitPercent}% ({cvResult.matched.length} of {cvEvidence.length} requirements confirmed)</Text>
-                       <ReviewDetails colors={colors}>
-                         <Text style={[styles.label, { color: "#10B981" }]}>Confirmed from the CV</Text>
-                         <BulletList values={cvResult.matched.map((item) => criterionLabel(item.criterion))} colors={colors} empty="Nothing was confirmed from the CV." />
-                         <Text style={[styles.label, { color: "#EF4444" }]}>Not found in the CV</Text>
-                         <BulletList values={cvResult.missing.map((item) => criterionLabel(item.criterion))} colors={colors} empty="No required items were clearly missing." />
-                         <Text style={[styles.label, { color: "#F59E0B" }]}>Could not confirm from the CV</Text>
-                         <BulletList values={cvResult.unclear.map((item) => criterionLabel(item.criterion))} colors={colors} empty="No items were left unclear." />
-                        {cvEvidence.flatMap((item) => list(item.evidence)).slice(0, 4).map((entry, index) => (
-                          <Text key={index} style={[styles.body, { color: colors.textSecondary }]}>{entry?.observation || "Evidence unavailable"}</Text>
-                        ))}
-                      </ReviewDetails>
+                      {cvEvidence.map((item, index) => (
+                        <EvidenceFinding key={`${item?.criterion || "cv-finding"}-${index}`} item={item} colors={colors} sourceContext="cv" />
+                      ))}
                     </View>
                   )}
-                  {application.ai_portfolio_review_consent === true &&
-                  cvDocumentStatus === "cv" &&
-                  !["queued", "processing", "failed", "consent_revoked"].includes(String(aiReview?.status)) ? (
-                    <View style={styles.stackMedium}>
-                      <StatusRow
-                        icon={cvNameCheckStatus === "match" ? "checkmark-circle-outline" : cvNameCheckStatus === "mismatch" ? "alert-circle-outline" : "warning-outline"}
-                        label={cvNameCheckStatus === "match" ? "Name matches" : cvNameCheckStatus === "mismatch" ? "Name does not match" : "Name not confirmed"}
-                        color={cvNameCheckStatus === "match" ? "#10B981" : cvNameCheckStatus === "mismatch" ? "#EF4444" : "#F59E0B"}
-                      />
-                       <Text style={[styles.body, { color: colors.textSecondary }]}>
-                         {cvNameCheck?.summary || "We couldn't confirm the name on the CV. Verify it manually."}
-                       </Text>
-                       {cvNameCheck?.extracted_name ? (
-                         <ReviewDetails colors={colors}>
-                           <Text style={[styles.body, { color: colors.textSecondary }]}>Name read from CV: {cvNameCheck.extracted_name}</Text>
-                           <Text style={[styles.body, { color: colors.textSecondary }]}>Applicant name: {name}</Text>
-                         </ReviewDetails>
-                       ) : null}
-                    </View>
-                  ) : null}
                   <TouchableOpacity onPress={() => onOpenMedia(application.cv_url, "Applicant CV")} style={[styles.outlineButton, { borderColor: colors.primary }]}>
                     <Ionicons name="open-outline" size={17} color={colors.primary} />
                     <Text style={[styles.outlineButtonText, { color: colors.primary }]}>View CV</Text>
@@ -734,11 +939,22 @@ export default function ApplicantDetailsModal({
 
               <Subsection title="Performance Video" icon="videocam-outline" colors={colors}>
               {application.video_url ? (
-                <TouchableOpacity onPress={() => onOpenMedia(application.video_url, "Performance Video")} style={[styles.outlineButton, { borderColor: colors.primary }]}>
-                  <Ionicons name="play-outline" size={18} color={colors.primary} />
-                  <Text style={[styles.outlineButtonText, { color: colors.primary }]}>Watch performance</Text>
-                </TouchableOpacity>
-              ) : <EmptyState colors={colors}>No performance video was uploaded.</EmptyState>}
+                <View style={styles.stackMedium}>
+                  <StatusRow icon="checkmark-circle-outline" label="Performance video submitted" color="#10B981" />
+                  <TouchableOpacity onPress={() => onOpenMedia(application.video_url, "Performance Video")} style={[styles.outlineButton, { borderColor: colors.primary }]}>
+                    <Ionicons name="play-outline" size={18} color={colors.primary} />
+                    <Text style={[styles.outlineButtonText, { color: colors.primary }]}>Watch performance</Text>
+                  </TouchableOpacity>
+                  {videoProcessingStatus === "processing_failed" ? (
+                    <View style={styles.stackMedium}>
+                      <StatusRow icon="warning-outline" label="Automatic review unavailable" color="#F59E0B" />
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>The performance video was submitted successfully, but the automatic review could not be completed. Review the video manually.</Text>
+                    </View>
+                  ) : videoEvidence.map((item, index) => (
+                      <EvidenceFinding key={`${item?.criterion || "video-finding"}-${index}`} item={item} colors={colors} />
+                    ))}
+                </View>
+              ) : <EmptyState colors={colors}>No performance video was submitted.</EmptyState>}
               </Subsection>
 
               <View style={[styles.reviewDivider, { backgroundColor: colors.border }]} />
@@ -862,6 +1078,10 @@ const styles = StyleSheet.create({
   progressTrack: { height: 7, borderRadius: 999, overflow: "hidden" },
   progressFill: { height: "100%", borderRadius: 999 },
   matchSummary: { fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15 },
+  requiredSummary: { fontFamily: "Poppins_600SemiBold", fontSize: 10, lineHeight: 15 },
+  majorVerificationBanner: { flexDirection: "row", alignItems: "flex-start", gap: 9, borderWidth: 1, borderColor: "#F59E0B", backgroundColor: "#FFFBEB", borderRadius: 11, padding: 10 },
+  majorVerificationTitle: { color: "#92400E", fontFamily: "Poppins_700Bold", fontSize: 11, lineHeight: 16 },
+  majorVerificationCopy: { color: "#92400E", fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15, marginTop: 2 },
   memberCoverage: { borderTopWidth: 1, marginTop: 3, paddingTop: 7, gap: 7 },
   memberCoverageSummary: { fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15 },
   memberCoverageRow: { flexDirection: "row", alignItems: "flex-start", gap: 7 },
@@ -891,6 +1111,9 @@ const styles = StyleSheet.create({
   manualPrompt: { fontFamily: "Poppins_600SemiBold", fontSize: 11, lineHeight: 17 },
   statusRow: { flexDirection: "row", alignItems: "center", gap: 7 },
   statusRowText: { flex: 1, fontFamily: "Poppins_600SemiBold", fontSize: 12, lineHeight: 18 },
+  findingCard: { borderWidth: 1, borderRadius: 11, padding: 11, gap: 6 },
+  findingTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 12, lineHeight: 17 },
+  evidenceSource: { fontFamily: "Poppins_600SemiBold", fontSize: 10, lineHeight: 15 },
   reviewDetails: { alignItems: "flex-start" },
   reviewDetailsButton: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 4 },
   reviewDetailsButtonText: { fontFamily: "Poppins_600SemiBold", fontSize: 10, lineHeight: 15 },

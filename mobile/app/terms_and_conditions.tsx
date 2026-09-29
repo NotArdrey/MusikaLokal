@@ -47,15 +47,15 @@ export default function TermsAndConditionsScreen() {
             Booking Cancellation Policy
           </Text>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            - All confirmed booking cancellations are non-refundable once payment has been made.{"\n"}
-            - Any amount already paid, including downpayments and full payments, is non-refundable and will not be returned after cancellation.{"\n"}
-            - Provider availability issues, admin-reviewed incidents, verified access issues, and approved force majeure cases may be handled through rescheduling or support review, but booking payments remain non-refundable.
+            - Normal customer-initiated cancellations are non-refundable once payment has been made.{"\n"}
+            - If the studio owner cancels, the customer declines an owner-requested schedule move, or an admin approves a refund after reviewing a booking report, the approved paid amount is credited to the customer&apos;s MusikaLokal Wallet.{"\n"}
+            - Duplicate refunds are not permitted. The booking and Wallet transaction history are the official record of an approved refund.
           </Text>
           <Text style={[styles.smallHeader, { color: colors.text }]}>
             Force Majeure
           </Text>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            In cases of extreme weather (typhoons), government-mandated lockdowns, or national emergencies, users may request rescheduling or review. Booking payments remain non-refundable.
+            In cases of extreme weather (typhoons), government-mandated lockdowns, or national emergencies, users may request rescheduling or admin review. A refund is issued only when approved through the booking-report process.
           </Text>
 
           {/* 3. LIMITATION OF LIABILITY */}
@@ -79,7 +79,7 @@ export default function TermsAndConditionsScreen() {
 
           <Text style={[styles.subHeader, { color: colors.text }]}>5. Gig Application Review</Text>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            By agreeing to these terms when applying for a gig, you authorize Musika Lokal to send your CV/resume and performance media to configured review providers. Identity documents and profile photos are not used for application-video matching. Any AI review is advisory and does not make the application decision by itself.
+            By agreeing to these terms when applying for a gig, you authorize Musika Lokal to send your CV/resume and performance media to configured review providers. You also authorize Musika Lokal to compare registered profile or reference photos with faces in the submitted performance video to help verify that registered members appear in the performance. General AI Match Review does not perform identity matching, government identity documents are never used for registered member verification, and all automated review is advisory rather than the application decision itself.
           </Text>
 
           {/* 6. PROHIBITED CONDUCT */}

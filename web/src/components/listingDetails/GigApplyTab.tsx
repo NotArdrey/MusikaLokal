@@ -38,6 +38,8 @@ interface GigApplyTabProps {
   setVideoUrl: (value: string) => void;
   aiPortfolioReviewConsent: boolean;
   setAiPortfolioReviewConsent: (value: boolean) => void;
+  memberVerificationConsent: boolean;
+  setMemberVerificationConsent: (value: boolean) => void;
   setVideoReviewFrameUrl: (value: string) => void;
   setVideoReviewFrameUrls: (value: string[]) => void;
   videoCopyrightDecision: UploadSafetyFileDecision | null;
@@ -84,6 +86,7 @@ const GigApplyTab = ({
   setVideoUrl,
   aiPortfolioReviewConsent,
   setAiPortfolioReviewConsent,
+  setMemberVerificationConsent,
   setVideoReviewFrameUrl,
   setVideoReviewFrameUrls,
   videoCopyrightDecision,
@@ -861,10 +864,19 @@ const GigApplyTab = ({
       </View>
 
       <DocumentUploader
-        label="Upload CV/Resume"
+        label={selectedGroupId ? "Upload Your CV/Resume" : "Upload CV/Resume"}
         onFileSelect={(file) => setCvFile(file)}
         existingUrl={cvUrl || undefined}
       />
+
+      {selectedGroupId && (
+        <View style={[styles.infoBox, { backgroundColor: `${colors.primary}14`, borderColor: colors.primary, marginBottom: 16 }]}>
+          <Ionicons name="people-outline" size={22} color={colors.primary} />
+          <Text style={[styles.infoText, { color: colors.text }]}>
+            This CV is yours. After you start the application, every other group member will receive a task to submit their own CV. The performance video is shared by the whole group.
+          </Text>
+        </View>
+      )}
 
       <VideoUploader
         videoUrl={videoUrl}
@@ -881,7 +893,6 @@ const GigApplyTab = ({
         allowPortfolioSelection={!isGroupApplicationFlow}
         onCopyrightDecisionChange={setVideoCopyrightDecision}
       />
-
 
       {!isGroupApplicationFlow && recognizedAudioGenres.length > 0 && (
         <View style={[styles.infoBox, { backgroundColor: `${colors.primary}14`, borderColor: colors.primary, marginBottom: 16 }]}>
@@ -925,13 +936,14 @@ const GigApplyTab = ({
               accessibilityState={{ checked: isSystemTermsAccepted }}
               accessibilityLabel={
                 isAiMatchReviewEnabled
-                  ? "Agree to Musika Lokal's Terms and Conditions, including AI Match Review terms"
-                  : "Agree to Musika Lokal's Terms and Conditions"
+                  ? "Agree to Musika Lokal's Terms and Conditions, including AI Match Review and registered member verification"
+                  : "Agree to Musika Lokal's Terms and Conditions, including registered member verification"
               }
               onPress={() => {
                 const accepted = !isSystemTermsAccepted;
                 setIsSystemTermsAccepted(accepted);
                 setAiPortfolioReviewConsent(isAiMatchReviewEnabled && accepted);
+                setMemberVerificationConsent(accepted);
               }}
               style={[gigApplyStyles.checkbox, {
               borderColor: isSystemTermsAccepted ? colors.primary : colors.border,
@@ -948,8 +960,8 @@ const GigApplyTab = ({
                 Terms and Conditions
               </Text>
               {isAiMatchReviewEnabled
-                ? ", including AI Match Review of the submitted performance (no ID or profile-photo comparison). *"
-                : ". *"}
+                ? ", including AI Match Review and registered member verification of the submitted performance. *"
+                : ", including registered member verification of the submitted performance. *"}
             </Text>
           </View>
         </View>
@@ -1051,7 +1063,7 @@ const GigApplyTab = ({
               <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>Users must not bypass platform payments, harass others, submit fraudulent information, upload content they do not have permission to use, or submit repetitive, duplicate, misleading, or abusive applications, booking requests, production-team requests, gig applications, or studio bookings. Musika Lokal may block duplicate active requests, restrict repeated cancellations or reapplications, reject invalid or overlapping studio bookings, and require unpaid bookings to be settled before new bookings are made.</Text>
 
               <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>4. Gig Application Review</Text>
-              <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>By agreeing to these terms for a gig application, you authorize Musika Lokal to send your CV/resume and performance media to configured review providers. Identity documents and profile photos are not used for application-video matching. Any AI review is advisory and does not make the application decision by itself.</Text>
+              <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>By agreeing to these terms for a gig application, you authorize Musika Lokal to send your CV/resume and performance media to configured review providers. You also authorize Musika Lokal to compare registered profile or reference photos with faces in the submitted performance video to help verify that registered members appear in the performance. General AI Match Review does not perform identity matching, government identity documents are never used for registered member verification, and all automated review is advisory rather than the application decision itself.</Text>
 
               <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>5. Liability</Text>
               <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>Musika Lokal acts as a facilitator and is not liable for personal injury, property damage, external payment network failures, or loss of income due to app downtime.</Text>

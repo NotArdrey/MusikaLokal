@@ -18,13 +18,14 @@ import {
   View,
 } from 'react-native';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
+import { AdminFilterBar } from '../../src/components/admin/filters';
 import Header from '../../src/components/header';
 import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
-import { getAdminPageCacheKey, invalidateAdminPageCache, readAdminPageCache, writeAdminPageCache } from './_cache';
-import { getFriendlyDetailEntries, getFriendlyDetailImage } from './_formatters';
+import { getAdminPageCacheKey, invalidateAdminPageCache, readAdminPageCache, writeAdminPageCache } from '../../src/admin/cache';
+import { getFriendlyDetailEntries, getFriendlyDetailImage } from '../../src/admin/formatters';
 import {
   STAFF_ENTITY_LABELS,
   StaffAccessLevel,
@@ -286,13 +287,13 @@ const formatRoleLabel = (role: UserRole | string) => String(role || '')
   .join(' ');
 
 const userFilters: { value: UserFilter; label: string }[] = [
-  { value: 'all', label: 'all' },
-  { value: 'fan', label: 'fans' },
-  { value: 'musicians', label: 'musicians' },
-  { value: 'studio-owner', label: 'studio owner' },
-  { value: 'venue-owner', label: 'gig owner' },
-  { value: 'producer', label: 'producer' },
-  { value: 'staff', label: 'staff' },
+  { value: 'all', label: 'All users' },
+  { value: 'fan', label: 'Fans' },
+  { value: 'musicians', label: 'Musicians' },
+  { value: 'studio-owner', label: 'Studio owners' },
+  { value: 'venue-owner', label: 'Gig owners' },
+  { value: 'producer', label: 'Producers' },
+  { value: 'staff', label: 'Staff' },
 ];
 
 const getDetailsSectionIcon = (title: string) => {
@@ -2251,31 +2252,26 @@ export default function AdminUsersPage() {
             ]}
           />
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-            {userFilters.map((filter) => {
-              const active = userFilter === filter.value;
-              return (
-                <TouchableOpacity
-                  key={filter.value}
-                  testID={`admin-users-filter-${filter.value}`}
-                  accessibilityLabel={`admin-users-filter-${filter.value}`}
-                  activeOpacity={1}
-                  onPress={() => setUserFilter(filter.value)}
-                  style={[
-                    styles.filterChip,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {filter.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+          <AdminFilterBar
+            filters={[
+              {
+                key: 'role',
+                label: 'Role',
+                type: 'single-select',
+                emptyValue: 'all',
+                emptyLabel: 'All users',
+                testID: 'admin-users-filter',
+                options: userFilters.map((filter) => ({
+                  ...filter,
+                  testID: `admin-users-filter-${filter.value}`,
+                })),
+              },
+            ]}
+            values={{ role: userFilter }}
+            onChange={(key, value) => {
+              if (key === 'role' && !Array.isArray(value)) setUserFilter(value as UserFilter);
+            }}
+          />
 
           <View style={styles.inlineActionsRow}>
             <TouchableOpacity

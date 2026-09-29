@@ -4117,13 +4117,6 @@ export default function SignupScreen() {
                             </TouchableOpacity>
                         )}
 
-                        <TouchableOpacity
-                            activeOpacity={0.7}
-                            onPress={() => void handleCancelSignup()}
-                            style={{ marginTop: 24 }}
-                        >
-                            <Text style={themeStyles.textSecondary}>Cancel registration</Text>
-                        </TouchableOpacity>
                     </View>
                 </View>
             );

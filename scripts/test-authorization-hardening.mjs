@@ -122,9 +122,20 @@ test("staff production conflicts are hidden or resolved through the guarded admi
   assert.match(migration, /grant execute on function public\.admin_resolve_staff_production_conflict[\s\S]*to service_role/);
 });
 
-test("web signup never creates a profile through an unauthenticated service-role request", async () => {
-  const source = await read("web/app/signup.tsx");
-  assert.match(source, /const signupAccessToken = authData\.session\?\.access_token \|\| null/);
-  assert.match(source, /profile\.create\.skipped_no_session/);
-  assert.match(source, /headers: \{ Authorization: `Bearer \$\{signupAccessToken\}` \}/);
+test("signup remains mobile-only and uses the guarded signup function", async () => {
+  await assert.rejects(
+    read("web/app/signup.tsx"),
+    (error) => error?.code === "ENOENT",
+  );
+
+  const [source, signupFunction] = await Promise.all([
+    read("mobile/app/signup.tsx"),
+    read("mobile/supabase/functions/create-unverified-user/index.ts"),
+  ]);
+  assert.match(source, /functions\.invoke\('create-unverified-user'/);
+  assert.doesNotMatch(source, /SUPABASE_SERVICE_ROLE_KEY|auth\.admin\.createUser/);
+  assert.match(signupFunction, /enforceRegistrationRateLimit/);
+  assert.match(signupFunction, /allowedSignupRoles\.has/);
+  assert.match(signupFunction, /Didit verification is not approved yet/);
+  assert.match(signupFunction, /auth\.admin\.createUser/);
 });

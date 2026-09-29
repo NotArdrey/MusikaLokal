@@ -106,7 +106,7 @@ const CRITERIA: {
   {
     key: "portfolio",
     label: "Portfolio or media",
-    description: "Checks whether the applicant provided a portfolio, video, or CV.",
+    description: "Checks the submitted performance video for direct performance evidence.",
   },
 ];
 
@@ -138,7 +138,7 @@ export default function GigRecommendationSettings({ value, onChange }: Props) {
           <View style={styles.titleRow}>
             <Ionicons name="sparkles" size={19} color={colors.primary} />
             <Text style={[styles.title, { color: colors.text }]}>
-              AI Match Review Settings
+              Gig Match Settings
             </Text>
           </View>
           <Text style={[styles.description, { color: colors.textSecondary }]}>

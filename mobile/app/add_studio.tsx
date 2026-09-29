@@ -1419,10 +1419,7 @@ export default function AddStudioScreen() {
           peak_season_dates: [],
           off_peak_multiplier: 1.0,
           off_peak_dates: [],
-          min_booking_duration_hours:
-            studioType === "Recording" || studioType === "Both"
-              ? parsePositiveDecimal(recordingHoursPerBlock) || 3
-              : 2,
+          min_booking_duration_hours: 2,
           recording_songs_per_block:
             parsePositiveInteger(recordingSongsPerBlock) || 1,
           recording_hours_per_block:
@@ -1559,7 +1556,6 @@ export default function AddStudioScreen() {
           parsePositiveInteger(bookingSettings.recording_songs_per_block) || 1,
         recording_hours_per_block:
           parsePositiveDecimal(bookingSettings.recording_hours_per_block) ||
-          Number(bookingSettings.min_booking_duration_hours) ||
           3,
         lead_time_hours: Number(bookingSettings.lead_time_hours) || 24,
         weekend_multiplier: Number(bookingSettings.weekend_multiplier) || 1.0,
@@ -3030,7 +3026,7 @@ export default function AddStudioScreen() {
                           marginBottom: 6,
                         }}
                       >
-                        Hours Per Time Block
+                        Required Hours Per Time Block
                       </Text>
                       <View
                         style={[
@@ -3094,7 +3090,7 @@ export default function AddStudioScreen() {
                           marginTop: 6,
                         }}
                       >
-                        Set songs and hours per time block to define your recording minimum. Musicians can still split the required hours across available dates and time slots.
+                        This directly sets the booking requirement. For example, 1 song per block and 3 required hours means 1 song needs 3 hours. Musicians can split those hours across available slots on the same date.
                       </Text>
                     </View>
                   </View>

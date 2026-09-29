@@ -1,7 +1,7 @@
-import UploadModerationPanel from "../../src/components/UploadModerationPanel";
+import UploadModerationPanel, { UploadModerationStatusCounts } from '../../src/components/UploadModerationPanel';
 ﻿
 import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -19,11 +19,12 @@ import {
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
 import LoadingState from '../../src/components/LoadingState';
+import { AdminFilterBar, FilterDropdown } from '../../src/components/admin/filters';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
-import { getAdminPageCacheKey, invalidateAdminPageCache, readAdminPageCache, writeAdminPageCache } from './_cache';
-import { getFriendlyDetailEntries, getFriendlyDetailImage } from './_formatters';
+import { getAdminPageCacheKey, invalidateAdminPageCache, readAdminPageCache, writeAdminPageCache } from '../../src/admin/cache';
+import { getFriendlyDetailEntries, getFriendlyDetailImage } from '../../src/admin/formatters';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -97,11 +98,20 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
 
 type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
 
-type ReportsSection = 'reports_list' | 'booking_incidents';
-
 type ReportStatus = 'pending' | 'resolved' | 'dismissed';
 
 type ReportFilter = 'all' | ReportStatus;
+
+type ReportSourceFilter = 'all' | 'user_reports' | 'ai_screening';
+
+type ReportSort = 'newest' | 'oldest';
+
+const emptyUploadModerationStatusCounts: UploadModerationStatusCounts = {
+  all: 0,
+  pending_review: 0,
+  approved: 0,
+  rejected: 0,
+};
 
 type ReportEscalationStatus = 'none' | 'manual_review';
 
@@ -116,17 +126,6 @@ type ReportTargetAccountAction =
   | 'ban_permanent'
   | 'lift_ban';
 
-type BookingIncidentFilter =
-  | 'all'
-  | 'open'
-  | 'responded'
-  | 'manual_review'
-  | 'resolved_refund'
-  | 'resolved_no_refund'
-  | 'dismissed';
-
-type BookingIncidentResolution = 'resolved_refund' | 'resolved_no_refund' | 'dismissed';
-
 const adminTabRoutes: Record<Tab, string> = {
   dashboard: '/admin',
   users: '/admin/users',
@@ -134,11 +133,6 @@ const adminTabRoutes: Record<Tab, string> = {
   audit: '/admin/audit',
   posts: '/admin/posts',
   products: '/admin/products',
-};
-
-const resolveReportsSection = (value?: string | string[]): ReportsSection => {
-  const rawValue = Array.isArray(value) ? value[0] : value;
-  return rawValue === 'booking_incidents' ? 'booking_incidents' : 'reports_list';
 };
 
 interface ReportEntry {
@@ -177,29 +171,6 @@ interface ReportDetailsEntry {
       owner_profile: Record<string, unknown> | null;
     }
     | null;
-}
-
-interface BookingIncidentEntry {
-  id: string;
-  booking_id?: string | null;
-  reporter_user_id?: string | null;
-  counterparty_user_id?: string | null;
-  resolved_by_user_id?: string | null;
-  issue_type: string;
-  status: string;
-  reporter_notes: string | null;
-  counterparty_notes: string | null;
-  resolution: string | null;
-  created_at: string;
-  response_deadline_at: string | null;
-  reporter_name: string;
-  reporter_email: string;
-  counterparty_name: string;
-  counterparty_email: string;
-  studio_name: string | null;
-  booking_date: string | null;
-  booking_start_time: string | null;
-  booking_end_time: string | null;
 }
 
 interface UserDetailsEntry {
@@ -252,7 +223,7 @@ const reportHasBanAccountAction = (report: Pick<ReportEntry, 'target_account_act
 };
 
 const reportStatusLabels: Record<ReportStatus, string> = {
-  pending: 'Active',
+  pending: 'Needs review',
   resolved: 'Resolved',
   dismissed: 'Dismissed',
 };
@@ -301,6 +272,7 @@ const reportMatchesFilter = (report: ReportEntry, filter: ReportFilter) => (
 );
 
 const reportTargetLabels: Record<string, string> = {
+  booking: 'Studio booking',
   feed_post: 'Feed post',
   gig: 'Gig',
   group: 'Group',
@@ -347,21 +319,10 @@ const extractReportTargetName = (record?: Record<string, unknown> | null) => {
   return '';
 };
 
-const incidentStatuses: BookingIncidentFilter[] = [
-  'all',
-  'open',
-  'responded',
-  'manual_review',
-  'resolved_refund',
-  'resolved_no_refund',
-  'dismissed',
-];
-
 const manageBookingsActionFallbacks: Record<string, string> = {};
 
 const REPORTS_PAGE_SIZE = 50;
 const REPORTS_CACHE_TTL_MS = 30_000;
-const INCIDENTS_CACHE_TTL_MS = 30_000;
 
 const getDetailsSectionIcon = (title: string) => {
   const normalized = title.toLowerCase();
@@ -940,19 +901,20 @@ export default function AdminReportsPage() {
   const { colors, isDark } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
   const { width } = useWindowDimensions();
-  const { section } = useLocalSearchParams<{ section?: string | string[] }>();
 
   const [initializingReports, setInitializingReports] = useState(false);
   const [reportSearch, setReportSearch] = useState('');
   const [reportFilter, setReportFilter] = useState<ReportFilter>('all');
+  const [reportSourceFilter, setReportSourceFilter] = useState<ReportSourceFilter>('all');
+  const [reportTargetFilter, setReportTargetFilter] = useState('all');
+  const [reportSort, setReportSort] = useState<ReportSort>('newest');
+  const [uploadModerationStatusCounts, setUploadModerationStatusCounts] = useState<UploadModerationStatusCounts>(
+    emptyUploadModerationStatusCounts,
+  );
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reports, setReports] = useState<ReportEntry[]>([]);
-  const [incidentsLoading, setIncidentsLoading] = useState(false);
-  const [incidents, setIncidents] = useState<BookingIncidentEntry[]>([]);
-  const [incidentFilter, setIncidentFilter] = useState<(typeof incidentStatuses)[number]>('all');
   const [reportViewLoadingId, setReportViewLoadingId] = useState<string | null>(null);
   const [reportActionLoadingId, setReportActionLoadingId] = useState<string | null>(null);
-  const [incidentActionLoadingId, setIncidentActionLoadingId] = useState<string | null>(null);
   const [userDetailsLoadingKey, setUserDetailsLoadingKey] = useState<string | null>(null);
 
   const [userDetailsTarget, setUserDetailsTarget] = useState<UserDetailsEntry | null>(null);
@@ -964,16 +926,17 @@ export default function AdminReportsPage() {
   const [reportTargetAccountAction, setReportTargetAccountAction] = useState<ReportTargetAccountAction>('none');
   const [reportModerationNotes, setReportModerationNotes] = useState('');
   const [reportModerationSubmitting, setReportModerationSubmitting] = useState(false);
-  const [incidentResolutionTarget, setIncidentResolutionTarget] = useState<BookingIncidentEntry | null>(null);
-  const [incidentResolutionChoice, setIncidentResolutionChoice] = useState<BookingIncidentResolution>('resolved_no_refund');
-  const [incidentResolutionNotes, setIncidentResolutionNotes] = useState('');
-  const [incidentResolutionSubmitting, setIncidentResolutionSubmitting] = useState(false);
 
   const [alertState, setAlertState] = useState<{
     visible: boolean;
     type: AlertType;
     title: string;
     message: string;
+    buttons?: {
+      text: string;
+      onPress?: () => void;
+      style?: 'default' | 'cancel' | 'destructive';
+    }[];
   }>({
     visible: false,
     type: 'info',
@@ -983,18 +946,24 @@ export default function AdminReportsPage() {
 
   const showSidebarLayout = Platform.OS === 'web' && width >= 768;
   const showInlineTabNav = !showSidebarLayout;
-  const activeReportsSection = useMemo(() => resolveReportsSection(section), [section]);
   const hasInitializedRef = useRef(false);
 
-  const showAlert = useCallback((type: AlertType, title: string, message: string) => {
-    setAlertState({ visible: true, type, title, message });
+  const showAlert = useCallback((
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: {
+      text: string;
+      onPress?: () => void;
+      style?: 'default' | 'cancel' | 'destructive';
+    }[],
+  ) => {
+    setAlertState({ visible: true, type, title, message, buttons });
   }, []);
 
   const reportsCacheKey = useMemo(
-    () => getAdminPageCacheKey('reports', {
-      reportFilter,
-    }),
-    [reportFilter],
+    () => getAdminPageCacheKey('reports'),
+    [],
   );
 
   const mergeReportItemIntoState = useCallback((rawItem: any) => {
@@ -1008,25 +977,18 @@ export default function AdminReportsPage() {
 
         found = true;
         const updatedReport = normalizeReportEntry(rawItem, existingReport);
-        return reportMatchesFilter(updatedReport, reportFilter) ? [updatedReport] : [];
+        return [updatedReport];
       });
 
       if (!found) {
         const updatedReport = normalizeReportEntry(rawItem);
-        if (reportMatchesFilter(updatedReport, reportFilter)) {
-          nextReports = [updatedReport, ...nextReports];
-        }
+        nextReports = [updatedReport, ...nextReports];
       }
 
       writeAdminPageCache(reportsCacheKey, { items: nextReports });
       return nextReports;
     });
-  }, [reportFilter, reportsCacheKey]);
-
-  const incidentsCacheKey = useMemo(
-    () => getAdminPageCacheKey('booking-incidents', { incidentFilter }),
-    [incidentFilter],
-  );
+  }, [reportsCacheKey]);
 
   const updateReportFilter = useCallback((nextFilter: ReportFilter) => {
     setReportFilter(nextFilter);
@@ -1094,7 +1056,8 @@ export default function AdminReportsPage() {
       const { data, error } = await supabase.functions.invoke<any>('admin-reports-management', {
         body: {
           action: 'fetch_reports',
-          statusFilter: reportFilter,
+          // Keep one local queue so status changes are instant and status counts are accurate.
+          statusFilter: 'all',
           limit: REPORTS_PAGE_SIZE,
         },
       });
@@ -1120,36 +1083,7 @@ export default function AdminReportsPage() {
         setReportsLoading(false);
       }
     }
-  }, [reportFilter, reportsCacheKey, showAlert]);
-
-  const fetchIncidents = useCallback(async (options?: { silent?: boolean }) => {
-    if (!options?.silent) {
-      setIncidentsLoading(true);
-    }
-
-    try {
-      const { data, error } = await supabase.rpc('admin_fetch_booking_incidents', {
-        p_status_filter: incidentFilter,
-        p_limit: 100,
-      });
-
-      if (error) throw error;
-
-      const nextIncidents = Array.isArray(data) ? data : [];
-      setIncidents(nextIncidents);
-      writeAdminPageCache(incidentsCacheKey, nextIncidents);
-    } catch (error) {
-      if (!options?.silent) {
-        const message = await getErrorMessage(error, 'Unable to fetch incidents.');
-        showAlert('error', 'Failed to load incidents', message);
-        setIncidents([]);
-      }
-    } finally {
-      if (!options?.silent) {
-        setIncidentsLoading(false);
-      }
-    }
-  }, [incidentFilter, incidentsCacheKey, showAlert]);
+  }, [reportsCacheKey, showAlert]);
 
   const isAccessReady = !loading && roleResolved && !!session && !isGuest && isAdmin;
 
@@ -1169,21 +1103,6 @@ export default function AdminReportsPage() {
   }, [isAccessReady, reportsCacheKey, fetchReports]);
 
   useEffect(() => {
-    if (!isAccessReady || !hasInitializedRef.current) return;
-
-    const cachedIncidents = readAdminPageCache<BookingIncidentEntry[]>(
-      incidentsCacheKey,
-      INCIDENTS_CACHE_TTL_MS,
-    );
-
-    if (cachedIncidents) {
-      setIncidents(cachedIncidents);
-    }
-
-    void fetchIncidents({ silent: Boolean(cachedIncidents) });
-  }, [isAccessReady, incidentsCacheKey, fetchIncidents]);
-
-  useEffect(() => {
     if (!isAccessReady) {
       hasInitializedRef.current = false;
       setInitializingReports(false);
@@ -1199,20 +1118,12 @@ export default function AdminReportsPage() {
       reportsCacheKey,
       REPORTS_CACHE_TTL_MS,
     );
-    const cachedIncidents = readAdminPageCache<BookingIncidentEntry[]>(
-      incidentsCacheKey,
-      INCIDENTS_CACHE_TTL_MS,
-    );
 
     if (cachedReports) {
       setReports(cachedReports.items);
     }
 
-    if (cachedIncidents) {
-      setIncidents(cachedIncidents);
-    }
-
-    if (cachedReports || cachedIncidents) {
+    if (cachedReports) {
       setInitializingReports(false);
       hasInitializedRef.current = true;
     } else {
@@ -1221,10 +1132,7 @@ export default function AdminReportsPage() {
 
     void (async () => {
       try {
-        await Promise.all([
-          fetchReports({ silent: Boolean(cachedReports) }),
-          fetchIncidents({ silent: Boolean(cachedIncidents) }),
-        ]);
+        await fetchReports({ silent: Boolean(cachedReports) });
       } finally {
         if (isMounted) {
           setInitializingReports(false);
@@ -1236,7 +1144,7 @@ export default function AdminReportsPage() {
     return () => {
       isMounted = false;
     };
-  }, [isAccessReady, reportsCacheKey, incidentsCacheKey, fetchReports, fetchIncidents]);
+  }, [isAccessReady, reportsCacheKey, fetchReports]);
 
   const moderateReport = useCallback(
     async ({
@@ -1290,6 +1198,60 @@ export default function AdminReportsPage() {
       }
     },
     [fetchReports, mergeReportItemIntoState, showAlert],
+  );
+
+  const refundBookingReport = useCallback(
+    async (targetReport: ReportEntry) => {
+      setReportActionLoadingId(targetReport.id);
+      try {
+        const { data, error } = await supabase.functions.invoke<any>('admin-reports-management', {
+          body: {
+            action: 'refund_booking_report',
+            reportId: targetReport.id,
+            notes: 'Admin approved a full wallet refund after reviewing the booking report.',
+          },
+        });
+
+        if (error) throw error;
+        if (data?.error) throw new Error(String(data.error));
+        if (data?.item) mergeReportItemIntoState(data.item);
+
+        const amount = Number(data?.refund?.refund_amount || 0);
+        const amountLabel = `PHP ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        const message = data?.refund?.already_refunded
+          ? `This booking was already refunded (${amountLabel}). The report is now resolved.`
+          : `${amountLabel} was credited to the user's MusikaLokal Wallet and the report was resolved.`;
+
+        invalidateAdminPageCache();
+        showAlert('success', 'Booking refunded', message);
+        void fetchReports({ silent: true });
+      } catch (error) {
+        const message = await getErrorMessage(error, 'Unable to refund this booking.');
+        showAlert('error', 'Refund failed', message);
+      } finally {
+        setReportActionLoadingId(null);
+      }
+    },
+    [fetchReports, mergeReportItemIntoState, showAlert],
+  );
+
+  const confirmBookingRefund = useCallback(
+    (targetReport: ReportEntry) => {
+      showAlert(
+        'warning',
+        'Refund booking to wallet?',
+        'This will credit the full recorded paid amount to the user’s MusikaLokal Wallet, cancel the booking, and resolve the report. This action cannot be reversed from the admin page.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Refund to Wallet',
+            style: 'destructive',
+            onPress: () => void refundBookingReport(targetReport),
+          },
+        ],
+      );
+    },
+    [refundBookingReport, showAlert],
   );
 
   const liftReportedAccountBan = useCallback(
@@ -1491,74 +1453,6 @@ export default function AdminReportsPage() {
     setReportDetailsTarget(null);
   }, []);
 
-  const resolveIncident = useCallback(
-    async (incidentId: string, resolution: BookingIncidentResolution, adminResolutionNotes = '') => {
-      setIncidentActionLoadingId(incidentId);
-      try {
-        const { data, error } = await supabase.functions.invoke<any>('admin-reports-management', {
-          body: {
-            action: 'admin_resolve_booking_incident',
-            incident_id: incidentId,
-            resolution,
-            admin_notes: adminResolutionNotes.trim() || null,
-          },
-        });
-
-        if (error) throw error;
-        if (data?.error) throw new Error(String(data.error));
-
-        invalidateAdminPageCache();
-        showAlert('success', 'Incident updated', `Incident marked as ${resolution.replace(/_/g, ' ')}.`);
-        await fetchIncidents();
-        return true;
-      } catch (error) {
-        const message = await getErrorMessage(error, 'Unable to update incident.');
-        showAlert('error', 'Failed to update incident', message);
-        return false;
-      } finally {
-        setIncidentActionLoadingId(null);
-      }
-    },
-    [fetchIncidents, showAlert],
-  );
-
-  const openIncidentResolutionModal = useCallback(
-    (incident: BookingIncidentEntry, resolution: BookingIncidentResolution) => {
-      setIncidentResolutionTarget(incident);
-      setIncidentResolutionChoice(resolution);
-      setIncidentResolutionNotes('');
-    },
-    [],
-  );
-
-  const closeIncidentResolutionModal = useCallback(() => {
-    if (incidentResolutionSubmitting) return;
-    setIncidentResolutionTarget(null);
-    setIncidentResolutionChoice('resolved_no_refund');
-    setIncidentResolutionNotes('');
-  }, [incidentResolutionSubmitting]);
-
-  const submitIncidentResolution = useCallback(async () => {
-    if (!incidentResolutionTarget) return;
-
-    setIncidentResolutionSubmitting(true);
-    try {
-      const ok = await resolveIncident(
-        incidentResolutionTarget.id,
-        incidentResolutionChoice,
-        incidentResolutionNotes,
-      );
-
-      if (ok) {
-        setIncidentResolutionTarget(null);
-        setIncidentResolutionChoice('resolved_no_refund');
-        setIncidentResolutionNotes('');
-      }
-    } finally {
-      setIncidentResolutionSubmitting(false);
-    }
-  }, [incidentResolutionChoice, incidentResolutionNotes, incidentResolutionTarget, resolveIncident]);
-
   const openUserDetailsModal = useCallback(async (targetUser: UserDetailsRequestTarget, loadingKey?: string) => {
     const requestLoadingKey = loadingKey || targetUser.id;
     setUserDetailsLoadingKey(requestLoadingKey);
@@ -1707,10 +1601,8 @@ export default function AdminReportsPage() {
 
   const filteredReports = useMemo(() => {
     const q = reportSearch.trim().toLowerCase();
-    if (!q) return reports;
-
     return reports.filter((item) => {
-      return (
+      const matchesSearch = !q || (
         String(item.reason || '').toLowerCase().includes(q) ||
         String(item.details || '').toLowerCase().includes(q) ||
         String(item.reporter_name || '').toLowerCase().includes(q) ||
@@ -1724,25 +1616,26 @@ export default function AdminReportsPage() {
         String(item.target_id || '').toLowerCase().includes(q) ||
         String(item.status || '').toLowerCase().includes(q)
       );
+
+      return matchesSearch &&
+        reportMatchesFilter(item, reportFilter) &&
+        (reportTargetFilter === 'all' || item.target_type === reportTargetFilter);
     });
-  }, [reports, reportSearch]);
+  }, [reportFilter, reportSearch, reportTargetFilter, reports]);
 
-  const activeReports = useMemo(
-    () => filteredReports.filter((report) => report.status === 'pending'),
-    [filteredReports],
-  );
+  const sortedReports = useMemo(() => (
+    [...filteredReports].sort((left, right) => {
+      const difference = new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+      return reportSort === 'newest' ? difference : -difference;
+    })
+  ), [filteredReports, reportSort]);
 
-  const historyReports = useMemo(
-    () => filteredReports.filter((report) => report.status !== 'pending'),
-    [filteredReports],
-  );
-
-  const showActiveReports = reportFilter === 'all' || reportFilter === 'pending';
-  const showHistoryReports = reportFilter === 'all' || reportFilter === 'resolved' || reportFilter === 'dismissed';
-
-  const incidentActionable = useCallback((status: string) => {
-    return ['open', 'responded', 'manual_review'].includes(status);
-  }, []);
+  const reportStatusCounts = useMemo(() => ({
+    all: reports.length + uploadModerationStatusCounts.all,
+    pending: reports.filter((report) => report.status === 'pending').length + uploadModerationStatusCounts.pending_review,
+    resolved: reports.filter((report) => report.status === 'resolved').length + uploadModerationStatusCounts.approved,
+    dismissed: reports.filter((report) => report.status === 'dismissed').length + uploadModerationStatusCounts.rejected,
+  }), [reports, uploadModerationStatusCounts]);
 
   const renderDetailsSection = useCallback((title: string, details: Record<string, unknown> | null, emptyText: string) => {
     const entries = getFriendlyDetailEntries(details);
@@ -1905,6 +1798,7 @@ export default function AdminReportsPage() {
         </View>
 
         <View style={styles.reportMetaGrid}>
+          {renderReportMeta('Source', 'User report')}
           {renderReportMeta('Reporter', `${report.reporter_name || 'Unknown'} (${report.reporter_email || 'no email'})`)}
           {renderReportMeta('Reported item', formatReportTargetType(report.target_type))}
           {renderReportMeta('Created', formatDateTime(report.created_at))}
@@ -1979,6 +1873,29 @@ export default function AdminReportsPage() {
 
           {report.status === 'pending' ? (
             <>
+              {report.target_type === 'booking' ? (
+                <TouchableOpacity
+                  testID={`admin-report-refund-${report.id}`}
+                  accessibilityLabel={`admin-report-refund-${report.id}`}
+                  activeOpacity={1}
+                  disabled={reportActionLoadingId === report.id}
+                  onPress={() => confirmBookingRefund(report)}
+                  style={[
+                    styles.smallActionButtonFilled,
+                    styles.reportActionButton,
+                    { backgroundColor: '#0EA5E9', opacity: reportActionLoadingId === report.id ? 0.6 : 1 },
+                  ]}
+                >
+                  {reportActionLoadingId === report.id ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="wallet-outline" size={14} color="#FFFFFF" />
+                      <Text style={styles.smallActionTextFilled}>Resolve & Refund</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity
                 testID={`admin-report-resolve-${report.id}`}
                 accessibilityLabel={`admin-report-resolve-${report.id}`}
@@ -2032,63 +1949,6 @@ export default function AdminReportsPage() {
     );
   };
 
-  const renderReportListSection = ({
-    title,
-    subtitle,
-    iconName,
-    sectionReports,
-    emptyMessage,
-  }: {
-    title: string;
-    subtitle: string;
-    iconName: string;
-    sectionReports: ReportEntry[];
-    emptyMessage: string;
-  }) => (
-    <View style={styles.reportListSection}>
-      <View style={[styles.reportListHeader, { borderBottomColor: colors.border }]}>
-        <View style={styles.reportListHeaderCopy}>
-          <View style={styles.reportListTitleRow}>
-            <Ionicons name={iconName as any} size={16} color={colors.primary} />
-            <Text style={[styles.reportListTitle, { color: colors.text }]}>{title}</Text>
-          </View>
-          <Text style={[styles.reportListSubtitle, { color: colors.textSecondary }]}>{subtitle}</Text>
-        </View>
-        <View
-          style={[
-            styles.reportCountPill,
-            {
-              backgroundColor: isDark ? '#0F172A' : '#FFFFFF',
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <Text style={[styles.reportCountText, { color: colors.text }]}>{sectionReports.length}</Text>
-        </View>
-      </View>
-
-      {sectionReports.length === 0 ? (
-        <View
-          style={[
-            styles.reportEmptyPanel,
-            {
-              backgroundColor: isDark ? '#111827' : '#F8FAFC',
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <Text style={[styles.emptyText, { color: colors.textSecondary, paddingVertical: 0 }]}>
-            {emptyMessage}
-          </Text>
-        </View>
-      ) : (
-        <View style={styles.sectionGap}>
-          {sectionReports.map(renderReportCard)}
-        </View>
-      )}
-    </View>
-  );
-
   const renderReportsManagementSection = () => (
     <View style={styles.sectionGap}>
       <TextInput
@@ -2108,238 +1968,107 @@ export default function AdminReportsPage() {
         ]}
       />
 
-      <View style={styles.filterGroup}>
-        <Text style={[styles.filterLabel, { color: colors.textSecondary }]}>Report Status</Text>
-        <View style={[styles.filterRow, styles.filterRowWrap]}>
-          {reportStatuses.map((status) => {
-            const active = reportFilter === status;
-            return (
-              <TouchableOpacity
-                key={status}
-                activeOpacity={1}
-                onPress={() => updateReportFilter(status)}
-                style={[
-                  styles.filterChip,
-                  {
-                    backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                    borderColor: active ? colors.primary : colors.border,
-                  },
-                ]}
-              >
-                <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                  {status === 'pending' ? 'active' : status}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+      <AdminFilterBar
+        filters={[
+          {
+            key: 'status',
+            label: 'Report Status',
+            type: 'segmented',
+            options: reportStatuses.map(s => ({
+              label: s === 'all' ? `All (${reportStatusCounts.all})` :
+                     s === 'pending' ? `Needs review (${reportStatusCounts.pending})` :
+                     s === 'resolved' ? `Resolved (${reportStatusCounts.resolved})` :
+                     `Dismissed (${reportStatusCounts.dismissed})`,
+              value: s
+            }))
+          },
+          {
+            key: 'source',
+            label: 'Source',
+            type: 'segmented',
+            options: [
+              { label: 'All', value: 'all' },
+              { label: 'User Reports', value: 'user_reports' },
+              { label: 'AI Screening', value: 'ai_screening' }
+            ]
+          },
+          ...(reportSourceFilter !== 'ai_screening' ? [{
+            key: 'type',
+            label: 'Report Type',
+            type: 'single-select' as const,
+            emptyValue: 'all',
+            emptyLabel: 'All types',
+            options: [
+              { label: 'All', value: 'all' },
+              { label: 'Feed Post', value: 'feed_post' },
+              { label: 'Marketplace Item', value: 'product' },
+              { label: 'User Profile', value: 'profile' },
+              { label: 'Gig', value: 'gig' },
+              { label: 'Group', value: 'group' },
+              { label: 'Studio', value: 'studio' },
+              { label: 'Music Playlist', value: 'playlist' }
+            ]
+          }] : [])
+        ]}
+        values={{
+          status: reportFilter,
+          source: reportSourceFilter,
+          type: reportTargetFilter,
+        }}
+        onChange={(key, value) => {
+          if (Array.isArray(value)) return;
+          if (key === 'status') updateReportFilter(value as ReportFilter);
+          if (key === 'source') setReportSourceFilter(value as ReportSourceFilter);
+          if (key === 'type') setReportTargetFilter(value);
+        }}
+        sortElement={
+          <FilterDropdown
+            label="Sort"
+            multiple={false}
+            options={[
+              { label: 'Newest first', value: 'newest' },
+              { label: 'Oldest first', value: 'oldest' },
+            ]}
+            value={reportSort}
+            onChange={(value) => {
+              if (!Array.isArray(value)) setReportSort(value as ReportSort);
+            }}
+            emptyValue="newest"
+            emptyLabel="Newest first"
+          />
+        }
+      />
+
+      <View style={styles.reportListSection}>
+        <View style={[styles.reportListHeader, { borderBottomColor: colors.border }]}>
+          <View style={styles.reportListHeaderCopy}>
+            <View style={styles.reportListTitleRow}>
+              <Ionicons name="flag-outline" size={16} color={colors.primary} />
+              <Text style={[styles.reportListTitle, { color: colors.text }]}>Reports</Text>
+            </View>
+            <Text style={[styles.reportListSubtitle, { color: colors.textSecondary }]}>One queue for user reports and AI-screened uploads.</Text>
+          </View>
         </View>
       </View>
 
-      {reportFilter !== 'dismissed' ? (
+      {reportSourceFilter === 'all' || reportSourceFilter === 'ai_screening' ? (
         <UploadModerationPanel
-          filterStatus={
-            reportFilter === 'pending'
-              ? 'pending_review'
-              : reportFilter === 'resolved'
-                ? 'reviewed'
-                : 'all'
-          }
+          filterStatus="all"
+          caseStatusFilter={reportFilter === 'pending' ? 'pending_review' : reportFilter === 'resolved' ? 'approved' : reportFilter === 'dismissed' ? 'rejected' : 'all'}
           searchQuery={reportSearch}
+          showHeader={false}
+          sort={reportSort}
+          onStatusCountsChange={setUploadModerationStatusCounts}
         />
       ) : null}
 
-      {reportsLoading ? (
+      {reportSourceFilter !== 'ai_screening' && reportsLoading ? (
         <View style={styles.inlineLoader}>
           <ActivityIndicator size="small" color={colors.primary} />
         </View>
-      ) : filteredReports.length === 0 ? (
+      ) : reportSourceFilter !== 'ai_screening' && sortedReports.length === 0 ? (
         <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No reports found.</Text>
-      ) : (
-        <View style={styles.sectionGap}>
-          {showActiveReports
-            ? renderReportListSection({
-              title: 'Active Reports',
-              subtitle: 'Pending reports awaiting moderation.',
-              iconName: 'alert-circle-outline',
-              sectionReports: activeReports,
-              emptyMessage: 'No active reports.',
-            })
-            : null}
-          {showHistoryReports
-            ? renderReportListSection({
-              title: 'Report History',
-              subtitle: reportFilter === 'all' ? 'Resolved and dismissed reports.' : `${reportFilter} reports.`,
-              iconName: 'time-outline',
-              sectionReports: historyReports,
-              emptyMessage: 'No report history.',
-            })
-            : null}
-        </View>
-      )}
-    </View>
-  );
-
-  const renderIncidentQueueSection = () => (
-    <View
-      testID="admin-incidents-section"
-      accessibilityLabel="admin-incidents-section"
-      style={styles.sectionGap}
-    >
-      <View style={styles.filterGroup}>
-        <Text style={[styles.filterLabel, { color: colors.textSecondary }]}>Incident Status</Text>
-        <View style={[styles.filterRow, styles.filterRowWrap]}>
-          {incidentStatuses.map((status) => {
-            const active = incidentFilter === status;
-            return (
-              <TouchableOpacity
-                testID={`admin-incidents-filter-${status}`}
-                accessibilityLabel={`admin-incidents-filter-${status}`}
-                key={status}
-                activeOpacity={1}
-                onPress={() => setIncidentFilter(status)}
-                style={[
-                  styles.filterChip,
-                  {
-                    backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                    borderColor: active ? colors.primary : colors.border,
-                  },
-                ]}
-              >
-                <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                  {status.replace(/_/g, ' ')}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      </View>
-
-      {incidentsLoading ? (
-        <View style={styles.inlineLoader}>
-          <ActivityIndicator size="small" color={colors.primary} />
-        </View>
-      ) : incidents.length === 0 ? (
-        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No incidents found.</Text>
-      ) : (
-        <View style={styles.sectionGap}>
-          {incidents.map((incident) => {
-            const reporterId = String(incident.reporter_user_id || '').trim();
-            const counterpartyId = String(incident.counterparty_user_id || '').trim();
-            const incidentReporterLoadingKey = `incident-card-${incident.id}-reporter`;
-            const incidentCounterpartyLoadingKey = `incident-card-${incident.id}-counterparty`;
-
-            return (
-              <View
-                key={incident.id}
-                testID={`admin-incident-card-${incident.id}`}
-                accessibilityLabel={`admin-incident-card-${incident.id}`}
-                style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-              >
-                <Text style={[styles.cardTitle, { color: colors.text }]}>{String(incident.issue_type || 'issue').replace(/_/g, ' ')}</Text>
-                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Status: {String(incident.status || '').replace(/_/g, ' ')}</Text>
-                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Studio: {incident.studio_name || 'Unknown studio'}</Text>
-                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Booking: {incident.booking_date || '-'} {incident.booking_start_time ? String(incident.booking_start_time).slice(0, 5) : ''}</Text>
-                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reporter: {incident.reporter_name} ({incident.reporter_email || 'no email'})</Text>
-                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Counterparty: {incident.counterparty_name} ({incident.counterparty_email || 'no email'})</Text>
-                {incident.reporter_notes ? <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reporter note: {incident.reporter_notes}</Text> : null}
-                {incident.counterparty_notes ? <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Counterparty note: {incident.counterparty_notes}</Text> : null}
-                {incident.resolution ? <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Resolution: {incident.resolution}</Text> : null}
-                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Created: {formatDateTime(incident.created_at)}</Text>
-                {incident.response_deadline_at ? (
-                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Deadline: {formatDateTime(incident.response_deadline_at)}</Text>
-                ) : null}
-
-                <View style={styles.cardActionsRow}>
-                  <TouchableOpacity
-                    testID={`admin-incident-reporter-${incident.id}`}
-                    accessibilityLabel={`admin-incident-reporter-${incident.id}`}
-                    activeOpacity={1}
-                    disabled={!reporterId || userDetailsLoadingKey === incidentReporterLoadingKey}
-                    onPress={() => {
-                      if (!reporterId) return;
-                      void openUserDetailsModal({
-                        id: reporterId,
-                        full_name: incident.reporter_name,
-                        email: incident.reporter_email,
-                      }, incidentReporterLoadingKey);
-                    }}
-                    style={[styles.smallActionButton, { borderColor: colors.border, opacity: reporterId ? 1 : 0.5 }]}
-                  >
-                    {userDetailsLoadingKey === incidentReporterLoadingKey ? (
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                      <>
-                        <Ionicons name="person-outline" size={14} color={colors.text} />
-                        <Text style={[styles.smallActionText, { color: colors.text }]}>View Reporter</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    testID={`admin-incident-counterparty-${incident.id}`}
-                    accessibilityLabel={`admin-incident-counterparty-${incident.id}`}
-                    activeOpacity={1}
-                    disabled={!counterpartyId || userDetailsLoadingKey === incidentCounterpartyLoadingKey}
-                    onPress={() => {
-                      if (!counterpartyId) return;
-                      void openUserDetailsModal({
-                        id: counterpartyId,
-                        full_name: incident.counterparty_name,
-                        email: incident.counterparty_email,
-                      }, incidentCounterpartyLoadingKey);
-                    }}
-                    style={[styles.smallActionButton, { borderColor: colors.border, opacity: counterpartyId ? 1 : 0.5 }]}
-                  >
-                    {userDetailsLoadingKey === incidentCounterpartyLoadingKey ? (
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                      <>
-                        <Ionicons name="people-outline" size={14} color={colors.text} />
-                        <Text style={[styles.smallActionText, { color: colors.text }]}>View Counterparty</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                </View>
-
-                {incidentActionable(String(incident.status || '')) && (
-                  <View style={styles.cardActionsRow}>
-                    <TouchableOpacity
-                      testID={`admin-incident-resolve-no-refund-${incident.id}`}
-                      accessibilityLabel={`admin-incident-resolve-no-refund-${incident.id}`}
-                      activeOpacity={1}
-                      disabled={incidentActionLoadingId === incident.id}
-                      onPress={() => openIncidentResolutionModal(incident, 'resolved_no_refund')}
-                      style={[styles.smallActionButtonFilled, { backgroundColor: '#16A34A', opacity: incidentActionLoadingId === incident.id ? 0.6 : 1 }]}
-                    >
-                      <Text style={styles.smallActionTextFilled}>Resolve No Refund</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      testID={`admin-incident-resolve-refund-${incident.id}`}
-                      accessibilityLabel={`admin-incident-resolve-refund-${incident.id}`}
-                      activeOpacity={1}
-                      disabled={incidentActionLoadingId === incident.id}
-                      onPress={() => openIncidentResolutionModal(incident, 'resolved_refund')}
-                      style={[styles.smallActionButtonFilled, { backgroundColor: '#D97706', opacity: incidentActionLoadingId === incident.id ? 0.6 : 1 }]}
-                    >
-                      <Text style={styles.smallActionTextFilled}>Resolve Refund</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      testID={`admin-incident-dismiss-${incident.id}`}
-                      accessibilityLabel={`admin-incident-dismiss-${incident.id}`}
-                      activeOpacity={1}
-                      disabled={incidentActionLoadingId === incident.id}
-                      onPress={() => openIncidentResolutionModal(incident, 'dismissed')}
-                      style={[styles.smallActionButtonFilled, { backgroundColor: '#64748B', opacity: incidentActionLoadingId === incident.id ? 0.6 : 1 }]}
-                    >
-                      <Text style={styles.smallActionTextFilled}>Dismiss</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-            );
-          })}
-        </View>
-      )}
+      ) : reportSourceFilter !== 'ai_screening' ? <View style={styles.sectionGap}>{sortedReports.map(renderReportCard)}</View> : null}
     </View>
   );
 
@@ -2399,16 +2128,7 @@ export default function AdminReportsPage() {
           </ScrollView>
         )}
 
-        {showSidebarLayout ? (
-          activeReportsSection === 'booking_incidents'
-            ? renderIncidentQueueSection()
-            : renderReportsManagementSection()
-        ) : (
-          <View style={styles.sectionGap}>
-            {renderReportsManagementSection()}
-            {renderIncidentQueueSection()}
-          </View>
-        )}
+        {renderReportsManagementSection()}
       </ScrollView>
 
       <Modal visible={!!userDetailsTarget} transparent animationType="fade" onRequestClose={closeUserDetailsModal}>
@@ -2760,74 +2480,13 @@ export default function AdminReportsPage() {
         </View>
       </Modal>
 
-      <Modal visible={!!incidentResolutionTarget} transparent animationType="fade" onRequestClose={closeIncidentResolutionModal}>
-        <View style={styles.modalBackdrop}>
-          <View
-            testID="admin-incident-resolution-modal"
-            accessibilityLabel="admin-incident-resolution-modal"
-            style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-          >
-            <Text style={[styles.modalTitle, { color: colors.text }]}>Resolve Incident</Text>
-            <Text style={[styles.modalDescription, { color: colors.textSecondary }]}>
-              {incidentResolutionTarget
-                ? `${String(incidentResolutionTarget.issue_type || 'issue').replace(/_/g, ' ')} - ${incidentResolutionChoice.replace(/_/g, ' ')}`
-                : 'Choose resolution notes.'}
-            </Text>
-
-            <TextInput
-              testID="admin-incident-resolution-notes-input"
-              accessibilityLabel="admin-incident-resolution-notes-input"
-              value={incidentResolutionNotes}
-              onChangeText={setIncidentResolutionNotes}
-              placeholder="Admin notes (optional)"
-              placeholderTextColor={colors.textSecondary}
-              multiline
-              style={[
-                styles.modalInput,
-                {
-                  color: colors.text,
-                  backgroundColor: colors.inputBackground,
-                  borderColor: colors.inputBorder,
-                },
-              ]}
-            />
-
-            <View style={styles.modalActionsRow}>
-              <TouchableOpacity
-                testID="admin-incident-resolution-cancel-button"
-                accessibilityLabel="admin-incident-resolution-cancel-button"
-                activeOpacity={1}
-                onPress={closeIncidentResolutionModal}
-                disabled={incidentResolutionSubmitting}
-                style={[styles.modalButton, { backgroundColor: isDark ? '#334155' : '#E5E7EB' }]}
-              >
-                <Text style={[styles.modalButtonText, { color: colors.text }]}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                testID="admin-incident-resolution-confirm-button"
-                accessibilityLabel="admin-incident-resolution-confirm-button"
-                activeOpacity={1}
-                onPress={() => void submitIncidentResolution()}
-                disabled={incidentResolutionSubmitting}
-                style={[styles.modalButton, { backgroundColor: colors.primary, opacity: incidentResolutionSubmitting ? 0.6 : 1 }]}
-              >
-                {incidentResolutionSubmitting ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.modalButtonText}>Confirm</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
       <CustomAlert
         visible={alertState.visible}
         type={alertState.type}
         title={alertState.title}
         message={alertState.message}
+        buttons={alertState.buttons}
+        forceModal={Boolean(alertState.buttons && alertState.buttons.length > 1)}
         onClose={() => setAlertState((prev) => ({ ...prev, visible: false }))}
       />
     </View>

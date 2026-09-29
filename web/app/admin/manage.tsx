@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { Calendar } from '../../src/components/CenteredCalendar';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
+import { AdminFilterBar } from '../../src/components/admin/filters';
 import Header from '../../src/components/header';
 import LoadingState from '../../src/components/LoadingState';
 import ImageUploader from '../../src/components/ImageUploader';
@@ -1172,32 +1173,24 @@ export default function AdminManagePage() {
           ) : null}
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRow}>
-          {resourceTabs.map((tab) => {
-            const active = tab.key === resourceFilter;
-            return (
-              <TouchableOpacity
-                key={tab.key}
-                activeOpacity={0.82}
-                testID={`admin-manage-filter-${tab.key}`}
-                accessibilityLabel={`admin-manage-filter-${tab.key}`}
-                style={[
-                  styles.tabButton,
-                  {
-                    backgroundColor: active ? colors.primary : colors.card,
-                    borderColor: active ? colors.primary : colors.border,
-                  },
-                ]}
-                onPress={() => setResourceFilter(tab.key)}
-              >
-                <Ionicons name={tab.icon as any} size={16} color={active ? '#FFFFFF' : colors.textSecondary} />
-                <Text style={[styles.tabText, { color: active ? '#FFFFFF' : colors.text }]}>
-                  {tab.label} ({counts[tab.key]})
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+        <AdminFilterBar
+          filters={[
+            {
+              key: 'resource',
+              label: 'Listing type',
+              type: 'segmented',
+              options: resourceTabs.map((tab) => ({
+                value: tab.key,
+                label: `${tab.label} (${counts[tab.key]})`,
+                testID: `admin-manage-filter-${tab.key}`,
+              })),
+            },
+          ]}
+          values={{ resource: resourceFilter }}
+          onChange={(key, value) => {
+            if (key === 'resource' && !Array.isArray(value)) setResourceFilter(value as ResourceFilter);
+          }}
+        />
 
         <View style={styles.createRow}>
           {(['studio', 'venue', 'production'] as ResourceType[]).map((resourceType) => (

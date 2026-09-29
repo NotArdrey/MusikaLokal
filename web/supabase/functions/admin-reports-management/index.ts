@@ -381,6 +381,7 @@ const reportTargetTableMap: Record<string, string> = {
   product: "products",
   playlist: "playlists",
   feed_post: "feed_posts",
+  booking: "studio_bookings",
 };
 
 async function insertNotificationIfMissing(
@@ -480,6 +481,36 @@ async function fetchReportTargetDetails(client: any, rawTargetType: unknown, raw
     .maybeSingle();
 
   if (recordError) throw recordError;
+
+  if (targetType === "booking") {
+    const { data: studio, error: studioError } = record?.studio_id
+      ? await client
+        .from("studios")
+        .select("id, name, owner_id")
+        .eq("id", record.studio_id)
+        .maybeSingle()
+      : { data: null, error: null };
+
+    if (studioError) throw studioError;
+
+    const ownerProfile = studio?.owner_id
+      ? await fetchProfileById(client, String(studio.owner_id))
+      : null;
+
+    return {
+      type: targetType,
+      id: targetId,
+      table,
+      record: record
+        ? {
+          ...record,
+          studio_name: studio?.name || null,
+          studio_owner_id: studio?.owner_id || null,
+        }
+        : null,
+      owner_profile: ownerProfile,
+    };
+  }
 
   if (targetType === "profile" || targetType === "user") {
     return {
@@ -1064,6 +1095,48 @@ serve(async (req: Request) => {
         },
         usedTargetAccountActionLegacy: !supportsTargetAccountActionColumns,
         success: true,
+      });
+    }
+
+    if (action === "refund_booking_report") {
+      const reportId = String(params.reportId || "").trim();
+      const notes = normalizeText(params.notes, 2000);
+
+      if (!reportId) {
+        return jsonResponse({ error: "reportId is required" }, 400);
+      }
+
+      const { data: refundResult, error: refundError } = await client.rpc(
+        "admin_refund_reported_booking",
+        {
+          p_report_id: reportId,
+          p_admin_user_id: userId,
+          p_notes: notes,
+        },
+      );
+
+      if (refundError) {
+        if (refundError.code === "42883" || refundError.code === "PGRST202") {
+          return jsonResponse(
+            { error: "Booking refunds require the latest database migration." },
+            503,
+          );
+        }
+        return jsonResponse({ error: refundError.message }, 400);
+      }
+
+      const { data: updatedReport, error: updatedReportError } = await client
+        .from("reports")
+        .select("id, status, target_type, target_id, reviewed_by, reviewed_at, moderation_action, moderation_notes, escalation_status, escalated_at, escalation_reason")
+        .eq("id", reportId)
+        .maybeSingle();
+
+      if (updatedReportError) throw updatedReportError;
+
+      return jsonResponse({
+        success: true,
+        refund: refundResult,
+        item: updatedReport,
       });
     }
 

@@ -366,6 +366,20 @@ export const resolveNotificationNavigationTarget = (
     || normalizeNotificationRouteParams(meta.route_params)
     || normalizeNotificationRouteParams(meta.params);
   const notificationType = readNotificationEventType(record, meta);
+  if (
+    notificationType === "group_application_member_cv_required" ||
+    notificationType === "group_application_ready_for_leader"
+  ) {
+    const applicationId = readStringId(
+      record.application_id,
+      record.applicationId,
+      meta.application_id,
+      meta.applicationId,
+    );
+    return applicationId
+      ? { pathname: "/group_application_cv", params: { applicationId } }
+      : { pathname: "/bookings", params: { tab: "Pending" } };
+  }
   const activityTab = inferActivityTabFromNotification(record, meta, notificationType, explicitParams);
   const postId = readStringId(record.post_id, record.postId, meta.post_id, meta.postId, explicitParams?.post_id, explicitParams?.postId);
   const teamId = readStringId(

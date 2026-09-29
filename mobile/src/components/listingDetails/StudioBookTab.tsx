@@ -339,7 +339,9 @@ const StudioBookTab = ({
       return `${selectedLabel}h selected / ${requiredLabel}h required for ${status.songCount} ${songLabel}.`;
     }
 
-    return `Add ${formatRecordingHours(status.remainingHours)}h more before submitting. ${selectedLabel}h selected / ${requiredLabel}h required for ${status.songCount} ${songLabel}.`;
+    const remainingLabel = formatRecordingHours(status.remainingHours);
+    const hourLabel = status.remainingHours === 1 ? "hour" : "hours";
+    return `${remainingLabel} more ${hourLabel} needed. You currently have ${selectedLabel} of ${requiredLabel} required hours for ${status.songCount} ${songLabel}. Add another recording slot on this date to continue.`;
   };
 
   const toValidDate = (value: any): Date | null => {
@@ -1811,7 +1813,7 @@ const StudioBookTab = ({
                     >
                       {draftRecordingDurationStatus.isComplete
                         ? "Recording time requirement met"
-                        : "Recording time still short"}
+                        : "More recording time needed"}
                     </Text>
                     <Text
                       style={{

@@ -73,20 +73,23 @@ identity-review Edge Functions.
 
 ## Consent-gated gig portfolio review
 
-Gig applicants can optionally consent to an advisory review of redacted CV text,
-video speech, and up to three client-generated video frames. Identity documents
+Gig applicants can optionally consent to an advisory review of extracted CV text
+and the submitted performance video. Identity documents
 and profile photos are not fetched, shown to gig managers, or compared with the
 submitted video. The review is processed in the background and does not change
 identity verification or make the final application decision.
 
 Deploy `20260719010000_add_consent_gated_gig_portfolio_reviews.sql` followed by
-`20260927180000_remove_gig_identity_video_matching.sql` before deploying the
-updated `gig-applications` Edge Function. Configure `GROQ_API_KEY` as a Supabase
-Edge Function secret. Never put server-side provider keys in Expo variables or
-client code.
-Optional model overrides are documented in `mobile/.env.example`; enable Groq
-Zero Data Retention in GroqCloud Data Controls when required by the deployment's
-privacy policy.
+`20260927180000_remove_gig_identity_video_matching.sql` and
+`20260928120000_add_gig_recommendation_needs_review_status.sql` before deploying
+the updated `gig-applications` Edge Function. Configure `GEMINI_API_KEY` as a
+Supabase Edge Function secret. The primary model is configurable with
+`GEMINI_MODEL` and defaults to `gemini-3.5-flash-lite`. Unclear, contradictory,
+or malformed primary results can be retried once with `GEMINI_FALLBACK_MODEL`,
+which defaults to `gemini-3.5-flash`; set `GEMINI_ENABLE_FALLBACK=false` to
+disable that escalation. Never put server-side provider keys in Expo variables
+or client code. `GIG_AI_REVIEW_PROVIDER=groq` temporarily preserves the legacy
+CV/transcript/frame path for migration comparisons; Gemini is the default.
 
 ## Gig performance video recording screening
 
@@ -127,7 +130,7 @@ their separate copyright-review workflow. Unrecognized original or live
 performances are not assigned a genre by ACRCloud and remain dependent on other
 evidence or manual review.
 
-Operational Groq text defaults now use `openai/gpt-oss-120b`, then
+Legacy Groq review mode uses `openai/gpt-oss-120b`, then
 `qwen/qwen3.8-27b` and `openai/gpt-oss-20b`. Vision defaults to
 `qwen/qwen3.8-27b`. Environment overrides remain available through
 `GROQ_TEXT_MODEL`, `GROQ_REVIEW_MODEL`, `GROQ_VISION_MODEL`, and

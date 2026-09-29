@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -15,6 +14,7 @@ import {
 import Header from '../../src/components/header';
 import LoadingState from '../../src/components/LoadingState';
 import CustomAlert from '../../src/components/CustomAlert';
+import { AdminFilterBar } from '../../src/components/admin/filters';
 import GigPresetDropdown, { GIG_GENRE_OPTIONS } from '../../src/components/GigPresetDropdown';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -556,26 +556,24 @@ export default function AdminStationsPage() {
               ]}
             />
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-              {(['all', 'live', 'offline'] as StationFilter[]).map((nextFilter) => (
-                <TouchableOpacity
-                  key={nextFilter}
-                  activeOpacity={1}
-                  onPress={() => setStationFilter(nextFilter)}
-                  style={[
-                    styles.filterChip,
-                    {
-                      backgroundColor: stationFilter === nextFilter ? colors.primary : colors.card,
-                      borderColor: stationFilter === nextFilter ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={{ color: stationFilter === nextFilter ? '#FFFFFF' : colors.text, fontSize: 13, fontFamily: 'Poppins_500Medium', textTransform: 'capitalize' }}>
-                    {nextFilter}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            <AdminFilterBar
+              filters={[
+                {
+                  key: 'status',
+                  label: 'Station status',
+                  type: 'segmented',
+                  options: [
+                    { value: 'all', label: 'All' },
+                    { value: 'live', label: 'Live' },
+                    { value: 'offline', label: 'Offline' },
+                  ],
+                },
+              ]}
+              values={{ status: stationFilter }}
+              onChange={(key, value) => {
+                if (key === 'status' && !Array.isArray(value)) setStationFilter(value as StationFilter);
+              }}
+            />
           </>
         ) : null}
 
@@ -674,17 +672,6 @@ export default function AdminStationsPage() {
               ) : null}
 
               <View style={styles.actionRow}>
-                <TouchableOpacity
-                  testID={`admin-station-view-${item.id}`}
-                  accessibilityLabel={`admin-station-view-${item.id}`}
-                  activeOpacity={1}
-                  style={[styles.actionBtn, { backgroundColor: isDark ? '#0F172A' : '#F3F4F6' }]}
-                  onPress={() => router.push({ pathname: '/station_details' as any, params: { station_id: item.id } })}
-                >
-                  <Ionicons name="eye-outline" size={15} color={colors.text} style={styles.actionBtnIcon} />
-                  <Text style={[styles.actionBtnText, { color: colors.text }]}>View</Text>
-                </TouchableOpacity>
-
                 {source ? (
                   <TouchableOpacity
                     testID={`admin-station-edit-${item.id}`}

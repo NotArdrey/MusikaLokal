@@ -440,17 +440,22 @@ const styles = StyleSheet.create({
   textContainer: {
     flex: 1,
     marginLeft: 12,
-    marginRight: 8,
+    marginRight: 26,
+    alignItems: "center",
   },
   title: {
     fontSize: 14,
     fontFamily: "Poppins_600SemiBold",
+    alignSelf: "stretch",
+    textAlign: "center",
   },
   message: {
     marginTop: 3,
     fontSize: 12,
     lineHeight: 18,
     fontFamily: "Poppins_400Regular",
+    alignSelf: "stretch",
+    textAlign: "center",
   },
   closeIcon: {
     opacity: 0.85,

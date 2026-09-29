@@ -21,17 +21,18 @@ import {
   View,
 } from 'react-native';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
+import { FilterDropdown } from '../../src/components/admin/filters';
 import Header from '../../src/components/header';
 import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
-import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from './_cache';
+import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from '../../src/admin/cache';
 import type {
   AdminPaymentStatusFilter,
   AdminPaymentTransaction,
   AdminPaymentTotals,
-} from './_payments';
+} from '../../src/admin/payments';
 import {
   downloadPaymentTransactionsExcel,
   downloadPaymentTransactionsPdf,
@@ -39,7 +40,7 @@ import {
   getPaymentStatusColor,
   normalizePaymentActionLabel,
   PAYMENT_STATUS_FILTERS,
-} from './_payments';
+} from '../../src/admin/payments';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -126,7 +127,6 @@ const DASHBOARD_CACHE_TTL_MS = 30_000;
 
 type DashboardDateRange = '7d' | '30d' | 'all';
 type RevenueFilter = 'gross' | 'net';
-type IncidentTypeFilter = 'all' | 'booking' | 'profile';
 type WithdrawalStatusFilter = 'all' | 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
 const DASHBOARD_DATE_RANGE_LABELS: Record<DashboardDateRange, string> = {
@@ -156,10 +156,6 @@ interface DashboardMetrics {
   totalReports: number;
   pendingReports: number;
   escalatedReports: number;
-  openIncidents: number;
-  resolvedIncidents: number;
-  openIncidentsInRange: number;
-  resolvedIncidentsInRange: number;
   dau: number;
   mau: number;
   newSignups24h: number;
@@ -171,7 +167,6 @@ interface DashboardMetrics {
   providerEarnings: number;
   pendingPayouts: number;
   avgReportResolutionHours: number;
-  avgIncidentResolutionHours: number;
   paymongoSuccessRate: number;
   paymentMetricsAvailable: boolean;
   paymentAttempts: number;
@@ -182,14 +177,6 @@ interface DashboardMetrics {
   dbHealthy: boolean;
   apiHealthy: boolean;
   paymongoHealthy: boolean;
-  incidentTypeBreakdown: {
-    key: string;
-    label: string;
-    category: 'booking' | 'profile' | 'other';
-    total: number;
-    open: number;
-    avgResolutionHours: number;
-  }[];
   peakActivitySlots: {
     label: string;
     count: number;
@@ -202,7 +189,6 @@ interface DashboardMetrics {
   searchSummary: {
     users: number;
     reports: number;
-    incidents: number;
     transactions: number;
     total: number;
   };
@@ -252,10 +238,6 @@ const defaultMetrics: DashboardMetrics = {
   totalReports: 0,
   pendingReports: 0,
   escalatedReports: 0,
-  openIncidents: 0,
-  resolvedIncidents: 0,
-  openIncidentsInRange: 0,
-  resolvedIncidentsInRange: 0,
   dau: 0,
   mau: 0,
   newSignups24h: 0,
@@ -267,7 +249,6 @@ const defaultMetrics: DashboardMetrics = {
   providerEarnings: 0,
   pendingPayouts: 0,
   avgReportResolutionHours: 0,
-  avgIncidentResolutionHours: 0,
   paymongoSuccessRate: 0,
   paymentMetricsAvailable: false,
   paymentAttempts: 0,
@@ -278,13 +259,11 @@ const defaultMetrics: DashboardMetrics = {
   dbHealthy: false,
   apiHealthy: false,
   paymongoHealthy: false,
-  incidentTypeBreakdown: [],
   peakActivitySlots: [],
   revenueTrend: [],
   searchSummary: {
     users: 0,
     reports: 0,
-    incidents: 0,
     transactions: 0,
     total: 0,
   },
@@ -354,12 +333,6 @@ const formatCurrency = (value?: number | null) => {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
-};
-
-const formatHours = (value?: number | null) => {
-  const safeValue = Number(value || 0);
-  if (!safeValue) return 'n/a';
-  return `${safeValue.toFixed(1)}h`;
 };
 
 const formatMetricCount = (value?: number | null) => {
@@ -626,12 +599,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 16,
     minHeight: 250,
-  },
-  actionCenterPanelLeft: {
-    flex: Platform.OS === 'web' ? 7 : 1,
-  },
-  actionCenterPanelRight: {
-    flex: Platform.OS === 'web' ? 5 : 1,
   },
   actionCenterRow: {
     flexDirection: Platform.OS === 'web' ? 'row' : 'column',
@@ -1149,7 +1116,6 @@ export default function AdminDashboardPage() {
   const [globalSearch, setGlobalSearch] = useState('');
   const [dashboardSearchQuery, setDashboardSearchQuery] = useState('');
   const [revenueFilter, setRevenueFilter] = useState<RevenueFilter>('net');
-  const [incidentTypeFilter, setIncidentTypeFilter] = useState<IncidentTypeFilter>('all');
   const [paymentTransactions, setPaymentTransactions] = useState<AdminPaymentTransaction[]>([]);
   const [paymentTotals, setPaymentTotals] = useState<AdminPaymentTotals>(defaultPaymentTotals);
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<AdminPaymentStatusFilter>('all');
@@ -1251,19 +1217,6 @@ export default function AdminDashboardPage() {
     if (error) throw error;
     if (data?.error) throw new Error(String(data.error));
 
-    const incidentTypeBreakdown = Array.isArray(data?.incidentTypeBreakdown)
-      ? data.incidentTypeBreakdown.map((item: any) => ({
-        key: String(item?.key || ''),
-        label: String(item?.label || item?.key || 'Unspecified'),
-        category: (['booking', 'profile', 'other'].includes(String(item?.category || '').toLowerCase())
-          ? String(item.category).toLowerCase()
-          : 'other') as 'booking' | 'profile' | 'other',
-        total: Number(item?.total || 0),
-        open: Number(item?.open || 0),
-        avgResolutionHours: Number(item?.avgResolutionHours || 0),
-      }))
-      : [];
-
     const peakActivitySlots = Array.isArray(data?.peakActivitySlots)
       ? data.peakActivitySlots.map((item: any) => ({
         label: String(item?.label || '-'),
@@ -1291,10 +1244,6 @@ export default function AdminDashboardPage() {
       totalReports: Number(data?.totalReports || 0),
       pendingReports: Number(data?.pendingReports || 0),
       escalatedReports: Number(data?.escalatedReports || 0),
-      openIncidents: Number(data?.openIncidents || 0),
-      resolvedIncidents: Number(data?.resolvedIncidents || 0),
-      openIncidentsInRange: Number(data?.openIncidentsInRange || 0),
-      resolvedIncidentsInRange: Number(data?.resolvedIncidentsInRange || 0),
       dau: Number(data?.dau || 0),
       mau: Number(data?.mau || 0),
       newSignups24h: Number(data?.newSignups24h || 0),
@@ -1306,7 +1255,6 @@ export default function AdminDashboardPage() {
       providerEarnings: Number(data?.providerEarnings || 0),
       pendingPayouts: Number(data?.pendingPayouts || 0),
       avgReportResolutionHours: Number(data?.avgReportResolutionHours || 0),
-      avgIncidentResolutionHours: Number(data?.avgIncidentResolutionHours || 0),
       paymongoSuccessRate: Number(data?.paymongoSuccessRate || 0),
       paymentMetricsAvailable: Object.prototype.hasOwnProperty.call(data || {}, 'paymentAttempts'),
       paymentAttempts: Number(data?.paymentAttempts || 0),
@@ -1317,15 +1265,16 @@ export default function AdminDashboardPage() {
       dbHealthy: Boolean(data?.dbHealthy),
       apiHealthy: Boolean(data?.apiHealthy),
       paymongoHealthy: Boolean(data?.paymongoHealthy),
-      incidentTypeBreakdown,
       peakActivitySlots,
       revenueTrend,
       searchSummary: {
         users: Number(data?.searchSummary?.users || 0),
         reports: Number(data?.searchSummary?.reports || 0),
-        incidents: Number(data?.searchSummary?.incidents || 0),
         transactions: Number(data?.searchSummary?.transactions || 0),
-        total: Number(data?.searchSummary?.total || 0),
+        total:
+          Number(data?.searchSummary?.users || 0) +
+          Number(data?.searchSummary?.reports || 0) +
+          Number(data?.searchSummary?.transactions || 0),
       },
     };
 
@@ -1800,11 +1749,6 @@ export default function AdminDashboardPage() {
     }
   }, [showAlert]);
 
-  const dashboardIncidentRows = useMemo(() => {
-    if (incidentTypeFilter === 'all') return metrics.incidentTypeBreakdown;
-    return metrics.incidentTypeBreakdown.filter((row) => row.category === incidentTypeFilter);
-  }, [metrics.incidentTypeBreakdown, incidentTypeFilter]);
-
   const peakActivityMaxCount = useMemo(() => {
     if (!metrics.peakActivitySlots.length) return 1;
     return Math.max(...metrics.peakActivitySlots.map((slot) => Number(slot.count || 0)), 1);
@@ -1960,7 +1904,6 @@ export default function AdminDashboardPage() {
               <Text style={[styles.cardTitle, { color: colors.text }]}>Search Matches ({dashboardDateRangeLabel})</Text>
               <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Users: {metrics.searchSummary.users}</Text>
               <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reports: {metrics.searchSummary.reports}</Text>
-              <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Incidents: {metrics.searchSummary.incidents}</Text>
               <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Transactions: {metrics.searchSummary.transactions}</Text>
               <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Total matches: {metrics.searchSummary.total}</Text>
             </View>
@@ -2103,20 +2046,16 @@ export default function AdminDashboardPage() {
               </View>
             </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }}>
-              {PAYMENT_STATUS_FILTERS.map((filter) => (
-                <SmoothFilterChip
-                  key={filter.key}
-                  isActive={paymentStatusFilter === filter.key}
-                  label={filter.label}
-                  onPress={() => setPaymentStatusFilter(filter.key)}
-                  activeColor={colors.primary}
-                  inactiveBackground={colors.card}
-                  inactiveBorder={colors.border}
-                  inactiveText={colors.textSecondary}
-                />
-              ))}
-            </ScrollView>
+            <FilterDropdown
+              label="Payment status"
+              options={PAYMENT_STATUS_FILTERS.map((filter) => ({ value: filter.key, label: filter.label }))}
+              value={paymentStatusFilter}
+              emptyValue="all"
+              emptyLabel="All payments"
+              onChange={(value) => {
+                if (!Array.isArray(value)) setPaymentStatusFilter(value as AdminPaymentStatusFilter);
+              }}
+            />
 
             <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
               <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#064E3B' : '#ECFDF5' }]}>
@@ -2287,20 +2226,16 @@ export default function AdminDashboardPage() {
               </Text>
             )}
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }}>
-              {WITHDRAWAL_STATUS_FILTERS.map((filter) => (
-                <SmoothFilterChip
-                  key={filter.key}
-                  isActive={withdrawalStatusFilter === filter.key}
-                  label={filter.label}
-                  onPress={() => setWithdrawalStatusFilter(filter.key)}
-                  activeColor={colors.primary}
-                  inactiveBackground={colors.card}
-                  inactiveBorder={colors.border}
-                  inactiveText={colors.textSecondary}
-                />
-              ))}
-            </ScrollView>
+            <FilterDropdown
+              label="Withdrawal status"
+              options={WITHDRAWAL_STATUS_FILTERS.map((filter) => ({ value: filter.key, label: filter.label }))}
+              value={withdrawalStatusFilter}
+              emptyValue="all"
+              emptyLabel="All withdrawals"
+              onChange={(value) => {
+                if (!Array.isArray(value)) setWithdrawalStatusFilter(value as WithdrawalStatusFilter);
+              }}
+            />
 
             <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
               <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#064E3B' : '#ECFDF5' }]}>
@@ -2476,47 +2411,7 @@ export default function AdminDashboardPage() {
           </View>
 
           <View style={styles.actionCenterRow}>
-            <View style={[styles.actionCenterPanel, styles.actionCenterPanelLeft, { backgroundColor: colors.card, borderColor: colors.border, flex: Platform.OS === 'web' ? 5 : 1 }]}>
-              <View style={[styles.pulseHeader, { marginBottom: 16, flexWrap: 'wrap', gap: 10 }]}>
-                <View>
-                  <Text style={[styles.panelTitle, { color: colors.text, marginBottom: 0 }]}>Incident Resolution</Text>
-                  <Text style={[styles.panelSubtitle, { color: colors.textSecondary, marginBottom: 0 }]}>Open: {metrics.openIncidentsInRange} | Resolved: {metrics.resolvedIncidentsInRange} | Avg: {formatHours(metrics.avgIncidentResolutionHours)}</Text>
-                </View>
-                <View style={[styles.segmentControl, { borderColor: colors.border }]}>
-                  {(['all', 'booking', 'profile'] as IncidentTypeFilter[]).map((typeKey) => (
-                    <SmoothSegmentButton
-                      key={typeKey}
-                      isActive={incidentTypeFilter === typeKey}
-                      label={typeKey}
-                      onPress={() => setIncidentTypeFilter(typeKey)}
-                      activeColor={colors.primary}
-                      inactiveText={colors.textSecondary}
-                      textTransform="capitalize"
-                    />
-                  ))}
-                </View>
-              </View>
-
-              <View style={styles.tableHeader}>
-                <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary }]}>Incident Type</Text>
-                <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary }]}>Volume</Text>
-                <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, textAlign: 'right' }]}>Avg Resolution</Text>
-              </View>
-
-              {dashboardIncidentRows.length === 0 ? (
-                <Text style={[styles.emptyText, { color: colors.textSecondary, textAlign: 'left', paddingVertical: 12 }]}>No incident records for this filter and date range.</Text>
-              ) : (
-                dashboardIncidentRows.map((row: any) => (
-                  <View key={row.key} style={[styles.tableRow, { borderBottomColor: colors.border }]}>
-                    <Text style={[styles.tableCell, { color: colors.text }]}>{row.label}</Text>
-                    <Text style={[styles.tableCell, { color: colors.textSecondary }]}>{row.total} total ({row.open} open)</Text>
-                    <Text style={[styles.tableCell, { color: colors.textSecondary, textAlign: 'right' }]}>{formatHours(row.avgResolutionHours)}</Text>
-                  </View>
-                ))
-              )}
-            </View>
-
-            <View style={[styles.actionCenterPanel, styles.actionCenterPanelRight, { backgroundColor: colors.card, borderColor: colors.border, flex: Platform.OS === 'web' ? 3 : 1 }]}>
+            <View style={[styles.actionCenterPanel, { backgroundColor: colors.card, borderColor: colors.border, flex: 1 }]}>
               <View style={[styles.pulseHeader, { marginBottom: 16, alignItems: 'flex-start' }]}>
                 <View>
                   <Text style={[styles.panelTitle, { color: colors.text, marginBottom: 0 }]}>Peak Activity Times</Text>

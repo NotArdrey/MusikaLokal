@@ -1813,8 +1813,13 @@ const getFeedUploaderDisplayName = (item: any) => {
 };
 
 const getFeedAvatarUri = (item: any) => {
-  const uploaderAvatar = item?.__feedKind === "ai_card" ? getFeedUploaderAvatarUri(item) : "";
-  const avatar = uploaderAvatar || resolveFeedMediaUrl(item?.author_avatar || item?.avatar_url || item?.logo_url || "");
+  // Recommendation cards represent a listing. Their header always represents
+  // the person who uploaded that listing, never its cover image or team logo.
+  if (item?.__feedKind === "ai_card") {
+    return getFeedUploaderAvatarUri(item);
+  }
+
+  const avatar = resolveFeedMediaUrl(item?.author_avatar || item?.avatar_url || item?.logo_url || "");
   if (avatar) return avatar;
   return getFeedMediaUrls(item)[0] || getFeedFallbackImage(item?.type || "Artist", item?.id);
 };

@@ -9,6 +9,12 @@ import {
     scheduleGigPortfolioReview,
 } from '../_shared/gigPortfolioReview.ts'
 import { matchGigMemberRequirements, normalizeGigRosterMembers } from '../_shared/gigMemberRequirementMatching.ts'
+import {
+    applyMemberVerificationRecommendationGate,
+    attachGigMemberVerification,
+    queueGigMemberVerification,
+    scheduleGigMemberVerification,
+} from '../_shared/gigMemberVerificationService.ts'
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -117,7 +123,11 @@ const GIG_APPLICATION_SUMMARY_SELECT = `
     status,
     slot_type,
     created_at,
+    member_cv_status,
+    member_cv_required_count,
+    member_cv_submitted_count,
     ai_portfolio_review_consent,
+    member_verification_consent,
     performer_snapshot,
     cv_url,
     video_url,
@@ -170,7 +180,11 @@ function toApplicationSummary(application: any) {
         status: application.status,
         slot_type: application.slot_type,
         created_at: application.created_at,
+        member_cv_status: application.member_cv_status || 'not_required',
+        member_cv_required_count: Number(application.member_cv_required_count || 0),
+        member_cv_submitted_count: Number(application.member_cv_submitted_count || 0),
         ai_portfolio_review_consent: application.ai_portfolio_review_consent === true,
+        member_verification_consent: application.member_verification_consent === true,
         performer_snapshot: application.performer_snapshot || {},
         applicant: pickProfile(application.applicant),
         group: pickGroup(application.group),
@@ -610,7 +624,15 @@ const DEFAULT_RECOMMENDATION_SETTINGS = {
     },
 }
 
-const RECOMMENDATION_MODEL_VERSION = 'gig-fit-v9-member-slot-coverage'
+const RECOMMENDATION_MODEL_VERSION = 'gig-fit-v11-submitted-media-state'
+
+function recommendationSortRank(recommendation: any) {
+    const status = String(recommendation?.recommendation_status || '')
+    if (status === 'recommended') return 3
+    if (status === 'needs_review') return 2
+    if (status === 'not_eligible') return 1
+    return 0
+}
 
 function normalizeCriterionMode(value: unknown, fallback: RecommendationCriterionMode) {
     const normalized = String(value || '')
@@ -775,7 +797,7 @@ function getApplicationPerformer(application: any) {
         ]),
         location: String(group?.location || profile?.location || '').trim(),
         coordinates: readCoordinates(group) || readCoordinates(profile),
-        hasPortfolio: Boolean(application?.video_url || application?.cv_url),
+        hasPortfolio: Boolean(application?.video_url),
         members: normalizeGigRosterMembers(group?.members),
         matchingGroupType: String(detailedGroupType || group?.group_type || ''),
     }
@@ -1091,7 +1113,11 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
 
     return evaluations.map((item) => {
         const review: any = reviewByApplicationId.get(String(item.application_id))
-        if (!review || !['completed', 'partial'].includes(String(review.status || ''))) return item
+        if (!review || !['completed', 'partial', 'failed'].includes(String(review.status || ''))) return item
+        if (
+            review.status === 'failed' &&
+            typeof review?.source_summary?.media_submitted !== 'boolean'
+        ) return item
 
         const reviewEvidence = Array.isArray(review?.evidence) ? review.evidence : []
         const portfolioEvidence = reviewEvidence.find(
@@ -1104,6 +1130,8 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
             (entry: any) => String(entry?.criterion || '') === 'genre_requirement'
         )
         const portfolioResult = String(portfolioEvidence?.result || 'unclear')
+        const mediaSubmitted = review?.source_summary?.media_submitted === true
+        const videoProcessingStatus = String(review?.source_summary?.video_processing_status || '')
         const instrumentResult = String(instrumentEvidence?.result || 'unclear')
         const genreResult = String(genreEvidence?.result || 'unclear')
         const memberRequirementCoverage = item?.criteria_snapshot?.member_requirement_coverage || null
@@ -1207,7 +1235,7 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
             ? Math.max(0, Math.min(100, Math.round((earnedPoints / possiblePoints) * 100)))
             : null
         const isEligible = hasApplicableCriteria && !missingRequired
-        const recommendationStatus = !hasApplicableCriteria
+        const fitRecommendationStatus = !hasApplicableCriteria
             ? 'insufficient_data'
             : isEligible
             ? 'recommended'
@@ -1219,10 +1247,16 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
         } else if (cvStatus === 'uncertain') {
             notes.push('The uploaded document could not be confirmed as a CV or resume.')
         }
-        if (portfolioResult === 'not_supported') {
-            notes.push('The CV and video did not clearly show the required performance experience.')
+        if (videoProcessingStatus === 'processing_failed') {
+            notes.push('The performance video was submitted, but its automatic review was unavailable. Review it manually.')
+        } else if (portfolioResult === 'not_supported') {
+            notes.push(mediaSubmitted
+                ? 'A performance video was submitted, but its contents did not satisfy the configured evidence requirement.'
+                : 'No performance video was submitted.')
         } else if (portfolioResult === 'unclear') {
-            notes.push('The performance evidence still needs a manual review.')
+            notes.push(mediaSubmitted
+                ? "A performance video was submitted, but its contents couldn't be confirmed automatically."
+                : 'No performance video was submitted.')
         }
 
         const missingRequiredItems = [
@@ -1258,15 +1292,131 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
                 ? 'The required genre could not be confirmed.'
                 : missingRequiredItems[0] === 'location'
                 ? 'The required location range could not be confirmed.'
-                : 'The required performance experience could not be confirmed.'
+                : 'The required submitted performance evidence could not be confirmed.'
+        const cvNameCheck = review?.source_summary?.cv_name_check || null
+        const cvNameCheckStatus = String(cvNameCheck?.status || 'not_run')
+        const verificationStatus = cvNameCheckStatus === 'mismatch'
+            ? 'needs_verification'
+            : cvNameCheckStatus === 'match'
+            ? 'clear'
+            : 'unconfirmed'
+        const technicalReviewNeedsManualDecision =
+            videoProcessingStatus === 'processing_failed' &&
+            criteria.portfolio === 'required' &&
+            missingRequiredItems.length === 1 &&
+            missingRequiredItems[0] === 'portfolio'
+        const recommendationStatus = verificationStatus === 'needs_verification' || technicalReviewNeedsManualDecision
+            ? 'needs_review'
+            : fitRecommendationStatus
         const baseExplanation =
-            recommendationStatus === 'recommended'
+            verificationStatus === 'needs_verification'
+                ? 'Important verification needed: the name on the CV does not match the application. The gig-fit score is unchanged, but verify the document before deciding.'
+            : technicalReviewNeedsManualDecision
+                ? 'Automatic video review was unavailable. The match score is unchanged; review the submitted video manually before deciding.'
+            : fitRecommendationStatus === 'recommended'
                 ? 'This applicant meets the required gig criteria. Review the advisory score and details before deciding.'
-                : recommendationStatus === 'insufficient_data'
+                : fitRecommendationStatus === 'insufficient_data'
                 ? 'There is not enough configured information to calculate a reliable match.'
                 : Number(score) >= 70
                 ? `This applicant matches many preferences, but a required item still needs review. ${requiredMismatchExplanation}`
                 : requiredMismatchExplanation
+        const requirementResults: Array<Record<string, unknown>> = []
+        const pushRequirementResult = (
+            key: string,
+            label: string,
+            configured: boolean,
+            met: boolean,
+            source: string,
+            detail: string,
+            unclear = false,
+        ) => {
+            if (!configured) return
+            requirementResults.push({
+                key,
+                label,
+                status: met ? 'met' : unclear ? 'unclear' : 'not_met',
+                source,
+                detail,
+            })
+        }
+        const instrumentConfigured = criteria.instruments !== 'ignore' && (
+            Number(memberRequirementCoverage?.total_count || 0) > 0 ||
+            (Array.isArray(expected.instruments) && expected.instruments.length > 0)
+        )
+        const instrumentMet = Number(memberRequirementCoverage?.total_count || 0) > 0
+            ? Number(memberRequirementCoverage?.matched_count || 0) === Number(memberRequirementCoverage?.total_count || 0)
+            : hasMatched('Instrument or role fit')
+        const instrumentUnavailable = missingCriteria.some((label: string) =>
+            label.startsWith('Instrument or role fit') && /unavailable|could not be confirmed|not checked/i.test(label)
+        )
+        pushRequirementResult(
+            'instruments',
+            'Instrument or role fit',
+            instrumentConfigured,
+            instrumentMet,
+            Number(memberRequirementCoverage?.total_count || 0) > 0 ? 'group_roster' : 'profile',
+            instrumentMet
+                ? `Role requirement confirmed from ${Number(memberRequirementCoverage?.total_count || 0) > 0 ? 'the group roster' : 'the applicant profile'}.`
+                : Number(memberRequirementCoverage?.total_count || 0) > 0
+                ? 'The saved group roster does not cover every required member role.'
+                : instrumentUnavailable
+                ? 'The applicant profile does not contain enough role or instrument information to confirm this requirement.'
+                : 'The instruments or roles on the applicant profile do not match the gig requirement.',
+            instrumentUnavailable,
+        )
+        const genreConfigured = criteria.genres !== 'ignore' && Array.isArray(expected.genres) && expected.genres.length > 0
+        const genreMet = hasMatched('Genre fit')
+        const genreUnavailable = missingCriteria.some((label: string) =>
+            label.startsWith('Genre fit') && /unavailable|could not be confirmed|not checked/i.test(label)
+        )
+        pushRequirementResult(
+            'genres',
+            'Genre fit',
+            genreConfigured,
+            genreMet,
+            genreResult === 'supported' ? String(genreEvidence?.source || 'application_evidence') : 'profile',
+            genreMet
+                ? `Genre requirement confirmed from ${genreResult === 'supported' ? 'submitted application evidence' : 'the applicant profile'}.`
+                : genreUnavailable
+                ? 'The available profile and application evidence could not confirm the requested genre.'
+                : 'The declared applicant genres do not match the gig requirement.',
+            genreUnavailable,
+        )
+        const locationConfigured = criteria.location !== 'ignore' && settings.location_radius_km !== null
+        const locationMet = matchedCriteria.some((label: string) => label.startsWith('Within '))
+        const locationUnavailable = item.distance_km === null || item.distance_km === undefined
+        pushRequirementResult(
+            'location',
+            'Location range',
+            locationConfigured,
+            locationMet,
+            'stored_coordinates',
+            locationMet
+                ? `Stored coordinates place the applicant within ${settings.location_radius_km} km of the gig.`
+                : locationUnavailable
+                ? 'Stored coordinates are unavailable, so the location range could not be confirmed.'
+                : `Stored coordinates place the applicant outside the ${settings.location_radius_km} km range.`,
+            locationUnavailable,
+        )
+        const portfolioConfigured = criteria.portfolio !== 'ignore'
+        const portfolioMet = hasMatched('Submitted performance evidence fits the gig')
+        pushRequirementResult(
+            'portfolio',
+            'Submitted performance evidence',
+            portfolioConfigured,
+            portfolioMet,
+            'performance_video',
+            portfolioMet
+                ? 'The submitted performance video contains direct performance evidence.'
+                : !mediaSubmitted
+                ? 'No performance video was submitted.'
+                : videoProcessingStatus === 'processing_failed'
+                ? 'The performance video was submitted, but its automatic review was unavailable. Review it manually.'
+                : portfolioResult === 'not_supported'
+                ? 'The submitted performance video was reviewed but did not show evidence that satisfies this requirement.'
+                : "A performance video was submitted, but we couldn't confidently confirm the required performance evidence.",
+            videoProcessingStatus === 'processing_failed' || portfolioResult !== 'not_supported',
+        )
         return {
             ...item,
             score,
@@ -1277,6 +1427,17 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
             explanation: `${baseExplanation} ${notes.join(' ')}`.trim(),
             criteria_snapshot: {
                 ...item.criteria_snapshot,
+                fit_recommendation_status: fitRecommendationStatus,
+                identity_status: verificationStatus,
+                verification: {
+                    status: verificationStatus,
+                    severity: verificationStatus === 'needs_verification' ? 'major' : 'none',
+                    reason: verificationStatus === 'needs_verification'
+                        ? 'The name extracted from the CV does not match the application name.'
+                        : cvNameCheck?.summary || '',
+                    cv_name: cvNameCheck?.extracted_name || null,
+                },
+                requirement_results: requirementResults,
                 score_breakdown: {
                     earned_points: earnedPoints,
                     possible_points: possiblePoints,
@@ -1347,11 +1508,8 @@ async function attachGigApplicationRecommendations(
         .sort((left, right) => {
             const leftRecommendation = left.ai_recommendation
             const rightRecommendation = right.ai_recommendation
-            if (leftRecommendation?.is_eligible !== rightRecommendation?.is_eligible) {
-                return (
-                    Number(rightRecommendation?.is_eligible || false) - Number(leftRecommendation?.is_eligible || false)
-                )
-            }
+            const rankDifference = recommendationSortRank(rightRecommendation) - recommendationSortRank(leftRecommendation)
+            if (rankDifference !== 0) return rankDifference
             return Number(rightRecommendation?.score || 0) - Number(leftRecommendation?.score || 0)
         })
 }
@@ -1416,6 +1574,168 @@ async function notifyGigFeatureConsentRequest(supabaseClient: any, applicationId
             ),
         })
     }
+}
+
+const ORGANIZER_VISIBLE_MEMBER_CV_STATUSES = ['not_required', 'complete']
+
+function isOwnedMemberCvPath(path: unknown, userId: string) {
+    const normalized = String(path || '').trim().replace(/^\/+/, '')
+    return Boolean(normalized && normalized.startsWith(`${userId}/`))
+}
+
+async function loadGroupApplicationMembers(supabaseClient: any, applicationId: string) {
+    const { data, error } = await supabaseClient
+        .from('gig_application_members')
+        .select('id, application_id, group_id, group_member_id, roster_member_id, user_id, member_name_snapshot, role_snapshot, instrument_snapshot, cv_storage_bucket, cv_storage_path, cv_filename, cv_status, ai_review_consent, member_verification_consent, member_verification_consented_at, cv_submitted_at, ai_review_status, ai_review_result, created_at, updated_at')
+        .eq('application_id', applicationId)
+        .order('created_at', { ascending: true })
+    if (error) throw error
+    return data || []
+}
+
+async function attachOrganizerMemberCvs(supabaseClient: any, application: any) {
+    if (!application?.group_id || application?.member_cv_status !== 'complete') {
+        return { ...application, member_cvs: [] }
+    }
+
+    const memberRows = await loadGroupApplicationMembers(supabaseClient, application.id)
+    const memberCvs = await Promise.all(memberRows.map(async (member: any) => {
+        let signedUrl: string | null = null
+        if (member.cv_storage_bucket && member.cv_storage_path) {
+            const { data, error } = await supabaseClient.storage
+                .from(member.cv_storage_bucket)
+                .createSignedUrl(member.cv_storage_path, 15 * 60)
+            if (error) {
+                console.warn('gig_member_cv_signed_url_failed', {
+                    applicationId: application.id,
+                    memberId: member.id,
+                    message: error.message,
+                })
+            } else {
+                signedUrl = data?.signedUrl || null
+            }
+        }
+        return {
+            id: member.id,
+            user_id: member.user_id,
+            member_name: member.member_name_snapshot,
+            role: member.role_snapshot,
+            instrument: member.instrument_snapshot,
+            cv_filename: member.cv_filename,
+            cv_status: member.cv_status,
+            cv_submitted_at: member.cv_submitted_at,
+            ai_review_consent: member.ai_review_consent === true,
+            member_verification_consent: member.member_verification_consent === true,
+            ai_review_status: member.ai_review_status,
+            ai_review_result: member.ai_review_result || null,
+            cv_url: signedUrl,
+        }
+    }))
+    return { ...application, member_cvs: memberCvs }
+}
+
+async function notifyOrganizerOfCompletedGroupApplication(supabaseClient: any, application: any) {
+    const organizerId = application?.gig?.organizer_id
+    if (!organizerId) return
+    await insertCoreNotification(supabaseClient, {
+        user_id: organizerId,
+        type: 'info',
+        title: 'New Gig Application',
+        message: `${application?.group?.name || 'A group'} completed its application for "${application?.gig?.name || 'your gig'}" and is ready for review.`,
+        meta: buildNotificationRouteMeta(
+            '/manage_gig',
+            { id: application.gig_id, tab: 'Applicants' },
+            {
+                event_type: 'group_gig_application_completed',
+                gig_id: application.gig_id,
+                application_id: application.id,
+                applicant_id: application.applicant_id,
+                group_id: application.group_id,
+            }
+        ),
+    })
+}
+
+async function finalizeGroupMemberCvCollection(
+    supabaseClient: any,
+    application: any,
+    actorUserId: string,
+    supabaseUrl: string,
+) {
+    if (!application?.group_id || !application?.group) throw new Error('Group application not found')
+    if (application.group.owner_id !== actorUserId) throw new Error('Only the group leader can submit this application')
+    if (application.status !== 'pending') throw new Error('Only pending applications can be submitted')
+    if (application.member_cv_status === 'complete') return application
+
+    const members = await loadGroupApplicationMembers(supabaseClient, application.id)
+    const submittedCount = members.filter((member: any) => member.cv_status === 'submitted' && member.cv_storage_path).length
+    if (members.length === 0 || submittedCount !== members.length) {
+        throw new Error('Every group member must submit a CV before the application can be sent')
+    }
+
+    const completedAt = new Date().toISOString()
+    const { data: updated, error: updateError } = await supabaseClient
+        .from('gig_applications')
+        .update({
+            member_cv_status: 'complete',
+            member_cv_required_count: members.length,
+            member_cv_submitted_count: submittedCount,
+            member_cv_completed_at: completedAt,
+            leader_approval_status: 'approved',
+            leader_reviewed_at: completedAt,
+        })
+        .eq('id', application.id)
+        .in('member_cv_status', ['collecting', 'ready'])
+        .select('*, gig:gig_id(id, name, organizer_id), group:group_id(id, name, owner_id)')
+        .maybeSingle()
+    if (updateError) throw updateError
+    if (!updated) throw new Error('Application was already updated. Refresh and try again.')
+
+    await notifyOrganizerOfCompletedGroupApplication(supabaseClient, updated)
+
+    const submitterId = updated.submitted_by_user_id || updated.applicant_id
+    if (submitterId && submitterId !== actorUserId) {
+        await insertCoreNotification(supabaseClient, {
+            user_id: submitterId,
+            type: 'success',
+            title: 'Group Application Submitted',
+            message: `${updated.group?.name || 'Your group'} completed all member CVs and sent the application for "${updated.gig?.name || 'the gig'}".`,
+            meta: buildNotificationRouteMeta('/bookings', { tab: 'Pending' }, {
+                event_type: 'group_gig_application_completed',
+                application_id: updated.id,
+                gig_id: updated.gig_id,
+                group_id: updated.group_id,
+            }),
+        })
+    }
+
+    if (updated.ai_portfolio_review_consent === true) {
+        try {
+            await queueGigPortfolioReview(supabaseClient, updated.id)
+            await scheduleGigPortfolioReview(supabaseClient, updated.id, supabaseUrl)
+        } catch (reviewError) {
+            console.warn('group_member_cv_ai_review_queue_failed', {
+                applicationId: updated.id,
+                message: String((reviewError as any)?.message || reviewError),
+            })
+        }
+    }
+
+    if (updated.member_verification_consent === true) {
+        try {
+            const queued = await queueGigMemberVerification(supabaseClient, updated.id)
+            if (queued?.status === 'queued' || queued?.status === 'processing') {
+                await scheduleGigMemberVerification(supabaseClient, updated.id)
+            }
+        } catch (verificationError) {
+            console.warn('group_member_verification_queue_failed', {
+                applicationId: updated.id,
+                errorCode: 'member_verification_unavailable',
+            })
+        }
+    }
+
+    return updated
 }
 
 Deno.serve(async (req: Request) => {
@@ -1499,6 +1819,485 @@ Deno.serve(async (req: Request) => {
 
         const effectiveUserId = userId || authenticatedUserId
 
+        if (action === 'submit_group_gig_application') {
+            const {
+                gigId,
+                groupId,
+                pitchMessage,
+                videoUrl,
+                memberCvStoragePath,
+                memberCvFilename,
+                slotType,
+                aiPortfolioReviewConsent,
+                memberVerificationConsent,
+                aiReviewFrameUrl,
+                aiReviewFrameUrls,
+                videoCopyrightAcknowledged,
+                videoCopyrightStatus,
+                videoCopyrightReviewId,
+                videoCopyrightMetadata,
+            } = params
+
+            if (!gigId || !groupId || !slotType) {
+                return new Response(JSON.stringify({ error: 'gigId, groupId, and slotType are required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+            if (!isOwnedMemberCvPath(memberCvStoragePath, effectiveUserId)) {
+                return new Response(JSON.stringify({ error: 'Upload your own CV before starting the group application' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const [gigResult, groupResult, membershipResult, rosterResult] = await Promise.all([
+                supabaseClient.from('gigs').select('id, name, organizer_id, status').eq('id', gigId).maybeSingle(),
+                supabaseClient.from('groups').select('id, name, owner_id, group_type').eq('id', groupId).maybeSingle(),
+                supabaseClient.from('group_members').select('id, user_id, role').eq('group_id', groupId),
+                supabaseClient
+                    .from('group_roster_members')
+                    .select('id, user_id, member_name, member_role, instrument')
+                    .eq('group_id', groupId)
+                    .order('sort_order', { ascending: true }),
+            ])
+            if (gigResult.error) throw gigResult.error
+            if (groupResult.error) throw groupResult.error
+            if (membershipResult.error) throw membershipResult.error
+            if (rosterResult.error) throw rosterResult.error
+
+            const gigRecord = gigResult.data
+            const groupRecord = groupResult.data
+            if (!gigRecord || String(gigRecord.status || '').toLowerCase() !== 'open') {
+                return new Response(JSON.stringify({ error: 'This gig is not currently accepting applications' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
+                })
+            }
+            if (!groupRecord) {
+                return new Response(JSON.stringify({ error: 'Group not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                })
+            }
+
+            const membershipByUserId = new Map<string, any>()
+            for (const membership of membershipResult.data || []) {
+                if (membership?.user_id) membershipByUserId.set(String(membership.user_id), membership)
+            }
+            if (!membershipByUserId.has(groupRecord.owner_id)) {
+                membershipByUserId.set(groupRecord.owner_id, {
+                    id: null,
+                    user_id: groupRecord.owner_id,
+                    role: 'owner',
+                })
+            }
+            if (!membershipByUserId.has(effectiveUserId)) {
+                return new Response(JSON.stringify({ error: 'Only a current group member can start this application' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                })
+            }
+
+            const normalizedSlotType = String(slotType).trim().toLowerCase()
+            const normalizedGroupType = String(groupRecord.group_type || 'band').trim().toLowerCase()
+            if (
+                (normalizedGroupType === 'duo' && normalizedSlotType !== 'duo') ||
+                (normalizedGroupType !== 'duo' && normalizedSlotType !== 'band')
+            ) {
+                return new Response(JSON.stringify({ error: 'The selected slot does not match this group type' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
+                })
+            }
+
+            const participantUserIds = Array.from(membershipByUserId.keys())
+            const minimumMembers = normalizedGroupType === 'duo' ? 2 : 2
+            if (participantUserIds.length < minimumMembers) {
+                return new Response(JSON.stringify({
+                    error: 'Every performing member must join the group with a MusikaLokal account before the group can apply',
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
+                })
+            }
+
+            const { data: existingApplication, error: existingApplicationError } = await supabaseClient
+                .from('gig_applications')
+                .select('id')
+                .eq('gig_id', gigId)
+                .eq('group_id', groupId)
+                .in('status', ACTIVE_GIG_APPLICATION_STATUSES)
+                .limit(1)
+                .maybeSingle()
+            if (existingApplicationError) throw existingApplicationError
+            if (existingApplication) {
+                return new Response(JSON.stringify({ error: 'This group already has an active application for this gig' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
+                })
+            }
+
+            const { data: profiles, error: profilesError } = await supabaseClient
+                .from('profiles')
+                .select('id, full_name')
+                .in('id', participantUserIds)
+            if (profilesError) throw profilesError
+            const profileById = new Map((profiles || []).map((profile: any) => [String(profile.id), profile]))
+            const rosterByUserId = new Map<string, any>()
+            for (const rosterMember of rosterResult.data || []) {
+                if (rosterMember?.user_id && !rosterByUserId.has(String(rosterMember.user_id))) {
+                    rosterByUserId.set(String(rosterMember.user_id), rosterMember)
+                }
+            }
+
+            const now = new Date().toISOString()
+            const memberCvStatus = participantUserIds.length === 1 ? 'ready' : 'collecting'
+            const applicationPayload = {
+                applicant_id: effectiveUserId,
+                submitted_by_user_id: effectiveUserId,
+                gig_id: gigId,
+                group_id: groupId,
+                is_solo_application: false,
+                slot_type: normalizedSlotType,
+                leader_approval_status: groupRecord.owner_id === effectiveUserId ? 'approved' : 'pending',
+                pitch_message: String(pitchMessage || '').trim() || null,
+                video_url: String(videoUrl || '').trim() || null,
+                cv_url: null,
+                ai_portfolio_review_consent: aiPortfolioReviewConsent === true,
+                member_verification_consent: memberVerificationConsent === true,
+                ai_review_frame_url: aiPortfolioReviewConsent === true ? String(aiReviewFrameUrl || '').trim() || null : null,
+                ai_review_frame_urls: aiPortfolioReviewConsent === true && Array.isArray(aiReviewFrameUrls)
+                    ? aiReviewFrameUrls.slice(0, 3)
+                    : [],
+                video_copyright_acknowledged: videoCopyrightAcknowledged === true,
+                video_copyright_status: String(videoCopyrightStatus || 'not_required'),
+                video_copyright_review_id: videoCopyrightReviewId || null,
+                video_copyright_metadata: videoCopyrightMetadata && typeof videoCopyrightMetadata === 'object'
+                    ? videoCopyrightMetadata
+                    : {},
+                member_cv_status: memberCvStatus,
+                member_cv_required_count: participantUserIds.length,
+                member_cv_submitted_count: 1,
+                status: 'pending',
+            }
+
+            const { data: application, error: applicationError } = await supabaseClient
+                .from('gig_applications')
+                .insert(applicationPayload)
+                .select('*, gig:gig_id(id, name, organizer_id), group:group_id(id, name, owner_id)')
+                .single()
+            if (applicationError) throw applicationError
+
+            const memberRows = participantUserIds.map((participantUserId) => {
+                const membership = membershipByUserId.get(participantUserId)
+                const rosterMember = rosterByUserId.get(participantUserId)
+                const profile = profileById.get(participantUserId)
+                const isSubmitter = participantUserId === effectiveUserId
+                return {
+                    application_id: application.id,
+                    group_id: groupId,
+                    group_member_id: membership?.id || null,
+                    roster_member_id: rosterMember?.id || null,
+                    user_id: participantUserId,
+                    member_name_snapshot: String(
+                        rosterMember?.member_name || profile?.full_name || 'Group member'
+                    ).trim(),
+                    role_snapshot: String(rosterMember?.member_role || membership?.role || '').trim() || null,
+                    instrument_snapshot: String(rosterMember?.instrument || '').trim() || null,
+                    cv_storage_bucket: isSubmitter ? 'application-cvs' : null,
+                    cv_storage_path: isSubmitter ? String(memberCvStoragePath).trim().replace(/^\/+/, '') : null,
+                    cv_filename: isSubmitter ? String(memberCvFilename || 'CV').trim() : null,
+                    cv_status: isSubmitter ? 'submitted' : 'pending',
+                    ai_review_consent: isSubmitter && aiPortfolioReviewConsent === true,
+                    member_verification_consent: isSubmitter && memberVerificationConsent === true,
+                    cv_submitted_at: isSubmitter ? now : null,
+                }
+            })
+            const { error: memberInsertError } = await supabaseClient
+                .from('gig_application_members')
+                .insert(memberRows)
+            if (memberInsertError) {
+                await supabaseClient.from('gig_applications').delete().eq('id', application.id)
+                throw memberInsertError
+            }
+
+            for (const member of memberRows) {
+                if (member.user_id === effectiveUserId) continue
+                await insertCoreNotification(supabaseClient, {
+                    user_id: member.user_id,
+                    type: 'info',
+                    title: 'CV Needed for Group Application',
+                    message: `${groupRecord.name} is applying for "${gigRecord.name}". Upload your CV before the group leader can submit the application.`,
+                    meta: buildNotificationRouteMeta(
+                        '/group_application_cv',
+                        { applicationId: application.id },
+                        {
+                            event_type: 'group_application_member_cv_required',
+                            application_id: application.id,
+                            gig_id: gigId,
+                            group_id: groupId,
+                            cv_status: 'pending',
+                        }
+                    ),
+                })
+            }
+
+            return new Response(JSON.stringify({
+                application_id: application.id,
+                status: memberCvStatus,
+                required_count: participantUserIds.length,
+                submitted_count: 1,
+            }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 201,
+            })
+        }
+
+        if (action === 'fetch_member_cv_tasks') {
+            const { data: memberRows, error: memberError } = await supabaseClient
+                .from('gig_application_members')
+                .select(`
+                    id,
+                    application_id,
+                    user_id,
+                    member_name_snapshot,
+                    role_snapshot,
+                    instrument_snapshot,
+                    cv_filename,
+                    cv_status,
+                    ai_review_consent,
+                    cv_submitted_at,
+                    application:application_id(
+                        id,
+                        applicant_id,
+                        submitted_by_user_id,
+                        gig_id,
+                        group_id,
+                        status,
+                        member_cv_status,
+                        member_cv_required_count,
+                        member_cv_submitted_count,
+                        video_url,
+                        created_at,
+                        gig:gig_id(id, name, location, event_date),
+                        group:group_id(id, name, owner_id, group_type)
+                    )
+                `)
+                .eq('user_id', effectiveUserId)
+                .order('created_at', { ascending: false })
+            if (memberError) throw memberError
+
+            const tasks = (memberRows || [])
+                .filter((row: any) =>
+                    row?.application?.status === 'pending' &&
+                    ['collecting', 'ready'].includes(String(row?.application?.member_cv_status || ''))
+                )
+                .map((row: any) => ({
+                    ...row,
+                    can_finalize:
+                        row?.application?.member_cv_status === 'ready' &&
+                        row?.application?.group?.owner_id === effectiveUserId,
+                }))
+
+            return new Response(JSON.stringify(tasks), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
+        if (action === 'fetch_group_application_cv_status') {
+            const { applicationId } = params
+            if (!applicationId) {
+                return new Response(JSON.stringify({ error: 'applicationId is required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+            const { data: application, error: applicationError }: { data: any; error: any } = await supabaseClient
+                .from('gig_applications')
+                .select('id, applicant_id, submitted_by_user_id, gig_id, group_id, status, member_cv_status, member_cv_required_count, member_cv_submitted_count, video_url, created_at, gig:gig_id(id, name, location, event_date), group:group_id(id, name, owner_id, group_type)')
+                .eq('id', applicationId)
+                .maybeSingle()
+            if (applicationError) throw applicationError
+            if (!application?.group_id) {
+                return new Response(JSON.stringify({ error: 'Group application not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                })
+            }
+            const members = await loadGroupApplicationMembers(supabaseClient, applicationId)
+            const canView =
+                application.applicant_id === effectiveUserId ||
+                application.submitted_by_user_id === effectiveUserId ||
+                application.group?.owner_id === effectiveUserId ||
+                members.some((member: any) => member.user_id === effectiveUserId)
+            if (!canView) {
+                return new Response(JSON.stringify({ error: 'Forbidden' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                })
+            }
+            return new Response(JSON.stringify({
+                application,
+                members: members.map((member: any) => ({
+                    id: member.id,
+                    user_id: member.user_id,
+                    member_name: member.member_name_snapshot,
+                    role: member.role_snapshot,
+                    instrument: member.instrument_snapshot,
+                    cv_filename: member.user_id === effectiveUserId ? member.cv_filename : null,
+                    cv_status: member.cv_status,
+                    ai_review_consent: member.user_id === effectiveUserId ? member.ai_review_consent === true : null,
+                    member_verification_consent: member.user_id === effectiveUserId ? member.member_verification_consent === true : null,
+                    cv_submitted_at: member.cv_submitted_at,
+                    is_current_user: member.user_id === effectiveUserId,
+                })),
+                can_finalize:
+                    application.member_cv_status === 'ready' &&
+                    application.group?.owner_id === effectiveUserId,
+            }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
+        if (action === 'submit_member_cv') {
+            const { applicationId, cvStoragePath, cvFilename, aiReviewConsent, memberVerificationConsent } = params
+            if (!applicationId || !isOwnedMemberCvPath(cvStoragePath, effectiveUserId)) {
+                return new Response(JSON.stringify({ error: 'applicationId and your uploaded CV are required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+            const { data: memberRow, error: memberError } = await supabaseClient
+                .from('gig_application_members')
+                .select('id, application_id, cv_status')
+                .eq('application_id', applicationId)
+                .eq('user_id', effectiveUserId)
+                .maybeSingle()
+            if (memberError) throw memberError
+            if (!memberRow) {
+                return new Response(JSON.stringify({ error: 'You are not a member of this application roster' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                })
+            }
+            const { data: application, error: applicationError }: { data: any; error: any } = await supabaseClient
+                .from('gig_applications')
+                .select('id, applicant_id, submitted_by_user_id, gig_id, group_id, status, member_cv_status, member_cv_required_count, member_cv_submitted_count, ai_portfolio_review_consent, gig:gig_id(id, name, organizer_id), group:group_id(id, name, owner_id)')
+                .eq('id', applicationId)
+                .maybeSingle()
+            if (applicationError) throw applicationError
+            if (!application || application.status !== 'pending' || !['collecting', 'ready'].includes(application.member_cv_status)) {
+                return new Response(JSON.stringify({ error: 'This application is no longer collecting member CVs' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
+                })
+            }
+
+            const submittedAt = new Date().toISOString()
+            const { error: updateMemberError } = await supabaseClient
+                .from('gig_application_members')
+                .update({
+                    cv_storage_bucket: 'application-cvs',
+                    cv_storage_path: String(cvStoragePath).trim().replace(/^\/+/, ''),
+                    cv_filename: String(cvFilename || 'CV').trim(),
+                    cv_status: 'submitted',
+                    ai_review_consent: aiReviewConsent === true,
+                    member_verification_consent: memberVerificationConsent === true,
+                    cv_submitted_at: submittedAt,
+                    updated_at: submittedAt,
+                })
+                .eq('id', memberRow.id)
+            if (updateMemberError) throw updateMemberError
+
+            const members = await loadGroupApplicationMembers(supabaseClient, applicationId)
+            const submittedCount = members.filter((member: any) => member.cv_status === 'submitted' && member.cv_storage_path).length
+            const allSubmitted = members.length > 0 && submittedCount === members.length
+            const nextMemberCvStatus = allSubmitted ? 'ready' : 'collecting'
+            const { error: updateApplicationError } = await supabaseClient
+                .from('gig_applications')
+                .update({
+                    member_cv_status: nextMemberCvStatus,
+                    member_cv_required_count: members.length,
+                    member_cv_submitted_count: submittedCount,
+                })
+                .eq('id', applicationId)
+            if (updateApplicationError) throw updateApplicationError
+
+            if (allSubmitted && application.member_cv_status !== 'ready') {
+                await insertCoreNotification(supabaseClient, {
+                    user_id: application.group.owner_id,
+                    type: 'success',
+                    title: 'Group Application Ready',
+                    message: `Every member of ${application.group.name || 'your group'} submitted a CV for "${application.gig?.name || 'the gig'}". Review and send the application.`,
+                    meta: buildNotificationRouteMeta(
+                        '/group_application_cv',
+                        { applicationId },
+                        {
+                            event_type: 'group_application_ready_for_leader',
+                            application_id: applicationId,
+                            gig_id: application.gig_id,
+                            group_id: application.group_id,
+                            cv_status: 'ready',
+                        }
+                    ),
+                })
+            }
+
+            return new Response(JSON.stringify({
+                application_id: applicationId,
+                status: nextMemberCvStatus,
+                required_count: members.length,
+                submitted_count: submittedCount,
+            }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
+        if (action === 'finalize_group_application') {
+            const { applicationId } = params
+            if (!applicationId) {
+                return new Response(JSON.stringify({ error: 'applicationId is required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+            const { data: application, error: applicationError } = await supabaseClient
+                .from('gig_applications')
+                .select('*, gig:gig_id(id, name, organizer_id), group:group_id(id, name, owner_id)')
+                .eq('id', applicationId)
+                .maybeSingle()
+            if (applicationError) throw applicationError
+            if (!application) {
+                return new Response(JSON.stringify({ error: 'Application not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                })
+            }
+            try {
+                const finalized = await finalizeGroupMemberCvCollection(
+                    supabaseClient,
+                    application,
+                    effectiveUserId,
+                    supabaseUrl,
+                )
+                return new Response(JSON.stringify(finalized), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                })
+            } catch (finalizeError) {
+                const message = String((finalizeError as any)?.message || finalizeError)
+                const forbidden = message.includes('Only the group leader')
+                return new Response(JSON.stringify({ error: message }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: forbidden ? 403 : 409,
+                })
+            }
+        }
+
         if (action === 'request_ai_portfolio_review') {
             const { applicationId } = params
             if (!applicationId) {
@@ -1510,7 +2309,7 @@ Deno.serve(async (req: Request) => {
 
             const { data: application, error: applicationError } = await supabaseClient
                 .from('gig_applications')
-                .select('id, applicant_id, submitted_by_user_id, group_id, leader_approval_status, ai_portfolio_review_consent')
+                .select('id, applicant_id, submitted_by_user_id, group_id, leader_approval_status, member_cv_status, ai_portfolio_review_consent')
                 .eq('id', applicationId)
                 .maybeSingle()
             if (applicationError) throw applicationError
@@ -1532,6 +2331,18 @@ Deno.serve(async (req: Request) => {
                     status: 409,
                 })
             }
+            if (
+                application.group_id &&
+                !ORGANIZER_VISIBLE_MEMBER_CV_STATUSES.includes(String(application.member_cv_status || 'not_required'))
+            ) {
+                return new Response(JSON.stringify({
+                    application_id: applicationId,
+                    status: 'awaiting_member_cvs',
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 202,
+                })
+            }
             if (application.group_id && application.leader_approval_status === 'pending') {
                 return new Response(JSON.stringify({
                     application_id: applicationId,
@@ -1547,6 +2358,52 @@ Deno.serve(async (req: Request) => {
             return new Response(JSON.stringify({ application_id: applicationId, status: 'queued' }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 202,
+            })
+        }
+
+        if (action === 'request_member_verification') {
+            const { applicationId } = params
+            if (!applicationId) {
+                return new Response(JSON.stringify({ error: 'applicationId is required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+            const { data: application, error: applicationError } = await supabaseClient
+                .from('gig_applications')
+                .select('id, applicant_id, submitted_by_user_id, group_id, leader_approval_status, member_cv_status, member_verification_consent')
+                .eq('id', applicationId)
+                .maybeSingle()
+            if (applicationError) throw applicationError
+            if (!application) {
+                return new Response(JSON.stringify({ error: 'Application not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404,
+                })
+            }
+            if (application.applicant_id !== effectiveUserId && application.submitted_by_user_id !== effectiveUserId) {
+                return new Response(JSON.stringify({ error: 'Only the applicant who granted consent can request member verification' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403,
+                })
+            }
+            if (application.member_verification_consent !== true) {
+                return new Response(JSON.stringify({ error: 'Member verification consent is required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409,
+                })
+            }
+            if (application.group_id && (
+                !ORGANIZER_VISIBLE_MEMBER_CV_STATUSES.includes(String(application.member_cv_status || 'not_required')) ||
+                application.leader_approval_status === 'pending'
+            )) {
+                return new Response(JSON.stringify({ application_id: applicationId, status: 'awaiting_group_completion' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 202,
+                })
+            }
+            const queued = await queueGigMemberVerification(supabaseClient, applicationId)
+            if (queued?.status === 'queued' || queued?.status === 'processing') {
+                await scheduleGigMemberVerification(supabaseClient, applicationId)
+            }
+            return new Response(JSON.stringify({ application_id: applicationId, status: queued?.status || 'not_requested' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 202,
             })
         }
 
@@ -1589,6 +2446,7 @@ Deno.serve(async (req: Request) => {
                 .from('gig_applications')
                 .select(GIG_APPLICATION_SUMMARY_SELECT)
                 .eq('gig_id', gigId)
+                .in('member_cv_status', ORGANIZER_VISIBLE_MEMBER_CV_STATUSES)
                 .or('leader_approval_status.is.null,leader_approval_status.eq.approved')
                 .order('created_at', { ascending: false })
 
@@ -1629,6 +2487,12 @@ Deno.serve(async (req: Request) => {
                 return new Response(JSON.stringify({ error: 'Application not found' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 404,
+                })
+            }
+            if (!ORGANIZER_VISIBLE_MEMBER_CV_STATUSES.includes(String(applicationRecord.member_cv_status || 'not_required'))) {
+                return new Response(JSON.stringify({ error: 'Application is still collecting member CVs' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
                 })
             }
 
@@ -1686,6 +2550,10 @@ Deno.serve(async (req: Request) => {
                 (['completed', 'partial'].includes(reviewStatus) &&
                     reviewPipelineVersion !== GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION)
             )
+            const shouldResumeQueuedReview = applicationRecord.ai_portfolio_review_consent === true &&
+                !shouldRefreshReview &&
+                (String(reviewData?.cv_status || '') === 'queued' ||
+                    String(reviewData?.video_status || '') === 'queued')
             if (shouldRefreshReview) {
                 try {
                     await queueGigPortfolioReview(supabaseClient, applicationId)
@@ -1693,7 +2561,13 @@ Deno.serve(async (req: Request) => {
                     reviewData = {
                         ...(reviewData || {}),
                         status: 'queued',
-                        source_summary: { review_pipeline_version: GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION },
+                        cv_status: 'queued',
+                        video_status: 'queued',
+                        source_summary: {
+                            review_pipeline_version: GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION,
+                            cv_processing_status: 'queued',
+                            video_processing_status: 'queued',
+                        },
                         evidence: [],
                         overall_summary: '',
                         limitations: [],
@@ -1704,6 +2578,8 @@ Deno.serve(async (req: Request) => {
                         message: String((reviewRefreshError as any)?.message || reviewRefreshError),
                     })
                 }
+            } else if (shouldResumeQueuedReview) {
+                await scheduleGigPortfolioReview(supabaseClient, applicationId, supabaseUrl)
             }
 
             const [applicationWithHistory] = await attachPriorApplicationCounts(
@@ -1728,12 +2604,28 @@ Deno.serve(async (req: Request) => {
                 })
             }
 
+            const applicationWithMemberCvs = await attachOrganizerMemberCvs(
+                supabaseClient,
+                applicationWithHistory,
+            )
+
+            const applicationWithVerification = await attachGigMemberVerification(supabaseClient, {
+                ...applicationWithMemberCvs,
+                ai_portfolio_review: reviewData,
+                ai_recommendation: recommendationData,
+            })
+            const verificationNextPollAt = Date.parse(String(applicationWithVerification.member_verification?.next_poll_at || ''))
+            const verificationStartedAt = Date.parse(String(applicationWithVerification.member_verification?.started_at || ''))
+            const verificationPollIsDue = Number.isFinite(verificationNextPollAt)
+                ? verificationNextPollAt <= Date.now()
+                : !Number.isFinite(verificationStartedAt) || verificationStartedAt <= Date.now() - 30_000
+            if (applicationWithVerification.member_verification?.status === 'processing' && verificationPollIsDue) {
+                await scheduleGigMemberVerification(supabaseClient, applicationId)
+            }
+            const gatedApplication = applyMemberVerificationRecommendationGate(applicationWithVerification)
+
             return new Response(
-                JSON.stringify({
-                    ...applicationWithHistory,
-                    ai_portfolio_review: reviewData,
-                    ai_recommendation: recommendationData,
-                }),
+                JSON.stringify(gatedApplication),
                 {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 200,
@@ -1785,6 +2677,7 @@ Deno.serve(async (req: Request) => {
                 .select(GIG_APPLICATION_SELECT)
                 .in('gig_id', allowedGigIds)
                 .eq('status', 'pending')
+                .in('member_cv_status', ORGANIZER_VISIBLE_MEMBER_CV_STATUSES)
                 .or('leader_approval_status.is.null,leader_approval_status.eq.approved')
                 .order('created_at', { ascending: false })
 
@@ -1871,16 +2764,23 @@ Deno.serve(async (req: Request) => {
                 .sort((left: any, right: any) => {
                     const leftRecommendation = left.ai_recommendation
                     const rightRecommendation = right.ai_recommendation
-                    if (leftRecommendation?.is_eligible !== rightRecommendation?.is_eligible) {
-                        return (
-                            Number(rightRecommendation?.is_eligible || false) -
-                            Number(leftRecommendation?.is_eligible || false)
-                        )
-                    }
+                    const rankDifference = recommendationSortRank(rightRecommendation) - recommendationSortRank(leftRecommendation)
+                    if (rankDifference !== 0) return rankDifference
                     return Number(rightRecommendation?.score || 0) - Number(leftRecommendation?.score || 0)
                 })
 
-            return new Response(JSON.stringify(rankedApplications), {
+            const applicationsWithVerification = await Promise.all(
+                rankedApplications.map((application: any) => attachGigMemberVerification(supabaseClient, application))
+            )
+            const gatedApplications = applicationsWithVerification
+                .map(applyMemberVerificationRecommendationGate)
+                .sort((left: any, right: any) => {
+                    const rankDifference = recommendationSortRank(right.ai_recommendation) - recommendationSortRank(left.ai_recommendation)
+                    if (rankDifference !== 0) return rankDifference
+                    return Number(right.ai_recommendation?.score || 0) - Number(left.ai_recommendation?.score || 0)
+                })
+
+            return new Response(JSON.stringify(gatedApplications), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
             })
@@ -2126,7 +3026,7 @@ Deno.serve(async (req: Request) => {
                 )
             }
 
-            const { data: rosterRecord, error: rosterError } = await supabaseClient
+            const { data: rosterRecord, error: rosterError }: { data: any; error: any } = await supabaseClient
                 .from('production_team_roster')
                 .select(
                     `
@@ -2393,7 +3293,7 @@ Deno.serve(async (req: Request) => {
                 })
             }
 
-            const { data: appDetails, error: appError } = await supabaseClient
+            const { data: appDetails, error: appError }: { data: any; error: any } = await supabaseClient
                 .from('gig_applications')
                 .select(ORGANIZER_APPLICATION_SELECT)
                 .eq('id', applicationId)
@@ -2414,6 +3314,13 @@ Deno.serve(async (req: Request) => {
                 return new Response(JSON.stringify({ error: 'Forbidden' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 403,
+                })
+            }
+
+            if (!ORGANIZER_VISIBLE_MEMBER_CV_STATUSES.includes(String(appDetails.member_cv_status || 'not_required'))) {
+                return new Response(JSON.stringify({ error: 'Application is still collecting member CVs' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
                 })
             }
 
@@ -2548,7 +3455,7 @@ Deno.serve(async (req: Request) => {
                 })
             }
 
-            const { data: appDetails, error: appError } = await supabaseClient
+            const { data: appDetails, error: appError }: { data: any; error: any } = await supabaseClient
                 .from('gig_applications')
                 .select(
                     `
@@ -2559,6 +3466,7 @@ Deno.serve(async (req: Request) => {
                     submitted_by_user_id,
                     status,
                     leader_approval_status,
+                    member_cv_status,
                     ai_portfolio_review_consent,
                     gig:gig_id(id, name, organizer_id),
                     group:group_id(id, name, owner_id)
@@ -2596,6 +3504,37 @@ Deno.serve(async (req: Request) => {
                         status: 409,
                     }
                 )
+            }
+
+            if (normalizedDecision === 'approved' && appDetails.member_cv_status === 'collecting') {
+                return new Response(JSON.stringify({
+                    error: 'Every group member must submit a CV before this application can be approved',
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
+                })
+            }
+
+            if (normalizedDecision === 'approved' && appDetails.member_cv_status === 'ready') {
+                try {
+                    const finalized = await finalizeGroupMemberCvCollection(
+                        supabaseClient,
+                        appDetails,
+                        effectiveUserId,
+                        supabaseUrl,
+                    )
+                    return new Response(JSON.stringify(finalized), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 200,
+                    })
+                } catch (finalizeError) {
+                    return new Response(JSON.stringify({
+                        error: String((finalizeError as any)?.message || finalizeError),
+                    }), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    })
+                }
             }
 
             if (appDetails.leader_approval_status && appDetails.leader_approval_status !== 'pending') {
@@ -2748,7 +3687,7 @@ Deno.serve(async (req: Request) => {
         if (action === 'cancel_application') {
             const { applicationId } = params
 
-            const { data: existingApp, error: fetchError } = await supabaseClient
+            const { data: existingApp, error: fetchError }: { data: any; error: any } = await supabaseClient
                 .from('gig_applications')
                 .select(
                     'applicant_id, submitted_by_user_id, gig_id, group_id, production_team_id, group:groups!group_id(owner_id), gig:gig_id(name)'

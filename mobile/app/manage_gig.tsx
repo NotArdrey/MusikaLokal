@@ -216,12 +216,15 @@ export default function GigDetailsScreen() {
 
   const Alert = { alert: showAlertNative };
 
-  const loadApplicantDetails = async (application: any) => {
+  const loadApplicantDetails = async (application: any, options?: { silent?: boolean }) => {
     if (!application?.id) return;
-    setSelectedApplicantSummary(application);
-    setSelectedApplicantDetails(null);
-    setApplicantDetailsError(null);
-    setApplicantDetailsLoading(true);
+    const silent = options?.silent === true;
+    if (!silent) {
+      setSelectedApplicantSummary(application);
+      setSelectedApplicantDetails(null);
+      setApplicantDetailsError(null);
+      setApplicantDetailsLoading(true);
+    }
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -250,9 +253,11 @@ export default function GigDetailsScreen() {
       if (data?.error) throw new Error(data.error);
       setSelectedApplicantDetails({ ...data, ai_recommendation: data?.ai_recommendation || application.ai_recommendation || null });
     } catch (detailsError: any) {
-      setApplicantDetailsError(detailsError?.message || "Applicant details could not be loaded.");
+      if (!silent) {
+        setApplicantDetailsError(detailsError?.message || "Applicant details could not be loaded.");
+      }
     } finally {
-      setApplicantDetailsLoading(false);
+      if (!silent) setApplicantDetailsLoading(false);
     }
   };
 
@@ -1470,7 +1475,7 @@ export default function GigDetailsScreen() {
                         style={[styles.inviteBtn, { backgroundColor: colors.inputBackground }]}
                       >
                         <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
-                        <Text style={[styles.inviteBtnText, { color: colors.primary }]}>AI Match Review</Text>
+                        <Text style={[styles.inviteBtnText, { color: colors.primary }]}>Match settings</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         activeOpacity={1}
@@ -1627,10 +1632,16 @@ export default function GigDetailsScreen() {
                           {aiRecommendation?.score !== null && aiRecommendation?.score !== undefined ? (
                             <View style={[styles.aiMatchReviewScoreRow, { backgroundColor: colors.inputBackground }]}>
                               <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
-                              <Text style={[styles.aiMatchReviewScoreLabel, { color: colors.text }]}>AI Match Review Score</Text>
+                              <Text style={[styles.aiMatchReviewScoreLabel, { color: colors.text }]}>Match to gig requirements</Text>
                               <Text style={[styles.aiMatchReviewScoreValue, { color: colors.primary }]}>
                                 {aiRecommendation.score == null ? "N/A" : `${Math.round(Number(aiRecommendation.score))}%`}
                               </Text>
+                            </View>
+                          ) : null}
+                          {aiRecommendation?.recommendation_status === "needs_review" ? (
+                            <View style={[styles.aiMatchReviewScoreRow, { backgroundColor: "#F59E0B18", borderWidth: 1, borderColor: "#F59E0B" }]}>
+                              <Ionicons name="alert-circle" size={17} color="#B45309" />
+                              <Text style={[styles.aiMatchReviewScoreLabel, { color: "#B45309", flex: 1 }]}>Important verification needed</Text>
                             </View>
                           ) : null}
                           <TouchableOpacity
@@ -1792,7 +1803,7 @@ export default function GigDetailsScreen() {
         error={applicantDetailsError}
         colors={colors}
         onClose={closeApplicantDetails}
-        onRetry={() => selectedApplicantSummary && loadApplicantDetails(selectedApplicantSummary)}
+        onRetry={(options) => selectedApplicantSummary && loadApplicantDetails(selectedApplicantSummary, options)}
         onOpenMedia={openMediaOrExternal}
         onAccept={(applicationId) => {
           closeApplicantDetails();

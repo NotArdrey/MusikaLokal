@@ -190,7 +190,6 @@ function getRecordingRule(source: any) {
   const songsPerBlock = toPositiveInteger(source?.recording_songs_per_block) ?? 1;
   const hoursPerBlock =
     toPositiveNumber(source?.recording_hours_per_block) ??
-    toPositiveNumber(source?.min_booking_duration_hours) ??
     3;
 
   return {
@@ -3895,6 +3894,20 @@ serve(async (req: Request) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
           status: 404,
         });
+      }
+
+      // Keep a gig's discoverability in sync even when an older database
+      // trigger is present. In particular, withdrawing the final accepted or
+      // approved performer must reopen a capacity-closed gig for Feed/Search.
+      if (table === "gig_applications" && data.gig_id) {
+        const { error: refreshGigSlotsError } = await supabaseAdmin.rpc(
+          "refresh_gig_slot_counts",
+          { p_gig_id: data.gig_id },
+        );
+
+        if (refreshGigSlotsError) {
+          console.error("Failed to refresh gig capacity after application update:", refreshGigSlotsError);
+        }
       }
 
       if (studioBalanceSettlement) {

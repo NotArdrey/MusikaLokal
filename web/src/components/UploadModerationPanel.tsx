@@ -57,9 +57,20 @@ type ButtonTone = "default" | "primary" | "danger";
 type EvidenceView = "original" | "frame";
 type UploadModerationStatus = "all" | "pending_review" | "reviewed";
 
+export type UploadModerationStatusCounts = {
+  all: number;
+  pending_review: number;
+  approved: number;
+  rejected: number;
+};
+
 type UploadModerationPanelProps = {
   filterStatus?: UploadModerationStatus;
   searchQuery?: string;
+  caseStatusFilter?: "all" | "pending_review" | "approved" | "rejected";
+  showHeader?: boolean;
+  sort?: "newest" | "oldest";
+  onStatusCountsChange?: (counts: UploadModerationStatusCounts) => void;
 };
 
 const label = (value: string) => value.replace(/_/g, " ");
@@ -83,6 +94,10 @@ async function invoke(action: string, params: Record<string, unknown>) {
 export default function UploadModerationPanel({
   filterStatus = "all",
   searchQuery = "",
+  caseStatusFilter = "all",
+  showHeader = true,
+  sort = "newest",
+  onStatusCountsChange,
 }: UploadModerationPanelProps) {
   const { colors, isDark } = useTheme();
   const { height, width } = useWindowDimensions();
@@ -257,7 +272,6 @@ export default function UploadModerationPanel({
   const viewerHeight = Math.max(260, height - (isCompact ? 140 : 180));
   const visibleCases = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    if (!query) return cases;
     return cases.filter((entry) => [
       entry.file_name,
       entry.reason,
@@ -266,8 +280,24 @@ export default function UploadModerationPanel({
       entry.uploader?.email,
       entry.uploader_name,
       entry.uploader_email,
-    ].some((value) => String(value || "").toLowerCase().includes(query)));
-  }, [cases, searchQuery]);
+    ].some((value) => String(value || "").toLowerCase().includes(query)) &&
+      (caseStatusFilter === "all" || entry.status === caseStatusFilter))
+      .sort((left, right) => {
+        const difference = new Date(right.created_at).getTime() - new Date(left.created_at).getTime();
+        return sort === "newest" ? difference : -difference;
+      });
+  }, [caseStatusFilter, cases, searchQuery, sort]);
+
+  const statusCounts = useMemo<UploadModerationStatusCounts>(() => ({
+    all: cases.length,
+    pending_review: cases.filter((entry) => entry.status === "pending_review").length,
+    approved: cases.filter((entry) => entry.status === "approved").length,
+    rejected: cases.filter((entry) => entry.status === "rejected").length,
+  }), [cases]);
+
+  useEffect(() => {
+    onStatusCountsChange?.(statusCounts);
+  }, [onStatusCountsChange, statusCounts]);
 
   const getCaseStatusTone = (caseStatus: string) => {
     if (caseStatus === "pending_review") {
@@ -275,7 +305,7 @@ export default function UploadModerationPanel({
         backgroundColor: isDark ? "#422006" : "#FFF7E6",
         borderColor: "#F59E0B",
         color: isDark ? "#FCD34D" : "#B45309",
-        label: "Active",
+        label: "Needs review",
       };
     }
     if (caseStatus === "approved") {
@@ -296,7 +326,7 @@ export default function UploadModerationPanel({
 
   return (
     <View style={styles.reportListSection} testID="admin-upload-moderation">
-      <View style={[styles.reportListHeader, { borderBottomColor: colors.border }]}>
+      {showHeader ? <View style={[styles.reportListHeader, { borderBottomColor: colors.border }]}>
         <View style={styles.reportListHeaderCopy}>
           <View style={styles.reportListTitleRow}>
             <Ionicons name="shield-checkmark-outline" size={16} color={colors.primary} />
@@ -318,7 +348,7 @@ export default function UploadModerationPanel({
             <Ionicons name="refresh-outline" size={15} color={colors.text} />
           </TouchableOpacity>
         </View>
-      </View>
+      </View> : null}
 
       {error && !selected ? (
         <View style={[styles.alert, { borderColor: "#FCA5A5", backgroundColor: isDark ? "#450A0A" : "#FEF2F2" }]}>
@@ -359,6 +389,10 @@ export default function UploadModerationPanel({
                   {new Date(entry.created_at).toLocaleString()}
                 </Text>
               </View>
+              <Text style={[styles.reportMetaText, { color: colors.textSecondary }]}>
+                <Text style={[styles.reportMetaLabel, { color: colors.text }]}>Source: </Text>
+                AI screened upload
+              </Text>
               <Text style={[styles.reportMetaText, { color: colors.textSecondary }]}>
                 <Text style={[styles.reportMetaLabel, { color: colors.text }]}>Media: </Text>
                 {label(entry.media_kind)}

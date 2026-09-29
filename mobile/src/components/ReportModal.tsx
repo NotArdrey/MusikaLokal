@@ -97,6 +97,14 @@ export const REPORT_REASONS_BY_TYPE: Record<string, string[]> = {
         'Hate speech',
         'Other',
     ],
+    booking: [
+        'Studio unavailable or booking not honored',
+        'Service was not provided as agreed',
+        'Payment or refund problem',
+        'Safety or conduct concern',
+        'Incorrect booking details or charges',
+        'Other',
+    ],
 };
 
 // Fallback list (generic)
@@ -137,6 +145,7 @@ export default function ReportModal({
         ? REPORT_REASONS_BY_TYPE[reportType.toLowerCase()]
         : REPORT_REASONS;
     const isOtherReason = selectedReason?.trim().toLowerCase() === 'other';
+    const isBookingReport = reportType?.trim().toLowerCase() === 'booking';
     const trimmedDetails = details.trim();
 
     const handleClose = () => {
@@ -247,7 +256,7 @@ export default function ReportModal({
                                     : "What is the issue?"}
                             </Text>
                             <Text style={[styles.subheadingNote, { color: colors.textSecondary }]}>
-                                Your report is anonymous. We will not share your identity with anyone.
+                                Only the admin team can see who submitted this report.
                             </Text>
 
                             {/* Reasons List */}
@@ -302,8 +311,8 @@ export default function ReportModal({
                                     );
                                 })}
 
-                                {/* Additional details field shown when "Other" is selected */}
-                                {isOtherReason && (
+                                {/* Booking reports always accept context; "Other" reports require it. */}
+                                {(isOtherReason || isBookingReport) && (
                                     <TextInput
                                         testID="report-details-input"
                                         accessibilityLabel="report-details-input"
@@ -315,7 +324,7 @@ export default function ReportModal({
                                                 borderColor: isDark ? '#374151' : '#E5E7EB',
                                             },
                                         ]}
-                                        placeholder="Type the reason for your report"
+                                        placeholder={isOtherReason ? "Describe what happened" : "Describe what happened (optional)"}
                                         placeholderTextColor={colors.textSecondary}
                                         multiline
                                         numberOfLines={3}

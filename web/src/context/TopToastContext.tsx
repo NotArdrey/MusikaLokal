@@ -442,17 +442,22 @@ const styles = StyleSheet.create({
   textContainer: {
     flex: 1,
     marginLeft: IS_WEB ? 10 : 12,
-    marginRight: 8,
+    marginRight: IS_WEB ? 18 : 26,
+    alignItems: "center",
   },
   title: {
     fontSize: IS_WEB ? 13 : 14,
     fontFamily: "Poppins_600SemiBold",
+    alignSelf: "stretch",
+    textAlign: "center",
   },
   message: {
     marginTop: IS_WEB ? 1 : 3,
     fontSize: IS_WEB ? 11 : 12,
     lineHeight: IS_WEB ? 15 : 18,
     fontFamily: "Poppins_400Regular",
+    alignSelf: "stretch",
+    textAlign: "center",
   },
   closeIcon: {
     opacity: 0.85,

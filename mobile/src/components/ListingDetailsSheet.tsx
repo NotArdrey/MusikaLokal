@@ -555,6 +555,7 @@ const ListingDetailsSheet = forwardRef<
   const [pitchMessage, setPitchMessage] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [aiPortfolioReviewConsent, setAiPortfolioReviewConsent] = useState(false);
+  const [memberVerificationConsent, setMemberVerificationConsent] = useState(false);
   const [videoReviewFrameUrl, setVideoReviewFrameUrl] = useState("");
   const [videoReviewFrameUrls, setVideoReviewFrameUrls] = useState<string[]>([]);
   const [videoCopyrightAcknowledged, setVideoCopyrightAcknowledged] = useState(false);
@@ -2067,6 +2068,7 @@ const ListingDetailsSheet = forwardRef<
     cvUrl,
     videoUrl,
     aiPortfolioReviewConsent,
+    memberVerificationConsent,
     videoReviewFrameUrl,
     videoReviewFrameUrls,
     videoCopyrightAcknowledged,
@@ -2083,6 +2085,7 @@ const ListingDetailsSheet = forwardRef<
     setPitchMessage,
     setVideoUrl,
     setAiPortfolioReviewConsent,
+    setMemberVerificationConsent,
     setVideoReviewFrameUrl,
     setVideoReviewFrameUrls,
     setVideoCopyrightAcknowledged,
@@ -3845,6 +3848,8 @@ const ListingDetailsSheet = forwardRef<
       setVideoUrl={setVideoUrl}
       aiPortfolioReviewConsent={aiPortfolioReviewConsent}
       setAiPortfolioReviewConsent={setAiPortfolioReviewConsent}
+      memberVerificationConsent={memberVerificationConsent}
+      setMemberVerificationConsent={setMemberVerificationConsent}
       setVideoReviewFrameUrl={setVideoReviewFrameUrl}
       setVideoReviewFrameUrls={setVideoReviewFrameUrls}
       videoCopyrightDecision={videoCopyrightDecision}
@@ -3894,6 +3899,8 @@ const ListingDetailsSheet = forwardRef<
       setVideoUrl={setVideoUrl}
       aiPortfolioReviewConsent={aiPortfolioReviewConsent}
       setAiPortfolioReviewConsent={setAiPortfolioReviewConsent}
+      memberVerificationConsent={memberVerificationConsent}
+      setMemberVerificationConsent={setMemberVerificationConsent}
       setVideoReviewFrameUrl={setVideoReviewFrameUrl}
       setVideoReviewFrameUrls={setVideoReviewFrameUrls}
       videoCopyrightDecision={null}

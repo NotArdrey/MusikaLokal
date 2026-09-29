@@ -1,0 +1,34 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RekognitionCollection",
+      "Effect": "Allow",
+      "Action": [
+        "rekognition:DeleteFaces",
+        "rekognition:IndexFaces",
+        "rekognition:StartFaceSearch"
+      ],
+      "Resource": "arn:aws:rekognition:ap-southeast-2:<AWS_ACCOUNT_ID>:collection/musikalokal-members-dev"
+    },
+    {
+      "Sid": "RekognitionJobAndImage",
+      "Effect": "Allow",
+      "Action": [
+        "rekognition:DetectFaces",
+        "rekognition:GetFaceSearch"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "TemporaryVideoObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::musikalokal-rekognition-dev-92826/rekognition-input/*"
+    }
+  ]
+}

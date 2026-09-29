@@ -53,6 +53,51 @@ const formatTime12 = (time24: string) => {
   return `${h12}:${minutes} ${suffix}`;
 };
 
+const getConsecutiveDurationOptions = (
+  startSlot: string,
+  availableSlots: string[],
+): string[] => {
+  const toMinutes = (value: string): number | null => {
+    const match = String(value).match(/^(\d{1,2}):(\d{2})/);
+    if (!match) return null;
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+    return hours * 60 + minutes;
+  };
+  const toTime = (minutes: number) =>
+    `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  const startMinutes = toMinutes(startSlot);
+  if (startMinutes === null) return [];
+
+  const normalizedMinutes = availableSlots
+    .map(toMinutes)
+    .filter((value): value is number => value !== null)
+    .sort((a, b) => a - b);
+  const availableSet = new Set(normalizedMinutes.map(toTime));
+  const positiveGaps = normalizedMinutes
+    .slice(1)
+    .map((value, index) => value - normalizedMinutes[index])
+    .filter((gap) => gap > 0 && gap <= 60);
+  const incrementMinutes = positiveGaps.length > 0 ? Math.min(...positiveGaps) : 60;
+  const durations: string[] = [];
+
+  for (let duration = 1; duration <= 12; duration += 1) {
+    const endMinutes = startMinutes + duration * 60;
+    let isContinuous = true;
+    for (let cursor = startMinutes; cursor < endMinutes; cursor += incrementMinutes) {
+      if (!availableSet.has(toTime(cursor))) {
+        isContinuous = false;
+        break;
+      }
+    }
+    if (!isContinuous) break;
+    durations.push(String(duration));
+  }
+
+  return durations;
+};
+
 const toLocalDateKey = (value: Date) => {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, "0");
@@ -727,25 +772,18 @@ const BookingControls = ({
                                       startDate.setHours(parseInt(hours), parseInt(minutes));
                                       setDate(startDate);
 
-                                      const availableSlotSet = new Set(availableSlots);
-                                      let maxDur = 0;
-                                      const current = new Date(startDate);
-
-                                      for (let i = 0; i < 12; i++) {
-                                        const currentSlot = current.toTimeString().slice(0, 5);
-                                        if (i > 0 && !availableSlotSet.has(currentSlot)) break;
-                                        maxDur++;
-                                        current.setHours(current.getHours() + 1);
-                                      }
-
-                                      const validDurs: string[] = [];
-                                      for (let i = 1; i <= maxDur; i++) validDurs.push(i.toString());
+                                      const validDurs = getConsecutiveDurationOptions(
+                                        slot,
+                                        availableSlots,
+                                      );
                                       setValidEndTimes(validDurs);
 
-                                      if (maxDur >= 1) {
+                                      if (validDurs.length > 0) {
                                         const newEndDate = new Date(startDate);
                                         newEndDate.setHours(startDate.getHours() + 1);
                                         setEndTime(newEndDate);
+                                      } else {
+                                        setEndTime(null);
                                       }
                                     }}
                                   >

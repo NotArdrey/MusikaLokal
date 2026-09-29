@@ -1,6 +1,7 @@
 type CacheVersion = string | number | Date | null | undefined;
 
 export interface SupabaseTransformOptions {
+  transform?: boolean;
   width?: number;
   height?: number;
   quality?: number;
@@ -114,6 +115,12 @@ export const optimizeSupabaseImageUrl = (
   }
 
   const pathname = parsed.pathname;
+
+  if (!options.transform) {
+    const version = normalizeCacheVersion(options.cacheVersion);
+    if (version) parsed.searchParams.set("v", version);
+    return parsed.toString();
+  }
 
   if (pathname.includes(OBJECT_PUBLIC_SEGMENT)) {
     const publicPath = pathname.split(OBJECT_PUBLIC_SEGMENT)[1];

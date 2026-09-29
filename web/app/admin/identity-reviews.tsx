@@ -21,7 +21,7 @@ import InAppMediaViewer from '../../src/components/InAppMediaViewer';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
-import { invalidateAdminPageCache } from './_cache';
+import { invalidateAdminPageCache } from '../../src/admin/cache';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
