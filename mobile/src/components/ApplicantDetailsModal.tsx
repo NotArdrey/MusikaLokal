@@ -3,7 +3,6 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Image,
   Modal,
   SafeAreaView,
   ScrollView,
@@ -145,6 +144,138 @@ const evidenceSourceLabel = (value: unknown) => {
   return labels[String(value || "")] || "Application";
 };
 
+type ReviewTone = "confirmed" | "review" | "failed" | "neutral";
+
+const toneMeta = (tone: ReviewTone) => {
+  if (tone === "confirmed") return { color: "#059669", soft: "#ECFDF5", icon: "checkmark-circle" as const };
+  if (tone === "failed") return { color: "#DC2626", soft: "#FEF2F2", icon: "close-circle" as const };
+  if (tone === "review") return { color: "#D97706", soft: "#FFFBEB", icon: "warning" as const };
+  return { color: "#7C3AED", soft: "#F5F3FF", icon: "information-circle" as const };
+};
+
+function SummaryMetric({ value, label, tone }: { value: number; label: string; tone: ReviewTone }) {
+  const meta = toneMeta(tone);
+  return (
+    <View style={[styles.summaryMetric, { backgroundColor: meta.soft }]}>
+      <Text style={[styles.summaryMetricValue, { color: meta.color }]}>{value}</Text>
+      <Text numberOfLines={2} style={[styles.summaryMetricLabel, { color: meta.color }]}>{label}</Text>
+    </View>
+  );
+}
+
+function AttentionItem({
+  title,
+  detail,
+  tone,
+  children,
+}: {
+  title: string;
+  detail: string;
+  tone: ReviewTone;
+  children?: React.ReactNode;
+}) {
+  const meta = toneMeta(tone);
+  return (
+    <View style={[styles.attentionItem, { borderLeftColor: meta.color, backgroundColor: meta.soft }]}>
+      <View style={styles.attentionHeading}>
+        <Ionicons name={meta.icon} size={18} color={meta.color} />
+        <Text style={[styles.attentionTitle, { color: meta.color }]}>{title}</Text>
+      </View>
+      <Text style={styles.attentionDetail}>{detail}</Text>
+      {children}
+    </View>
+  );
+}
+
+function ReviewGroup({
+  title,
+  icon,
+  colors,
+  children,
+}: {
+  title: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  colors: Colors;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={[styles.reviewGroup, { borderTopColor: colors.border }]}>
+      <View style={styles.reviewGroupHeader}>
+        <Ionicons name={icon} size={18} color={colors.primary} />
+        <Text style={[styles.reviewGroupTitle, { color: colors.text }]}>{title}</Text>
+      </View>
+      <View style={styles.reviewGroupBody}>{children}</View>
+    </View>
+  );
+}
+
+function ConfirmedRequirements({ rows, colors }: { rows: any[]; colors: Colors }) {
+  const [open, setOpen] = useState(false);
+  if (rows.length === 0) return null;
+  return (
+    <View style={[styles.confirmedGroup, { borderColor: "#A7F3D0", backgroundColor: "#F0FDF4" }]}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen((current) => !current)}
+        style={styles.confirmedGroupHeader}
+      >
+        <Ionicons name="checkmark-circle" size={19} color="#059669" />
+        <Text style={styles.confirmedGroupTitle}>{rows.length} {rows.length === 1 ? "requirement" : "requirements"} confirmed</Text>
+        <Text style={[styles.confirmedGroupAction, { color: colors.primary }]}>{open ? "Hide" : "Show"}</Text>
+        <Ionicons name={open ? "chevron-up" : "chevron-down"} size={16} color={colors.primary} />
+      </TouchableOpacity>
+      {open ? (
+        <View style={[styles.confirmedGroupBody, { borderTopColor: "#A7F3D0" }]}>
+          {rows.map((row, index) => (
+            <RequirementRow key={`${row.key || row.label}-${index}`} row={row} colors={colors} />
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function RequirementRow({ row, colors }: { row: any; colors: Colors }) {
+  const [open, setOpen] = useState(false);
+  const meta = toneMeta(row.tone);
+  return (
+    <View style={[styles.requirementRow, { borderColor: colors.border }]}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen((current) => !current)}
+        style={styles.requirementRowButton}
+      >
+        <Ionicons name={meta.icon} size={19} color={meta.color} />
+        <View style={styles.requirementCopy}>
+          <Text style={[styles.requirementTitle, { color: colors.text }]}>{row.label}</Text>
+          <Text style={[styles.requirementStatus, { color: meta.color }]}>{row.statusLabel}</Text>
+          <Text numberOfLines={open ? undefined : 2} style={[styles.requirementDetail, { color: colors.textSecondary }]}>{row.detail}</Text>
+        </View>
+        <View style={styles.evidenceAction}>
+          <Text style={[styles.evidenceActionText, { color: colors.primary }]}>{open ? "Hide" : "View evidence"}</Text>
+          <Ionicons name={open ? "chevron-up" : "chevron-down"} size={15} color={colors.primary} />
+        </View>
+      </TouchableOpacity>
+      {open ? (
+        <View style={[styles.requirementEvidence, { borderTopColor: colors.border, backgroundColor: colors.inputBackground }]}>
+          <Text style={[styles.evidenceLabel, { color: colors.textSecondary }]}>EVIDENCE SOURCE</Text>
+          <Text style={[styles.evidenceValue, { color: colors.text }]}>{row.sourceLabel}</Text>
+          {row.evidenceEntries.length > 0 ? row.evidenceEntries.map((entry: any, index: number) => (
+            <View key={`${entry?.source || "evidence"}-${index}`} style={styles.evidenceEntry}>
+              <Text style={[styles.evidenceLabel, { color: colors.textSecondary }]}>RELEVANT EXTRACT</Text>
+              <Text style={[styles.body, { color: colors.textSecondary }]}>{entry?.observation || row.detail}</Text>
+            </View>
+          )) : null}
+          <Text style={[styles.evidenceLabel, { color: colors.textSecondary }]}>REVIEW ANALYSIS</Text>
+          <Text style={[styles.body, { color: colors.textSecondary }]}>{row.analysis}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function Section({
   title,
   icon,
@@ -199,19 +330,29 @@ function StatusRow({
   );
 }
 
-function EvidenceFinding({ item, colors, sourceContext }: { item: any; colors: Colors; sourceContext?: "cv" | "application" }) {
-  const result = String(item?.result || "unclear").toLowerCase();
+function EvidenceFinding({ item, colors, sourceContext }: { item: any; colors: Colors; sourceContext?: "cv" | "video" | "application" }) {
+  const recordedResult = String(item?.result || "unclear").toLowerCase();
+  const videoSources = ["performance_video", "video_transcript", "video_frame", "recognized_audio"];
+  const hasVideoContradiction = list(item?.evidence).some((entry) =>
+    videoSources.includes(String(entry?.source || "")) &&
+    /\b(did not|does not|not demonstrated|no evidence|could not confirm|couldn't confirm)\b/i.test(String(entry?.observation || "")),
+  );
+  const result = sourceContext === "video" && recordedResult === "supported" && !videoSources.includes(String(item?.source || ""))
+    ? hasVideoContradiction ? "not_supported" : "unclear"
+    : recordedResult;
   const status = result === "supported"
-    ? { label: "Confirmed", color: "#10B981", icon: "checkmark-circle-outline" as const }
+    ? { label: sourceContext === "cv" ? "Confirmed from CV" : sourceContext === "video" ? "Confirmed from video" : "Confirmed", color: "#10B981", icon: "checkmark-circle-outline" as const }
     : result === "not_supported"
-      ? { label: "Not found", color: "#EF4444", icon: "alert-circle-outline" as const }
+      ? { label: sourceContext === "video" ? "Not demonstrated in video" : "Requirement not met", color: "#EF4444", icon: "alert-circle-outline" as const }
       : { label: sourceContext === "cv" ? "Couldn't confirm from CV" : "Couldn't confirm", color: "#F59E0B", icon: "warning-outline" as const };
   const entries = list(item?.evidence);
   const reason = String(item?.short_reason || "").trim() || (
     result === "supported"
       ? "The reviewed source contains evidence for this item."
       : result === "not_supported"
-        ? "The reviewed source contains evidence that does not satisfy this item."
+        ? sourceContext === "video"
+          ? "The submitted video did not demonstrate this requirement."
+          : "The reviewed source contains evidence that does not satisfy this item."
         : "The reviewed source did not provide enough information to confirm this item."
   );
 
@@ -247,7 +388,7 @@ function ReviewDetails({ children, colors }: { children: React.ReactNode; colors
         style={styles.reviewDetailsButton}
       >
         <Text style={[styles.reviewDetailsButtonText, { color: colors.primary }]}>
-          {open ? "Hide details" : "View details"}
+          {open ? "Hide evidence" : "View evidence"}
         </Text>
         <Ionicons name={open ? "chevron-up" : "chevron-down"} size={15} color={colors.primary} />
       </TouchableOpacity>
@@ -371,6 +512,7 @@ export default function ApplicantDetailsModal({
   const retryRef = useRef(onRetry);
   const refreshAttemptsRef = useRef(0);
   const refreshingApplicationIdRef = useRef<string | null>(null);
+  const [showAcceptConfirmation, setShowAcceptConfirmation] = useState(false);
 
   useEffect(() => {
     retryRef.current = onRetry;
@@ -459,8 +601,6 @@ export default function ApplicantDetailsModal({
   const matchedCriteriaCount = list(recommendation?.matched_criteria).length;
   const memberRequirementCoverage = recommendation?.criteria_snapshot?.member_requirement_coverage || null;
   const memberCoverageItems = list(memberRequirementCoverage?.members);
-  const verification = recommendation?.criteria_snapshot?.verification || null;
-  const hasMajorVerificationIssue = verification?.status === "needs_verification" || recommendation?.criteria_snapshot?.identity_status === "needs_verification" || cvNameCheckStatus === "mismatch";
   const requirementResults = list(recommendation?.criteria_snapshot?.requirement_results);
   const metRequirementResults = requirementResults.filter((item) => item?.status === "met");
   const notMetRequirementResults = requirementResults.filter((item) => item?.status === "not_met");
@@ -512,17 +652,160 @@ export default function ApplicantDetailsModal({
           }
     : screening;
 
+  const criterionByRequirementKey: Record<string, string[]> = {
+    instruments: ["instrument_requirement"],
+    genres: ["genre_requirement"],
+    location: ["location_requirement"],
+    portfolio: ["portfolio_requirement", "performance_experience"],
+  };
+  const requirementLabels: Record<string, string> = {
+    instruments: "Role & instruments",
+    genres: "Music genre",
+    location: "Location",
+    portfolio: "Performance evidence",
+  };
+  const requirementReviewRows = requirementResults.map((item: any) => {
+    const key = String(item?.key || item?.criterion || "requirement");
+    const expectedCriteria = criterionByRequirementKey[key] || [String(item?.criterion || "")];
+    const evidenceItem = evidence.find((candidate) => expectedCriteria.includes(String(candidate?.criterion || "")));
+    const evidenceEntries = list(evidenceItem?.evidence).slice(0, 4);
+    const sourceKeys = Array.from(new Set([
+      String(item?.source || ""),
+      ...evidenceEntries.map((entry) => String(entry?.source || "")),
+    ].filter(Boolean)));
+    const confirmationSource = String(item?.source || evidenceItem?.source || "");
+    const hasCvSource = confirmationSource === "cv";
+    const hasVideoSource = ["performance_video", "video_transcript", "video_frame", "recognized_audio"].includes(confirmationSource);
+    const sourceLabel = sourceKeys.map(evidenceSourceLabel).join(" + ") || "Application";
+    const status = String(item?.status || "unclear");
+    const tone: ReviewTone = status === "met" ? "confirmed" : status === "not_met" ? "failed" : "review";
+    const statusLabel = status === "met"
+      ? hasCvSource
+          ? "Confirmed from CV"
+          : hasVideoSource
+            ? "Confirmed from video"
+            : `Confirmed from ${sourceLabel}`
+      : status === "not_met" && key === "portfolio" && hasVideoSource
+        ? "Not demonstrated in video"
+        : status === "not_met"
+          ? "Requirement not met"
+          : "Couldn't confirm — manual review needed";
+    return {
+      key,
+      label: requirementLabels[key] || item?.label || criterionLabel(item?.criterion),
+      tone,
+      statusLabel,
+      detail: String(item?.detail || evidenceItem?.short_reason || "Review the available evidence before deciding."),
+      sourceLabel,
+      evidenceEntries,
+      analysis: String(evidenceItem?.short_reason || item?.detail || "No additional automated analysis was recorded."),
+    };
+  });
+  const confirmedRequirementRows = requirementReviewRows.filter((item) => item.tone === "confirmed");
+  const visibleRequirementRows = requirementReviewRows.filter((item) => item.tone !== "confirmed");
+  const accountVerificationLabel = isVerified ? "Account verified" : "Account not verified";
+  const memberVerificationStatus = String(memberVerification?.status || "").toLowerCase();
+  const memberIdentityVerified = memberVerification?.result === "verified";
+  const memberIdentityInProgress = ["queued", "processing"].includes(memberVerificationStatus);
+  const memberIdentityLabel = memberIdentityVerified
+    ? "Performance identity confirmed"
+    : memberIdentityInProgress
+      ? "Performance identity in progress"
+      : memberVerification
+        ? "Performance identity not confirmed"
+        : "Performance identity not checked";
+  const memberIdentityDetail = memberVerification
+    ? `${Number(memberVerification.verified_member_count || 0)} of ${Number(memberVerification.expected_member_count || 0)} registered members were confidently matched in the submitted performance video.`
+    : "No registered-member verification result is available for this application.";
+  const cvIdentityMismatch = cvNameCheckStatus === "mismatch";
+  const cvIdentityDetail = cvIdentityMismatch && cvNameCheck?.extracted_name
+    ? `Major verification issue. The CV lists ${cvNameCheck.extracted_name}, while the application belongs to ${name}.`
+    : cvNameCheck?.summary || "The CV name could not be confirmed against the applicant name.";
+  const cvNeedsManualReview = Boolean(application.cv_url) && !cvIdentityMismatch && (
+    application.ai_portfolio_review_consent !== true ||
+    cvProcessingStatus === "processing_failed" ||
+    ["not_a_cv", "uncertain", "not_run"].includes(cvDocumentStatus)
+  );
+  const attentionItems: { key: string; title: string; detail: string; tone: ReviewTone; category: "not_met" | "review" }[] = [
+    ...visibleRequirementRows.map((row) => ({
+      key: `requirement-${row.key}`,
+      title: row.label,
+      detail: row.detail,
+      tone: row.tone,
+      category: row.tone === "failed" ? "not_met" as const : "review" as const,
+    })),
+    ...(cvIdentityMismatch ? [{
+      key: "cv-identity",
+      title: "CV identity mismatch",
+      detail: cvIdentityDetail,
+      tone: "failed" as const,
+      category: "review" as const,
+    }] : []),
+    ...(memberVerification && !memberIdentityVerified ? [{
+      key: "performance-identity",
+      title: "Performance identity",
+      detail: memberIdentityDetail,
+      tone: "review" as const,
+      category: "review" as const,
+    }] : []),
+    ...(cvNeedsManualReview ? [{
+      key: "cv-review",
+      title: "CV review",
+      detail: application.ai_portfolio_review_consent !== true
+        ? "Automatic CV review was not authorized. Review the submitted CV manually."
+        : "The CV could not be confirmed automatically. Review the document manually.",
+      tone: "review" as const,
+      category: "review" as const,
+    }] : []),
+    ...(videoProcessingStatus === "processing_failed" && !visibleRequirementRows.some((row) => row.key === "portfolio") ? [{
+      key: "video-review",
+      title: "Performance video",
+      detail: "The automatic video review was unavailable. Review the submitted performance manually.",
+      tone: "review" as const,
+      category: "review" as const,
+    }] : []),
+  ].sort((left, right) => Number(right.tone === "failed") - Number(left.tone === "failed"));
+  const requirementsNotMetCount = attentionItems.filter((item) => item.category === "not_met").length;
+  const needsReviewCount = attentionItems.filter((item) => item.category === "review").length;
+  const confirmedReviewCount = confirmedRequirementRows.length
+    + Number(cvNameCheckStatus === "match")
+    + Number(memberIdentityVerified);
+  const requirementsCount = requirementResults.length || matchedCriteriaCount;
+  const majorUnresolvedIssues = attentionItems;
+  const acceptanceIssueNames = majorUnresolvedIssues.slice(0, 2).map((item) =>
+    item.title === "CV identity mismatch" ? "CV identity" : item.title.toLowerCase(),
+  );
+  const acceptanceWarning = acceptanceIssueNames.length === 1
+    ? `The ${acceptanceIssueNames[0]} still needs review.`
+    : acceptanceIssueNames.length === 2
+      ? `The ${acceptanceIssueNames[0]} and ${acceptanceIssueNames[1]} could not be confirmed.`
+      : "Review the unresolved checks before making the final decision.";
+
   const openApplicantProfile = () => {
     if (!viewedProfileId) return;
     onClose();
     router.push({ pathname: "/profile", params: { userId: String(viewedProfileId) } });
   };
 
+  const handleAcceptPress = () => {
+    if (majorUnresolvedIssues.length > 0) {
+      setShowAcceptConfirmation(true);
+      return;
+    }
+    onAccept(application.id);
+  };
+
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => {
+      setShowAcceptConfirmation(false);
+      onClose();
+    }}>
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
         <View style={[styles.modalHeader, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-          <TouchableOpacity testID="close-applicant-details" accessibilityLabel="Close applicant details" onPress={onClose} style={[styles.closeButton, { borderColor: colors.border }]}>
+          <TouchableOpacity testID="close-applicant-details" accessibilityLabel="Close applicant details" onPress={() => {
+            setShowAcceptConfirmation(false);
+            onClose();
+          }} style={[styles.closeButton, { borderColor: colors.border }]}>
             <Ionicons name="arrow-back" size={22} color={colors.text} />
           </TouchableOpacity>
           <View style={styles.headerCopy}>
@@ -552,11 +835,41 @@ export default function ApplicantDetailsModal({
             keyboardShouldPersistTaps="handled"
           >
             <View style={[styles.heroCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={styles.heroProfileRow}>
+                <ProfileAvatar
+                  uri={avatar}
+                  size={68}
+                  backgroundColor={`${colors.primary}14`}
+                  iconColor={colors.primary}
+                />
+                <View style={styles.heroIdentity}>
+                  <Text numberOfLines={2} style={[styles.heroName, { color: colors.text }]}>{name}</Text>
+                  <Text style={[styles.heroRole, { color: colors.primary }]}>{appliedRole}</Text>
+                  <View style={styles.heroLocationRow}>
+                    <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
+                    <Text numberOfLines={1} style={[styles.heroLocation, { color: colors.textSecondary }]}>
+                      {shortLocation(fullLocation) || "Location not provided"}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.verificationBadges}>
+                <View style={[styles.verificationBadge, { backgroundColor: isVerified ? "#ECFDF5" : colors.inputBackground }]}>
+                  <Ionicons name={isVerified ? "shield-checkmark" : "shield-outline"} size={15} color={isVerified ? "#059669" : colors.textSecondary} />
+                  <Text style={[styles.verificationBadgeText, { color: isVerified ? "#047857" : colors.textSecondary }]}>{accountVerificationLabel}</Text>
+                </View>
+                <View style={[styles.verificationBadge, { backgroundColor: memberIdentityVerified ? "#ECFDF5" : "#FFFBEB" }]}>
+                  <Ionicons name={memberIdentityVerified ? "videocam" : "warning-outline"} size={15} color={memberIdentityVerified ? "#059669" : "#D97706"} />
+                  <Text style={[styles.verificationBadgeText, { color: memberIdentityVerified ? "#047857" : "#B45309" }]}>{memberIdentityLabel}</Text>
+                </View>
+              </View>
+
               <View style={[styles.matchPanel, { backgroundColor: `${colors.primary}0D` }]}>
-                <View style={styles.matchPanelHeader}>
+                <View accessibilityLabel="Match to gig requirements review summary" style={styles.matchPanelHeader}>
                   <View style={styles.matchPanelLabelRow}>
-                    <Ionicons name="sparkles" size={17} color={colors.primary} />
-                    <Text style={[styles.matchPanelLabel, { color: colors.text }]}>Match to gig requirements</Text>
+                    <Ionicons name="clipboard-outline" size={17} color={colors.primary} />
+                    <Text style={[styles.matchPanelLabel, { color: colors.text }]}>Review Summary</Text>
                   </View>
                   <Text style={[styles.matchPanelScore, { color: colors.primary }]}>
                     {matchPercentage === null ? "Unavailable" : `${matchPercentage}%`}
@@ -572,19 +885,24 @@ export default function ApplicantDetailsModal({
                     />
                   </View>
                 ) : null}
-                {hasMajorVerificationIssue ? (
-                  <View style={styles.majorVerificationBanner}>
-                    <Ionicons name="alert-circle" size={20} color="#B45309" />
-                    <View style={styles.flexOne}>
-                      <Text style={styles.majorVerificationTitle}>Important verification needed</Text>
-                      <Text style={styles.majorVerificationCopy}>The name on the CV does not match the application. Verify the document before making a decision.</Text>
-                    </View>
+                <View style={styles.summaryMetrics}>
+                  <SummaryMetric value={confirmedReviewCount} label="Confirmed" tone="confirmed" />
+                  <SummaryMetric value={requirementsNotMetCount} label="Requirement not met" tone="failed" />
+                  <SummaryMetric value={needsReviewCount} label="Need review" tone="review" />
+                </View>
+                <Text style={[styles.attentionSectionTitle, { color: colors.text }]}>Needs attention</Text>
+                {attentionItems.length > 0 ? attentionItems.map((item) => (
+                  <AttentionItem key={item.key} title={item.title} detail={item.detail} tone={item.tone} />
+                )) : (
+                  <View style={styles.allClearRow}>
+                    <Ionicons name="checkmark-circle" size={19} color="#059669" />
+                    <Text style={styles.allClearText}>No unresolved checks were found.</Text>
                   </View>
-                ) : null}
+                )}
                 {!recommendation ? (
                   <EmptyState colors={colors}>The requirements match is unavailable. The applicant remains manually reviewable.</EmptyState>
                 ) : (
-                  <>
+                  <ReviewDetails colors={colors}>
                     <Text style={[styles.matchSummary, { color: colors.textSecondary }]}>
                       {friendlyRecommendationSummary(recommendation, matchPercentage)}
                     </Text>
@@ -643,36 +961,14 @@ export default function ApplicantDetailsModal({
                         })}
                       </View>
                     ) : null}
-                  </>
+                  </ReviewDetails>
                 )}
                 <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>Advisory only. All applicants remain accessible and require an organizer decision.</Text>
               </View>
 
-              <View style={styles.heroProfileRow}>
-                <ProfileAvatar
-                  uri={avatar}
-                  size={72}
-                  backgroundColor={`${colors.primary}14`}
-                  iconColor={colors.primary}
-                />
-                <View style={styles.heroIdentity}>
-                  <View style={styles.nameRow}>
-                    <Text numberOfLines={2} style={[styles.heroName, { color: colors.text }]}>{name}</Text>
-                    {isVerified ? <Ionicons name="shield-checkmark" size={17} color="#10B981" /> : null}
-                  </View>
-                  <Text style={[styles.heroRole, { color: colors.primary }]}>{appliedRole}</Text>
-                  <View style={styles.heroLocationRow}>
-                    <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
-                    <Text numberOfLines={1} style={[styles.heroLocation, { color: colors.textSecondary }]}>
-                      {shortLocation(fullLocation) || "Location not provided"}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
               <View style={[styles.quickStats, { borderTopColor: colors.border }]}>
                 <View style={styles.quickStat}>
-                  <Text style={[styles.quickStatValue, { color: colors.text }]}>{matchedCriteriaCount}</Text>
+                  <Text style={[styles.quickStatValue, { color: colors.text }]}>{requirementsCount}</Text>
                   <Text style={[styles.quickStatLabel, { color: colors.textSecondary }]}>Requirements</Text>
                 </View>
                 <View style={[styles.quickStatDivider, { backgroundColor: colors.border }]} />
@@ -697,8 +993,14 @@ export default function ApplicantDetailsModal({
               <DetailRow icon="musical-notes-outline" label="Applied role or slot" value={appliedRole} colors={colors} />
               <DetailRow
                 icon={isVerified ? "shield-checkmark-outline" : "shield-outline"}
-                label="Verification"
-                value={isVerified ? "Verified profile" : "Not verified"}
+                label="Account verification"
+                value={accountVerificationLabel}
+                colors={colors}
+              />
+              <DetailRow
+                icon={memberIdentityVerified ? "videocam" : "videocam-outline"}
+                label="Performance identity verification"
+                value={memberIdentityLabel}
                 colors={colors}
               />
               {viewedProfileId ? (
@@ -765,26 +1067,103 @@ export default function ApplicantDetailsModal({
               </Subsection>
             </Section>
 
-            <Section title="Qualification Review" icon="checkmark-done-outline" colors={colors}>
+            <Section title="Qualification Review" icon="checkmark-done-outline" colors={colors} defaultOpen>
+              <ReviewGroup title="Needs attention" icon="alert-circle-outline" colors={colors}>
+                {visibleRequirementRows.length > 0 ? visibleRequirementRows.map((row, index) => (
+                  <RequirementRow key={`${row.key}-${index}`} row={row} colors={colors} />
+                )) : (
+                  <Text style={[styles.body, { color: colors.textSecondary }]}>No requirement exceptions need review.</Text>
+                )}
+                {cvIdentityMismatch ? (
+                  <View accessibilityLabel="Important verification needed">
+                    <AttentionItem title="CV identity mismatch" detail={cvIdentityDetail} tone="failed" />
+                  </View>
+                ) : null}
+                {memberVerification && !memberIdentityVerified ? <AttentionItem title="Performance identity" detail={memberIdentityDetail} tone="review" /> : null}
+              </ReviewGroup>
+
+              <ConfirmedRequirements rows={confirmedRequirementRows} colors={colors} />
+
+              <ReviewGroup title="CV" icon="document-text-outline" colors={colors}>
+                {!application.cv_url && memberCvs.length === 0 ? (
+                  <EmptyState colors={colors}>No CV was uploaded.</EmptyState>
+                ) : (
+                  <>
+                    <StatusRow
+                      icon={cvIdentityMismatch ? "close-circle-outline" : cvNameCheckStatus === "match" ? "checkmark-circle-outline" : "warning-outline"}
+                      label={cvIdentityMismatch ? "CV identity mismatch" : cvNameCheckStatus === "match" ? "CV identity confirmed" : "Manual review needed"}
+                      color={cvIdentityMismatch ? "#DC2626" : cvNameCheckStatus === "match" ? "#059669" : "#D97706"}
+                    />
+                    <Text style={[styles.body, { color: colors.textSecondary }]}>{cvIdentityMismatch ? cvIdentityDetail : cvNameCheck?.summary || "Open the submitted CV when you need to verify its contents."}</Text>
+                    {application.cv_url ? (
+                      <TouchableOpacity onPress={() => onOpenMedia(application.cv_url, "Applicant CV")} style={[styles.outlineButton, { borderColor: colors.primary }]}>
+                        <Ionicons name="open-outline" size={17} color={colors.primary} />
+                        <Text style={[styles.outlineButtonText, { color: colors.primary }]}>View CV</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </>
+                )}
+              </ReviewGroup>
+
+              <ReviewGroup title="Performance video" icon="videocam-outline" colors={colors}>
+                {application.video_url ? (
+                  <>
+                    <StatusRow
+                      icon={videoProcessingStatus === "processing_failed" ? "warning-outline" : "checkmark-circle-outline"}
+                      label={videoProcessingStatus === "processing_failed" ? "Automatic review unavailable" : "Performance video submitted"}
+                      color={videoProcessingStatus === "processing_failed" ? "#D97706" : "#059669"}
+                    />
+                    <Text style={[styles.body, { color: colors.textSecondary }]}>{videoProcessingStatus === "processing_failed" ? "Review the submitted performance manually." : "Open the performance when you need to verify the evidence."}</Text>
+                    <TouchableOpacity onPress={() => onOpenMedia(application.video_url, "Performance Video")} style={[styles.outlineButton, { borderColor: colors.primary }]}>
+                      <Ionicons name="play-outline" size={18} color={colors.primary} />
+                      <Text style={[styles.outlineButtonText, { color: colors.primary }]}>Watch performance</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : <EmptyState colors={colors}>No performance video was submitted.</EmptyState>}
+              </ReviewGroup>
+
+              <ReviewGroup title="Registered member verification" icon="people-circle-outline" colors={colors}>
+                <StatusRow
+                  icon={memberIdentityVerified ? "checkmark-circle-outline" : memberIdentityInProgress ? "time-outline" : "warning-outline"}
+                  label={memberIdentityLabel}
+                  color={memberIdentityVerified ? "#059669" : "#D97706"}
+                />
+                <Text style={[styles.body, { color: colors.textSecondary }]}>{memberIdentityDetail}</Text>
+                {memberVerificationMembers.map((member: any, index: number) => {
+                  const verified = member.status === "verified";
+                  const similarity = Number(member.best_similarity);
+                  return (
+                    <View key={`${member.member_id || "member-summary"}-${index}`} style={[styles.messageCard, { backgroundColor: colors.inputBackground }]}>
+                      <Text style={[styles.requirementTitle, { color: colors.text }]}>Member {index + 1}</Text>
+                      <Text style={[styles.advisory, { color: verified ? "#059669" : "#D97706" }]}>{verified ? "Identity confirmed" : "Identity not confirmed"}</Text>
+                      {Number.isFinite(similarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>Best similarity: {similarity.toFixed(1)}%</Text> : null}
+                      {!verified ? <Text style={[styles.advisory, { color: "#B45309" }]}>Manual review recommended</Text> : null}
+                    </View>
+                  );
+                })}
+                <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>Advisory only. This check does not accept or decline an applicant.</Text>
+              </ReviewGroup>
+
+              <ReviewDetails colors={colors}>
               {memberVerification ? (
                 <Subsection title="Registered Member Verification" icon="people-circle-outline" colors={colors}>
                   <StatusRow
                     icon={memberVerification.result === "verified" ? "checkmark-circle-outline" : ["queued", "processing"].includes(String(memberVerification.status)) ? "time-outline" : "warning-outline"}
                     label={
                       memberVerification.result === "verified"
-                        ? "All registered members found"
+                        ? "Performance identity confirmed"
                         : ["queued", "processing"].includes(String(memberVerification.status))
-                          ? "Verification in progress"
+                          ? "Performance identity in progress"
                           : memberVerification.result === "no_video"
                             ? "No performance video to verify"
                             : memberVerification.status === "not_requested"
                               ? "Verification was not authorized"
-                              : "Manual member review needed"
+                              : "Identity not confirmed"
                     }
                     color={memberVerification.result === "verified" ? "#10B981" : ["queued", "processing"].includes(String(memberVerification.status)) ? colors.primary : "#F59E0B"}
                   />
                   <Text style={[styles.body, { color: colors.textSecondary }]}>
-                    {Number(memberVerification.verified_member_count || 0)} of {Number(memberVerification.expected_member_count || 0)} registered members were found in the submitted performance video. {"This is advisory and does not change the match score or make the organizer's decision."}
+                    {memberIdentityDetail} {"This is advisory and does not change the match score or make the organizer's decision."}
                   </Text>
                   {memberVerification.additional_people_detected ? (
                     <Text style={[styles.advisory, { color: "#B45309" }]}>Additional people may appear in the video. Review the performance manually.</Text>
@@ -796,12 +1175,13 @@ export default function ApplicantDetailsModal({
                       <View key={`${member.member_id || "member"}-${index}`} style={[styles.messageCard, { backgroundColor: colors.inputBackground }]}>
                         <StatusRow
                           icon={verified ? "checkmark-circle-outline" : "warning-outline"}
-                          label={`Member ${index + 1}: ${verified ? "found" : member.status === "no_reference" ? "no reference photo" : member.status === "reference_unusable" ? "reference photo unusable" : member.status === "needs_review" ? "ambiguous match" : "not confirmed"}`}
+                          label={`Member ${index + 1}: ${verified ? "identity confirmed" : "identity not confirmed"}`}
                           color={verified ? "#10B981" : "#F59E0B"}
                         />
                         {Number.isFinite(similarity) ? (
                           <Text style={[styles.advisory, { color: colors.textSecondary }]}>Best similarity: {similarity.toFixed(1)}%</Text>
                         ) : null}
+                        {!verified ? <Text style={[styles.advisory, { color: "#B45309" }]}>Manual review recommended</Text> : null}
                       </View>
                     );
                   })}
@@ -812,17 +1192,21 @@ export default function ApplicantDetailsModal({
               application.ai_portfolio_review_consent === true &&
               cvDocumentStatus === "cv" &&
               cvProcessingStatus === "reviewed" ? (
-                <Subsection title="CV Name" icon="person-circle-outline" colors={colors}>
+                <Subsection title={cvNameCheckStatus === "mismatch" ? "CV identity mismatch" : "CV identity"} icon="person-circle-outline" colors={colors}>
                   <StatusRow
-                    icon={cvNameCheckStatus === "match" ? "checkmark-circle-outline" : "warning-outline"}
-                    label={cvNameCheckStatus === "match" ? "Name matches the application" : cvNameCheckStatus === "mismatch" ? "Major verification issue" : "Please verify this CV"}
-                    color={cvNameCheckStatus === "match" ? "#10B981" : cvNameCheckStatus === "mismatch" ? "#B45309" : "#F59E0B"}
+                    icon={cvNameCheckStatus === "match" ? "checkmark-circle-outline" : cvNameCheckStatus === "mismatch" ? "close-circle-outline" : "warning-outline"}
+                    label={cvNameCheckStatus === "match" ? "CV identity confirmed" : cvNameCheckStatus === "mismatch" ? "CV identity mismatch" : "Please verify this CV"}
+                    color={cvNameCheckStatus === "match" ? "#10B981" : cvNameCheckStatus === "mismatch" ? "#DC2626" : "#F59E0B"}
                   />
                   <Text style={[styles.body, { color: colors.textSecondary }]}>
                     {cvNameCheckStatus === "mismatch" && cvNameCheck?.extracted_name
-                      ? `The CV shows ${cvNameCheck.extracted_name}, while this application is under ${name}. Make sure the correct CV was submitted.`
+                      ? `The CV lists ${cvNameCheck.extracted_name}, while the application belongs to ${name}.`
                       : cvNameCheck?.summary || "We couldn't confirm the name on the CV. Verify it manually."}
                   </Text>
+                  <TouchableOpacity onPress={() => onOpenMedia(application.cv_url, "Applicant CV")} style={[styles.outlineButton, { borderColor: colors.primary }]}>
+                    <Ionicons name="open-outline" size={17} color={colors.primary} />
+                    <Text style={[styles.outlineButtonText, { color: colors.primary }]}>View CV</Text>
+                  </TouchableOpacity>
                   {cvNameCheck?.extracted_name ? (
                     <ReviewDetails colors={colors}>
                       <Text style={[styles.body, { color: colors.textSecondary }]}>CV name: {cvNameCheck.extracted_name}</Text>
@@ -951,7 +1335,7 @@ export default function ApplicantDetailsModal({
                       <Text style={[styles.body, { color: colors.textSecondary }]}>The performance video was submitted successfully, but the automatic review could not be completed. Review the video manually.</Text>
                     </View>
                   ) : videoEvidence.map((item, index) => (
-                      <EvidenceFinding key={`${item?.criterion || "video-finding"}-${index}`} item={item} colors={colors} />
+                      <EvidenceFinding key={`${item?.criterion || "video-finding"}-${index}`} item={item} colors={colors} sourceContext="video" />
                     ))}
                 </View>
               ) : <EmptyState colors={colors}>No performance video was submitted.</EmptyState>}
@@ -980,7 +1364,7 @@ export default function ApplicantDetailsModal({
                 </ReviewDetails>
               ) : null}
               </Subsection>
-
+              </ReviewDetails>
             </Section>
 
             <Section title="Application History" icon="time-outline" colors={colors}>
@@ -1027,7 +1411,7 @@ export default function ApplicantDetailsModal({
               <TouchableOpacity
                 testID="accept-applicant-details"
                 accessibilityRole="button"
-                onPress={() => onAccept(application.id)}
+                onPress={handleAcceptPress}
                 style={[styles.footerPrimaryButton, { backgroundColor: "#10B981" }]}
               >
                 <Ionicons name="checkmark-circle-outline" size={18} color="#FFF" />
@@ -1048,6 +1432,40 @@ export default function ApplicantDetailsModal({
           ) : null}
           </>
         )}
+
+        <Modal visible={showAcceptConfirmation} transparent animationType="fade" onRequestClose={() => setShowAcceptConfirmation(false)}>
+          <View style={styles.confirmationBackdrop}>
+            <View style={[styles.confirmationSheet, { backgroundColor: colors.surface }]}>
+              <View style={styles.confirmationHandle} />
+              <View style={styles.confirmationIcon}>
+                <Ionicons name="warning" size={24} color="#D97706" />
+              </View>
+              <Text style={[styles.confirmationTitle, { color: colors.text }]}>
+                {majorUnresolvedIssues.length} {majorUnresolvedIssues.length === 1 ? "issue" : "issues"} still need review
+              </Text>
+              <Text style={[styles.confirmationCopy, { color: colors.textSecondary }]}>{acceptanceWarning}</Text>
+              <View style={styles.confirmationActions}>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  onPress={() => setShowAcceptConfirmation(false)}
+                  style={[styles.confirmationSecondary, { borderColor: colors.border }]}
+                >
+                  <Text style={[styles.confirmationSecondaryText, { color: colors.text }]}>Continue reviewing</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  onPress={() => {
+                    setShowAcceptConfirmation(false);
+                    onAccept(application.id);
+                  }}
+                  style={styles.confirmationPrimary}
+                >
+                  <Text style={styles.confirmationPrimaryText}>Accept anyway</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     </Modal>
   );
@@ -1070,6 +1488,9 @@ const styles = StyleSheet.create({
   heroRole: { marginTop: 2, fontFamily: "Poppins_600SemiBold", fontSize: 12, lineHeight: 17 },
   heroLocationRow: { marginTop: 3, flexDirection: "row", alignItems: "center", gap: 4 },
   heroLocation: { flex: 1, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 15 },
+  verificationBadges: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
+  verificationBadge: { maxWidth: "100%", minHeight: 30, borderRadius: 999, paddingHorizontal: 9, flexDirection: "row", alignItems: "center", gap: 5 },
+  verificationBadgeText: { flexShrink: 1, fontFamily: "Poppins_600SemiBold", fontSize: 9, lineHeight: 13 },
   matchPanel: { borderRadius: 14, padding: 12, gap: 8 },
   matchPanelHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   matchPanelLabelRow: { flexDirection: "row", alignItems: "center", gap: 7, flex: 1 },
@@ -1077,6 +1498,17 @@ const styles = StyleSheet.create({
   matchPanelScore: { fontFamily: "Poppins_700Bold", fontSize: 14, lineHeight: 19 },
   progressTrack: { height: 7, borderRadius: 999, overflow: "hidden" },
   progressFill: { height: "100%", borderRadius: 999 },
+  summaryMetrics: { flexDirection: "row", gap: 6, marginTop: 3 },
+  summaryMetric: { flex: 1, minHeight: 60, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 8, justifyContent: "center" },
+  summaryMetricValue: { fontFamily: "Poppins_700Bold", fontSize: 17, lineHeight: 21 },
+  summaryMetricLabel: { marginTop: 1, fontFamily: "Poppins_500Medium", fontSize: 8, lineHeight: 11 },
+  attentionSectionTitle: { marginTop: 4, fontFamily: "Poppins_700Bold", fontSize: 11, lineHeight: 16 },
+  attentionItem: { borderLeftWidth: 3, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 9, gap: 3 },
+  attentionHeading: { flexDirection: "row", alignItems: "center", gap: 6 },
+  attentionTitle: { flex: 1, fontFamily: "Poppins_700Bold", fontSize: 10, lineHeight: 15 },
+  attentionDetail: { color: "#4B5563", fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14, paddingLeft: 24 },
+  allClearRow: { minHeight: 38, borderRadius: 9, backgroundColor: "#ECFDF5", paddingHorizontal: 10, flexDirection: "row", alignItems: "center", gap: 7 },
+  allClearText: { flex: 1, color: "#047857", fontFamily: "Poppins_600SemiBold", fontSize: 10, lineHeight: 15 },
   matchSummary: { fontFamily: "Poppins_400Regular", fontSize: 10, lineHeight: 15 },
   requiredSummary: { fontFamily: "Poppins_600SemiBold", fontSize: 10, lineHeight: 15 },
   majorVerificationBanner: { flexDirection: "row", alignItems: "flex-start", gap: 9, borderWidth: 1, borderColor: "#F59E0B", backgroundColor: "#FFFBEB", borderRadius: 11, padding: 10 },
@@ -1098,6 +1530,27 @@ const styles = StyleSheet.create({
   sectionIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   sectionTitle: { flex: 1, fontFamily: "Poppins_600SemiBold", fontSize: 13, lineHeight: 18 },
   sectionBody: { borderTopWidth: 1, padding: 14, gap: 10 },
+  reviewGroup: { borderTopWidth: 1, paddingTop: 10, gap: 8 },
+  reviewGroupHeader: { flexDirection: "row", alignItems: "center", gap: 7 },
+  reviewGroupTitle: { flex: 1, fontFamily: "Poppins_700Bold", fontSize: 12, lineHeight: 17 },
+  reviewGroupBody: { gap: 8 },
+  confirmedGroup: { borderWidth: 1, borderRadius: 11, overflow: "hidden" },
+  confirmedGroupHeader: { minHeight: 44, paddingHorizontal: 11, flexDirection: "row", alignItems: "center", gap: 7 },
+  confirmedGroupTitle: { flex: 1, color: "#047857", fontFamily: "Poppins_600SemiBold", fontSize: 11, lineHeight: 16 },
+  confirmedGroupAction: { fontFamily: "Poppins_600SemiBold", fontSize: 9, lineHeight: 13 },
+  confirmedGroupBody: { borderTopWidth: 1, padding: 8, gap: 7 },
+  requirementRow: { borderWidth: 1, borderRadius: 10, overflow: "hidden" },
+  requirementRowButton: { minHeight: 66, padding: 10, flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  requirementCopy: { flex: 1, minWidth: 0 },
+  requirementTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 11, lineHeight: 16 },
+  requirementStatus: { marginTop: 1, fontFamily: "Poppins_600SemiBold", fontSize: 9, lineHeight: 13 },
+  requirementDetail: { marginTop: 2, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14 },
+  evidenceAction: { flexDirection: "row", alignItems: "center", gap: 2, paddingTop: 1 },
+  evidenceActionText: { fontFamily: "Poppins_600SemiBold", fontSize: 8, lineHeight: 12 },
+  requirementEvidence: { borderTopWidth: 1, padding: 10, gap: 5 },
+  evidenceLabel: { fontFamily: "Poppins_600SemiBold", fontSize: 8, lineHeight: 12, letterSpacing: 0.5 },
+  evidenceValue: { fontFamily: "Poppins_500Medium", fontSize: 10, lineHeight: 15 },
+  evidenceEntry: { gap: 2, marginTop: 3 },
   subsection: { gap: 10 },
   subsectionHeader: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 8 },
   subsectionTitle: { flex: 1, fontFamily: "Poppins_600SemiBold", fontSize: 12, lineHeight: 17 },
@@ -1142,4 +1595,15 @@ const styles = StyleSheet.create({
   actionButtonText: { fontFamily: "Poppins_600SemiBold", fontSize: 13 },
   readOnlyNotice: { flex: 1, minHeight: 46, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   readOnlyText: { fontFamily: "Poppins_500Medium", fontSize: 12 },
+  confirmationBackdrop: { flex: 1, backgroundColor: "rgba(15, 23, 42, 0.52)", justifyContent: "flex-end" },
+  confirmationSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 24, alignItems: "center" },
+  confirmationHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: "#D1D5DB", marginBottom: 18 },
+  confirmationIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: "#FFFBEB", alignItems: "center", justifyContent: "center", marginBottom: 12 },
+  confirmationTitle: { textAlign: "center", fontFamily: "Poppins_700Bold", fontSize: 18, lineHeight: 25 },
+  confirmationCopy: { marginTop: 6, textAlign: "center", fontFamily: "Poppins_400Regular", fontSize: 12, lineHeight: 19 },
+  confirmationActions: { width: "100%", marginTop: 20, gap: 9 },
+  confirmationSecondary: { minHeight: 48, borderWidth: 1, borderRadius: 999, alignItems: "center", justifyContent: "center" },
+  confirmationSecondaryText: { fontFamily: "Poppins_600SemiBold", fontSize: 12 },
+  confirmationPrimary: { minHeight: 48, borderRadius: 999, backgroundColor: "#10B981", alignItems: "center", justifyContent: "center" },
+  confirmationPrimaryText: { color: "#FFFFFF", fontFamily: "Poppins_600SemiBold", fontSize: 12 },
 });
