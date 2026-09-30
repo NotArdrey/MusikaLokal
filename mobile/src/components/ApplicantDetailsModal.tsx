@@ -507,6 +507,7 @@ export default function ApplicantDetailsModal({
   const recommendation = application.ai_recommendation || null;
   const aiReview = application.ai_portfolio_review || null;
   const memberVerification = application.member_verification || null;
+  const usesVerifiedIdPortrait = memberVerification?.reference_source === "verified_id_portrait";
   const memberVerificationMembers = list(memberVerification?.members);
   const aiReviewStatus = String(aiReview?.status || "").toLowerCase();
   const retryRef = useRef(onRetry);
@@ -715,7 +716,9 @@ export default function ApplicantDetailsModal({
         ? "Performance identity not confirmed"
         : "Performance identity not checked";
   const memberIdentityDetail = memberVerification
-    ? `${Number(memberVerification.verified_member_count || 0)} of ${Number(memberVerification.expected_member_count || 0)} registered members were confidently matched in the submitted performance video.`
+    ? usesVerifiedIdPortrait
+      ? `${Number(memberVerification.verified_member_count || 0)} of ${Number(memberVerification.expected_member_count || 0)} registered members were confidently matched in the submitted performance video using approved government-ID holder portraits. Full ID documents are not shown; only private face crops may be viewed.`
+      : `${Number(memberVerification.verified_member_count || 0)} of ${Number(memberVerification.expected_member_count || 0)} registered members were confidently matched in this historical check using registered profile photos. New checks use approved government-ID holder portraits.`
     : "No registered-member verification result is available for this application.";
   const cvIdentityMismatch = cvNameCheckStatus === "mismatch";
   const cvIdentityDetail = cvIdentityMismatch && cvNameCheck?.extracted_name
@@ -1134,7 +1137,21 @@ export default function ApplicantDetailsModal({
                   const similarity = Number(member.best_similarity);
                   return (
                     <View key={`${member.member_id || "member-summary"}-${index}`} style={[styles.messageCard, { backgroundColor: colors.inputBackground }]}>
-                      <Text style={[styles.requirementTitle, { color: colors.text }]}>Member {index + 1}</Text>
+                      {member.reference_portrait_url ? (
+                        <TouchableOpacity
+                          accessibilityRole="button"
+                          accessibilityLabel={`View government ID holder portrait for ${member.member_name_snapshot || `member ${index + 1}`}`}
+                          onPress={() => onOpenMedia(member.reference_portrait_url, `${member.member_name_snapshot || `Member ${index + 1}`} - ID Holder Portrait`)}
+                          style={styles.portraitPreviewRow}
+                        >
+                          <ProfileAvatar uri={member.reference_portrait_url} size={56} backgroundColor={colors.surface} iconColor={colors.primary} cachePolicy="none" />
+                          <View style={styles.flexOne}>
+                            <Text style={[styles.requirementTitle, { color: colors.text }]}>Government ID holder portrait</Text>
+                            <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view the face crop used for verification</Text>
+                          </View>
+                        </TouchableOpacity>
+                      ) : null}
+                      <Text style={[styles.requirementTitle, { color: colors.text }]}>{member.member_name_snapshot || `Member ${index + 1}`}</Text>
                       <Text style={[styles.advisory, { color: verified ? "#059669" : "#D97706" }]}>{verified ? "Identity confirmed" : "Identity not confirmed"}</Text>
                       {Number.isFinite(similarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>Best similarity: {similarity.toFixed(1)}%</Text> : null}
                       {!verified ? <Text style={[styles.advisory, { color: "#B45309" }]}>Manual review recommended</Text> : null}
@@ -1173,9 +1190,23 @@ export default function ApplicantDetailsModal({
                     const similarity = Number(member.best_similarity);
                     return (
                       <View key={`${member.member_id || "member"}-${index}`} style={[styles.messageCard, { backgroundColor: colors.inputBackground }]}>
+                        {member.reference_portrait_url ? (
+                          <TouchableOpacity
+                            accessibilityRole="button"
+                            accessibilityLabel={`View government ID holder portrait for ${member.member_name_snapshot || `member ${index + 1}`}`}
+                            onPress={() => onOpenMedia(member.reference_portrait_url, `${member.member_name_snapshot || `Member ${index + 1}`} - ID Holder Portrait`)}
+                            style={styles.portraitPreviewRow}
+                          >
+                            <ProfileAvatar uri={member.reference_portrait_url} size={56} backgroundColor={colors.surface} iconColor={colors.primary} cachePolicy="none" />
+                            <View style={styles.flexOne}>
+                              <Text style={[styles.requirementTitle, { color: colors.text }]}>Government ID holder portrait</Text>
+                              <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view the face crop used for verification</Text>
+                            </View>
+                          </TouchableOpacity>
+                        ) : null}
                         <StatusRow
                           icon={verified ? "checkmark-circle-outline" : "warning-outline"}
-                          label={`Member ${index + 1}: ${verified ? "identity confirmed" : "identity not confirmed"}`}
+                          label={`${member.member_name_snapshot || `Member ${index + 1}`}: ${verified ? "identity confirmed" : "identity not confirmed"}`}
                           color={verified ? "#10B981" : "#F59E0B"}
                         />
                         {Number.isFinite(similarity) ? (
@@ -1574,7 +1605,8 @@ const styles = StyleSheet.create({
   detailRow: { flexDirection: "row", alignItems: "flex-start", gap: 9 },
   detailLabel: { fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 13 },
   detailValue: { marginTop: 1, fontFamily: "Poppins_500Medium", fontSize: 12, lineHeight: 17 },
-  messageCard: { borderRadius: 11, padding: 12 },
+  messageCard: { borderRadius: 11, padding: 12, gap: 7 },
+  portraitPreviewRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 2 },
   tagList: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
   tag: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
   tagText: { fontFamily: "Poppins_500Medium", fontSize: 10, lineHeight: 14 },

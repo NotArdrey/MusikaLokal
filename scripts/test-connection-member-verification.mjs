@@ -46,5 +46,9 @@ test("connection application UIs collect consent and show verification results",
   assert.match(productionForm, /member_verification_consent:\s*memberVerificationConsent/);
   assert.match(review, /Registered member:/);
   assert.match(details, /Registered Member Verification/);
-  assert.match(details, /does not use a government ID/i);
+  assert.match(details, /holder portrait from the applicant(?:&apos;|'|’)?s approved government ID verification/i);
+  assert.match(details, /full ID is not shown/i);
+  assert.match(details, /only the face crop below may be viewed/i);
+  assert.match(details, /Government ID holder portrait/);
+  assert.match(details, /reference_portrait_url/);
 });

@@ -111,6 +111,7 @@ export default function GigDetailsScreen() {
   });
   const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
   const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
+  const [mediaViewerSensitive, setMediaViewerSensitive] = useState(false);
   const [selectedApplicantSummary, setSelectedApplicantSummary] = useState<any | null>(null);
   const [selectedApplicantDetails, setSelectedApplicantDetails] = useState<any | null>(null);
   const [applicantDetailsLoading, setApplicantDetailsLoading] = useState(false);
@@ -198,6 +199,7 @@ export default function GigDetailsScreen() {
 
     if (isInAppMediaUrl(normalizedUrl)) {
       setMediaViewerTitle(title);
+      setMediaViewerSensitive(title.includes("ID Holder Portrait"));
       setMediaViewerUrl(normalizedUrl);
       return;
     }
@@ -1910,7 +1912,11 @@ export default function GigDetailsScreen() {
         visible={!!mediaViewerUrl}
         uri={mediaViewerUrl}
         title={mediaViewerTitle}
-        onClose={() => setMediaViewerUrl(null)}
+        sensitive={mediaViewerSensitive}
+        onClose={() => {
+          setMediaViewerUrl(null);
+          setMediaViewerSensitive(false);
+        }}
       />
     </>
   );

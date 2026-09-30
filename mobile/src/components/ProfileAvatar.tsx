@@ -11,6 +11,7 @@ type ProfileAvatarProps = {
   iconSize?: number;
   backgroundColor?: string;
   iconColor?: string;
+  cachePolicy?: "none" | "disk" | "memory" | "memory-disk";
 };
 
 const ProfileAvatar = ({
@@ -21,6 +22,7 @@ const ProfileAvatar = ({
   iconSize,
   backgroundColor = "#E5E7EB",
   iconColor = "#64748B",
+  cachePolicy = "memory-disk",
 }: ProfileAvatarProps) => {
   const flattenedStyle = useMemo(() => StyleSheet.flatten(style) || {}, [style]);
   const width = typeof flattenedStyle.width === "number" ? flattenedStyle.width : size;
@@ -54,6 +56,7 @@ const ProfileAvatar = ({
         width={width}
         height={height}
         quality={76}
+        cachePolicy={cachePolicy}
       />
     </View>
   );

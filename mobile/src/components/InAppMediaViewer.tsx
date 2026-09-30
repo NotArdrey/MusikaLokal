@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { Image as ExpoImage } from "expo-image";
 import { useVideoPlayer, VideoView } from "expo-video";
 import React, { useEffect, useMemo, useState } from "react";
 import {
@@ -87,6 +88,7 @@ interface InAppMediaViewerProps {
   visible: boolean;
   uri: string | null;
   title?: string;
+  sensitive?: boolean;
   onClose: () => void;
 }
 
@@ -98,7 +100,7 @@ const MediaVideo = ({ uri }: { uri: string }) => {
   return <VideoView player={player} style={styles.media} nativeControls contentFit="contain" />;
 };
 
-const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProps) => {
+const InAppMediaViewer = ({ visible, uri, title, sensitive = false, onClose }: InAppMediaViewerProps) => {
   const [loadedUri, setLoadedUri] = useState<string | null>(null);
   const mediaType = useMemo(() => getInAppMediaType(uri), [uri]);
   const canPreviewDocument = useMemo(() => isPreviewableDocumentUrl(uri, mediaType), [mediaType, uri]);
@@ -162,13 +164,25 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
           {uri && mediaType === "video" ? (
             <MediaVideo key={uri} uri={uri} />
           ) : uri && mediaType === "image" ? (
-            <Image
-              source={{ uri }}
-              style={styles.media}
-              resizeMode="contain"
-              onLoadEnd={() => setLoadedUri(uri)}
-              onError={() => setLoadedUri(uri)}
-            />
+            sensitive ? (
+              <ExpoImage
+                source={{ uri }}
+                style={styles.media}
+                contentFit="contain"
+                cachePolicy="none"
+                recyclingKey={uri}
+                onLoad={() => setLoadedUri(uri)}
+                onError={() => setLoadedUri(uri)}
+              />
+            ) : (
+              <Image
+                source={{ uri }}
+                style={styles.media}
+                resizeMode="contain"
+                onLoadEnd={() => setLoadedUri(uri)}
+                onError={() => setLoadedUri(uri)}
+              />
+            )
           ) : previewUri && mediaType === "document" && canPreviewDocument ? (
             <View style={styles.documentFrame}>
               <WebView

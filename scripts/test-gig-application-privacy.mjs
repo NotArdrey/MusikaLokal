@@ -36,12 +36,14 @@ for (const root of ["mobile", "web"]) {
       : read("web/app/manage_gig.tsx");
 
     assert.doesNotMatch(submission, /identity_document_review_consent/);
-    assert.match(terms, /General AI Match Review does not perform identity matching/);
+    assert.match(terms, /General AI Match Review remains separate from this identity check/);
     assert.match(terms, /including AI Match Review and registered member verification/);
-    assert.match(terms, /government identity documents are never used/i);
+    assert.match(terms, /holder portrait from your approved government ID verification/i);
+    assert.match(terms, /full ID document is not shown to organizers/i);
+    assert.match(terms, /face-only crop of the ID holder portrait through a short-lived private link/i);
     assert.match(terms, /setMemberVerificationConsent\(accepted\)/);
     assert.doesNotMatch(terms, /Allow MusikaLokal to compare your registered profile\/reference photo/);
-    assert.match(fullTerms, /compare registered profile or reference photos with faces in the submitted performance video/);
+    assert.match(fullTerms, /compare the holder portrait from an approved government ID verification with faces in the submitted performance video/);
     assert.match(submission, /member_verification_consent:\s*memberVerificationConsent/);
     assert.match(submission, /action:\s*"request_member_verification"/);
     assert.doesNotMatch(reviewUi, /Approved ID & Video Check|Face\+\+ video match|identity_document_review|face_similarity|group_face_similarity/);
@@ -147,6 +149,8 @@ for (const root of ["mobile", "web"]) {
     const service = read(`${root}/supabase/functions/_shared/gigMemberVerificationService.ts`);
     const applications = read(`${root}/supabase/functions/gig-applications/index.ts`);
     const migration = read(`${root}/supabase/migrations/20260928170000_add_gig_member_verification.sql`);
+    const identityPortraitMigration = read(`${root}/supabase/migrations/20260930170000_use_verified_id_portrait_for_member_verification.sql`);
+    const portraitPreviewMigration = read(`${root}/supabase/migrations/20261001120000_add_member_verification_portrait_previews.sql`);
     const groupMemberScreen = read(`${root}/app/group_application_cv.tsx`);
 
     assert.match(migration, /member_verification_consent/i);
@@ -154,6 +158,11 @@ for (const root of ["mobile", "web"]) {
     assert.match(migration, /create table if not exists public\.gig_application_member_verifications/i);
     assert.match(migration, /create table if not exists public\.gig_application_member_verification_results/i);
     assert.doesNotMatch(migration, /identity_document/i);
+    assert.match(identityPortraitMigration, /verified_id_portrait/i);
+    assert.match(identityPortraitMigration, /gig_application_member_verifications[\s\S]*reference_source/i);
+    assert.match(portraitPreviewMigration, /member-verification-portraits/i);
+    assert.match(portraitPreviewMigration, /public, file_size_limit, allowed_mime_types/i);
+    assert.match(portraitPreviewMigration, /preview_storage_path/i);
     assert.match(groupMemberScreen, /memberVerificationConsent/);
     assert.match(applications, /request_member_verification/);
     assert.match(service, /IndexFacesCommand/);
@@ -164,6 +173,14 @@ for (const root of ["mobile", "web"]) {
     assert.match(service, /NextToken/);
     assert.match(service, /roster_snapshot:\s*references\.map/);
     assert.match(service, /MEMBER_VERIFICATION_ALLOWED_MEDIA_HOSTS/);
+    assert.match(service, /portrait_image/);
+    assert.match(service, /DIDIT_API_KEY/);
+    assert.match(service, /identity-manual/);
+    assert.match(service, /reference_source:\s*'verified_id_portrait'/);
+    assert.doesNotMatch(service, /select\([^)]*avatar_url/);
+    assert.match(service, /createFaceCroppedPortrait/);
+    assert.match(service, /createSignedUrl\(previewPath, PORTRAIT_PREVIEW_TTL_SECONDS\)/);
+    assert.match(service, /reference_portrait_url/);
     assert.match(service, /redirect:\s*'manual'/);
     assert.match(service, /recommendation_status:\s*'needs_review'/);
     assert.doesNotMatch(service, /score\s*:/);

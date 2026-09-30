@@ -1194,7 +1194,7 @@ const ProductionTeamDetailsSheet = forwardRef<
           </View>
           <View style={styles.consentCopy}>
             <Text style={[styles.consentTitle, { color: colors.text }]}>Registered member verification *</Text>
-            <Text style={[styles.consentBody, { color: colors.textSecondary }]}>{selectedApplicationGroup ? "I confirm that every registered member represented by this group application may have their registered profile photo compared with faces in this performance video. Government ID photos are not used, and the result is advisory." : "I consent to Musika Lokal comparing my registered profile photo with faces in this performance video. Government ID photos are not used, and the result is advisory."}</Text>
+            <Text style={[styles.consentBody, { color: colors.textSecondary }]}>{selectedApplicationGroup ? "I confirm that every registered member represented by this group application may have the holder portrait from their approved government ID verification compared with faces in this performance video. Full ID documents are not shown; authorized reviewers may view a face-only holder portrait through a short-lived private link. The result is advisory." : "I consent to Musika Lokal comparing the holder portrait from my approved government ID verification with faces in this performance video. My full ID document is not shown; authorized reviewers may view a face-only holder portrait through a short-lived private link. The result is advisory."}</Text>
           </View>
         </TouchableOpacity>
 

@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import ProfileAvatar from "./ProfileAvatar";
+import InAppMediaViewer from "./InAppMediaViewer";
 
 type Colors = {
   background: string;
@@ -55,12 +56,17 @@ export default function ConnectionApplicantDetailsModal({
   onDecline,
   onOpenMedia,
 }: Props) {
+  const [portraitViewer, setPortraitViewer] = React.useState<{ url: string; title: string } | null>(null);
+  React.useEffect(() => {
+    if (!visible) setPortraitViewer(null);
+  }, [visible]);
   if (!application) return null;
   const details = application?.event_details?.request_details || {};
   const applicant = application?.applicant || {};
   const senderGroup = application?.sender_group || null;
   const recommendation = application?.ai_recommendation || null;
   const verification = application?.member_verification || null;
+  const usesVerifiedIdPortrait = verification?.reference_source === "verified_id_portrait";
   const requirementResults = list(recommendation?.criteria_snapshot?.requirement_results);
   const matched = list(recommendation?.matched_criteria).map(String);
   const missing = list(recommendation?.missing_criteria).map(String);
@@ -82,6 +88,7 @@ export default function ConnectionApplicantDetailsModal({
     : list(applicant?.genres);
 
   return (
+    <>
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
         <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
@@ -154,15 +161,34 @@ export default function ConnectionApplicantDetailsModal({
                   />
                   <View style={styles.requirementCopy}>
                     <Text style={[styles.requirementTitle, { color: verification.result === "verified" ? "#047857" : "#B45309" }]}>
-                      {verification.result === "verified" ? "Applicant found in the submitted video" : verification.status === "processing" ? "Verification is processing" : verification.status === "queued" ? "Verification is queued" : verification.result === "no_reference" ? "Registered profile photo unavailable" : "Manual verification needed"}
+                      {verification.result === "verified" ? "Applicant found in the submitted video" : verification.status === "processing" ? "Verification is processing" : verification.status === "queued" ? "Verification is queued" : verification.result === "no_reference" ? usesVerifiedIdPortrait ? "Verified ID portrait unavailable" : "Registered photo unavailable" : "Manual verification needed"}
                     </Text>
-                    <Text style={[styles.requirementDetail, { color: colors.textSecondary }]}>This consent-gated check compares the applicant's registered profile photo with faces in the submitted video. It does not use a government ID and does not change the match score.</Text>
+                    <Text style={[styles.requirementDetail, { color: colors.textSecondary }]}>{usesVerifiedIdPortrait ? "This consent-gated check compares the holder portrait from the applicant's approved government ID verification with faces in the submitted video. The full ID is not shown; only the face crop below may be viewed. The result does not change the match score." : "This historical result used the applicant's registered profile photo. New checks use the holder portrait from the approved government ID verification."}</Text>
                   </View>
                 </View>
                 {list(verification.members).map((member, index) => (
-                  <Text key={`${member?.member_id || "member"}-${index}`} style={[styles.body, { color: colors.textSecondary }]}>
-                    {member?.member_name_snapshot || `Registered member ${index + 1}`}: {member?.status === "verified" ? "verified" : "needs review"}. Best similarity: {member?.best_similarity === null || member?.best_similarity === undefined ? "Unavailable" : `${Number(member.best_similarity).toFixed(1)}%`}
-                  </Text>
+                  <View key={`${member?.member_id || "member"}-${index}`} style={[styles.memberVerificationCard, { backgroundColor: colors.inputBackground }]}>
+                    {member?.reference_portrait_url ? (
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={`View government ID holder portrait for ${member?.member_name_snapshot || `registered member ${index + 1}`}`}
+                        onPress={() => setPortraitViewer({
+                          url: member.reference_portrait_url,
+                          title: `${member?.member_name_snapshot || `Registered Member ${index + 1}`} - ID Holder Portrait`,
+                        })}
+                        style={styles.portraitRow}
+                      >
+                        <ProfileAvatar uri={member.reference_portrait_url} size={54} backgroundColor={colors.surface} iconColor={colors.primary} cachePolicy="none" />
+                        <View style={styles.portraitCopy}>
+                          <Text style={[styles.requirementTitle, { color: colors.text }]}>Government ID holder portrait</Text>
+                          <Text style={[styles.requirementDetail, { color: colors.primary }]}>Tap to view the face crop used for verification</Text>
+                        </View>
+                      </TouchableOpacity>
+                    ) : null}
+                    <Text style={[styles.body, { color: colors.textSecondary }]}>
+                      {member?.member_name_snapshot || `Registered member ${index + 1}`}: {member?.status === "verified" ? "verified" : "needs review"}. Best similarity: {member?.best_similarity === null || member?.best_similarity === undefined ? "Unavailable" : `${Number(member.best_similarity).toFixed(1)}%`}
+                    </Text>
+                  </View>
                 ))}
               </>
             ) : (
@@ -236,6 +262,14 @@ export default function ConnectionApplicantDetailsModal({
         ) : null}
       </SafeAreaView>
     </Modal>
+    <InAppMediaViewer
+      visible={Boolean(portraitViewer)}
+      uri={portraitViewer?.url || null}
+      title={portraitViewer?.title}
+      sensitive
+      onClose={() => setPortraitViewer(null)}
+    />
+    </>
   );
 }
 
@@ -274,6 +308,9 @@ const styles = StyleSheet.create({
   requirement: { borderWidth: 1, borderRadius: 12, padding: 11, flexDirection: "row", alignItems: "flex-start", gap: 9 },
   requirementCopy: { flex: 1 },
   verificationBanner: { borderRadius: 12, padding: 11, flexDirection: "row", alignItems: "flex-start", gap: 9 },
+  memberVerificationCard: { borderRadius: 12, padding: 11, gap: 8 },
+  portraitRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  portraitCopy: { flex: 1, minWidth: 0 },
   requirementTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 12 },
   requirementDetail: { fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 2 },
   source: { fontFamily: "Poppins_500Medium", fontSize: 9, marginTop: 5 },

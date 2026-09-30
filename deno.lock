@@ -4,6 +4,7 @@
     "npm:@aws-sdk/client-rekognition@3": "3.1141.0",
     "npm:@aws-sdk/client-s3@3": "3.1141.0",
     "npm:@electric-sql/pglite@~0.5.8": "0.5.8",
+    "npm:@imagemagick/magick-wasm@0.0.43": "0.0.43",
     "npm:@playwright/test@^1.59.1": "1.61.1",
     "npm:@supabase/supabase-js@^2.93.1": "2.110.7",
     "npm:@types/node@^24.10.1": "24.13.3",
@@ -230,6 +231,9 @@
     },
     "@electric-sql/pglite@0.5.8": {
       "integrity": "sha512-n9tsbUOhwx2epK1V0ZG9Ar4SHWUju04dhmzZXiSBXwBoleOvIfals33NAaWgagQVAL4Rbvx/Ptsu3P+pA09f6Q=="
+    },
+    "@imagemagick/magick-wasm@0.0.43": {
+      "integrity": "sha512-+Wlr3eEl4JlqLwrhAHBlf4VDzOWiFa8L2hYl7mOMXCgq896KghEnh3Go35nuZJMfmE6lX2waBZdr+u9FVluJLA=="
     },
     "@playwright/test@1.61.1": {
       "integrity": "sha512-8nKv6+0RJSL9FE4jYOEGXnPeM/Hg12qZpmqzZjRh3qM0Y7c3z1mrOTfFLids72RDQYVh9WpLEfR5WdpNX4fkig==",

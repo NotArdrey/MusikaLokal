@@ -21,6 +21,9 @@ import {
 
 type VerificationTarget = 'gig' | 'connection'
 
+const PORTRAIT_PREVIEW_BUCKET = 'member-verification-portraits'
+const PORTRAIT_PREVIEW_TTL_SECONDS = 15 * 60
+
 type VerificationConfig = {
     region: string
     collectionId: string
@@ -30,11 +33,13 @@ type VerificationConfig = {
     maxVideoBytes: number
     pollAttempts: number
     allowedMediaHosts: Set<string>
+    diditApiKey: string
 }
 
 type RosterMember = {
     member_id: string
-    reference_url: string
+    reference_source: 'didit_portrait' | 'manual_id_front' | 'unavailable'
+    reference_locator: string
     consented_at: string
 }
 
@@ -77,6 +82,7 @@ function getConfig(): VerificationConfig {
         maxVideoBytes: Math.max(1, readNumber('AWS_REKOGNITION_MAX_VIDEO_BYTES', 250 * 1024 * 1024)),
         pollAttempts: Math.max(1, Math.min(8, Math.trunc(readNumber('AWS_REKOGNITION_POLL_ATTEMPTS', 5)))),
         allowedMediaHosts,
+        diditApiKey: clean(Deno.env.get('DIDIT_API_KEY')),
     }
 }
 
@@ -135,6 +141,48 @@ function isJpegOrPng(bytes: Uint8Array) {
     return jpeg || png
 }
 
+async function attachIdentityDocumentReferences(
+    client: any,
+    members: Array<{ member_id: string; consented_at: string }>,
+): Promise<RosterMember[]> {
+    const memberIds = members.map((member) => clean(member.member_id)).filter(Boolean)
+    if (memberIds.length === 0) return []
+    const [{ data: profiles, error: profileError }, { data: manualReviews, error: manualError }] = await Promise.all([
+        client.from('profiles')
+            .select('id, is_verified, verification_status, didit_session_id')
+            .in('id', memberIds),
+        client.from('manual_identity_reviews')
+            .select('user_id, front_image_path, status, updated_at')
+            .in('user_id', memberIds)
+            .eq('status', 'APPROVED')
+            .order('updated_at', { ascending: false }),
+    ])
+    if (profileError) throw profileError
+    if (manualError) throw manualError
+    const profileById = new Map<string, any>((profiles || []).map((profile: any) => [clean(profile.id), profile]))
+    const manualPathByUserId = new Map<string, string>()
+    for (const review of manualReviews || []) {
+        const userId = clean(review?.user_id)
+        if (userId && !manualPathByUserId.has(userId) && clean(review?.front_image_path)) {
+            manualPathByUserId.set(userId, clean(review.front_image_path))
+        }
+    }
+    return members.map((member): RosterMember => {
+        const memberId = clean(member.member_id)
+        const profile = profileById.get(memberId)
+        const verificationStatus = clean(profile?.verification_status).toLowerCase()
+        const identityApproved = profile?.is_verified === true && ['approved', 'verified'].includes(verificationStatus)
+        const diditSessionId = identityApproved ? clean(profile?.didit_session_id) : ''
+        const manualPath = identityApproved ? clean(manualPathByUserId.get(memberId)) : ''
+        return {
+            member_id: memberId,
+            reference_source: diditSessionId ? 'didit_portrait' : manualPath ? 'manual_id_front' : 'unavailable',
+            reference_locator: diditSessionId || manualPath,
+            consented_at: clean(member.consented_at),
+        }
+    }).filter((member) => Boolean(member.member_id))
+}
+
 async function loadRoster(client: any, application: any): Promise<RosterMember[]> {
     if (application.group_id) {
         const { data: members, error: memberError } = await client
@@ -145,19 +193,12 @@ async function loadRoster(client: any, application: any): Promise<RosterMember[]
         if (memberError) throw memberError
         const memberIds = (members || []).map((member: any) => clean(member.user_id)).filter(Boolean)
         if (memberIds.length === 0) return []
-        const { data: profiles, error: profileError } = await client
-            .from('profiles')
-            .select('id, avatar_url')
-            .in('id', memberIds)
-        if (profileError) throw profileError
-        const avatarById = new Map((profiles || []).map((profile: any) => [clean(profile.id), clean(profile.avatar_url)]))
-        return (members || []).map((member: any) => ({
+        return attachIdentityDocumentReferences(client, (members || []).map((member: any) => ({
             member_id: clean(member.user_id),
-            reference_url: avatarById.get(clean(member.user_id)) || '',
             consented_at: member.member_verification_consent === true
                 ? clean(member.member_verification_consented_at)
                 : '',
-        })).filter((member: RosterMember) => member.member_id)
+        })))
     }
 
     let memberId = clean(application.applicant_id)
@@ -171,19 +212,12 @@ async function loadRoster(client: any, application: any): Promise<RosterMember[]
         memberId = clean(roster?.profile_id) || memberId
     }
     if (!memberId) return []
-    const { data: profile, error: profileError } = await client
-        .from('profiles')
-        .select('id, avatar_url')
-        .eq('id', memberId)
-        .maybeSingle()
-    if (profileError) throw profileError
-    return [{
+    return attachIdentityDocumentReferences(client, [{
         member_id: memberId,
-        reference_url: clean(profile?.avatar_url),
         consented_at: application.member_verification_consent === true
             ? clean(application.member_verification_consented_at)
             : '',
-    }]
+    }])
 }
 
 async function loadApplicationAndRoster(
@@ -221,21 +255,14 @@ async function loadApplicationAndRoster(
         if (snapshotError) throw snapshotError
         if ((snapshotMembers || []).length > 0) {
             const memberIds = (snapshotMembers || []).map((member: any) => clean(member.user_id)).filter(Boolean)
-            const { data: profiles, error: profileError } = await client
-                .from('profiles')
-                .select('id, avatar_url')
-                .in('id', memberIds)
-            if (profileError) throw profileError
-            const avatarById = new Map((profiles || []).map((profile: any) => [clean(profile.id), clean(profile.avatar_url)]))
             return {
                 application,
-                roster: (snapshotMembers || []).map((member: any) => ({
+                roster: await attachIdentityDocumentReferences(client, (snapshotMembers || []).map((member: any) => ({
                     member_id: clean(member.user_id),
-                    reference_url: avatarById.get(clean(member.user_id)) || '',
                     consented_at: member.member_verification_consent === true
                         ? clean(member.member_verification_consented_at)
                         : '',
-                })).filter((member: RosterMember) => member.member_id),
+                }))),
             }
         }
         return { application, roster: await loadRoster(client, application) }
@@ -263,7 +290,7 @@ async function queueMemberVerification(
     const now = new Date().toISOString()
     const { data: existing, error: existingError } = await client
         .from('gig_application_member_verifications')
-        .select('id, status, aws_job_id, client_request_token')
+        .select('id, status, aws_job_id, client_request_token, reference_source')
         .eq(targetColumn, applicationId)
         .maybeSingle()
     if (existingError) throw existingError
@@ -272,6 +299,7 @@ async function queueMemberVerification(
     const payload = {
         application_id: target === 'gig' ? applicationId : null,
         booking_request_id: target === 'connection' ? applicationId : null,
+        reference_source: 'verified_id_portrait',
         status: allConsented ? 'queued' : 'not_requested',
         result: !allConsented ? null : !clean(application.video_url) ? 'no_video' : null,
         expected_member_count: roster.length,
@@ -303,24 +331,176 @@ export async function queueConnectionMemberVerification(client: any, application
     return queueMemberVerification(client, applicationId, 'connection')
 }
 
+function diditDecision(payload: any) {
+    const candidates = [
+        payload?.decision,
+        payload?.verification_data?.decision,
+        payload?.details?.decision,
+        payload,
+    ]
+    return candidates.find((value) => value && typeof value === 'object' && (
+        value.id_verification || value.idVerification || Array.isArray(value.id_verifications)
+    )) || payload
+}
+
+function diditIdVerification(payload: any) {
+    const decision = diditDecision(payload)
+    const candidates = [
+        decision?.id_verification,
+        decision?.idVerification,
+        decision?.id_verifications?.[0],
+        payload?.verification_data?.id_verification,
+        payload?.details?.id_verification,
+    ]
+    return candidates.find((value) => value && typeof value === 'object') || null
+}
+
+function isUnsafeTemporaryMediaHost(hostname: string) {
+    const host = hostname.toLowerCase()
+    return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' ||
+        host === '::1' || host.endsWith('.local') || host.startsWith('10.') ||
+        host.startsWith('192.168.') || /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+        host.startsWith('169.254.')
+}
+
+async function fetchDiditPortraitBytes(config: VerificationConfig, sessionId: string) {
+    if (!config.diditApiKey || !sessionId) return null
+    const response = await fetch(
+        `https://verification.didit.me/v3/session/${encodeURIComponent(sessionId)}/decision/`,
+        {
+            headers: { 'Content-Type': 'application/json', 'x-api-key': config.diditApiKey },
+            signal: AbortSignal.timeout(30_000),
+        },
+    )
+    if (!response.ok) return null
+    const payload = await response.json()
+    const verification = diditIdVerification(payload)
+    if (clean(verification?.status).toLowerCase() !== 'approved') return null
+    const portraitUrl = clean(
+        verification?.portrait_image ||
+        verification?.portrait_image_url ||
+        verification?.portraitImage ||
+        verification?.portraitImageUrl,
+    )
+    if (!portraitUrl) return null
+    const parsed = new URL(portraitUrl)
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || isUnsafeTemporaryMediaHost(parsed.hostname)) {
+        throw new Error('identity_portrait_url_unsupported')
+    }
+    return fetchBytes(portraitUrl, 15 * 1024 * 1024, 'image', new Set([parsed.hostname.toLowerCase()]))
+}
+
+async function loadIdentityDocumentImage(
+    client: any,
+    config: VerificationConfig,
+    member: RosterMember,
+) {
+    if (member.reference_source === 'didit_portrait') {
+        return fetchDiditPortraitBytes(config, member.reference_locator)
+    }
+    if (member.reference_source === 'manual_id_front' && member.reference_locator) {
+        const { data, error } = await client.storage.from('identity-manual').download(member.reference_locator)
+        if (error || !data) return null
+        if (data.size === 0 || data.size > 15 * 1024 * 1024) throw new Error('identity_image_too_large')
+        return {
+            bytes: new Uint8Array(await data.arrayBuffer()),
+            contentType: clean(data.type).toLowerCase(),
+        }
+    }
+    return null
+}
+
+let imageMagickModulePromise: Promise<any> | null = null
+
+async function getImageMagickModule() {
+    if (!imageMagickModulePromise) {
+        imageMagickModulePromise = (async () => {
+            const module = await import('npm:@imagemagick/magick-wasm@0.0.43')
+            const wasmUrl = new URL(import.meta.resolve('npm:@imagemagick/magick-wasm@0.0.43/magick.wasm'))
+            await module.initializeImageMagick(await Deno.readFile(wasmUrl))
+            return module
+        })()
+    }
+    return imageMagickModulePromise
+}
+
+async function createFaceCroppedPortrait(bytes: Uint8Array, boundingBox: any) {
+    const left = Number(boundingBox?.Left)
+    const top = Number(boundingBox?.Top)
+    const width = Number(boundingBox?.Width)
+    const height = Number(boundingBox?.Height)
+    if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
+        throw new Error('identity_portrait_bounds_invalid')
+    }
+    const { ImageMagick, MagickFormat, MagickGeometry } = await getImageMagickModule()
+    return ImageMagick.read(bytes, (image: any): Uint8Array => {
+        image.autoOrient()
+        const imageWidth = Number(image.width)
+        const imageHeight = Number(image.height)
+        const faceWidth = Math.max(1, width * imageWidth)
+        const faceHeight = Math.max(1, height * imageHeight)
+        const cropSide = Math.max(1, Math.min(
+            imageWidth,
+            imageHeight,
+            Math.ceil(Math.max(faceWidth, faceHeight) * 1.8),
+        ))
+        const centerX = (left * imageWidth) + (faceWidth / 2)
+        const centerY = (top * imageHeight) + (faceHeight * 0.48)
+        const cropX = Math.max(0, Math.min(imageWidth - cropSide, Math.round(centerX - cropSide / 2)))
+        const cropY = Math.max(0, Math.min(imageHeight - cropSide, Math.round(centerY - cropSide / 2)))
+        image.crop(new MagickGeometry(cropX, cropY, cropSide, cropSide))
+        image.resize(320, 320)
+        image.quality = 82
+        return image.write(MagickFormat.Jpeg, (output: Uint8Array) => Uint8Array.from(output))
+    })
+}
+
+async function storePortraitPreview(
+    client: any,
+    memberId: string,
+    referenceHash: string,
+    bytes: Uint8Array,
+    boundingBox: any,
+) {
+    try {
+        const preview = await createFaceCroppedPortrait(bytes, boundingBox)
+        if (!preview.length || preview.length > 1024 * 1024) throw new Error('identity_portrait_preview_too_large')
+        const path = `${memberId}/${referenceHash}.jpg`
+        const { error } = await client.storage.from(PORTRAIT_PREVIEW_BUCKET).upload(path, preview, {
+            contentType: 'image/jpeg',
+            cacheControl: '3600',
+            upsert: true,
+        })
+        if (error) throw error
+        return path
+    } catch (error) {
+        console.warn('member_verification_portrait_preview_failed', {
+            memberId,
+            errorCode: safeErrorCode(error),
+        })
+        return ''
+    }
+}
+
 async function ensureReferenceFace(
     client: any,
     rekognition: RekognitionClient,
     config: VerificationConfig,
     member: RosterMember,
 ) {
-    if (!member.reference_url) return { member_id: member.member_id, status: 'no_reference', faceId: '', hash: '' }
-    const { bytes } = await fetchBytes(member.reference_url, 15 * 1024 * 1024, 'image', config.allowedMediaHosts)
+    const identityImage = await loadIdentityDocumentImage(client, config, member)
+    if (!identityImage) return { member_id: member.member_id, status: 'no_reference', faceId: '', hash: '' }
+    const { bytes } = identityImage
     if (!isJpegOrPng(bytes)) return { member_id: member.member_id, status: 'reference_unusable', faceId: '', hash: '' }
     const hash = await hashReferenceImage(bytes)
     const { data: existing, error: existingError } = await client
         .from('member_verification_reference_faces')
-        .select('id, face_id, reference_image_hash, status')
+        .select('id, face_id, reference_image_hash, status, reference_source, preview_storage_path')
         .eq('member_id', member.member_id)
         .eq('collection_id', config.collectionId)
         .maybeSingle()
     if (existingError) throw existingError
-    if (existing?.status === 'indexed' && existing.reference_image_hash === hash && existing.face_id) {
+    if (existing?.status === 'indexed' && existing.reference_source === 'verified_id_portrait' && existing.reference_image_hash === hash && existing.face_id && existing.preview_storage_path) {
         return { member_id: member.member_id, status: 'indexed', faceId: clean(existing.face_id), hash, referenceId: existing.id }
     }
 
@@ -333,14 +513,36 @@ async function ensureReferenceFace(
             collection_id: config.collectionId,
             external_image_id: externalImageIdForMember(member.member_id),
             reference_image_hash: hash,
+            reference_source: 'verified_id_portrait',
             status,
             face_id: null,
+            preview_storage_path: null,
             detected_face_count: faceCount,
             error_code: faceCount === 0 ? 'no_face' : 'multiple_faces',
             updated_at: new Date().toISOString(),
         }, { onConflict: 'member_id,collection_id' }).select('id').single()
         if (saveError) throw saveError
+        const previousPreviewPath = clean(existing?.preview_storage_path)
+        if (previousPreviewPath) await client.storage.from(PORTRAIT_PREVIEW_BUCKET).remove([previousPreviewPath])
         return { member_id: member.member_id, status, faceId: '', hash, referenceId: saved.id }
+    }
+
+    const previewStoragePath = await storePortraitPreview(
+        client,
+        member.member_id,
+        hash,
+        bytes,
+        detected.FaceDetails?.[0]?.BoundingBox,
+    )
+    if (existing?.status === 'indexed' && existing.reference_source === 'verified_id_portrait' && existing.reference_image_hash === hash && existing.face_id) {
+        if (previewStoragePath) {
+            const { error: previewUpdateError } = await client.from('member_verification_reference_faces').update({
+                preview_storage_path: previewStoragePath,
+                updated_at: new Date().toISOString(),
+            }).eq('id', existing.id)
+            if (previewUpdateError) throw previewUpdateError
+        }
+        return { member_id: member.member_id, status: 'indexed', faceId: clean(existing.face_id), hash, referenceId: existing.id }
     }
 
     const indexed = await rekognition.send(new IndexFacesCommand({
@@ -363,6 +565,8 @@ async function ensureReferenceFace(
         face_id: faceId,
         external_image_id: externalImageIdForMember(member.member_id),
         reference_image_hash: hash,
+        reference_source: 'verified_id_portrait',
+        preview_storage_path: previewStoragePath || null,
         status: 'indexed',
         detected_face_count: 1,
         error_code: null,
@@ -373,6 +577,10 @@ async function ensureReferenceFace(
     if (saveError) throw saveError
     if (previousFaceId && previousFaceId !== faceId) {
         await rekognition.send(new DeleteFacesCommand({ CollectionId: config.collectionId, FaceIds: [previousFaceId] }))
+    }
+    const previousPreviewPath = clean(existing?.preview_storage_path)
+    if (previousPreviewPath && previousPreviewPath !== previewStoragePath) {
+        await client.storage.from(PORTRAIT_PREVIEW_BUCKET).remove([previousPreviewPath])
     }
     return { member_id: member.member_id, status: 'indexed', faceId, hash, referenceId: saved.id }
 }
@@ -526,7 +734,8 @@ async function runMemberVerification(
 
         const startedAt = new Date().toISOString()
         await client.from('gig_application_member_verifications').update({
-            status: 'processing', started_at: verification.started_at || startedAt, updated_at: startedAt,
+            status: 'processing', reference_source: 'verified_id_portrait',
+            started_at: verification.started_at || startedAt, updated_at: startedAt,
         }).eq('id', verification.id)
         const references = await Promise.all(
             roster.map((member) => ensureReferenceFace(client, clients.rekognition, config!, member)),
@@ -566,6 +775,7 @@ async function runMemberVerification(
         if (!jobId) throw new Error('start_face_search_missing_job_id')
         const { data: updated, error: updateError } = await client.from('gig_application_member_verifications').update({
             status: 'processing',
+            reference_source: 'verified_id_portrait',
             aws_job_id: jobId,
             aws_collection_id: config.collectionId,
             video_object_key: objectKey,
@@ -617,7 +827,7 @@ export async function deleteMemberReferenceFaces(client: any, memberId: string) 
     if (!normalizedMemberId) throw new Error('member_id_required')
     const { data: references, error } = await client
         .from('member_verification_reference_faces')
-        .select('id, collection_id, face_id')
+        .select('id, collection_id, face_id, preview_storage_path')
         .eq('member_id', normalizedMemberId)
     if (error) throw error
     if (!references?.length) return { deleted: 0 }
@@ -630,6 +840,11 @@ export async function deleteMemberReferenceFaces(client: any, memberId: string) 
         if (collectionId && faceId) {
             await rekognition.send(new DeleteFacesCommand({ CollectionId: collectionId, FaceIds: [faceId] }))
         }
+    }
+    const previewPaths = references.map((reference: any) => clean(reference.preview_storage_path)).filter(Boolean)
+    if (previewPaths.length > 0) {
+        const { error: previewDeleteError } = await client.storage.from(PORTRAIT_PREVIEW_BUCKET).remove(previewPaths)
+        if (previewDeleteError) throw previewDeleteError
     }
     const { error: deleteError } = await client
         .from('member_verification_reference_faces')
@@ -661,15 +876,36 @@ async function attachMemberVerification(client: any, application: any, target: V
     const targetColumn = target === 'connection' ? 'booking_request_id' : 'application_id'
     const { data: verification, error } = await client
         .from('gig_application_member_verifications')
-        .select('id, application_id, booking_request_id, status, result, expected_member_count, verified_member_count, additional_people_detected, created_at, updated_at, started_at, completed_at, next_poll_at')
+        .select('id, application_id, booking_request_id, reference_source, status, result, expected_member_count, verified_member_count, additional_people_detected, created_at, updated_at, started_at, completed_at, next_poll_at')
         .eq(targetColumn, application.id)
         .maybeSingle()
     if (error || !verification) return { ...application, member_verification: null }
     const { data: members } = await client
         .from('gig_application_member_verification_results')
-        .select('member_id, status, best_similarity, match_count, first_match_timestamp_ms, best_match_timestamp_ms')
+        .select('member_id, reference_face_id, status, best_similarity, match_count, first_match_timestamp_ms, best_match_timestamp_ms')
         .eq('verification_id', verification.id)
-    let attachedMembers = members || []
+    const referenceIds = (members || []).map((member: any) => clean(member.reference_face_id)).filter(Boolean)
+    const { data: referenceFaces } = referenceIds.length > 0
+        ? await client.from('member_verification_reference_faces')
+            .select('id, reference_source, preview_storage_path')
+            .in('id', referenceIds)
+        : { data: [] }
+    const referenceById = new Map<string, any>((referenceFaces || []).map((reference: any) => [clean(reference.id), reference]))
+    let attachedMembers = await Promise.all((members || []).map(async (member: any) => {
+        const reference = referenceById.get(clean(member.reference_face_id))
+        const previewPath = reference?.reference_source === 'verified_id_portrait'
+            ? clean(reference?.preview_storage_path)
+            : ''
+        if (!previewPath) return { ...member, reference_portrait_url: null }
+        const { data: signed, error: signedError } = await client.storage
+            .from(PORTRAIT_PREVIEW_BUCKET)
+            .createSignedUrl(previewPath, PORTRAIT_PREVIEW_TTL_SECONDS)
+        return {
+            ...member,
+            reference_portrait_url: signedError ? null : signed?.signedUrl || null,
+            reference_portrait_expires_in: signedError ? null : PORTRAIT_PREVIEW_TTL_SECONDS,
+        }
+    }))
     if (target === 'connection' && attachedMembers.length > 0) {
         const { data: snapshots } = await client
             .from('connection_application_members')
@@ -681,10 +917,19 @@ async function attachMemberVerification(client: any, application: any, target: V
             member_name_snapshot: snapshotByUserId.get(clean(member.member_id))?.member_name_snapshot || null,
             role_snapshot: snapshotByUserId.get(clean(member.member_id))?.role_snapshot || null,
         }))
+    } else if (attachedMembers.length > 0) {
+        const memberIds = attachedMembers.map((member: any) => clean(member.member_id)).filter(Boolean)
+        const { data: profiles } = await client.from('profiles').select('id, full_name').in('id', memberIds)
+        const profileById = new Map<string, any>((profiles || []).map((profile: any) => [clean(profile.id), profile]))
+        attachedMembers = attachedMembers.map((member: any) => ({
+            ...member,
+            member_name_snapshot: clean(profileById.get(clean(member.member_id))?.full_name) || null,
+        }))
     }
     return {
         ...application,
         member_verification: {
+            reference_source: verification.reference_source,
             status: verification.status,
             result: verification.result,
             expected_member_count: verification.expected_member_count,

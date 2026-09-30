@@ -132,7 +132,7 @@ for (const [target, api] of modules) {
     assert.equal(result.members[0].status, "no_reference");
   });
 
-  test(`${target}: an unusable registered photo is distinct from a missing photo`, () => {
+  test(`${target}: an unusable verified-ID portrait is distinct from a missing portrait`, () => {
     const unusable = { ...member("a", null), reference_status: "reference_unusable" };
     const result = api.aggregateMemberFaceSearch([unusable], []);
     assert.equal(result.result, "needs_review");
