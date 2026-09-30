@@ -3,6 +3,7 @@ import { router } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { supabase } from "../../lib/supabase";
+import { radius, typography } from "../theme/tokens";
 
 type Props = {
   userId: string | null;
@@ -50,6 +51,7 @@ export default function GroupApplicationCvTaskList({ userId, visible, colors, is
         const canFinalize = task.can_finalize === true;
         const statusLabel = canFinalize ? "Ready to send" : needsCv ? "Your CV required" : "Waiting for members";
         const statusColor = canFinalize ? "#10B981" : needsCv ? "#F59E0B" : colors.primary;
+        const statusIcon = canFinalize ? "checkmark-circle" : "time-outline";
         return (
           <TouchableOpacity
             key={task.id}
@@ -57,15 +59,31 @@ export default function GroupApplicationCvTaskList({ userId, visible, colors, is
             onPress={() => router.push({ pathname: "/group_application_cv", params: { applicationId: task.application_id } } as any)}
             style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
           >
-            <View style={[styles.icon, { backgroundColor: isDark ? "rgba(124,58,237,0.18)" : "#F3E8FF" }]}>
-              <Ionicons name="document-text-outline" size={22} color={colors.primary} />
+            <View style={styles.labelRow}>
+              <Text style={[styles.applicationType, { color: colors.primary }]}>Group application</Text>
+              <Text style={[styles.actionLabel, { color: colors.textSecondary }]}>View task</Text>
             </View>
-            <View style={styles.copy}>
-              <Text style={[styles.groupName, { color: colors.text }]} numberOfLines={1}>{application.group?.name || "Your group"}</Text>
-              <Text style={[styles.gigName, { color: colors.textSecondary }]} numberOfLines={1}>{application.gig?.name || "Gig application"}</Text>
-              <Text style={[styles.status, { color: statusColor }]}>{statusLabel}</Text>
+
+            <Text style={[styles.gigName, { color: colors.text }]} numberOfLines={2}>
+              {application.gig?.name || "Gig application"}
+            </Text>
+
+            <View style={styles.detailRow}>
+              <Ionicons name="people-outline" size={14} color={colors.primary} />
+              <Text style={[styles.groupName, { color: colors.textSecondary }]} numberOfLines={1}>
+                Applying with {application.group?.name || "your group"}
+              </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+
+            <View style={[styles.footer, { borderTopColor: isDark ? colors.border : "#F3F4F6" }]}>
+              <View style={styles.statusRow}>
+                <Ionicons name={statusIcon} size={16} color={statusColor} />
+                <Text style={[styles.status, { color: statusColor }]}>{statusLabel}</Text>
+              </View>
+              <View style={[styles.chevronButton, { borderColor: colors.border }]}>
+                <Ionicons name="chevron-forward" size={17} color={colors.primary} />
+              </View>
+            </View>
           </TouchableOpacity>
         );
       })}
@@ -74,14 +92,45 @@ export default function GroupApplicationCvTaskList({ userId, visible, colors, is
 }
 
 const styles = StyleSheet.create({
-  container: { marginHorizontal: 16, marginTop: 12, gap: 10 },
+  container: { marginTop: 12, marginBottom: 12, gap: 10 },
   headingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  heading: { fontFamily: "Poppins_600SemiBold", fontSize: 15 },
-  subtitle: { fontFamily: "Poppins_400Regular", fontSize: 11 },
-  card: { borderWidth: 1, borderRadius: 14, padding: 13, flexDirection: "row", alignItems: "center", gap: 11 },
-  icon: { width: 42, height: 42, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  copy: { flex: 1 },
-  groupName: { fontFamily: "Poppins_600SemiBold", fontSize: 14 },
-  gigName: { fontFamily: "Poppins_400Regular", fontSize: 12 },
-  status: { fontFamily: "Poppins_600SemiBold", fontSize: 11, marginTop: 2 },
+  heading: { fontFamily: typography.heading, fontSize: 16, lineHeight: 21 },
+  subtitle: { fontFamily: typography.body, fontSize: 11, lineHeight: 16, marginTop: 2 },
+  card: { borderWidth: 1, borderRadius: radius.card, padding: 16 },
+  labelRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 10,
+  },
+  applicationType: {
+    flex: 1,
+    fontFamily: typography.bold,
+    fontSize: 11,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
+  actionLabel: { fontFamily: typography.semibold, fontSize: 12 },
+  gigName: { fontFamily: typography.title, fontSize: 19, lineHeight: 25 },
+  detailRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 8 },
+  groupName: { flex: 1, fontFamily: typography.body, fontSize: 11, lineHeight: 15 },
+  footer: {
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  statusRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  status: { fontFamily: typography.semibold, fontSize: 12 },
+  chevronButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });

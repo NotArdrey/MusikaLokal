@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -16,6 +16,7 @@ import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import { useRequireAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { radius, typography } from "../src/theme/tokens";
 import { sanitizeStorageFileName, uploadStorageObject } from "../src/utils/storageUpload";
 
 const readFunctionError = async (error: any, fallback: string) => {
@@ -39,8 +40,6 @@ export default function GroupApplicationCvScreen() {
   const [details, setDetails] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [file, setFile] = useState<any>(null);
-  const [aiConsent, setAiConsent] = useState(false);
-  const [memberVerificationConsent, setMemberVerificationConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
@@ -71,9 +70,6 @@ export default function GroupApplicationCvScreen() {
       );
     } else {
       setDetails(data);
-      const ownMember = (data?.members || []).find((member: any) => member.is_current_user);
-      setAiConsent(ownMember?.ai_review_consent === true);
-      setMemberVerificationConsent(ownMember?.member_verification_consent === true);
     }
     setLoading(false);
   }, [applicationId, isAuthenticated, userId]);
@@ -121,8 +117,8 @@ export default function GroupApplicationCvScreen() {
           userId,
           cvStoragePath: upload.path,
           cvFilename: filename,
-          aiReviewConsent: aiConsent,
-          memberVerificationConsent,
+          aiReviewConsent: true,
+          memberVerificationConsent: true,
         },
       });
       if (error || data?.error) {
@@ -222,30 +218,6 @@ export default function GroupApplicationCvScreen() {
                   onFileSelect={setFile}
                 />
                 <TouchableOpacity
-                  activeOpacity={0.8}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: aiConsent }}
-                  onPress={() => setAiConsent((value) => !value)}
-                  style={styles.consentRow}
-                >
-                  <View style={[styles.checkbox, { borderColor: aiConsent ? colors.primary : colors.border, backgroundColor: aiConsent ? colors.primary : "transparent" }]}>
-                    {aiConsent && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
-                  </View>
-                  <Text style={[styles.consentText, { color: colors.textSecondary }]}>Allow Gemini to review my CV as advisory evidence for this gig.</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  activeOpacity={0.8}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: memberVerificationConsent }}
-                  onPress={() => setMemberVerificationConsent((value) => !value)}
-                  style={styles.consentRow}
-                >
-                  <View style={[styles.checkbox, { borderColor: memberVerificationConsent ? colors.primary : colors.border, backgroundColor: memberVerificationConsent ? colors.primary : "transparent" }]}>
-                    {memberVerificationConsent && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
-                  </View>
-                  <Text style={[styles.consentText, { color: colors.textSecondary }]}>Allow MusikaLokal to compare my registered profile/reference photo with faces in the shared performance video to help verify that I appear in the performance. Optional.</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
                   activeOpacity={0.82}
                   disabled={!file || submitting}
                   onPress={uploadCv}
@@ -304,9 +276,6 @@ export default function GroupApplicationCvScreen() {
               </View>
             )}
 
-            <TouchableOpacity onPress={() => router.replace({ pathname: "/bookings", params: { tab: "Pending" } } as any)} style={styles.backButton}>
-              <Text style={[styles.backButtonText, { color: colors.primary }]}>Back to Bookings</Text>
-            </TouchableOpacity>
           </>
         )}
       </ScrollView>
@@ -326,27 +295,22 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   content: { padding: 16, paddingBottom: 120, gap: 14, width: "100%", maxWidth: 760, alignSelf: "center" },
   loading: { paddingVertical: 64, alignItems: "center", gap: 12 },
-  card: { borderWidth: 1, borderRadius: 16, padding: 16 },
-  eyebrow: { fontFamily: "Poppins_600SemiBold", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.7 },
-  title: { fontFamily: "Poppins_600SemiBold", fontSize: 21, marginTop: 3 },
-  sectionTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 16 },
-  secondary: { fontFamily: "Poppins_400Regular", fontSize: 13, marginTop: 4 },
+  card: { borderWidth: 1, borderRadius: radius.card, padding: 16 },
+  eyebrow: { fontFamily: typography.bold, fontSize: 12, textTransform: "uppercase", letterSpacing: 0.7 },
+  title: { fontFamily: typography.title, fontSize: 21, lineHeight: 27, marginTop: 3 },
+  sectionTitle: { fontFamily: typography.heading, fontSize: 16, lineHeight: 22 },
+  secondary: { fontFamily: typography.body, fontSize: 13, lineHeight: 19, marginTop: 4 },
   progressTrack: { height: 8, borderRadius: 4, marginTop: 16, overflow: "hidden" },
   progressFill: { height: "100%", borderRadius: 4 },
-  progressText: { fontFamily: "Poppins_500Medium", fontSize: 12, marginTop: 7 },
+  progressText: { fontFamily: typography.medium, fontSize: 12, marginTop: 7 },
   sharedRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 14 },
   successRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10, marginBottom: 12 },
-  consentRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 16 },
-  checkbox: { width: 22, height: 22, borderWidth: 1.5, borderRadius: 6, alignItems: "center", justifyContent: "center" },
-  consentText: { flex: 1, fontFamily: "Poppins_400Regular", fontSize: 12, lineHeight: 18 },
   primaryButton: { minHeight: 48, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 18 },
-  primaryButtonText: { color: "#FFFFFF", fontFamily: "Poppins_600SemiBold", fontSize: 14 },
+  primaryButtonText: { color: "#FFFFFF", fontFamily: typography.semibold, fontSize: 14 },
   memberRow: { minHeight: 66, flexDirection: "row", alignItems: "center", gap: 10, borderBottomWidth: StyleSheet.hairlineWidth },
   memberText: { flex: 1 },
-  memberName: { fontFamily: "Poppins_600SemiBold", fontSize: 14 },
-  memberMeta: { fontFamily: "Poppins_400Regular", fontSize: 12 },
-  statusText: { fontFamily: "Poppins_600SemiBold", fontSize: 11 },
-  completeCard: { borderWidth: 1, borderRadius: 16, padding: 16, flexDirection: "row", alignItems: "center", gap: 12 },
-  backButton: { alignItems: "center", paddingVertical: 12 },
-  backButtonText: { fontFamily: "Poppins_600SemiBold", fontSize: 14 },
+  memberName: { fontFamily: typography.semibold, fontSize: 14, lineHeight: 20 },
+  memberMeta: { fontFamily: typography.body, fontSize: 12, lineHeight: 18 },
+  statusText: { fontFamily: typography.semibold, fontSize: 11 },
+  completeCard: { borderWidth: 1, borderRadius: radius.card, padding: 16, flexDirection: "row", alignItems: "center", gap: 12 },
 });

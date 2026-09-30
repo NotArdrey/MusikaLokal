@@ -241,6 +241,7 @@ const ProductionTeamDetailsSheet = forwardRef<
   const [requestDocumentFile, setRequestDocumentFile] = useState<any>(null);
   const [requestDocumentUrl, setRequestDocumentUrl] = useState("");
   const [requestVideoUrl, setRequestVideoUrl] = useState("");
+  const [memberVerificationConsent, setMemberVerificationConsent] = useState(true);
   const [isSendingRequest, setIsSendingRequest] = useState(false);
   const requestInFlightRef = useRef(false);
   const previousSheetIndexRef = useRef(-1);
@@ -322,6 +323,7 @@ const ProductionTeamDetailsSheet = forwardRef<
       setRequestDocumentFile(null);
       setRequestDocumentUrl("");
       setRequestVideoUrl("");
+      setMemberVerificationConsent(true);
       setIsFavorited(false);
       setFavoriteCount(0);
       return () => {
@@ -356,6 +358,7 @@ const ProductionTeamDetailsSheet = forwardRef<
     setRequestDocumentFile(null);
     setRequestDocumentUrl("");
     setRequestVideoUrl("");
+    setMemberVerificationConsent(true);
 
     void (async () => {
       try {
@@ -810,6 +813,15 @@ const ProductionTeamDetailsSheet = forwardRef<
       return;
     }
 
+    if (!memberVerificationConsent) {
+      showSheetAlert(
+        "warning",
+        "Verification Consent Required",
+        "Consent to registered-profile-photo verification before sending this application.",
+      );
+      return;
+    }
+
     requestInFlightRef.current = true;
     setIsSendingRequest(true);
     try {
@@ -843,6 +855,7 @@ const ProductionTeamDetailsSheet = forwardRef<
         apply_as: selectedApplicationGroup ? "group" : "solo",
         selected_group_id: selectedApplicationGroup?.id || null,
         selected_group_type: selectedApplicationGroup?.group_type || null,
+        member_verification_consent: memberVerificationConsent,
       };
 
       await submitListingRequest({
@@ -875,6 +888,7 @@ const ProductionTeamDetailsSheet = forwardRef<
       setRequestDocumentFile(null);
       setRequestDocumentUrl("");
       setRequestVideoUrl("");
+      setMemberVerificationConsent(true);
       setSelectedGroupId(null);
       showSheetAlert(
         "success",
@@ -910,6 +924,7 @@ const ProductionTeamDetailsSheet = forwardRef<
     requestMessage,
     requestVideoUrl,
     isSendingRequest,
+    memberVerificationConsent,
     selectedApplicationGroup,
     team?.id,
     team?.logo_url,
@@ -1158,6 +1173,30 @@ const ProductionTeamDetailsSheet = forwardRef<
           folder="performance-videos"
           maxSizeMB={50}
         />
+
+        <TouchableOpacity
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: memberVerificationConsent }}
+          activeOpacity={0.78}
+          onPress={() => setMemberVerificationConsent((current) => !current)}
+          style={styles.consentRow}
+        >
+          <View
+            style={[
+              styles.consentCheckbox,
+              {
+                borderColor: memberVerificationConsent ? colors.primary : colors.border,
+                backgroundColor: memberVerificationConsent ? colors.primary : "transparent",
+              },
+            ]}
+          >
+            {memberVerificationConsent ? <Ionicons name="checkmark" size={16} color="#FFFFFF" /> : null}
+          </View>
+          <View style={styles.consentCopy}>
+            <Text style={[styles.consentTitle, { color: colors.text }]}>Registered member verification *</Text>
+            <Text style={[styles.consentBody, { color: colors.textSecondary }]}>{selectedApplicationGroup ? "I confirm that every registered member represented by this group application may have their registered profile photo compared with faces in this performance video. Government ID photos are not used, and the result is advisory." : "I consent to Musika Lokal comparing my registered profile photo with faces in this performance video. Government ID photos are not used, and the result is advisory."}</Text>
+          </View>
+        </TouchableOpacity>
 
         <TouchableOpacity
           activeOpacity={isSendingRequest ? 1 : 0.78}
@@ -1934,6 +1973,31 @@ const styles = StyleSheet.create({
   },
   uploadFieldWrap: {
     paddingTop: 16,
+  },
+  consentRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginTop: 16,
+  },
+  consentCheckbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  consentCopy: { flex: 1 },
+  consentTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+  },
+  consentBody: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    lineHeight: 17,
+    marginTop: 2,
   },
   compactInputBox: {
     marginTop: 8,

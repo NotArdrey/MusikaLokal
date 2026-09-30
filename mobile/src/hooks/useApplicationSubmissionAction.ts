@@ -559,6 +559,7 @@ export const useApplicationSubmissionAction = ({
           pitch_message: pitchMessage,
           video_url: videoUrl || null,
           cv_url: uploadedCvUrl,
+          member_verification_consent: memberVerificationConsent,
           submitted_at: submittedAt,
           status: "pending",
           request_details: {
@@ -568,6 +569,7 @@ export const useApplicationSubmissionAction = ({
             request_kind: "application",
             cv_url: uploadedCvUrl,
             video_url: videoUrl || null,
+            member_verification_consent: memberVerificationConsent,
           },
         };
         const selfApplicationMeta = listingId
@@ -657,6 +659,7 @@ export const useApplicationSubmissionAction = ({
 
         setPitchMessage("");
         setVideoUrl("");
+        setMemberVerificationConsent(false);
         setCvFile(null);
         setCvUrl("");
 

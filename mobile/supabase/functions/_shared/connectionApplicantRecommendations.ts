@@ -343,6 +343,16 @@ const rank = (recommendation: any) => {
   return 0;
 };
 
+export function sortConnectionApplicantRecommendations(applications: any[]) {
+  return [...applications].sort((left, right) => {
+    const recommendationDifference = rank(right.ai_recommendation) - rank(left.ai_recommendation);
+    if (recommendationDifference !== 0) return recommendationDifference;
+    const scoreDifference = Number(right.ai_recommendation?.score || 0) - Number(left.ai_recommendation?.score || 0);
+    if (scoreDifference !== 0) return scoreDifference;
+    return new Date(right.created_at || 0).getTime() - new Date(left.created_at || 0).getTime();
+  });
+}
+
 export async function attachConnectionApplicantRecommendations(
   supabaseAdmin: any,
   applications: any[],
@@ -369,13 +379,7 @@ export async function attachConnectionApplicantRecommendations(
   }
 
   const byId = new Map(evaluations.map((item) => [item.application_id, item]));
-  return applications
-    .map((application) => ({ ...application, ai_recommendation: byId.get(application.id) || null }))
-    .sort((left, right) => {
-      const recommendationDifference = rank(right.ai_recommendation) - rank(left.ai_recommendation);
-      if (recommendationDifference !== 0) return recommendationDifference;
-      const scoreDifference = Number(right.ai_recommendation?.score || 0) - Number(left.ai_recommendation?.score || 0);
-      if (scoreDifference !== 0) return scoreDifference;
-      return new Date(right.created_at || 0).getTime() - new Date(left.created_at || 0).getTime();
-    });
+  return sortConnectionApplicantRecommendations(
+    applications.map((application) => ({ ...application, ai_recommendation: byId.get(application.id) || null })),
+  );
 }

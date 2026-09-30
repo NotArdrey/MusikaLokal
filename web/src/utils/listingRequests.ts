@@ -91,6 +91,9 @@ const createListingRequestFallback = async (payload: ListingRequestPayload) => {
       status: "pending",
       attachment_url: payload.attachmentUrl,
       event_details: eventDetails,
+      member_verification_consent:
+        (eventDetails as any)?.request_details?.member_verification_consent === true ||
+        (eventDetails as any)?.member_verification_consent === true,
     })
     .select("id, created_at, sender_id, receiver_id, group_id, studio_id, status, event_details, attachment_url")
     .single();
@@ -203,6 +206,15 @@ const isProductionTeamApplicationPayload = (payload: ListingRequestPayload) => {
   return (
     payload.receiverEntityType === "production_team" &&
     String(extraMeta.request_kind || "").trim().toLowerCase() === "application"
+  );
+};
+
+const isGroupMemberApplicationPayload = (payload: ListingRequestPayload) => {
+  const extraMeta = normalizeExtraMeta(payload.extraMeta);
+  return (
+    payload.receiverEntityType === "group" &&
+    String(extraMeta.request_kind || "").trim().toLowerCase() === "application" &&
+    String(extraMeta.application_scope || "").trim().toLowerCase() === "group_member"
   );
 };
 
@@ -443,7 +455,11 @@ export const submitListingRequest = async ({
 
   if (error) {
     const contextBody = await readFunctionsErrorBody(error as FunctionsInvokeError);
-    if (isProductionTeamInvitePayload(body) || isProductionTeamApplicationPayload(body)) {
+    if (
+      isProductionTeamInvitePayload(body) ||
+      isProductionTeamApplicationPayload(body) ||
+      isGroupMemberApplicationPayload(body)
+    ) {
       console.error("create_listing_request failed for production team request", {
         message: getFunctionsErrorMessage(error as FunctionsInvokeError, contextBody),
         status: (error as any).status || (error as any).context?.status,

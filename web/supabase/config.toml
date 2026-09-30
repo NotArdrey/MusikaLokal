@@ -55,6 +55,9 @@ verify_jwt = false
 [functions.gig-member-verification]
 verify_jwt = false
 
+[functions.connection-member-verification]
+verify_jwt = false
+
 [functions.manual-identity-review]
 verify_jwt = false
 

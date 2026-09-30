@@ -60,6 +60,7 @@ export default function ConnectionApplicantDetailsModal({
   const applicant = application?.applicant || {};
   const senderGroup = application?.sender_group || null;
   const recommendation = application?.ai_recommendation || null;
+  const verification = application?.member_verification || null;
   const requirementResults = list(recommendation?.criteria_snapshot?.requirement_results);
   const matched = list(recommendation?.matched_criteria).map(String);
   const missing = list(recommendation?.missing_criteria).map(String);
@@ -136,6 +137,37 @@ export default function ConnectionApplicantDetailsModal({
               </Text>
               <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>Advisory only. All applicants remain accessible and require an owner or manager decision.</Text>
             </View>
+          </View>
+
+          <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="person-circle-outline" size={19} color={colors.primary} />
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Registered Member Verification</Text>
+            </View>
+            {verification ? (
+              <>
+                <View style={[styles.verificationBanner, { backgroundColor: verification.result === "verified" ? "#ECFDF5" : "#FFFBEB" }]}>
+                  <Ionicons
+                    name={verification.result === "verified" ? "checkmark-circle" : verification.status === "processing" || verification.status === "queued" ? "time" : "warning"}
+                    size={21}
+                    color={verification.result === "verified" ? "#059669" : "#D97706"}
+                  />
+                  <View style={styles.requirementCopy}>
+                    <Text style={[styles.requirementTitle, { color: verification.result === "verified" ? "#047857" : "#B45309" }]}>
+                      {verification.result === "verified" ? "Applicant found in the submitted video" : verification.status === "processing" ? "Verification is processing" : verification.status === "queued" ? "Verification is queued" : verification.result === "no_reference" ? "Registered profile photo unavailable" : "Manual verification needed"}
+                    </Text>
+                    <Text style={[styles.requirementDetail, { color: colors.textSecondary }]}>This consent-gated check compares the applicant's registered profile photo with faces in the submitted video. It does not use a government ID and does not change the match score.</Text>
+                  </View>
+                </View>
+                {list(verification.members).map((member, index) => (
+                  <Text key={`${member?.member_id || "member"}-${index}`} style={[styles.body, { color: colors.textSecondary }]}>
+                    {member?.member_name_snapshot || `Registered member ${index + 1}`}: {member?.status === "verified" ? "verified" : "needs review"}. Best similarity: {member?.best_similarity === null || member?.best_similarity === undefined ? "Unavailable" : `${Number(member.best_similarity).toFixed(1)}%`}
+                  </Text>
+                ))}
+              </>
+            ) : (
+              <Text style={[styles.body, { color: colors.textSecondary }]}>{application?.member_verification_consent === true ? "Registered member verification was requested, but a result is not available yet." : "The applicant did not request registered member verification for this application."}</Text>
+            )}
           </View>
 
           <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -241,6 +273,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 14 },
   requirement: { borderWidth: 1, borderRadius: 12, padding: 11, flexDirection: "row", alignItems: "flex-start", gap: 9 },
   requirementCopy: { flex: 1 },
+  verificationBanner: { borderRadius: 12, padding: 11, flexDirection: "row", alignItems: "flex-start", gap: 9 },
   requirementTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 12 },
   requirementDetail: { fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 2 },
   source: { fontFamily: "Poppins_500Medium", fontSize: 9, marginTop: 5 },

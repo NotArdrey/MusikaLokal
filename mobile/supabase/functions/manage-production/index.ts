@@ -7,7 +7,16 @@ import {
   withNotificationSeverityType,
 } from "../_shared/notificationRoutes.ts";
 import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
-import { attachConnectionApplicantRecommendations } from "../_shared/connectionApplicantRecommendations.ts";
+import {
+  attachConnectionApplicantRecommendations,
+  sortConnectionApplicantRecommendations,
+} from "../_shared/connectionApplicantRecommendations.ts";
+import {
+  applyMemberVerificationRecommendationGate,
+  attachConnectionMemberVerification,
+  queueConnectionMemberVerification,
+  scheduleConnectionMemberVerification,
+} from "../_shared/gigMemberVerificationService.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1144,6 +1153,90 @@ function getProductionTeamIdFromRequest(request: any) {
   return null;
 }
 
+function isConnectionApplicationEvent(eventDetails: any) {
+  return isProductionTeamApplicationEvent(eventDetails) || (
+    normalizeConnectionEntityType(eventDetails?.receiver_entity_type) === "group" &&
+    getListingRequestKind(eventDetails) === "application" &&
+    normalizeConnectionEntityType(readEventString(eventDetails, "application_scope")) === "group_member"
+  );
+}
+
+async function snapshotConnectionApplicationMembers(
+  supabaseAdmin: any,
+  request: any,
+  eventDetails: any,
+  actorUserId: string,
+) {
+  const consentedAt = toNonEmptyString(request?.member_verification_consented_at) || new Date().toISOString();
+  const senderEntityType = normalizeConnectionEntityType(eventDetails?.sender_entity_type);
+  const groupId = senderEntityType === "group" ? toNonEmptyString(request?.group_id) : null;
+  const rosterByUserId = new Map<string, { group_member_id: string | null; role: string | null }>();
+
+  if (groupId) {
+    const [{ data: group, error: groupError }, { data: members, error: memberError }] = await Promise.all([
+      supabaseAdmin.from("groups").select("id, owner_id").eq("id", groupId).maybeSingle(),
+      supabaseAdmin.from("group_members").select("id, user_id, role").eq("group_id", groupId),
+    ]);
+    if (groupError) throw groupError;
+    if (memberError) throw memberError;
+    if (!group) throw new Error("Applicant group was not found");
+    if (group.owner_id) {
+      rosterByUserId.set(String(group.owner_id), { group_member_id: null, role: "owner" });
+    }
+    for (const member of members || []) {
+      const userId = toNonEmptyString(member?.user_id);
+      if (!userId) continue;
+      rosterByUserId.set(userId, {
+        group_member_id: toNonEmptyString(member?.id),
+        role: toNonEmptyString(member?.role),
+      });
+    }
+    if (!rosterByUserId.has(actorUserId)) {
+      throw new Error("Only a registered member can apply on behalf of this group");
+    }
+  } else {
+    rosterByUserId.set(actorUserId, { group_member_id: null, role: "applicant" });
+  }
+
+  const userIds = Array.from(rosterByUserId.keys());
+  const { data: profiles, error: profileError } = await supabaseAdmin
+    .from("profiles")
+    .select("id, full_name")
+    .in("id", userIds);
+  if (profileError) throw profileError;
+  const profileNameById = new Map((profiles || []).map((profile: any) => [
+    String(profile.id),
+    toNonEmptyString(profile.full_name) || "Registered member",
+  ]));
+  const { error: insertError } = await supabaseAdmin.from("connection_application_members").insert(
+    userIds.map((userId) => ({
+      booking_request_id: request.id,
+      group_id: groupId,
+      group_member_id: rosterByUserId.get(userId)?.group_member_id || null,
+      user_id: userId,
+      member_name_snapshot: profileNameById.get(userId) || "Registered member",
+      role_snapshot: rosterByUserId.get(userId)?.role || null,
+      member_verification_consent: true,
+      member_verification_consented_at: consentedAt,
+    })),
+  );
+  if (insertError) throw insertError;
+  return userIds.length;
+}
+
+async function attachConnectionVerificationAndResume(supabaseAdmin: any, application: any) {
+  const attached = await attachConnectionMemberVerification(supabaseAdmin, application);
+  const nextPollAt = Date.parse(String(attached.member_verification?.next_poll_at || ""));
+  const startedAt = Date.parse(String(attached.member_verification?.started_at || ""));
+  const pollIsDue = Number.isFinite(nextPollAt)
+    ? nextPollAt <= Date.now()
+    : !Number.isFinite(startedAt) || startedAt <= Date.now() - 30_000;
+  if (attached.member_verification?.status === "processing" && pollIsDue) {
+    await scheduleConnectionMemberVerification(supabaseAdmin, application.id);
+  }
+  return applyMemberVerificationRecommendationGate(attached);
+}
+
 async function hasProductionApplicationConflict(
   supabaseAdmin: any,
   request: any,
@@ -1228,7 +1321,7 @@ async function getProductionTeamApplications(
 
   const { data: requestRows, error: requestError } = await supabaseAdmin
     .from("booking_requests")
-    .select("id, created_at, sender_id, receiver_id, group_id, studio_id, status, message, attachment_url, event_details")
+    .select("id, created_at, sender_id, receiver_id, group_id, studio_id, status, message, attachment_url, event_details, member_verification_consent, member_verification_consented_at")
     .eq("receiver_id", team.owner_id)
     .in("status", PRODUCTION_APPLICATION_STATUSES)
     .order("created_at", { ascending: false })
@@ -1353,9 +1446,13 @@ async function getProductionTeamApplications(
     team,
   );
 
+  const verifiedApplications = await Promise.all(
+    rankedApplications.map((application: any) => attachConnectionVerificationAndResume(supabaseAdmin, application)),
+  );
+
   return {
     team,
-    applications: rankedApplications,
+    applications: sortConnectionApplicantRecommendations(verifiedApplications),
   };
 }
 
@@ -1683,12 +1780,38 @@ serve(async (req: Request) => {
           status: "pending",
           attachment_url: toNonEmptyString(params.attachmentUrl ?? params.attachment_url),
           event_details: eventDetails,
+          member_verification_consent:
+            isConnectionApplicationEvent(eventDetails) &&
+            (eventDetails?.request_details?.member_verification_consent === true ||
+              eventDetails?.member_verification_consent === true),
         })
-        .select("id, created_at, sender_id, receiver_id, group_id, studio_id, status, event_details, attachment_url")
+        .select("id, created_at, sender_id, receiver_id, group_id, studio_id, status, event_details, attachment_url, member_verification_consent, member_verification_consented_at")
         .single();
 
       if (requestError) {
         return jsonResponse({ error: requestError.message }, 500);
+      }
+
+      if (requestRow?.id && requestRow.member_verification_consent === true) {
+        try {
+          await snapshotConnectionApplicationMembers(supabaseAdmin, requestRow, eventDetails, authUser.id);
+        } catch (snapshotError) {
+          await supabaseAdmin.from("booking_requests").delete().eq("id", requestRow.id);
+          return jsonResponse({
+            error: String((snapshotError as any)?.message || "Failed to snapshot the application roster"),
+          }, 500);
+        }
+        try {
+          const queued = await queueConnectionMemberVerification(supabaseAdmin, requestRow.id);
+          if (queued?.status === "queued") {
+            await scheduleConnectionMemberVerification(supabaseAdmin, requestRow.id);
+          }
+        } catch (verificationError) {
+          console.warn("connection_member_verification_queue_failed", {
+            requestId: requestRow.id,
+            message: String((verificationError as any)?.message || verificationError).slice(0, 300),
+          });
+        }
       }
 
       try {

@@ -30,6 +30,7 @@ import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { typography } from "../src/theme/tokens";
 import { getGroupMembersLabel, isGroupLeaderMember } from "../src/utils/groupMembers";
 import { fetchGroupLinkedPlaylists } from "../src/utils/groupPlaylists";
 import {
@@ -1456,34 +1457,32 @@ export default function GroupDetailsScreen() {
             {activeTab === "Applications" && (
               <View style={styles.aboutContainer}>
                 <View>
-                  <View style={styles.applicationsHeaderRow}>
-                    <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>
+                  <View style={styles.applicationsHeader}>
+                    <Text style={[styles.sectionTitle, { color: colors.text }]} numberOfLines={1}>
                       Member Applications
                     </Text>
-                    <TouchableOpacity
-                      activeOpacity={1}
-                      style={[styles.inviteMembersButton, { backgroundColor: colors.inputBackground }]}
-                      onPress={() => router.push({ pathname: "/edit_group", params: { id: group?.id, returnTab: "Applications" } })}
-                    >
-                      <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
-                      <Text style={[styles.inviteMembersButtonText, { color: colors.primary }]}>Match settings</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      activeOpacity={1}
-                      style={[styles.inviteMembersButton, { backgroundColor: colors.primary }]}
-                      onPress={() => setInviteModalVisible(true)}
-                    >
-                      <Ionicons name="person-add-outline" size={16} color="#FFFFFF" />
-                      <Text style={styles.inviteMembersButtonText}>Invite</Text>
-                    </TouchableOpacity>
+                    <View style={styles.applicationHeaderActions}>
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        style={[styles.inviteMembersButton, styles.matchSettingsButton, { backgroundColor: colors.inputBackground }]}
+                        onPress={() => router.push({ pathname: "/edit_group", params: { id: group?.id, returnTab: "Applications" } })}
+                      >
+                        <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
+                        <Text style={[styles.inviteMembersButtonText, { color: colors.primary }]} numberOfLines={1}>Match settings</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        style={[styles.inviteMembersButton, { backgroundColor: colors.primary }]}
+                        onPress={() => setInviteModalVisible(true)}
+                      >
+                        <Ionicons name="person-add-outline" size={16} color="#FFFFFF" />
+                        <Text style={styles.inviteMembersButtonText}>Invite</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
 
                   {groupMemberApplications.length > 0 ? (
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={styles.applicationFilters}
-                    >
+                    <View style={styles.applicationFilters}>
                       {CONNECTION_APPLICATION_FILTERS.map((filter) => {
                         const selected = memberApplicationFilter === filter;
                         const count = memberApplicationCounts[filter];
@@ -1501,13 +1500,13 @@ export default function GroupDetailsScreen() {
                             ]}
                           >
                             {filter === "Recommended" || filter === "Needs Review" ? <Ionicons name={filter === "Recommended" ? "sparkles" : "warning-outline"} size={13} color={selected ? colors.primary : colors.textSecondary} /> : null}
-                            <Text style={{ color: selected ? colors.primary : colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
+                            <Text style={[styles.applicationFilterText, { color: selected ? colors.primary : colors.textSecondary }]}>
                               {filter} ({count})
                             </Text>
                           </TouchableOpacity>
                         );
                       })}
-                    </ScrollView>
+                    </View>
                   ) : null}
 
                   {groupMemberApplications.length === 0 ? (
@@ -1539,7 +1538,7 @@ export default function GroupDetailsScreen() {
                           key={app.id}
                           style={[
                             styles.setupCard,
-                            { backgroundColor: colors.surface, marginTop: 12 },
+                            { backgroundColor: colors.surface, borderColor: colors.border, marginTop: 12 },
                           ]}
                         >
                           <View
@@ -1553,18 +1552,18 @@ export default function GroupDetailsScreen() {
                             <Text style={[styles.setupTitle, { color: colors.text, flex: 1 }]}>
                               {app.applicant?.full_name || "Applicant"}
                             </Text>
-                            <Text style={{ color: statusColor, fontWeight: "bold" }}>
+                            <Text style={[styles.applicationStatusText, { color: statusColor }]}>
                               {rawStatus.toUpperCase()}
                             </Text>
                           </View>
 
-                          <Text style={{ color: colors.textSecondary, marginBottom: 6 }}>
+                          <Text style={[styles.applicationBodyText, { color: colors.textSecondary, marginBottom: 6 }]}>
                             {requestDetails?.application_context ||
                               requestDetails?.pitch_message ||
                               app.message ||
                               "No application message provided."}
                           </Text>
-                          <Text style={{ color: colors.textSecondary, marginBottom: isPending ? 12 : 0 }}>
+                          <Text style={[styles.applicationBodyText, { color: colors.textSecondary, marginBottom: isPending ? 12 : 0 }]}>
                             Applied on:{" "}
                             {app.created_at
                               ? formatFriendlyDateTime(app.created_at)
@@ -1595,7 +1594,7 @@ export default function GroupDetailsScreen() {
                                   confirmGroupMemberApplicationDecision(app, "declined")
                                 }
                               >
-                                <Text style={{ color: "#EF4444", fontFamily: "Poppins_600SemiBold" }}>
+                                <Text style={[styles.applicationDecisionText, { color: "#EF4444" }]}>
                                   Decline
                                 </Text>
                               </TouchableOpacity>
@@ -1646,7 +1645,7 @@ export default function GroupDetailsScreen() {
                         key={app.id}
                         style={[
                           styles.setupCard,
-                          { backgroundColor: colors.surface, marginBottom: 12 },
+                          { backgroundColor: colors.surface, borderColor: colors.border, marginBottom: 12 },
                         ]}
                       >
                         <View
@@ -1661,26 +1660,17 @@ export default function GroupDetailsScreen() {
                           >
                             {app.gig?.name || "Unknown Gig"}
                           </Text>
-                          <Text
-                            style={{
-                              color: statusColor,
-                              fontWeight: "bold",
-                            }}
-                          >
+                          <Text style={[styles.applicationStatusText, { color: statusColor }]}>
                             {rawStatus.toUpperCase()}
                           </Text>
                         </View>
-                        <Text
-                          style={{ color: colors.textSecondary, marginBottom: 4 }}
-                        >
+                        <Text style={[styles.applicationBodyText, { color: colors.textSecondary, marginBottom: 4 }]}>
                           {app.gig?.location || "Location N/A"}
                         </Text>
-                        <Text
-                          style={{ color: colors.textSecondary, marginBottom: 8 }}
-                        >
+                        <Text style={[styles.applicationBodyText, { color: colors.textSecondary, marginBottom: 8 }]}>
                           Payout: PHP {Number(app.gig?.budget || 0).toLocaleString()}
                         </Text>
-                        <Text style={{ color: colors.textSecondary }}>
+                        <Text style={[styles.applicationBodyText, { color: colors.textSecondary }]}>
                           Applied on:{" "}
                           {app.created_at
                             ? formatFriendlyDateTime(app.created_at)
@@ -1797,6 +1787,8 @@ export default function GroupDetailsScreen() {
       <BottomModal
         visible={inviteModalVisible}
         overlayLabel="ManageGroupInviteMembersModal"
+        bottomInsetBackgroundColor={colors.background}
+        navigationBarStyleWhileVisible={isDark ? "dark" : "light"}
         onClose={() => {
           if (!sendingInvites) {
             setInviteModalVisible(false);
@@ -1885,6 +1877,8 @@ export default function GroupDetailsScreen() {
       <BottomModal
         visible={transferModalVisible}
         overlayLabel="ManageGroupTransferLeadershipModal"
+        bottomInsetBackgroundColor={colors.background}
+        navigationBarStyleWhileVisible={isDark ? "dark" : "light"}
         onClose={closeTransferModal}
         contentContainerStyle={[
           styles.transferModalContent,
@@ -2287,13 +2281,16 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 18,
-    fontFamily: "Poppins_600SemiBold",
+    lineHeight: 24,
+    fontFamily: typography.heading,
   },
-  applicationsHeaderRow: {
+  applicationsHeader: {
+    gap: 12,
+  },
+  applicationHeaderActions: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
+    gap: 8,
   },
   inviteMembersButton: {
     minHeight: 38,
@@ -2304,9 +2301,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
   },
+  matchSettingsButton: {
+    flex: 1,
+  },
   inviteMembersButtonText: {
     color: "#FFFFFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 12,
   },
   inviteModalContent: {
@@ -2324,12 +2324,12 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   inviteModalTitle: {
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.title,
     fontSize: 20,
   },
   inviteModalSubtitle: {
     marginTop: 2,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
   },
   inviteModalClose: {
@@ -2349,7 +2349,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   sendInviteButtonText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 14,
   },
   transferModalContent: {
@@ -2362,12 +2362,12 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
   },
   transferModalTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 18,
     marginBottom: 8,
   },
   transferModalSubtitle: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
     marginBottom: 20,
   },
@@ -2377,7 +2377,7 @@ const styles = StyleSheet.create({
   transferEmptyText: {
     textAlign: "center",
     paddingVertical: 24,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   memberSelectItem: {
     flexDirection: "row",
@@ -2393,11 +2393,11 @@ const styles = StyleSheet.create({
     borderRadius: 22,
   },
   transferMemberName: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 14,
   },
   transferMemberRole: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
   },
   transferMessageInput: {
@@ -2407,7 +2407,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     minHeight: 80,
     textAlignVertical: "top",
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   transferModalActions: {
     flexDirection: "row",
@@ -2485,7 +2485,7 @@ const styles = StyleSheet.create({
   },
   actionBtnText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 13,
   },
   invitationCard: {
@@ -2548,9 +2548,10 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   applicationFilters: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
     paddingVertical: 10,
-    paddingRight: 12,
   },
   applicationFilterChip: {
     minHeight: 34,
@@ -2560,6 +2561,23 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
+  },
+  applicationFilterText: {
+    fontFamily: typography.medium,
+    fontSize: 11,
+  },
+  applicationStatusText: {
+    fontFamily: typography.bold,
+    fontSize: 11,
+  },
+  applicationBodyText: {
+    fontFamily: typography.body,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  applicationDecisionText: {
+    fontFamily: typography.semibold,
+    fontSize: 13,
   },
   declineButton: {
     flex: 1,
@@ -2588,7 +2606,8 @@ const styles = StyleSheet.create({
   },
   setupCard: {
     padding: 16,
-    borderRadius: 16,
+    borderRadius: 14,
+    borderWidth: 1,
   },
   setupHeader: {
     flexDirection: "row",
@@ -2598,7 +2617,8 @@ const styles = StyleSheet.create({
   },
   setupTitle: {
     fontSize: 18,
-    fontFamily: "Poppins_600SemiBold",
+    lineHeight: 24,
+    fontFamily: typography.heading,
   },
   editLink: {
     fontSize: 14,

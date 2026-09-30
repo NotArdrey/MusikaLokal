@@ -5,7 +5,15 @@ import {
     withNotificationSeverityType,
 } from "../_shared/notificationRoutes.ts";
 import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
-import { attachConnectionApplicantRecommendations } from "../_shared/connectionApplicantRecommendations.ts";
+import {
+    attachConnectionApplicantRecommendations,
+    sortConnectionApplicantRecommendations,
+} from "../_shared/connectionApplicantRecommendations.ts";
+import {
+    applyMemberVerificationRecommendationGate,
+    attachConnectionMemberVerification,
+    scheduleConnectionMemberVerification,
+} from "../_shared/gigMemberVerificationService.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -258,7 +266,7 @@ Deno.serve(async (req: Request) => {
 
             const { data: requestRows, error: requestError } = await supabaseClient
                 .from('booking_requests')
-                .select('id, created_at, sender_id, receiver_id, group_id, status, message, attachment_url, event_details')
+                .select('id, created_at, sender_id, receiver_id, group_id, status, message, attachment_url, event_details, member_verification_consent, member_verification_consented_at')
                 .eq('group_id', groupId)
                 .in('status', GROUP_APPLICATION_STATUSES)
                 .order('created_at', { ascending: false });
@@ -308,10 +316,22 @@ Deno.serve(async (req: Request) => {
                 'group',
                 group,
             );
+            const verifiedApplications = await Promise.all(rankedApplications.map(async (application: any) => {
+                const attached = await attachConnectionMemberVerification(supabaseClient, application);
+                const nextPollAt = Date.parse(String(attached.member_verification?.next_poll_at || ''));
+                const startedAt = Date.parse(String(attached.member_verification?.started_at || ''));
+                const pollIsDue = Number.isFinite(nextPollAt)
+                    ? nextPollAt <= Date.now()
+                    : !Number.isFinite(startedAt) || startedAt <= Date.now() - 30_000;
+                if (attached.member_verification?.status === 'processing' && pollIsDue) {
+                    await scheduleConnectionMemberVerification(supabaseClient, application.id);
+                }
+                return applyMemberVerificationRecommendationGate(attached);
+            }));
 
             return jsonResponse({
                 success: true,
-                applications: rankedApplications,
+                applications: sortConnectionApplicantRecommendations(verifiedApplications),
             });
         }
 

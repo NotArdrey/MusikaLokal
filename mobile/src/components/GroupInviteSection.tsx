@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import CachedImage from "./CachedImage";
 import { useTheme } from "../context/ThemeContext";
+import { typography } from "../theme/tokens";
 import {
   GroupInviteTarget,
   searchGroupInviteTargets,
@@ -234,19 +235,19 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 16,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.title,
   },
   sectionText: {
     marginTop: 6,
     fontSize: 12,
     lineHeight: 18,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   label: {
     marginTop: 14,
     marginBottom: 8,
     fontSize: 13,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   searchInputWrap: {
     flexDirection: "row",
@@ -264,7 +265,7 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
     padding: 0,
     textAlignVertical: "center",
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   selectedList: {
     marginTop: 14,
@@ -291,12 +292,12 @@ const styles = StyleSheet.create({
   },
   selectedName: {
     fontSize: 13,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   selectedSubtitle: {
     marginTop: 2,
     fontSize: 11,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   avatar: {
     width: 36,
@@ -322,7 +323,7 @@ const styles = StyleSheet.create({
   searchStateText: {
     marginTop: 12,
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   resultsList: {
     marginTop: 12,
@@ -353,6 +354,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     textAlignVertical: "top",
     fontSize: 14,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
 });

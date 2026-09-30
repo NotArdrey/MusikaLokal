@@ -29,6 +29,7 @@ import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth, useRequireAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { typography } from "../src/theme/tokens";
 import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
 import { ProductionInviteTarget, sendProductionTeamInvites } from "../src/utils/productionTeamInvites";
 import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
@@ -160,6 +161,8 @@ export default function ProductionTeamScreen() {
       overlayLabel={`ProductionTeam:${title}`}
       onClose={onClose}
       closeOnBackdropPress
+      bottomInsetBackgroundColor={colors.background}
+      navigationBarStyleWhileVisible={isDark ? "dark" : "light"}
     >
         <View
           style={[
@@ -943,28 +946,22 @@ export default function ProductionTeamScreen() {
 
             {activeTab === "Applications" && canManage && (
               <View>
-                <View style={styles.sectionHeader}>
-                  <View>
-                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Production Applicants</Text>
-                    <Text style={[styles.applicationHelper, { color: colors.textSecondary }]}>Match scores are advisory; review every profile and attachment.</Text>
-                  </View>
-                  <View style={{ alignItems: "flex-end", gap: 8 }}>
+                <View style={styles.applicationSectionHeader}>
+                  <View style={styles.applicationTitleRow}>
+                    <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]} numberOfLines={1}>Production Applicants</Text>
                     <Text style={[styles.subsectionCount, { color: colors.textSecondary }]}>{teamApplications.length}</Text>
-                    <TouchableOpacity
-                      onPress={() => router.push({ pathname: "/edit_production", params: { id: selectedTeam.id } })}
-                      style={[styles.attachmentButton, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}
-                    >
-                      <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
-                      <Text style={[styles.attachmentText, { color: colors.primary }]}>Match settings</Text>
-                    </TouchableOpacity>
                   </View>
+                  <Text style={[styles.applicationHelper, { color: colors.textSecondary }]}>Match scores are advisory; review every profile and attachment.</Text>
+                  <TouchableOpacity
+                    onPress={() => router.push({ pathname: "/edit_production", params: { id: selectedTeam.id } })}
+                    style={[styles.attachmentButton, styles.applicationSettingsButton, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}
+                  >
+                    <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
+                    <Text style={[styles.attachmentText, { color: colors.primary }]}>Match settings</Text>
+                  </TouchableOpacity>
                 </View>
 
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.applicationFilters}
-                >
+                <View style={styles.applicationFilters}>
                   {CONNECTION_APPLICATION_FILTERS.map((filter) => {
                     const selected = applicationFilter === filter;
                     return (
@@ -985,7 +982,7 @@ export default function ProductionTeamScreen() {
                       </TouchableOpacity>
                     );
                   })}
-                </ScrollView>
+                </View>
 
                 {loadingApplications ? (
                   <View style={styles.loadingContainer}>
@@ -1473,12 +1470,12 @@ const styles = StyleSheet.create({
 
   // Members
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  sectionTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 16 },
+  sectionTitle: { fontFamily: typography.heading, fontSize: 16, lineHeight: 22 },
   subsectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
   memberSubsectionSpacing: { marginTop: 18 },
   subsectionTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.6 },
-  subsectionCount: { fontFamily: "Poppins_600SemiBold", fontSize: 12 },
-  emptyInlineText: { fontFamily: "Poppins_400Regular", fontSize: 13, marginBottom: 10 },
+  subsectionCount: { fontFamily: typography.semibold, fontSize: 12 },
+  emptyInlineText: { fontFamily: typography.body, fontSize: 13, marginBottom: 10 },
   inviteBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   inviteBtnText: { color: "#FFFFFF", fontFamily: "Poppins_600SemiBold", fontSize: 12 },
   memberCard: { borderRadius: 12, borderWidth: 1, padding: 12, marginBottom: 8 },
@@ -1487,27 +1484,30 @@ const styles = StyleSheet.create({
   avatarPlaceholder: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   memberInfo: { flex: 1, marginLeft: 10 },
   memberName: { fontFamily: "Poppins_500Medium", fontSize: 14 },
-  memberRole: { fontFamily: "Poppins_400Regular", fontSize: 12, textTransform: "capitalize" },
+  memberRole: { fontFamily: typography.body, fontSize: 12, textTransform: "capitalize" },
   removeBtn: { padding: 4 },
 
   // Applications
-  applicationHelper: { fontFamily: "Poppins_400Regular", fontSize: 12, lineHeight: 18, marginTop: 2, maxWidth: 270 },
-  applicationFilters: { gap: 8, paddingVertical: 10, paddingRight: 12 },
+  applicationSectionHeader: { gap: 8, marginBottom: 2 },
+  applicationTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  applicationSettingsButton: { alignSelf: "flex-start" },
+  applicationHelper: { fontFamily: typography.body, fontSize: 12, lineHeight: 18 },
+  applicationFilters: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingVertical: 10 },
   applicationFilterChip: { minHeight: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, flexDirection: "row", alignItems: "center", gap: 5 },
-  applicationFilterText: { fontFamily: "Poppins_500Medium", fontSize: 11 },
+  applicationFilterText: { fontFamily: typography.medium, fontSize: 11 },
   applicationCard: { borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 12 },
   applicationAvatar: { width: 44, height: 44, borderRadius: 22 },
-  applicationName: { fontFamily: "Poppins_600SemiBold", fontSize: 15 },
+  applicationName: { fontFamily: typography.heading, fontSize: 15, lineHeight: 20 },
   applicationStatus: { borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4 },
-  applicationStatusText: { fontFamily: "Poppins_600SemiBold", fontSize: 10, textTransform: "capitalize" },
-  applicationPitch: { fontFamily: "Poppins_400Regular", fontSize: 13, lineHeight: 19, marginTop: 12 },
-  applicationContext: { fontFamily: "Poppins_400Regular", fontSize: 12, lineHeight: 18, marginTop: 6, fontStyle: "italic" },
+  applicationStatusText: { fontFamily: typography.semibold, fontSize: 10, textTransform: "capitalize" },
+  applicationPitch: { fontFamily: typography.body, fontSize: 13, lineHeight: 19, marginTop: 12 },
+  applicationContext: { fontFamily: typography.body, fontSize: 12, lineHeight: 18, marginTop: 6, fontStyle: "italic" },
   attachmentRow: { flexDirection: "row", gap: 8, marginTop: 10 },
   attachmentButton: { flexDirection: "row", alignItems: "center", gap: 5, borderWidth: 1, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 7 },
-  attachmentText: { fontFamily: "Poppins_500Medium", fontSize: 12 },
+  attachmentText: { fontFamily: typography.medium, fontSize: 12 },
   applicationActions: { flexDirection: "row", gap: 10, marginTop: 12 },
   applicationDecision: { flex: 1, minHeight: 42, borderWidth: 1, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  applicationDecisionText: { fontFamily: "Poppins_600SemiBold", fontSize: 13 },
+  applicationDecisionText: { fontFamily: typography.semibold, fontSize: 13 },
   viewApplicantButton: { minHeight: 42, marginTop: 12, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
 
   // Buttons
@@ -1571,14 +1571,14 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   sheetEyebrow: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 11,
     textTransform: "uppercase",
     letterSpacing: 0.6,
     marginBottom: 2,
   },
   sheetTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 18,
   },
   sheetCloseButton: {
@@ -1598,11 +1598,11 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   modalContent: { paddingHorizontal: 4 },
-  inputLabel: { fontFamily: "Poppins_500Medium", fontSize: 13, marginBottom: 6 },
-  input: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontFamily: "Poppins_400Regular", fontSize: 14 },
+  inputLabel: { fontFamily: typography.medium, fontSize: 13, marginBottom: 6 },
+  input: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontFamily: typography.body, fontSize: 14 },
   textArea: { minHeight: 80, textAlignVertical: "top" },
   submitBtn: { marginTop: 20, paddingVertical: 14, borderRadius: 12, alignItems: "center" },
-  submitBtnText: { color: "#fff", fontFamily: "Poppins_600SemiBold", fontSize: 15 },
+  submitBtnText: { color: "#fff", fontFamily: typography.semibold, fontSize: 15 },
 });
 
 

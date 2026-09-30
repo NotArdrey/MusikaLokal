@@ -136,6 +136,12 @@ const GigApplyTab = ({
     !isGroupApplicationFlow &&
     group?.requirements?.ai_recommendation_settings?.enabled === true;
   const hasCustomContract = !isGroupApplicationFlow && Boolean(group?.contract_url);
+
+  React.useEffect(() => {
+    if (!isGroupApplicationFlow) return;
+    setIsSystemTermsAccepted(true);
+    setMemberVerificationConsent(true);
+  }, [isGroupApplicationFlow, setMemberVerificationConsent]);
   const musicianTypeRequired = group?.requirements?.musician_type || "both";
   const hasGroups = userGroups.length > 0;
   const selectedProductionTeam = productionTeams.find((team) => team.id === selectedProductionTeamId) || null;
@@ -274,10 +280,8 @@ const GigApplyTab = ({
         .map((genre) => String(genre).trim())
         .filter(Boolean)
     : [];
-  const isTermsIncomplete = !isGroupApplicationFlow && (
-    !isSystemTermsAccepted ||
-    (hasCustomContract && !isCustomContractAccepted)
-  );
+  const isTermsIncomplete = !isSystemTermsAccepted ||
+    (hasCustomContract && !isCustomContractAccepted);
   const isFormIncomplete =
     isPitchMissing ||
     isCvMissing ||
@@ -874,8 +878,7 @@ const GigApplyTab = ({
         </View>
       )}
 
-      {!isGroupApplicationFlow && (
-        <View style={{ marginBottom: 24, gap: 12 }}>
+      <View style={{ marginBottom: 24, gap: 12 }}>
           {hasCustomContract && (
             <TouchableOpacity
               activeOpacity={0.78}
@@ -954,8 +957,7 @@ const GigApplyTab = ({
                 : ", including registered member verification of the submitted performance.\u00A0*"}
             </Text>
           </TouchableOpacity>
-        </View>
-      )}
+      </View>
 
       {isReapplicationCooldownActive && (
         <View
@@ -1085,8 +1087,8 @@ const GigApplyTab = ({
               <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>3. User Conduct</Text>
               <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>Users must not bypass platform payments, harass others, submit fraudulent information, upload content they do not have permission to use, or submit repetitive, duplicate, misleading, or abusive applications, booking requests, production-team requests, gig applications, or studio bookings. Musika Lokal may block duplicate active requests, restrict repeated cancellations or reapplications, reject invalid or overlapping studio bookings, and require unpaid bookings to be settled before new bookings are made.</Text>
 
-              <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>4. Gig Application Review</Text>
-              <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>By agreeing to these terms for a gig application, you authorize Musika Lokal to send your CV/resume and performance media to configured review providers. You also authorize Musika Lokal to compare registered profile or reference photos with faces in the submitted performance video to help verify that registered members appear in the performance. General AI Match Review does not perform identity matching, government identity documents are never used for registered member verification, and all automated review is advisory rather than the application decision itself.</Text>
+              <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>4. Application Review</Text>
+              <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>By agreeing to these terms for an application, you authorize Musika Lokal to process the CV/resume and performance media needed for the selected review features. You also authorize Musika Lokal to compare your registered profile photo with faces in the submitted performance video to help verify that you appear in the performance. General AI Match Review does not perform identity matching. Government identity documents are never used for registered member verification, and all automated review is advisory rather than the application decision itself.</Text>
 
               <Text style={[gigApplyStyles.termsSectionTitle, { color: colors.text }]}>5. Liability</Text>
               <Text style={[gigApplyStyles.termsBody, { color: colors.textSecondary }]}>Musika Lokal acts as a facilitator and is not liable for personal injury, property damage, external payment network failures, or loss of income due to app downtime.</Text>

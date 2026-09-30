@@ -1,4 +1,8 @@
-type WorkerName = 'gig-cv-review' | 'gig-video-review' | 'gig-member-verification'
+type WorkerName =
+    | 'gig-cv-review'
+    | 'gig-video-review'
+    | 'gig-member-verification'
+    | 'connection-member-verification'
 
 const clean = (value: unknown) => String(value || '').trim()
 
@@ -60,3 +64,17 @@ export function scheduleGigMemberVerificationWorker(applicationId: string, supab
     return work
 }
 
+export function scheduleConnectionMemberVerificationWorker(applicationId: string, supabaseUrl = '') {
+    const work = invokeWorker('connection-member-verification', applicationId, supabaseUrl).catch((error) => {
+        console.warn('connection_member_verification_worker_dispatch_failed', {
+            applicationId,
+            message: clean(error?.message || error).slice(0, 300),
+        })
+    })
+    const edgeRuntime = (globalThis as any)?.EdgeRuntime
+    if (typeof edgeRuntime?.waitUntil === 'function') {
+        edgeRuntime.waitUntil(work)
+        return
+    }
+    return work
+}

@@ -462,7 +462,7 @@ const BookingDetailsSheet = forwardRef<
                 onPress={() => (ref as any)?.current?.dismiss()}
                 style={[styles.closeBtn, { borderColor: colors.border }]}
               >
-                <Ionicons name="arrow-down" size={21} color={colors.text} />
+                <Ionicons name="close" size={21} color={colors.text} />
               </TouchableOpacity>
               <View style={styles.headerCopy}>
                 <Text style={[styles.eyebrow, { color: colors.textSecondary }]}>REQUEST REVIEW</Text>
@@ -887,7 +887,7 @@ const BookingDetailsSheet = forwardRef<
               onPress={() => (ref as any)?.current?.dismiss()}
               style={[styles.closeBtn, { borderColor: colors.border }]}
             >
-              <Ionicons name="arrow-down" size={21} color={colors.text} />
+              <Ionicons name="close" size={21} color={colors.text} />
             </TouchableOpacity>
             <View style={styles.headerCopy}>
               <Text style={[styles.eyebrow, { color: colors.textSecondary }]}>
@@ -923,18 +923,20 @@ const BookingDetailsSheet = forwardRef<
                     { backgroundColor: colors.surface, borderColor: colors.border },
                   ]}
                 >
-                  <CachedImage
-                    uri={
-                      studioDetails?.images?.[0] ||
-                      booking.image ||
-                      "https://via.placeholder.com/400x200"
-                    }
-                    style={styles.studioImage}
-                    width={1000}
-                    height={500}
-                    quality={72}
-                    cacheVersion={studioDetails?.updated_at || booking.updated_at || booking.id}
-                  />
+                  {!isGig ? (
+                    <CachedImage
+                      uri={
+                        studioDetails?.images?.[0] ||
+                        booking.image ||
+                        "https://via.placeholder.com/400x200"
+                      }
+                      style={styles.studioImage}
+                      width={1000}
+                      height={500}
+                      quality={72}
+                      cacheVersion={studioDetails?.updated_at || booking.updated_at || booking.id}
+                    />
+                  ) : null}
                   <View style={styles.studioInfo}>
                     <Text style={[styles.studioName, { color: colors.text }]}>
                       {studioDetails?.name || booking.name}

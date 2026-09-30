@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { createE2EDocumentFixture, isE2EFixtureMode } from '../utils/e2eFixtures';
+import { typography } from '../theme/tokens';
 import {
     DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
     persistUploadAsset,
@@ -144,7 +145,7 @@ const styles = StyleSheet.create({
         marginBottom: 16,
     },
     label: {
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: typography.medium,
         fontSize: 14,
         marginBottom: 8,
     },
@@ -159,7 +160,7 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     uploadText: {
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: typography.medium,
         fontSize: 14,
     },
     fileContainer: {
@@ -177,7 +178,7 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     fileName: {
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
         fontSize: 14,
         flex: 1,
     },

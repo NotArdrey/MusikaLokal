@@ -2,7 +2,7 @@
 
 ## Current status
 
-The application code and database migration are deployed. No duplicate S3 bucket or Rekognition collection was created.
+The gig-application implementation and the connection-application extension for group-member and production-team applications are deployed. Migrations `20260928170000_add_gig_member_verification.sql`, `20260930130000_add_connection_member_verification.sql`, and `20260930150000_add_connection_application_members.sql` are recorded remotely. No duplicate S3 bucket or Rekognition collection was needed.
 
 The AWS project's selected Region is Asia Pacific (Sydney), `ap-southeast-2`. The repository configuration, AWS CLI profile, S3 bucket, and Rekognition collection now agree on that Region. Do not create duplicates in another Region or attempt to bypass the AWS-managed service control policy.
 
@@ -20,10 +20,10 @@ The AWS project reports an active Free plan. S3 and Rekognition are supported by
 The linked Supabase project is active and healthy. Deployment verification confirms:
 
 - the required AWS member-verification secret names exist;
-- migration `20260928170000_add_gig_member_verification.sql` is applied and recorded remotely;
-- the three verification tables and both consent-normalization triggers exist;
-- `gig-applications` and `delete-account` are active with the member-verification implementation;
-- both deployed bundles return the expected unauthenticated `401`, confirming successful startup without changing application data.
+- migrations `20260928170000_add_gig_member_verification.sql`, `20260930130000_add_connection_member_verification.sql`, and `20260930150000_add_connection_application_members.sql` are applied and recorded remotely;
+- the three verification tables, the connection roster table, and all three consent-normalization triggers exist;
+- `gig-applications`, `delete-account`, `connection-member-verification`, `manage-production`, and `group-members` are active with the member-verification implementation;
+- the internal connection worker returns the expected unauthenticated `403`, confirming successful startup and service-role enforcement without changing application data.
 
 A dedicated non-console runtime IAM identity named `musikalokal-member-verification-dev` has an inline policy limited to the verified Rekognition collection operations and temporary S3 object prefix. The selected-Region IAM simulation allows all eight required SDK actions.
 
@@ -34,7 +34,8 @@ The Supabase runtime uses its own dedicated credential. It does not use the huma
 ## Runtime design
 
 - A member grants separate, optional consent. General terms and Gemini review consent do not grant face verification consent.
-- Every member in a group application's frozen roster must consent. One member's consent cannot authorize another member.
+- Every member in a gig group application's frozen roster must consent through that workflow. For a production-team group application, the checked group attestation records that every represented registered member is included in the verification roster.
+- A solo or join-a-group connection application verifies the submitting applicant. A production-team application submitted as a group freezes every registered group member into a connection roster and verifies each member against the submitted performance video.
 - A registered profile/reference image is validated as JPEG or PNG and must contain exactly one detectable face before `IndexFaces` runs.
 - The application video is copied to a private temporary S3 object and checked for an MPEG-4/MOV-style ISO base media container carrying H.264 before `StartFaceSearch` runs.
 - The asynchronous job is resumed with bounded polling through `GetFaceSearch`; all result pages are collected.
@@ -154,16 +155,16 @@ Do not use `--upload-policies` without reviewing the generated result. Autopilot
    npx supabase db push --linked --dry-run --workdir web
    ```
 
-   Continue only when the dry run lists solely the intended migration. For this deployment, the member-verification migration was applied directly and transactionally, then only its version was recorded; no unrelated migration was applied or marked.
+   Continue only when the dry run lists solely the intended verification migration. Because this repository still has historical migration gaps, the deployed verification migrations were applied directly and transactionally through `supabase db query`, then only their exact versions were recorded; no unrelated migration was applied or marked.
 
    ```powershell
    npx supabase db push --linked --workdir web
    ```
 
-9. Deploy both functions together while preserving their current function-level JWT setting:
+9. Deploy the connection worker and the functions that create or review connection applications, while preserving their current function-level JWT setting. Redeploy `gig-applications` and `delete-account` only when their bundles also changed:
 
    ```powershell
-   npx supabase functions deploy gig-applications delete-account `
+   npx supabase functions deploy connection-member-verification manage-production group-members `
      --project-ref $env:SUPABASE_PROJECT_REF `
      --workdir web `
      --no-verify-jwt `
@@ -188,4 +189,3 @@ Rekognition Stored Video Analysis charges by video analysis usage, and stored fa
 
 - https://aws.amazon.com/rekognition/pricing/
 - https://aws.amazon.com/s3/pricing/
-

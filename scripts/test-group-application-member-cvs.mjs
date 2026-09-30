@@ -6,7 +6,7 @@ const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
 for (const app of ["mobile", "web"]) {
   test(`${app}: group applications collect one private CV per member`, async () => {
-    const [migration, backend, review, memberVerification, submission, notificationNavigation, taskList, screen] = await Promise.all([
+    const [migration, backend, review, memberVerification, submission, notificationNavigation, taskList, screen, bookings, bookingDetails] = await Promise.all([
       read(`../${app}/supabase/migrations/20260928150000_add_group_application_member_cvs.sql`),
       read(`../${app}/supabase/functions/gig-applications/index.ts`),
       read(`../${app}/supabase/functions/_shared/gigPortfolioReview.ts`),
@@ -15,6 +15,8 @@ for (const app of ["mobile", "web"]) {
       read(`../${app}/src/utils/notificationNavigation.ts`),
       read(`../${app}/src/components/GroupApplicationCvTaskList.tsx`),
       app === "mobile" ? read(`../${app}/app/group_application_cv.tsx`) : Promise.resolve(""),
+      app === "mobile" ? read(`../${app}/app/(tabs)/bookings.tsx`) : Promise.resolve(""),
+      app === "mobile" ? read(`../${app}/src/components/BookingDetailsSheet.tsx`) : Promise.resolve(""),
     ]);
 
     assert.match(migration, /create table if not exists public\.gig_application_members/i);
@@ -47,7 +49,16 @@ for (const app of ["mobile", "web"]) {
     assert.match(taskList, /Group application tasks/);
     if (app === "mobile") {
       assert.match(screen, /Send Complete Application/);
-      assert.match(screen, /Allow Gemini to review my CV/);
+      assert.match(screen, /aiReviewConsent: true/);
+      assert.match(screen, /memberVerificationConsent: true/);
+      assert.doesNotMatch(screen, /accessibilityRole="checkbox"/);
+      assert.doesNotMatch(screen, /Back to Bookings/);
+      assert.doesNotMatch(bookings, /<GroupApplicationCvTaskList/);
+      assert.match(bookings, /"Waiting for members"/);
+      assert.match(bookings, /member CVs submitted/);
+      assert.match(bookings, /\bWithdraw\b/);
+      assert.doesNotMatch(bookingDetails, /name="arrow-down"/);
+      assert.match(bookingDetails, /!isGig \? \([\s\S]*<CachedImage/);
     }
   });
 }

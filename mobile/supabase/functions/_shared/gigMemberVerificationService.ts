@@ -14,7 +14,12 @@ import {
     hashReferenceImage,
     inspectRekognitionVideo,
 } from './gigMemberVerification.ts'
-import { scheduleGigMemberVerificationWorker } from './gigReviewWorkerDispatch.ts'
+import {
+    scheduleConnectionMemberVerificationWorker,
+    scheduleGigMemberVerificationWorker,
+} from './gigReviewWorkerDispatch.ts'
+
+type VerificationTarget = 'gig' | 'connection'
 
 type VerificationConfig = {
     region: string
@@ -181,7 +186,60 @@ async function loadRoster(client: any, application: any): Promise<RosterMember[]
     }]
 }
 
-async function loadApplicationAndRoster(client: any, applicationId: string) {
+async function loadApplicationAndRoster(
+    client: any,
+    applicationId: string,
+    target: VerificationTarget = 'gig',
+): Promise<{ application: any; roster: RosterMember[] }> {
+    if (target === 'connection') {
+        const { data: request, error } = await client
+            .from('booking_requests')
+            .select('id, sender_id, group_id, event_details, member_verification_consent, member_verification_consented_at, created_at')
+            .eq('id', applicationId)
+            .maybeSingle()
+        if (error) throw error
+        if (!request) throw new Error('application_not_found')
+        const details = request.event_details?.request_details && typeof request.event_details.request_details === 'object'
+            ? request.event_details.request_details
+            : {}
+        const application = {
+            id: request.id,
+            applicant_id: request.sender_id,
+            submitted_by_user_id: request.sender_id,
+            group_id: null,
+            production_roster_id: null,
+            video_url: clean(details.video_url),
+            member_verification_consent: request.member_verification_consent === true,
+            member_verification_consented_at: request.member_verification_consented_at,
+            updated_at: request.created_at,
+        }
+        const { data: snapshotMembers, error: snapshotError } = await client
+            .from('connection_application_members')
+            .select('user_id, member_verification_consent, member_verification_consented_at')
+            .eq('booking_request_id', applicationId)
+            .order('created_at', { ascending: true })
+        if (snapshotError) throw snapshotError
+        if ((snapshotMembers || []).length > 0) {
+            const memberIds = (snapshotMembers || []).map((member: any) => clean(member.user_id)).filter(Boolean)
+            const { data: profiles, error: profileError } = await client
+                .from('profiles')
+                .select('id, avatar_url')
+                .in('id', memberIds)
+            if (profileError) throw profileError
+            const avatarById = new Map((profiles || []).map((profile: any) => [clean(profile.id), clean(profile.avatar_url)]))
+            return {
+                application,
+                roster: (snapshotMembers || []).map((member: any) => ({
+                    member_id: clean(member.user_id),
+                    reference_url: avatarById.get(clean(member.user_id)) || '',
+                    consented_at: member.member_verification_consent === true
+                        ? clean(member.member_verification_consented_at)
+                        : '',
+                })).filter((member: RosterMember) => member.member_id),
+            }
+        }
+        return { application, roster: await loadRoster(client, application) }
+    }
     const { data: application, error } = await client
         .from('gig_applications')
         .select('id, applicant_id, submitted_by_user_id, group_id, production_roster_id, video_url, member_verification_consent, member_verification_consented_at, updated_at')
@@ -192,8 +250,13 @@ async function loadApplicationAndRoster(client: any, applicationId: string) {
     return { application, roster: await loadRoster(client, application) }
 }
 
-export async function queueGigMemberVerification(client: any, applicationId: string) {
-    const { application, roster } = await loadApplicationAndRoster(client, applicationId)
+async function queueMemberVerification(
+    client: any,
+    applicationId: string,
+    target: VerificationTarget,
+) {
+    const { application, roster } = await loadApplicationAndRoster(client, applicationId, target)
+    const targetColumn = target === 'connection' ? 'booking_request_id' : 'application_id'
     const allConsented = application.member_verification_consent === true &&
         Boolean(application.member_verification_consented_at) &&
         roster.length > 0 && roster.every((member) => Boolean(member.consented_at))
@@ -201,13 +264,14 @@ export async function queueGigMemberVerification(client: any, applicationId: str
     const { data: existing, error: existingError } = await client
         .from('gig_application_member_verifications')
         .select('id, status, aws_job_id, client_request_token')
-        .eq('application_id', applicationId)
+        .eq(targetColumn, applicationId)
         .maybeSingle()
     if (existingError) throw existingError
     if (existing && ['queued', 'processing', 'completed'].includes(clean(existing.status))) return existing
 
     const payload = {
-        application_id: applicationId,
+        application_id: target === 'gig' ? applicationId : null,
+        booking_request_id: target === 'connection' ? applicationId : null,
         status: allConsented ? 'queued' : 'not_requested',
         result: !allConsented ? null : !clean(application.video_url) ? 'no_video' : null,
         expected_member_count: roster.length,
@@ -224,11 +288,19 @@ export async function queueGigMemberVerification(client: any, applicationId: str
     if (allConsented && !clean(application.video_url)) payload.status = 'completed'
     const { data, error: upsertError } = await client
         .from('gig_application_member_verifications')
-        .upsert(payload, { onConflict: 'application_id' })
+        .upsert(payload, { onConflict: targetColumn })
         .select('id, status, result')
         .single()
     if (upsertError) throw upsertError
     return data
+}
+
+export async function queueGigMemberVerification(client: any, applicationId: string) {
+    return queueMemberVerification(client, applicationId, 'gig')
+}
+
+export async function queueConnectionMemberVerification(client: any, applicationId: string) {
+    return queueMemberVerification(client, applicationId, 'connection')
 }
 
 async function ensureReferenceFace(
@@ -370,7 +442,8 @@ async function completeFaceSearch(
     const { error: resultError } = await client.from('gig_application_member_verification_results').insert(
         aggregate.members.map((member) => ({
             verification_id: verification.id,
-            application_id: verification.application_id,
+            application_id: verification.application_id || null,
+            booking_request_id: verification.booking_request_id || null,
             member_id: member.member_id,
             reference_face_id: referenceByMemberId.get(member.member_id)?.referenceId || null,
             status: member.status,
@@ -398,7 +471,11 @@ async function completeFaceSearch(
     return { status: 'completed', result: aggregate.result }
 }
 
-export async function runGigMemberVerification(client: any, applicationId: string) {
+async function runMemberVerification(
+    client: any,
+    applicationId: string,
+    target: VerificationTarget,
+) {
     let config: VerificationConfig | null = null
     let s3: S3Client | null = null
     let verification: any = null
@@ -407,13 +484,13 @@ export async function runGigMemberVerification(client: any, applicationId: strin
         config = getConfig()
         const clients = createAwsClients(config)
         s3 = clients.s3
-        const { application, roster } = await loadApplicationAndRoster(client, applicationId)
+        const { application, roster } = await loadApplicationAndRoster(client, applicationId, target)
         const allConsented = application.member_verification_consent === true &&
             Boolean(application.member_verification_consented_at) && roster.length > 0 &&
             roster.every((member) => Boolean(member.consented_at))
         const { data: existing, error: verificationError } = await client
             .from('gig_application_member_verifications').select('*')
-            .eq('application_id', applicationId).maybeSingle()
+            .eq(target === 'connection' ? 'booking_request_id' : 'application_id', applicationId).maybeSingle()
         if (verificationError) throw verificationError
         verification = existing
         activeObjectKey = clean(verification?.video_object_key)
@@ -462,11 +539,11 @@ export async function runGigMemberVerification(client: any, applicationId: strin
         if (!media.supported) throw new Error(clean(media.reason))
         const videoVersion = await hashReferenceImage(video.bytes)
         const clientRequestToken = await buildFaceSearchClientRequestToken({
-            application_id: applicationId,
+            application_id: target === 'connection' ? `connection-${applicationId}` : applicationId,
             video_version: videoVersion,
             roster_version: rosterVersion,
         })
-        const objectKey = `rekognition-input/${applicationId}/${videoVersion}.mp4`
+        const objectKey = `rekognition-input/${target}/${applicationId}/${videoVersion}.mp4`
         activeObjectKey = objectKey
         await clients.s3.send(new PutObjectCommand({
             Bucket: config.bucket,
@@ -511,7 +588,7 @@ export async function runGigMemberVerification(client: any, applicationId: strin
         return completeFaceSearch(client, clients.rekognition, clients.s3, config, updated, references)
     } catch (error) {
         const errorCode = safeErrorCode(error)
-        console.warn('gig_member_verification_failed', { applicationId, errorCode })
+        console.warn(`${target}_member_verification_failed`, { applicationId, errorCode })
         if (verification?.id) {
             const completedAt = new Date().toISOString()
             await client.from('gig_application_member_verifications').update({
@@ -525,6 +602,14 @@ export async function runGigMemberVerification(client: any, applicationId: strin
         }
         return { status: 'failed', result: 'unavailable', error_code: errorCode }
     }
+}
+
+export async function runGigMemberVerification(client: any, applicationId: string) {
+    return runMemberVerification(client, applicationId, 'gig')
+}
+
+export async function runConnectionMemberVerification(client: any, applicationId: string) {
+    return runMemberVerification(client, applicationId, 'connection')
 }
 
 export async function deleteMemberReferenceFaces(client: any, memberId: string) {
@@ -559,17 +644,44 @@ export async function scheduleGigMemberVerification(client: any, applicationId: 
     await scheduleGigMemberVerificationWorker(applicationId)
 }
 
+export async function scheduleConnectionMemberVerification(client: any, applicationId: string) {
+    void client
+    await scheduleConnectionMemberVerificationWorker(applicationId)
+}
+
 export async function attachGigMemberVerification(client: any, application: any) {
+    return attachMemberVerification(client, application, 'gig')
+}
+
+export async function attachConnectionMemberVerification(client: any, application: any) {
+    return attachMemberVerification(client, application, 'connection')
+}
+
+async function attachMemberVerification(client: any, application: any, target: VerificationTarget) {
+    const targetColumn = target === 'connection' ? 'booking_request_id' : 'application_id'
     const { data: verification, error } = await client
         .from('gig_application_member_verifications')
-        .select('id, application_id, status, result, expected_member_count, verified_member_count, additional_people_detected, created_at, updated_at, started_at, completed_at, next_poll_at')
-        .eq('application_id', application.id)
+        .select('id, application_id, booking_request_id, status, result, expected_member_count, verified_member_count, additional_people_detected, created_at, updated_at, started_at, completed_at, next_poll_at')
+        .eq(targetColumn, application.id)
         .maybeSingle()
     if (error || !verification) return { ...application, member_verification: null }
     const { data: members } = await client
         .from('gig_application_member_verification_results')
         .select('member_id, status, best_similarity, match_count, first_match_timestamp_ms, best_match_timestamp_ms')
         .eq('verification_id', verification.id)
+    let attachedMembers = members || []
+    if (target === 'connection' && attachedMembers.length > 0) {
+        const { data: snapshots } = await client
+            .from('connection_application_members')
+            .select('user_id, member_name_snapshot, role_snapshot')
+            .eq('booking_request_id', application.id)
+        const snapshotByUserId = new Map<string, any>((snapshots || []).map((member: any) => [clean(member.user_id), member]))
+        attachedMembers = attachedMembers.map((member: any) => ({
+            ...member,
+            member_name_snapshot: snapshotByUserId.get(clean(member.member_id))?.member_name_snapshot || null,
+            role_snapshot: snapshotByUserId.get(clean(member.member_id))?.role_snapshot || null,
+        }))
+    }
     return {
         ...application,
         member_verification: {
@@ -581,7 +693,7 @@ export async function attachGigMemberVerification(client: any, application: any)
             started_at: verification.started_at,
             completed_at: verification.completed_at,
             next_poll_at: verification.next_poll_at,
-            members: members || [],
+            members: attachedMembers,
         },
     }
 }

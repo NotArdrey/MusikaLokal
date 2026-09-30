@@ -1,9 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
-import { useFocusEffect } from "expo-router";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ExpoLinking from "expo-linking";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Calendar } from "../../src/components/CenteredCalendar";
 import {
@@ -26,7 +25,6 @@ import ApplicantDetailsModal from "../../src/components/ApplicantDetailsModal";
 import CachedImage from "../../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
 import GuestSignInGate from "../../src/components/GuestSignInGate";
-import GroupApplicationCvTaskList from "../../src/components/GroupApplicationCvTaskList";
 import Header from "../../src/components/header";
 import InAppMediaViewer, { isInAppMediaUrl } from "../../src/components/InAppMediaViewer";
 import BookingActionModal, { normalizeVisibleInput } from "../../src/components/modal";
@@ -66,6 +64,31 @@ import {
 } from "../../src/utils/recordingRule";
 
 const debugLog = (..._args: unknown[]) => { };
+
+const readFunctionInvokeError = async (error: any, fallback: string) => {
+  const context = error?.context;
+  const status = Number(context?.status ?? error?.status ?? 0);
+  let message = "";
+
+  if (context && typeof context.json === "function") {
+    try {
+      const response = typeof context.clone === "function" ? context.clone() : context;
+      const body = await response.json();
+      message = String(body?.error || body?.message || "").trim();
+    } catch {
+      // Keep the safe fallback when the function response has no readable body.
+    }
+  }
+
+  if (!message) {
+    const errorMessage = typeof error?.message === "string" ? error.message.trim() : "";
+    if (errorMessage && !errorMessage.includes("non-2xx status code")) {
+      message = errorMessage;
+    }
+  }
+
+  return { status, message: message || fallback };
+};
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const EMPTY_ACTIVITY_ITEMS: any[] = [];
@@ -1707,10 +1730,40 @@ export default function BookingsScreen() {
   const [applicationData, setApplicationData] = useState<ApplicationTabData>(
     () => initialBookingsCacheRef.current?.applicationData || createEmptyApplicationData(),
   );
+  const [groupApplicationTasksByApplicationId, setGroupApplicationTasksByApplicationId] = useState<Record<string, any>>({});
 
   const [loading, setLoading] = useState(false);
   const [userRole, setUserRole] = useState<string>(
     () => initialBookingsCacheRef.current?.userRole || "",
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isAuthenticated || !userId || userRole !== "musician") {
+        setGroupApplicationTasksByApplicationId({});
+        return undefined;
+      }
+
+      let active = true;
+      void supabase.functions.invoke("gig-applications", {
+        body: { action: "fetch_member_cv_tasks", userId },
+      }).then(({ data: taskRows, error }) => {
+        if (!active || error) return;
+        const tasksByApplicationId = (Array.isArray(taskRows) ? taskRows : []).reduce(
+          (result: Record<string, any>, task: any) => {
+            const applicationId = String(task?.application_id || "").trim();
+            if (applicationId) result[applicationId] = task;
+            return result;
+          },
+          {},
+        );
+        setGroupApplicationTasksByApplicationId(tasksByApplicationId);
+      });
+
+      return () => {
+        active = false;
+      };
+    }, [isAuthenticated, userId, userRole]),
   );
   const [staffBookingContexts, setStaffBookingContexts] = useState<any[]>([]);
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
@@ -4201,24 +4254,38 @@ export default function BookingsScreen() {
         });
 
         if (error) {
-          console.error("respond_to_production_team_invite failed", {
-            message: error.message,
-            status: (error as any).status,
-            code: (error as any).code,
-            details: (error as any).details,
-            hint: (error as any).hint,
-            context: (error as any).context,
-            body: {
-              action: "respond_to_production_team_invite",
-              request_id: item.id,
-              decision: nextStatus,
-            },
-          });
-          throw error;
+          const failure = await readFunctionInvokeError(
+            error,
+            "Failed to update the production team invite.",
+          );
+          const isStaleInvite =
+            failure.status === 409 || /no longer pending/i.test(failure.message);
+
+          if (isStaleInvite) {
+            await fetchBookings(userId);
+            showAlert(
+              "warning",
+              "Invite already updated",
+              "This production team invite is no longer pending.",
+            );
+            return;
+          }
+
+          throw new Error(failure.message);
         }
 
         if (!data?.success) {
-          throw new Error(data?.error || "Failed to update the production team invite.");
+          const message = data?.error || "Failed to update the production team invite.";
+          if (/no longer pending/i.test(message)) {
+            await fetchBookings(userId);
+            showAlert(
+              "warning",
+              "Invite already updated",
+              "This production team invite is no longer pending.",
+            );
+            return;
+          }
+          throw new Error(message);
         }
 
         await fetchBookings(userId);
@@ -6485,12 +6552,6 @@ export default function BookingsScreen() {
           ListHeaderComponent={
             <>
               {bookingsControlsHeader}
-              <GroupApplicationCvTaskList
-                userId={userId}
-                visible={renderActiveTab === "Pending" && userRole === "musician"}
-                colors={colors}
-                isDark={isDark}
-              />
               {!loading &&
                 (userRole === "studio-owner" || staffBookingContexts.some((context) => context?.entity_type === "studio")) &&
                 renderActiveTab === "Pending" &&
@@ -7573,13 +7634,39 @@ export default function BookingsScreen() {
                 // Determine if this is the musician's own application view
                 const isMusicianView = userRole === "musician";
                 const isLeaderConfirmation = !!item.leader_approval_required;
-                const isReadOnlyApplication = isReadOnlyBookingItem(item);
                 const gigName = getGigTitleFromActivityItem(item);
                 const applicationLabel = getApplicationDisplayLabel(item);
                 const applicationIcon = applicationLabel === "Solo Artist" ? "person-outline" : "people-outline";
                 const applicationTypeBadge = `${applicationLabel} Application`;
                 const applicationReceivedAt = formatApplicationReceivedDateTime(item);
                 const applicationReceivedLabel = isMusicianView ? "Submitted" : "Received";
+                const memberCvTask = isMusicianView
+                  ? groupApplicationTasksByApplicationId[String(item.id)]
+                  : null;
+                const isReadOnlyApplication = isReadOnlyBookingItem(item) && !memberCvTask;
+                const requiredMemberCvCount = Number(memberCvTask?.application?.member_cv_required_count || 0);
+                const submittedMemberCvCount = Number(memberCvTask?.application?.member_cv_submitted_count || 0);
+                const remainingMemberCvCount = Math.max(0, requiredMemberCvCount - submittedMemberCvCount);
+                const memberCvStatus = memberCvTask
+                  ? memberCvTask.can_finalize === true
+                    ? "Ready to send"
+                    : memberCvTask.cv_status !== "submitted"
+                      ? "Your CV required"
+                      : remainingMemberCvCount > 0
+                        ? `Waiting for ${remainingMemberCvCount} ${remainingMemberCvCount === 1 ? "member" : "members"}`
+                        : "Waiting for members"
+                  : null;
+                const displayedApplicationStatus = memberCvStatus || item.status;
+                const openApplicationDetails = () => {
+                  if (memberCvTask) {
+                    router.push({
+                      pathname: "/group_application_cv",
+                      params: { applicationId: item.id },
+                    } as any);
+                    return;
+                  }
+                  handleDetailsPress(item);
+                };
 
                 return (
                   <View
@@ -7602,7 +7689,7 @@ export default function BookingsScreen() {
                       <View style={styles.cardHeader}>
                         <View style={styles.cardTitleContainer}>
                           <TouchableOpacity activeOpacity={1}
-                            onPress={() => handleDetailsPress(item)}
+                            onPress={openApplicationDetails}
                           >
                             <Text
                               style={[styles.cardTitle, { color: colors.text }]}
@@ -7632,6 +7719,15 @@ export default function BookingsScreen() {
                                     : `Applied for ${gigName}`}
                               </Text>
                             </View>
+
+                            {memberCvTask && requiredMemberCvCount > 0 ? (
+                              <View style={styles.cardDetailRow}>
+                                <Ionicons name="document-text-outline" size={14} color={colors.textSecondary} />
+                                <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
+                                  {submittedMemberCvCount} of {requiredMemberCvCount} member CVs submitted · {remainingMemberCvCount} remaining
+                                </Text>
+                              </View>
+                            ) : null}
 
                             {/* Location */}
                             {item.location && (
@@ -7775,9 +7871,9 @@ export default function BookingsScreen() {
                           }}
                         >
                           <View style={styles.statusContainer}>
-                            {item.status === "Happening Now" || item.status === "Accepted" || item.status === "Confirmed" || item.status === "Completed" ? (
+                            {displayedApplicationStatus === "Happening Now" || displayedApplicationStatus === "Accepted" || displayedApplicationStatus === "Confirmed" || displayedApplicationStatus === "Completed" ? (
                               <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                            ) : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Withdrawn" ? (
+                            ) : displayedApplicationStatus === "Declined" || displayedApplicationStatus === "Cancelled" || displayedApplicationStatus === "Fired" || displayedApplicationStatus === "Withdrawn" ? (
                               <Ionicons name="close-circle" size={16} color="#EF4444" />
                             ) : (
                               <Ionicons name="time-outline" size={16} color="#F59E0B" />
@@ -7787,18 +7883,18 @@ export default function BookingsScreen() {
                                 styles.statusText,
                                 {
                                   color:
-                                    item.status === "Happening Now" ||
-                                      item.status === "Accepted" ||
-                                      item.status === "Confirmed" ||
-                                      item.status === "Completed"
+                                    displayedApplicationStatus === "Happening Now" ||
+                                      displayedApplicationStatus === "Accepted" ||
+                                      displayedApplicationStatus === "Confirmed" ||
+                                      displayedApplicationStatus === "Completed"
                                       ? "#10B981"
-                                      : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Withdrawn"
+                                      : displayedApplicationStatus === "Declined" || displayedApplicationStatus === "Cancelled" || displayedApplicationStatus === "Fired" || displayedApplicationStatus === "Withdrawn"
                                         ? "#EF4444"
                                         : "#F59E0B",
                                 },
                               ]}
                             >
-                              {item.status}
+                              {displayedApplicationStatus}
                             </Text>
                           </View>
 
@@ -8005,7 +8101,7 @@ export default function BookingsScreen() {
                                   if (isGigReconfirmationItem(item)) {
                                     handleGigReconfirmationDecision(item, false);
                                   } else {
-                                    handleDetailsPress(item);
+                                    openApplicationDetails();
                                   }
                                 }}
                                 style={{
@@ -8050,8 +8146,10 @@ export default function BookingsScreen() {
                                   if (isGigReconfirmationItem(item)) {
                                     handleGigReconfirmationDecision(item, true);
                                   } else {
-                                    setSelectedItem(item);
-                                    handleCancelBooking(item.id);
+                                    setSelectedItem(memberCvTask ? { ...item, viewer_can_act: true, viewer_access: "applicant" } : item);
+                                    setCancellationReason("");
+                                    setModalMode("cancel");
+                                    setModalVisible(true);
                                   }
                                 }}
                                 style={{

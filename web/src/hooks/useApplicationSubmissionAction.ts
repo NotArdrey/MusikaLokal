@@ -542,6 +542,7 @@ export const useApplicationSubmissionAction = ({
           pitch_message: pitchMessage,
           video_url: videoUrl || null,
           cv_url: uploadedCvUrl,
+          member_verification_consent: memberVerificationConsent,
           submitted_at: new Date().toISOString(),
           status: "pending",
         };
