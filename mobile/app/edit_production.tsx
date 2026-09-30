@@ -9,6 +9,11 @@ import Header from '../src/components/header';
 import ImageUploader from '../src/components/ImageUploader';
 import Navbar from '../src/components/navbar';
 import ProductionInviteSection from '../src/components/ProductionInviteSection';
+import ConnectionRecommendationSettings, {
+  DEFAULT_CONNECTION_RECOMMENDATION_SETTINGS,
+  normalizeConnectionRecommendationSettings,
+  type ConnectionRecommendationSettingsValue,
+} from '../src/components/ConnectionRecommendationSettings';
 import Skeleton from '../src/components/Skeleton';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
@@ -47,6 +52,7 @@ type TeamRecord = {
   staff_can_add_listing?: boolean;
   staff_can_delete_listing?: boolean;
   created_at: string;
+  ai_recommendation_settings?: unknown;
 };
 
 export default function EditProductionScreen() {
@@ -77,6 +83,13 @@ export default function EditProductionScreen() {
   const [thumbnailIndex, setThumbnailIndex] = useState(0);
   const [inviteMessage, setInviteMessage] = useState('');
   const [selectedInviteTargets, setSelectedInviteTargets] = useState<ProductionInviteTarget[]>([]);
+  const [aiRecommendationSettings, setAiRecommendationSettings] = useState<ConnectionRecommendationSettingsValue>(() => ({
+    ...DEFAULT_CONNECTION_RECOMMENDATION_SETTINGS,
+    criteria: {
+      ...DEFAULT_CONNECTION_RECOMMENDATION_SETTINGS.criteria,
+      instruments: 'required',
+    },
+  }));
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
 
   const hasIncompleteRequiredFields = !logoImages.length || !teamName.trim() || !description.trim();
@@ -152,6 +165,15 @@ export default function EditProductionScreen() {
       );
       setLogoImages(existingTeam.logo_url ? [existingTeam.logo_url] : []);
       setThumbnailIndex(0);
+      setAiRecommendationSettings(normalizeConnectionRecommendationSettings(
+        existingTeam.ai_recommendation_settings,
+        {
+          criteria: {
+            ...DEFAULT_CONNECTION_RECOMMENDATION_SETTINGS.criteria,
+            instruments: 'required',
+          },
+        },
+      ));
     } catch (error: any) {
       setAlert({ type: 'error', title: 'Error', message: error?.message || 'Failed to load production team.' });
     } finally {
@@ -196,6 +218,7 @@ export default function EditProductionScreen() {
         name: teamName.trim(),
         description: description.trim() || null,
         logo_url: primaryLogo,
+        ai_recommendation_settings: aiRecommendationSettings,
       });
 
       if (!data?.success) {
@@ -311,6 +334,12 @@ export default function EditProductionScreen() {
               <Text style={[styles.descriptionHint, { color: colors.textSecondary }]}>
                 This description is shown on your Manage Production About section.
               </Text>
+
+              <ConnectionRecommendationSettings
+                value={aiRecommendationSettings}
+                onChange={setAiRecommendationSettings}
+                entityLabel="production team"
+              />
 
               <ProductionInviteSection
                 currentUserId={userId || session?.user?.id || null}

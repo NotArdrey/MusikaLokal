@@ -10,6 +10,7 @@
     "test:local-simulation": "node --test scripts/test-local-simulation-fixtures.mjs",
     "test:workflows": "node --test scripts/test-gig-history-upload-moderation.mjs scripts/test-upload-screening.mjs scripts/test-gig-genre-matching.mjs scripts/test-gig-member-requirement-matching.mjs scripts/test-gig-member-verification.mjs scripts/test-gig-application-privacy.mjs scripts/test-group-application-member-cvs.mjs scripts/test-gig-split-review-workers.mjs scripts/test-feed-featured-suggestions.mjs scripts/test-auth-typography.mjs scripts/test-authorization-hardening.mjs",
     "test:member-verification": "node --test scripts/test-gig-member-verification.mjs",
+    "test:connection-recommendations": "npx -y deno test scripts/test-connection-application-recommendations.ts",
     "test:security": "node --test scripts/test-authorization-hardening.mjs",
     "test:accounts": "node --test scripts/test-separate-role-accounts.mjs",
     "test:security-migration": "node scripts/validate-security-migration.mjs",

@@ -2,6 +2,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
 import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
+import { attachConnectionApplicantRecommendations } from "../_shared/connectionApplicantRecommendations.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -239,7 +240,7 @@ Deno.serve(async (req: Request) => {
 
             const { data: group, error: groupError } = await supabaseClient
                 .from('groups')
-                .select('owner_id, name')
+                .select('id, owner_id, name, genre, description, location, latitude, longitude, ai_recommendation_settings')
                 .eq('id', groupId)
                 .single();
 
@@ -275,7 +276,7 @@ Deno.serve(async (req: Request) => {
             if (applicantIds.length > 0) {
                 const { data: profiles, error: profileError } = await supabaseClient
                     .from('profiles')
-                    .select('id, full_name, avatar_url, email, location, address, bio, is_verified, verification_status')
+                    .select('id, full_name, avatar_url, email, location, address, latitude, longitude, bio, is_verified, verification_status')
                     .in('id', applicantIds);
 
                 if (profileError) throw profileError;
@@ -293,12 +294,20 @@ Deno.serve(async (req: Request) => {
                 });
             }
 
+            const hydratedApplications = applications.map((request: any) => ({
+                ...request,
+                applicant: applicantProfilesById.get(request.sender_id) || null,
+            }));
+            const rankedApplications = await attachConnectionApplicantRecommendations(
+                supabaseClient,
+                hydratedApplications,
+                'group',
+                group,
+            );
+
             return jsonResponse({
                 success: true,
-                applications: applications.map((request: any) => ({
-                    ...request,
-                    applicant: applicantProfilesById.get(request.sender_id) || null,
-                })),
+                applications: rankedApplications,
             });
         }
 

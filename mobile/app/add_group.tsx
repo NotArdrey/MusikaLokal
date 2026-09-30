@@ -22,6 +22,10 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import ConnectionRecommendationSettings, {
+  DEFAULT_CONNECTION_RECOMMENDATION_SETTINGS,
+  type ConnectionRecommendationSettingsValue,
+} from "../src/components/ConnectionRecommendationSettings";
 import GigPresetDropdown, {
   GIG_INSTRUMENT_OPTIONS,
   GIG_ROLE_OPTIONS,
@@ -199,6 +203,13 @@ export default function AddGroupScreen() {
   const [customGenre, setCustomGenre] = useState("");
   const [showAllGenres, setShowAllGenres] = useState(false);
   const [description, setDescription] = useState("");
+  const [aiRecommendationSettings, setAiRecommendationSettings] = useState<ConnectionRecommendationSettingsValue>(() => ({
+    ...DEFAULT_CONNECTION_RECOMMENDATION_SETTINGS,
+    criteria: {
+      ...DEFAULT_CONNECTION_RECOMMENDATION_SETTINGS.criteria,
+      genres: "required",
+    },
+  }));
   const [modalVisible, setModalVisible] = useState(false);
   // Group type based on the 11 PH Music Group Types
   const [groupType, setGroupType] = useState<string>(
@@ -646,6 +657,12 @@ export default function AddGroupScreen() {
           latitude: payload.latitude,
           longitude: payload.longitude,
           group_type: payload.group_type,
+          ai_recommendation_settings: {
+            ...aiRecommendationSettings,
+            required_genres: aiRecommendationSettings.required_genres.length > 0
+              ? aiRecommendationSettings.required_genres
+              : selectedGenres,
+          },
         })
         .select()
         .single();
@@ -1335,6 +1352,13 @@ export default function AddGroupScreen() {
                   "Brief bio about your band...",
                   true,
                 )}
+
+                <ConnectionRecommendationSettings
+                  value={aiRecommendationSettings}
+                  onChange={setAiRecommendationSettings}
+                  entityLabel="group"
+                  supportsLocation
+                />
 
                 {/* Image Upload */}
                 <View style={styles.inputContainer}>

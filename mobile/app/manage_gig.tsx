@@ -886,14 +886,7 @@ export default function GigDetailsScreen() {
         >
           {/* Header Image & Info */}
           <View style={styles.headerContainer}>
-            <View
-              style={[
-                styles.headerImageContainer,
-                {
-                  shadowColor: colors.primary,
-                },
-              ]}
-            >
+            <View style={styles.headerImageContainer}>
               <Image
                 source={{
                   uri: (gig?.images && gig.images[0]) || gig?.image || null,
@@ -1247,7 +1240,7 @@ export default function GigDetailsScreen() {
                       <Text
                         style={[styles.payoutAmount, { color: colors.primary }]}
                       >
-                        ₱{(gig?.budget || 0).toLocaleString()}
+                        PHP {(gig?.budget || 0).toLocaleString()}
                       </Text>
                     </View>
                   </View>
@@ -1946,10 +1939,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     marginBottom: 16,
     position: "relative",
-    elevation: 10,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
   },
   headerImage: {
     width: "100%",

@@ -1657,22 +1657,24 @@ const ListingDetailsSheet = forwardRef<
       return;
     }
 
-    let cooldownDays = group.reapplication_cooldown_days;
-    if (cooldownDays === null || cooldownDays === undefined) {
-      const { data: gigSettings, error: gigSettingsError } = await supabase
-        .from("gigs")
-        .select("reapplication_cooldown_days")
-        .eq("id", listingId)
-        .maybeSingle();
+    const { data: gigSettings, error: gigSettingsError } = await supabase
+      .from("gigs")
+      .select("reapplication_cooldown_days")
+      .eq("id", listingId)
+      .maybeSingle();
 
-      if (gigSettingsError) {
-        console.error("Error loading the gig reapplication cooldown:", gigSettingsError);
-        resetReapplicationCooldown();
-        return;
-      }
-
-      cooldownDays = gigSettings?.reapplication_cooldown_days ?? 30;
+    if (gigSettingsError) {
+      console.error("Error loading the gig reapplication cooldown:", gigSettingsError);
+      resetReapplicationCooldown();
+      return;
     }
+
+    // Always prefer the live gig value. Listing cards can remain mounted after
+    // an organizer changes the setting, especially when switching to None.
+    const cooldownDays =
+      gigSettings?.reapplication_cooldown_days ??
+      group.reapplication_cooldown_days ??
+      30;
 
     if (Number(cooldownDays) <= 0) {
       resetReapplicationCooldown();
@@ -4904,7 +4906,7 @@ const ListingDetailsSheet = forwardRef<
                   { color: colors.textSecondary },
                 ]}
               >
-                Total booking amount: ₱{paymentModalTotalAmount.toLocaleString()}
+                Total booking amount: PHP {paymentModalTotalAmount.toLocaleString()}
               </Text>
               <Text style={[styles.paymentOptionHint, { color: colors.textSecondary }]}>
                 Full payment settles the booking. Downpayment leaves the other half as Balance Due.
@@ -4948,7 +4950,7 @@ const ListingDetailsSheet = forwardRef<
                         { color: colors.primary },
                       ]}
                     >
-                      ₱{paymentModalTotalAmount.toLocaleString()}
+                      PHP {paymentModalTotalAmount.toLocaleString()}
                     </Text>
                   </View>
                 </View>
@@ -5000,8 +5002,7 @@ const ListingDetailsSheet = forwardRef<
                         { color: colors.primary },
                       ]}
                     >
-                      ₱
-                      {paymentModalHalfAmount.toLocaleString()}
+                      PHP {paymentModalHalfAmount.toLocaleString()}
                     </Text>
                   </View>
                 </View>
@@ -5011,8 +5012,7 @@ const ListingDetailsSheet = forwardRef<
                     { color: colors.textSecondary },
                   ]}
                 >
-                  Pay half today. Remaining balance: ₱
-                  {paymentModalHalfAmount.toLocaleString()} shown in Pending.
+                  Pay half today. Remaining balance: PHP {paymentModalHalfAmount.toLocaleString()} shown in Pending.
                 </Text>
               </TouchableOpacity>
 
@@ -5026,7 +5026,7 @@ const ListingDetailsSheet = forwardRef<
                   ]}
                 >
                   <Text style={styles.paymentOptionConfirmText}>
-                    Pay ?
+                    Pay PHP{" "}
                     {(selectedPaymentType === "downpayment"
                       ? paymentModalHalfAmount
                       : paymentModalTotalAmount

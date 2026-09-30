@@ -281,17 +281,17 @@ export const useApplicationSubmissionAction = ({
       return inactive;
     }
 
-    let cooldownDays = group.reapplication_cooldown_days;
-    if (cooldownDays === null || cooldownDays === undefined) {
-      const { data: gigSettings, error: gigSettingsError } = await supabase
-        .from("gigs")
-        .select("reapplication_cooldown_days")
-        .eq("id", listingId)
-        .maybeSingle();
+    const { data: gigSettings, error: gigSettingsError } = await supabase
+      .from("gigs")
+      .select("reapplication_cooldown_days")
+      .eq("id", listingId)
+      .maybeSingle();
 
-      if (gigSettingsError) throw gigSettingsError;
-      cooldownDays = gigSettings?.reapplication_cooldown_days ?? 30;
-    }
+    if (gigSettingsError) throw gigSettingsError;
+    const cooldownDays =
+      gigSettings?.reapplication_cooldown_days ??
+      group.reapplication_cooldown_days ??
+      30;
 
     if (Number(cooldownDays) <= 0) {
       return inactive;

@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Image,
+    Linking,
     ScrollView,
     StyleSheet,
     Switch,
@@ -15,6 +16,7 @@ import {
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import BottomModal from "../src/components/BottomModal";
+import ConnectionApplicantDetailsModal from "../src/components/ConnectionApplicantDetailsModal";
 import ConnectionApplicantReview from "../src/components/ConnectionApplicantReview";
 import GroupInviteSection from "../src/components/GroupInviteSection";
 import GroupLinkedPlaylistsSection from "../src/components/GroupLinkedPlaylistsSection";
@@ -42,7 +44,11 @@ import {
 import { getSmoothTabIndex, setSmoothTab, useStagedTabRows } from "../src/utils/smoothTabs";
 import {
   attachConnectionApplicantRecommendation,
+  CONNECTION_APPLICATION_FILTERS,
+  filterConnectionApplications,
+  getConnectionApplicationCounts,
   sortConnectionApplicationsByRecommendation,
+  type ConnectionApplicationFilter,
 } from "../src/utils/connectionApplicantRecommendations";
 
 import { useLocalSearchParams } from "expo-router";
@@ -109,9 +115,8 @@ export default function GroupDetailsScreen() {
   const [group, setGroup] = useState<any>(null);
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
   const [groupMemberApplications, setGroupMemberApplications] = useState<any[]>([]);
-  const [memberApplicationFilter, setMemberApplicationFilter] = useState<
-    "All" | "Recommended" | "Pending" | "Accepted" | "Declined"
-  >("All");
+  const [memberApplicationFilter, setMemberApplicationFilter] = useState<ConnectionApplicationFilter>("All");
+  const [selectedMemberApplication, setSelectedMemberApplication] = useState<any | null>(null);
   const [respondingGroupApplicationId, setRespondingGroupApplicationId] = useState<string | null>(null);
   const [applications, setApplications] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
@@ -531,7 +536,7 @@ export default function GroupDetailsScreen() {
         setGroupMemberApplications(
           sortConnectionApplicationsByRecommendation(
             applicationRows.map((application: any) =>
-              attachConnectionApplicantRecommendation(application, groupData),
+              attachConnectionApplicantRecommendation(application),
             ),
           ),
         );
@@ -976,18 +981,10 @@ export default function GroupDetailsScreen() {
     10,
   );
   const renderedGroupMemberApplications = useStagedTabRows(
-    useMemo(() => groupMemberApplications.filter((application) => {
-      const status = String(application?.status || "pending").trim().toLowerCase();
-      if (memberApplicationFilter === "All") return true;
-      if (memberApplicationFilter === "Recommended") {
-        return application?.ai_recommendation?.recommendation_status === "recommended";
-      }
-      if (memberApplicationFilter === "Pending") return status === "pending";
-      if (memberApplicationFilter === "Accepted") {
-        return ["accepted", "approved", "connected"].includes(status);
-      }
-      return ["declined", "rejected", "cancelled"].includes(status);
-    }), [groupMemberApplications, memberApplicationFilter]),
+    useMemo(
+      () => filterConnectionApplications(groupMemberApplications, memberApplicationFilter),
+      [groupMemberApplications, memberApplicationFilter],
+    ),
     activeTab === "Applications",
     6,
   );
@@ -997,6 +994,10 @@ export default function GroupDetailsScreen() {
     6,
   );
   const displayMemberCount = displayMembers.length;
+  const memberApplicationCounts = useMemo(
+    () => getConnectionApplicationCounts(groupMemberApplications),
+    [groupMemberApplications],
+  );
   const displayGroupType = getDisplayGroupType(group);
 
   // Show loading while checking authorization
@@ -1461,6 +1462,14 @@ export default function GroupDetailsScreen() {
                     </Text>
                     <TouchableOpacity
                       activeOpacity={1}
+                      style={[styles.inviteMembersButton, { backgroundColor: colors.inputBackground }]}
+                      onPress={() => router.push({ pathname: "/edit_group", params: { id: group?.id, returnTab: "Applications" } })}
+                    >
+                      <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
+                      <Text style={[styles.inviteMembersButtonText, { color: colors.primary }]}>Match settings</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={1}
                       style={[styles.inviteMembersButton, { backgroundColor: colors.primary }]}
                       onPress={() => setInviteModalVisible(true)}
                     >
@@ -1475,16 +1484,9 @@ export default function GroupDetailsScreen() {
                       showsHorizontalScrollIndicator={false}
                       contentContainerStyle={styles.applicationFilters}
                     >
-                      {(["All", "Recommended", "Pending", "Accepted", "Declined"] as const).map((filter) => {
+                      {CONNECTION_APPLICATION_FILTERS.map((filter) => {
                         const selected = memberApplicationFilter === filter;
-                        const count = groupMemberApplications.filter((application) => {
-                          const status = String(application?.status || "pending").toLowerCase();
-                          if (filter === "All") return true;
-                          if (filter === "Recommended") return application?.ai_recommendation?.recommendation_status === "recommended";
-                          if (filter === "Pending") return status === "pending";
-                          if (filter === "Accepted") return ["accepted", "approved", "connected"].includes(status);
-                          return ["declined", "rejected", "cancelled"].includes(status);
-                        }).length;
+                        const count = memberApplicationCounts[filter];
                         return (
                           <TouchableOpacity
                             key={filter}
@@ -1498,7 +1500,7 @@ export default function GroupDetailsScreen() {
                               },
                             ]}
                           >
-                            {filter === "Recommended" ? <Ionicons name="sparkles" size={13} color={selected ? colors.primary : colors.textSecondary} /> : null}
+                            {filter === "Recommended" || filter === "Needs Review" ? <Ionicons name={filter === "Recommended" ? "sparkles" : "warning-outline"} size={13} color={selected ? colors.primary : colors.textSecondary} /> : null}
                             <Text style={{ color: selected ? colors.primary : colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
                               {filter} ({count})
                             </Text>
@@ -1570,6 +1572,15 @@ export default function GroupDetailsScreen() {
                           </Text>
 
                           <ConnectionApplicantReview application={app} colors={colors} compact />
+
+                          <TouchableOpacity
+                            testID={`view-group-applicant-${app.id}`}
+                            onPress={() => setSelectedMemberApplication(app)}
+                            style={[styles.viewApplicantButton, { backgroundColor: colors.primary }]}
+                          >
+                            <Text style={styles.actionBtnText}>View Applicant</Text>
+                            <Ionicons name="arrow-forward" size={17} color="#FFFFFF" />
+                          </TouchableOpacity>
 
                           {isPending && (
                             <View style={styles.actionButtons}>
@@ -2002,6 +2013,23 @@ export default function GroupDetailsScreen() {
           if (modalAction) {
             modalAction();
           }
+        }}
+      />
+      <ConnectionApplicantDetailsModal
+        visible={Boolean(selectedMemberApplication)}
+        application={selectedMemberApplication}
+        colors={colors}
+        entityLabel="group"
+        busy={Boolean(respondingGroupApplicationId)}
+        onClose={() => setSelectedMemberApplication(null)}
+        onOpenMedia={(url) => Linking.openURL(url)}
+        onAccept={(application) => {
+          setSelectedMemberApplication(null);
+          confirmGroupMemberApplicationDecision(application, "accepted");
+        }}
+        onDecline={(application) => {
+          setSelectedMemberApplication(null);
+          confirmGroupMemberApplicationDecision(application, "declined");
         }}
       />
       <CustomAlert
@@ -2547,6 +2575,16 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
+  },
+  viewApplicantButton: {
+    minHeight: 44,
+    marginTop: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
   },
   setupCard: {
     padding: 16,

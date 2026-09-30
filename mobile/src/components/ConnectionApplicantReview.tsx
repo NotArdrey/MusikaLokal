@@ -30,9 +30,10 @@ export default function ConnectionApplicantReview({
   if (!recommendation) return null;
 
   const isRecommended = recommendation.recommendation_status === "recommended";
+  const isUnavailable = recommendation.recommendation_status === "insufficient_data";
   const matched = list(recommendation.matched_criteria);
   const missing = list(recommendation.missing_criteria);
-  const accent = isRecommended ? "#10B981" : "#F59E0B";
+  const accent = isRecommended ? "#10B981" : isUnavailable ? "#6B7280" : "#F59E0B";
 
   return (
     <View
@@ -52,12 +53,14 @@ export default function ConnectionApplicantReview({
           <Text style={[styles.title, { color: colors.text }]}>AI Match Review</Text>
         </View>
         <Text style={[styles.score, { color: accent }]}>
-          {Math.round(Number(recommendation.score || 0))}%
+          {recommendation.score === null || recommendation.score === undefined
+            ? "N/A"
+            : `${Math.round(Number(recommendation.score))}%`}
         </Text>
       </View>
 
       <Text style={[styles.status, { color: accent }]}>
-        {isRecommended ? "Recommended" : "Manual review suggested"}
+        {isRecommended ? "Recommended" : isUnavailable ? "Match unavailable" : "Manual review suggested"}
       </Text>
 
       {!compact && recommendation.explanation ? (

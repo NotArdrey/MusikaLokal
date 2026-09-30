@@ -709,7 +709,7 @@ export default function StudioDetailsScreen() {
   const formatCurrency = (value?: unknown) => {
     const amount = Number(value || 0);
     if (!Number.isFinite(amount) || amount <= 0) return "Price pending";
-    return `₱${amount.toLocaleString()}`;
+    return `PHP ${amount.toLocaleString()}`;
   };
 
   const getBookingSessionLabel = (booking: any) =>
@@ -888,13 +888,13 @@ export default function StudioDetailsScreen() {
             : "Rate";
   const studioRateDisplay =
     hasRehearsalRate && hasRecordingRate
-      ? `₱${rehearsalRateValue.toLocaleString()}/hr | ₱${recordingRateValue.toLocaleString()}/song`
+      ? `PHP ${rehearsalRateValue.toLocaleString()}/hr | PHP ${recordingRateValue.toLocaleString()}/song`
       : hasRecordingRate
-        ? `₱${recordingRateValue.toLocaleString()}/song`
+        ? `PHP ${recordingRateValue.toLocaleString()}/song`
         : hasRehearsalRate
-          ? `₱${rehearsalRateValue.toLocaleString()}/hr`
+          ? `PHP ${rehearsalRateValue.toLocaleString()}/hr`
           : hourlyRateValue > 0
-            ? `₱${hourlyRateValue.toLocaleString()}/hr`
+            ? `PHP ${hourlyRateValue.toLocaleString()}/hr`
             : "N/A";
   const studioEquipment = Array.isArray(studio?.instruments)
     ? studio.instruments.filter((item: any) => {
@@ -1046,7 +1046,7 @@ export default function StudioDetailsScreen() {
     const value = Number(promo?.discount_value || 0);
     if (!value) return "Discount";
     return promo?.discount_type === "fixed_amount"
-      ? `₱${value.toLocaleString()} off`
+      ? `PHP ${value.toLocaleString()} off`
       : `${value}% off`;
   };
   const formatPromotionTarget = (value?: unknown) => {
@@ -2258,7 +2258,7 @@ export default function StudioDetailsScreen() {
                                 { color: colors.primary },
                               ]}
                             >
-                              ₱
+                              PHP{" "}
                               {(
                                 booking.total_price ||
                                 booking.final_price ||

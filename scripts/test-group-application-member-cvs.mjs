@@ -6,14 +6,15 @@ const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
 for (const app of ["mobile", "web"]) {
   test(`${app}: group applications collect one private CV per member`, async () => {
-    const [migration, backend, review, submission, notificationNavigation, taskList, screen] = await Promise.all([
+    const [migration, backend, review, memberVerification, submission, notificationNavigation, taskList, screen] = await Promise.all([
       read(`../${app}/supabase/migrations/20260928150000_add_group_application_member_cvs.sql`),
       read(`../${app}/supabase/functions/gig-applications/index.ts`),
       read(`../${app}/supabase/functions/_shared/gigPortfolioReview.ts`),
+      read(`../${app}/supabase/functions/_shared/gigMemberVerificationService.ts`),
       read(`../${app}/src/hooks/useApplicationSubmissionAction.ts`),
       read(`../${app}/src/utils/notificationNavigation.ts`),
       read(`../${app}/src/components/GroupApplicationCvTaskList.tsx`),
-      read(`../${app}/app/group_application_cv.tsx`),
+      app === "mobile" ? read(`../${app}/app/group_application_cv.tsx`) : Promise.resolve(""),
     ]);
 
     assert.match(migration, /create table if not exists public\.gig_application_members/i);
@@ -34,11 +35,19 @@ for (const app of ["mobile", "web"]) {
     assert.match(review, /member_cv_reviews/);
     assert.match(review, /Member did not authorize optional AI review/);
 
+    assert.match(memberVerification, /if \(application\.group_id\)/);
+    assert.match(memberVerification, /from\('gig_application_members'\)/);
+    assert.match(memberVerification, /\.eq\('application_id', application\.id\)/);
+    assert.match(memberVerification, /expected_member_count: roster\.length/);
+    assert.match(memberVerification, /roster\.every\(\(member\) => Boolean\(member\.consented_at\)\)/);
+
     assert.match(submission, /submit_group_gig_application/);
     assert.match(submission, /bucket: "application-cvs"/);
     assert.match(notificationNavigation, /group_application_member_cv_required/);
     assert.match(taskList, /Group application tasks/);
-    assert.match(screen, /Send Complete Application/);
-    assert.match(screen, /Allow Gemini to review my CV/);
+    if (app === "mobile") {
+      assert.match(screen, /Send Complete Application/);
+      assert.match(screen, /Allow Gemini to review my CV/);
+    }
   });
 }

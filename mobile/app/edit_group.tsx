@@ -20,6 +20,11 @@ import {
     View
 } from "react-native";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import ConnectionRecommendationSettings, {
+  DEFAULT_CONNECTION_RECOMMENDATION_SETTINGS,
+  normalizeConnectionRecommendationSettings,
+  type ConnectionRecommendationSettingsValue,
+} from "../src/components/ConnectionRecommendationSettings";
 import GigPresetDropdown, {
   GIG_INSTRUMENT_OPTIONS,
   GIG_ROLE_OPTIONS,
@@ -195,6 +200,13 @@ export default function EditGroupScreen() {
   const [customGenre, setCustomGenre] = useState("");
   const [showAllGenres, setShowAllGenres] = useState(false);
   const [description, setDescription] = useState("");
+  const [aiRecommendationSettings, setAiRecommendationSettings] = useState<ConnectionRecommendationSettingsValue>(() => ({
+    ...DEFAULT_CONNECTION_RECOMMENDATION_SETTINGS,
+    criteria: {
+      ...DEFAULT_CONNECTION_RECOMMENDATION_SETTINGS.criteria,
+      genres: "required",
+    },
+  }));
   const [address, setAddress] = useState("");
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
@@ -637,6 +649,18 @@ export default function EditGroupScreen() {
         setSelectedGenres(genreArray);
       }
       setDescription(data.description);
+      setAiRecommendationSettings(normalizeConnectionRecommendationSettings(
+        data.ai_recommendation_settings,
+        {
+          criteria: {
+            ...DEFAULT_CONNECTION_RECOMMENDATION_SETTINGS.criteria,
+            genres: "required",
+          },
+          required_genres: data.genre
+            ? data.genre.split(",").map((genre: string) => genre.trim()).filter(Boolean)
+            : [],
+        },
+      ));
       setGroupOwnerId(data.owner_id || null);
       setAddress(data.location || "");
       setLatitude(data.latitude || null);
@@ -911,6 +935,12 @@ export default function EditGroupScreen() {
           latitude: payload.latitude,
           longitude: payload.longitude,
           group_type: payload.group_type,
+          ai_recommendation_settings: {
+            ...aiRecommendationSettings,
+            required_genres: aiRecommendationSettings.required_genres.length > 0
+              ? aiRecommendationSettings.required_genres
+              : selectedGenres,
+          },
         })
         .eq('id', groupId)
         .eq('owner_id', user.id)
@@ -1751,6 +1781,13 @@ export default function EditGroupScreen() {
           </View>
 
           {renderInput("Description", description, setDescription, true)}
+
+          <ConnectionRecommendationSettings
+            value={aiRecommendationSettings}
+            onChange={setAiRecommendationSettings}
+            entityLabel="group"
+            supportsLocation
+          />
 
           {renderSectionHeader("Visuals", "image")}
           <ImageUploader

@@ -16,6 +16,7 @@ import {
 import { supabase } from "../lib/supabase";
 import BottomModal from "../src/components/BottomModal";
 import CachedImage from "../src/components/CachedImage";
+import ConnectionApplicantDetailsModal from "../src/components/ConnectionApplicantDetailsModal";
 import ConnectionApplicantReview from "../src/components/ConnectionApplicantReview";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
@@ -35,7 +36,11 @@ import { runAfterUIIdle } from "../src/utils/idleTask";
 import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
 import {
   attachConnectionApplicantRecommendation,
+  CONNECTION_APPLICATION_FILTERS,
+  filterConnectionApplications,
+  getConnectionApplicationCounts,
   sortConnectionApplicationsByRecommendation,
+  type ConnectionApplicationFilter,
 } from "../src/utils/connectionApplicantRecommendations";
 
 interface Team {
@@ -75,8 +80,6 @@ interface TeamRosterEntry {
 }
 
 type ProductionTab = "About" | "Members" | "Applications" | "Reviews";
-type ApplicationFilter = "All" | "Recommended" | "Pending" | "Accepted" | "Declined";
-
 const PRODUCTION_TABS: ProductionTab[] = ["About", "Members", "Applications", "Reviews"];
 
 export default function ProductionTeamScreen() {
@@ -121,7 +124,8 @@ export default function ProductionTeamScreen() {
   const [teamApplications, setTeamApplications] = useState<any[]>([]);
   const [loadingApplications, setLoadingApplications] = useState(false);
   const [respondingApplicationId, setRespondingApplicationId] = useState<string | null>(null);
-  const [applicationFilter, setApplicationFilter] = useState<ApplicationFilter>("All");
+  const [applicationFilter, setApplicationFilter] = useState<ConnectionApplicationFilter>("All");
+  const [selectedApplication, setSelectedApplication] = useState<any | null>(null);
 
   // Alert
   const [alertVisible, setAlertVisible] = useState(false);
@@ -266,7 +270,7 @@ export default function ProductionTeamScreen() {
       setTeamApplications(
         sortConnectionApplicationsByRecommendation(
           applications.map((application: any) =>
-            attachConnectionApplicantRecommendation(application, team),
+            attachConnectionApplicantRecommendation(application),
           ),
         ),
       );
@@ -700,18 +704,8 @@ export default function ProductionTeamScreen() {
     const tabs = canManage
       ? PRODUCTION_TABS
       : PRODUCTION_TABS.filter((tab) => tab !== "Applications");
-    const filteredApplications = teamApplications.filter((application) => {
-      const status = String(application?.status || "pending").trim().toLowerCase();
-      if (applicationFilter === "All") return true;
-      if (applicationFilter === "Recommended") {
-        return application?.ai_recommendation?.recommendation_status === "recommended";
-      }
-      if (applicationFilter === "Pending") return status === "pending";
-      if (applicationFilter === "Accepted") {
-        return ["accepted", "approved", "connected"].includes(status);
-      }
-      return ["declined", "rejected", "cancelled"].includes(status);
-    });
+    const filteredApplications = filterConnectionApplications(teamApplications, applicationFilter);
+    const applicationCounts = getConnectionApplicationCounts(teamApplications);
 
     return (
       <>
@@ -954,7 +948,16 @@ export default function ProductionTeamScreen() {
                     <Text style={[styles.sectionTitle, { color: colors.text }]}>Production Applicants</Text>
                     <Text style={[styles.applicationHelper, { color: colors.textSecondary }]}>Match scores are advisory; review every profile and attachment.</Text>
                   </View>
-                  <Text style={[styles.subsectionCount, { color: colors.textSecondary }]}>{teamApplications.length}</Text>
+                  <View style={{ alignItems: "flex-end", gap: 8 }}>
+                    <Text style={[styles.subsectionCount, { color: colors.textSecondary }]}>{teamApplications.length}</Text>
+                    <TouchableOpacity
+                      onPress={() => router.push({ pathname: "/edit_production", params: { id: selectedTeam.id } })}
+                      style={[styles.attachmentButton, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}
+                    >
+                      <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
+                      <Text style={[styles.attachmentText, { color: colors.primary }]}>Match settings</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 <ScrollView
@@ -962,7 +965,7 @@ export default function ProductionTeamScreen() {
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.applicationFilters}
                 >
-                  {(["All", "Recommended", "Pending", "Accepted", "Declined"] as ApplicationFilter[]).map((filter) => {
+                  {CONNECTION_APPLICATION_FILTERS.map((filter) => {
                     const selected = applicationFilter === filter;
                     return (
                       <TouchableOpacity
@@ -977,8 +980,8 @@ export default function ProductionTeamScreen() {
                           },
                         ]}
                       >
-                        {filter === "Recommended" ? <Ionicons name="sparkles" size={13} color={selected ? colors.primary : colors.textSecondary} /> : null}
-                        <Text style={[styles.applicationFilterText, { color: selected ? colors.primary : colors.textSecondary }]}>{filter}</Text>
+                        {filter === "Recommended" || filter === "Needs Review" ? <Ionicons name={filter === "Recommended" ? "sparkles" : "warning-outline"} size={13} color={selected ? colors.primary : colors.textSecondary} /> : null}
+                        <Text style={[styles.applicationFilterText, { color: selected ? colors.primary : colors.textSecondary }]}>{filter} ({applicationCounts[filter]})</Text>
                       </TouchableOpacity>
                     );
                   })}
@@ -1031,6 +1034,15 @@ export default function ProductionTeamScreen() {
                         ) : null}
 
                         <ConnectionApplicantReview application={application} colors={colors} compact />
+
+                        <TouchableOpacity
+                          testID={`view-production-applicant-${application.id}`}
+                          onPress={() => setSelectedApplication(application)}
+                          style={[styles.viewApplicantButton, { backgroundColor: colors.primary }]}
+                        >
+                          <Text style={[styles.applicationDecisionText, { color: "#FFFFFF" }]}>View Applicant</Text>
+                          <Ionicons name="arrow-forward" size={17} color="#FFFFFF" />
+                        </TouchableOpacity>
 
                         {cvUrl || videoUrl ? (
                           <View style={styles.attachmentRow}>
@@ -1108,6 +1120,24 @@ export default function ProductionTeamScreen() {
           confirmDisabled={firingMember}
           loading={firingMember}
           loadingMessage="Removing member and sending notification..."
+        />
+
+        <ConnectionApplicantDetailsModal
+          visible={Boolean(selectedApplication)}
+          application={selectedApplication}
+          colors={colors}
+          entityLabel="production team"
+          busy={Boolean(respondingApplicationId)}
+          onClose={() => setSelectedApplication(null)}
+          onOpenMedia={(url) => Linking.openURL(url)}
+          onAccept={(application) => {
+            setSelectedApplication(null);
+            handleApplicationDecision(application, "accepted");
+          }}
+          onDecline={(application) => {
+            setSelectedApplication(null);
+            handleApplicationDecision(application, "declined");
+          }}
         />
 
         {renderSheetModal({
@@ -1478,6 +1508,7 @@ const styles = StyleSheet.create({
   applicationActions: { flexDirection: "row", gap: 10, marginTop: 12 },
   applicationDecision: { flex: 1, minHeight: 42, borderWidth: 1, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   applicationDecisionText: { fontFamily: "Poppins_600SemiBold", fontSize: 13 },
+  viewApplicantButton: { minHeight: 42, marginTop: 12, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
 
   // Buttons
   reviewCard: {

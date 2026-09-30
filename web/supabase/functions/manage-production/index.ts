@@ -4,6 +4,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
 import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
+import { attachConnectionApplicantRecommendations } from "../_shared/connectionApplicantRecommendations.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -450,7 +451,7 @@ function normalizeRouteParams(value: unknown) {
   return Object.fromEntries(entries) as Record<string, string>;
 }
 
-function buildListingRequestEventDetails(params: Record<string, unknown>) {
+function buildListingRequestEventDetails(params: Record<string, unknown>): Record<string, any> {
   const senderEntityType =
     toNonEmptyString(params.senderEntityType ?? params.sender_entity_type) ||
     "musician";
@@ -1209,7 +1210,7 @@ async function getProductionTeamApplications(
 
   const { data: team, error: teamError } = await supabaseAdmin
     .from("production_teams")
-    .select("id, owner_id, name, description")
+    .select("id, owner_id, name, description, ai_recommendation_settings")
     .eq("id", teamId)
     .maybeSingle();
 
@@ -1249,7 +1250,7 @@ async function getProductionTeamApplications(
       await Promise.all([
         supabaseAdmin
           .from("profiles")
-          .select("id, full_name, avatar_url, email, location, address, bio, is_verified, verification_status")
+          .select("id, full_name, avatar_url, email, location, address, latitude, longitude, bio, is_verified, verification_status")
           .in("id", applicantIds),
         supabaseAdmin
           .from("profiles_legacy_projection")
@@ -1288,7 +1289,7 @@ async function getProductionTeamApplications(
       await Promise.all([
         supabaseAdmin
           .from("groups")
-          .select("id, name, group_type, genre, description, location, owner_id")
+          .select("id, name, group_type, genre, description, location, latitude, longitude, owner_id")
           .in("id", groupIds),
         supabaseAdmin
           .from("groups_legacy_projection")
@@ -1307,13 +1308,49 @@ async function getProductionTeamApplications(
     });
   }
 
-  return {
-    team,
-    applications: applications.map((request: any) => ({
+  const hydratedApplications = applications.map((request: any) => ({
       ...request,
       applicant: applicantProfilesById.get(request.sender_id) || null,
       sender_group: groupsById.get(request.group_id) || null,
-    })),
+  }));
+
+  if (groupIds.length > 0) {
+    const { data: rosterRows, error: rosterError } = await supabaseAdmin
+      .from("group_roster_members")
+      .select("group_id, member_role, instrument, raw_member")
+      .in("group_id", groupIds)
+      .order("sort_order", { ascending: true });
+    if (rosterError) throw rosterError;
+    const membersByGroupId = new Map<string, any[]>();
+    (rosterRows || []).forEach((row: any) => {
+      const current = membersByGroupId.get(row.group_id) || [];
+      current.push({
+        ...(row.raw_member && typeof row.raw_member === "object" ? row.raw_member : {}),
+        member_role: row.member_role,
+        instrument: row.instrument,
+      });
+      membersByGroupId.set(row.group_id, current);
+    });
+    hydratedApplications.forEach((application: any) => {
+      if (application.sender_group?.id) {
+        application.sender_group = {
+          ...application.sender_group,
+          members: membersByGroupId.get(application.sender_group.id) || [],
+        };
+      }
+    });
+  }
+
+  const rankedApplications = await attachConnectionApplicantRecommendations(
+    supabaseAdmin,
+    hydratedApplications,
+    "production_team",
+    team,
+  );
+
+  return {
+    team,
+    applications: rankedApplications,
   };
 }
 
@@ -1902,7 +1939,7 @@ serve(async (req: Request) => {
     // ================================================================
 
     if (action === "create_production_team") {
-      const { name, description, logo_url, owner_id } = params;
+      const { name, description, logo_url, owner_id, ai_recommendation_settings } = params;
       if (!name?.trim()) return jsonResponse({ error: "Team name is required" }, 400);
 
       const callerRole = await getProfileRole(supabaseAdmin, authUser.id);
@@ -1937,7 +1974,7 @@ serve(async (req: Request) => {
 
       const { data: team, error: teamErr } = await supabaseAdmin
         .from("production_teams")
-        .insert({ owner_id: effectiveOwnerId, name: name.trim(), description, logo_url })
+        .insert({ owner_id: effectiveOwnerId, name: name.trim(), description, logo_url, ai_recommendation_settings })
         .select()
         .single();
 
@@ -1997,7 +2034,7 @@ serve(async (req: Request) => {
     }
 
     if (action === "update_production_team") {
-      const { team_id, name, description, logo_url, open_production_applications } = params;
+      const { team_id, name, description, logo_url, open_production_applications, ai_recommendation_settings } = params;
       if (!team_id) return jsonResponse({ error: "team_id is required" }, 400);
       if (!name?.trim()) return jsonResponse({ error: "Team name is required" }, 400);
 
@@ -2022,6 +2059,9 @@ serve(async (req: Request) => {
           name: name.trim(),
           description: description?.trim() || null,
           logo_url: logo_url || null,
+          ...(ai_recommendation_settings && typeof ai_recommendation_settings === "object"
+            ? { ai_recommendation_settings }
+            : {}),
           ...(typeof open_production_applications === "boolean"
             ? { open_production_applications }
             : {}),
