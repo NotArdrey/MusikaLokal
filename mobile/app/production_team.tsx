@@ -32,6 +32,7 @@ import { useTheme } from "../src/context/ThemeContext";
 import { typography } from "../src/theme/tokens";
 import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
 import { ProductionInviteTarget, sendProductionTeamInvites } from "../src/utils/productionTeamInvites";
+import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import { getSmoothTabIndex, setSmoothTab } from "../src/utils/smoothTabs";
 import { runAfterUIIdle } from "../src/utils/idleTask";
 import { fetchActiveStaffAssignment, getStaffPermissions } from "../src/utils/staffAccess";
@@ -948,26 +949,33 @@ export default function ProductionTeamScreen() {
               <View>
                 <View style={styles.applicationSectionHeader}>
                   <View style={styles.applicationTitleRow}>
-                    <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]} numberOfLines={1}>Production Applicants</Text>
-                    <Text style={[styles.subsectionCount, { color: colors.textSecondary }]}>{teamApplications.length}</Text>
+                    <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]} numberOfLines={1}>Production Applicants ({teamApplications.length})</Text>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="Open match settings"
+                      onPress={() => router.push({ pathname: "/edit_production", params: { id: selectedTeam.id } })}
+                      style={[styles.attachmentButton, styles.applicationSettingsButton, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}
+                    >
+                      <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
+                      <Text style={[styles.attachmentText, { color: colors.primary }]}>Match settings</Text>
+                    </TouchableOpacity>
                   </View>
-                  <Text style={[styles.applicationHelper, { color: colors.textSecondary }]}>Match scores are advisory; review every profile and attachment.</Text>
-                  <TouchableOpacity
-                    onPress={() => router.push({ pathname: "/edit_production", params: { id: selectedTeam.id } })}
-                    style={[styles.attachmentButton, styles.applicationSettingsButton, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}
-                  >
-                    <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
-                    <Text style={[styles.attachmentText, { color: colors.primary }]}>Match settings</Text>
-                  </TouchableOpacity>
+                  <Text style={[styles.applicationHelper, { color: colors.textSecondary }]}>AI recommendations are advisory. Review applicant details before deciding.</Text>
                 </View>
 
-                <View style={styles.applicationFilters}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.applicationFilters}
+                >
                   {CONNECTION_APPLICATION_FILTERS.map((filter) => {
                     const selected = applicationFilter === filter;
                     return (
                       <TouchableOpacity
                         key={filter}
                         testID={`production-applicant-filter-${filter.toLowerCase()}`}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
                         onPress={() => setApplicationFilter(filter)}
                         style={[
                           styles.applicationFilterChip,
@@ -982,7 +990,7 @@ export default function ProductionTeamScreen() {
                       </TouchableOpacity>
                     );
                   })}
-                </View>
+                </ScrollView>
 
                 {loadingApplications ? (
                   <View style={styles.loadingContainer}>
@@ -1003,6 +1011,7 @@ export default function ProductionTeamScreen() {
                     const isBusy = respondingApplicationId === application.id;
                     const cvUrl = details?.cv_url || application?.attachment_url;
                     const videoUrl = details?.video_url;
+                    const applicationMessage = details?.pitch || application?.message;
 
                     return (
                       <View key={application.id} style={[styles.applicationCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -1014,8 +1023,8 @@ export default function ProductionTeamScreen() {
                               <Ionicons name={senderGroup ? "people" : "person"} size={20} color={colors.textSecondary} />
                             </View>
                           )}
-                          <View style={styles.memberInfo}>
-                            <Text style={[styles.applicationName, { color: colors.text }]}>{name}</Text>
+                          <View style={styles.applicationInfo}>
+                            <Text numberOfLines={2} style={[styles.applicationName, { color: colors.text }]}>{name}</Text>
                             <Text style={[styles.memberRole, { color: colors.primary }]}>{senderGroup?.group_type || applicant?.location || "Musician"}</Text>
                           </View>
                           <View style={[styles.applicationStatus, { backgroundColor: status === "accepted" ? "#10B98120" : status === "pending" ? colors.primary + "18" : "#EF444420" }]}>
@@ -1023,17 +1032,28 @@ export default function ProductionTeamScreen() {
                           </View>
                         </View>
 
-                        {details?.pitch || application?.message ? (
-                          <Text style={[styles.applicationPitch, { color: colors.textSecondary }]}>{details?.pitch || application?.message}</Text>
+                        {applicationMessage ? (
+                          <View style={styles.applicationMessageBlock}>
+                            <Text style={[styles.applicationMetaLabel, { color: colors.textSecondary }]}>Message</Text>
+                            <Text numberOfLines={3} style={[styles.applicationPitch, { color: colors.textSecondary }]}>{applicationMessage}</Text>
+                          </View>
                         ) : null}
                         {details?.application_context ? (
-                          <Text style={[styles.applicationContext, { color: colors.textSecondary }]}>{details.application_context}</Text>
+                          <View style={styles.applicationMessageBlock}>
+                            <Text style={[styles.applicationMetaLabel, { color: colors.textSecondary }]}>Application details</Text>
+                            <Text numberOfLines={3} style={[styles.applicationContext, { color: colors.textSecondary }]}>{details.application_context}</Text>
+                          </View>
                         ) : null}
+                        <View style={styles.applicationAppliedRow}>
+                          <Ionicons name="calendar-outline" size={14} color={colors.textSecondary} />
+                          <Text style={[styles.applicationMetaText, { color: colors.textSecondary }]}>Applied {application?.created_at ? formatFriendlyDateTime(application.created_at) : "N/A"}</Text>
+                        </View>
 
                         <ConnectionApplicantReview application={application} colors={colors} compact />
 
                         <TouchableOpacity
                           testID={`view-production-applicant-${application.id}`}
+                          accessibilityRole="button"
                           onPress={() => setSelectedApplication(application)}
                           style={[styles.viewApplicantButton, { backgroundColor: colors.primary }]}
                         >
@@ -1488,20 +1508,25 @@ const styles = StyleSheet.create({
   removeBtn: { padding: 4 },
 
   // Applications
-  applicationSectionHeader: { gap: 8, marginBottom: 2 },
+  applicationSectionHeader: { gap: 6, marginBottom: 2 },
   applicationTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   applicationSettingsButton: { alignSelf: "flex-start" },
   applicationHelper: { fontFamily: typography.body, fontSize: 12, lineHeight: 18 },
-  applicationFilters: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingVertical: 10 },
+  applicationFilters: { flexDirection: "row", gap: 8, paddingTop: 10, paddingBottom: 14 },
   applicationFilterChip: { minHeight: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, flexDirection: "row", alignItems: "center", gap: 5 },
   applicationFilterText: { fontFamily: typography.medium, fontSize: 11 },
-  applicationCard: { borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 12 },
+  applicationCard: { borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 12, gap: 10 },
   applicationAvatar: { width: 44, height: 44, borderRadius: 22 },
+  applicationInfo: { flex: 1, minWidth: 0, marginLeft: 10 },
   applicationName: { fontFamily: typography.heading, fontSize: 15, lineHeight: 20 },
   applicationStatus: { borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4 },
   applicationStatusText: { fontFamily: typography.semibold, fontSize: 10, textTransform: "capitalize" },
-  applicationPitch: { fontFamily: typography.body, fontSize: 13, lineHeight: 19, marginTop: 12 },
-  applicationContext: { fontFamily: typography.body, fontSize: 12, lineHeight: 18, marginTop: 6, fontStyle: "italic" },
+  applicationMessageBlock: { marginTop: 2 },
+  applicationMetaLabel: { fontFamily: typography.semibold, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 },
+  applicationMetaText: { fontFamily: typography.body, fontSize: 11, lineHeight: 17 },
+  applicationAppliedRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+  applicationPitch: { fontFamily: typography.body, fontSize: 13, lineHeight: 19 },
+  applicationContext: { fontFamily: typography.body, fontSize: 12, lineHeight: 18, fontStyle: "italic" },
   attachmentRow: { flexDirection: "row", gap: 8, marginTop: 10 },
   attachmentButton: { flexDirection: "row", alignItems: "center", gap: 5, borderWidth: 1, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 7 },
   attachmentText: { fontFamily: typography.medium, fontSize: 12 },

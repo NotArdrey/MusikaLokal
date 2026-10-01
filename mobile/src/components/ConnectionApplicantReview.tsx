@@ -31,6 +31,13 @@ export default function ConnectionApplicantReview({
   const verification = application?.member_verification;
   const usesVerifiedIdPortrait = ["verified_id_portrait", "verified_id_and_profile_photo"].includes(String(verification?.reference_source || ""));
   const usesDualReference = verification?.reference_source === "verified_id_and_profile_photo";
+  const verificationMembers = Array.isArray(verification?.members) ? verification.members : [];
+  const allMemberIdsFound = Number(verification?.expected_member_count || 0) > 0 &&
+    Number(verification?.verified_member_count || 0) === Number(verification?.expected_member_count || 0);
+  const hasProfileMismatch = usesDualReference && verificationMembers.some((member: any) =>
+    member?.profile_status === "mismatch" || ["matches_another_member", "different_video_person", "not_found_in_video"].includes(String(member?.profile_issue_code || "")),
+  );
+  const hasProfileReviewIssue = usesDualReference && verificationMembers.some((member: any) => member?.profile_status !== "verified");
   const verificationRequested = application?.member_verification_consent === true;
   if (!recommendation && !verification && !verificationRequested) return null;
 
@@ -78,7 +85,7 @@ export default function ConnectionApplicantReview({
             color={verification?.result === "verified" ? "#10B981" : "#D97706"}
           />
           <Text style={[styles.verificationText, { color: colors.textSecondary }]}>
-            Registered member: {verification?.result === "verified" ? usesDualReference ? "ID verified in video; profile checked separately" : "verified in video" : verification?.status === "processing" ? "verification processing" : verification?.status === "queued" ? "verification queued" : verification?.result === "no_reference" ? usesVerifiedIdPortrait ? "verified ID portrait unavailable" : "registered photo unavailable" : verification ? "manual review needed" : "verification unavailable"}
+            Registered member: {verification?.result === "verified" ? usesDualReference ? "profile and ID match" : "ID found in video" : verification?.status === "processing" ? "checking ID and profile" : verification?.status === "queued" ? "check is waiting" : allMemberIdsFound && hasProfileMismatch ? "ID matched; profile does not match" : allMemberIdsFound && hasProfileReviewIssue ? "ID matched; profile could not be checked" : verification?.result === "no_reference" ? usesVerifiedIdPortrait ? "government ID photo unavailable" : "photo unavailable" : verification ? "manual review needed" : "check unavailable"}
           </Text>
         </View>
       ) : null}

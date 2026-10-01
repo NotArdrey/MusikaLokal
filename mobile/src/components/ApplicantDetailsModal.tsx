@@ -48,21 +48,22 @@ const titleCase = (value: unknown) =>
 const profileVerificationMeta = (member: any) => {
   const issueCode = String(member?.profile_issue_code || "");
   if (issueCode === "matches_another_member") {
-    return { label: "Mismatch - profile matches another registered member", color: "#DC2626" };
+    return { label: "No match: profile belongs to another member", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
   }
   if (issueCode === "different_video_person") {
-    return { label: "Mismatch - profile and ID match different people", color: "#DC2626" };
+    return { label: "No match: profile and ID show different people", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
   }
   if (issueCode === "identity_not_confirmed") {
-    return { label: "Could not correlate - ID person not confirmed", color: "#D97706" };
+    return { label: "Could not check: ID photo was not found in the video", color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
   }
   if (issueCode === "not_found_in_video") {
-    return { label: "Profile photo not found in video", color: "#D97706" };
+    return { label: "No match: profile does not match the ID photo", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
   }
-  if (member?.profile_status === "verified") return { label: "Matched to the same person as the ID", color: "#059669" };
-  if (member?.profile_status === "no_reference") return { label: "Profile photo unavailable", color: "#D97706" };
-  if (member?.profile_status === "reference_unusable") return { label: "Profile photo unusable", color: "#D97706" };
-  return { label: "Not confirmed", color: "#D97706" };
+  if (member?.profile_status === "verified") return { label: "Match: same person", color: "#059669", soft: "#ECFDF5", tone: "match" as const };
+  if (member?.profile_status === "no_reference") return { label: "Could not check: no profile photo", color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
+  if (member?.profile_status === "reference_unusable") return { label: "Could not check: profile photo is unclear", color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
+  if (member?.profile_status === "mismatch") return { label: "No match: profile does not match the ID photo", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
+  return { label: "Could not check", color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
 };
 
 const list = (value: unknown): any[] => (Array.isArray(value) ? value : []);
@@ -179,6 +180,22 @@ function SummaryMetric({ value, label, tone }: { value: number; label: string; t
     <View style={[styles.summaryMetric, { backgroundColor: meta.soft }]}>
       <Text style={[styles.summaryMetricValue, { color: meta.color }]}>{value}</Text>
       <Text numberOfLines={2} style={[styles.summaryMetricLabel, { color: meta.color }]}>{label}</Text>
+    </View>
+  );
+}
+
+function ProfileIdFinding({ meta }: { meta: ReturnType<typeof profileVerificationMeta> }) {
+  return (
+    <View style={[styles.profileIdFinding, { backgroundColor: meta.soft, borderColor: meta.color }]}>
+      <Ionicons
+        name={meta.tone === "match" ? "checkmark-circle" : meta.tone === "mismatch" ? "close-circle" : "warning"}
+        size={20}
+        color={meta.color}
+      />
+      <View style={styles.flexOne}>
+        <Text style={[styles.profileIdFindingTitle, { color: meta.color }]}>Profile photo vs ID photo</Text>
+        <Text style={[styles.profileIdFindingText, { color: meta.color }]}>{meta.label}</Text>
+      </View>
     </View>
   );
 }
@@ -729,16 +746,25 @@ export default function ApplicantDetailsModal({
   const memberVerificationStatus = String(memberVerification?.status || "").toLowerCase();
   const memberIdentityVerified = memberVerification?.result === "verified";
   const memberIdentityInProgress = ["queued", "processing"].includes(memberVerificationStatus);
+  const verifiedMemberCount = Number(memberVerification?.verified_member_count || 0);
+  const expectedMemberCount = Number(memberVerification?.expected_member_count || 0);
+  const allMemberIdsFound = expectedMemberCount > 0 && verifiedMemberCount === expectedMemberCount;
+  const hasProfileMismatch = usesDualReference && memberVerificationMembers.some((member: any) => profileVerificationMeta(member).tone === "mismatch");
+  const hasProfileReviewIssue = usesDualReference && memberVerificationMembers.some((member: any) => member?.profile_status !== "verified");
   const memberIdentityLabel = memberIdentityVerified
     ? "Performance identity confirmed"
     : memberIdentityInProgress
       ? "Performance identity in progress"
+      : allMemberIdsFound && hasProfileMismatch
+        ? "ID matched; profile does not match"
+        : allMemberIdsFound && hasProfileReviewIssue
+          ? "ID matched; profile could not be checked"
       : memberVerification
         ? "Performance identity not confirmed"
         : "Performance identity not checked";
   const memberIdentityDetail = memberVerification
     ? usesVerifiedIdPortrait
-      ? `${Number(memberVerification.verified_member_count || 0)} of ${Number(memberVerification.expected_member_count || 0)} registered members were confidently matched in the submitted performance video using approved government-ID holder portraits.${usesDualReference ? " Registered profile photos were also compared as a separate advisory check and are shown without cropping." : ""} Full ID documents are not shown; only the private ID-holder face crop may be viewed.`
+      ? `${verifiedMemberCount} of ${expectedMemberCount} member ID photos matched people in the video.${hasProfileMismatch ? " At least one profile photo does not match that member's ID photo." : hasProfileReviewIssue ? " At least one profile photo could not be checked." : usesDualReference ? " Each profile photo matched the same person as that member's ID." : ""} The full ID is hidden; only the ID holder's face is shown.`
       : `${Number(memberVerification.verified_member_count || 0)} of ${Number(memberVerification.expected_member_count || 0)} registered members were confidently matched in this historical check using registered profile photos. New checks use approved government-ID holder portraits.`
     : "No registered-member verification result is available for this application.";
   const cvIdentityMismatch = cvNameCheckStatus === "mismatch";
@@ -1163,14 +1189,14 @@ export default function ApplicantDetailsModal({
                       {member.reference_portrait_url ? (
                         <TouchableOpacity
                           accessibilityRole="button"
-                          accessibilityLabel={`View government ID holder portrait for ${member.member_name_snapshot || `member ${index + 1}`}`}
-                          onPress={() => onOpenMedia(member.reference_portrait_url, `${member.member_name_snapshot || `Member ${index + 1}`} - ID Holder Portrait`)}
+                          accessibilityLabel={`View government ID photo for ${member.member_name_snapshot || `member ${index + 1}`}`}
+                          onPress={() => onOpenMedia(member.reference_portrait_url, `${member.member_name_snapshot || `Member ${index + 1}`} - Government ID Photo`)}
                           style={styles.portraitPreviewRow}
                         >
                           <ProfileAvatar uri={member.reference_portrait_url} size={56} backgroundColor={colors.surface} iconColor={colors.primary} cachePolicy="none" />
                           <View style={styles.flexOne}>
-                            <Text style={[styles.requirementTitle, { color: colors.text }]}>Government ID holder portrait</Text>
-                            <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view the face crop used for verification</Text>
+                            <Text style={[styles.requirementTitle, { color: colors.text }]}>Government ID photo</Text>
+                            <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view the ID holder's face</Text>
                           </View>
                         </TouchableOpacity>
                       ) : null}
@@ -1183,19 +1209,19 @@ export default function ApplicantDetailsModal({
                         >
                           <ProfileAvatar uri={member.profile_photo_url} size={56} backgroundColor={colors.surface} iconColor={colors.primary} />
                           <View style={styles.flexOne}>
-                            <Text style={[styles.requirementTitle, { color: colors.text }]}>Registered profile photo</Text>
-                            <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view the profile photo used for the secondary check</Text>
+                            <Text style={[styles.requirementTitle, { color: colors.text }]}>Profile photo</Text>
+                            <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view</Text>
                           </View>
                         </TouchableOpacity>
                       ) : null}
                       <Text style={[styles.requirementTitle, { color: colors.text }]}>{member.member_name_snapshot || `Member ${index + 1}`}</Text>
-                      <Text style={[styles.advisory, { color: verified ? "#059669" : "#D97706" }]}>ID-to-video: {verified ? "identity confirmed" : "identity not confirmed"}</Text>
-                      {Number.isFinite(similarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>ID similarity: {similarity.toFixed(1)}%</Text> : null}
+                      <Text style={[styles.advisory, { color: verified ? "#059669" : "#D97706" }]}>ID found in video: {verified ? "Yes" : "No"}</Text>
+                      {Number.isFinite(similarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>ID match: {similarity.toFixed(1)}%</Text> : null}
                       {usesDualReference ? (
                         <>
-                          <Text style={[styles.advisory, { color: profileMeta.color }]}>Profile-to-video: {profileMeta.label}</Text>
-                          {Number.isFinite(profileSimilarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>Profile similarity: {profileSimilarity.toFixed(1)}%</Text> : null}
-                          <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>The profile-photo result is secondary and never overrides the ID result.</Text>
+                          <ProfileIdFinding meta={profileMeta} />
+                          {Number.isFinite(profileSimilarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>Profile match: {profileSimilarity.toFixed(1)}%</Text> : null}
+                          {profileMeta.tone !== "match" ? <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>The ID match stays recorded. Review this member.</Text> : null}
                         </>
                       ) : null}
                       {!verified ? <Text style={[styles.advisory, { color: "#B45309" }]}>Manual review recommended</Text> : null}
@@ -1239,14 +1265,14 @@ export default function ApplicantDetailsModal({
                         {member.reference_portrait_url ? (
                           <TouchableOpacity
                             accessibilityRole="button"
-                            accessibilityLabel={`View government ID holder portrait for ${member.member_name_snapshot || `member ${index + 1}`}`}
-                            onPress={() => onOpenMedia(member.reference_portrait_url, `${member.member_name_snapshot || `Member ${index + 1}`} - ID Holder Portrait`)}
+                            accessibilityLabel={`View government ID photo for ${member.member_name_snapshot || `member ${index + 1}`}`}
+                            onPress={() => onOpenMedia(member.reference_portrait_url, `${member.member_name_snapshot || `Member ${index + 1}`} - Government ID Photo`)}
                             style={styles.portraitPreviewRow}
                           >
                             <ProfileAvatar uri={member.reference_portrait_url} size={56} backgroundColor={colors.surface} iconColor={colors.primary} cachePolicy="none" />
                             <View style={styles.flexOne}>
-                              <Text style={[styles.requirementTitle, { color: colors.text }]}>Government ID holder portrait</Text>
-                              <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view the face crop used for verification</Text>
+                              <Text style={[styles.requirementTitle, { color: colors.text }]}>Government ID photo</Text>
+                              <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view the ID holder's face</Text>
                             </View>
                           </TouchableOpacity>
                         ) : null}
@@ -1259,24 +1285,24 @@ export default function ApplicantDetailsModal({
                           >
                             <ProfileAvatar uri={member.profile_photo_url} size={56} backgroundColor={colors.surface} iconColor={colors.primary} />
                             <View style={styles.flexOne}>
-                              <Text style={[styles.requirementTitle, { color: colors.text }]}>Registered profile photo</Text>
-                              <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view the profile photo used for the secondary check</Text>
+                              <Text style={[styles.requirementTitle, { color: colors.text }]}>Profile photo</Text>
+                              <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view</Text>
                             </View>
                           </TouchableOpacity>
                         ) : null}
                         <StatusRow
                           icon={verified ? "checkmark-circle-outline" : "warning-outline"}
-                          label={`${member.member_name_snapshot || `Member ${index + 1}`}: ID-to-video ${verified ? "confirmed" : "not confirmed"}`}
+                          label={`${member.member_name_snapshot || `Member ${index + 1}`}: ID found in video - ${verified ? "Yes" : "No"}`}
                           color={verified ? "#10B981" : "#F59E0B"}
                         />
                         {Number.isFinite(similarity) ? (
-                          <Text style={[styles.advisory, { color: colors.textSecondary }]}>ID similarity: {similarity.toFixed(1)}%</Text>
+                          <Text style={[styles.advisory, { color: colors.textSecondary }]}>ID match: {similarity.toFixed(1)}%</Text>
                         ) : null}
                         {usesDualReference ? (
                           <>
-                            <Text style={[styles.advisory, { color: profileMeta.color }]}>Profile-to-video: {profileMeta.label}</Text>
-                            {Number.isFinite(profileSimilarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>Profile similarity: {profileSimilarity.toFixed(1)}%</Text> : null}
-                            <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>The profile-photo result is secondary and never overrides the ID result.</Text>
+                            <ProfileIdFinding meta={profileMeta} />
+                            {Number.isFinite(profileSimilarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>Profile match: {profileSimilarity.toFixed(1)}%</Text> : null}
+                            {profileMeta.tone !== "match" ? <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>The ID match stays recorded. Review this member.</Text> : null}
                           </>
                         ) : null}
                         {!verified ? <Text style={[styles.advisory, { color: "#B45309" }]}>Manual review recommended</Text> : null}
@@ -1673,6 +1699,9 @@ const styles = StyleSheet.create({
   detailLabel: { fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 13 },
   detailValue: { marginTop: 1, fontFamily: "Poppins_500Medium", fontSize: 12, lineHeight: 17 },
   messageCard: { borderRadius: 11, padding: 12, gap: 7 },
+  profileIdFinding: { borderWidth: 1, borderRadius: 10, padding: 9, flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  profileIdFindingTitle: { fontFamily: "Poppins_700Bold", fontSize: 10, lineHeight: 15 },
+  profileIdFindingText: { fontFamily: "Poppins_500Medium", fontSize: 10, lineHeight: 15 },
   portraitPreviewRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 2 },
   tagList: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
   tag: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },

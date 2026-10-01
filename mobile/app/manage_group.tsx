@@ -1459,7 +1459,7 @@ export default function GroupDetailsScreen() {
                 <View>
                   <View style={styles.applicationsHeader}>
                     <Text style={[styles.sectionTitle, { color: colors.text }]} numberOfLines={1}>
-                      Member Applications
+                      Member Applications ({memberApplicationCounts.All})
                     </Text>
                     <View style={styles.applicationHeaderActions}>
                       <TouchableOpacity
@@ -1482,7 +1482,11 @@ export default function GroupDetailsScreen() {
                   </View>
 
                   {groupMemberApplications.length > 0 ? (
-                    <View style={styles.applicationFilters}>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.applicationFilters}
+                    >
                       {CONNECTION_APPLICATION_FILTERS.map((filter) => {
                         const selected = memberApplicationFilter === filter;
                         const count = memberApplicationCounts[filter];
@@ -1490,6 +1494,8 @@ export default function GroupDetailsScreen() {
                           <TouchableOpacity
                             key={filter}
                             testID={`group-applicant-filter-${filter.toLowerCase()}`}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected }}
                             onPress={() => setMemberApplicationFilter(filter)}
                             style={[
                               styles.applicationFilterChip,
@@ -1506,7 +1512,7 @@ export default function GroupDetailsScreen() {
                           </TouchableOpacity>
                         );
                       })}
-                    </View>
+                    </ScrollView>
                   ) : null}
 
                   {groupMemberApplications.length === 0 ? (
@@ -1532,54 +1538,94 @@ export default function GroupDetailsScreen() {
                             : "#EF4444";
                       const isPending = normalizedStatus === "pending";
                       const isResponding = respondingGroupApplicationId === app.id;
+                      const cvUrl = requestDetails?.cv_url || app?.attachment_url;
+                      const videoUrl = requestDetails?.video_url;
+                      const applicationMessage =
+                        requestDetails?.application_context ||
+                        requestDetails?.pitch_message ||
+                        app.message;
 
                       return (
                         <View
                           key={app.id}
                           style={[
-                            styles.setupCard,
-                            { backgroundColor: colors.surface, borderColor: colors.border, marginTop: 12 },
+                            styles.applicationCard,
+                            { backgroundColor: colors.surface, borderColor: colors.border },
                           ]}
                         >
-                          <View
-                            style={{
-                              flexDirection: "row",
-                              justifyContent: "space-between",
-                              gap: 12,
-                              marginBottom: 8,
-                            }}
-                          >
-                            <Text style={[styles.setupTitle, { color: colors.text, flex: 1 }]}>
-                              {app.applicant?.full_name || "Applicant"}
-                            </Text>
-                            <Text style={[styles.applicationStatusText, { color: statusColor }]}>
-                              {rawStatus.toUpperCase()}
-                            </Text>
+                          <View style={styles.applicationApplicantHeader}>
+                            <ProfileAvatar
+                              uri={app.applicant?.avatar_url}
+                              size={48}
+                              backgroundColor={colors.inputBackground}
+                              iconColor={colors.textSecondary}
+                            />
+                            <View style={styles.applicationApplicantCopy}>
+                              <Text numberOfLines={2} style={[styles.applicationName, { color: colors.text }]}>
+                                {app.applicant?.full_name || "Applicant"}
+                              </Text>
+                              <Text numberOfLines={1} style={[styles.applicationMetaText, { color: colors.textSecondary }]}>
+                                {app.applicant?.location || "Musician"}
+                              </Text>
+                            </View>
+                            <View style={[styles.applicationStatusBadge, { backgroundColor: `${statusColor}18` }]}>
+                              <Text style={[styles.applicationStatusText, { color: statusColor }]}>
+                                {normalizedStatus.replace(/_/g, " ")}
+                              </Text>
+                            </View>
                           </View>
 
-                          <Text style={[styles.applicationBodyText, { color: colors.textSecondary, marginBottom: 6 }]}>
-                            {requestDetails?.application_context ||
-                              requestDetails?.pitch_message ||
-                              app.message ||
-                              "No application message provided."}
-                          </Text>
-                          <Text style={[styles.applicationBodyText, { color: colors.textSecondary, marginBottom: isPending ? 12 : 0 }]}>
-                            Applied on:{" "}
-                            {app.created_at
-                              ? formatFriendlyDateTime(app.created_at)
-                              : "N/A"}
-                          </Text>
+                          {applicationMessage ? (
+                            <View style={styles.applicationMessageBlock}>
+                              <Text style={[styles.applicationMetaLabel, { color: colors.textSecondary }]}>Message</Text>
+                              <Text numberOfLines={3} style={[styles.applicationBodyText, { color: colors.textSecondary }]}>
+                                {applicationMessage}
+                              </Text>
+                            </View>
+                          ) : null}
+                          <View style={styles.applicationAppliedRow}>
+                            <Ionicons name="calendar-outline" size={14} color={colors.textSecondary} />
+                            <Text style={[styles.applicationMetaText, { color: colors.textSecondary }]}>
+                              Applied {app.created_at ? formatFriendlyDateTime(app.created_at) : "N/A"}
+                            </Text>
+                          </View>
 
                           <ConnectionApplicantReview application={app} colors={colors} compact />
 
                           <TouchableOpacity
                             testID={`view-group-applicant-${app.id}`}
+                            accessibilityRole="button"
                             onPress={() => setSelectedMemberApplication(app)}
                             style={[styles.viewApplicantButton, { backgroundColor: colors.primary }]}
                           >
                             <Text style={styles.actionBtnText}>View Applicant</Text>
                             <Ionicons name="arrow-forward" size={17} color="#FFFFFF" />
                           </TouchableOpacity>
+
+                          {cvUrl || videoUrl ? (
+                            <View style={styles.attachmentRow}>
+                              {cvUrl ? (
+                                <TouchableOpacity
+                                  accessibilityRole="button"
+                                  onPress={() => Linking.openURL(cvUrl)}
+                                  style={[styles.attachmentButton, { borderColor: colors.border }]}
+                                >
+                                  <Ionicons name="document-text-outline" size={15} color={colors.primary} />
+                                  <Text style={[styles.attachmentText, { color: colors.primary }]}>CV</Text>
+                                </TouchableOpacity>
+                              ) : null}
+                              {videoUrl ? (
+                                <TouchableOpacity
+                                  accessibilityRole="button"
+                                  onPress={() => Linking.openURL(videoUrl)}
+                                  style={[styles.attachmentButton, { borderColor: colors.border }]}
+                                >
+                                  <Ionicons name="videocam-outline" size={15} color={colors.primary} />
+                                  <Text style={[styles.attachmentText, { color: colors.primary }]}>Video</Text>
+                                </TouchableOpacity>
+                              ) : null}
+                            </View>
+                          ) : null}
 
                           {isPending && (
                             <View style={styles.actionButtons}>
@@ -1588,7 +1634,7 @@ export default function GroupDetailsScreen() {
                                 disabled={isResponding}
                                 style={[
                                   styles.declineButton,
-                                  { borderColor: colors.border, opacity: isResponding ? 0.6 : 1 },
+                                  { borderColor: "#EF4444", opacity: isResponding ? 0.6 : 1 },
                                 ]}
                                 onPress={() =>
                                   confirmGroupMemberApplicationDecision(app, "declined")
@@ -1634,11 +1680,11 @@ export default function GroupDetailsScreen() {
                     const statusColor =
                       normalizedStatus === "approved" ||
                       normalizedStatus === "accepted"
-                        ? "green"
+                        ? "#10B981"
                         : normalizedStatus === "pending" ||
                             normalizedStatus === "applied"
-                          ? "orange"
-                          : "red";
+                          ? "#F59E0B"
+                          : "#EF4444";
 
                     return (
                       <View
@@ -1660,9 +1706,11 @@ export default function GroupDetailsScreen() {
                           >
                             {app.gig?.name || "Unknown Gig"}
                           </Text>
-                          <Text style={[styles.applicationStatusText, { color: statusColor }]}>
-                            {rawStatus.toUpperCase()}
-                          </Text>
+                          <View style={[styles.applicationStatusBadge, { backgroundColor: `${statusColor}18` }]}>
+                            <Text style={[styles.applicationStatusText, { color: statusColor }]}>
+                              {normalizedStatus.replace(/_/g, " ")}
+                            </Text>
+                          </View>
                         </View>
                         <Text style={[styles.applicationBodyText, { color: colors.textSecondary, marginBottom: 4 }]}>
                           {app.gig?.location || "Location N/A"}
@@ -2549,9 +2597,9 @@ const styles = StyleSheet.create({
   },
   applicationFilters: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 8,
-    paddingVertical: 10,
+    paddingTop: 10,
+    paddingBottom: 14,
   },
   applicationFilterChip: {
     minHeight: 34,
@@ -2567,8 +2615,56 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   applicationStatusText: {
-    fontFamily: typography.bold,
+    fontFamily: typography.semibold,
+    fontSize: 10,
+    textTransform: "capitalize",
+  },
+  applicationCard: {
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 12,
+    gap: 10,
+  },
+  applicationApplicantHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  applicationApplicantCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  applicationName: {
+    fontFamily: typography.heading,
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  applicationStatusBadge: {
+    flexShrink: 0,
+    borderRadius: 10,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  applicationMetaLabel: {
+    fontFamily: typography.semibold,
+    fontSize: 10,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  applicationMetaText: {
+    fontFamily: typography.body,
     fontSize: 11,
+    lineHeight: 17,
+  },
+  applicationMessageBlock: {
+    marginTop: 2,
+  },
+  applicationAppliedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
   },
   applicationBodyText: {
     fontFamily: typography.body,
@@ -2603,6 +2699,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 7,
+  },
+  attachmentRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  attachmentButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  attachmentText: {
+    fontFamily: typography.medium,
+    fontSize: 12,
   },
   setupCard: {
     padding: 16,

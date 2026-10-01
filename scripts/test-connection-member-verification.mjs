@@ -46,13 +46,30 @@ test("connection application UIs collect consent and show verification results",
   assert.match(productionForm, /member_verification_consent:\s*memberVerificationConsent/);
   assert.match(review, /Registered member:/);
   assert.match(details, /Registered Member Verification/);
-  assert.match(details, /approved government-ID holder portrait as the primary identity reference/i);
-  assert.match(details, /registered profile photo is shown normally and compared separately as a secondary check/i);
-  assert.match(details, /full ID is not shown/i);
-  assert.match(details, /Government ID holder portrait/);
+  assert.match(details, /member ID photos matched people in the video/i);
+  assert.match(details, /Each profile matched the same person as that member's ID/i);
+  assert.match(details, /full ID is hidden/i);
+  assert.match(details, /Government ID photo/);
   assert.match(details, /reference_portrait_url/);
   assert.match(details, /profile_photo_url/);
-  assert.match(details, /Profile-to-video/);
-  assert.match(details, /Mismatch - profile matches another registered member/);
-  assert.match(details, /Mismatch - profile and ID match different people/);
+  assert.match(details, /Profile photo vs ID photo/);
+  assert.match(details, /No match: profile belongs to another member/);
+  assert.match(details, /No match: profile and ID show different people/);
+  assert.match(details, /No match: profile does not match the ID photo/);
+});
+
+test("gig, group, and production reviews show the same simple profile and ID finding", () => {
+  const gigDetails = read("mobile/src/components/ApplicantDetailsModal.tsx");
+  const connectionDetails = read("mobile/src/components/ConnectionApplicantDetailsModal.tsx");
+
+  for (const details of [gigDetails, connectionDetails]) {
+    assert.match(details, /Profile photo vs ID photo/);
+    assert.match(details, /Match: same person/);
+    assert.match(details, /No match: profile belongs to another member/);
+    assert.match(details, /No match: profile and ID show different people/);
+    assert.match(details, /No match: profile does not match the ID photo/);
+    assert.match(details, /Government ID photo/);
+    assert.doesNotMatch(details, /Profile-to-video/);
+    assert.doesNotMatch(details, /secondary result never overrides/i);
+  }
 });
