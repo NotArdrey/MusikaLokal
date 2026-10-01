@@ -10,6 +10,7 @@ import { DeleteObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } fr
 import {
     aggregateMemberFaceSearch,
     buildFaceSearchClientRequestToken,
+    correlateProfileFaceSearch,
     externalImageIdForMember,
     hashReferenceImage,
     inspectRekognitionVideo,
@@ -40,7 +41,23 @@ type RosterMember = {
     member_id: string
     reference_source: 'didit_portrait' | 'manual_id_front' | 'unavailable'
     reference_locator: string
+    profile_photo_url: string
     consented_at: string
+}
+
+type IndexedReference = {
+    member_id: string
+    status: 'indexed' | 'no_reference' | 'reference_unusable' | 'needs_review'
+    faceId: string
+    hash: string
+    referenceId?: string
+}
+
+type MemberReferences = {
+    member_id: string
+    identity: IndexedReference
+    profile: IndexedReference | null
+    profilePhotoUrl: string
 }
 
 const waitFor = (delayMs: number) => new Promise((resolve) => setTimeout(resolve, delayMs))
@@ -149,7 +166,7 @@ async function attachIdentityDocumentReferences(
     if (memberIds.length === 0) return []
     const [{ data: profiles, error: profileError }, { data: manualReviews, error: manualError }] = await Promise.all([
         client.from('profiles')
-            .select('id, is_verified, verification_status, didit_session_id')
+            .select('id, avatar_url, is_verified, verification_status, didit_session_id')
             .in('id', memberIds),
         client.from('manual_identity_reviews')
             .select('user_id, front_image_path, status, updated_at')
@@ -178,6 +195,7 @@ async function attachIdentityDocumentReferences(
             member_id: memberId,
             reference_source: diditSessionId ? 'didit_portrait' : manualPath ? 'manual_id_front' : 'unavailable',
             reference_locator: diditSessionId || manualPath,
+            profile_photo_url: clean(profile?.avatar_url),
             consented_at: clean(member.consented_at),
         }
     }).filter((member) => Boolean(member.member_id))
@@ -299,7 +317,7 @@ async function queueMemberVerification(
     const payload = {
         application_id: target === 'gig' ? applicationId : null,
         booking_request_id: target === 'connection' ? applicationId : null,
-        reference_source: 'verified_id_portrait',
+        reference_source: 'verified_id_and_profile_photo',
         status: allConsented ? 'queued' : 'not_requested',
         result: !allConsented ? null : !clean(application.video_url) ? 'no_video' : null,
         expected_member_count: roster.length,
@@ -410,6 +428,21 @@ async function loadIdentityDocumentImage(
     return null
 }
 
+async function loadProfilePhotoImage(config: VerificationConfig, member: RosterMember) {
+    const profilePhotoUrl = clean(member.profile_photo_url)
+    if (!profilePhotoUrl) return null
+    return fetchBytes(profilePhotoUrl, 15 * 1024 * 1024, 'image', config.allowedMediaHosts)
+}
+
+function externalImageIdForSource(
+    memberId: string,
+    referenceSource: 'verified_id_portrait' | 'profile_photo',
+) {
+    const suffix = referenceSource === 'profile_photo' ? '_profile' : '_id'
+    const base = externalImageIdForMember(memberId)
+    return `${base.slice(0, 255 - suffix.length)}${suffix}`
+}
+
 let imageMagickModulePromise: Promise<any> | null = null
 
 async function getImageMagickModule() {
@@ -459,13 +492,14 @@ async function storePortraitPreview(
     client: any,
     memberId: string,
     referenceHash: string,
+    referenceSource: 'verified_id_portrait' | 'profile_photo',
     bytes: Uint8Array,
     boundingBox: any,
 ) {
     try {
         const preview = await createFaceCroppedPortrait(bytes, boundingBox)
         if (!preview.length || preview.length > 1024 * 1024) throw new Error('identity_portrait_preview_too_large')
-        const path = `${memberId}/${referenceHash}.jpg`
+        const path = `${memberId}/${referenceSource}/${referenceHash}.jpg`
         const { error } = await client.storage.from(PORTRAIT_PREVIEW_BUCKET).upload(path, preview, {
             contentType: 'image/jpeg',
             cacheControl: '3600',
@@ -476,6 +510,7 @@ async function storePortraitPreview(
     } catch (error) {
         console.warn('member_verification_portrait_preview_failed', {
             memberId,
+            referenceSource,
             errorCode: safeErrorCode(error),
         })
         return ''
@@ -487,20 +522,31 @@ async function ensureReferenceFace(
     rekognition: RekognitionClient,
     config: VerificationConfig,
     member: RosterMember,
-) {
-    const identityImage = await loadIdentityDocumentImage(client, config, member)
-    if (!identityImage) return { member_id: member.member_id, status: 'no_reference', faceId: '', hash: '' }
-    const { bytes } = identityImage
+    referenceSource: 'verified_id_portrait' | 'profile_photo',
+): Promise<IndexedReference> {
+    const referenceImage = referenceSource === 'verified_id_portrait'
+        ? await loadIdentityDocumentImage(client, config, member)
+        : await loadProfilePhotoImage(config, member)
+    if (!referenceImage) return { member_id: member.member_id, status: 'no_reference', faceId: '', hash: '' }
+    const { bytes } = referenceImage
     if (!isJpegOrPng(bytes)) return { member_id: member.member_id, status: 'reference_unusable', faceId: '', hash: '' }
     const hash = await hashReferenceImage(bytes)
+    const requiresPreview = referenceSource === 'verified_id_portrait'
     const { data: existing, error: existingError } = await client
         .from('member_verification_reference_faces')
         .select('id, face_id, reference_image_hash, status, reference_source, preview_storage_path')
         .eq('member_id', member.member_id)
         .eq('collection_id', config.collectionId)
+        .eq('reference_source', referenceSource)
         .maybeSingle()
     if (existingError) throw existingError
-    if (existing?.status === 'indexed' && existing.reference_source === 'verified_id_portrait' && existing.reference_image_hash === hash && existing.face_id && existing.preview_storage_path) {
+    if (
+        existing?.status === 'indexed' &&
+        existing.reference_source === referenceSource &&
+        existing.reference_image_hash === hash &&
+        existing.face_id &&
+        (!requiresPreview || existing.preview_storage_path)
+    ) {
         return { member_id: member.member_id, status: 'indexed', faceId: clean(existing.face_id), hash, referenceId: existing.id }
     }
 
@@ -511,31 +557,34 @@ async function ensureReferenceFace(
         const { data: saved, error: saveError } = await client.from('member_verification_reference_faces').upsert({
             member_id: member.member_id,
             collection_id: config.collectionId,
-            external_image_id: externalImageIdForMember(member.member_id),
+            external_image_id: externalImageIdForSource(member.member_id, referenceSource),
             reference_image_hash: hash,
-            reference_source: 'verified_id_portrait',
+            reference_source: referenceSource,
             status,
             face_id: null,
             preview_storage_path: null,
             detected_face_count: faceCount,
             error_code: faceCount === 0 ? 'no_face' : 'multiple_faces',
             updated_at: new Date().toISOString(),
-        }, { onConflict: 'member_id,collection_id' }).select('id').single()
+        }, { onConflict: 'member_id,collection_id,reference_source' }).select('id').single()
         if (saveError) throw saveError
         const previousPreviewPath = clean(existing?.preview_storage_path)
         if (previousPreviewPath) await client.storage.from(PORTRAIT_PREVIEW_BUCKET).remove([previousPreviewPath])
         return { member_id: member.member_id, status, faceId: '', hash, referenceId: saved.id }
     }
 
-    const previewStoragePath = await storePortraitPreview(
-        client,
-        member.member_id,
-        hash,
-        bytes,
-        detected.FaceDetails?.[0]?.BoundingBox,
-    )
-    if (existing?.status === 'indexed' && existing.reference_source === 'verified_id_portrait' && existing.reference_image_hash === hash && existing.face_id) {
-        if (previewStoragePath) {
+    const previewStoragePath = requiresPreview
+        ? await storePortraitPreview(
+            client,
+            member.member_id,
+            hash,
+            referenceSource,
+            bytes,
+            detected.FaceDetails?.[0]?.BoundingBox,
+        )
+        : ''
+    if (existing?.status === 'indexed' && existing.reference_source === referenceSource && existing.reference_image_hash === hash && existing.face_id) {
+        if (requiresPreview && previewStoragePath) {
             const { error: previewUpdateError } = await client.from('member_verification_reference_faces').update({
                 preview_storage_path: previewStoragePath,
                 updated_at: new Date().toISOString(),
@@ -548,7 +597,7 @@ async function ensureReferenceFace(
     const indexed = await rekognition.send(new IndexFacesCommand({
         CollectionId: config.collectionId,
         Image: { Bytes: bytes },
-        ExternalImageId: externalImageIdForMember(member.member_id),
+        ExternalImageId: externalImageIdForSource(member.member_id, referenceSource),
         MaxFaces: 1,
         QualityFilter: 'AUTO',
         DetectionAttributes: ['DEFAULT'],
@@ -563,9 +612,9 @@ async function ensureReferenceFace(
         member_id: member.member_id,
         collection_id: config.collectionId,
         face_id: faceId,
-        external_image_id: externalImageIdForMember(member.member_id),
+        external_image_id: externalImageIdForSource(member.member_id, referenceSource),
         reference_image_hash: hash,
-        reference_source: 'verified_id_portrait',
+        reference_source: referenceSource,
         preview_storage_path: previewStoragePath || null,
         status: 'indexed',
         detected_face_count: 1,
@@ -573,7 +622,7 @@ async function ensureReferenceFace(
         indexed_at: indexedAt,
         deleted_at: null,
         updated_at: indexedAt,
-    }, { onConflict: 'member_id,collection_id' }).select('id').single()
+    }, { onConflict: 'member_id,collection_id,reference_source' }).select('id').single()
     if (saveError) throw saveError
     if (previousFaceId && previousFaceId !== faceId) {
         await rekognition.send(new DeleteFacesCommand({ CollectionId: config.collectionId, FaceIds: [previousFaceId] }))
@@ -600,7 +649,7 @@ async function completeFaceSearch(
     s3: S3Client,
     config: VerificationConfig,
     verification: any,
-    references: any[],
+    references: MemberReferences[],
 ) {
     let firstPage: any = null
     for (let attempt = 0; attempt < config.pollAttempts; attempt += 1) {
@@ -633,50 +682,84 @@ async function completeFaceSearch(
         personMatches.push(...(page.Persons || []))
         nextToken = clean(page.NextToken)
     }
-    const expected = references.map((reference) => ({
+    const expectedIdentityReferences = references.map((reference) => ({
         member_id: reference.member_id,
-        external_image_id: externalImageIdForMember(reference.member_id),
-        reference_face_ids: reference.faceId ? [reference.faceId] : [],
-        reference_status: reference.status,
+        external_image_id: externalImageIdForSource(reference.member_id, 'verified_id_portrait'),
+        reference_face_ids: reference.identity.faceId ? [reference.identity.faceId] : [],
+        reference_status: reference.identity.status,
     }))
-    const aggregate = aggregateMemberFaceSearch(expected, personMatches, {
+    const identityAggregate = aggregateMemberFaceSearch(expectedIdentityReferences, personMatches, {
         threshold: config.threshold,
         ambiguity_delta: config.ambiguityDelta,
     })
+    const profileResults = correlateProfileFaceSearch(
+        identityAggregate.members,
+        references
+        .filter((reference) => reference.profile)
+        .map((reference) => ({
+            member_id: reference.member_id,
+            face_id: reference.profile?.faceId || null,
+            reference_hash: reference.profile?.hash || null,
+            reference_status: reference.profile?.status,
+        })),
+        personMatches,
+        {
+            threshold: config.threshold,
+        },
+    )
     const referenceByMemberId = new Map(references.map((reference) => [reference.member_id, reference]))
+    const profileResultByMemberId = new Map<string, any>(
+        profileResults.map((member) => [member.member_id, member]),
+    )
     const { error: deleteError } = await client.from('gig_application_member_verification_results')
         .delete().eq('verification_id', verification.id)
     if (deleteError) throw deleteError
     const { error: resultError } = await client.from('gig_application_member_verification_results').insert(
-        aggregate.members.map((member) => ({
-            verification_id: verification.id,
-            application_id: verification.application_id || null,
-            booking_request_id: verification.booking_request_id || null,
-            member_id: member.member_id,
-            reference_face_id: referenceByMemberId.get(member.member_id)?.referenceId || null,
-            status: member.status,
-            best_similarity: member.best_similarity,
-            match_count: member.match_count,
-            first_match_timestamp_ms: member.first_match_timestamp_ms,
-            best_match_timestamp_ms: member.best_match_timestamp_ms,
-            matched_person_indexes: member.matched_person_indexes,
-            updated_at: new Date().toISOString(),
-        })),
+        identityAggregate.members.map((member) => {
+            const memberReferences = referenceByMemberId.get(member.member_id)
+            const profileResult = profileResultByMemberId.get(member.member_id)
+            return {
+                verification_id: verification.id,
+                application_id: verification.application_id || null,
+                booking_request_id: verification.booking_request_id || null,
+                member_id: member.member_id,
+                reference_face_id: memberReferences?.identity.referenceId || null,
+                status: member.status,
+                best_similarity: member.best_similarity,
+                match_count: member.match_count,
+                first_match_timestamp_ms: member.first_match_timestamp_ms,
+                best_match_timestamp_ms: member.best_match_timestamp_ms,
+                matched_person_indexes: member.matched_person_indexes,
+                profile_reference_face_id: memberReferences?.profile?.referenceId || null,
+                profile_status: profileResult?.status || null,
+                profile_issue_code: profileResult?.issue_code || null,
+                profile_best_similarity: profileResult?.best_similarity ?? null,
+                profile_match_count: profileResult?.match_count || 0,
+                profile_first_match_timestamp_ms: profileResult?.first_match_timestamp_ms ?? null,
+                profile_best_match_timestamp_ms: profileResult?.best_match_timestamp_ms ?? null,
+                profile_matched_person_indexes: profileResult?.matched_person_indexes || [],
+                updated_at: new Date().toISOString(),
+            }
+        }),
     )
     if (resultError) throw resultError
     const completedAt = new Date().toISOString()
+    const completedResult = identityAggregate.result === 'verified' &&
+            profileResults.some((member) => member.status !== 'verified')
+        ? 'needs_review'
+        : identityAggregate.result
     const { error: completionError } = await client.from('gig_application_member_verifications').update({
         status: 'completed',
-        result: aggregate.result,
-        verified_member_count: aggregate.verified_member_count,
-        additional_people_detected: aggregate.additional_people_detected,
+        result: completedResult,
+        verified_member_count: identityAggregate.verified_member_count,
+        additional_people_detected: identityAggregate.additional_people_detected,
         next_poll_at: null,
         completed_at: completedAt,
         updated_at: completedAt,
     }).eq('id', verification.id)
     if (completionError) throw completionError
     await cleanupVideo(s3, config, clean(verification.video_object_key))
-    return { status: 'completed', result: aggregate.result }
+    return { status: 'completed', result: completedResult }
 }
 
 async function runMemberVerification(
@@ -703,6 +786,7 @@ async function runMemberVerification(
         verification = existing
         activeObjectKey = clean(verification?.video_object_key)
         if (!verification) throw new Error('verification_not_queued')
+        const usesProfileReference = clean(verification.reference_source) === 'verified_id_and_profile_photo'
         if (!allConsented) {
             await client.from('gig_application_member_verifications').update({
                 status: 'consent_revoked', result: null, completed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
@@ -715,17 +799,36 @@ async function runMemberVerification(
             const snapshot = Array.isArray(verification.roster_snapshot) ? verification.roster_snapshot : []
             const currentMemberIds = roster.map((member) => member.member_id).sort()
             const snapshotMemberIds = snapshot.map((member: any) => clean(member.member_id)).filter(Boolean).sort()
-            const references = snapshot.map((member: any) => ({
-                member_id: clean(member.member_id),
-                status: clean(member.status),
-                faceId: clean(member.face_id),
-                hash: clean(member.reference_hash),
-                referenceId: clean(member.reference_id) || undefined,
-            })).filter((member: any) => member.member_id)
+            const references: MemberReferences[] = snapshot.map((member: any) => {
+                const memberId = clean(member.member_id)
+                return {
+                    member_id: memberId,
+                    identity: {
+                        member_id: memberId,
+                        status: clean(member.identity_status || member.status) as IndexedReference['status'],
+                        faceId: clean(member.identity_face_id || member.face_id),
+                        hash: clean(member.identity_reference_hash || member.reference_hash),
+                        referenceId: clean(member.identity_reference_id || member.reference_id) || undefined,
+                    },
+                    profile: usesProfileReference
+                        ? {
+                            member_id: memberId,
+                            status: clean(member.profile_status) as IndexedReference['status'],
+                            faceId: clean(member.profile_face_id),
+                            hash: clean(member.profile_reference_hash),
+                            referenceId: clean(member.profile_reference_id) || undefined,
+                        }
+                        : null,
+                    profilePhotoUrl: usesProfileReference ? clean(member.profile_photo_url) : '',
+                }
+            }).filter((member: MemberReferences) => member.member_id)
             if (
                 references.length !== snapshot.length ||
                 currentMemberIds.join('\n') !== snapshotMemberIds.join('\n') ||
-                references.some((reference: any) => !reference.status)
+                references.some((reference) => (
+                    !reference.identity.status ||
+                    (usesProfileReference && !reference.profile?.status)
+                ))
             ) {
                 throw new Error('verification_roster_snapshot_invalid')
             }
@@ -734,14 +837,43 @@ async function runMemberVerification(
 
         const startedAt = new Date().toISOString()
         await client.from('gig_application_member_verifications').update({
-            status: 'processing', reference_source: 'verified_id_portrait',
+            status: 'processing',
             started_at: verification.started_at || startedAt, updated_at: startedAt,
         }).eq('id', verification.id)
-        const references = await Promise.all(
-            roster.map((member) => ensureReferenceFace(client, clients.rekognition, config!, member)),
+        const references: MemberReferences[] = await Promise.all(
+            roster.map(async (member) => {
+                const identity = await ensureReferenceFace(
+                    client,
+                    clients.rekognition,
+                    config!,
+                    member,
+                    'verified_id_portrait',
+                )
+                const profile = usesProfileReference
+                    ? await ensureReferenceFace(
+                        client,
+                        clients.rekognition,
+                        config!,
+                        member,
+                        'profile_photo',
+                    )
+                    : null
+                return {
+                    member_id: member.member_id,
+                    identity,
+                    profile,
+                    profilePhotoUrl: usesProfileReference ? clean(member.profile_photo_url) : '',
+                }
+            }),
         )
         const rosterVersion = await hashReferenceImage(new TextEncoder().encode(
-            references.map((reference) => `${reference.member_id}:${reference.hash}:${reference.faceId}`).sort().join('\n'),
+            references.map((reference) => [
+                reference.member_id,
+                reference.identity.hash,
+                reference.identity.faceId,
+                reference.profile?.hash || '',
+                reference.profile?.faceId || '',
+            ].join(':')).sort().join('\n'),
         ))
         const video = await fetchBytes(clean(application.video_url), config.maxVideoBytes, 'video', config.allowedMediaHosts)
         const media = inspectRekognitionVideo(video.bytes)
@@ -775,7 +907,6 @@ async function runMemberVerification(
         if (!jobId) throw new Error('start_face_search_missing_job_id')
         const { data: updated, error: updateError } = await client.from('gig_application_member_verifications').update({
             status: 'processing',
-            reference_source: 'verified_id_portrait',
             aws_job_id: jobId,
             aws_collection_id: config.collectionId,
             video_object_key: objectKey,
@@ -784,10 +915,15 @@ async function runMemberVerification(
             client_request_token: clientRequestToken,
             roster_snapshot: references.map((reference) => ({
                 member_id: reference.member_id,
-                status: reference.status,
-                face_id: reference.faceId || null,
-                reference_hash: reference.hash || null,
-                reference_id: reference.referenceId || null,
+                identity_status: reference.identity.status,
+                identity_face_id: reference.identity.faceId || null,
+                identity_reference_hash: reference.identity.hash || null,
+                identity_reference_id: reference.identity.referenceId || null,
+                profile_status: reference.profile?.status || null,
+                profile_face_id: reference.profile?.faceId || null,
+                profile_reference_hash: reference.profile?.hash || null,
+                profile_reference_id: reference.profile?.referenceId || null,
+                profile_photo_url: reference.profilePhotoUrl || null,
             })),
             configured_face_match_threshold: config.threshold ?? null,
             poll_attempt_count: 0,
@@ -876,34 +1012,44 @@ async function attachMemberVerification(client: any, application: any, target: V
     const targetColumn = target === 'connection' ? 'booking_request_id' : 'application_id'
     const { data: verification, error } = await client
         .from('gig_application_member_verifications')
-        .select('id, application_id, booking_request_id, reference_source, status, result, expected_member_count, verified_member_count, additional_people_detected, created_at, updated_at, started_at, completed_at, next_poll_at')
+        .select('id, application_id, booking_request_id, reference_source, status, result, expected_member_count, verified_member_count, additional_people_detected, roster_snapshot, created_at, updated_at, started_at, completed_at, next_poll_at')
         .eq(targetColumn, application.id)
         .maybeSingle()
     if (error || !verification) return { ...application, member_verification: null }
     const { data: members } = await client
         .from('gig_application_member_verification_results')
-        .select('member_id, reference_face_id, status, best_similarity, match_count, first_match_timestamp_ms, best_match_timestamp_ms')
+        .select('member_id, reference_face_id, status, best_similarity, match_count, first_match_timestamp_ms, best_match_timestamp_ms, profile_reference_face_id, profile_status, profile_issue_code, profile_best_similarity, profile_match_count, profile_first_match_timestamp_ms, profile_best_match_timestamp_ms')
         .eq('verification_id', verification.id)
-    const referenceIds = (members || []).map((member: any) => clean(member.reference_face_id)).filter(Boolean)
+    const referenceIds = [...new Set((members || []).flatMap((member: any) => [
+        clean(member.reference_face_id),
+        clean(member.profile_reference_face_id),
+    ]).filter(Boolean))]
     const { data: referenceFaces } = referenceIds.length > 0
         ? await client.from('member_verification_reference_faces')
             .select('id, reference_source, preview_storage_path')
             .in('id', referenceIds)
         : { data: [] }
     const referenceById = new Map<string, any>((referenceFaces || []).map((reference: any) => [clean(reference.id), reference]))
+    const profilePhotoByMemberId = new Map<string, string>(
+        (Array.isArray(verification.roster_snapshot) ? verification.roster_snapshot : [])
+            .map((member: any) => [clean(member.member_id), clean(member.profile_photo_url)]),
+    )
     let attachedMembers = await Promise.all((members || []).map(async (member: any) => {
-        const reference = referenceById.get(clean(member.reference_face_id))
-        const previewPath = reference?.reference_source === 'verified_id_portrait'
-            ? clean(reference?.preview_storage_path)
+        const identityReference = referenceById.get(clean(member.reference_face_id))
+        const identityPreviewPath = identityReference?.reference_source === 'verified_id_portrait'
+            ? clean(identityReference?.preview_storage_path)
             : ''
-        if (!previewPath) return { ...member, reference_portrait_url: null }
-        const { data: signed, error: signedError } = await client.storage
-            .from(PORTRAIT_PREVIEW_BUCKET)
-            .createSignedUrl(previewPath, PORTRAIT_PREVIEW_TTL_SECONDS)
+        const identityPreview = identityPreviewPath
+            ? await client.storage.from(PORTRAIT_PREVIEW_BUCKET)
+                .createSignedUrl(identityPreviewPath, PORTRAIT_PREVIEW_TTL_SECONDS)
+            : { data: null, error: null }
         return {
             ...member,
-            reference_portrait_url: signedError ? null : signed?.signedUrl || null,
-            reference_portrait_expires_in: signedError ? null : PORTRAIT_PREVIEW_TTL_SECONDS,
+            reference_portrait_url: identityPreview.error ? null : identityPreview.data?.signedUrl || null,
+            reference_portrait_expires_in: identityPreview.error || !identityPreview.data?.signedUrl
+                ? null
+                : PORTRAIT_PREVIEW_TTL_SECONDS,
+            profile_photo_url: profilePhotoByMemberId.get(clean(member.member_id)) || null,
         }
     }))
     if (target === 'connection' && attachedMembers.length > 0) {

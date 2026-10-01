@@ -79,7 +79,7 @@ export default function TermsAndConditionsScreen() {
 
           <Text style={[styles.subHeader, { color: colors.text }]}>5. Gig Application Review</Text>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            By agreeing to these terms when applying for a gig, group, or production team, you authorize Musika Lokal to send your CV/resume and performance media to configured review providers. You also authorize Musika Lokal to compare the holder portrait from an approved government ID verification with faces in the submitted performance video to help verify that registered members appear in the performance. Full ID documents are not shown to application reviewers. An authorized reviewer may view a face-only crop of the ID holder portrait through a short-lived private link, and all automated review is advisory rather than the application decision itself.
+            By agreeing to these terms when applying for a gig, group, or production team, you authorize Musika Lokal to send your CV/resume and performance media to configured review providers. You also authorize Musika Lokal to compare both the holder portrait from an approved government ID verification and the registered profile photo with faces in the submitted performance video. The approved ID-holder portrait is the primary identity reference, while the profile-photo result is a separate secondary check. Full ID documents are not shown to application reviewers. An authorized reviewer may view a face-only crop of the ID-holder portrait through a short-lived private link and the registered profile photo normally, and all automated review is advisory rather than the application decision itself.
           </Text>
 
           {/* 6. PROHIBITED CONDUCT */}

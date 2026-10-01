@@ -80,6 +80,63 @@ for (const [target, api] of modules) {
     assert.equal(result.verified_member_count, 2);
   });
 
+  test(`${target}: solo profile must match the same tracked person as the government ID`, () => {
+    const identity = api.aggregateMemberFaceSearch(
+      [member("solo")],
+      [person(3, 100, [face("solo", 99)])],
+    );
+    const profiles = api.correlateProfileFaceSearch(
+      identity.members,
+      [{ member_id: "solo", face_id: "profile-solo", reference_hash: "solo-profile" }],
+      [person(4, 200, [{ Similarity: 98, Face: { FaceId: "profile-solo" } }])],
+    );
+
+    assert.equal(profiles[0].status, "mismatch");
+    assert.equal(profiles[0].issue_code, "different_video_person");
+  });
+
+  test(`${target}: copied profile in a duo is assigned to the member whose ID owns that video person`, () => {
+    const identity = api.aggregateMemberFaceSearch(
+      [member("a"), member("b")],
+      [person(10, 100, [face("a", 99)]), person(20, 200, [face("b", 99)])],
+    );
+    const profiles = api.correlateProfileFaceSearch(
+      identity.members,
+      [
+        { member_id: "a", face_id: "profile-a", reference_hash: "same-image-hash" },
+        { member_id: "b", face_id: "profile-b", reference_hash: "same-image-hash" },
+      ],
+      [person(10, 300, [{ Similarity: 98.5, Face: { FaceId: "profile-a" } }])],
+    );
+
+    assert.equal(profiles.find((item) => item.member_id === "a").status, "verified");
+    assert.equal(profiles.find((item) => item.member_id === "b").status, "mismatch");
+    assert.equal(profiles.find((item) => item.member_id === "b").issue_code, "matches_another_member");
+  });
+
+  test(`${target}: every member in a larger group is independently correlated to their ID person`, () => {
+    const identity = api.aggregateMemberFaceSearch(
+      [member("a"), member("b"), member("c")],
+      [person(1, 100, [face("a", 99)]), person(2, 200, [face("b", 98)]), person(3, 300, [face("c", 97)])],
+    );
+    const profiles = api.correlateProfileFaceSearch(
+      identity.members,
+      [
+        { member_id: "a", face_id: "profile-a", reference_hash: "hash-a" },
+        { member_id: "b", face_id: "profile-b", reference_hash: "hash-b" },
+        { member_id: "c", face_id: "profile-c", reference_hash: "hash-c" },
+      ],
+      [
+        person(1, 400, [{ Similarity: 96, Face: { FaceId: "profile-a" } }]),
+        person(2, 500, [{ Similarity: 97, Face: { FaceId: "profile-b" } }]),
+        person(3, 600, [{ Similarity: 98, Face: { FaceId: "profile-c" } }]),
+      ],
+    );
+
+    assert.deepEqual(profiles.map((item) => item.status), ["verified", "verified", "verified"]);
+    assert.deepEqual(profiles.map((item) => item.matched_person_indexes), [[1], [2], [3]]);
+  });
+
   test(`${target}: one Person.Index cannot verify two roster members across timestamps`, () => {
     const result = api.aggregateMemberFaceSearch(
       [member("a"), member("b")],

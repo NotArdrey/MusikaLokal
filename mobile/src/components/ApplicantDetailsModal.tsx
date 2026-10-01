@@ -45,6 +45,26 @@ const titleCase = (value: unknown) =>
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 
+const profileVerificationMeta = (member: any) => {
+  const issueCode = String(member?.profile_issue_code || "");
+  if (issueCode === "matches_another_member") {
+    return { label: "Mismatch - profile matches another registered member", color: "#DC2626" };
+  }
+  if (issueCode === "different_video_person") {
+    return { label: "Mismatch - profile and ID match different people", color: "#DC2626" };
+  }
+  if (issueCode === "identity_not_confirmed") {
+    return { label: "Could not correlate - ID person not confirmed", color: "#D97706" };
+  }
+  if (issueCode === "not_found_in_video") {
+    return { label: "Profile photo not found in video", color: "#D97706" };
+  }
+  if (member?.profile_status === "verified") return { label: "Matched to the same person as the ID", color: "#059669" };
+  if (member?.profile_status === "no_reference") return { label: "Profile photo unavailable", color: "#D97706" };
+  if (member?.profile_status === "reference_unusable") return { label: "Profile photo unusable", color: "#D97706" };
+  return { label: "Not confirmed", color: "#D97706" };
+};
+
 const list = (value: unknown): any[] => (Array.isArray(value) ? value : []);
 
 const criterionLabel = (value: unknown) => {
@@ -507,7 +527,8 @@ export default function ApplicantDetailsModal({
   const recommendation = application.ai_recommendation || null;
   const aiReview = application.ai_portfolio_review || null;
   const memberVerification = application.member_verification || null;
-  const usesVerifiedIdPortrait = memberVerification?.reference_source === "verified_id_portrait";
+  const usesVerifiedIdPortrait = ["verified_id_portrait", "verified_id_and_profile_photo"].includes(String(memberVerification?.reference_source || ""));
+  const usesDualReference = memberVerification?.reference_source === "verified_id_and_profile_photo";
   const memberVerificationMembers = list(memberVerification?.members);
   const aiReviewStatus = String(aiReview?.status || "").toLowerCase();
   const retryRef = useRef(onRetry);
@@ -717,7 +738,7 @@ export default function ApplicantDetailsModal({
         : "Performance identity not checked";
   const memberIdentityDetail = memberVerification
     ? usesVerifiedIdPortrait
-      ? `${Number(memberVerification.verified_member_count || 0)} of ${Number(memberVerification.expected_member_count || 0)} registered members were confidently matched in the submitted performance video using approved government-ID holder portraits. Full ID documents are not shown; only private face crops may be viewed.`
+      ? `${Number(memberVerification.verified_member_count || 0)} of ${Number(memberVerification.expected_member_count || 0)} registered members were confidently matched in the submitted performance video using approved government-ID holder portraits.${usesDualReference ? " Registered profile photos were also compared as a separate advisory check and are shown without cropping." : ""} Full ID documents are not shown; only the private ID-holder face crop may be viewed.`
       : `${Number(memberVerification.verified_member_count || 0)} of ${Number(memberVerification.expected_member_count || 0)} registered members were confidently matched in this historical check using registered profile photos. New checks use approved government-ID holder portraits.`
     : "No registered-member verification result is available for this application.";
   const cvIdentityMismatch = cvNameCheckStatus === "mismatch";
@@ -1134,7 +1155,9 @@ export default function ApplicantDetailsModal({
                 <Text style={[styles.body, { color: colors.textSecondary }]}>{memberIdentityDetail}</Text>
                 {memberVerificationMembers.map((member: any, index: number) => {
                   const verified = member.status === "verified";
-                  const similarity = Number(member.best_similarity);
+                  const similarity = member.best_similarity === null || member.best_similarity === undefined ? Number.NaN : Number(member.best_similarity);
+                  const profileMeta = profileVerificationMeta(member);
+                  const profileSimilarity = member.profile_best_similarity === null || member.profile_best_similarity === undefined ? Number.NaN : Number(member.profile_best_similarity);
                   return (
                     <View key={`${member.member_id || "member-summary"}-${index}`} style={[styles.messageCard, { backgroundColor: colors.inputBackground }]}>
                       {member.reference_portrait_url ? (
@@ -1151,9 +1174,30 @@ export default function ApplicantDetailsModal({
                           </View>
                         </TouchableOpacity>
                       ) : null}
+                      {usesDualReference && member.profile_photo_url ? (
+                        <TouchableOpacity
+                          accessibilityRole="button"
+                          accessibilityLabel={`View registered profile photo for ${member.member_name_snapshot || `member ${index + 1}`}`}
+                          onPress={() => onOpenMedia(member.profile_photo_url, `${member.member_name_snapshot || `Member ${index + 1}`} - Profile Photo`)}
+                          style={styles.portraitPreviewRow}
+                        >
+                          <ProfileAvatar uri={member.profile_photo_url} size={56} backgroundColor={colors.surface} iconColor={colors.primary} />
+                          <View style={styles.flexOne}>
+                            <Text style={[styles.requirementTitle, { color: colors.text }]}>Registered profile photo</Text>
+                            <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view the profile photo used for the secondary check</Text>
+                          </View>
+                        </TouchableOpacity>
+                      ) : null}
                       <Text style={[styles.requirementTitle, { color: colors.text }]}>{member.member_name_snapshot || `Member ${index + 1}`}</Text>
-                      <Text style={[styles.advisory, { color: verified ? "#059669" : "#D97706" }]}>{verified ? "Identity confirmed" : "Identity not confirmed"}</Text>
-                      {Number.isFinite(similarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>Best similarity: {similarity.toFixed(1)}%</Text> : null}
+                      <Text style={[styles.advisory, { color: verified ? "#059669" : "#D97706" }]}>ID-to-video: {verified ? "identity confirmed" : "identity not confirmed"}</Text>
+                      {Number.isFinite(similarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>ID similarity: {similarity.toFixed(1)}%</Text> : null}
+                      {usesDualReference ? (
+                        <>
+                          <Text style={[styles.advisory, { color: profileMeta.color }]}>Profile-to-video: {profileMeta.label}</Text>
+                          {Number.isFinite(profileSimilarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>Profile similarity: {profileSimilarity.toFixed(1)}%</Text> : null}
+                          <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>The profile-photo result is secondary and never overrides the ID result.</Text>
+                        </>
+                      ) : null}
                       {!verified ? <Text style={[styles.advisory, { color: "#B45309" }]}>Manual review recommended</Text> : null}
                     </View>
                   );
@@ -1187,7 +1231,9 @@ export default function ApplicantDetailsModal({
                   ) : null}
                   {memberVerificationMembers.map((member: any, index: number) => {
                     const verified = member.status === "verified";
-                    const similarity = Number(member.best_similarity);
+                    const similarity = member.best_similarity === null || member.best_similarity === undefined ? Number.NaN : Number(member.best_similarity);
+                    const profileMeta = profileVerificationMeta(member);
+                    const profileSimilarity = member.profile_best_similarity === null || member.profile_best_similarity === undefined ? Number.NaN : Number(member.profile_best_similarity);
                     return (
                       <View key={`${member.member_id || "member"}-${index}`} style={[styles.messageCard, { backgroundColor: colors.inputBackground }]}>
                         {member.reference_portrait_url ? (
@@ -1204,13 +1250,34 @@ export default function ApplicantDetailsModal({
                             </View>
                           </TouchableOpacity>
                         ) : null}
+                        {usesDualReference && member.profile_photo_url ? (
+                          <TouchableOpacity
+                            accessibilityRole="button"
+                            accessibilityLabel={`View registered profile photo for ${member.member_name_snapshot || `member ${index + 1}`}`}
+                            onPress={() => onOpenMedia(member.profile_photo_url, `${member.member_name_snapshot || `Member ${index + 1}`} - Profile Photo`)}
+                            style={styles.portraitPreviewRow}
+                          >
+                            <ProfileAvatar uri={member.profile_photo_url} size={56} backgroundColor={colors.surface} iconColor={colors.primary} />
+                            <View style={styles.flexOne}>
+                              <Text style={[styles.requirementTitle, { color: colors.text }]}>Registered profile photo</Text>
+                              <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view the profile photo used for the secondary check</Text>
+                            </View>
+                          </TouchableOpacity>
+                        ) : null}
                         <StatusRow
                           icon={verified ? "checkmark-circle-outline" : "warning-outline"}
-                          label={`${member.member_name_snapshot || `Member ${index + 1}`}: ${verified ? "identity confirmed" : "identity not confirmed"}`}
+                          label={`${member.member_name_snapshot || `Member ${index + 1}`}: ID-to-video ${verified ? "confirmed" : "not confirmed"}`}
                           color={verified ? "#10B981" : "#F59E0B"}
                         />
                         {Number.isFinite(similarity) ? (
-                          <Text style={[styles.advisory, { color: colors.textSecondary }]}>Best similarity: {similarity.toFixed(1)}%</Text>
+                          <Text style={[styles.advisory, { color: colors.textSecondary }]}>ID similarity: {similarity.toFixed(1)}%</Text>
+                        ) : null}
+                        {usesDualReference ? (
+                          <>
+                            <Text style={[styles.advisory, { color: profileMeta.color }]}>Profile-to-video: {profileMeta.label}</Text>
+                            {Number.isFinite(profileSimilarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>Profile similarity: {profileSimilarity.toFixed(1)}%</Text> : null}
+                            <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>The profile-photo result is secondary and never overrides the ID result.</Text>
+                          </>
                         ) : null}
                         {!verified ? <Text style={[styles.advisory, { color: "#B45309" }]}>Manual review recommended</Text> : null}
                       </View>

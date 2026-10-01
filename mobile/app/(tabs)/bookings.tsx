@@ -1807,6 +1807,7 @@ export default function BookingsScreen() {
   });
   const [mediaViewerUrl, setMediaViewerUrl] = useState<string | null>(null);
   const [mediaViewerTitle, setMediaViewerTitle] = useState("Media");
+  const [mediaViewerSensitive, setMediaViewerSensitive] = useState(false);
   const [selectedApplicantSummary, setSelectedApplicantSummary] = useState<any | null>(null);
   const [selectedApplicantDetails, setSelectedApplicantDetails] = useState<any | null>(null);
   const [applicantDetailsLoading, setApplicantDetailsLoading] = useState(false);
@@ -4615,6 +4616,7 @@ export default function BookingsScreen() {
 
       if (isInAppMediaUrl(normalizedUrl)) {
         setMediaViewerTitle(label);
+        setMediaViewerSensitive(label.includes("ID Holder Portrait"));
         setMediaViewerUrl(normalizedUrl);
         return;
       }
@@ -10264,7 +10266,11 @@ export default function BookingsScreen() {
           visible
           uri={mediaViewerUrl}
           title={mediaViewerTitle}
-          onClose={() => setMediaViewerUrl(null)}
+          sensitive={mediaViewerSensitive}
+          onClose={() => {
+            setMediaViewerUrl(null);
+            setMediaViewerSensitive(false);
+          }}
         />
       ) : null}
 

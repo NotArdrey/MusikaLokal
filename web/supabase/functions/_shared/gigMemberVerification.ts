@@ -44,6 +44,17 @@ export type AggregatedMemberVerification = {
     }>
 }
 
+export type CorrelatedProfileVerification = {
+    member_id: string
+    status: 'verified' | 'needs_review' | 'no_reference' | 'reference_unusable' | 'mismatch'
+    issue_code: 'matches_another_member' | 'different_video_person' | 'identity_not_confirmed' | 'not_found_in_video' | null
+    best_similarity: number | null
+    match_count: number
+    first_match_timestamp_ms: number | null
+    best_match_timestamp_ms: number | null
+    matched_person_indexes: number[]
+}
+
 const clean = (value: unknown) => String(value || '').trim()
 
 export function externalImageIdForMember(memberId: string) {
@@ -185,6 +196,126 @@ export function aggregateMemberFaceSearch(
         ambiguous_person_indexes: [...ambiguousPersonIndexes].sort((a, b) => a - b),
         members,
     }
+}
+
+export function correlateProfileFaceSearch(
+    identityMembers: AggregatedMemberVerification['members'],
+    profileReferences: Array<{
+        member_id: string
+        face_id?: string | null
+        reference_hash?: string | null
+        reference_status?: ExpectedVerificationMember['reference_status']
+    }>,
+    personMatches: RekognitionPersonMatch[],
+    options: { threshold?: number } = {},
+): CorrelatedProfileVerification[] {
+    const threshold = Number.isFinite(options.threshold) ? Number(options.threshold) : null
+    const identityByMemberId = new Map(
+        identityMembers.map((member) => [clean(member.member_id), member]),
+    )
+    const identityOwnerByPersonIndex = new Map<number, string>()
+    for (const member of identityMembers) {
+        if (member.status !== 'verified') continue
+        for (const personIndex of member.matched_person_indexes) {
+            identityOwnerByPersonIndex.set(personIndex, clean(member.member_id))
+        }
+    }
+
+    const faceIdsByHash = new Map<string, Set<string>>()
+    for (const reference of profileReferences) {
+        const hash = clean(reference.reference_hash)
+        const faceId = clean(reference.face_id)
+        if (!hash || !faceId) continue
+        const faceIds = faceIdsByHash.get(hash) || new Set<string>()
+        faceIds.add(faceId)
+        faceIdsByHash.set(hash, faceIds)
+    }
+
+    return profileReferences.map((reference) => {
+        const memberId = clean(reference.member_id)
+        const faceId = clean(reference.face_id)
+        const referenceHash = clean(reference.reference_hash)
+        const referenceFaceIds = referenceHash && faceIdsByHash.has(referenceHash)
+            ? faceIdsByHash.get(referenceHash)!
+            : new Set(faceId ? [faceId] : [])
+        const missingReferenceStatus = reference.reference_status === 'reference_unusable'
+            ? 'reference_unusable' as const
+            : reference.reference_status === 'needs_review'
+            ? 'needs_review' as const
+            : 'no_reference' as const
+        if (referenceFaceIds.size === 0) {
+            return {
+                member_id: memberId,
+                status: missingReferenceStatus,
+                issue_code: null,
+                best_similarity: null,
+                match_count: 0,
+                first_match_timestamp_ms: null,
+                best_match_timestamp_ms: null,
+                matched_person_indexes: [],
+            }
+        }
+
+        const evidenceByPersonAndTimestamp = new Map<string, {
+            similarity: number
+            timestamp: number
+            personIndex: number
+        }>()
+        for (const personMatch of personMatches || []) {
+            const personIndex = Number(personMatch?.Person?.Index)
+            if (!Number.isInteger(personIndex) || personIndex < 0) continue
+            const timestamp = Number.isFinite(personMatch?.Timestamp) ? Number(personMatch.Timestamp) : 0
+            for (const faceMatch of personMatch.FaceMatches || []) {
+                const similarity = Number(faceMatch?.Similarity)
+                const matchedFaceId = clean(faceMatch?.Face?.FaceId)
+                if (
+                    !Number.isFinite(similarity) ||
+                    (threshold !== null && similarity < threshold) ||
+                    !referenceFaceIds.has(matchedFaceId)
+                ) continue
+                const key = `${personIndex}:${timestamp}`
+                const previous = evidenceByPersonAndTimestamp.get(key)
+                if (!previous || similarity > previous.similarity) {
+                    evidenceByPersonAndTimestamp.set(key, { similarity, timestamp, personIndex })
+                }
+            }
+        }
+        const evidence = [...evidenceByPersonAndTimestamp.values()]
+        const strongest = [...evidence].sort((left, right) => right.similarity - left.similarity)[0]
+        const timestamps = evidence.map((item) => item.timestamp)
+        const matchedPersonIndexes = [...new Set(evidence.map((item) => item.personIndex))].sort((a, b) => a - b)
+        const base = {
+            member_id: memberId,
+            best_similarity: strongest?.similarity ?? null,
+            match_count: evidence.length,
+            first_match_timestamp_ms: evidence.length > 0 ? Math.min(...timestamps) : null,
+            best_match_timestamp_ms: strongest?.timestamp ?? null,
+            matched_person_indexes: matchedPersonIndexes,
+        }
+        if (evidence.length === 0) {
+            return { ...base, status: 'needs_review' as const, issue_code: 'not_found_in_video' as const }
+        }
+
+        const identity = identityByMemberId.get(memberId)
+        const ownIdentityIndexes = new Set(
+            identity?.status === 'verified' ? identity.matched_person_indexes : [],
+        )
+        if (ownIdentityIndexes.size === 0) {
+            return { ...base, status: 'needs_review' as const, issue_code: 'identity_not_confirmed' as const }
+        }
+        if (matchedPersonIndexes.some((personIndex) => ownIdentityIndexes.has(personIndex))) {
+            return { ...base, status: 'verified' as const, issue_code: null }
+        }
+        const matchesAnotherMember = matchedPersonIndexes.some((personIndex) => {
+            const ownerId = identityOwnerByPersonIndex.get(personIndex)
+            return Boolean(ownerId && ownerId !== memberId)
+        })
+        return {
+            ...base,
+            status: 'mismatch' as const,
+            issue_code: matchesAnotherMember ? 'matches_another_member' as const : 'different_video_person' as const,
+        }
+    })
 }
 
 async function sha256Hex(value: Uint8Array) {

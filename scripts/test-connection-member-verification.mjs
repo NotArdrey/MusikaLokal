@@ -46,9 +46,13 @@ test("connection application UIs collect consent and show verification results",
   assert.match(productionForm, /member_verification_consent:\s*memberVerificationConsent/);
   assert.match(review, /Registered member:/);
   assert.match(details, /Registered Member Verification/);
-  assert.match(details, /holder portrait from the applicant(?:&apos;|'|’)?s approved government ID verification/i);
+  assert.match(details, /approved government-ID holder portrait as the primary identity reference/i);
+  assert.match(details, /registered profile photo is shown normally and compared separately as a secondary check/i);
   assert.match(details, /full ID is not shown/i);
-  assert.match(details, /only the face crop below may be viewed/i);
   assert.match(details, /Government ID holder portrait/);
   assert.match(details, /reference_portrait_url/);
+  assert.match(details, /profile_photo_url/);
+  assert.match(details, /Profile-to-video/);
+  assert.match(details, /Mismatch - profile matches another registered member/);
+  assert.match(details, /Mismatch - profile and ID match different people/);
 });

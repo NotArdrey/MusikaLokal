@@ -29,7 +29,8 @@ export default function ConnectionApplicantReview({
 }: Props) {
   const recommendation = application?.ai_recommendation;
   const verification = application?.member_verification;
-  const usesVerifiedIdPortrait = verification?.reference_source === "verified_id_portrait";
+  const usesVerifiedIdPortrait = ["verified_id_portrait", "verified_id_and_profile_photo"].includes(String(verification?.reference_source || ""));
+  const usesDualReference = verification?.reference_source === "verified_id_and_profile_photo";
   const verificationRequested = application?.member_verification_consent === true;
   if (!recommendation && !verification && !verificationRequested) return null;
 
@@ -77,7 +78,7 @@ export default function ConnectionApplicantReview({
             color={verification?.result === "verified" ? "#10B981" : "#D97706"}
           />
           <Text style={[styles.verificationText, { color: colors.textSecondary }]}>
-            Registered member: {verification?.result === "verified" ? "verified in video" : verification?.status === "processing" ? "verification processing" : verification?.status === "queued" ? "verification queued" : verification?.result === "no_reference" ? usesVerifiedIdPortrait ? "verified ID portrait unavailable" : "registered photo unavailable" : verification ? "manual review needed" : "verification unavailable"}
+            Registered member: {verification?.result === "verified" ? usesDualReference ? "ID verified in video; profile checked separately" : "verified in video" : verification?.status === "processing" ? "verification processing" : verification?.status === "queued" ? "verification queued" : verification?.result === "no_reference" ? usesVerifiedIdPortrait ? "verified ID portrait unavailable" : "registered photo unavailable" : verification ? "manual review needed" : "verification unavailable"}
           </Text>
         </View>
       ) : null}

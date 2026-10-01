@@ -30,7 +30,7 @@ export default function PrivacyPolicyScreen() {
           </Text>
 
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            When a musician enables application review, the submitted CV/resume and performance media may be processed by configured review providers. With separate verification consent, the holder portrait from an approved government ID verification may be compared with faces in the submitted performance video. Full identity documents are not shared with application reviewers. A face-only crop of the ID holder portrait may be stored privately and shown to an authorized reviewer through a short-lived signed link.
+            When a musician enables application review, the submitted CV/resume and performance media may be processed by configured review providers. With separate verification consent, both the holder portrait from an approved government ID verification and the registered profile photo may be compared with faces in the submitted performance video. The ID-holder portrait remains the primary identity reference and the profile-photo result is secondary. Full identity documents are not shared with application reviewers. A face-only crop of the ID-holder portrait may be stored privately and shown to an authorized reviewer through a short-lived signed link. The registered profile photo is shown normally and is not stored as another cropped preview.
           </Text>
 
           <Text style={[styles.text, { color: colors.textSecondary }]}>

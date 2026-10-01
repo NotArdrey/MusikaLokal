@@ -37,6 +37,26 @@ type Props = {
 const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
 const titleCase = (value: unknown) => String(value || "").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 
+const profileVerificationMeta = (member: any) => {
+  const issueCode = String(member?.profile_issue_code || "");
+  if (issueCode === "matches_another_member") {
+    return { label: "Mismatch - profile matches another registered member", color: "#DC2626" };
+  }
+  if (issueCode === "different_video_person") {
+    return { label: "Mismatch - profile and ID match different people", color: "#DC2626" };
+  }
+  if (issueCode === "identity_not_confirmed") {
+    return { label: "Could not correlate - ID person not confirmed", color: "#D97706" };
+  }
+  if (issueCode === "not_found_in_video") {
+    return { label: "Profile photo not found in video", color: "#D97706" };
+  }
+  if (member?.profile_status === "verified") return { label: "Matched to the same person as the ID", color: "#059669" };
+  if (member?.profile_status === "no_reference") return { label: "Profile photo unavailable", color: "#D97706" };
+  if (member?.profile_status === "reference_unusable") return { label: "Profile photo unusable", color: "#D97706" };
+  return { label: "Not confirmed", color: "#D97706" };
+};
+
 const recommendationMeta = (statusValue: unknown) => {
   const status = String(statusValue || "insufficient_data").toLowerCase();
   if (status === "recommended") return { label: "Recommended", color: "#059669", soft: "#ECFDF5", icon: "checkmark-circle" as const };
@@ -56,7 +76,7 @@ export default function ConnectionApplicantDetailsModal({
   onDecline,
   onOpenMedia,
 }: Props) {
-  const [portraitViewer, setPortraitViewer] = React.useState<{ url: string; title: string } | null>(null);
+  const [portraitViewer, setPortraitViewer] = React.useState<{ url: string; title: string; sensitive: boolean } | null>(null);
   React.useEffect(() => {
     if (!visible) setPortraitViewer(null);
   }, [visible]);
@@ -66,7 +86,8 @@ export default function ConnectionApplicantDetailsModal({
   const senderGroup = application?.sender_group || null;
   const recommendation = application?.ai_recommendation || null;
   const verification = application?.member_verification || null;
-  const usesVerifiedIdPortrait = verification?.reference_source === "verified_id_portrait";
+  const usesVerifiedIdPortrait = ["verified_id_portrait", "verified_id_and_profile_photo"].includes(String(verification?.reference_source || ""));
+  const usesDualReference = verification?.reference_source === "verified_id_and_profile_photo";
   const requirementResults = list(recommendation?.criteria_snapshot?.requirement_results);
   const matched = list(recommendation?.matched_criteria).map(String);
   const missing = list(recommendation?.missing_criteria).map(String);
@@ -163,10 +184,12 @@ export default function ConnectionApplicantDetailsModal({
                     <Text style={[styles.requirementTitle, { color: verification.result === "verified" ? "#047857" : "#B45309" }]}>
                       {verification.result === "verified" ? "Applicant found in the submitted video" : verification.status === "processing" ? "Verification is processing" : verification.status === "queued" ? "Verification is queued" : verification.result === "no_reference" ? usesVerifiedIdPortrait ? "Verified ID portrait unavailable" : "Registered photo unavailable" : "Manual verification needed"}
                     </Text>
-                    <Text style={[styles.requirementDetail, { color: colors.textSecondary }]}>{usesVerifiedIdPortrait ? "This consent-gated check compares the holder portrait from the applicant's approved government ID verification with faces in the submitted video. The full ID is not shown; only the face crop below may be viewed. The result does not change the match score." : "This historical result used the applicant's registered profile photo. New checks use the holder portrait from the approved government ID verification."}</Text>
+                    <Text style={[styles.requirementDetail, { color: colors.textSecondary }]}>{usesVerifiedIdPortrait ? `This consent-gated check uses the approved government-ID holder portrait as the primary identity reference.${usesDualReference ? " The registered profile photo is shown normally and compared separately as a secondary check." : ""} The full ID is not shown; only the ID-holder face is cropped. Neither result changes the match score.` : "This historical result used the applicant's registered profile photo. New checks use the approved ID-holder portrait as the primary reference."}</Text>
                   </View>
                 </View>
-                {list(verification.members).map((member, index) => (
+                {list(verification.members).map((member, index) => {
+                  const profileMeta = profileVerificationMeta(member);
+                  return (
                   <View key={`${member?.member_id || "member"}-${index}`} style={[styles.memberVerificationCard, { backgroundColor: colors.inputBackground }]}>
                     {member?.reference_portrait_url ? (
                       <TouchableOpacity
@@ -175,6 +198,7 @@ export default function ConnectionApplicantDetailsModal({
                         onPress={() => setPortraitViewer({
                           url: member.reference_portrait_url,
                           title: `${member?.member_name_snapshot || `Registered Member ${index + 1}`} - ID Holder Portrait`,
+                          sensitive: true,
                         })}
                         style={styles.portraitRow}
                       >
@@ -185,11 +209,33 @@ export default function ConnectionApplicantDetailsModal({
                         </View>
                       </TouchableOpacity>
                     ) : null}
+                    {usesDualReference && member?.profile_photo_url ? (
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={`View registered profile photo for ${member?.member_name_snapshot || `registered member ${index + 1}`}`}
+                        onPress={() => setPortraitViewer({
+                          url: member.profile_photo_url,
+                          title: `${member?.member_name_snapshot || `Registered Member ${index + 1}`} - Profile Photo`,
+                          sensitive: false,
+                        })}
+                        style={styles.portraitRow}
+                      >
+                        <ProfileAvatar uri={member.profile_photo_url} size={54} backgroundColor={colors.surface} iconColor={colors.primary} />
+                        <View style={styles.portraitCopy}>
+                          <Text style={[styles.requirementTitle, { color: colors.text }]}>Registered profile photo</Text>
+                          <Text style={[styles.requirementDetail, { color: colors.primary }]}>Tap to view the profile photo used for the secondary check</Text>
+                        </View>
+                      </TouchableOpacity>
+                    ) : null}
                     <Text style={[styles.body, { color: colors.textSecondary }]}>
-                      {member?.member_name_snapshot || `Registered member ${index + 1}`}: {member?.status === "verified" ? "verified" : "needs review"}. Best similarity: {member?.best_similarity === null || member?.best_similarity === undefined ? "Unavailable" : `${Number(member.best_similarity).toFixed(1)}%`}
+                      {member?.member_name_snapshot || `Registered member ${index + 1}`}: ID-to-video {member?.status === "verified" ? "confirmed" : "needs review"}. ID similarity: {member?.best_similarity === null || member?.best_similarity === undefined ? "Unavailable" : `${Number(member.best_similarity).toFixed(1)}%`}
                     </Text>
+                    {usesDualReference ? (
+                      <Text style={[styles.body, { color: profileMeta.color }]}>Profile-to-video: {profileMeta.label}. Profile similarity: {member?.profile_best_similarity === null || member?.profile_best_similarity === undefined ? "Unavailable" : `${Number(member.profile_best_similarity).toFixed(1)}%`}. This secondary result never overrides the ID result.</Text>
+                    ) : null}
                   </View>
-                ))}
+                  );
+                })}
               </>
             ) : (
               <Text style={[styles.body, { color: colors.textSecondary }]}>{application?.member_verification_consent === true ? "Registered member verification was requested, but a result is not available yet." : "The applicant did not request registered member verification for this application."}</Text>
@@ -266,7 +312,7 @@ export default function ConnectionApplicantDetailsModal({
       visible={Boolean(portraitViewer)}
       uri={portraitViewer?.url || null}
       title={portraitViewer?.title}
-      sensitive
+      sensitive={portraitViewer?.sensitive === true}
       onClose={() => setPortraitViewer(null)}
     />
     </>

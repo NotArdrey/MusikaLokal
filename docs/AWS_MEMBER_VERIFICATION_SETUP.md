@@ -1,8 +1,8 @@
-# AWS Verified-ID Member Verification
+# AWS Dual-Reference Member Verification
 
 ## Current status
 
-The gig-application implementation and the connection-application extension for group-member and production-team applications are deployed. Migrations `20260928170000_add_gig_member_verification.sql`, `20260930130000_add_connection_member_verification.sql`, `20260930150000_add_connection_application_members.sql`, `20260930170000_use_verified_id_portrait_for_member_verification.sql`, and `20261001120000_add_member_verification_portrait_previews.sql` are recorded remotely. No duplicate S3 bucket or Rekognition collection was needed.
+The gig-application implementation and the connection-application extension for group-member and production-team applications are deployed. Migrations `20260928170000_add_gig_member_verification.sql`, `20260930130000_add_connection_member_verification.sql`, `20260930150000_add_connection_application_members.sql`, `20260930170000_use_verified_id_portrait_for_member_verification.sql`, `20261001120000_add_member_verification_portrait_previews.sql`, `20261001150000_add_profile_photo_member_verification.sql`, and `20261001170000_correlate_profile_and_id_video_people.sql` are recorded remotely. No duplicate S3 bucket or Rekognition collection was needed.
 
 The AWS project's selected Region is Asia Pacific (Sydney), `ap-southeast-2`. The repository configuration, AWS CLI profile, S3 bucket, and Rekognition collection now agree on that Region. Do not create duplicates in another Region or attempt to bypass the AWS-managed service control policy.
 
@@ -20,10 +20,10 @@ The AWS project reports an active Free plan. S3 and Rekognition are supported by
 The linked Supabase project is active and healthy. Deployment verification confirms:
 
 - the required AWS and Didit member-verification secret names exist;
-- migrations `20260928170000_add_gig_member_verification.sql`, `20260930130000_add_connection_member_verification.sql`, `20260930150000_add_connection_application_members.sql`, `20260930170000_use_verified_id_portrait_for_member_verification.sql`, and `20261001120000_add_member_verification_portrait_previews.sql` are applied and recorded remotely;
+- migrations `20260928170000_add_gig_member_verification.sql`, `20260930130000_add_connection_member_verification.sql`, `20260930150000_add_connection_application_members.sql`, `20260930170000_use_verified_id_portrait_for_member_verification.sql`, `20261001120000_add_member_verification_portrait_previews.sql`, `20261001150000_add_profile_photo_member_verification.sql`, and `20261001170000_correlate_profile_and_id_video_people.sql` are applied and recorded remotely;
 - the three verification tables, the connection roster table, and all three consent-normalization triggers exist;
 - private bucket `member-verification-portraits` exists with public access disabled, JPEG-only uploads, and a 1 MiB object limit;
-- `gig-applications`, `gig-member-verification`, `connection-member-verification`, `manage-production`, `group-members`, and `delete-account` are active with the verified-ID member-verification implementation;
+- `gig-applications` v119, `gig-member-verification` v9, `connection-member-verification` v8, `manage-production` v73, `group-members` v66, and `delete-account` v82 are active with same-person ID/profile correlation in the dual-reference member-verification implementation;
 - the internal connection worker returns the expected unauthenticated `403`, confirming successful startup and service-role enforcement without changing application data.
 
 A dedicated non-console runtime IAM identity named `musikalokal-member-verification-dev` has an inline policy limited to the verified Rekognition collection operations and temporary S3 object prefix. The selected-Region IAM simulation allows all eight required SDK actions.
@@ -34,19 +34,22 @@ The Supabase runtime uses its own dedicated credential. It does not use the huma
 
 ## Runtime design
 
-- A member grants separate, optional consent. General terms and Gemini review consent do not grant face verification consent.
+- A member grants separate, optional consent covering both the approved ID-holder portrait and registered profile photo. General terms and Gemini review consent do not grant face verification consent.
 - Every member in a gig group application's frozen roster must consent through that workflow. For a production-team group application, the checked group attestation records that every represented registered member is included in the verification roster.
 - A solo or join-a-group connection application verifies the submitting applicant. A production-team application submitted as a group freezes every registered group member into a connection roster and verifies each member against the submitted performance video.
 - For Didit-approved identities, the worker requests the current decision server-side and downloads its temporary `portrait_image`. For an approved manual identity review, it downloads the private front-ID image from the `identity-manual` bucket.
-- The identity holder image is validated as JPEG or PNG and must contain exactly one detectable face before `IndexFaces` runs. Temporary Didit URLs, raw ID images, and image bytes are not stored in application records.
-- After the single face is detected, the worker creates one 320x320 JPEG face crop and stores it in the private `member-verification-portraits` bucket. Authorized application-review responses receive a 15-minute signed URL; the full ID document is never returned to the reviewer.
+- The identity holder image and registered profile photo are validated independently as JPEG or PNG and each must contain exactly one detectable face before `IndexFaces` runs. Temporary Didit URLs, raw ID images, profile-photo bytes, and image bytes are not stored in application records.
+- After the single ID-holder face is detected, the worker creates one 320x320 JPEG face crop and stores it in the private `member-verification-portraits` bucket. Authorized application-review responses receive a 15-minute signed URL for that ID face crop; the full ID document is never returned. The registered profile photo is shown using the original profile URL and is not cropped or copied into the private preview bucket.
 - The application video is copied to a private temporary S3 object and checked for an MPEG-4/MOV-style ISO base media container carrying H.264 before `StartFaceSearch` runs.
 - The asynchronous job is resumed with bounded polling through `GetFaceSearch`; all result pages are collected.
-- A tracked `Person.Index` can verify only one roster member, preventing one person from satisfying multiple members.
+- One stored-video face-search job evaluates both indexed references. A tracked `Person.Index` can verify only one roster member within each reference class, preventing one person from satisfying multiple members.
+- For every solo or roster member, the profile reference must resolve to the same tracked `Person.Index` as that member's approved ID reference. A profile that resolves to another registered member or a different video person is marked as a mismatch and routes the application to manual review. This rule applies independently to solos, duos, and groups of any supported size.
+- ID-to-video is the authoritative registered-member identity result. Profile-to-video is reported separately as an advisory consistency check; a mismatch does not erase an ID match or alter the fit score, but it prevents the overall verification from being presented as fully verified.
 - Ambiguous near-ties, missing references, partial matches, unavailable processing, and extra people are routed to manual review.
 - Results can change recommendation presentation to `needs_review`, but never modify the deterministic 30/25/10/15 score or make the organizer's decision.
 - Temporary videos are deleted after completion/failure, with an S3 Lifecycle expiration rule as a fallback.
-- Indexed reference faces are reused by source-image hash, replaced when the photo changes, and deleted before account deletion.
+- Indexed ID and profile reference faces are reused independently by source-image hash, replaced when either photo changes, and deleted before account deletion.
+- Existing completed or already queued ID-only checks are not silently expanded. Newly queued checks use both references under the updated consent language.
 
 Didit's verification report documents `id_verification.portrait_image` as the portrait extracted from the identity document and notes that document media URLs are temporary:
 
@@ -198,7 +201,7 @@ Rekognition Stored Video Analysis charges by video analysis usage, and stored fa
 - https://aws.amazon.com/rekognition/pricing/
 - https://aws.amazon.com/s3/pricing/
 
-Portrait previews are generated once inside the verification worker and stored as small JPEG files. They do not use Supabase Storage Image Transformations, so they do not add transformed-origin-image usage. Normal private Storage size, cached egress, and Edge Function invocation usage still apply. Supabase currently lists on-demand Image Transformations as unavailable on Free and, on Pro/Team, 100 origin images included followed by $5 per 1,000 origin images:
+ID portrait previews are generated once inside the verification worker and stored as small JPEG files. Profile photos are not cropped or stored as additional previews. The implementation does not use Supabase Storage Image Transformations, so it does not add transformed-origin-image usage. Normal private Storage size, cached egress, and Edge Function invocation usage still apply. The secondary profile check adds one DetectFaces/IndexFaces path when a new or changed profile reference is cached and stores one additional Rekognition face vector per member; it reuses the same stored-video face-search job. Supabase currently lists on-demand Image Transformations as unavailable on Free and, on Pro/Team, 100 origin images included followed by $5 per 1,000 origin images:
 
 - https://supabase.com/docs/guides/platform/manage-your-usage/storage-image-transformations
 - https://supabase.com/docs/guides/platform/billing-on-supabase
