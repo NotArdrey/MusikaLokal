@@ -12,6 +12,7 @@ import {
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import DocumentUploader from "../src/components/DocumentUploader";
+import { assertCvDocument } from "../src/utils/cvDocument";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import { useRequireAuth } from "../src/context/AuthContext";
@@ -98,6 +99,7 @@ export default function GroupApplicationCvScreen() {
     }
     setSubmitting(true);
     try {
+      const contentType = assertCvDocument(file);
       const extension = file.name?.split(".").pop() || "pdf";
       const filename = sanitizeStorageFileName(file.name || `cv.${extension}`, `cv.${extension}`);
       const path = `${userId}/gig-applications/${applicationId}/${Date.now()}_${filename}`;
@@ -105,7 +107,8 @@ export default function GroupApplicationCvScreen() {
         bucket: "application-cvs",
         path,
         uri: file.uri,
-        contentType: file.mimeType || "application/pdf",
+        contentType,
+        documentOnly: true,
         upsert: false,
       });
       if (uploadError) throw uploadError;

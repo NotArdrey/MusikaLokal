@@ -1,6 +1,7 @@
 ﻿import { supabase } from "../../lib/supabase";
 
 import { sanitizeStorageFileName, uploadStorageObject } from "./storageUpload";
+import { assertCvDocument } from "./cvDocument";
 
 type EntityType = "musician" | "group" | "venue" | "production_team";
 
@@ -477,6 +478,7 @@ export const uploadListingRequestDocument = async (
   file: any,
   folder: "contracts" | "applications" = "applications",
 ) => {
+  const contentType = assertCvDocument(file);
   const fileExt = file.name?.split(".").pop() || "pdf";
   const safeFileName = sanitizeStorageFileName(file.name || `${folder}.${fileExt}`, `${folder}.${fileExt}`);
   const storagePath = `${userId}/${folder}/${Date.now()}_${safeFileName}`;
@@ -485,7 +487,8 @@ export const uploadListingRequestDocument = async (
     bucket: "documents",
     path: storagePath,
     uri: file.uri,
-    contentType: file.mimeType || "application/pdf",
+    contentType,
+    documentOnly: true,
     upsert: false,
   });
 

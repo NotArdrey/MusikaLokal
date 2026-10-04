@@ -1,6 +1,7 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
 import { supabase, supabaseAnonKey, supabaseUrl } from "../../lib/supabase";
+import { assertCvDocument, assertCvDocumentContent } from "./cvDocument";
 
 type UploadBody = ArrayBuffer | Blob | Uint8Array;
 
@@ -22,6 +23,7 @@ type UploadStorageObjectInput = {
   upsert?: boolean;
   uri?: string;
   body?: UploadBody;
+  documentOnly?: boolean;
 };
 
 const encodeStoragePath = (path: string) =>
@@ -267,7 +269,9 @@ export const uploadStorageObject = async ({
   upsert = false,
   uri,
   body,
+  documentOnly = false,
 }: UploadStorageObjectInput) => {
+  if (documentOnly) contentType = assertCvDocument({ name: path, mimeType: contentType });
   if (Platform.OS !== "web" && uri) {
     const {
       data: { session },
@@ -286,6 +290,13 @@ export const uploadStorageObject = async ({
       // provider/cache permission edge case.
       temporaryFile = await createTemporaryUploadFile(uri, path.split("/").pop());
       await assertReadableFile(temporaryFile.uri);
+
+      if (documentOnly) {
+        const header = await FileSystem.readAsStringAsync(temporaryFile.uri, {
+          encoding: FileSystem.EncodingType.Base64, position: 0, length: 1024,
+        });
+        assertCvDocumentContent(path, Uint8Array.from(atob(header), (character) => character.charCodeAt(0)));
+      }
 
       const baseUrl = supabaseUrl.replace(/\/+$/, "");
       const uploadUrl = `${baseUrl}/storage/v1/object/${encodeURIComponent(bucket)}/${encodeStoragePath(path)}`;
@@ -337,6 +348,11 @@ export const uploadStorageObject = async ({
 
   if (!uploadBody) {
     throw new Error("No upload body was provided.");
+  }
+  if (documentOnly) {
+    const bytes = uploadBody instanceof Uint8Array ? uploadBody
+      : new Uint8Array(uploadBody instanceof ArrayBuffer ? uploadBody : await uploadBody.arrayBuffer());
+    assertCvDocumentContent(path, bytes.subarray(0, 1024));
   }
 
   for (let attempt = 0; attempt < STORAGE_UPLOAD_ATTEMPTS; attempt += 1) {

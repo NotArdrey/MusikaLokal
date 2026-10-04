@@ -12,6 +12,10 @@ const compiled = ts.transpileModule(source, {
     target: ts.ScriptTarget.ES2022,
   },
 }).outputText;
+const documentExports = {};
+vm.runInNewContext(ts.transpileModule(readFileSync("mobile/src/utils/cvDocument.ts", "utf8"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText, { exports: documentExports, TextDecoder });
 
 const sourceFilesUnder = (root) => readdirSync(root).flatMap((entry) => {
   const path = join(root, entry);
@@ -19,7 +23,7 @@ const sourceFilesUnder = (root) => readdirSync(root).flatMap((entry) => {
   return /\.(?:ts|tsx)$/.test(entry) ? [path] : [];
 });
 
-const loadStorageUpload = (platform = "android") => {
+const loadStorageUpload = (platform = "android", fileContent = "test") => {
   const files = new Set();
   const copies = [];
   const uploads = [];
@@ -43,7 +47,7 @@ const loadStorageUpload = (platform = "android") => {
     readAsStringAsync: async (uri, options) => {
       assert.equal(options.encoding, "base64");
       assert(files.has(uri), `read must use an existing app-owned file: ${uri}`);
-      return "dGVzdA==";
+      return Buffer.from(fileContent).toString("base64");
     },
     uploadAsync: async (_url, uri) => {
       uploads.push(uri);
@@ -59,11 +63,12 @@ const loadStorageUpload = (platform = "android") => {
       }),
     },
     storage: {
-      from: () => ({ upload: async () => ({ data: {}, error: null }) }),
+      from: () => ({ upload: async () => { uploads.push("web upload"); return { data: {}, error: null }; } }),
     },
   };
   const module = { exports: {} };
   const localRequire = (id) => {
+    if (id === "./cvDocument") return documentExports;
     if (id === "expo-file-system/legacy") return fileSystem;
     if (id === "react-native") return { Platform: { OS: platform } };
     if (id === "../../lib/supabase") {
@@ -79,6 +84,9 @@ const loadStorageUpload = (platform = "android") => {
   vm.runInNewContext(`(function (require, module, exports) { ${compiled}\n})`, {
     URL,
     setTimeout,
+    atob,
+    Uint8Array,
+    ArrayBuffer,
   })(localRequire, module, module.exports);
 
   return { api: module.exports, copies, deleted, files, uploads };
@@ -96,6 +104,36 @@ test("persists a valid Android content URI without rejecting it via a false exis
   assert.equal(copies.length, 1);
   assert.equal(copies[0].from, "content://picker/document/42");
   assert(files.has(persisted.uri));
+});
+
+test("native CV uploads reject renamed images before uploading any bytes", async () => {
+  const { api, uploads } = loadStorageUpload("android", new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+  await assert.rejects(api.uploadStorageObject({
+    bucket: "documents", path: "owner/cvs/resume.pdf", uri: "content://picker/document/42",
+    contentType: "application/pdf", documentOnly: true,
+  }), /Images and videos are not allowed/);
+  assert.equal(uploads.length, 0);
+});
+
+test("native CV uploads still stream a valid document", async () => {
+  const { api, uploads } = loadStorageUpload("android", "%PDF-1.7\n");
+  await api.uploadStorageObject({
+    bucket: "application-cvs", path: "owner/gig-applications/resume.pdf", uri: "content://picker/document/42",
+    contentType: "application/pdf", documentOnly: true,
+  });
+  assert.equal(uploads.length, 1);
+});
+
+test("web CV uploads reject renamed video content while normal media uploads remain available", async () => {
+  const { api, uploads } = loadStorageUpload("web");
+  const video = new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70]);
+  await assert.rejects(api.uploadStorageObject({
+    bucket: "documents", path: "owner/cvs/resume.pdf", body: video,
+    contentType: "application/pdf", documentOnly: true,
+  }), /Images and videos are not allowed/);
+  assert.equal(uploads.length, 0);
+  await api.uploadStorageObject({ bucket: "post-media", path: "owner/video.mp4", body: video, contentType: "video/mp4" });
+  assert.equal(uploads.length, 1);
 });
 
 test("keeps the picker-managed cache copy on iOS", () => {

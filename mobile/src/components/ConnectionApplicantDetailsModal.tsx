@@ -298,7 +298,17 @@ export default function ConnectionApplicantDetailsModal({
                   <View style={styles.requirementCopy}>
                     <Text style={[styles.requirementTitle, { color: colors.text }]}>{row?.label || "Requirement"}</Text>
                     <Text style={[styles.requirementDetail, { color: colors.textSecondary }]}>{row?.detail || "No details recorded."}</Text>
-                    <Text style={[styles.source, { color }]}>Source: {titleCase(row?.source || "application")}</Text>
+                    <Text style={[styles.source, { color }]}>Source: {row?.key === "genres" ? "CV + Performance Video" : titleCase(row?.source || "application")}</Text>
+                    {list(row?.source_results).map((check, checkIndex) => (
+                      <View key={`${check.source}-${checkIndex}`}>
+                        <Text style={[styles.source, { color: check.status === "met" ? "#059669" : check.status === "not_met" ? "#DC2626" : "#D97706" }]}>
+                          {check.source === "cv" ? "CV" : "Performance Video"}: {check.status === "met" ? "Confirmed" : check.status === "not_met" ? "Does not match" : "Needs review"}
+                        </Text>
+                        {list(check.evidence).map((entry, entryIndex) => (
+                          <Text key={entryIndex} style={[styles.requirementDetail, { color: colors.textSecondary }]}>{entry.observation}</Text>
+                        ))}
+                      </View>
+                    ))}
                   </View>
                 </View>
               );

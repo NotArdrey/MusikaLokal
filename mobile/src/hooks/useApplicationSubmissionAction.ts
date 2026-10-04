@@ -6,6 +6,7 @@ import { getGigReapplicationCooldownInfo } from "../utils/gigReapplicationCooldo
 import { submitListingRequest } from "../utils/listingRequests";
 import { buildNotificationRouteMeta } from "../utils/notificationNavigation";
 import { sanitizeStorageFileName, uploadStorageObject } from "../utils/storageUpload";
+import { assertCvDocument } from "../utils/cvDocument";
 
 interface AlertConfig {
   type: "success" | "error" | "warning" | "info";
@@ -404,6 +405,7 @@ export const useApplicationSubmissionAction = ({
 
   const uploadDocument = useCallback(async (file: any) => {
     try {
+      const contentType = assertCvDocument(file);
       const fileExt = file.name.split(".").pop() || "pdf";
       const safeFileName = sanitizeStorageFileName(file.name || `cv.${fileExt}`, `cv.${fileExt}`);
       const fileName = `${userId}/cvs/${Date.now()}_${safeFileName}`;
@@ -412,7 +414,8 @@ export const useApplicationSubmissionAction = ({
         bucket: "documents",
         path: fileName,
         uri: file.uri,
-        contentType: file.mimeType || "application/pdf",
+        contentType,
+        documentOnly: true,
         upsert: false,
       });
 
@@ -430,6 +433,7 @@ export const useApplicationSubmissionAction = ({
   }, [userId]);
 
   const uploadGroupMemberDocument = useCallback(async (file: any) => {
+    const contentType = assertCvDocument(file);
     const fileExt = file.name?.split(".").pop() || "pdf";
     const safeFileName = sanitizeStorageFileName(
       file.name || `cv.${fileExt}`,
@@ -440,7 +444,8 @@ export const useApplicationSubmissionAction = ({
       bucket: "application-cvs",
       path,
       uri: file.uri,
-      contentType: file.mimeType || "application/pdf",
+      contentType,
+      documentOnly: true,
       upsert: false,
     });
     if (error) throw error;
@@ -570,6 +575,9 @@ export const useApplicationSubmissionAction = ({
             cv_url: uploadedCvUrl,
             video_url: videoUrl || null,
             member_verification_consent: memberVerificationConsent,
+            video_copyright_status: videoCopyrightDecision?.copyrightStatus || "not_required",
+            video_copyright_review_id: videoCopyrightDecision?.copyrightReviewId || null,
+            video_copyright_metadata: videoCopyrightDecision?.copyrightMetadata || {},
           },
         };
         const selfApplicationMeta = listingId

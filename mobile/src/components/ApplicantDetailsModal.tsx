@@ -151,6 +151,7 @@ const screeningMeta = (statusValue: unknown) => {
 const evidenceSourceLabel = (value: unknown) => {
   const labels: Record<string, string> = {
     cv: "CV",
+    cv_and_performance_video: "CV + Performance Video",
     video_transcript: "Performance video transcript",
     video_frame: "Performance video",
     profile: "Profile",
@@ -707,7 +708,10 @@ export default function ApplicantDetailsModal({
     const key = String(item?.key || item?.criterion || "requirement");
     const expectedCriteria = criterionByRequirementKey[key] || [String(item?.criterion || "")];
     const evidenceItem = evidence.find((candidate) => expectedCriteria.includes(String(candidate?.criterion || "")));
-    const evidenceEntries = list(evidenceItem?.evidence).slice(0, 4);
+    const sourceChecks = list(item?.source_results);
+    const evidenceEntries = (key === "genres" && sourceChecks.length > 0
+      ? sourceChecks.flatMap((check) => list(check?.evidence))
+      : list(evidenceItem?.evidence)).slice(0, 4);
     const sourceKeys = Array.from(new Set([
       String(item?.source || ""),
       ...evidenceEntries.map((entry) => String(entry?.source || "")),
@@ -715,7 +719,7 @@ export default function ApplicantDetailsModal({
     const confirmationSource = String(item?.source || evidenceItem?.source || "");
     const hasCvSource = confirmationSource === "cv";
     const hasVideoSource = ["performance_video", "video_transcript", "video_frame", "recognized_audio"].includes(confirmationSource);
-    const sourceLabel = sourceKeys.map(evidenceSourceLabel).join(" + ") || "Application";
+    const sourceLabel = key === "genres" ? "CV + Performance Video" : sourceKeys.map(evidenceSourceLabel).join(" + ") || "Application";
     const status = String(item?.status || "unclear");
     const tone: ReviewTone = status === "met" ? "confirmed" : status === "not_met" ? "failed" : "review";
     const statusLabel = status === "met"
@@ -737,7 +741,7 @@ export default function ApplicantDetailsModal({
       detail: String(item?.detail || evidenceItem?.short_reason || "Review the available evidence before deciding."),
       sourceLabel,
       evidenceEntries,
-      analysis: String(evidenceItem?.short_reason || item?.detail || "No additional automated analysis was recorded."),
+      analysis: String(key === "genres" ? item?.detail || "Review the CV and performance video." : evidenceItem?.short_reason || item?.detail || "No additional automated analysis was recorded."),
     };
   });
   const confirmedRequirementRows = requirementReviewRows.filter((item) => item.tone === "confirmed");

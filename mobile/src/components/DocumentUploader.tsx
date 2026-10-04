@@ -5,26 +5,13 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { createE2EDocumentFixture, isE2EFixtureMode } from '../utils/e2eFixtures';
 import { typography } from '../theme/tokens';
+import { assertCvDocument, CV_DOCUMENT_MIME_TYPES } from '../utils/cvDocument';
 import {
     DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
     persistUploadAsset,
     removePersistedUploadAsset,
 } from '../utils/storageUpload';
 import CustomAlert, { AlertType } from './CustomAlert';
-
-const ACCEPTED_DOCUMENT_TYPES = [
-    'application/pdf',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/vnd.oasis.opendocument.text',
-    'application/rtf',
-    'text/rtf',
-    'text/plain',
-    'text/markdown',
-    'image/jpeg',
-    'image/png',
-    'image/webp',
-];
 
 interface DocumentUploaderProps {
     onFileSelect: (file: any) => void;
@@ -70,13 +57,15 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
             }
 
             const result = await DocumentPicker.getDocumentAsync({
-                type: ACCEPTED_DOCUMENT_TYPES,
+                type: CV_DOCUMENT_MIME_TYPES,
                 copyToCacheDirectory: DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
             });
 
             if (result.canceled) return;
 
+            assertCvDocument(result.assets[0]);
             const file = await persistUploadAsset(result.assets[0]);
+            file.mimeType = assertCvDocument(file);
             const previousAsset = persistedAssetRef.current;
             persistedAssetRef.current = file;
             setFileName(file.name);

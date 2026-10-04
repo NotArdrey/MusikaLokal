@@ -9,6 +9,7 @@ import {
     scheduleGigPortfolioReview,
 } from '../_shared/gigPortfolioReview.ts'
 import { matchGigMemberRequirements, normalizeGigRosterMembers } from '../_shared/gigMemberRequirementMatching.ts'
+import { submittedGenreFit } from '../_shared/submittedGenreFit.ts'
 import {
     applyMemberVerificationRecommendationGate,
     attachGigMemberVerification,
@@ -908,13 +909,11 @@ function evaluateGigApplication(
             performer.instruments
         )
     }
-    applyValueCriterion(
-        'genres',
-        'Genre fit',
-        25,
-        expected.genres,
-        performer.genres
-    )
+    if (settings.criteria.genres !== 'ignore' && expected.genres.length > 0) {
+        possiblePoints += 25
+        missing.push('Genre fit could not be confirmed from the CV and performance video')
+        if (settings.criteria.genres === 'required') missingRequired = true
+    }
 
     const gigCoordinates = readCoordinates(requirements?.gig_coordinates)
     const distanceKm =
@@ -956,6 +955,8 @@ function evaluateGigApplication(
         ? 'insufficient_data'
         : isEligible
         ? 'recommended'
+        : settings.criteria.genres !== 'ignore' && expected.genres.length > 0
+        ? 'needs_review'
         : 'not_eligible'
     const explanation =
         recommendationStatus === 'recommended'
@@ -1099,7 +1100,7 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
 
     const { data, error } = await supabaseClient
         .from('gig_application_ai_reviews')
-        .select('application_id, status, source_summary, evidence')
+        .select('application_id, status, source_summary, evidence, cv_result, video_result')
         .in('application_id', applicationIds)
 
     if (error) {
@@ -1133,7 +1134,6 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
         const mediaSubmitted = review?.source_summary?.media_submitted === true
         const videoProcessingStatus = String(review?.source_summary?.video_processing_status || '')
         const instrumentResult = String(instrumentEvidence?.result || 'unclear')
-        const genreResult = String(genreEvidence?.result || 'unclear')
         const memberRequirementCoverage = item?.criteria_snapshot?.member_requirement_coverage || null
         let matchedCriteria = Array.isArray(item.matched_criteria) ? item.matched_criteria : []
         let missingCriteria = Array.isArray(item.missing_criteria) ? item.missing_criteria : []
@@ -1145,7 +1145,31 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
         if (!memberRequirementCoverage) {
             applySupportingEvidence('Instrument or role fit', instrumentResult)
         }
-        applySupportingEvidence('Genre fit', genreResult)
+        const cvGenreEvidence = (review?.cv_result?.evidence || review?.source_summary?.cv_requirement_review || [])
+            .find((entry: any) => entry?.criterion === 'genre_requirement')
+            || (genreEvidence?.source === 'cv' ? {
+                ...genreEvidence,
+                evidence: (genreEvidence?.evidence || []).filter((entry: any) => entry.source === 'cv'),
+            } : null)
+        const videoGenreEntries = (genreEvidence?.evidence || []).filter((entry: any) =>
+            ['performance_video', 'video_frame', 'video_transcript', 'recognized_audio'].includes(String(entry?.source || '')),
+        )
+        const storedVideoGenre = (review?.video_result?.evidence || []).find((entry: any) => entry?.criterion === 'genre_requirement')
+        const videoGenreEvidence = storedVideoGenre || (videoGenreEntries.length > 0 ? {
+            ...genreEvidence,
+            evidence: videoGenreEntries,
+            result: ['performance_video', 'video_frame', 'video_transcript', 'recognized_audio'].includes(String(genreEvidence?.source || ''))
+                ? genreEvidence.result : 'unclear',
+            short_reason: ['performance_video', 'video_frame', 'video_transcript', 'recognized_audio'].includes(String(genreEvidence?.source || ''))
+                ? genreEvidence.short_reason : 'The video genre could not be separately confirmed from this older combined review.',
+        } : null)
+        const submittedGenres = submittedGenreFit(cvGenreEvidence, videoGenreEvidence)
+        matchedCriteria = matchedCriteria.filter((label: string) => label !== 'Genre fit')
+        missingCriteria = missingCriteria.filter((label: string) => !label.startsWith('Genre fit'))
+        if (item?.criteria_snapshot?.settings?.criteria?.genres !== 'ignore' && item?.criteria_snapshot?.requirements?.genres?.length > 0) {
+            if (submittedGenres.status === 'met') matchedCriteria = [...matchedCriteria, 'Genre fit']
+            else missingCriteria = [...missingCriteria, submittedGenres.status === 'not_met' ? 'Genre fit' : 'Genre fit could not be confirmed from the CV and performance video']
+        }
         const portfolioLabel = 'Submitted performance evidence fits the gig'
         const portfolioMissingLabels = [
             'Portfolio fit review pending',
@@ -1305,12 +1329,15 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
             criteria.portfolio === 'required' &&
             missingRequiredItems.length === 1 &&
             missingRequiredItems[0] === 'portfolio'
-        const recommendationStatus = verificationStatus === 'needs_verification' || technicalReviewNeedsManualDecision
+        const genreNeedsManualDecision = criteria.genres !== 'ignore' && Array.isArray(expected.genres) && expected.genres.length > 0 && submittedGenres.status === 'unclear'
+        const recommendationStatus = verificationStatus === 'needs_verification' || technicalReviewNeedsManualDecision || genreNeedsManualDecision
             ? 'needs_review'
             : fitRecommendationStatus
         const baseExplanation =
             verificationStatus === 'needs_verification'
                 ? 'Important verification needed: the name on the CV does not match the application. The gig-fit score is unchanged, but verify the document before deciding.'
+            : genreNeedsManualDecision
+                ? 'Genre fit could not be confirmed from the submitted CV and performance video. Review both before deciding.'
             : technicalReviewNeedsManualDecision
                 ? 'Automatic video review was unavailable. The match score is unchanged; review the submitted video manually before deciding.'
             : fitRecommendationStatus === 'recommended'
@@ -1365,23 +1392,7 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
             instrumentUnavailable,
         )
         const genreConfigured = criteria.genres !== 'ignore' && Array.isArray(expected.genres) && expected.genres.length > 0
-        const genreMet = hasMatched('Genre fit')
-        const genreUnavailable = missingCriteria.some((label: string) =>
-            label.startsWith('Genre fit') && /unavailable|could not be confirmed|not checked/i.test(label)
-        )
-        pushRequirementResult(
-            'genres',
-            'Genre fit',
-            genreConfigured,
-            genreMet,
-            genreResult === 'supported' ? String(genreEvidence?.source || 'application_evidence') : 'profile',
-            genreMet
-                ? `Genre requirement confirmed from ${genreResult === 'supported' ? 'submitted application evidence' : 'the applicant profile'}.`
-                : genreUnavailable
-                ? 'The available profile and application evidence could not confirm the requested genre.'
-                : 'The declared applicant genres do not match the gig requirement.',
-            genreUnavailable,
-        )
+        if (genreConfigured) requirementResults.push(submittedGenres)
         const locationConfigured = criteria.location !== 'ignore' && settings.location_radius_km !== null
         const locationMet = matchedCriteria.some((label: string) => label.startsWith('Within '))
         const locationUnavailable = item.distance_km === null || item.distance_km === undefined
@@ -3784,7 +3795,7 @@ Deno.serve(async (req: Request) => {
 
         throw new Error('Invalid action')
     } catch (error: any) {
-        console.error('âŒ Edge Function Error:', error)
+        console.error('❌ Edge Function Error:', error)
         return new Response(
             JSON.stringify({
                 error: error.message,

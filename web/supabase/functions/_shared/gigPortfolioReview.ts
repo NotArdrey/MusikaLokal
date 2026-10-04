@@ -3348,6 +3348,59 @@ export async function runGigVideoReview(client: any, applicationId: string, supa
     }
 }
 
+export async function reviewConnectionGenres(application: any, genres: string[], supabaseUrl: string) {
+    const details = application?.event_details?.request_details || {}
+    const criteria = [{ key: 'genre_requirement', requirement: genres.join(', ') }]
+    const apiKey = String(Deno.env.get('GEMINI_API_KEY') || '').trim()
+    const model = String(Deno.env.get('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL).trim()
+    const groqKeys = uniqueStrings([Deno.env.get('GROQ_API_KEY'), Deno.env.get('GROQ_FALLBACK_API_KEY')])
+    const visionModels = uniqueStrings([Deno.env.get('GROQ_VISION_MODEL'), DEFAULT_VISION_MODEL])
+    const cvUrl = details.cv_url || application.attachment_url || null
+    const videoUrl = details.video_url || null
+    const unavailable = (source: 'cv' | 'performance_video', reason: string) =>
+        unclearFinding('genre_requirement', reason, source)
+    if (details.ai_portfolio_review_consent === false) {
+        return {
+            cv: unavailable('cv', 'Permission to review the CV was not given.'),
+            video: unavailable('performance_video', 'Permission to review the video was not given.'),
+        }
+    }
+    const [cvFinding, videoFinding] = await Promise.all([
+        (async () => {
+            if (!cvUrl) return unavailable('cv', 'No CV was submitted.')
+            if (!apiKey) return unavailable('cv', 'Automatic CV review is unavailable. Review the CV manually.')
+            try {
+                const document = await extractCvText(cvUrl, supabaseUrl, groqKeys, visionModels,
+                    { apiKey, model, applicationId: application.id })
+                const review = await reviewCvWithGemini(document.text, criteria, apiKey, model, application.id)
+                if (review.classification.status !== 'cv') {
+                    return unavailable('cv', review.classification.summary)
+                }
+                return sanitizeReviewEvidence(review.criteria, criteria).find((item) => item.criterion === 'genre_requirement')
+                    || unavailable('cv', 'The requested genre could not be confirmed from the CV.')
+            } catch {
+                return unavailable('cv', 'Automatic CV review failed. Review the CV manually.')
+            }
+        })(),
+        (async () => {
+            if (!videoUrl) return unavailable('performance_video', 'No performance video was submitted.')
+            let findings: ReviewEvidence[] = []
+            if (apiKey) {
+                const review = await reviewVideoWithGemini(videoUrl, supabaseUrl, criteria, apiKey, model, application.id)
+                findings = sanitizeReviewEvidence(review.criteria, criteria)
+            }
+            const metadata = details.video_copyright_metadata || {}
+            if (await verifyGenreEvidenceReceipt(metadata, String(application.sender_id || ''))) {
+                const recognized = buildRecognizedAudioGenreEvidence(criteria, metadata)
+                if (recognized) findings.push(recognized)
+            }
+            return mergeReviewEvidence(findings).find((item) => item.criterion === 'genre_requirement')
+                || unavailable('performance_video', 'The requested genre could not be confirmed from the performance video. Review it manually.')
+        })(),
+    ])
+    return { cv: cvFinding, video: videoFinding }
+}
+
 export async function scheduleGigPortfolioReview(client: any, applicationId: string, supabaseUrl: string) {
     void client
     const { scheduleGigReviewWorkers } = await import('./gigReviewWorkerDispatch.ts')

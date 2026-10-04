@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
+import useConnectionGenreReviewRefresh from "../src/hooks/useConnectionGenreReviewRefresh";
 import {
   ActivityIndicator,
   Linking,
@@ -626,8 +627,25 @@ export default function ProductionTeamScreen() {
     }
   };
 
+  const applicationDecisionRef = useRef(false);
+  useConnectionGenreReviewRefresh(teamApplications, Boolean(selectedTeam) && activeTab === "Applications", async () => {
+    if (!selectedTeam || applicationDecisionRef.current) return;
+    const { data, error } = await supabase.functions.invoke("manage-production", {
+      body: { action: "fetch_team_applications", team_id: selectedTeam.id },
+    });
+    if (error || data?.error || !Array.isArray(data?.applications) || applicationDecisionRef.current) return;
+    setTeamApplications((previous) => data.applications.map((application: any) => {
+      const existing = previous.find((item) => item.id === application.id);
+      return existing && existing.status !== "pending" && application.status === "pending"
+        ? { ...application, status: existing.status, event_details: existing.event_details } : application;
+    }));
+    setSelectedApplication((selected: any) => selected
+      ? data.applications.find((application: any) => application.id === selected.id) || selected : selected);
+  });
+
   const handleApplicationDecision = async (application: any, decision: "accepted" | "declined") => {
-    if (!selectedTeam || respondingApplicationId) return;
+    if (!selectedTeam || applicationDecisionRef.current || String(application?.status || "pending").toLowerCase() !== "pending") return;
+    applicationDecisionRef.current = true;
     setRespondingApplicationId(application.id);
     try {
       const { data, error } = await supabase.functions.invoke("manage-production", {
@@ -641,10 +659,10 @@ export default function ProductionTeamScreen() {
       if (data?.error) throw new Error(data.error);
 
       invalidateListingCaches(userId, ["bookings", "details", "home", "notifications"]);
-      await Promise.all([
-        fetchTeamApplications(selectedTeam),
-        decision === "accepted" ? fetchTeamMembers(selectedTeam.id) : Promise.resolve(),
-      ]);
+      setTeamApplications((previous) => previous.map((item) => item.id === application.id
+        ? { ...item, ...data?.request, status: data?.request?.status || decision } : item));
+      if (applicationFilter === "Pending") setApplicationFilter(decision === "accepted" ? "Accepted" : "Declined");
+      if (decision === "accepted") await fetchTeamMembers(selectedTeam.id);
       showAlert(
         "success",
         decision === "accepted" ? "Application Accepted" : "Application Declined",
@@ -655,6 +673,7 @@ export default function ProductionTeamScreen() {
     } catch (e: any) {
       showAlert("error", "Update Failed", e.message || "Could not update this application");
     } finally {
+      applicationDecisionRef.current = false;
       setRespondingApplicationId(null);
     }
   };

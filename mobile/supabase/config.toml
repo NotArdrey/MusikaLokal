@@ -65,6 +65,9 @@ verify_jwt = false
 [functions.connection-member-verification]
 verify_jwt = false
 
+[functions.connection-genre-review]
+verify_jwt = false
+
 [functions.upload-safety-screen]
 verify_jwt = false
 

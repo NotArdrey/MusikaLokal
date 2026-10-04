@@ -1,7 +1,10 @@
+import { attachConnectionGenreReviews } from "./connectionGenreReview.ts";
+import { submittedGenreFit } from "./submittedGenreFit.ts";
+
 type CriterionMode = "required" | "ignore";
 type TargetType = "group" | "production_team";
 
-const MODEL_VERSION = "connection-fit-v2-server";
+const MODEL_VERSION = "connection-fit-v3-submitted-genres";
 
 const uniqueStrings = (values: unknown[]): string[] => {
   const output: string[] = [];
@@ -128,7 +131,7 @@ const getPerformer = (application: any) => {
   };
 };
 
-const evaluate = (application: any, targetType: TargetType, target: any, settings: ReturnType<typeof normalizeSettings>) => {
+const evaluate = (application: any, targetType: TargetType, target: any, settings: ReturnType<typeof normalizeSettings>, genreReview?: any) => {
   const performer = getPerformer(application);
   const matched: string[] = [];
   const missing: string[] = [];
@@ -136,6 +139,7 @@ const evaluate = (application: any, targetType: TargetType, target: any, setting
   let earnedPoints = 0;
   let possiblePoints = 0;
   let missingRequired = false;
+  let genreNeedsReview = false;
 
   const valueCriterion = (
     key: "genres" | "instruments",
@@ -169,7 +173,19 @@ const evaluate = (application: any, targetType: TargetType, target: any, setting
   };
 
   valueCriterion("instruments", "Instrument or role fit", 30, settings.required_instruments, performer.instruments, application?.sender_group ? "group_roster" : "profile");
-  valueCriterion("genres", "Genre fit", 25, settings.required_genres, performer.genres, "profile");
+  if (settings.criteria.genres !== "ignore" && settings.required_genres.length > 0) {
+    possiblePoints += 25;
+    const result = submittedGenreFit(genreReview?.cv, genreReview?.video);
+    requirementResults.push(result);
+    if (result.status === "met") {
+      earnedPoints += 25;
+      matched.push("Genre fit");
+    } else {
+      missing.push(result.status === "unclear" ? "Genre fit could not be confirmed from the CV and performance video" : "Genre fit");
+      missingRequired = true;
+      genreNeedsReview = result.status === "unclear";
+    }
+  }
 
   let applicantDistanceKm: number | null = null;
   if (settings.criteria.location !== "ignore" && settings.location_radius_km !== null) {
@@ -221,10 +237,10 @@ const evaluate = (application: any, targetType: TargetType, target: any, setting
 
   const hasCriteria = possiblePoints > 0;
   const score = hasCriteria ? Math.max(0, Math.min(100, Math.round((earnedPoints / possiblePoints) * 100))) : null;
-  const recommendationStatus = !hasCriteria ? "insufficient_data" : missingRequired ? "not_eligible" : "recommended";
+  const recommendationStatus = !hasCriteria ? "insufficient_data" : genreNeedsReview ? "needs_review" : missingRequired ? "not_eligible" : "recommended";
   const explanation = recommendationStatus === "recommended"
     ? `Meets the configured ${targetType === "group" ? "group" : "production team"} criteria. Review the ${score}% advisory fit before deciding.`
-    : recommendationStatus === "not_eligible"
+    : recommendationStatus === "not_eligible" || recommendationStatus === "needs_review"
       ? "At least one required criterion could not be confirmed. Review every application before deciding."
       : "No applicable applicant match criteria are configured.";
 
@@ -251,6 +267,7 @@ const evaluate = (application: any, targetType: TargetType, target: any, setting
         has_portfolio: performer.has_portfolio,
       },
       requirement_results: requirementResults,
+      genre_review_status: genreReview?.status || "unavailable",
       distance_km: applicantDistanceKm === null ? null : Number(applicantDistanceKm.toFixed(1)),
       score_breakdown: { earned_points: earnedPoints, possible_points: possiblePoints },
     },
@@ -263,8 +280,9 @@ export function evaluateConnectionApplicantRecommendation(
   application: any,
   targetType: TargetType,
   target: any,
+  genreReview?: any,
 ) {
-  return evaluate(application, targetType, target, normalizeSettings(target, targetType));
+  return evaluate(application, targetType, target, normalizeSettings(target, targetType), genreReview);
 }
 
 const addGroqExplanations = async (evaluations: any[]) => {
@@ -364,7 +382,10 @@ export async function attachConnectionApplicantRecommendations(
     return applications.map((application) => ({ ...application, ai_recommendation: null }));
   }
 
-  let evaluations = applications.map((application) => evaluate(application, targetType, target, settings));
+  const genreReviews = settings.criteria.genres !== "ignore"
+    ? await attachConnectionGenreReviews(supabaseAdmin, applications, settings.required_genres)
+    : new Map<string, any>();
+  let evaluations = applications.map((application) => evaluate(application, targetType, target, settings, genreReviews.get(application.id)));
   evaluations = await addGroqExplanations(evaluations);
 
   if (evaluations.length > 0) {

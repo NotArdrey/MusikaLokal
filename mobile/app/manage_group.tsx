@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Image,
@@ -28,6 +28,8 @@ import ProfileAvatar from "../src/components/ProfileAvatar";
 import SlidingTabBar from "../src/components/SlidingTabBar";
 import SmoothTabTransition from "../src/components/SmoothTabTransition";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
+import useConnectionGenreReviewRefresh from "../src/hooks/useConnectionGenreReviewRefresh";
+import { invalidateListingCaches } from "../src/utils/listingCacheInvalidation";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { typography } from "../src/theme/tokens";
@@ -119,6 +121,22 @@ export default function GroupDetailsScreen() {
   const [memberApplicationFilter, setMemberApplicationFilter] = useState<ConnectionApplicationFilter>("All");
   const [selectedMemberApplication, setSelectedMemberApplication] = useState<any | null>(null);
   const [respondingGroupApplicationId, setRespondingGroupApplicationId] = useState<string | null>(null);
+  const groupApplicationDecisionRef = useRef(false);
+  useConnectionGenreReviewRefresh(groupMemberApplications, authorized && activeTab === "Applications", async () => {
+    if (!currentUserId || !id || groupApplicationDecisionRef.current) return;
+    const { data, error } = await supabase.functions.invoke("group-members", {
+      body: { action: "fetch_group_applications", userId: currentUserId, groupId: id },
+    });
+    if (error || data?.error || !Array.isArray(data?.applications) || groupApplicationDecisionRef.current) return;
+    const incoming = data.applications;
+    setGroupMemberApplications((previous) => incoming.map((application: any) => {
+      const existing = previous.find((item) => item.id === application.id);
+      return existing && existing.status !== "pending" && application.status === "pending"
+        ? { ...application, status: existing.status, event_details: existing.event_details } : application;
+    }));
+    setSelectedMemberApplication((selected: any) => selected
+      ? incoming.find((application: any) => application.id === selected.id) || selected : selected);
+  });
   const [applications, setApplications] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [groupPlaylists, setGroupPlaylists] = useState<any[]>([]);
@@ -621,6 +639,7 @@ export default function GroupDetailsScreen() {
     app: any,
     decision: "accepted" | "declined",
   ) => {
+    if (groupApplicationDecisionRef.current || String(app?.status || "pending").toLowerCase() !== "pending") return;
     const applicantName = app?.applicant?.full_name || "this applicant";
 
     setModalTitle(
@@ -633,6 +652,8 @@ export default function GroupDetailsScreen() {
     );
     setModalButtonText(decision === "accepted" ? "Accept" : "Decline");
     setModalAction(() => async () => {
+      if (groupApplicationDecisionRef.current) return;
+      groupApplicationDecisionRef.current = true;
       setRespondingGroupApplicationId(app.id);
       try {
         const { data, error } = await supabase.functions.invoke("group-members", {
@@ -648,6 +669,7 @@ export default function GroupDetailsScreen() {
         if (data?.error) throw new Error(data.error);
 
         const nextStatus = data?.request?.status || decision;
+        invalidateListingCaches(currentUserId, ["bookings", "details", "home", "notifications"]);
         setGroupMemberApplications((prev) =>
           prev.map((request) =>
             request.id === app.id
@@ -659,6 +681,11 @@ export default function GroupDetailsScreen() {
               : request,
           ),
         );
+        setSelectedMemberApplication((selected: any) => selected?.id === app.id
+          ? { ...selected, ...data?.request, status: nextStatus } : selected);
+        if (memberApplicationFilter === "Pending") {
+          setMemberApplicationFilter(decision === "accepted" ? "Accepted" : "Declined");
+        }
 
         if (data?.member) {
           setGroupMembers((prev) => {
@@ -696,6 +723,7 @@ export default function GroupDetailsScreen() {
           e?.message || "Failed to update the group application.",
         );
       } finally {
+        groupApplicationDecisionRef.current = false;
         setRespondingGroupApplicationId(null);
       }
     });
@@ -1519,6 +1547,10 @@ export default function GroupDetailsScreen() {
                     <Text style={{ color: colors.textSecondary, marginTop: 8 }}>
                       No member applications yet.
                     </Text>
+                  ) : memberApplicationCounts[memberApplicationFilter] === 0 ? (
+                    <Text style={{ color: colors.textSecondary, marginTop: 8 }}>
+                      No member applications match this filter.
+                    </Text>
                   ) : (
                     renderedGroupMemberApplications.map((app) => {
                       const rawStatus = String(app?.status || "pending");
@@ -2051,9 +2083,11 @@ export default function GroupDetailsScreen() {
         message={modalMessage}
         buttonText={modalButtonText}
         danger={modalButtonText === "Reject" || modalButtonText === "Decline"}
+        loading={Boolean(respondingGroupApplicationId)}
+        confirmDisabled={Boolean(respondingGroupApplicationId)}
         onConfirm={() => {
           if (modalAction) {
-            modalAction();
+            return modalAction();
           }
         }}
       />

@@ -99,3 +99,6 @@ content_path = "./supabase/templates/email_change.html"
 subject = "Confirm reauthentication - MusikaLokal"
 content_path = "./supabase/templates/reauthentication.html"
 
+
+[functions.connection-genre-review]
+verify_jwt = false

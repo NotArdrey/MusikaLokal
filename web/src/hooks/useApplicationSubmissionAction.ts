@@ -5,6 +5,7 @@ import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
 import { getGigReapplicationCooldownInfo } from "../utils/gigReapplicationCooldown";
 import { buildNotificationRouteMeta } from "../utils/notificationNavigation";
 import { sanitizeStorageFileName, uploadStorageObject } from "../utils/storageUpload";
+import { assertCvDocument } from "../utils/cvDocument";
 
 interface AlertConfig {
   type: "success" | "error" | "warning" | "info";
@@ -409,19 +410,15 @@ export const useApplicationSubmissionAction = ({
 
   const uploadDocument = useCallback(async (file: any) => {
     try {
-
-      const response = await fetch(file.uri);
-      const arrayBuffer = await response.arrayBuffer();
+      const contentType = assertCvDocument(file);
 
       const fileExt = file.name.split(".").pop() || "pdf";
       const fileName = `${userId}/cvs/${Date.now()}_cv.${fileExt}`;
 
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(fileName, arrayBuffer, {
-          contentType: file.mimeType || "application/pdf",
-          upsert: false,
-        });
+      const { data, error } = await uploadStorageObject({
+        bucket: "documents", path: fileName, uri: file.uri,
+        contentType, documentOnly: true, upsert: false,
+      });
 
       if (error) throw error;
 
@@ -437,6 +434,7 @@ export const useApplicationSubmissionAction = ({
   }, [userId]);
 
   const uploadGroupMemberDocument = useCallback(async (file: any) => {
+    const contentType = assertCvDocument(file);
     const fileExt = file.name?.split(".").pop() || "pdf";
     const safeFileName = sanitizeStorageFileName(
       file.name || `cv.${fileExt}`,
@@ -447,7 +445,8 @@ export const useApplicationSubmissionAction = ({
       bucket: "application-cvs",
       path,
       uri: file.uri,
-      contentType: file.mimeType || "application/pdf",
+      contentType,
+      documentOnly: true,
       upsert: false,
     });
     if (error) throw error;
