@@ -12,7 +12,7 @@ import SlidingTabBar from "./SlidingTabBar";
 import { useTheme } from "../context/ThemeContext";
 
 type StaffWorkspaceTabsProps = {
-  activeKey: StaffEntityType;
+  activeKey: StaffEntityType | "history";
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
 };
@@ -78,11 +78,11 @@ export default function StaffWorkspaceTabs({ activeKey, style, textStyle }: Staf
     return activeTab?.key ?? activeKey;
   }, [activeKey, pathname, visibleTabs]);
   const tabItems = useMemo(
-    () => visibleTabs.map((tab) => ({ key: tab.key, label: tab.label })),
+    () => [...visibleTabs.map((tab) => ({ key: tab.key, label: tab.label })), { key: "history" as const, label: "My History" }],
     [visibleTabs],
   );
 
-  if (visibleTabs.length <= 1) return null;
+  if (visibleTabs.length === 0 && activeKey !== "history") return null;
 
   return (
     <SlidingTabBar
@@ -93,6 +93,10 @@ export default function StaffWorkspaceTabs({ activeKey, style, textStyle }: Staf
       indicatorColor={colors.primary}
       indicatorWidthRatio={0.28}
       onChange={(nextKey) => {
+        if (nextKey === "history") {
+          if (routeActiveKey !== "history") router.replace("/my_history" as any);
+          return;
+        }
         const nextTab = visibleTabs.find((tab) => tab.key === nextKey);
         if (nextTab && nextKey !== routeActiveKey) router.replace(nextTab.route as any);
       }}
@@ -101,6 +105,8 @@ export default function StaffWorkspaceTabs({ activeKey, style, textStyle }: Staf
       style={[styles.container, style]}
       tabs={tabItems}
       textStyle={[styles.label, textStyle]}
+      labelNumberOfLines={2}
+      tabStyle={{ paddingHorizontal: 2 }}
     />
   );
 }
@@ -111,6 +117,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   label: {
-    fontSize: 12,
+    fontSize: 11,
   },
 });

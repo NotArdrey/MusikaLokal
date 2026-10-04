@@ -1,3 +1,6 @@
+import ListingLifecycleAction from "../src/components/ListingLifecycleAction";
+import { typography } from "../src/theme/tokens";
+import { managementCardStyles } from "../src/theme/managementCards";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -111,6 +114,7 @@ export default function StudioDetailsScreen() {
 
   const [authorized, setAuthorized] = useState(false);
   const [canManageStudio, setCanManageStudio] = useState(false);
+  const [canChangeLifecycle, setCanChangeLifecycle] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   const [studio, setStudio] = useState<any>(null);
@@ -346,6 +350,7 @@ export default function StudioDetailsScreen() {
       }
 
       let mayManageStudio = false;
+      let mayEditStudio = false;
       let mayViewStudio = false;
       if (profile?.role === "studio-owner") {
         const { data: ownedStudio, error: ownedStudioError } = await supabase
@@ -357,6 +362,7 @@ export default function StudioDetailsScreen() {
 
         if (ownedStudioError) throw ownedStudioError;
         mayManageStudio = !!ownedStudio?.id;
+        mayEditStudio = mayManageStudio;
         mayViewStudio = mayManageStudio;
       }
 
@@ -368,6 +374,7 @@ export default function StudioDetailsScreen() {
           assignment.studio_id === studioId;
         mayViewStudio = isAssignedStudio;
         mayManageStudio = isAssignedStudio && permissions.canManageBookings;
+        mayEditStudio = isAssignedStudio && getStaffPermissions(assignment?.access_level, assignment).canEditListing;
       }
 
       if (!mayViewStudio) {
@@ -377,6 +384,7 @@ export default function StudioDetailsScreen() {
       }
 
       setCanManageStudio(mayManageStudio);
+      setCanChangeLifecycle(mayEditStudio);
       setAuthorized(true);
       if (id) fetchData(user.id);
     } catch (e) {
@@ -397,7 +405,6 @@ export default function StudioDetailsScreen() {
         router.replace("/home");
         return;
       }
-
 
       // Base query + legacy projection merge
       const { data: studioData, error: studioError } = await supabase
@@ -1137,7 +1144,7 @@ export default function StudioDetailsScreen() {
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title={canManageStudio ? "Manage Studio" : "View Studio"} />
+        <Header title={canManageStudio ? "Manage Studio" : "View Studio"} onBackPress={() => router.canGoBack() ? router.back() : router.replace("/my_studio")} />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -1182,6 +1189,12 @@ export default function StudioDetailsScreen() {
                 <Text style={styles.navigateButtonText}>Navigate</Text>
               </TouchableOpacity>
             )}
+            {studio && canChangeLifecycle ? (
+              <ListingLifecycleAction
+                type="studio" id={studio.id} name={studio.name} status={studio.management_status}
+                onChanged={(management_status) => setStudio((current: any) => current ? { ...current, management_status } : current)}
+              />
+            ) : null}
           </View>
 
           {/* Tabs */}
@@ -1217,7 +1230,7 @@ export default function StudioDetailsScreen() {
                   <View
                     style={[
                       styles.infoCard,
-                      { backgroundColor: colors.surface },
+                      { backgroundColor: colors.surface, borderColor: colors.border },
                     ]}
                   >
                     <Text
@@ -1235,7 +1248,7 @@ export default function StudioDetailsScreen() {
                   <View
                     style={[
                       styles.infoCard,
-                      { backgroundColor: colors.surface },
+                      { backgroundColor: colors.surface, borderColor: colors.border },
                     ]}
                   >
                     <Text
@@ -1256,7 +1269,7 @@ export default function StudioDetailsScreen() {
                   <View
                     style={[
                       styles.infoCard,
-                      { backgroundColor: colors.surface },
+                      { backgroundColor: colors.surface, borderColor: colors.border },
                     ]}
                   >
                     <Text
@@ -1984,17 +1997,6 @@ export default function StudioDetailsScreen() {
                                   ]}
                                 >
                                   <View style={styles.calendarBookingTopRow}>
-                                    <View
-                                      style={[
-                                        styles.calendarTimePill,
-                                        { backgroundColor: statusTone.color },
-                                      ]}
-                                    >
-                                      <Text style={styles.calendarTimePillText}>
-                                        {getBookingTimeSummary(booking)}
-                                      </Text>
-                                    </View>
-
                                     <View style={{ flex: 1, minWidth: 0 }}>
                                       <Text
                                         style={[
@@ -2042,6 +2044,16 @@ export default function StudioDetailsScreen() {
                                         {badgeLabel}
                                       </Text>
                                     </View>
+                                  </View>
+                                  <View
+                                    style={[
+                                      styles.calendarTimePill,
+                                      { backgroundColor: statusTone.color },
+                                    ]}
+                                  >
+                                    <Text style={styles.calendarTimePillText}>
+                                      {getBookingTimeSummary(booking)}
+                                    </Text>
                                   </View>
 
                                   <View style={styles.calendarBookingMetaRow}>
@@ -2221,7 +2233,7 @@ export default function StudioDetailsScreen() {
                         key={booking.id}
                         style={[
                           styles.bookingCard,
-                          { backgroundColor: colors.surface, marginBottom: 12 },
+                          { backgroundColor: colors.surface, marginBottom: 12, borderColor: colors.border },
                         ]}
                       >
                         <View style={styles.bookingHeader}>
@@ -2488,7 +2500,7 @@ export default function StudioDetailsScreen() {
                     key={review.id}
                     style={[
                       styles.reviewCard,
-                      { backgroundColor: colors.surface, marginBottom: 12 },
+                      { backgroundColor: colors.surface, marginBottom: 12, borderColor: colors.border },
                     ]}
                   >
                     <View style={styles.reviewUserHeader}>
@@ -2503,7 +2515,8 @@ export default function StudioDetailsScreen() {
                         />
                         <Text
                           style={{
-                            fontFamily: "Poppins_600SemiBold",
+                            fontFamily: typography.semibold,
+                              flex: 1,
                             color: colors.text,
                           }}
                         >
@@ -2514,7 +2527,8 @@ export default function StudioDetailsScreen() {
                         style={{
                           fontSize: 12,
                           color: colors.textSecondary,
-                          fontFamily: "Poppins_400Regular",
+                          fontFamily: typography.body,
+                            flexShrink: 1,
                         }}
                       >
                         {formatFriendlyDateTime(review.created_at)}
@@ -2711,7 +2725,7 @@ export default function StudioDetailsScreen() {
             </ScrollView>
 
             {/* Summary */}
-            <View style={[styles.slotSummary, { borderColor: colors.border }]}>
+          <View style={[styles.slotSummary, { borderColor: colors.border }]}>
               <View style={styles.summaryRow}>
                 <View
                   style={[styles.summaryDot, { backgroundColor: "#10B981" }]}
@@ -2818,12 +2832,13 @@ const styles = StyleSheet.create({
   },
   navigateButton: {
     marginTop: 12,
+    minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderRadius: 999,
+    borderRadius: 12,
   },
   navigateButtonText: {
     color: "#FFF",
@@ -2856,21 +2871,19 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     fontFamily: "Poppins_400Regular",
   },
-  infoCard: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 16,
-  },
+  infoCard: { ...managementCardStyles.surface, flex: 1 },
   infoLabel: {
-    fontSize: 12,
     textTransform: "uppercase",
-    letterSpacing: 1,
     marginBottom: 4,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
+    fontSize: 10,
+    lineHeight: 15,
+    letterSpacing: 0.5,
   },
   infoValue: {
+    fontFamily: typography.semibold,
     fontSize: 18,
-    fontFamily: "Poppins_600SemiBold",
+    lineHeight: 24,
   },
   sectionTitle: {
     fontSize: 18,
@@ -2910,14 +2923,7 @@ const styles = StyleSheet.create({
   equipmentList: {
     gap: 12,
   },
-  equipmentDetailCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-  },
+  equipmentDetailCard: { ...managementCardStyles.surface, flexDirection: "row", alignItems: "center", gap: 12 },
   equipmentThumb: {
     width: 56,
     height: 56,
@@ -2943,11 +2949,7 @@ const styles = StyleSheet.create({
   promotionList: {
     gap: 12,
   },
-  promotionCard: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 14,
-  },
+  promotionCard: { ...managementCardStyles.surface },
   promotionHeader: {
     flexDirection: "row",
     gap: 12,
@@ -2967,17 +2969,8 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_700Bold",
     fontSize: 14,
   },
-  promotionMetaText: {
-    marginTop: 8,
-    fontFamily: "Poppins_400Regular",
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  documentMetaCard: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 16,
-  },
+  promotionMetaText: { ...managementCardStyles.body, marginTop: 8 },
+  documentMetaCard: { ...managementCardStyles.surface },
   documentMetaRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -3004,15 +2997,7 @@ const styles = StyleSheet.create({
   addGearText: {
     fontFamily: "Poppins_600SemiBold",
   },
-  mediaButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
+  mediaButton: { ...managementCardStyles.button, flexDirection: "row", paddingVertical: 12, borderWidth: 1 },
   roomProfileCard: {
     padding: 16,
     borderRadius: 16,
@@ -3060,57 +3045,36 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Poppins_500Medium",
   },
-  bookingCard: {
-    padding: 16,
-    borderRadius: 24,
-  },
-  calendarBookingCard: {
-    width: "100%",
-    borderWidth: 1,
-    borderRadius: 18,
-    padding: 14,
-    marginBottom: 10,
-    gap: 12,
-  },
-  calendarBookingTopRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
+  bookingCard: { ...managementCardStyles.surface },
+  calendarBookingCard: { ...managementCardStyles.surface, width: "100%", marginBottom: 10, gap: 12 },
+  calendarBookingTopRow: { flexDirection: "row", gap: 10, flexWrap: "wrap", alignItems: "flex-start" },
   calendarTimePill: {
-    minWidth: 92,
     maxWidth: 118,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
+    alignSelf: "flex-start",
+    minWidth: 0,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
   },
   calendarTimePillText: {
     color: "#FFFFFF",
-    fontSize: 12,
-    lineHeight: 16,
     textAlign: "center",
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.semibold,
+    fontSize: 12,
+    lineHeight: 18,
   },
-  calendarBookingName: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 15,
-    lineHeight: 20,
-  },
-  calendarBookingEmail: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 11,
-    lineHeight: 16,
-  },
+  calendarBookingName: { ...managementCardStyles.title },
+  calendarBookingEmail: { ...managementCardStyles.metadata },
   calendarStatusBadge: {
     maxWidth: 112,
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 999,
+    borderRadius: 7,
+    paddingVertical: 4,
   },
   calendarStatusBadgeText: {
     flexShrink: 1,
@@ -3128,15 +3092,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     borderWidth: 1,
-    borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
+    borderRadius: 8,
+    flexShrink: 1,
   },
-  calendarMetaPillText: {
-    fontFamily: "Poppins_500Medium",
-    fontSize: 11,
-    lineHeight: 15,
-  },
+  calendarMetaPillText: { fontSize: 11, lineHeight: 15, flexShrink: 1, fontFamily: typography.medium },
   calendarSlotList: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -3172,34 +3133,23 @@ const styles = StyleSheet.create({
   },
   bookingHeader: {
     flexDirection: "row",
-    alignItems: "center",
     gap: 12,
     marginBottom: 12,
+    alignItems: "flex-start",
+    flexWrap: "wrap",
   },
-  bookingImage: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-  },
-  bookingTitle: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 16,
-  },
-  bookingSubtitle: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 12,
-  },
+  bookingImage: { ...managementCardStyles.thumbnail },
+  bookingTitle: { ...managementCardStyles.title },
+  bookingSubtitle: { ...managementCardStyles.metadata },
   bookingPriceContainer: {
-    alignItems: "flex-end",
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
   },
-  bookingPrice: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 16,
-  },
-  bookingDuration: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 11,
-  },
+  bookingPrice: { fontSize: 16, fontFamily: typography.semibold },
+  bookingDuration: { ...managementCardStyles.metadata },
   bookingDateContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -3218,25 +3168,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Poppins_400Regular",
   },
-  actionButtons: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  declineButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  acceptButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  actionButtons: { flexDirection: "row", gap: 8 },
+  declineButton: { ...managementCardStyles.button, flex: 1, paddingVertical: 12, borderWidth: 1 },
+  acceptButton: { ...managementCardStyles.button, flex: 1, paddingVertical: 12 },
   reviewHeader: {
     alignItems: "center",
     marginBottom: 32,
@@ -3251,30 +3185,28 @@ const styles = StyleSheet.create({
     gap: 4,
     marginBottom: 8,
   },
-  reviewCard: {
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 16,
-  },
+  reviewCard: { ...managementCardStyles.surface, marginBottom: 16 },
   reviewUserHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
     marginBottom: 8,
+    flexWrap: "wrap",
+    gap: 8,
   },
   userInfo: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    flex: 1,
+    minWidth: 120,
   },
   userAvatar: {
     width: 32,
     height: 32,
     borderRadius: 16,
   },
-  reviewText: {
-    lineHeight: 20,
-  },
+  reviewText: { ...managementCardStyles.body },
   timeSlotChip: {
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -3283,14 +3215,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  contractCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 16,
-  },
+  contractCard: { ...managementCardStyles.surface, flexDirection: "row", alignItems: "center", marginBottom: 16 },
   contractIcon: {
     width: 48,
     height: 48,
@@ -3298,23 +3223,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  contractTitle: {
-    fontSize: 16,
-    fontFamily: "Poppins_600SemiBold",
-    marginBottom: 2,
-  },
-  contractSubtitle: {
-    fontSize: 12,
-    fontFamily: "Poppins_400Regular",
-  },
-  noContractCard: {
-    padding: 24,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderStyle: "dashed",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  contractTitle: { fontSize: 16, marginBottom: 2, fontFamily: typography.semibold },
+  contractSubtitle: { ...managementCardStyles.metadata },
+  noContractCard: { ...managementCardStyles.surface, borderStyle: "dashed", alignItems: "center", justifyContent: "center" },
   noContractText: {
     fontSize: 14,
     fontFamily: "Poppins_500Medium",
@@ -3322,11 +3233,9 @@ const styles = StyleSheet.create({
   },
   // Partial Approval Styles
   partialApprovalButton: {
+    ...managementCardStyles.button,
     flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
     paddingVertical: 12,
-    borderRadius: 12,
     borderWidth: 1,
     borderStyle: "dashed",
   },
@@ -3410,5 +3319,4 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 });
-
 

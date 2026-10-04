@@ -1,7 +1,11 @@
+import ManagedListingContent, { ManagedListingScreenProps } from "../../src/components/ManagedListingContent";
+import ManageWorkspaceTabs from "../../src/components/ManageWorkspaceTabs";
+import { isGigInHistory } from '../../src/utils/listingHistory';
+import { managementCardStyles } from "../../src/theme/managementCards";
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { runAfterUIIdle } from '../../src/utils/idleTask';
 import CachedImage from '../../src/components/CachedImage';
@@ -9,10 +13,8 @@ import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
 import InlineErrorBanner from '../../src/components/InlineErrorBanner';
 import Modal, { normalizeVisibleInput } from '../../src/components/modal';
-import MusicianWorkspaceTabs from '../../src/components/MusicianWorkspaceTabs';
 import Navbar from '../../src/components/navbar';
 import Skeleton from '../../src/components/Skeleton';
-import StaffWorkspaceTabs from '../../src/components/StaffWorkspaceTabs';
 import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -21,79 +23,16 @@ import { formatFriendlyDateTime } from '../../src/utils/friendlyDateTime';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
 import { StaffAssignment, fetchActiveStaffAssignments, getStaffPermissions } from '../../src/utils/staffAccess';
 import { createRealtimeChannelTopic } from '../../src/utils/realtimeChannel';
-import { palette, radius, typography } from '../../src/theme/tokens';
+import { palette, typography } from '../../src/theme/tokens';
 
 const DEFAULT_GIG_IMAGE = 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop';
-const JOINED_GIG_APPLICATION_STATUSES = ['accepted', 'approved'];
-const FINISHED_GIG_STATUSES = new Set(['cancelled', 'canceled', 'completed', 'done']);
-
+const JOINED_GIG_APPLICATION_STATUSES = ['accepted', 'approved', 'completed'];
 const normalizeStatus = (status: unknown) => String(status || '').trim().toLowerCase();
-
-const isJoinedGigApplicationStatus = (status: unknown) =>
-    JOINED_GIG_APPLICATION_STATUSES.includes(normalizeStatus(status));
-
-const parseClockTime = (timeValue: unknown) => {
-    const timeText = String(timeValue || '').trim();
-    if (!timeText) return null;
-
-    const match = timeText.match(/^(\d{1,2})(?::(\d{2}))?(?::\d{2})?\s*(AM|PM)?$/i);
-    if (!match) return null;
-
-    let hours = Number(match[1]);
-    const minutes = Number(match[2] || '0');
-    const period = match[3]?.toUpperCase();
-
-    if (!Number.isFinite(hours) || !Number.isFinite(minutes) || minutes < 0 || minutes > 59) {
-        return null;
-    }
-
-    if (period) {
-        if (hours < 1 || hours > 12) return null;
-        if (period === 'PM' && hours !== 12) hours += 12;
-        if (period === 'AM' && hours === 12) hours = 0;
-    } else if (hours < 0 || hours > 23) {
-        return null;
-    }
-
-    return { hours, minutes };
-};
-
-const parseGigDateTime = (dateValue: unknown, timeValue?: unknown, endOfDayFallback = false) => {
-    const dateText = String(dateValue || '').trim();
-    if (!dateText || dateText.toLowerCase() === 'tba') return null;
-
-    const baseDate = new Date(dateText.includes('T') ? dateText : `${dateText}T00:00:00`);
-    if (Number.isNaN(baseDate.getTime())) return null;
-
-    const clock = parseClockTime(timeValue);
-    if (clock) {
-        baseDate.setHours(clock.hours, clock.minutes, 0, 0);
-    } else if (endOfDayFallback) {
-        baseDate.setHours(23, 59, 59, 999);
-    }
-
-    return baseDate;
-};
-
-const isUpcomingOrOngoingGig = (gig: any, now = new Date()) => {
-    if (FINISHED_GIG_STATUSES.has(normalizeStatus(gig?.status))) {
-        return false;
-    }
-
-    const startDateTime = parseGigDateTime(gig?.event_date, gig?.requirements?.event_start_time);
-    const endDateTime = parseGigDateTime(gig?.event_date, gig?.requirements?.event_end_time, true);
-    if (!endDateTime) return true;
-
-    if (startDateTime && endDateTime.getTime() < startDateTime.getTime()) {
-        endDateTime.setDate(endDateTime.getDate() + 1);
-    }
-
-    return endDateTime.getTime() >= now.getTime();
-};
+const isJoinedGigApplicationStatus = (status: unknown) => JOINED_GIG_APPLICATION_STATUSES.includes(normalizeStatus(status));
 
 const collectJoinedGigIdsFromBookingsPayload = (payload: any) => {
     const buckets = payload?.categorized || payload || {};
-    const rows = ['Upcoming', 'Ongoing', 'Review']
+    const rows = ['Upcoming', 'Ongoing', 'Review', 'History']
         .flatMap((key) => Array.isArray(buckets?.[key]) ? buckets[key] : []);
 
     return Array.from(
@@ -145,7 +84,7 @@ const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     return normalizedPermitStatus;
 };
 
-export default function MyVenueScreen() {
+export default function MyVenueScreen({ historyOnly = false, embedded = false }: ManagedListingScreenProps = {}) {
     const { colors, isDark } = useTheme();
     const { contentBottomPadding } = useBottomBarClearance(24);
     const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
@@ -160,6 +99,7 @@ export default function MyVenueScreen() {
     const [selectedName, setSelectedName] = useState('');
     const [cancellationReason, setCancellationReason] = useState('');
     const [gigs, setGigs] = useState<any[]>([]);
+    const visibleGigs = gigs.filter((item) => historyOnly ? isGigInHistory(item) : !(isGigInHistory(item)));
     const [staffAssignments, setStaffAssignments] = useState<StaffAssignment[]>([]);
     const [staffAddOwnerState, setStaffAddOwnerState] = useState<{ userId: string; ownerIds: string[] } | null>(null);
     const [loading, setLoading] = useState(true);
@@ -181,7 +121,7 @@ export default function MyVenueScreen() {
     const showAlert = useCallback((type: AlertType, title: string, message: string, buttons?: any[]) => {
         setAlertConfig({ type, title, message, buttons });
         setAlertVisible(true);
-    }, []);
+    }, [setAlertConfig, setAlertVisible]);
 
     const fetchGigs = useCallback(async (options?: { showAlertOnError?: boolean }) => {
         if (!userId) return;
@@ -287,7 +227,7 @@ export default function MyVenueScreen() {
 
                 const { data: joinedGigs, error: joinedGigsError } = await supabase
                     .from('gigs')
-                    .select('id, organizer_id, name, location, budget, description, event_date, status, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
+                    .select('id, organizer_id, name, location, budget, description, event_date, status, management_status, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
                     .in('id', joinedGigIds)
                     .order('created_at', { ascending: false });
 
@@ -296,7 +236,7 @@ export default function MyVenueScreen() {
             } else {
                 let gigsQuery = supabase
                     .from('gigs')
-                    .select('id, organizer_id, name, location, budget, description, event_date, status, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
+                    .select('id, organizer_id, name, location, budget, description, event_date, status, management_status, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
                     .order('created_at', { ascending: false });
 
                 const assignedGigIds = activeStaffAssignments.map((assignment) => assignment.gig_id).filter(Boolean) as string[];
@@ -402,7 +342,7 @@ export default function MyVenueScreen() {
                 };
             });
 
-            setGigs(hydratedGigs.filter((gig: any) => isUpcomingOrOngoingGig(gig)));
+            setGigs(hydratedGigs);
         } catch (e) {
             const message = getActionErrorMessage(e, 'Failed to load gigs.');
             logActionError('MyVenue', 'fetchGigs', e, { userId, isMusicianView });
@@ -478,7 +418,7 @@ export default function MyVenueScreen() {
 
     const onRefresh = () => {
         setRefreshing(true);
-        void fetchGigs({ showAlertOnError: true });
+        return fetchGigs({ showAlertOnError: true });
     };
 
     const closeDeleteModal = () => {
@@ -602,35 +542,32 @@ export default function MyVenueScreen() {
 
     return (
         <>
-            <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header
+            <View style={[!embedded && styles.flex1, { backgroundColor: colors.background }]}>
+                {!embedded && (<Header
                     title="My Gigs"
                     overline="MusikaLokal"
                     showTitle={false}
                     onAddPress={staffHeaderAddOwnerId ? openStaffAddGig : undefined}
                     addButtonAccessibilityLabel="Add gig"
-                />
+                />)}
 
-                <ScrollView
+                <ManagedListingContent embedded={embedded} listingType="gig" loading={loading} itemCount={visibleGigs.length} error={loadError}
                     showsVerticalScrollIndicator={false}
-                    contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
+                    contentContainerStyle={[styles.scrollContent, { paddingBottom: embedded ? 16 : contentBottomPadding }]}
                     style={styles.flex1}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 >
-                    {isMusicianView && (
-                        <MusicianWorkspaceTabs activeKey="venue" />
-                    )}
-                    {userRole === 'staff' && <StaffWorkspaceTabs activeKey="venue" />}
+                    {!embedded && <ManageWorkspaceTabs activeKey={historyOnly ? "history" : "venue"} />}
 
-                    <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>DATES, TALENT & APPLICANTS</Text>
+                    {!embedded && (<Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>DATES, TALENT & APPLICANTS</Text>)}
 
-                    <InlineErrorBanner
+                    {!embedded && (<InlineErrorBanner
                         message={loadError}
                         onRetry={() => {
                             if (gigs.length === 0) setLoading(true);
                             void fetchGigs({ showAlertOnError: true });
                         }}
-                    />
+                    />)}
 
                     {loading ? (
                         <View style={styles.skeletonList}>
@@ -639,36 +576,41 @@ export default function MyVenueScreen() {
                                     key={`gig-skeleton-${index}`}
                                     style={[styles.skeletonCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
                                 >
-                                    <Skeleton width="100%" height={192} borderRadius={18} />
-                                    <Skeleton width="66%" height={22} style={{ marginTop: 14 }} />
+                                    <View style={styles.cardIdentity}>
+                                        <Skeleton width={64} height={64} borderRadius={10} />
+                                        <View style={styles.cardHeading}>
+                                            <Skeleton width="80%" height={22} />
+                                            <Skeleton width="65%" height={14} style={{ marginTop: 6 }} />
+                                        </View>
+                                    </View>
                                     <Skeleton width="74%" height={14} style={{ marginTop: 10 }} />
                                     <Skeleton width="100%" height={14} style={{ marginTop: 8 }} />
                                     <View style={styles.skeletonActionRow}>
-                                        <Skeleton width={124} height={40} borderRadius={12} />
-                                        <Skeleton width={40} height={40} borderRadius={12} />
-                                        <Skeleton width={40} height={40} borderRadius={12} />
+                                        <Skeleton width={124} height={44} borderRadius={9} />
+                                        <Skeleton width={44} height={44} borderRadius={9} />
+                                        <Skeleton width={44} height={44} borderRadius={9} />
                                     </View>
                                 </View>
                             ))}
                         </View>
-                    ) : gigs.length === 0 ? (
+                    ) : visibleGigs.length === 0 ? (
                         <View style={styles.emptyState}>
                             <Ionicons name="musical-notes-outline" size={48} color={colors.textSecondary} />
-                            <Text style={[styles.emptyTitle, { color: colors.text }]}>No active gigs</Text>
+                            <Text style={[styles.emptyTitle, { color: colors.text }]}>{historyOnly ? 'No past gigs yet' : 'No active gigs'}</Text>
                             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                                {isMusicianView ? 'Your accepted upcoming and ongoing gigs appear here.' : 'Your upcoming and ongoing gigs appear here.'}
+                                {historyOnly ? 'Your past and cancelled gigs appear here. Completed gigs keep their original records.' : isMusicianView ? 'Your accepted upcoming and ongoing gigs appear here.' : 'Your upcoming and ongoing gigs appear here.'}
                             </Text>
                         </View>
                     ) : (
-                        gigs.map((gig) => (
+                        visibleGigs.map((gig) => (
                             <View
                                 key={gig.id}
                                 testID={`mobile-gig-card-${gig.id}`}
                                 accessibilityLabel={`mobile-gig-card-${gig.id}`}
                                 style={[styles.cardContainer, {
-                                backgroundColor: colors.surface,
-                                shadowColor: colors.primary,
-                            }]}
+                                    backgroundColor: colors.surface,
+                                    borderColor: colors.border,
+                                }]}
                             >
                                 {(() => {
                                     const normalizedPermitStatus = normalizePermitStatus(gig.permit_status);
@@ -705,136 +647,148 @@ export default function MyVenueScreen() {
 
                                     return (
                                         <>
-                                <View style={styles.imageWrapper}>
-                                    <CachedImage
-                                        uri={resolveGigImage(gig)}
-                                        style={styles.cardImage}
-                                        width={420}
-                                        height={220}
-                                        quality={68}
-                                        priority="high"
-                                        cacheVersion={gig.updated_at || gig.created_at || gig.id}
-                                    />
-                                    <View style={[styles.statusBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
-                                        <Text style={[styles.statusText, { color: colors.primary }]}>{gig.status || 'Active'}</Text>
-                                    </View>
-                                </View>
+                                            <View style={styles.cardIdentity}>
+                                                <View style={styles.imageWrapper}>
+                                                    <CachedImage
+                                                        uri={resolveGigImage(gig)}
+                                                        style={styles.cardImage}
+                                                        width={128}
+                                                        height={128}
+                                                        quality={68}
+                                                        priority="high"
+                                                        cacheVersion={gig.updated_at || gig.created_at || gig.id}
+                                                    />
+                                                </View>
+                                                <View style={styles.cardHeading}>
+                                                    <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={2}>{gig.name}</Text>
+                                                    <Text style={[styles.cardSubTitle, { color: colors.textSecondary }]}>
+                                                        {gig.event_date ? formatFriendlyDateTime(gig.event_date, { forceDateOnly: true }) : 'Date TBA'}
+                                                        {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` · ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''}
+                                                    </Text>
+                                                    <View style={[styles.statusBadge, { backgroundColor: colors.inputBackground }]}>
+                                                        <Text style={[styles.statusText, { color: colors.primary }]}>{gig.management_status === 'done' ? 'Done' : isGigInHistory(gig) && gig.status !== 'cancelled' ? 'Past' : gig.status || 'Active'}</Text>
+                                                    </View>
+                                                </View>
+                                            </View>
 
-                                <View style={styles.cardContent}>
-                                    <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={2}>{gig.name}</Text>
-                                    <Text style={[styles.cardSubTitle, { color: colors.textSecondary }]}>
-                                        {gig.event_date ? formatFriendlyDateTime(gig.event_date, { forceDateOnly: true }) : 'Date TBA'}
-                                        {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` · ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''}
-                                    </Text>
-                                    {!!gig.location && <Text style={[styles.cardLocation, { color: colors.textSecondary }]}>{gig.location}</Text>}
-                                    {gig.budget != null && <Text style={[styles.cardBudget, { color: colors.text }]}>PHP {gig.budget.toLocaleString()} talent fee</Text>}
+                                            <View style={styles.cardContent}>
+                                                {!!gig.location && (
+                                                    <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.cardLocation, { color: colors.textSecondary }]}>
+                                                        {gig.location}
+                                                    </Text>
+                                                )}
+                                                {gig.budget != null && <Text style={[styles.cardBudget, { color: colors.text }]}>PHP {gig.budget.toLocaleString()} talent fee</Text>}
 
-                                    <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
-                                        {String(gig.description || '').replace(/^\[role_accurate_demo_seed_v\d+\]\s*/i, '')}
-                                    </Text>
+                                                {!isApproved && (
+                                                    <View style={[styles.permitStatusChip, { backgroundColor: permitBadgeBackground }]}>
+                                                        <Text style={[styles.permitStatusChipText, { color: permitBadgeColor }]}>Permit: {permitStatusLabel}</Text>
+                                                    </View>
+                                                )}
 
-                                    {!isApproved && (
-                                        <View style={[styles.permitStatusChip, { backgroundColor: permitBadgeBackground }]}>
-                                            <Text style={[styles.permitStatusChipText, { color: permitBadgeColor }]}>Permit: {permitStatusLabel}</Text>
-                                        </View>
-                                    )}
+                                                {isRejected && !!gig.permit_rejection_reason && (
+                                                    <Text style={styles.rejectionReasonText} numberOfLines={3}>
+                                                        Rejection reason: {gig.permit_rejection_reason}
+                                                    </Text>
+                                                )}
 
-                                    {isRejected && !!gig.permit_rejection_reason && (
-                                        <Text style={styles.rejectionReasonText} numberOfLines={3}>
-                                            Rejection reason: {gig.permit_rejection_reason}
-                                        </Text>
-                                    )}
+                                                {(normalizedPermitStatus === 'pending' || normalizedPermitStatus === 'pending_review' || normalizedPermitStatus === 'resubmitted') && (
+                                                    <Text style={[styles.permitHintText, { color: colors.textSecondary }]}>
+                                                        Hidden from Home right now.
+                                                    </Text>
+                                                )}
 
-                                    {(normalizedPermitStatus === 'pending' || normalizedPermitStatus === 'pending_review' || normalizedPermitStatus === 'resubmitted') && (
-                                        <Text style={[styles.permitHintText, { color: colors.textSecondary }]}>
-                                            Hidden from Home right now.
-                                        </Text>
-                                    )}
+                                                <View style={[styles.actionRow, { borderColor: colors.border }]}>
+                                                    <View style={styles.actionLeft}>
+                                                        <TouchableOpacity
+                                                            activeOpacity={1}
+                                                            testID={`mobile-gig-manage-${gig.id}`}
+                                                            accessibilityLabel={`mobile-gig-manage-${gig.id}`}
+                                                            onPress={() => {
+                                                                if (canManageGig) {
+                                                                    router.push({ pathname: '/manage_gig', params: { id: gig.id } });
+                                                                    return;
+                                                                }
 
-                                    <View style={[styles.actionRow, { borderColor: colors.border }]}>
-                                        <View style={styles.actionLeft}>
-                                            <TouchableOpacity
-                                                activeOpacity={1}
-                                                testID={`mobile-gig-manage-${gig.id}`}
-                                                accessibilityLabel={`mobile-gig-manage-${gig.id}`}
-                                                onPress={() => {
-                                                    if (canManageGig) {
-                                                        router.push({ pathname: '/manage_gig', params: { id: gig.id } });
-                                                        return;
-                                                    }
+                                                                router.push({ pathname: '/manage_gig', params: { id: gig.id } });
+                                                            }}
+                                                            style={[styles.manageBtn, { borderColor: colors.primary }]}
+                                                        >
+                                                            <Text style={[styles.manageBtnText, { color: colors.primary }]}>{canManageGig ? 'Manage' : 'View'}</Text>
+                                                        </TouchableOpacity>
 
-                                                    router.push({ pathname: '/manage_gig', params: { id: gig.id } });
-                                                }}
-                                                style={[styles.manageBtn, { borderColor: colors.primary }]}
-                                            >
-                                                <Text style={[styles.manageBtnText, { color: colors.primary }]}>{canManageGig ? 'Manage' : 'View'}</Text>
-                                            </TouchableOpacity>
+                                                        {canEditVenue && gig.management_status !== 'done' && isRejected ? (
+                                                            <TouchableOpacity
+                                                                activeOpacity={1}
+                                                                onPress={() =>
+                                                                    router.push({
+                                                                        pathname: '/edit_gig',
+                                                                        params: { id: gig.id, reapply: '1' },
+                                                                    })
+                                                                }
+                                                                style={[
+                                                                    styles.reapplyBtn,
+                                                                    {
+                                                                        borderColor: '#F97316',
+                                                                        backgroundColor: isDark ? 'rgba(249,115,22,0.12)' : '#FFF7ED',
+                                                                    },
+                                                                ]}
+                                                            >
+                                                                <Ionicons name="refresh-outline" size={16} color="#EA580C" />
+                                                                <Text style={styles.reapplyBtnText}>Edit & Reapply</Text>
+                                                            </TouchableOpacity>
+                                                        ) : canEditVenue && gig.management_status !== 'done' ? (
+                                                            <TouchableOpacity
+                                                                activeOpacity={1}
+                                                                testID={`mobile-gig-edit-${gig.id}`}
+                                                                accessibilityLabel={`mobile-gig-edit-${gig.id}`}
+                                                                onPress={() => router.push({ pathname: '/edit_gig', params: { id: gig.id } })}
+                                                                style={[styles.editBtn, { borderColor: colors.border }]}
+                                                            >
+                                                                <Ionicons name="pencil-outline" size={20} color={colors.text} style={styles.editBtnIcon} />
+                                                            </TouchableOpacity>
+                                                        ) : !staffPermissions ? (
+                                                            <TouchableOpacity
+                                                                activeOpacity={1}
+                                                                onPress={() => handleOpenGigChat(gig)}
+                                                                style={[styles.editBtn, { borderColor: colors.border }]}
+                                                            >
+                                                                <Ionicons name="chatbubble-outline" size={20} color={colors.text} style={styles.editBtnIcon} />
+                                                            </TouchableOpacity>
+                                                        ) : null}
+                                                        {staffPermissions?.canAddListing && !staffHeaderAddOwnerId ? (
+                                                            <TouchableOpacity
+                                                                activeOpacity={1}
+                                                                testID={`mobile-gig-add-for-owner-${gig.id}`}
+                                                                accessibilityLabel={`Add gig for ${gig.name}`}
+                                                                onPress={() => router.push({ pathname: '/add_gig', params: { ownerId: gig.organizer_id } })}
+                                                                style={[styles.editBtn, { borderColor: colors.border }]}
+                                                            >
+                                                                <Ionicons name="add-outline" size={20} color={colors.text} />
+                                                            </TouchableOpacity>
+                                                        ) : null}
+                                                    </View>
 
-                                            {canEditVenue && isRejected ? (
-                                                <TouchableOpacity
-                                                    activeOpacity={1}
-                                                    onPress={() =>
-                                                        router.push({
-                                                            pathname: '/edit_gig',
-                                                            params: { id: gig.id, reapply: '1' },
-                                                        })
-                                                    }
-                                                    style={[
-                                                        styles.reapplyBtn,
-                                                        {
-                                                            borderColor: '#F97316',
-                                                            backgroundColor: isDark ? 'rgba(249,115,22,0.12)' : '#FFF7ED',
-                                                        },
-                                                    ]}
-                                                >
-                                                    <Ionicons name="refresh-outline" size={16} color="#EA580C" />
-                                                    <Text style={styles.reapplyBtnText}>Edit & Reapply</Text>
-                                                </TouchableOpacity>
-                                            ) : canEditVenue ? (
-                                                <TouchableOpacity
-                                                    activeOpacity={1}
-                                                    testID={`mobile-gig-edit-${gig.id}`}
-                                                    accessibilityLabel={`mobile-gig-edit-${gig.id}`}
-                                                    onPress={() => router.push({ pathname: '/edit_gig', params: { id: gig.id } })}
-                                                    style={[styles.editBtn, { borderColor: colors.border }]}
-                                                >
-                                                    <Ionicons name="pencil-outline" size={20} color={colors.text} style={styles.editBtnIcon} />
-                                                </TouchableOpacity>
-                                            ) : !staffPermissions ? (
-                                                <TouchableOpacity
-                                                    activeOpacity={1}
-                                                    onPress={() => handleOpenGigChat(gig)}
-                                                    style={[styles.editBtn, { borderColor: colors.border }]}
-                                                >
-                                                    <Ionicons name="chatbubble-outline" size={20} color={colors.text} style={styles.editBtnIcon} />
-                                                </TouchableOpacity>
-                                            ) : null}
-                                            {staffPermissions?.canAddListing && !staffHeaderAddOwnerId ? (
-                                                <TouchableOpacity
-                                                    activeOpacity={1}
-                                                    testID={`mobile-gig-add-for-owner-${gig.id}`}
-                                                    accessibilityLabel={`Add gig for ${gig.name}`}
-                                                    onPress={() => router.push({ pathname: '/add_gig', params: { ownerId: gig.organizer_id } })}
-                                                    style={[styles.editBtn, { borderColor: colors.border }]}
-                                                >
-                                                    <Ionicons name="add-outline" size={20} color={colors.text} />
-                                                </TouchableOpacity>
-                                            ) : null}
-                                        </View>
+                                                    {canManageGig && (!staffPermissions || staffPermissions.canDeleteListing) ? (
+                                                        <TouchableOpacity
+                                                            activeOpacity={1}
+                                                            testID={`mobile-gig-delete-${gig.id}`}
+                                                            accessibilityLabel={`mobile-gig-delete-${gig.id}`}
+                                                            onPress={() => confirmDelete(gig.id, gig.name)}
+                                                            style={styles.deleteBtn}
+                                                        >
+                                                            <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                                                        </TouchableOpacity>
+                                                    ) : null}
+                                                </View>
 
-                                        {canManageGig && (!staffPermissions || staffPermissions.canDeleteListing) ? (
-                                            <TouchableOpacity
-                                                activeOpacity={1}
-                                                testID={`mobile-gig-delete-${gig.id}`}
-                                                accessibilityLabel={`mobile-gig-delete-${gig.id}`}
-                                                onPress={() => confirmDelete(gig.id, gig.name)}
-                                                style={styles.deleteBtn}
-                                            >
-                                                <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                                            </TouchableOpacity>
-                                        ) : null}
-                                    </View>
-                                </View>
+                                                {gig.management_status === 'done' && !isMusicianView && (!staffPermissions || staffPermissions.canAddListing) ? (
+                                                    <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Create a new gig for ${gig.name}`}
+                                                        onPress={() => router.push({ pathname: '/add_gig', params: { ownerId: gig.organizer_id } })}
+                                                        style={[styles.manageBtn, { borderColor: colors.primary, marginTop: 10 }]}>
+                                                        <Text style={[styles.manageBtnText, { color: colors.primary }]}>Create new gig</Text>
+                                                    </TouchableOpacity>
+                                                ) : null}
+                                            </View>
                                         </>
                                     );
                                 })()}
@@ -842,9 +796,9 @@ export default function MyVenueScreen() {
                         ))
                     )}
 
-                </ScrollView>
+                </ManagedListingContent>
 
-                <Navbar />
+                {!embedded && <Navbar />}
             </View>
             <Modal
                 visible={modalVisible}
@@ -879,11 +833,7 @@ const styles = StyleSheet.create({
     flex1: {
         flex: 1,
     },
-    scrollContent: {
-        paddingHorizontal: 24,
-        paddingBottom: 180,
-        paddingTop: 16,
-    },
+    scrollContent: { paddingBottom: 180, paddingTop: 0, paddingHorizontal: 16 },
     sectionHeading: {
         fontFamily: typography.bold,
         fontSize: 12,
@@ -919,11 +869,7 @@ const styles = StyleSheet.create({
     skeletonList: {
         gap: 16,
     },
-    skeletonCard: {
-        borderRadius: radius.card,
-        borderWidth: 1,
-        padding: 16,
-    },
+    skeletonCard: { ...managementCardStyles.surface },
     skeletonActionRow: {
         marginTop: 16,
         flexDirection: 'row',
@@ -943,64 +889,21 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
         textAlign: 'center',
     },
-    cardContainer: {
-        marginBottom: 16,
-        borderRadius: radius.card,
-        overflow: 'hidden',
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.line,
-    },
-    imageWrapper: {
-        height: 160,
-        position: 'relative',
-    },
-    cardImage: {
-        width: '100%',
-        height: '100%',
-    },
-    statusBadge: {
-        position: 'absolute',
-        top: 16,
-        right: 16,
-        paddingHorizontal: 12,
-        paddingVertical: 4,
-        borderRadius: 100,
-    },
-    statusText: {
-        fontSize: 12,
-        fontFamily: typography.semibold,
-    },
-    cardContent: {
-        padding: 16,
-    },
-    cardTitle: {
-        fontFamily: typography.title,
-        fontSize: 20,
-        lineHeight: 26,
-        letterSpacing: -0.4,
-        marginBottom: 8,
-    },
-    cardSubTitle: {
-        fontFamily: typography.medium,
-        fontSize: 14,
-        lineHeight: 20,
-    },
-    cardLocation: {
-        fontFamily: typography.body,
-        fontSize: 14,
-        lineHeight: 20,
-        marginTop: 2,
-    },
+    cardContainer: { ...managementCardStyles.surface, overflow: 'hidden', borderColor: palette.line, marginBottom: 12 },
+    imageWrapper: { width: 64, height: 64, borderRadius: 10, overflow: "hidden" },
+    cardImage: { ...managementCardStyles.thumbnail },
+    statusBadge: { alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7 },
+    statusText: { fontSize: 12, fontFamily: typography.semibold },
+    cardContent: { padding: 0, paddingTop: 8 },
+    cardTitle: { ...managementCardStyles.title, marginBottom: 0 },
+    cardSubTitle: { ...managementCardStyles.metadata },
+    cardLocation: { ...managementCardStyles.metadata, marginTop: 2 },
     cardBudget: {
-        fontFamily: typography.semibold,
-        fontSize: 14,
-        marginTop: 10,
         marginBottom: 8,
-    },
-    cardDescription: {
-        fontFamily: typography.body,
+        fontFamily: typography.semibold,
         fontSize: 13,
         lineHeight: 20,
+        marginTop: 4,
     },
     permitStatusChip: {
         marginTop: 10,
@@ -1016,47 +919,45 @@ const styles = StyleSheet.create({
     rejectionReasonText: {
         marginTop: 8,
         color: '#DC2626',
-        fontFamily: 'Poppins_500Medium',
         fontSize: 12,
         lineHeight: 17,
+        fontFamily: typography.medium,
     },
-    permitHintText: {
-        marginTop: 8,
-        fontFamily: 'Poppins_400Regular',
-        fontSize: 12,
-        lineHeight: 17,
-    },
+    permitHintText: { marginTop: 8, fontSize: 12, lineHeight: 17, fontFamily: typography.body },
     actionRow: {
         flexDirection: 'row',
-        alignItems: 'center',
         justifyContent: 'space-between',
-        marginTop: 16,
         borderTopWidth: 1,
-        paddingTop: 16,
+        gap: 8,
+        marginTop: 8,
+        paddingTop: 8,
+        flexWrap: "wrap",
+        alignItems: "flex-start",
     },
     actionLeft: {
         flexDirection: 'row',
-        gap: 12,
+        flex: 1,
+        gap: 8,
+        alignItems: "center",
+        flexWrap: "wrap",
     },
     manageBtn: {
+        ...managementCardStyles.button,
         flexDirection: 'row',
-        alignItems: 'center',
         gap: 8,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 12,
         borderWidth: 1,
+        flex: 1,
+        minWidth: 88,
+        paddingVertical: 8,
     },
-    manageBtnText: {
-        fontFamily: typography.semibold,
-    },
+    manageBtnText: { fontFamily: typography.semibold },
     editBtn: {
-        width: 38,
-        height: 38,
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 12,
         borderWidth: 1,
+        width: 44,
+        height: 44,
+        borderRadius: 9,
     },
     editBtnIcon: {
         width: 20,
@@ -1067,21 +968,24 @@ const styles = StyleSheet.create({
         textAlignVertical: 'center',
     },
     reapplyBtn: {
+        ...managementCardStyles.button,
         flexDirection: 'row',
-        alignItems: 'center',
         gap: 6,
-        borderRadius: 12,
         borderWidth: 1,
-        paddingHorizontal: 12,
         paddingVertical: 8,
+        paddingHorizontal: 10,
+        flex: 1,
+        minWidth: 120,
     },
-    reapplyBtnText: {
-        color: '#EA580C',
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: 12,
-    },
+    reapplyBtnText: { color: '#EA580C', fontSize: 12, fontFamily: typography.semibold },
     deleteBtn: {
-        padding: 8,
+        width: 44,
+        height: 44,
+        padding: 0,
+        alignItems: "center",
+        justifyContent: "center",
     },
+    cardIdentity: { ...managementCardStyles.identity },
+    cardHeading: { flex: 1, minWidth: 0, gap: 4 },
 });
 

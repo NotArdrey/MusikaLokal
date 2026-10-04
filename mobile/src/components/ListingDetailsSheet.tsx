@@ -1,3 +1,4 @@
+import { useListingLifecycle } from "../hooks/useListingLifecycle";
 import { Ionicons } from "@expo/vector-icons";
 import {
     BottomSheetBackdrop,
@@ -810,6 +811,7 @@ const ListingDetailsSheet = forwardRef<
 
   // BackHandler Logic
   const [sheetIndex, setSheetIndex] = useState(-1);
+  const listingLifecycle = useListingLifecycle({ type: group?.type || initialListingKind, id: listingId, enabled: sheetIndex >= 0 });
   const previousSheetIndex = useRef(-1);
 
   const fetchStudioBookings = useCallback(async (studioId: string) => {
@@ -3639,6 +3641,10 @@ const ListingDetailsSheet = forwardRef<
       baseTabs.push("Review");
     }
 
+    if (!listingLifecycle.canAcceptNewRequests) {
+      return baseTabs.filter((tab) => !["Apply", "Book", "Connect"].includes(tab));
+    }
+
     const roleFilteredTabs = isMusicianUser
       ? baseTabs
       : baseTabs.filter((tab) => !["Apply", "Book"].includes(tab));
@@ -3680,7 +3686,7 @@ const ListingDetailsSheet = forwardRef<
     const nextTabs = [...withoutApply];
     nextTabs.splice(reviewTabIndex, 0, "Apply");
     return nextTabs;
-  }, [canApplyToGroup, isGigFull, isGroupListing, isGuest, isMusicianUser, labels.tabs, shouldShowConnectTab]);
+  }, [canApplyToGroup, isGigFull, isGroupListing, isGuest, isMusicianUser, labels.tabs, listingLifecycle.canAcceptNewRequests, shouldShowConnectTab]);
 
   const showTabs = hasDefaultTabs && tabsToRender.length > 0;
   const visibleActiveTab = tabsToRender.includes(activeTab)
@@ -4741,6 +4747,11 @@ const ListingDetailsSheet = forwardRef<
         </View>
       ) : null}
 
+      {listingLifecycle.status === 'inactive' || listingLifecycle.status === 'done' ? (
+        <Text style={{ color: colors.textSecondary, marginHorizontal: 20, marginVertical: 12 }}>
+          {listingLifecycle.status === 'done' ? 'This gig is completed and is not accepting applications.' : 'This listing is inactive and is not accepting new requests.'}
+        </Text>
+      ) : null}
       {/* TABS SELECTOR */}
             {showTabs && renderTabs()}
 

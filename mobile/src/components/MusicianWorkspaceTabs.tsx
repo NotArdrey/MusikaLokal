@@ -4,7 +4,7 @@ import { StyleProp, StyleSheet, TextStyle, ViewStyle } from "react-native";
 import SlidingTabBar from "./SlidingTabBar";
 import { useTheme } from "../context/ThemeContext";
 
-type MusicianWorkspaceTabKey = "group" | "producer" | "venue";
+type MusicianWorkspaceTabKey = "group" | "producer" | "venue" | "history";
 
 type MusicianWorkspaceTabsProps = {
   activeKey: MusicianWorkspaceTabKey;
@@ -16,6 +16,7 @@ const MUSICIAN_WORKSPACE_TABS = [
   { key: "group", label: "My Group", route: "/my_group" },
   { key: "producer", label: "My Production", route: "/my_production" },
   { key: "venue", label: "My Gig", route: "/my_venue" },
+  { key: "history", label: "My History", route: "/my_history" },
 ] as const;
 
 export default function MusicianWorkspaceTabs({
@@ -59,6 +60,8 @@ export default function MusicianWorkspaceTabs({
         label: tab.label,
       }))}
       textStyle={[styles.label, textStyle]}
+      labelNumberOfLines={2}
+      tabStyle={{ paddingHorizontal: 2 }}
     />
   );
 }
@@ -69,6 +72,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   label: {
-    fontSize: 12,
+    fontSize: 11,
   },
 });

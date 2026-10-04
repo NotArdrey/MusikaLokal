@@ -156,6 +156,7 @@ const dedupeSearchResults = (items: any[]) => {
 };
 
 const isOpenSearchResult = (item: any) => {
+  if (item?.management_status && item.management_status !== "active") return false;
   const type = String(item?.type || "").trim().toLowerCase();
   if (type === "group" || type === "duo") return item?.open_group_applications === true;
   if (type === "production" || type === "production team") {

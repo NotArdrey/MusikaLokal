@@ -109,8 +109,8 @@ const moderateScale = (size: number, factor = 0.3) => {
   return size + (scaled - size) * factor;
 };
 
-const BOOKING_CARD_IMAGE_WIDTH = 640;
-const BOOKING_CARD_IMAGE_HEIGHT = 240;
+const BOOKING_CARD_IMAGE_WIDTH = 128;
+const BOOKING_CARD_IMAGE_HEIGHT = 128;
 const BOOKING_AVATAR_IMAGE_SIZE = 64;
 
 const REQUEST_PLACEHOLDER_IMAGE =
@@ -6608,10 +6608,13 @@ export default function BookingsScreen() {
                     >
                       <View style={styles.cardContent}>
                         <View style={styles.cardHeader}>
-                          <View style={styles.cardTitleContainer}>
-                            <Text
-                              style={[styles.cardTitle, { color: colors.text }]}
-                              numberOfLines={1}
+                            <View style={[styles.activityCardIcon, { backgroundColor: `${colors.primary}0D` }]}>
+                              <Ionicons name={listingType === "gig" ? "musical-notes-outline" : "business-outline"} size={24} color={colors.primary} />
+                            </View>
+                            <View style={styles.cardTitleContainer}>
+                              <Text
+                                style={[styles.cardTitle, { color: colors.text }]}
+                                numberOfLines={2}
                             >
                               {listingName}
                             </Text>
@@ -6716,7 +6719,7 @@ export default function BookingsScreen() {
                                       styles.outlineButtonText,
                                       {
                                         color: "#EA580C",
-                                        fontFamily: "Poppins_600SemiBold",
+                                          fontFamily: typography.semibold,
                                       },
                                     ]}
                                   >
@@ -6751,7 +6754,7 @@ export default function BookingsScreen() {
                                     styles.outlineButtonText,
                                     {
                                       color: "#DC2626",
-                                      fontFamily: "Poppins_600SemiBold",
+                                        fontFamily: typography.semibold,
                                     },
                                   ]}
                                 >
@@ -6781,10 +6784,19 @@ export default function BookingsScreen() {
                       { backgroundColor: colors.surface, borderColor: colors.border },
                     ]}
                   >
-                    <Skeleton width="100%" height={160} borderRadius={12} />
-                    <Skeleton width="72%" height={20} style={{ marginTop: 12 }} />
-                    <Skeleton width="52%" height={14} style={{ marginTop: 8 }} />
-                    <Skeleton width="100%" height={14} style={{ marginTop: 12 }} />
+                    <View style={styles.activityCardIdentity}>
+                      <Skeleton width={64} height={64} borderRadius={10} />
+                      <View style={styles.activityCardMain}>
+                        <Skeleton width="80%" height={20} />
+                        <Skeleton width="60%" height={14} style={{ marginTop: 8 }} />
+                        <Skeleton width="72%" height={12} style={{ marginTop: 6 }} />
+                      </View>
+                    </View>
+                    <View style={[styles.activityDetailGrid, { marginTop: 12 }]}>
+                      <Skeleton width="46%" height={32} />
+                      <Skeleton width="46%" height={32} />
+                    </View>
+                    <Skeleton width="100%" height={36} borderRadius={9} style={{ marginTop: 12 }} />
                   </View>
                 ))}
               </View>
@@ -6837,7 +6849,7 @@ export default function BookingsScreen() {
               </View>
             ) : null
           }
-          renderItem={({ item: row }: { item: any }) => {
+          renderItem={({ item: row }: { item: any; }) => {
               if (row?.kind === "application-group-header") {
                 const groupKind = row.groupKind as ApplicationActivityGroupKind;
                 const groupLabel = getApplicationGroupCountLabel(
@@ -6873,7 +6885,6 @@ export default function BookingsScreen() {
                 return (
                   <TouchableOpacity
                     activeOpacity={0.82}
-                    accessibilityRole="button"
                     accessibilityState={{ expanded: row.isExpanded }}
                     accessibilityLabel={`${row.title}, ${groupLabel}. ${row.isExpanded ? "Collapse" : "Expand"} applicants.`}
                     testID={`mobile-bookings-${groupPresentation.testPrefix}-group-${row.entityId}`}
@@ -6919,11 +6930,11 @@ export default function BookingsScreen() {
                           </View>
                         )}
                         <View style={styles.gigGroupTitleContainer}>
-                          <Text style={[styles.gigGroupEyebrow, { color: colors.primary }]}>
-                            {groupPresentation.eyebrow}
-                          </Text>
-                          <Text style={[styles.gigGroupTitle, { color: colors.text }]} numberOfLines={2}>
-                            {row.title}
+                        <Text style={[styles.gigGroupTitle, { color: colors.text }]} numberOfLines={2}>
+                          {row.title}
+                        </Text>
+                        <Text style={[styles.gigGroupEyebrow, { color: colors.primary }]}>
+                          {groupPresentation.eyebrow}
                           </Text>
                         </View>
                         <Ionicons
@@ -6978,15 +6989,16 @@ export default function BookingsScreen() {
                         style={[
                           styles.gigGroupViewButton,
                           {
-                            backgroundColor: `${colors.primary}10`,
-                            borderColor: `${colors.primary}38`,
-                          },
-                        ]}
-                      >
-                        <Ionicons name="open-outline" size={18} color={colors.primary} />
-                        <Text style={[styles.gigGroupViewButtonText, { color: colors.primary }]}>
-                          {groupPresentation.actionLabel}
-                        </Text>
+                          backgroundColor: colors.card,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                    >
+
+                      <Text style={[styles.gigGroupViewButtonText, { color: colors.primary }]}>
+                        {groupPresentation.actionLabel}
+                      </Text>
+                      <Ionicons name="arrow-forward" size={19} color={colors.primary} />
                       </TouchableOpacity>
                     </View>
                   </TouchableOpacity>
@@ -7008,6 +7020,13 @@ export default function BookingsScreen() {
                 const requestStatusColors = getConnectionRequestStatusColors(
                   item.raw_status || item.status,
                 );
+                const requestStatusTextColor = isDark
+                  ? requestStatusColors.textColor
+                  : requestStatusColors.textColor === "#10B981"
+                    ? palette.success
+                    : requestStatusColors.textColor === "#EF4444"
+                      ? palette.danger
+                      : palette.warning;
                 const connectionMetaLine = [
                   item.request_slot_type
                     ? `Slot: ${formatConnectionEntityType(item.request_slot_type)}`
@@ -7019,322 +7038,266 @@ export default function BookingsScreen() {
                   .filter(Boolean)
                   .join("  |  ");
 
+                const isConnectionApplication =
+                  item.request_kind === "application" || /Application$/i.test(item.type || "");
+                const requestTypeLabel = String(item.type || "Connection request")
+                  .replace(/\s+Application$/i, "");
+                const requestCounterparty = item.request_direction === "incoming"
+                  ? item.sender_entity_name
+                  : item.receiver_entity_name;
+                const requestApplicantName = isConnectionApplication
+                  ? item.sender_entity_name || item.applicant?.full_name
+                  : null;
+                const showRequestManagementActions = !isHistoryTabView && (
+                  canRespond || (
+                    item.viewer_is_group_owner &&
+                    isGroupMemberApplicationRequest(item) &&
+                    row?.groupedUnderApplicationEntity !== true
+                  )
+                );
+                const viewLabel = isConnectionApplication ? "View application" : "View request";
+                const requestAttachments = [
+                  { url: item.request_contract_url, label: "Contract", icon: "document-text-outline" as const },
+                  { url: item.request_cv_url, label: "CV", icon: "document-text-outline" as const },
+                  { url: item.request_video_url, label: "Video", icon: "play-circle-outline" as const },
+                ].filter((attachment) => attachment.url);
+
                 return (
                   <TouchableOpacity
-                    activeOpacity={1}
+                    activeOpacity={0.92}
                     key={item.id}
                     testID={`mobile-bookings-booking-request-card-${item.id}`}
-                    accessibilityLabel={`mobile-bookings-booking-request-card-${item.id}`}
+                    accessibilityLabel={`${viewLabel}: ${item.name || item.counterparty_name || "Connection request"}, ${item.status}`}
                     onPress={() => handleDetailsPress(item)}
                     style={[
                       styles.cardContainer,
-                      row?.groupedUnderApplicationEntity === true &&
-                        styles.groupedApplicationCard,
-                      row?.isLastInApplicationGroup === true &&
-                        styles.groupedApplicationCardLast,
-                      {
-                        backgroundColor: colors.card,
-                        borderColor: colors.border,
-                      },
+                      row?.groupedUnderApplicationEntity === true && styles.groupedApplicationCard,
+                      row?.isLastInApplicationGroup === true && styles.groupedApplicationCardLast,
+                      styles.requestSummaryCard,
+                      showRequestManagementActions && { paddingBottom: moderateScale(16) },
+                      { backgroundColor: colors.card, borderColor: colors.border },
                     ]}
                   >
-                    <View>
+                    <View style={styles.requestSummaryIdentity}>
                       <CachedImage
                         uri={item.image}
                         fallbackUri={REQUEST_PLACEHOLDER_IMAGE}
-                        style={[
-                          styles.cardImage,
-                          row?.groupedUnderApplicationEntity === true && styles.groupedApplicationCardImage,
-                        ]}
-                        width={BOOKING_CARD_IMAGE_WIDTH}
-                        height={BOOKING_CARD_IMAGE_HEIGHT}
+                        style={styles.requestSummaryThumbnail}
+                        width={128}
+                        height={128}
                         quality={72}
                         cacheVersion={item.updated_at || item.created_at || item.id}
                       />
-                      <View style={[styles.typeBadge, styles.topLeftImageBadge]}>
-                        <Text style={styles.typeBadgeText} numberOfLines={1}>
-                          {item.type}
-                        </Text>
-                      </View>
-                      <View style={styles.topRightBadgeStack}>
-                        <View
-                          style={[
-                            styles.typeBadge,
-                            styles.stackedImageBadge,
-                            {
-                              backgroundColor:
-                                item.status === "Accepted"
-                                  ? "rgba(16, 185, 129, 0.85)"
-                                  : item.status === "Declined" || item.status === "Cancelled" || item.status === "Fired" || item.status === "Withdrawn"
-                                    ? "rgba(239, 68, 68, 0.85)"
-                                    : "rgba(0,0,0,0.6)",
-                            },
-                          ]}
-                        >
-                          <Text style={styles.typeBadgeText} numberOfLines={1}>
-                            {item.status}
+                      <View style={styles.requestSummaryTitleContainer}>
+                        <View style={styles.requestSummaryTitleRow}>
+                          <Text style={[styles.requestSummaryTitle, { color: colors.text }]} numberOfLines={2}>
+                            {item.name || item.counterparty_name || "Connection request"}
                           </Text>
-                        </View>
-                      </View>
-                    </View>
-
-                    <View style={styles.cardContent}>
-                      <View style={styles.cardHeader}>
-                        <View style={styles.cardTitleContainer}>
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: scale(8) }}>
-                            <Ionicons
-                              name={item.request_direction === "incoming" ? "mail-unread-outline" : "paper-plane-outline"}
-                              size={moderateScale(20)}
-                              color={colors.primary}
-                            />
-                            <Text style={[styles.cardTitle, { color: colors.text, flex: 1 }]} numberOfLines={1}>
-                              {item.name || item.counterparty_name || "Connection Request"}
-                            </Text>
-                          </View>
-
-                          <View style={{ marginTop: moderateScale(8), gap: moderateScale(4) }}>
-                            <View style={styles.cardDetailRow}>
-                              <Ionicons name="albums-outline" size={14} color={colors.textSecondary} />
-                              <Text style={[styles.cardDetailText, { color: colors.textSecondary }]} numberOfLines={1}>
-                                {item.type}
-                              </Text>
-                            </View>
-                            <View style={styles.cardDetailRow}>
-                              <Ionicons name="swap-horizontal-outline" size={14} color={colors.textSecondary} />
-                              <Text style={[styles.cardDetailText, { color: colors.textSecondary }]} numberOfLines={1}>
-                                {item.request_context_label} {item.counterparty_name || item.name}
-                              </Text>
-                            </View>
-                            {connectionMetaLine ? (
-                              <View style={styles.cardDetailRow}>
-                                <Ionicons name="person-outline" size={14} color={colors.textSecondary} />
-                                <Text style={[styles.cardDetailText, { color: colors.textSecondary }]} numberOfLines={1}>
-                                  {connectionMetaLine}
-                                </Text>
-                              </View>
-                            ) : null}
-                            <View style={styles.cardDetailRow}>
-                              <Ionicons name="calendar-outline" size={14} color={colors.textSecondary} />
-                              <Text style={[styles.cardDetailText, { color: colors.textSecondary }]} numberOfLines={1}>
-                                {formatFriendlyDateTime(item.created_at || item.raw_date)}
-                              </Text>
-                            </View>
-                          </View>
-                        </View>
-                      </View>
-
-                      {item.message ? (
-                        <Text
-                          style={[styles.applicationMessageText, { color: colors.textSecondary }]}
-                          numberOfLines={2}
-                        >
-                          {item.message}
-                        </Text>
-                      ) : null}
-                      {item.request_application_context ? (
-                        <Text
-                          style={[styles.cardDetailText, { color: colors.textSecondary, marginBottom: moderateScale(6) }]}
-                          numberOfLines={1}
-                        >
-                          {item.request_context_title || "Application Context"}: {item.request_application_context}
-                        </Text>
-                      ) : null}
-
-                      {!isHistoryTabView && (item.request_contract_url || item.request_cv_url || item.request_video_url) && (
-                        <View style={styles.attachmentChipRow}>
-                          {item.request_contract_url ? (
+                          {!isHistoryTabView && shouldShowMessageForItem(item) ? (
                             <TouchableOpacity
-                              activeOpacity={1}
-                              onPress={(e) => {
-                                e.stopPropagation();
-                                openConnectionRequestLink(item.request_contract_url, "Contract");
-                              }}
-                              style={[styles.attachmentChip, { borderColor: colors.border, backgroundColor: colors.card }]}
-                            >
-                              <Text style={[styles.attachmentChipText, { color: colors.textSecondary }]}>
-                                Contract
-                              </Text>
-                            </TouchableOpacity>
-                          ) : null}
-                          {item.request_cv_url ? (
-                            <TouchableOpacity
-                              activeOpacity={1}
-                              onPress={(e) => {
-                                e.stopPropagation();
-                                openConnectionRequestLink(item.request_cv_url, "CV");
-                              }}
-                              style={[styles.attachmentChip, { borderColor: colors.border, backgroundColor: colors.card }]}
-                            >
-                              <Text style={[styles.attachmentChipText, { color: colors.textSecondary }]}>
-                                CV
-                              </Text>
-                            </TouchableOpacity>
-                          ) : null}
-                          {item.request_video_url ? (
-                            <TouchableOpacity
-                              activeOpacity={1}
-                              onPress={(e) => {
-                                e.stopPropagation();
-                                openConnectionRequestLink(item.request_video_url, "Video");
-                              }}
-                              style={[styles.attachmentChip, { borderColor: colors.border, backgroundColor: colors.card }]}
-                            >
-                              <Text style={[styles.attachmentChipText, { color: colors.textSecondary }]}>
-                                Video
-                              </Text>
-                            </TouchableOpacity>
-                          ) : null}
-                        </View>
-                      )}
-
-                      <View
-                        style={[
-                          styles.cardFooter,
-                          {
-                            borderColor: isDark ? colors.border : "#F3F4F6",
-                            flexDirection: "column",
-                            alignItems: "flex-start",
-                            gap: moderateScale(8),
-                          },
-                        ]}
-                      >
-                        <View
-                          style={{
-                            width: "100%",
-                            flexDirection: "row",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: moderateScale(8),
-                          }}
-                        >
-                          <View style={[styles.statusContainer, { flex: 1 }]}>
-                            <Ionicons
-                              name={
-                                item.status === "Accepted"
-                                  ? "checkmark-circle"
-                                  : item.status === "Declined"
-                                    ? "close-circle"
-                                    : "time-outline"
-                              }
-                              size={16}
-                              color={requestStatusColors.textColor}
-                            />
-                            <Text style={[styles.statusText, { color: requestStatusColors.textColor }]} numberOfLines={1}>
-                              {item.status}
-                            </Text>
-                          </View>
-
-                          {!isHistoryTabView && shouldShowMessageForItem(item) && (
-                            <TouchableOpacity
-                              activeOpacity={1}
-                              onPress={(e) => {
-                                e.stopPropagation();
+                              activeOpacity={0.75}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Message ${item.counterparty_name || item.name}`}
+                              onPress={(event) => {
+                                event.stopPropagation();
                                 handleMessagePress(item);
                               }}
-                              style={[
-                                styles.messageIconButton,
-                                {
-                                  borderColor: colors.border,
-                                  backgroundColor: colors.card,
-                                },
-                              ]}
+                              style={styles.requestSummaryMessageButton}
                             >
-                              <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.primary} />
+                              <Ionicons name="chatbubble-ellipses-outline" size={19} color={colors.textSecondary} />
                             </TouchableOpacity>
-                          )}
+                          ) : null}
+                        </View>
+                      <View style={styles.requestSummarySubtitleRow}>
+                        <View style={styles.requestSummarySubtitleText}>
+                          <Text style={[styles.requestSummaryType, { color: colors.textSecondary }]} numberOfLines={1}>
+                            {requestTypeLabel}
+                          </Text>
+                          <Text style={[styles.requestSummarySecondary, { color: colors.textSecondary }]} numberOfLines={2}>
+                            {item.request_context_label || (item.request_direction === "incoming" ? "From" : "To")} {requestCounterparty || item.counterparty_name || item.name}
+                          </Text>
                         </View>
 
-                        {isRequestActionPending && (
-                          <View style={styles.actionLoadingRow}>
-                            <ActivityIndicator size="small" color={colors.primary} />
-                            <Text style={[styles.actionLoadingText, { color: colors.textSecondary }]}>
-                              Updating request...
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={[styles.activityMetadataRow, { marginBottom: 0 }]}>
+                    <Text style={[styles.requestSummaryMetaText, { color: colors.textSecondary }]}>
+                      {formatFriendlyDateTime(item.created_at || item.raw_date).replace(" at ", ", ")}
+                    </Text>
+
+                    {item.status !== "Pending" ? (
+                      <View
+                        style={[
+                          styles.requestSummaryStatus,
+                          { backgroundColor: requestStatusColors.backgroundColor },
+                        ]}
+                      >
+                        <View style={[styles.requestSummaryStatusDot, { backgroundColor: requestStatusTextColor }]} />
+                        <Text style={[styles.requestSummaryStatusText, { color: requestStatusTextColor }]}>
+                          {item.status}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                    {connectionMetaLine ? (
+                      <Text style={[styles.requestSummarySecondary, { color: colors.textSecondary }]} numberOfLines={2}>
+                        {connectionMetaLine}
+                      </Text>
+                    ) : null}
+
+                    {item.request_application_context || requestApplicantName ? (
+                      <View style={styles.requestSummaryFields}>
+                        {item.request_application_context ? (
+                          <View style={[styles.requestSummaryContext, styles.requestSummaryField]}>
+                            <Text style={[styles.requestSummaryContextLabel, { color: colors.textSecondary }]}>
+                              {item.request_context_title || "Application context"}
+                            </Text>
+                            <Text style={[styles.requestSummaryBody, { color: colors.text }]} numberOfLines={2}>
+                              {item.request_application_context}
                             </Text>
                           </View>
-                        )}
+                        ) : null}
+                        {requestApplicantName ? (
+                          <View style={[styles.requestSummaryContext, styles.requestSummaryField]}>
+                            <Text style={[styles.requestSummaryContextLabel, { color: colors.textSecondary }]}>
+                              Applicant
+                            </Text>
+                            <Text style={[styles.requestSummaryBody, { color: colors.text }]} numberOfLines={2}>
+                              {requestApplicantName}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    ) : null}
+                    {item.message &&
+                    item.message !== item.request_application_context &&
+                    item.message !== requestApplicantName ? (
+                      <View style={styles.requestSummaryContext}>
+                        <Text style={[styles.requestSummaryContextLabel, { color: colors.textSecondary }]}>
+                          Message
+                        </Text>
+                        <Text style={[styles.requestSummaryBody, { color: colors.text }]} numberOfLines={2}>
+                          {item.message}
+                        </Text>
+                      </View>
+                    ) : null}
 
-                        {!isHistoryTabView && (
-                          <View style={[styles.actionButtonsContainer, styles.compactActionRow]}>
+                    {!isHistoryTabView && requestAttachments.length > 0 ? (
+                      <View style={styles.requestSummaryAttachments}>
+                        {requestAttachments.map((attachment) => (
+                          <TouchableOpacity
+                            key={attachment.label}
+                            activeOpacity={0.75}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Open ${attachment.label} attachment`}
+                            onPress={(event) => {
+                              event.stopPropagation();
+                              openConnectionRequestLink(attachment.url, attachment.label);
+                            }}
+                            hitSlop={{ top: 4, bottom: 4 }}
+                            style={[
+                              styles.requestSummaryAttachment,
+                              requestAttachments.length > 2 && styles.requestSummaryAttachmentCompact,
+                              { backgroundColor: isDark ? "#FFFFFF05" : "#FAFAFC", borderColor: colors.border },
+                            ]}
+                          >
+                            <Ionicons name={attachment.icon} size={16} color={colors.textSecondary} />
+                            <Text style={[styles.requestSummaryAttachmentText, { color: colors.text }]} numberOfLines={1}>
+                              {attachment.label}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    ) : null}
+
+                    <View style={[styles.requestSummaryFooter, { borderTopColor: colors.border }]}>
+                      <TouchableOpacity
+                        activeOpacity={0.75}
+                        testID={bookingActionTestId(item, isHistoryTabView ? "view-details" : "view")}
+                        accessibilityRole="button"
+                        accessibilityLabel={viewLabel}
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          handleDetailsPress(item);
+                        }}
+                        style={styles.requestSummaryViewButton}
+                      >
+                        <Text style={[styles.requestSummaryViewText, { color: colors.primary }]}>
+                          {viewLabel}
+                        </Text>
+                        <Ionicons name="arrow-forward" size={19} color={colors.primary} />
+                      </TouchableOpacity>
+
+                      {isRequestActionPending ? (
+                        <View style={styles.actionLoadingRow}>
+                          <ActivityIndicator size="small" color={colors.primary} />
+                          <Text style={[styles.actionLoadingText, { color: colors.textSecondary }]}>
+                            Updating request...
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      {showRequestManagementActions ? (
+                        <View style={[styles.actionButtonsContainer, styles.compactActionRow]}>
+                          {item.viewer_is_group_owner &&
+                          isGroupMemberApplicationRequest(item) &&
+                          row?.groupedUnderApplicationEntity !== true ? (
                             <TouchableOpacity
                               activeOpacity={1}
-                              testID={bookingActionTestId(item, "view")}
-                              accessibilityLabel={bookingActionTestId(item, "view")}
                               onPress={(e) => {
                                 e.stopPropagation();
-                                handleDetailsPress(item);
+                                router.push({ pathname: "/manage_group", params: { id: item.group_id } });
                               }}
                               style={[
                                 styles.outlineButton,
                                 {
                                   flex: 1,
-                                  borderColor: colors.border,
+                                  borderColor: colors.primary,
+                                  backgroundColor: isDark ? `${colors.primary}1A` : `${colors.primary}10`,
                                 },
                               ]}
                             >
                               <View style={styles.detailsButtonLabelContainer}>
-                                <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>
-                                  View
+                                <Text style={[styles.outlineButtonText, { color: colors.primary }]}>
+                                  Manage Group
                                 </Text>
                               </View>
                             </TouchableOpacity>
+                          ) : null}
 
-                            {item.viewer_is_group_owner &&
-                            isGroupMemberApplicationRequest(item) &&
-                            row?.groupedUnderApplicationEntity !== true ? (
-                              <TouchableOpacity
-                                activeOpacity={1}
-                                onPress={(e) => {
-                                  e.stopPropagation();
-                                  router.push({ pathname: "/manage_group", params: { id: item.group_id } });
-                                }}
-                                style={[
-                                  styles.outlineButton,
-                                  {
-                                    flex: 1,
-                                    borderColor: colors.primary,
-                                    backgroundColor: isDark ? `${colors.primary}1A` : `${colors.primary}10`,
-                                  },
-                                ]}
-                              >
-                                <View style={styles.detailsButtonLabelContainer}>
-                                  <Text style={[styles.outlineButtonText, { color: colors.primary }]}>
-                                    Manage Group
+                          {canRespond ? (
+                            <TouchableOpacity
+                              activeOpacity={1}
+                              disabled={isRequestActionPending}
+                              testID={bookingActionTestId(item, "decline")}
+                              accessibilityLabel={bookingActionTestId(item, "decline")}
+                              onPress={(e) => {
+                                e.stopPropagation();
+                                promptConnectionRequestDecision(item, "declined");
+                              }}
+                              style={[
+                                styles.outlineButton,
+                                {
+                                  flex: 1,
+                                  borderColor: "#EF4444",
+                                  backgroundColor: colors.card,
+                                  opacity: isRequestActionPending ? 0.6 : 1,
+                                },
+                              ]}
+                            >
+                              <View style={styles.detailsButtonLabelContainer}>
+                                {isRequestActionPending ? (
+                                  <ActivityIndicator size="small" color="#EF4444" />
+                                ) : (
+                                <Text style={[styles.outlineButtonText, { color: "#EF4444", fontFamily: typography.semibold }]}>
+                                    Decline
                                   </Text>
-                                </View>
-                              </TouchableOpacity>
-                            ) : null}
-
-                            {canRespond ? (
-                              <TouchableOpacity
-                                activeOpacity={1}
-                                disabled={isRequestActionPending}
-                                testID={bookingActionTestId(item, "decline")}
-                                accessibilityLabel={bookingActionTestId(item, "decline")}
-                                onPress={(e) => {
-                                  e.stopPropagation();
-                                  promptConnectionRequestDecision(item, "declined");
-                                }}
-                                style={[
-                                  styles.outlineButton,
-                                  {
-                                    flex: 1,
-                                    borderColor: "#EF4444",
-                                    backgroundColor: colors.card,
-                                    opacity: isRequestActionPending ? 0.6 : 1,
-                                  },
-                                ]}
-                              >
-                                <View style={styles.detailsButtonLabelContainer}>
-                                  {isRequestActionPending ? (
-                                    <ActivityIndicator size="small" color="#EF4444" />
-                                  ) : (
-                                    <Text style={[styles.outlineButtonText, { color: "#EF4444", fontFamily: "Poppins_600SemiBold" }]}>
-                                      Decline
-                                    </Text>
-                                  )}
-                                </View>
-                              </TouchableOpacity>
-                            ) : null}
+                                )}
+                              </View>
+                            </TouchableOpacity>
+                          ) : null}
 
                           {canRespond ? (
                             <TouchableOpacity
@@ -7366,36 +7329,8 @@ export default function BookingsScreen() {
                               )}
                             </TouchableOpacity>
                           ) : null}
-                          </View>
-                        )}
-
-                        {isHistoryTabView && (
-                          <View style={[styles.actionButtonsContainer, styles.compactActionRow]}>
-                            <TouchableOpacity
-                              activeOpacity={1}
-                              testID={bookingActionTestId(item, "view-details")}
-                              accessibilityLabel={bookingActionTestId(item, "view-details")}
-                              onPress={(e) => {
-                                e.stopPropagation();
-                                handleDetailsPress(item);
-                              }}
-                              style={[
-                                styles.outlineButton,
-                                {
-                                  flex: 1,
-                                  borderColor: colors.border,
-                                },
-                              ]}
-                            >
-                              <View style={styles.detailsButtonLabelContainer}>
-                                <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>
-                                  View Details
-                                </Text>
-                              </View>
-                            </TouchableOpacity>
-                          </View>
-                        )}
-                      </View>
+                        </View>
+                      ) : null}
                     </View>
                   </TouchableOpacity>
                 );
@@ -7446,7 +7381,6 @@ export default function BookingsScreen() {
                   <TouchableOpacity
                     activeOpacity={0.82}
                     testID={`mobile-bookings-gig-application-card-${item.id}`}
-                    accessibilityRole="button"
                     accessibilityLabel={`${item.customer_name || "Applicant"}, ${applicationLabel}, ${item.status}`}
                     onPress={() => handleDetailsPress(item)}
                     style={[
@@ -7469,7 +7403,7 @@ export default function BookingsScreen() {
                       />
 
                       <View style={styles.ownerApplicantMain}>
-                        <Text style={[styles.ownerApplicantName, { color: colors.text }]} numberOfLines={1}>
+                      <Text style={[styles.ownerApplicantName, { color: colors.text }]} numberOfLines={2}>
                           {item.customer_name || "Applicant"}
                         </Text>
                         <Text style={[styles.ownerApplicantType, { color: colors.textSecondary }]} numberOfLines={1}>
@@ -7684,27 +7618,49 @@ export default function BookingsScreen() {
                     ]}
                   >
                     <View style={styles.cardContent}>
-                      <View style={styles.applicationCardLabelRow}>
-                        <Text style={[styles.applicationCardType, { color: colors.primary }]}>{applicationTypeBadge}</Text>
-                        <Text style={[styles.applicationCardStatus, { color: colors.textSecondary }]}>{item.status}</Text>
-                      </View>
-                      <View style={styles.cardHeader}>
-                        <View style={styles.cardTitleContainer}>
+                    <View style={styles.activityCardIdentity}>
+                      <CachedImage
+                        uri={isMusicianView ? item.gig_image || item.image : item.customer_avatar || item.image}
+                        fallbackUri={REQUEST_PLACEHOLDER_IMAGE}
+                        style={styles.activityCardThumbnail}
+                        width={BOOKING_AVATAR_IMAGE_SIZE * 2}
+                        height={BOOKING_AVATAR_IMAGE_SIZE * 2}
+                        quality={72}
+                        cacheVersion={item.updated_at || item.created_at || item.id}
+                      />
+                      <View style={styles.activityCardMain}>
+                        <View style={styles.activityCardTitleRow}>
                           <TouchableOpacity activeOpacity={1}
                             onPress={openApplicationDetails}
+                            style={styles.activityCardTitleLink}
                           >
-                            <Text
-                              style={[styles.cardTitle, { color: colors.text }]}
-                              numberOfLines={2}
-                            >
-                              {isMusicianView
-                                ? gigName
-                                : item.customer_name || "Applicant"}
+                            <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={2}>
+                              {isMusicianView ? gigName : item.customer_name || "Applicant"}
                             </Text>
                           </TouchableOpacity>
-
-                          <View style={{ marginTop: 8, gap: 4 }}>
-                            {/* Role / Context */}
+                          {!isHistoryTabView && shouldShowMessageForItem(item) && (
+                            <TouchableOpacity
+                              activeOpacity={1}
+                              onPress={() => handleMessagePress(item)}
+                              style={[
+                                styles.messageIconButton,
+                                {
+                                  borderColor: colors.border,
+                                  backgroundColor: colors.card,
+                                },
+                              ]}
+                            >
+                              <Ionicons
+                                name="chatbubble-ellipses-outline"
+                                size={16}
+                                color={colors.primary}
+                              />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                        <Text style={[styles.activityCardType, { color: colors.textSecondary }]}>
+                          {applicationTypeBadge}
+                        </Text>
                             <View style={styles.cardDetailRow}>
                               <Ionicons
                                 name={isMusicianView ? (applicationIcon as any) : (applicationIcon as any)}
@@ -7721,10 +7677,41 @@ export default function BookingsScreen() {
                                     : `Applied for ${gigName}`}
                               </Text>
                             </View>
-
-                            {memberCvTask && requiredMemberCvCount > 0 ? (
-                              <View style={styles.cardDetailRow}>
-                                <Ionicons name="document-text-outline" size={14} color={colors.textSecondary} />
+                      </View>
+                    </View>
+                    <View style={styles.activityMetadataRow}>
+                      <View style={styles.activityStatusChip}>
+                        {displayedApplicationStatus === "Happening Now" || displayedApplicationStatus === "Accepted" || displayedApplicationStatus === "Confirmed" || displayedApplicationStatus === "Completed" ? (
+                          <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                        ) : displayedApplicationStatus === "Declined" || displayedApplicationStatus === "Cancelled" || displayedApplicationStatus === "Fired" || displayedApplicationStatus === "Withdrawn" ? (
+                          <Ionicons name="close-circle" size={16} color="#EF4444" />
+                        ) : (
+                          <Ionicons name="time-outline" size={16} color="#F59E0B" />
+                        )}
+                        <Text
+                          style={[
+                            styles.statusText,
+                            {
+                              color:
+                                displayedApplicationStatus === "Happening Now" ||
+                                  displayedApplicationStatus === "Accepted" ||
+                                  displayedApplicationStatus === "Confirmed" ||
+                                  displayedApplicationStatus === "Completed"
+                                  ? "#10B981"
+                                  : displayedApplicationStatus === "Declined" || displayedApplicationStatus === "Cancelled" || displayedApplicationStatus === "Fired" || displayedApplicationStatus === "Withdrawn"
+                                    ? "#EF4444"
+                                    : "#F59E0B",
+                            },
+                          ]}
+                        >
+                          {displayedApplicationStatus}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.activityDetailGrid}>
+                      {memberCvTask && requiredMemberCvCount > 0 ? (
+                        <View style={styles.activityDetailField}>
+                          <Text style={[styles.activityFieldLabel, { color: colors.textSecondary }]}>Member CVs</Text>
                                 <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
                                   {submittedMemberCvCount} of {requiredMemberCvCount} member CVs submitted · {remainingMemberCvCount} remaining
                                 </Text>
@@ -7733,12 +7720,8 @@ export default function BookingsScreen() {
 
                             {/* Location */}
                             {item.location && (
-                              <View style={styles.cardDetailRow}>
-                                <Ionicons
-                                  name="location-outline"
-                                  size={14}
-                                  color={colors.textSecondary}
-                                />
+                        <View style={styles.activityDetailField}>
+                          <Text style={[styles.activityFieldLabel, { color: colors.textSecondary }]}>Location</Text>
                                 <Text
                                   style={[styles.cardDetailText, { color: colors.textSecondary }]}
                                   numberOfLines={2}
@@ -7750,29 +7733,21 @@ export default function BookingsScreen() {
 
                             {/* Received / Submitted Time */}
                             {applicationReceivedAt && (
-                              <View style={styles.cardDetailRow}>
-                                <Ionicons
-                                  name="time-outline"
-                                  size={14}
-                                  color={colors.textSecondary}
-                                />
-                                <Text
-                                  style={[styles.cardDetailText, { color: colors.textSecondary }]}
-                                  numberOfLines={2}
-                                >
-                                  {`${applicationReceivedLabel} ${applicationReceivedAt}`}
+                        <View style={styles.activityDetailField}>
+                          <Text style={[styles.activityFieldLabel, { color: colors.textSecondary }]}>{applicationReceivedLabel}</Text>
+                          <Text
+                            style={[styles.cardDetailText, { color: colors.textSecondary }]}
+                            numberOfLines={2}
+                          >
+                            {applicationReceivedAt}
                                 </Text>
                               </View>
                             )}
 
                             {/* Date */}
                             {item.date && item.date !== "TBA" && (
-                              <View style={styles.cardDetailRow}>
-                                <Ionicons
-                                  name="calendar-outline"
-                                  size={14}
-                                  color={colors.textSecondary}
-                                />
+                        <View style={styles.activityDetailField}>
+                          <Text style={[styles.activityFieldLabel, { color: colors.textSecondary }]}>Event</Text>
                                 <Text
                                   style={[styles.cardDetailText, { color: colors.textSecondary }]}
                                   numberOfLines={1}
@@ -7781,8 +7756,7 @@ export default function BookingsScreen() {
                                 </Text>
                               </View>
                             )}
-                          </View>
-                        </View>
+
                       </View>
 
                       {/* Content: Pitch & Audition (for gig owners) */}
@@ -7806,15 +7780,13 @@ export default function BookingsScreen() {
                                 style={[
                                   styles.attachmentChip,
                                   {
-                                    borderColor: isDark ? "rgba(59, 130, 246, 0.35)" : "#BFDBFE",
-                                    backgroundColor: isDark
-                                      ? "rgba(59, 130, 246, 0.2)"
-                                      : "#EFF6FF",
+                                    borderColor: colors.border,
+                                    backgroundColor: isDark ? "#FFFFFF05" : "#FAFAFC",
                                   },
                                 ]}
                               >
                                 <Text
-                                  style={[styles.attachmentChipText, { color: "#3B82F6" }]}
+                                  style={[styles.attachmentChipText, { color: colors.text }]}
                                 >
                                   Audition
                                 </Text>
@@ -7828,15 +7800,13 @@ export default function BookingsScreen() {
                                 style={[
                                   styles.attachmentChip,
                                   {
-                                    borderColor: isDark ? "rgba(139, 92, 246, 0.35)" : "#DDD6FE",
-                                    backgroundColor: isDark
-                                      ? "rgba(139, 92, 246, 0.2)"
-                                      : "#F3E8FF",
+                                    borderColor: colors.border,
+                                    backgroundColor: isDark ? "#FFFFFF05" : "#FAFAFC",
                                   },
                                 ]}
                               >
                                 <Text
-                                  style={[styles.attachmentChipText, { color: "#8B5CF6" }]}
+                                  style={[styles.attachmentChipText, { color: colors.text }]}
                                 >
                                   CV
                                 </Text>
@@ -7863,63 +7833,7 @@ export default function BookingsScreen() {
                           },
                         ]}
                       >
-                        <View
-                          style={{
-                            width: "100%",
-                            flexDirection: "row",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: moderateScale(8),
-                          }}
-                        >
-                          <View style={styles.statusContainer}>
-                            {displayedApplicationStatus === "Happening Now" || displayedApplicationStatus === "Accepted" || displayedApplicationStatus === "Confirmed" || displayedApplicationStatus === "Completed" ? (
-                              <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                            ) : displayedApplicationStatus === "Declined" || displayedApplicationStatus === "Cancelled" || displayedApplicationStatus === "Fired" || displayedApplicationStatus === "Withdrawn" ? (
-                              <Ionicons name="close-circle" size={16} color="#EF4444" />
-                            ) : (
-                              <Ionicons name="time-outline" size={16} color="#F59E0B" />
-                            )}
-                            <Text
-                              style={[
-                                styles.statusText,
-                                {
-                                  color:
-                                    displayedApplicationStatus === "Happening Now" ||
-                                      displayedApplicationStatus === "Accepted" ||
-                                      displayedApplicationStatus === "Confirmed" ||
-                                      displayedApplicationStatus === "Completed"
-                                      ? "#10B981"
-                                      : displayedApplicationStatus === "Declined" || displayedApplicationStatus === "Cancelled" || displayedApplicationStatus === "Fired" || displayedApplicationStatus === "Withdrawn"
-                                        ? "#EF4444"
-                                        : "#F59E0B",
-                                },
-                              ]}
-                            >
-                              {displayedApplicationStatus}
-                            </Text>
-                          </View>
 
-                          {!isHistoryTabView && shouldShowMessageForItem(item) && (
-                            <TouchableOpacity
-                              activeOpacity={1}
-                              onPress={() => handleMessagePress(item)}
-                              style={[
-                                styles.messageIconButton,
-                                {
-                                  borderColor: colors.border,
-                                  backgroundColor: colors.card,
-                                },
-                              ]}
-                            >
-                              <Ionicons
-                                name="chatbubble-ellipses-outline"
-                                size={16}
-                                color={colors.primary}
-                              />
-                            </TouchableOpacity>
-                          )}
-                        </View>
                         {renderActionLoadingIndicator(item)}
                         {isMusicianView && isAcceptedGigApplicationItem(item) ? (
                           <TouchableOpacity
@@ -7940,11 +7854,11 @@ export default function BookingsScreen() {
                               borderColor: colors.primary,
                               backgroundColor: colors.primary + "12",
                               padding: 10,
-                              borderRadius: 100,
-                            }}
-                          >
-                            <Ionicons name="megaphone-outline" size={16} color={colors.primary} />
-                            <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
+                            borderRadius: moderateScale(9),
+                          }}
+                        >
+                          <Ionicons name="megaphone-outline" size={16} color={colors.primary} />
+                          <Text style={{ color: colors.primary, fontFamily: typography.semibold, fontSize: 12 }}>
                               {String(item.feature_consent_status || "").toLowerCase() === "pending"
                                 ? "Respond to Featuring Request"
                                 : "Manage Featuring Permission"}
@@ -7967,14 +7881,14 @@ export default function BookingsScreen() {
                                 borderColor: colors.border,
                                 borderWidth: 1,
                                 padding: 10,
-                                borderRadius: 100,
+                              borderRadius: moderateScale(9),
                                 alignItems: "center",
                               }}
                             >
                               <Text
                                 style={{
                                   color: colors.textSecondary,
-                                  fontFamily: "Poppins_500Medium",
+                                fontFamily: typography.medium,
                                   fontSize: 12,
                                 }}
                               >
@@ -8003,14 +7917,14 @@ export default function BookingsScreen() {
                                 borderColor: colors.border,
                                 borderWidth: 1,
                                 padding: 10,
-                                borderRadius: 100,
+                                borderRadius: moderateScale(9),
                                 gap: 6,
                               }}
                             >
                               <Text
                                 style={{
                                   color: colors.textSecondary,
-                                  fontFamily: "Poppins_500Medium",
+                                  fontFamily: typography.medium,
                                   fontSize: 12,
                                 }}
                               >
@@ -8057,7 +7971,7 @@ export default function BookingsScreen() {
                                     ]}
                                   >
                                     <Text
-                                      style={[styles.outlineButtonText, { color: "#EF4444", fontFamily: "Poppins_600SemiBold" }]}
+                                    style={[styles.outlineButtonText, { color: "#EF4444", fontFamily: typography.semibold }]}
                                     >
                                       Decline
                                     </Text>
@@ -8116,7 +8030,7 @@ export default function BookingsScreen() {
                                       : "#FEF2F2"
                                     : "transparent",
                                   padding: 10,
-                                  borderRadius: 100,
+                                  borderRadius: moderateScale(9),
                                   alignItems: "center",
                                   flexDirection: "row",
                                   justifyContent: "center",
@@ -8162,14 +8076,14 @@ export default function BookingsScreen() {
                                       ? "rgba(239, 68, 68, 0.2)"
                                       : "#FEF2F2",
                                   padding: 10,
-                                  borderRadius: 100,
+                                  borderRadius: moderateScale(9),
                                   alignItems: "center",
                                 }}
                               >
                                 <Text
                                   style={{
                                     color: isGigReconfirmationItem(item) ? "white" : "#EF4444",
-                                    fontFamily: "Poppins_600SemiBold",
+                                    fontFamily: typography.semibold,
                                     fontSize: 12,
                                   }}
                                 >
@@ -8214,7 +8128,7 @@ export default function BookingsScreen() {
                                   ]}
                                 >
                                   <Text
-                                    style={[styles.outlineButtonText, { color: "#EF4444", fontFamily: "Poppins_600SemiBold" }]}
+                                    style={[styles.outlineButtonText, { color: "#EF4444", fontFamily: typography.semibold }]}
                                   >
                                     Reject
                                   </Text>
@@ -8230,7 +8144,7 @@ export default function BookingsScreen() {
                                   style={{
                                     flex: 1,
                                     backgroundColor: "#10B981",
-                                    borderRadius: 100,
+                                    borderRadius: moderateScale(9),
                                     alignItems: "center",
                                     justifyContent: "center",
                                     paddingVertical: moderateScale(8),
@@ -8263,14 +8177,14 @@ export default function BookingsScreen() {
                                         ? "rgba(239, 68, 68, 0.2)"
                                         : "#FEF2F2",
                                       padding: 10,
-                                      borderRadius: 100,
+                                      borderRadius: moderateScale(9),
                                       alignItems: "center",
                                     }}
                                   >
                                     <Text
                                       style={{
                                         color: "#EF4444",
-                                        fontFamily: "Poppins_700Bold",
+                                        fontFamily: typography.bold,
                                         fontSize: 12,
                                       }}
                                     >
@@ -8289,14 +8203,14 @@ export default function BookingsScreen() {
                                         flex: 1,
                                         backgroundColor: "#10B981",
                                         padding: 10,
-                                        borderRadius: 100,
+                                        borderRadius: moderateScale(9),
                                         alignItems: "center",
                                       }}
                                     >
                                       <Text
                                         style={{
                                           color: "white",
-                                          fontFamily: "Poppins_700Bold",
+                                          fontFamily: typography.bold,
                                           fontSize: 12,
                                         }}
                                       >
@@ -8340,14 +8254,14 @@ export default function BookingsScreen() {
                                 borderColor: colors.border,
                                 borderWidth: 1,
                                 padding: 10,
-                                borderRadius: 100,
+                                borderRadius: moderateScale(9),
                                 alignItems: "center",
                               }}
                             >
                               <Text
                                 style={{
                                   color: colors.textSecondary,
-                                  fontFamily: "Poppins_500Medium",
+                                  fontFamily: typography.medium,
                                   fontSize: 12,
                                 }}
                               >
@@ -8379,14 +8293,15 @@ export default function BookingsScreen() {
                     },
                   ]}
                 >
-                  <View>
+                <View style={styles.cardContent}>
+                  <View style={styles.activityCardIdentity}>
                     <CachedImage
                       uri={item.image}
                       fallbackUri={
                         "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop"
                       }
                       style={[
-                        styles.cardImage,
+                        styles.activityCardThumbnail,
                         { opacity: item.isCancelled ? 0.6 : 1 },
                       ]}
                       width={BOOKING_CARD_IMAGE_WIDTH}
@@ -8394,70 +8309,111 @@ export default function BookingsScreen() {
                       quality={72}
                       cacheVersion={item.updated_at || item.created_at || item.id}
                     />
-                    <View style={[styles.typeBadge, styles.topLeftImageBadge]}>
-                      <Text style={styles.typeBadgeText} numberOfLines={1}>{item.type}</Text>
-                    </View>
-
-                    {/* Pax Badge for Studios */}
-                    {item.pax && (
-                      <View style={styles.topRightBadgeStack}>
-                        <View
-                          style={[
-                            styles.typeBadge,
-                            styles.stackedImageBadge,
-                            {
-                              backgroundColor: "#10B981",
-                            },
-                          ]}
-                        >
-                          <Text style={styles.typeBadgeText} numberOfLines={1}>{item.pax} pax</Text>
-                        </View>
-
-                        {/* Status Overlays */}
-                        {renderActiveTab === "Ongoing" && (
-                          <View style={[styles.liveBadge, styles.stackedImageBadge]}>
-                            <View style={styles.liveDot} />
-                            <Text style={styles.liveText}>Live</Text>
-                          </View>
-                        )}
-                      </View>
-                    )}
-
-                    {!item.pax && renderActiveTab === "Ongoing" && (
-                      <View style={styles.topRightBadgeStack}>
-                        <View style={[styles.liveBadge, styles.stackedImageBadge]}>
-                          <View style={styles.liveDot} />
-                          <Text style={styles.liveText}>Live</Text>
-                        </View>
-                      </View>
-                    )}
-
-                    {item.isCancelled && (
-                      <View style={styles.cancelledOverlay}>
-                        <View
-                          style={[
-                            styles.cancelledBadge,
-                            isRefundedStudioBooking(item) && { backgroundColor: "#0EA5E9" },
-                          ]}
-                        >
-                          <Text style={styles.cancelledText}>
-                            {getStudioBookingStatusLabel(item) === "Refunded" ? "Refunded" : "Cancelled"}
-                          </Text>
-                        </View>
-                      </View>
-                    )}
-                  </View>
-
-                  <View style={styles.cardContent}>
-                    <View style={styles.cardHeader}>
-                      <View style={styles.cardTitleContainer}>
-                        <Text
-                          style={[styles.cardTitle, { color: colors.text }]}
-                          numberOfLines={1}
-                        >
+                    <View style={styles.activityCardMain}>
+                      <View style={styles.activityCardTitleRow}>
+                        <Text style={[styles.cardTitle, styles.activityCardTitleLink, { color: colors.text }]} numberOfLines={2}>
                           {item.name}
                         </Text>
+                        {!isHistoryTabView && shouldShowMessageForItem(item) && (
+                          <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => handleMessagePress(item)}
+                            style={[
+                              styles.messageIconButton,
+                              {
+                                borderColor: colors.border,
+                                backgroundColor: colors.card,
+                              },
+                            ]}
+                          >
+                            <Ionicons
+                              name="chatbubble-ellipses-outline"
+                              size={16}
+                              color={colors.primary}
+                            />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                      <Text style={[styles.activityCardType, { color: colors.textSecondary }]}>{item.type}</Text>
+                      <View style={styles.activityStatusChip}>
+                        {isRefundedStudioBooking(item) ? (
+                          <Ionicons
+                            name="cash-outline"
+                            size={16}
+                            color="#0EA5E9"
+                          />
+                        ) : item.isCancelled ? (
+                          <Ionicons
+                            name="close-circle"
+                            size={16}
+                            color="#EF4444"
+                          />
+                        ) : renderActiveTab === "Ongoing" ? (
+                          <Ionicons
+                            name="play-circle"
+                            size={16}
+                            color="#10B981"
+                          />
+                        ) : renderActiveTab === "Review" ? (
+                          <Ionicons
+                            name="checkmark-done-circle"
+                            size={16}
+                            color={colors.textSecondary}
+                          />
+                        ) : renderActiveTab === "Pending" ? (
+                          <Ionicons
+                            name="time-outline"
+                            size={16}
+                            color="#F59E0B"
+                          />
+                        ) : (
+                          <Ionicons
+                            name="checkmark-circle"
+                            size={16}
+                            color="#10B981"
+                          />
+                        )}
 
+                        <Text
+                          style={[
+                            styles.statusText,
+                            {
+                              color: isRefundedStudioBooking(item)
+                                ? "#0EA5E9"
+                                : item.isCancelled
+                                  ? "#EF4444"
+                                  : renderActiveTab === "Pending"
+                                    ? "#F59E0B"
+                                    : renderActiveTab === "Ongoing"
+                                      ? "#10B981"
+                                      : renderActiveTab === "Review"
+                                        ? colors.textSecondary
+                                        : "#10B981",
+                            },
+                          ]}
+                          numberOfLines={2}
+                        >
+                          {getStudioBookingStatusLabel(item)}
+                        </Text>
+
+                      </View>
+                    </View>
+                  </View>
+                  {item.pax || renderActiveTab === "Ongoing" ? (
+                    <View style={styles.activityMetadataRow}>
+                      {item.pax && (
+                        <Text style={[styles.activityCardType, { color: colors.textSecondary }]}>{item.pax} pax</Text>
+                      )}
+                      {renderActiveTab === "Ongoing" && (
+                        <View style={[styles.activityStatusChip, { backgroundColor: "#10B98112" }]}>
+                          <View style={[styles.requestSummaryStatusDot, { backgroundColor: "#10B981" }]} />
+                          <Text style={[styles.statusText, { color: "#10B981" }]}>Live</Text>
+                        </View>
+                      )}
+                    </View>
+                  ) : null}
+                  <View style={styles.cardHeader}>
+                    <View style={styles.cardTitleContainer}>
                         {/* Booker Info for Studio/Gig Owners */}
                         {isListingManagerItem(item) &&
                           item.customer_name && (
@@ -8501,7 +8457,7 @@ export default function BookingsScreen() {
                                   : "Booked by "}
                                 <Text
                                   style={{
-                                    fontFamily: "Poppins_600SemiBold",
+                                  fontFamily: typography.semibold,
                                     color: colors.text,
                                   }}
                                 >
@@ -8536,7 +8492,7 @@ export default function BookingsScreen() {
                                   <Text
                                     style={{
                                       fontSize: 12,
-                                      fontFamily: "Poppins_400Regular",
+                                    fontFamily: typography.body,
                                       color: colors.text,
                                     }}
                                   >
@@ -8560,7 +8516,7 @@ export default function BookingsScreen() {
                                   <Text
                                     style={{
                                       fontSize: 12,
-                                      fontFamily: "Poppins_400Regular",
+                                    fontFamily: typography.body,
                                       color: colors.text,
                                     }}
                                     numberOfLines={1}
@@ -8593,7 +8549,7 @@ export default function BookingsScreen() {
                                   <Text
                                     style={{
                                       fontSize: 12,
-                                      fontFamily: "Poppins_500Medium",
+                                    fontFamily: typography.medium,
                                       color: "#3B82F6",
                                     }}
                                   >
@@ -8615,7 +8571,7 @@ export default function BookingsScreen() {
                                   <Text
                                     style={{
                                       fontSize: 11,
-                                      fontFamily: "Poppins_600SemiBold",
+                                    fontFamily: typography.semibold,
                                       color: colors.textSecondary,
                                       marginBottom: 2,
                                     }}
@@ -8625,7 +8581,7 @@ export default function BookingsScreen() {
                                   <Text
                                     style={{
                                       fontSize: 12,
-                                      fontFamily: "Poppins_400Regular",
+                                    fontFamily: typography.body,
                                       color: colors.text,
                                     }}
                                   >
@@ -8746,46 +8702,42 @@ export default function BookingsScreen() {
                                 : null;
 
                             return (
-                              <>
-                                <View style={styles.cardDetailRow}>
-                                  <Ionicons name="calendar-outline" size={14} color={colors.textSecondary} />
+                            <View style={styles.activityDetailGrid}>
+                              <View style={styles.activityDetailField}>
+                                <Text style={[styles.activityFieldLabel, { color: colors.textSecondary }]}>Date</Text>
                                   <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
                                     {dateStr}
                                   </Text>
                                 </View>
                                 {timeStr ? (
-                                  <View style={styles.cardDetailRow}>
-                                    <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
+                                <View style={styles.activityDetailField}>
+                                  <Text style={[styles.activityFieldLabel, { color: colors.textSecondary }]}>Time</Text>
                                     <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
                                       {timeStr}
                                     </Text>
                                   </View>
                                 ) : null}
                                 {item.batch_count > 1 ? (
-                                  <View style={styles.cardDetailRow}>
-                                    <Ionicons name="albums-outline" size={14} color={colors.textSecondary} />
+                                <View style={styles.activityDetailField}>
+                                  <Text style={[styles.activityFieldLabel, { color: colors.textSecondary }]}>Sessions</Text>
                                     <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
                                       {item.batch_count} sessions in this payment
                                     </Text>
                                   </View>
                                 ) : null}
                                 {paidAmountLabel ? (
-                                  <View style={styles.cardDetailRow}>
-                                    <Ionicons name="cash-outline" size={14} color={colors.textSecondary} />
-                                    <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
-                                      Amount paid | {paidAmountLabel}
+                                <View style={styles.activityDetailField}>
+                                  <Text style={[styles.activityFieldLabel, { color: colors.textSecondary }]}>Amount paid</Text>
+                                  <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
+                                    {paidAmountLabel}
                                     </Text>
                                   </View>
                                 ) : null}
                                 {showRecordingMeta ? (
                                   <>
                                     {requiredTotalHours ? (
-                                      <View style={styles.cardDetailRow}>
-                                        <Ionicons
-                                          name="hourglass-outline"
-                                          size={14}
-                                          color={recordingDurationColor}
-                                        />
+                                    <View style={[styles.activityDetailField, styles.activityDetailFieldFull]}>
+                                      <Text style={[styles.activityFieldLabel, { color: colors.textSecondary }]}>Recording duration</Text>
                                         <Text
                                           style={[
                                             styles.cardDetailText,
@@ -8804,7 +8756,7 @@ export default function BookingsScreen() {
                                     ) : null}
                                   </>
                                 ) : null}
-                              </>
+                            </View>
                             );
                           })()}
                         </View>
@@ -8815,7 +8767,6 @@ export default function BookingsScreen() {
                       style={[
                         styles.cardFooter,
                         { borderColor: isDark ? colors.border : "#F3F4F6" },
-                        // FORCE COLUMN LAYOUT for proper vertical stacking
                         {
                           flexDirection: "column",
                           alignItems: "flex-start",
@@ -8823,7 +8774,9 @@ export default function BookingsScreen() {
                         },
                       ]}
                     >
-                      {/* Status Text with Icon - Now at the Top */}
+                    {/* Payment and refund information */}
+                    {(isHistoryTabView && isRefundedStudioBooking(item) && getBookingRefundAmount(item) > 0) ||
+                      shouldShowPaidBalanceBadge(item) || isBalancePaymentProcessing(item) || shouldShowBalanceDueBadge(item) ? (
                       <View
                         style={{
                           width: "100%",
@@ -8839,66 +8792,6 @@ export default function BookingsScreen() {
                             { marginBottom: 0, flex: 1, flexWrap: "wrap" },
                           ]}
                         >
-                          {isRefundedStudioBooking(item) ? (
-                            <Ionicons
-                              name="cash-outline"
-                              size={16}
-                              color="#0EA5E9"
-                            />
-                          ) : item.isCancelled ? (
-                            <Ionicons
-                              name="close-circle"
-                              size={16}
-                              color="#EF4444"
-                            />
-                          ) : renderActiveTab === "Ongoing" ? (
-                            <Ionicons
-                              name="play-circle"
-                              size={16}
-                              color="#10B981"
-                            />
-                          ) : renderActiveTab === "Review" ? (
-                            <Ionicons
-                              name="checkmark-done-circle"
-                              size={16}
-                              color={colors.textSecondary}
-                            />
-                          ) : renderActiveTab === "Pending" ? (
-                            <Ionicons
-                              name="time-outline"
-                              size={16}
-                              color="#F59E0B"
-                            />
-                          ) : (
-                            <Ionicons
-                              name="checkmark-circle"
-                              size={16}
-                              color="#10B981"
-                            />
-                          )}
-
-                          <Text
-                            style={[
-                              styles.statusText,
-                              {
-                                color: isRefundedStudioBooking(item)
-                                  ? "#0EA5E9"
-                                  : item.isCancelled
-                                  ? "#EF4444"
-                                  : renderActiveTab === "Pending"
-                                    ? "#F59E0B"
-                                    : renderActiveTab === "Ongoing"
-                                      ? "#10B981"
-                                      : renderActiveTab === "Review"
-                                        ? colors.textSecondary
-                                        : "#10B981",
-                              },
-                            ]}
-                            numberOfLines={2}
-                          >
-                            {getStudioBookingStatusLabel(item)}
-                          </Text>
-
                           {isHistoryTabView && isRefundedStudioBooking(item) && getBookingRefundAmount(item) > 0 && (
                             <View
                               style={[
@@ -8993,27 +8886,10 @@ export default function BookingsScreen() {
                           )}
                         </View>
 
-                        {!isHistoryTabView && shouldShowMessageForItem(item) && (
-                          <TouchableOpacity
-                            activeOpacity={1}
-                            onPress={() => handleMessagePress(item)}
-                            style={[
-                              styles.messageIconButton,
-                              {
-                                borderColor: colors.border,
-                                backgroundColor: colors.card,
-                              },
-                            ]}
-                          >
-                            <Ionicons
-                              name="chatbubble-ellipses-outline"
-                              size={16}
-                              color={colors.primary}
-                            />
-                          </TouchableOpacity>
-                        )}
+
                       </View>
 
+                    ) : null}
                       {renderActionLoadingIndicator(item)}
 
                       {!isHistoryTabView && (
@@ -9046,7 +8922,7 @@ export default function BookingsScreen() {
                                 style={{
                                   color: "#D97706",
                                   fontSize: 12,
-                                  fontFamily: "Poppins_600SemiBold",
+                                  fontFamily: typography.semibold,
                                 }}
                               >
                                 Studio requested a schedule move
@@ -9055,7 +8931,7 @@ export default function BookingsScreen() {
                                 style={{
                                   color: colors.text,
                                   fontSize: 12,
-                                  fontFamily: "Poppins_500Medium",
+                                  fontFamily: typography.medium,
                                 }}
                               >
                                 Preferred slot: {formatRelocationSlotLabel(getSelectedRelocationSlot(item))}
@@ -9064,7 +8940,7 @@ export default function BookingsScreen() {
                                 style={{
                                   color: colors.textSecondary,
                                   fontSize: 11,
-                                  fontFamily: "Poppins_400Regular",
+                                  fontFamily: typography.body,
                                 }}
                               >
                                 Original price and booking details stay attached.
@@ -9074,7 +8950,7 @@ export default function BookingsScreen() {
                                   style={{
                                     color: colors.textSecondary,
                                     fontSize: 11,
-                                    fontFamily: "Poppins_400Regular",
+                                    fontFamily: typography.body,
                                   }}
                                 >
                                   Respond before: {formatFriendlyDateTime(item.relocation_expires_at)}
@@ -9092,7 +8968,7 @@ export default function BookingsScreen() {
                                   borderColor: colors.primary,
                                   width: "100%",
                                   alignItems: "center",
-                                  borderRadius: 100,
+                                  borderRadius: moderateScale(9),
                                   flexDirection: "row",
                                   gap: scale(8),
                                   opacity: isActionLoadingFor(item) ? 0.65 : 1,
@@ -9132,7 +9008,7 @@ export default function BookingsScreen() {
                                     : "#FEF2F2",
                                   width: "100%",
                                   alignItems: "center",
-                                  borderRadius: 100,
+                                  borderRadius: moderateScale(9),
                                   opacity: isActionLoadingFor(item) ? 0.65 : 1,
                                 },
                               ]}
@@ -9279,7 +9155,7 @@ export default function BookingsScreen() {
                                       : "#FEF2F2",
                                     flex: 1,
                                     alignItems: "center",
-                                    borderRadius: 100,
+                                    borderRadius: moderateScale(9),
                                   },
                                 ]}
                               >
@@ -9312,7 +9188,7 @@ export default function BookingsScreen() {
                                 borderColor: colors.border,
                                 borderWidth: 1,
                                 padding: 10,
-                                borderRadius: 100,
+                                borderRadius: moderateScale(9),
                                 alignItems: "center",
                                 flexDirection: "row",
                                 justifyContent: "center",
@@ -9322,7 +9198,7 @@ export default function BookingsScreen() {
                               <Text
                                 style={{
                                   color: colors.textSecondary,
-                                  fontFamily: "Poppins_500Medium",
+                                  fontFamily: typography.medium,
                                   fontSize: 12,
                                 }}
                               >
@@ -9345,14 +9221,14 @@ export default function BookingsScreen() {
                                   ? "rgba(239, 68, 68, 0.2)"
                                   : "#FEF2F2",
                                 padding: 10,
-                                borderRadius: 100,
+                                borderRadius: moderateScale(9),
                                 alignItems: "center",
                               }}
                             >
                               <Text
                                 style={{
                                   color: "#EF4444",
-                                  fontFamily: "Poppins_600SemiBold",
+                                  fontFamily: typography.semibold,
                                   fontSize: 12,
                                 }}
                               >
@@ -9415,7 +9291,7 @@ export default function BookingsScreen() {
                                     flex: 1,
                                     alignItems: "center",
                                     justifyContent: "center",
-                                    borderRadius: 100,
+                                    borderRadius: moderateScale(9),
                                   },
                                 ]}
                               >
@@ -9451,7 +9327,7 @@ export default function BookingsScreen() {
                                 styles.reviewActionButton,
                                 {
                                   backgroundColor: "#10B981",
-                                  borderRadius: 100,
+                                  borderRadius: moderateScale(9),
                                   opacity: isActionLoadingFor(item) ? 0.65 : 1,
                                 },
                               ]}
@@ -9528,7 +9404,7 @@ export default function BookingsScreen() {
                                         : "#FFF7ED",
                                       width: "100%",
                                       alignItems: "center",
-                                      borderRadius: 100,
+                                    borderRadius: moderateScale(9),
                                     },
                                   ]}
                                 >
@@ -9562,7 +9438,7 @@ export default function BookingsScreen() {
                                           alignItems: "center",
                                           flexDirection: "row",
                                           justifyContent: "center",
-                                          borderRadius: 100,
+                                          borderRadius: moderateScale(9),
                                           opacity: isActionLoadingFor(item) ? 0.65 : 1,
                                         },
                                       ]}
@@ -9598,7 +9474,7 @@ export default function BookingsScreen() {
                                           alignItems: "center",
                                           flexDirection: "row",
                                           justifyContent: "center",
-                                          borderRadius: 100,
+                                          borderRadius: moderateScale(9),
                                         },
                                       ]}
                                     >
@@ -9683,7 +9559,7 @@ export default function BookingsScreen() {
                                           : "#FEF2F2",
                                         flex: 1,
                                         alignItems: "center",
-                                        borderRadius: 100,
+                                        borderRadius: moderateScale(9),
                                       },
                                     ]}
                                   >
@@ -10672,7 +10548,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   gigGroupHeader: {
-    borderRadius: radius.card,
+    borderRadius: moderateScale(16),
     borderWidth: 1,
     marginBottom: moderateScale(12),
     overflow: "hidden",
@@ -10685,9 +10561,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 0,
   },
   gigGroupContent: {
-    paddingHorizontal: scale(14),
-    paddingTop: moderateScale(12),
-    paddingBottom: moderateScale(12),
+    padding: moderateScale(16),
   },
   gigGroupTopRow: {
     flexDirection: "row",
@@ -10695,46 +10569,49 @@ const styles = StyleSheet.create({
     gap: scale(10),
   },
   gigGroupIcon: {
-    width: moderateScale(38),
-    height: moderateScale(38),
-    borderRadius: moderateScale(12),
+    width: moderateScale(64),
+    height: moderateScale(64),
+    borderRadius: moderateScale(10),
     alignItems: "center",
     justifyContent: "center",
   },
   gigGroupImage: {
-    width: moderateScale(44),
-    height: moderateScale(44),
-    borderRadius: moderateScale(22),
+    width: moderateScale(64),
+    height: moderateScale(64),
+    borderRadius: moderateScale(10),
   },
   gigGroupTitleContainer: {
     flex: 1,
   },
   gigGroupEyebrow: {
-    fontSize: moderateScale(9),
-    lineHeight: moderateScale(12),
-    fontFamily: "Poppins_700Bold",
-    letterSpacing: 0.8,
+    marginTop: moderateScale(3),
+    fontSize: moderateScale(11),
+    lineHeight: moderateScale(16),
+    fontFamily: typography.medium,
   },
   gigGroupTitle: {
-    marginTop: moderateScale(1),
     fontSize: moderateScale(18),
     lineHeight: moderateScale(24),
-    fontFamily: typography.title,
+    fontFamily: typography.semibold,
   },
   gigGroupMeta: {
     marginTop: moderateScale(10),
-    gap: moderateScale(5),
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: moderateScale(10),
   },
   gigGroupMetaRow: {
+    flexBasis: "46%",
+    flexGrow: 1,
     flexDirection: "row",
-    alignItems: "center",
-    gap: scale(7),
+    alignItems: "flex-start",
+    gap: moderateScale(5),
   },
   gigGroupMetaText: {
     flex: 1,
     fontSize: moderateScale(11),
     lineHeight: moderateScale(16),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   gigGroupApplicantsRow: {
     marginTop: moderateScale(11),
@@ -10752,7 +10629,7 @@ const styles = StyleSheet.create({
   },
   gigGroupApplicantsText: {
     fontSize: moderateScale(12),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   gigGroupCountBadge: {
     borderRadius: moderateScale(999),
@@ -10761,23 +10638,21 @@ const styles = StyleSheet.create({
   },
   gigGroupCountText: {
     fontSize: moderateScale(10),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   gigGroupViewButton: {
     minHeight: moderateScale(44),
-    borderWidth: 1,
-    borderRadius: radius.button,
+    borderTopWidth: 1,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: scale(8),
-    paddingHorizontal: scale(12),
+    justifyContent: "space-between",
+    gap: moderateScale(8),
     marginTop: moderateScale(2),
   },
   gigGroupViewButtonText: {
     fontSize: moderateScale(12),
     lineHeight: moderateScale(16),
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     includeFontPadding: false,
     textAlignVertical: "center",
   },
@@ -10792,10 +10667,6 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: radius.card,
     borderBottomRightRadius: radius.card,
   },
-  groupedApplicationCardImage: {
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
-  },
   groupedOwnerApplicantCard: {
     marginHorizontal: 0,
     marginBottom: 0,
@@ -10803,16 +10674,13 @@ const styles = StyleSheet.create({
     borderRadius: 0,
   },
   ownerApplicantCard: {
-    marginHorizontal: scale(12),
-    marginBottom: moderateScale(10),
+    marginHorizontal: 0,
+    marginBottom: moderateScale(12),
     borderWidth: 1,
-    borderRadius: moderateScale(14),
-    padding: moderateScale(12),
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 1,
+    borderRadius: moderateScale(16),
+    padding: moderateScale(16),
+    shadowOpacity: 0,
+    elevation: 0,
   },
   ownerApplicantCardLast: {
     marginBottom: moderateScale(18),
@@ -10821,28 +10689,28 @@ const styles = StyleSheet.create({
   },
   ownerApplicantSummaryRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: scale(10),
+    alignItems: "flex-start",
+    gap: moderateScale(12),
   },
   ownerApplicantAvatar: {
-    width: moderateScale(52),
-    height: moderateScale(52),
-    borderRadius: moderateScale(26),
+    width: moderateScale(64),
+    height: moderateScale(64),
+    borderRadius: moderateScale(10),
   },
   ownerApplicantMain: {
     flex: 1,
     minWidth: 0,
   },
   ownerApplicantName: {
-    fontSize: moderateScale(14),
-    lineHeight: moderateScale(19),
-    fontFamily: "Poppins_700Bold",
+    fontSize: moderateScale(18),
+    lineHeight: moderateScale(24),
+    fontFamily: typography.semibold,
   },
   ownerApplicantType: {
-    marginTop: moderateScale(1),
-    fontSize: moderateScale(11),
-    lineHeight: moderateScale(15),
-    fontFamily: "Poppins_400Regular",
+    marginTop: moderateScale(3),
+    fontSize: moderateScale(12),
+    lineHeight: moderateScale(17),
+    fontFamily: typography.body,
   },
   ownerApplicantReceivedRow: {
     marginTop: moderateScale(3),
@@ -10852,15 +10720,14 @@ const styles = StyleSheet.create({
   },
   ownerApplicantReceivedText: {
     flex: 1,
-    fontSize: moderateScale(10),
-    lineHeight: moderateScale(14),
-    fontFamily: "Poppins_400Regular",
+    fontSize: moderateScale(11),
+    lineHeight: moderateScale(16),
+    fontFamily: typography.body,
   },
   ownerApplicantIconButton: {
-    width: moderateScale(34),
-    height: moderateScale(34),
-    borderRadius: moderateScale(17),
-    borderWidth: 1,
+    width: moderateScale(44),
+    height: moderateScale(44),
+    borderWidth: 0,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -10890,7 +10757,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     fontSize: moderateScale(10),
     lineHeight: moderateScale(13),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   ownerApplicantRecommendationChip: {
     minHeight: moderateScale(25),
@@ -10902,15 +10769,15 @@ const styles = StyleSheet.create({
     gap: scale(4),
   },
   ownerApplicantRecommendationText: {
-    fontSize: moderateScale(9),
-    lineHeight: moderateScale(12),
-    fontFamily: "Poppins_600SemiBold",
+    fontSize: moderateScale(11),
+    lineHeight: moderateScale(16),
+    fontFamily: typography.semibold,
   },
   ownerApplicantAttachmentText: {
     marginLeft: "auto",
-    fontSize: moderateScale(9),
-    lineHeight: moderateScale(12),
-    fontFamily: "Poppins_500Medium",
+    fontSize: moderateScale(11),
+    lineHeight: moderateScale(16),
+    fontFamily: typography.medium,
   },
   ownerApplicantActions: {
     marginTop: moderateScale(10),
@@ -10922,23 +10789,23 @@ const styles = StyleSheet.create({
   },
   ownerApplicantSecondaryButton: {
     flex: 1,
-    minHeight: moderateScale(34),
+    minHeight: moderateScale(44),
     borderWidth: 1,
-    borderRadius: moderateScale(999),
+    borderRadius: moderateScale(9),
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: scale(8),
     paddingVertical: moderateScale(7),
   },
   ownerApplicantSecondaryButtonText: {
-    fontSize: moderateScale(10),
-    lineHeight: moderateScale(13),
-    fontFamily: "Poppins_600SemiBold",
+    fontSize: moderateScale(12),
+    lineHeight: moderateScale(17),
+    fontFamily: typography.semibold,
   },
   ownerApplicantPrimaryButton: {
     flex: 1,
-    minHeight: moderateScale(34),
-    borderRadius: moderateScale(999),
+    minHeight: moderateScale(44),
+    borderRadius: moderateScale(9),
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -10948,141 +10815,265 @@ const styles = StyleSheet.create({
   },
   ownerApplicantPrimaryButtonText: {
     color: "#FFFFFF",
+    fontSize: moderateScale(12),
+    lineHeight: moderateScale(17),
+    fontFamily: typography.semibold,
+  },
+  activityCardIdentity: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: moderateScale(12),
+    marginBottom: moderateScale(10),
+  },
+  activityCardThumbnail: {
+    width: moderateScale(64),
+    height: moderateScale(64),
+    borderRadius: moderateScale(10),
+  },
+  activityCardIcon: {
+    width: moderateScale(64),
+    height: moderateScale(64),
+    borderRadius: moderateScale(10),
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  activityCardMain: {
+    flex: 1,
+    minWidth: 0,
+    gap: moderateScale(3),
+  },
+  activityCardTitleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: moderateScale(8),
+  },
+  activityCardTitleLink: {
+    flex: 1,
+    minWidth: 0,
+  },
+  activityCardType: {
+    fontSize: moderateScale(12),
+    lineHeight: moderateScale(17),
+    fontFamily: typography.body,
+  },
+  activityMetadataRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: moderateScale(8),
+    marginBottom: moderateScale(8),
+  },
+  activityStatusChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    flexWrap: "wrap",
+    gap: moderateScale(5),
+    paddingVertical: moderateScale(3),
+  },
+  activityDetailGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: moderateScale(10),
+    marginBottom: moderateScale(10),
+  },
+  activityDetailField: {
+    flexBasis: "46%",
+    flexGrow: 1,
+    minWidth: 0,
+    gap: moderateScale(3),
+  },
+  activityDetailFieldFull: {
+    flexBasis: "100%",
+  },
+  activityFieldLabel: {
     fontSize: moderateScale(10),
-    lineHeight: moderateScale(13),
-    fontFamily: "Poppins_600SemiBold",
+    lineHeight: moderateScale(15),
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+    fontFamily: typography.semibold,
   },
   cardContainer: {
     marginBottom: SCREEN_HEIGHT < 700 ? moderateScale(8) : moderateScale(12),
-    borderRadius: radius.card,
+    borderRadius: moderateScale(16),
     borderWidth: 1,
     overflow: "hidden",
     backgroundColor: "#FFFFFF",
     shadowOpacity: 0,
     elevation: 0,
   },
-  cardImage: {
-    width: "100%",
-    height: SCREEN_HEIGHT < 700 ? verticalScale(88) : verticalScale(104),
-    borderTopLeftRadius: moderateScale(12),
-    borderTopRightRadius: moderateScale(12),
+  requestSummaryCard: {
+    borderRadius: moderateScale(16),
+    paddingHorizontal: moderateScale(16),
+    paddingTop: moderateScale(16),
+    paddingBottom: moderateScale(4),
+    gap: moderateScale(10),
   },
-  typeBadge: {
-    position: "absolute",
-    top: moderateScale(10),
-    left: scale(10),
-    paddingHorizontal: scale(12),
-    paddingVertical: moderateScale(5),
-    borderRadius: moderateScale(9999),
-    backgroundColor: "rgba(0,0,0,0.65)",
+  requestSummaryIdentity: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: moderateScale(12),
   },
-  topLeftImageBadge: {
-    maxWidth: "56%",
+  requestSummaryThumbnail: {
+    width: moderateScale(64),
+    height: moderateScale(64),
+    borderRadius: moderateScale(10),
   },
-  topRightBadgeStack: {
-    position: "absolute",
-    top: moderateScale(10),
-    right: scale(10),
-    alignItems: "flex-end",
-    gap: moderateScale(5),
-    maxWidth: "44%",
+  requestSummaryTitleContainer: {
+    flex: 1,
+    minWidth: 0,
+    gap: moderateScale(2),
   },
-  stackedImageBadge: {
-    position: "relative",
-    top: undefined,
-    left: undefined,
-    right: undefined,
-    maxWidth: "100%",
+  requestSummaryTitleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: moderateScale(8),
   },
-  typeBadgeText: {
-    color: "white",
-    fontSize: moderateScale(10),
-    lineHeight: moderateScale(13),
-    fontFamily: "Poppins_600SemiBold",
-    includeFontPadding: false,
-    textAlignVertical: "center",
+  requestSummaryTitle: {
+    flex: 1,
+    fontSize: moderateScale(18),
+    lineHeight: moderateScale(24),
+    fontFamily: typography.semibold,
   },
-  liveBadge: {
-    position: "absolute",
-    top: moderateScale(10),
-    right: scale(10),
-    paddingHorizontal: scale(12),
-    paddingVertical: moderateScale(5),
-    borderRadius: moderateScale(9999),
-    backgroundColor: "#22C55E", // green-500
+  requestSummarySubtitleRow: {
     flexDirection: "row",
     alignItems: "center",
+    gap: moderateScale(4),
   },
-  liveDot: {
-    width: moderateScale(8),
-    height: moderateScale(8),
-    borderRadius: moderateScale(4),
-    backgroundColor: "white",
-    marginRight: scale(6),
+  requestSummarySubtitleText: {
+    flex: 1,
+    minWidth: 0,
+    gap: moderateScale(2),
   },
-  liveText: {
-    color: "white",
+  requestSummaryType: {
+    fontSize: moderateScale(12),
+    lineHeight: moderateScale(17),
+    fontFamily: typography.body,
+  },
+  requestSummarySecondary: {
+    fontSize: moderateScale(13),
+    lineHeight: moderateScale(18),
+    fontFamily: typography.body,
+  },
+  requestSummaryStatus: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: moderateScale(4),
+    minHeight: moderateScale(24),
+    paddingHorizontal: moderateScale(7),
+    paddingVertical: moderateScale(3),
+    borderRadius: moderateScale(999),
+  },
+  requestSummaryStatusDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+  },
+  requestSummaryStatusText: {
     fontSize: moderateScale(10),
-    fontWeight: "bold",
-    textTransform: "uppercase",
+    lineHeight: moderateScale(15),
+    fontFamily: typography.medium,
   },
-  cancelledOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+  requestSummaryMetaText: {
+    fontSize: moderateScale(11),
+    lineHeight: moderateScale(17),
+    fontFamily: typography.body,
+  },
+  requestSummaryContext: {
+    gap: moderateScale(3),
+  },
+  requestSummaryFields: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: moderateScale(16),
+  },
+  requestSummaryField: {
+    flex: 1,
+    minWidth: 0,
+  },
+  requestSummaryContextLabel: {
+    fontSize: moderateScale(10),
+    lineHeight: moderateScale(15),
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+    fontFamily: typography.semibold,
+  },
+  requestSummaryBody: {
+    fontSize: moderateScale(14),
+    lineHeight: moderateScale(20),
+    fontFamily: typography.body,
+  },
+  requestSummaryAttachments: {
+    flexDirection: "row",
+    gap: moderateScale(8),
+  },
+  requestSummaryAttachment: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.2)",
+    gap: moderateScale(6),
+    minHeight: moderateScale(36),
+    paddingHorizontal: moderateScale(12),
+    paddingVertical: moderateScale(7),
+    borderWidth: 1,
+    borderRadius: moderateScale(9),
   },
-  cancelledBadge: {
-    paddingHorizontal: scale(12),
-    paddingVertical: moderateScale(4),
-    backgroundColor: "#EF4444", // red-500
-    borderRadius: moderateScale(8),
+  requestSummaryAttachmentCompact: {
+    paddingHorizontal: moderateScale(6),
+    gap: moderateScale(4),
   },
-  cancelledText: {
-    color: "white",
+  requestSummaryAttachmentText: {
+    flexShrink: 1,
     fontSize: moderateScale(12),
-    fontWeight: "bold",
-    textTransform: "uppercase",
+    lineHeight: moderateScale(18),
+    fontFamily: typography.medium,
+  },
+  requestSummaryFooter: {
+    borderTopWidth: 1,
+    paddingTop: moderateScale(2),
+    gap: moderateScale(8),
+  },
+  requestSummaryViewButton: {
+    minHeight: moderateScale(44),
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: moderateScale(8),
+  },
+  requestSummaryViewText: {
+    fontSize: moderateScale(13),
+    lineHeight: moderateScale(19),
+    fontFamily: typography.semibold,
+    flexShrink: 1,
+  },
+  requestSummaryMessageButton: {
+    width: moderateScale(44),
+    height: moderateScale(44),
+    marginTop: moderateScale(-8),
+    marginRight: moderateScale(-8),
+    marginBottom: moderateScale(-8),
+    alignItems: "center",
+    justifyContent: "center",
   },
   cardContent: {
     padding: moderateScale(16),
   },
-  applicationCardLabelRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: scale(8),
-    marginBottom: moderateScale(10),
-  },
-  applicationCardType: {
-    flex: 1,
-    fontFamily: typography.bold,
-    fontSize: moderateScale(11),
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
-  },
-  applicationCardStatus: {
-    fontFamily: typography.semibold,
-    fontSize: moderateScale(12),
-  },
   cardHeader: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: moderateScale(6),
+    gap: moderateScale(10),
+    marginBottom: moderateScale(10),
   },
   cardTitleContainer: {
     flex: 1,
-    marginRight: scale(8),
+    minWidth: 0,
   },
   cardTitle: {
-    fontSize: moderateScale(19),
-    lineHeight: moderateScale(25),
-    fontFamily: typography.title,
+    fontSize: moderateScale(18),
+    lineHeight: moderateScale(24),
+    fontFamily: typography.semibold,
   },
   cardDate: {
     fontSize: moderateScale(12),
@@ -11094,7 +11085,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginTop: moderateScale(4),
-    paddingTop: moderateScale(8),
+    paddingTop: moderateScale(10),
     borderTopWidth: 1,
   },
   statusContainer: {
@@ -11116,7 +11107,7 @@ const styles = StyleSheet.create({
   },
   permitStatusChipText: {
     fontSize: moderateScale(10),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     textTransform: "uppercase",
   },
   permitNoticeBox: {
@@ -11128,18 +11119,18 @@ const styles = StyleSheet.create({
   },
   permitNoticeTitle: {
     fontSize: moderateScale(12),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   permitNoticeReason: {
     marginTop: moderateScale(4),
-    fontSize: moderateScale(11),
-    fontFamily: "Poppins_500Medium",
+    fontSize: moderateScale(12),
+    fontFamily: typography.medium,
     color: "#DC2626",
   },
   permitNoticeText: {
     marginTop: moderateScale(4),
-    fontSize: moderateScale(11),
-    fontFamily: "Poppins_400Regular",
+    fontSize: moderateScale(12),
+    fontFamily: typography.body,
   },
   customerInfoContainer: {
     flexDirection: "row",
@@ -11155,7 +11146,7 @@ const styles = StyleSheet.create({
   },
   customerName: {
     fontSize: moderateScale(12),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     marginRight: scale(4),
   },
   locationContainer: {
@@ -11166,7 +11157,7 @@ const styles = StyleSheet.create({
   },
   locationText: {
     fontSize: moderateScale(12),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     flex: 1,
   },
   actionButtonsContainer: {
@@ -11198,13 +11189,15 @@ const styles = StyleSheet.create({
   actionLoadingText: {
     fontSize: moderateScale(11),
     lineHeight: moderateScale(15),
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   messageIconButton: {
-    width: moderateScale(34),
-    height: moderateScale(34),
-    borderRadius: moderateScale(999),
-    borderWidth: 1,
+    width: moderateScale(44),
+    height: moderateScale(44),
+    borderRadius: moderateScale(9),
+    borderWidth: 0,
+    marginTop: moderateScale(-8),
+    marginRight: moderateScale(-8),
     alignItems: "center",
     justifyContent: "center",
   },
@@ -11378,14 +11371,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: scale(12),
     paddingVertical: 0,
     minHeight: moderateScale(44),
-    borderRadius: moderateScale(100),
+    borderRadius: moderateScale(9),
     alignItems: "center",
     justifyContent: "center",
   },
   actionButtonText: {
     fontSize: moderateScale(12),
     lineHeight: moderateScale(16),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     textAlign: "center",
     includeFontPadding: false,
     textAlignVertical: "center",
@@ -11394,7 +11387,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: scale(12),
     paddingVertical: 0,
     minHeight: moderateScale(44),
-    borderRadius: moderateScale(100),
+    borderRadius: moderateScale(9),
     borderWidth: 1.5,
     alignItems: "center",
     justifyContent: "center",
@@ -11402,7 +11395,7 @@ const styles = StyleSheet.create({
   outlineButtonText: {
     fontSize: moderateScale(12),
     lineHeight: moderateScale(16),
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     textAlign: "center",
     includeFontPadding: false,
     textAlignVertical: "center",
@@ -11445,14 +11438,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: scale(12),
     paddingVertical: 0,
     minHeight: moderateScale(44),
-    borderRadius: moderateScale(100),
+    borderRadius: moderateScale(9),
     alignItems: "center",
     justifyContent: "center",
   },
   cancelButtonText: {
     fontSize: moderateScale(12),
     lineHeight: moderateScale(16),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     textAlign: "center",
     includeFontPadding: false,
     textAlignVertical: "center",
@@ -11476,7 +11469,7 @@ const styles = StyleSheet.create({
   },
   downpaymentText: {
     fontSize: 11,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     flexShrink: 1,
   },
   // Payment Option Modal Styles
@@ -11591,16 +11584,16 @@ const styles = StyleSheet.create({
     gap: scale(5),
   },
   cardDetailText: {
-    fontSize: moderateScale(11),
-    lineHeight: moderateScale(15),
-    fontFamily: "Poppins_400Regular",
-    flex: 1,
+    fontSize: moderateScale(13),
+    lineHeight: moderateScale(19),
+    fontFamily: typography.body,
+    flexShrink: 1,
   },
   applicationMessageText: {
-    fontSize: moderateScale(10),
-    lineHeight: moderateScale(14),
-    fontFamily: "Poppins_400Regular",
-    marginBottom: moderateScale(6),
+    fontSize: moderateScale(13),
+    lineHeight: moderateScale(19),
+    fontFamily: typography.body,
+    marginBottom: moderateScale(8),
   },
   attachmentChipRow: {
     flexDirection: "row",
@@ -11609,7 +11602,8 @@ const styles = StyleSheet.create({
     marginBottom: moderateScale(6),
   },
   attachmentChip: {
-    minHeight: moderateScale(30),
+    flex: 1,
+    minHeight: moderateScale(36),
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -11617,12 +11611,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: scale(10),
     paddingVertical: 0,
-    borderRadius: moderateScale(100),
+    borderRadius: moderateScale(9),
   },
   attachmentChipText: {
     fontSize: moderateScale(11),
     lineHeight: moderateScale(15),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     includeFontPadding: false,
     textAlignVertical: "center",
   },

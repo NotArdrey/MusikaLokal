@@ -1,3 +1,4 @@
+import { managementCardStyles } from "../theme/managementCards";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useState } from "react";
 import {
@@ -116,7 +117,7 @@ export default function GroupInviteSection({
   };
 
   return (
-    <View style={[styles.sectionCard, { borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.surface }]}>
+    <View style={[styles.sectionCard, { borderColor: colors.border, backgroundColor: colors.surface }]}>
       <Text style={[styles.sectionTitle, { color: colors.text }]}>Invite Members</Text>
       <Text style={[styles.sectionText, { color: colors.textSecondary }]}>Search musicians and send invites. Accepted invites add the musician to this group, and recipients can respond from Bookings &gt; Pending.</Text>
 
@@ -227,16 +228,8 @@ export default function GroupInviteSection({
 }
 
 const styles = StyleSheet.create({
-  sectionCard: {
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 16,
-    marginTop: 14,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontFamily: typography.title,
-  },
+  sectionCard: { ...managementCardStyles.surface, marginTop: 14 },
+  sectionTitle: { ...managementCardStyles.title },
   sectionText: {
     marginTop: 6,
     fontSize: 12,
@@ -273,7 +266,7 @@ const styles = StyleSheet.create({
   },
   selectedItem: {
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
     flexDirection: "row",
@@ -287,9 +280,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
-  selectedTextWrap: {
-    flex: 1,
-  },
+  selectedTextWrap: { flex: 1, minWidth: 0 },
   selectedName: {
     fontSize: 13,
     fontFamily: typography.semibold,
@@ -311,9 +302,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  removeBtn: {
-    padding: 2,
-  },
+  removeBtn: { minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
   searchStateRow: {
     marginTop: 12,
     flexDirection: "row",
@@ -331,7 +320,7 @@ const styles = StyleSheet.create({
   },
   resultItem: {
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
     flexDirection: "row",
@@ -340,9 +329,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   addBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 44,
+    height: 44,
+    borderRadius: 9,
     alignItems: "center",
     justifyContent: "center",
   },

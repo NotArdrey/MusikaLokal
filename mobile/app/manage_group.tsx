@@ -1,3 +1,5 @@
+import ListingLifecycleAction from "../src/components/ListingLifecycleAction";
+import { managementCardStyles } from "../src/theme/managementCards";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -392,7 +394,6 @@ export default function GroupDetailsScreen() {
         router.replace("/home");
         return;
       }
-
 
       // Base query + legacy projection merge
       const { data: groupData, error: groupError } = await supabase
@@ -1075,7 +1076,7 @@ export default function GroupDetailsScreen() {
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Manage Group" />
+        <Header title="Manage Group" onBackPress={() => router.canGoBack() ? router.back() : router.replace("/my_group")} />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -1119,6 +1120,12 @@ export default function GroupDetailsScreen() {
                 <Text style={styles.navigateButtonText}>Navigate</Text>
               </TouchableOpacity>
             )}
+            {group?.owner_id === currentUserId ? (
+              <ListingLifecycleAction
+                type="group" id={group.id} name={group.name} status={group.management_status}
+                onChanged={(management_status) => setGroup((current: any) => current ? { ...current, management_status } : current)}
+              />
+            ) : null}
           </View>
 
           {/* Tabs */}
@@ -1218,7 +1225,7 @@ export default function GroupDetailsScreen() {
                   <View
                     style={[
                       styles.infoCard,
-                      { backgroundColor: colors.surface },
+                      { backgroundColor: colors.surface, borderColor: colors.border },
                     ]}
                   >
                     <Text
@@ -1236,7 +1243,7 @@ export default function GroupDetailsScreen() {
                   <View
                     style={[
                       styles.infoCard,
-                      { backgroundColor: colors.surface },
+                      { backgroundColor: colors.surface, borderColor: colors.border },
                     ]}
                   >
                     <Text
@@ -1263,7 +1270,7 @@ export default function GroupDetailsScreen() {
                   <View
                     style={[
                       styles.infoCard,
-                      { backgroundColor: colors.surface },
+                      { backgroundColor: colors.surface, borderColor: colors.border },
                     ]}
                   >
                     <Text
@@ -1588,7 +1595,7 @@ export default function GroupDetailsScreen() {
                           <View style={styles.applicationApplicantHeader}>
                             <ProfileAvatar
                               uri={app.applicant?.avatar_url}
-                              size={48}
+                              size={64}
                               backgroundColor={colors.inputBackground}
                               iconColor={colors.textSecondary}
                             />
@@ -1624,16 +1631,6 @@ export default function GroupDetailsScreen() {
 
                           <ConnectionApplicantReview application={app} colors={colors} compact />
 
-                          <TouchableOpacity
-                            testID={`view-group-applicant-${app.id}`}
-                            accessibilityRole="button"
-                            onPress={() => setSelectedMemberApplication(app)}
-                            style={[styles.viewApplicantButton, { backgroundColor: colors.primary }]}
-                          >
-                            <Text style={styles.actionBtnText}>View Applicant</Text>
-                            <Ionicons name="arrow-forward" size={17} color="#FFFFFF" />
-                          </TouchableOpacity>
-
                           {cvUrl || videoUrl ? (
                             <View style={styles.attachmentRow}>
                               {cvUrl ? (
@@ -1658,6 +1655,16 @@ export default function GroupDetailsScreen() {
                               ) : null}
                             </View>
                           ) : null}
+
+                          <TouchableOpacity
+                            testID={`view-group-applicant-${app.id}`}
+                            accessibilityRole="button"
+                            onPress={() => setSelectedMemberApplication(app)}
+                            style={[styles.viewApplicantButton, { backgroundColor: colors.primary }]}
+                          >
+                            <Text style={styles.actionBtnText}>View Applicant</Text>
+                            <Ionicons name="arrow-forward" size={17} color="#FFFFFF" />
+                          </TouchableOpacity>
 
                           {isPending && (
                             <View style={styles.actionButtons}>
@@ -1799,7 +1806,7 @@ export default function GroupDetailsScreen() {
                       key={review.id}
                       style={[
                         styles.reviewCard,
-                        { backgroundColor: colors.surface, marginBottom: 12 },
+                        { backgroundColor: colors.surface, marginBottom: 12, borderColor: colors.border },
                       ]}
                     >
                       <View style={styles.reviewUserHeader}>
@@ -1815,7 +1822,8 @@ export default function GroupDetailsScreen() {
                           />
                           <Text
                             style={{
-                              fontFamily: "Poppins_600SemiBold",
+                              fontFamily: typography.semibold,
+                              flex: 1,
                               color: colors.text,
                             }}
                           >
@@ -1826,7 +1834,8 @@ export default function GroupDetailsScreen() {
                           style={{
                             fontSize: 12,
                             color: colors.textSecondary,
-                            fontFamily: "Poppins_400Regular",
+                            fontFamily: typography.body,
+                            flexShrink: 1,
                           }}
                         >
                           {formatFriendlyDateTime(review.created_at)}
@@ -2165,12 +2174,13 @@ const styles = StyleSheet.create({
   },
   navigateButton: {
     marginTop: 12,
+    minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderRadius: 999,
+    borderRadius: 12,
   },
   navigateButtonText: {
     color: "#FFF",
@@ -2204,10 +2214,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
   },
   visibilityCard: {
-    borderWidth: 1,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    ...managementCardStyles.surface,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -2225,30 +2232,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
-  infoCard: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 16,
-  },
+  infoCard: { ...managementCardStyles.surface, flex: 1 },
   infoLabel: {
-    fontSize: 12,
     textTransform: "uppercase",
-    letterSpacing: 1,
     marginBottom: 4,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
+    fontSize: 10,
+    lineHeight: 15,
+    letterSpacing: 0.5,
   },
   infoValue: {
+    fontFamily: typography.semibold,
     fontSize: 18,
-    fontFamily: "Poppins_600SemiBold",
+    lineHeight: 24,
   },
   memberRow: {
     paddingVertical: 12,
     borderBottomWidth: 1,
   },
-  memberName: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 14,
-  },
+  memberName: { fontSize: 14, flexShrink: 1, fontFamily: typography.semibold },
   memberMeta: {
     fontFamily: "Poppins_400Regular",
     fontSize: 12,
@@ -2565,11 +2567,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  actionBtnText: {
-    color: "#FFF",
-    fontFamily: typography.semibold,
-    fontSize: 13,
-  },
+  actionBtnText: { color: "#FFF", fontSize: 13, fontFamily: typography.semibold },
   invitationCard: {
     padding: 16,
     borderRadius: 24,
@@ -2625,10 +2623,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Poppins_400Regular",
   },
-  actionButtons: {
-    flexDirection: "row",
-    gap: 12,
-  },
+  actionButtons: { flexDirection: "row", gap: 8 },
   applicationFilters: {
     flexDirection: "row",
     gap: 8,
@@ -2652,121 +2647,44 @@ const styles = StyleSheet.create({
     fontFamily: typography.semibold,
     fontSize: 10,
     textTransform: "capitalize",
+    lineHeight: 15,
+    flexShrink: 1,
   },
-  applicationCard: {
-    padding: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginTop: 12,
-    gap: 10,
-  },
-  applicationApplicantHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  applicationApplicantCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  applicationName: {
-    fontFamily: typography.heading,
-    fontSize: 15,
-    lineHeight: 20,
-  },
+  applicationCard: { ...managementCardStyles.surface, marginTop: 12, gap: 10 },
+  applicationApplicantHeader: { ...managementCardStyles.identity, flexWrap: "wrap" },
+  applicationApplicantCopy: { flex: 1, minWidth: 90 },
+  applicationName: { ...managementCardStyles.title },
   applicationStatusBadge: {
     flexShrink: 0,
-    borderRadius: 10,
-    paddingHorizontal: 9,
+    borderRadius: 7,
+    paddingHorizontal: 8,
     paddingVertical: 4,
+    alignSelf: "flex-start",
   },
-  applicationMetaLabel: {
-    fontFamily: typography.semibold,
-    fontSize: 10,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  applicationMetaText: {
-    fontFamily: typography.body,
-    fontSize: 11,
-    lineHeight: 17,
-  },
-  applicationMessageBlock: {
-    marginTop: 2,
-  },
+  applicationMetaLabel: { ...managementCardStyles.label, marginBottom: 2 },
+  applicationMetaText: { ...managementCardStyles.metadata },
+  applicationMessageBlock: { marginTop: 0 },
   applicationAppliedRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
   },
-  applicationBodyText: {
-    fontFamily: typography.body,
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  applicationDecisionText: {
-    fontFamily: typography.semibold,
-    fontSize: 13,
-  },
-  declineButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  acceptButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  viewApplicantButton: {
-    minHeight: 44,
-    marginTop: 12,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 7,
-  },
-  attachmentRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  attachmentButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    borderWidth: 1,
-    borderRadius: 9,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  attachmentText: {
-    fontFamily: typography.medium,
-    fontSize: 12,
-  },
-  setupCard: {
-    padding: 16,
-    borderRadius: 14,
-    borderWidth: 1,
-  },
+  applicationBodyText: { ...managementCardStyles.body },
+  applicationDecisionText: { fontSize: 13, fontFamily: typography.semibold },
+  declineButton: { ...managementCardStyles.button, flex: 1, paddingVertical: 12, borderWidth: 1 },
+  acceptButton: { ...managementCardStyles.button, flex: 1, paddingVertical: 12 },
+  viewApplicantButton: { ...managementCardStyles.button, flexDirection: "row", marginTop: 0, gap: 8 },
+  attachmentRow: { flexDirection: "row", marginTop: 0, gap: 8 },
+  attachmentButton: { ...managementCardStyles.attachment, paddingVertical: 7 },
+  attachmentText: { fontFamily: typography.medium, fontSize: 12 },
+  setupCard: { ...managementCardStyles.surface },
   setupHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 16,
   },
-  setupTitle: {
-    fontSize: 18,
-    lineHeight: 24,
-    fontFamily: typography.heading,
-  },
+  setupTitle: { fontSize: 18, lineHeight: 24, fontFamily: typography.semibold },
   editLink: {
     fontSize: 14,
     fontFamily: "Poppins_500Medium",
@@ -2896,28 +2814,26 @@ const styles = StyleSheet.create({
     gap: 4,
     marginBottom: 8,
   },
-  reviewCard: {
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 16,
-  },
+  reviewCard: { ...managementCardStyles.surface, marginBottom: 16 },
   reviewUserHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
     marginBottom: 8,
+    flexWrap: "wrap",
+    gap: 8,
   },
   userInfo: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    flex: 1,
+    minWidth: 120,
   },
   userAvatar: {
     width: 32,
     height: 32,
     borderRadius: 16,
   },
-  reviewText: {
-    lineHeight: 20,
-  },
+  reviewText: { ...managementCardStyles.body },
 });

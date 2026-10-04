@@ -207,6 +207,7 @@ serve(async (req: Request) => {
 
     for (const table of tables) {
       let query = supabaseClient.from(table).select("*");
+      if (table !== "profiles") query = query.eq("management_status", "active");
 
       if (table === "profiles") {
         query = query

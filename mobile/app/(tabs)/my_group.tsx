@@ -1,7 +1,10 @@
+import ManagedListingContent, { ManagedListingScreenProps } from "../../src/components/ManagedListingContent";
+import ManageWorkspaceTabs from "../../src/components/ManageWorkspaceTabs";
+import { managementCardStyles } from "../../src/theme/managementCards";
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { runAfterUIIdle } from '../../src/utils/idleTask';
 import CachedImage from '../../src/components/CachedImage';
@@ -9,7 +12,6 @@ import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import Header from '../../src/components/header';
 import InlineErrorBanner from '../../src/components/InlineErrorBanner';
 import Modal, { normalizeConfirmationInput } from '../../src/components/modal';
-import MusicianWorkspaceTabs from '../../src/components/MusicianWorkspaceTabs';
 import Navbar from '../../src/components/navbar';
 import Skeleton from '../../src/components/Skeleton';
 import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
@@ -17,14 +19,14 @@ import { useAuth, useRequireAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../../src/utils/actionError';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
-import { palette, radius, typography } from '../../src/theme/tokens';
+import { palette, typography } from '../../src/theme/tokens';
 
 const isMissingRelationError = (error: any, relationName: string) => {
     const message = String(error?.message || '').toLowerCase();
     return error?.code === '42P01' && message.includes(relationName.toLowerCase());
 };
 
-export default function MyGroupScreen() {
+export default function MyGroupScreen({ historyOnly = false, embedded = false }: ManagedListingScreenProps = {}) {
     const { colors, isDark } = useTheme();
     const { contentBottomPadding } = useBottomBarClearance(24);
     const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
@@ -37,6 +39,7 @@ export default function MyGroupScreen() {
     const [selectedName, setSelectedName] = useState('');
     const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
     const [groups, setGroups] = useState<any[]>([]);
+    const visibleGroups = groups.filter((item) => historyOnly ? item.management_status === 'inactive' : !(item.management_status === 'inactive'));
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -56,7 +59,7 @@ export default function MyGroupScreen() {
     const showAlert = useCallback((type: AlertType, title: string, message: string, buttons?: any[]) => {
         setAlertConfig({ type, title, message, buttons });
         setAlertVisible(true);
-    }, []);
+    }, [setAlertConfig, setAlertVisible]);
 
     const fetchGroups = useCallback(async (options?: { showAlertOnError?: boolean }) => {
         if (!userId) return;
@@ -79,7 +82,7 @@ export default function MyGroupScreen() {
                 if (isMissingRelationError(error, 'groups_with_stats')) {
                     const { data: fallbackData, error: fallbackError } = await supabase
                         .from('groups')
-                        .select('id, owner_id, name, genre, description, location, latitude, longitude, rate, created_at, group_type')
+                        .select('id, owner_id, name, genre, description, location, latitude, longitude, rate, created_at, group_type, management_status')
                         .eq('owner_id', userId)
                         .order('created_at', { ascending: false });
 
@@ -110,7 +113,7 @@ export default function MyGroupScreen() {
                 if (isMissingRelationError(error, 'groups_with_stats')) {
                     const { data: fallbackData, error: fallbackError } = await supabase
                         .from('groups')
-                        .select('id, owner_id, name, genre, description, location, latitude, longitude, rate, created_at, group_type')
+                        .select('id, owner_id, name, genre, description, location, latitude, longitude, rate, created_at, group_type, management_status')
                         .in('id', groupIds)
                         .order('created_at', { ascending: false });
 
@@ -272,7 +275,7 @@ export default function MyGroupScreen() {
 
     const onRefresh = () => {
         setRefreshing(true);
-        void fetchGroups({ showAlertOnError: true });
+        return fetchGroups({ showAlertOnError: true });
     };
 
     const closeDeleteModal = () => {
@@ -356,28 +359,26 @@ export default function MyGroupScreen() {
 
     return (
         <>
-            <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header title="My Groups" overline="MusikaLokal" showTitle={false} />
+            <View style={[!embedded && styles.flex1, { backgroundColor: colors.background }]}>
+                {!embedded && (<Header title="My Groups" overline="MusikaLokal" showTitle={false} />)}
 
-                <ScrollView
+                <ManagedListingContent embedded={embedded} listingType="group" loading={loading} itemCount={visibleGroups.length} error={loadError}
                     showsVerticalScrollIndicator={false}
-                    contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
+                    contentContainerStyle={[styles.scrollContent, { paddingBottom: embedded ? 16 : contentBottomPadding }]}
                     style={styles.flex1}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 >
-                        {isMusicianView && (
-                            <MusicianWorkspaceTabs activeKey="group" />
-                        )}
+                    {!embedded && <ManageWorkspaceTabs activeKey={historyOnly ? "history" : "group"} />}
 
-                        <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>YOUR MUSIC CIRCLE</Text>
+                        {!embedded && (<Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>YOUR MUSIC CIRCLE</Text>)}
 
-                        <InlineErrorBanner
+                        {!embedded && (<InlineErrorBanner
                             message={loadError}
                             onRetry={() => {
                                 if (groups.length === 0) setLoading(true);
                                 void fetchGroups({ showAlertOnError: true });
                             }}
-                        />
+                        />)}
 
                         {loading ? (
                         <View style={styles.skeletonList}>
@@ -386,25 +387,30 @@ export default function MyGroupScreen() {
                                     key={`group-skeleton-${index}`}
                                     style={[styles.skeletonCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
                                 >
-                                    <Skeleton width="100%" height={192} borderRadius={18} />
-                                    <Skeleton width="62%" height={22} style={{ marginTop: 14 }} />
+                                    <View style={styles.cardIdentity}>
+                                        <Skeleton width={64} height={64} borderRadius={10} />
+                                        <View style={styles.cardHeading}>
+                                            <Skeleton width="80%" height={22} />
+                                            <Skeleton width="65%" height={14} style={{ marginTop: 6 }} />
+                                        </View>
+                                    </View>
                                     <Skeleton width="100%" height={14} style={{ marginTop: 10 }} />
                                     <Skeleton width="78%" height={14} style={{ marginTop: 6 }} />
                                     <View style={styles.skeletonActionRow}>
-                                        <Skeleton width={124} height={40} borderRadius={12} />
-                                        <Skeleton width={40} height={40} borderRadius={12} />
-                                        <Skeleton width={40} height={40} borderRadius={12} />
+                                        <Skeleton width={124} height={44} borderRadius={9} />
+                                        <Skeleton width={44} height={44} borderRadius={9} />
+                                        <Skeleton width={44} height={44} borderRadius={9} />
                                     </View>
                                 </View>
                             ))}
                         </View>
-                    ) : groups.length === 0 ? (
+                    ) : visibleGroups.length === 0 ? (
                         <View style={styles.emptyState}>
                             <Ionicons name="people-outline" size={48} color={colors.textSecondary} />
-                            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No groups found</Text>
+                            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{historyOnly ? 'No inactive groups yet' : 'No active groups found'}</Text>
                         </View>
                     ) : (
-                        groups.map((group) => {
+                        visibleGroups.map((group) => {
                             const canManageGroup = !isMusicianView || group.is_owner === true;
 
                             return (
@@ -413,35 +419,41 @@ export default function MyGroupScreen() {
                                     testID={`mobile-group-card-${group.id}`}
                                     accessibilityLabel={`mobile-group-card-${group.id}`}
                                     style={[styles.cardContainer, {
-                                    backgroundColor: colors.surface,
-                                    shadowColor: colors.primary,
-                                }]}
+                                        backgroundColor: colors.surface,
+                                        borderColor: colors.border,
+                                    }]}
                                 >
-                                    <View style={styles.imageWrapper}>
-                                        <CachedImage
-                                            uri={(group.images && group.images[0]) || 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop'}
-                                            style={styles.cardImage}
-                                            width={420}
-                                            height={220}
-                                            quality={68}
-                                            priority="high"
-                                            cacheVersion={group.updated_at || group.created_at || group.id}
-                                        />
-                                        <View style={[styles.activeBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
-                                            <Text style={[styles.activeText, { color: colors.primary }]}>{canManageGroup ? 'Active' : 'Joined'}</Text>
+                                    <View style={styles.cardIdentity}>
+                                        <View style={styles.imageWrapper}>
+                                            <CachedImage
+                                                uri={(group.images && group.images[0]) || 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop'}
+                                                style={styles.cardImage}
+                                                width={128}
+                                                height={128}
+                                                quality={68}
+                                                priority="high"
+                                                cacheVersion={group.updated_at || group.created_at || group.id}
+                                            />
+                                        </View>
+                                        <View style={styles.cardHeading}>
+                                            <View style={styles.cardTitleRow}>
+                                                <Text style={[styles.cardTitle, { color: colors.text }]}>{group.name}</Text>
+                                                <View style={[styles.activeBadge, { backgroundColor: isDark ? colors.primary + '18' : colors.inputBackground }]}>
+                                                    <Text style={[styles.activeText, { color: colors.primary }]}>{group.management_status === 'inactive' ? 'Inactive' : canManageGroup ? 'Active' : 'Joined'}</Text>
+                                                </View>
+                                            </View>
+                                            <View style={styles.groupMetaRow}>
+                                                <Text numberOfLines={1} style={[styles.groupMetaText, { color: colors.primary }]}>{group.genre || 'Genre not set'}</Text>
+                                                {group.location ? (
+                                                    <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.groupMetaText, { color: colors.textSecondary }]}>
+                                                        {group.location}
+                                                    </Text>
+                                                ) : null}
+                                            </View>
                                         </View>
                                     </View>
 
                                     <View style={styles.cardContent}>
-                                        <Text style={[styles.cardTitle, { color: colors.text }]}>{group.name}</Text>
-                                        <View style={styles.groupMetaRow}>
-                                            <Text style={[styles.groupMetaText, { color: colors.primary }]}>{group.genre || 'Genre not set'}</Text>
-                                            {group.location ? <Text style={[styles.groupMetaText, { color: colors.textSecondary }]}>· {group.location}</Text> : null}
-                                        </View>
-                                        <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
-                                            {group.description}
-                                        </Text>
-
                                         <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                             <View style={styles.actionLeft}>
                                                 <TouchableOpacity
@@ -455,7 +467,7 @@ export default function MyGroupScreen() {
                                                     }
                                                     style={[styles.manageBtn, { borderColor: colors.primary }]}
                                                 >
-                                                    <Ionicons name={canManageGroup ? 'arrow-forward-outline' : 'eye-outline'} size={18} color={colors.primary} />
+
                                                     <Text style={[styles.manageBtnText, { color: colors.primary }]}>{canManageGroup ? 'Manage' : 'View'}</Text>
                                                 </TouchableOpacity>
 
@@ -497,14 +509,15 @@ export default function MyGroupScreen() {
                                                 </TouchableOpacity>
                                             ) : null}
                                         </View>
+
                                     </View>
                                 </View>
                             );
                         })
                     )}
-                </ScrollView>
+                </ManagedListingContent>
 
-                <Navbar />
+                {!embedded && <Navbar />}
             </View>
             <Modal
                 visible={modalVisible}
@@ -540,11 +553,7 @@ const styles = StyleSheet.create({
     flex1: {
         flex: 1,
     },
-    scrollContent: {
-        paddingHorizontal: 24,
-        paddingBottom: 180,
-        paddingTop: 16,
-    },
+    scrollContent: { paddingBottom: 180, paddingTop: 0, paddingHorizontal: 16 },
     sectionHeading: {
         fontFamily: typography.bold,
         fontSize: 12,
@@ -580,11 +589,7 @@ const styles = StyleSheet.create({
     skeletonList: {
         gap: 16,
     },
-    skeletonCard: {
-        borderRadius: radius.card,
-        borderWidth: 1,
-        padding: 16,
-    },
+    skeletonCard: { ...managementCardStyles.surface },
     skeletonActionRow: {
         marginTop: 16,
         flexDirection: 'row',
@@ -599,90 +604,50 @@ const styles = StyleSheet.create({
         marginTop: 16,
         fontFamily: 'Poppins_400Regular',
     },
-    cardContainer: {
-        marginBottom: 16,
-        borderRadius: radius.card,
-        overflow: 'hidden',
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.line,
-    },
-    imageWrapper: {
-        height: 160,
-        position: 'relative',
-    },
-    cardImage: {
-        width: '100%',
-        height: '100%',
-    },
-    activeBadge: {
-        position: 'absolute',
-        top: 16,
-        right: 16,
-        paddingHorizontal: 12,
-        paddingVertical: 4,
-        borderRadius: radius.status,
-    },
-    activeText: {
-        fontSize: 12,
-        fontFamily: typography.semibold,
-    },
-    cardContent: {
-        padding: 16,
-    },
-    cardTitle: {
-        fontFamily: typography.title,
-        fontSize: 20,
-        letterSpacing: -0.4,
-        marginBottom: 4,
-    },
-    groupMetaRow: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 6,
-        marginBottom: 8,
-    },
-    groupMetaText: {
-        fontFamily: typography.semibold,
-        fontSize: 11,
-        textTransform: 'uppercase',
-        letterSpacing: 0.7,
-    },
-    cardDescription: {
-        fontFamily: typography.body,
-        fontSize: 13,
-        lineHeight: 20,
-    },
+    cardContainer: { ...managementCardStyles.surface, overflow: 'hidden', borderColor: palette.line, marginBottom: 12 },
+    imageWrapper: { width: 64, height: 64, borderRadius: 10, overflow: "hidden" },
+    cardImage: { ...managementCardStyles.thumbnail },
+    activeBadge: { alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7 },
+    activeText: { fontSize: 12, fontFamily: typography.semibold },
+    cardContent: { padding: 0, paddingTop: 8 },
+    cardTitle: { ...managementCardStyles.title, flex: 1, minWidth: 0, marginBottom: 0 },
+    cardTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+    groupMetaRow: { flexDirection: 'column', gap: 3 },
+    groupMetaText: { ...managementCardStyles.metadata, textTransform: "none", letterSpacing: 0 },
     actionRow: {
         flexDirection: 'row',
-        alignItems: 'center',
         justifyContent: 'space-between',
-        marginTop: 16,
         borderTopWidth: 1,
-        paddingTop: 16,
+        gap: 8,
+        marginTop: 8,
+        paddingTop: 8,
+        flexWrap: "wrap",
+        alignItems: "flex-start",
     },
     actionLeft: {
         flexDirection: 'row',
-        gap: 12,
+        flex: 1,
+        gap: 8,
+        alignItems: "center",
+        flexWrap: "wrap",
     },
     manageBtn: {
+        ...managementCardStyles.button,
         flexDirection: 'row',
-        alignItems: 'center',
         gap: 8,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: radius.button,
         borderWidth: 1,
+        flex: 1,
+        minWidth: 88,
+        paddingVertical: 8,
     },
-    manageBtnText: {
-        fontFamily: typography.semibold,
-    },
+    manageBtnText: { fontFamily: typography.semibold },
     editBtn: {
-        width: 38,
-        height: 38,
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: radius.control,
         borderWidth: 1,
+        width: 44,
+        height: 44,
+        borderRadius: 9,
     },
     editBtnIcon: {
         width: 20,
@@ -693,7 +658,13 @@ const styles = StyleSheet.create({
         textAlignVertical: 'center',
     },
     deleteBtn: {
-        padding: 8,
+        width: 44,
+        height: 44,
+        padding: 0,
+        alignItems: "center",
+        justifyContent: "center",
     },
+    cardIdentity: { ...managementCardStyles.identity },
+    cardHeading: { flex: 1, minWidth: 0, gap: 4 },
 });
 

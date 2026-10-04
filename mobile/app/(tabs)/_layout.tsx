@@ -53,6 +53,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="my_production" options={HIDDEN_TAB_OPTIONS} />
       <Tabs.Screen name="my_studio" options={HIDDEN_TAB_OPTIONS} />
       <Tabs.Screen name="my_venue" options={HIDDEN_TAB_OPTIONS} />
+      <Tabs.Screen name="my_history" options={HIDDEN_TAB_OPTIONS} />
     </Tabs>
   );
 }

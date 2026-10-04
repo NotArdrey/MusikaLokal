@@ -65,6 +65,7 @@ const TAB_BAR_HOSTED_PATHS = new Set([
     '/my_production',
     '/my_studio',
     '/my_venue',
+    '/my_history',
 ]);
 
 type NavIconProps = {
@@ -151,7 +152,8 @@ const getTabIdFromRouteName = (routeName: string | undefined) => {
         routeName === 'my_group' ||
         routeName === 'my_production' ||
         routeName === 'my_studio' ||
-        routeName === 'my_venue'
+        routeName === 'my_venue' ||
+        routeName === 'my_history'
     ) {
         return 'manage';
     }
@@ -188,6 +190,7 @@ const getTabIdFromPathname = (pathname: string) => {
         pathname.includes('my_studio') ||
         pathname.includes('my_venue') ||
         pathname.includes('my_group') ||
+        pathname.includes('my_history') ||
         pathname.includes('production_team') ||
         pathname.includes('manage_') ||
         pathname.includes('edit_') ||

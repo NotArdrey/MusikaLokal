@@ -50,6 +50,7 @@ type SlidingTabBarProps<T extends SlidingTabKey> = {
   style?: StyleProp<ViewStyle>;
   tabStyle?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
+  labelNumberOfLines?: number;
 };
 
 export default function SlidingTabBar<T extends SlidingTabKey>({
@@ -67,6 +68,7 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
   indicatorHeight = 2.5,
   indicatorWidthRatio = 0.42,
   showTopBorder = false,
+  labelNumberOfLines = 1,
   style,
   tabStyle,
   textStyle,
@@ -215,7 +217,7 @@ export default function SlidingTabBar<T extends SlidingTabKey>({
               <Text
                 adjustsFontSizeToFit
                 minimumFontScale={0.82}
-                numberOfLines={1}
+                numberOfLines={labelNumberOfLines}
                 style={[
                   styles.label,
                   textStyle,

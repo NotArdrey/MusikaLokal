@@ -1487,6 +1487,7 @@ Deno.serve(async (req: Request) => {
         const images = Array.isArray(item?.images) ? item.images : [];
         return {
           __feedKind: "ai_card",
+          management_status: item?.management_status,
           id: item?.id,
           type: "Group",
           name: item?.name || "Unnamed Group",
@@ -1514,6 +1515,7 @@ Deno.serve(async (req: Request) => {
           : false;
         return {
           __feedKind: "ai_card",
+          management_status: item?.management_status,
           id: item?.id,
           type: isVenue ? "Venue" : "Studio",
           name: item?.name || (isVenue ? "Unnamed Gig" : "Unnamed Studio"),
@@ -1542,6 +1544,7 @@ Deno.serve(async (req: Request) => {
         const requirements = item?.requirements || {};
         return {
           __feedKind: "ai_card",
+          management_status: item?.management_status,
           id: item?.id,
           type: "Gig",
           name: item?.name || "Untitled Gig",
@@ -1568,7 +1571,7 @@ Deno.serve(async (req: Request) => {
       };
       const normalizeArtistFeedCard = (item: any) => ({
         __feedKind: "ai_card",
-        id: item?.id,
+          id: item?.id,
         type: "Artist",
         name: item?.full_name || "Musician",
         image: item?.avatar_url || null,
@@ -1586,6 +1589,7 @@ Deno.serve(async (req: Request) => {
       });
       const normalizeProductionFeedCard = (item: any) => ({
         __feedKind: "ai_card",
+          management_status: item?.management_status,
         id: item?.id,
         type: "Production",
         name: item?.name || "Production Team",
@@ -1691,6 +1695,7 @@ Deno.serve(async (req: Request) => {
                 supabaseAdmin
                   .from("groups_with_stats")
                   .select("*")
+                  .eq("management_status", "active")
                   .in("owner_id", followedProfileIds),
               )
             : emptyResult(),
@@ -1699,6 +1704,7 @@ Deno.serve(async (req: Request) => {
                 supabaseAdmin
                   .from("groups_with_stats")
                   .select("*")
+                  .eq("management_status", "active")
                   .in("id", followedGroupIds),
               )
             : emptyResult(),
@@ -1707,6 +1713,7 @@ Deno.serve(async (req: Request) => {
                 supabaseAdmin
                   .from("studios_with_stats")
                   .select("*")
+                  .eq("management_status", "active")
                   .eq("permit_status", "approved")
                   .in("owner_id", followedProfileIds),
               )
@@ -1716,6 +1723,7 @@ Deno.serve(async (req: Request) => {
                 supabaseAdmin
                   .from("gigs_with_stats")
                   .select("*")
+                  .eq("management_status", "active")
                   .neq("status", "cancelled")
                   .eq("permit_status", "approved")
                   .in("organizer_id", followedProfileIds),
@@ -1726,6 +1734,7 @@ Deno.serve(async (req: Request) => {
                 supabaseAdmin
                   .from("production_teams")
                   .select("*")
+                  .eq("management_status", "active")
                   .in("owner_id", followedProfileIds),
               )
             : emptyResult(),
@@ -1801,7 +1810,8 @@ Deno.serve(async (req: Request) => {
             ? withCursorAndLimit(
                 supabaseAdmin
                   .from("groups_with_stats")
-                  .select("*"),
+                  .select("*")
+                  .eq("management_status", "active"),
               )
             : emptyResult(),
           includeEntityCards
@@ -1809,6 +1819,7 @@ Deno.serve(async (req: Request) => {
                 supabaseAdmin
                   .from("studios_with_stats")
                   .select("*")
+                  .eq("management_status", "active")
                   .eq("permit_status", "approved"),
               )
             : emptyResult(),
@@ -1817,6 +1828,7 @@ Deno.serve(async (req: Request) => {
                 supabaseAdmin
                   .from("gigs_with_stats")
                   .select("*")
+                  .eq("management_status", "active")
                   .neq("status", "cancelled")
                   .eq("permit_status", "approved"),
               )
@@ -1825,7 +1837,8 @@ Deno.serve(async (req: Request) => {
             ? withCursorAndLimit(
                 supabaseAdmin
                   .from("production_teams")
-                  .select("*"),
+                  .select("*")
+                  .eq("management_status", "active"),
               )
             : emptyResult(),
         ]);

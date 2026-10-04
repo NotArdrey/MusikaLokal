@@ -1,3 +1,6 @@
+import { managementCardStyles } from "../src/theme/managementCards";
+import ListingLifecycleAction from "../src/components/ListingLifecycleAction";
+import { ListingManagementStatus } from "../src/utils/listingHistory";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
@@ -47,6 +50,7 @@ import {
 } from "../src/utils/connectionApplicantRecommendations";
 
 interface Team {
+  management_status: ListingManagementStatus;
   id: string;
   name: string;
   description: string | null;
@@ -167,10 +171,10 @@ export default function ProductionTeamScreen() {
       navigationBarStyleWhileVisible={isDark ? "dark" : "light"}
     >
         <View
-          style={[
-            styles.sheetContainer,
-            { backgroundColor: colors.background, borderColor: colors.border },
-          ]}
+        style={[
+          styles.sheetContainer,
+          { backgroundColor: colors.background, borderColor: colors.border },
+        ]}
         >
           <View
             style={[
@@ -190,10 +194,10 @@ export default function ProductionTeamScreen() {
             <TouchableOpacity
               activeOpacity={1}
               onPress={onClose}
-              style={[
-                styles.sheetCloseButton,
-                { backgroundColor: colors.card, borderColor: colors.border },
-              ]}
+            style={[
+              styles.sheetCloseButton,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
             >
               <Ionicons name="close" size={18} color={colors.text} />
             </TouchableOpacity>
@@ -732,7 +736,7 @@ export default function ProductionTeamScreen() {
 
     return (
       <>
-        <View style={[styles.flex1, { backgroundColor: colors.background }]}> 
+        <View style={[styles.flex1, { backgroundColor: colors.background }]}>
           <Header title="Manage Production" onBackPress={closeTeamDetail} />
 
           <ScrollView
@@ -763,6 +767,18 @@ export default function ProductionTeamScreen() {
             </Text>
           </View>
 
+          {selectedTeam.member_role === "owner" || selectedTeam.member_role === "manager" || selectedStaffPermissions?.canEditListing ? (
+            <View style={{ marginHorizontal: 24, marginBottom: 12 }}>
+              <ListingLifecycleAction
+                type="production" id={selectedTeam.id} name={selectedTeam.name} status={selectedTeam.management_status}
+                onChanged={(management_status) => {
+                  setSelectedTeam((current) => current ? { ...current, management_status } : current);
+                  setTeams((current) => current.map((team) => team.id === selectedTeam.id ? { ...team, management_status } : team));
+                }}
+              />
+            </View>
+          ) : null}
+
           <SlidingTabBar
             activeColor={colors.primary}
             activeKey={activeTab}
@@ -783,19 +799,19 @@ export default function ProductionTeamScreen() {
           >
             {activeTab === "About" && (
               <View style={styles.aboutContainer}>
-                <Text style={[styles.aboutText, { color: colors.textSecondary }]}> 
+                <Text style={[styles.aboutText, { color: colors.textSecondary }]}>
                   {selectedTeam.description || "No description available."}
                 </Text>
 
                 {canManage && typeof selectedTeam.open_production_applications === "boolean" ? (
                   <View
-                    style={[
-                      styles.visibilityCard,
-                      {
-                        backgroundColor: colors.surface,
-                        borderColor: colors.border,
-                      },
-                    ]}
+                      style={[
+                        styles.visibilityCard,
+                        {
+                          backgroundColor: colors.surface,
+                          borderColor: colors.border,
+                        },
+                      ]}
                   >
                     <View style={styles.visibilityTextWrap}>
                       <Text style={[styles.visibilityTitle, { color: colors.text }]}>
@@ -821,21 +837,21 @@ export default function ProductionTeamScreen() {
                 ) : null}
 
                 <View style={styles.statsRow}>
-                  <View style={[styles.infoCard, { backgroundColor: colors.surface }]}> 
+                    <View style={[styles.infoCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                     <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Team Members</Text>
-                    <Text style={[styles.infoValue, { color: colors.text }]}> 
+                    <Text style={[styles.infoValue, { color: colors.text }]}>
                       {loadingMembers ? "-" : teamMembers.length}
                     </Text>
                   </View>
-                  <View style={[styles.infoCard, { backgroundColor: colors.surface }]}> 
+                    <View style={[styles.infoCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                     <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Roster</Text>
-                    <Text style={[styles.infoValue, { color: colors.text }]}> 
+                    <Text style={[styles.infoValue, { color: colors.text }]}>
                       {loadingMembers ? "-" : teamRoster.length}
                     </Text>
                   </View>
-                  <View style={[styles.infoCard, { backgroundColor: colors.surface }]}> 
+                    <View style={[styles.infoCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                     <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Role</Text>
-                    <Text style={[styles.infoValue, { color: colors.text }]}> 
+                    <Text style={[styles.infoValue, { color: colors.text }]}>
                       {selectedTeam.member_role}
                     </Text>
                   </View>
@@ -893,7 +909,7 @@ export default function ProductionTeamScreen() {
                               {entry.avatar_url ? (
                                 <CachedImage uri={entry.avatar_url} style={styles.avatar} />
                               ) : (
-                                <View style={[styles.avatarPlaceholder, { backgroundColor: colors.border }]}> 
+                                <View style={[styles.avatarPlaceholder, { backgroundColor: colors.border }]}>
                                   <Ionicons name={isGroupEntry ? "people" : "person"} size={18} color={colors.textSecondary} />
                                 </View>
                               )}
@@ -938,7 +954,7 @@ export default function ProductionTeamScreen() {
                             {member.avatar_url ? (
                               <CachedImage uri={member.avatar_url} style={styles.avatar} />
                             ) : (
-                              <View style={[styles.avatarPlaceholder, { backgroundColor: colors.border }]}> 
+                              <View style={[styles.avatarPlaceholder, { backgroundColor: colors.border }]}>
                                 <Ionicons name="person" size={18} color={colors.textSecondary} />
                               </View>
                             )}
@@ -973,7 +989,7 @@ export default function ProductionTeamScreen() {
                       accessibilityRole="button"
                       accessibilityLabel="Open match settings"
                       onPress={() => router.push({ pathname: "/edit_production", params: { id: selectedTeam.id } })}
-                      style={[styles.attachmentButton, styles.applicationSettingsButton, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}
+                        style={[styles.attachmentButton, styles.applicationSettingsButton, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}
                     >
                       <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
                       <Text style={[styles.attachmentText, { color: colors.primary }]}>Match settings</Text>
@@ -1070,16 +1086,6 @@ export default function ProductionTeamScreen() {
 
                         <ConnectionApplicantReview application={application} colors={colors} compact />
 
-                        <TouchableOpacity
-                          testID={`view-production-applicant-${application.id}`}
-                          accessibilityRole="button"
-                          onPress={() => setSelectedApplication(application)}
-                          style={[styles.viewApplicantButton, { backgroundColor: colors.primary }]}
-                        >
-                          <Text style={[styles.applicationDecisionText, { color: "#FFFFFF" }]}>View Applicant</Text>
-                          <Ionicons name="arrow-forward" size={17} color="#FFFFFF" />
-                        </TouchableOpacity>
-
                         {cvUrl || videoUrl ? (
                           <View style={styles.attachmentRow}>
                             {cvUrl ? (
@@ -1096,6 +1102,16 @@ export default function ProductionTeamScreen() {
                             ) : null}
                           </View>
                         ) : null}
+
+                        <TouchableOpacity
+                          testID={`view-production-applicant-${application.id}`}
+                          accessibilityRole="button"
+                          onPress={() => setSelectedApplication(application)}
+                          style={[styles.viewApplicantButton, { backgroundColor: colors.primary }]}
+                        >
+                          <Text style={[styles.applicationDecisionText, { color: "#FFFFFF" }]}>View Applicant</Text>
+                          <Ionicons name="arrow-forward" size={17} color="#FFFFFF" />
+                        </TouchableOpacity>
 
                         {isPending ? (
                           <View style={styles.applicationActions}>
@@ -1123,10 +1139,10 @@ export default function ProductionTeamScreen() {
             )}
 
             {activeTab === "Reviews" && (
-              <View style={[styles.reviewCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+                <View style={[styles.reviewCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <Ionicons name="chatbubble-ellipses-outline" size={24} color={colors.primary} />
                 <Text style={[styles.reviewTitle, { color: colors.text }]}>No reviews yet</Text>
-                <Text style={[styles.reviewDescription, { color: colors.textSecondary }]}> 
+                <Text style={[styles.reviewDescription, { color: colors.textSecondary }]}>
                   Production team reviews will appear here once this section is available.
                 </Text>
               </View>
@@ -1322,14 +1338,14 @@ export default function ProductionTeamScreen() {
           <View style={styles.modalContent}>
           <Text style={[styles.inputLabel, { color: colors.text }]}>Team Name *</Text>
           <TextInput
-            style={[
-              styles.input,
-              {
-                color: colors.text,
-                borderColor: colors.border,
-                backgroundColor: colors.card,
-              },
-            ]}
+              style={[
+                styles.input,
+                {
+                  color: colors.text,
+                  borderColor: colors.border,
+                  backgroundColor: colors.card,
+                },
+              ]}
             value={newTeamName}
             onChangeText={setNewTeamName}
             placeholder="e.g. Events Pro Team"
@@ -1338,15 +1354,15 @@ export default function ProductionTeamScreen() {
 
           <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Description *</Text>
           <TextInput
-            style={[
-              styles.input,
-              styles.textArea,
-              {
-                color: colors.text,
-                borderColor: colors.border,
-                backgroundColor: colors.card,
-              },
-            ]}
+              style={[
+                styles.input,
+                styles.textArea,
+                {
+                  color: colors.text,
+                  borderColor: colors.border,
+                  backgroundColor: colors.card,
+                },
+              ]}
             value={newTeamDescription}
             onChangeText={setNewTeamDescription}
             placeholder="Brief description of the team..."
@@ -1392,13 +1408,13 @@ const styles = StyleSheet.create({
   emptyText: { fontFamily: "Poppins_400Regular", fontSize: 14, textAlign: "center", marginTop: 8, paddingHorizontal: 32 },
 
   // Team list
-  teamCard: { borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 10 },
-  teamCardRow: { flexDirection: "row", alignItems: "center" },
-  teamCardLogo: { width: 44, height: 44, borderRadius: 22 },
-  teamCardLogoPlaceholder: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
-  teamCardInfo: { flex: 1, marginLeft: 12 },
-  teamCardName: { fontFamily: "Poppins_600SemiBold", fontSize: 15 },
-  teamCardMeta: { flexDirection: "row", marginTop: 2 },
+  teamCard: { ...managementCardStyles.surface, marginBottom: 10 },
+  teamCardRow: { ...managementCardStyles.identity },
+  teamCardLogo: { ...managementCardStyles.thumbnail },
+  teamCardLogoPlaceholder: { ...managementCardStyles.thumbnail, alignItems: "center", justifyContent: "center" },
+  teamCardInfo: { flex: 1, marginLeft: 0, minWidth: 0, gap: 4 },
+  teamCardName: { ...managementCardStyles.title },
+  teamCardMeta: { flexDirection: "row", marginTop: 2, flexWrap: "wrap" },
 
   // Team detail
   headerContainer: {
@@ -1465,9 +1481,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
   },
   visibilityCard: {
-    borderWidth: 1,
-    borderRadius: 18,
-    padding: 18,
+    ...managementCardStyles.surface,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -1489,22 +1503,19 @@ const styles = StyleSheet.create({
     gap: 16,
     flexWrap: "wrap",
   },
-  infoCard: {
-    flex: 1,
-    minWidth: 96,
-    borderRadius: 16,
-    padding: 16,
-  },
+  infoCard: { ...managementCardStyles.surface, flex: 1, minWidth: 96 },
   infoLabel: {
-    fontSize: 12,
     textTransform: "uppercase",
-    letterSpacing: 1,
     marginBottom: 4,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
+    fontSize: 10,
+    lineHeight: 15,
+    letterSpacing: 0.5,
   },
   infoValue: {
+    fontFamily: typography.semibold,
     fontSize: 18,
-    fontFamily: "Poppins_700Bold",
+    lineHeight: 24,
   },
 
   // Members
@@ -1517,14 +1528,20 @@ const styles = StyleSheet.create({
   emptyInlineText: { fontFamily: typography.body, fontSize: 13, marginBottom: 10 },
   inviteBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   inviteBtnText: { color: "#FFFFFF", fontFamily: "Poppins_600SemiBold", fontSize: 12 },
-  memberCard: { borderRadius: 12, borderWidth: 1, padding: 12, marginBottom: 8 },
-  memberRow: { flexDirection: "row", alignItems: "center" },
+  memberCard: { ...managementCardStyles.surface, marginBottom: 8 },
+  memberRow: { flexDirection: "row", alignItems: "flex-start" },
   avatar: { width: 36, height: 36, borderRadius: 18 },
   avatarPlaceholder: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  memberInfo: { flex: 1, marginLeft: 10 },
-  memberName: { fontFamily: "Poppins_500Medium", fontSize: 14 },
-  memberRole: { fontFamily: typography.body, fontSize: 12, textTransform: "capitalize" },
-  removeBtn: { padding: 4 },
+  memberInfo: { flex: 1, marginLeft: 10, minWidth: 0 },
+  memberName: { fontSize: 14, flexShrink: 1, fontFamily: typography.semibold },
+  memberRole: { ...managementCardStyles.metadata, textTransform: "capitalize" },
+  removeBtn: {
+    padding: 4,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 
   // Applications
   applicationSectionHeader: { gap: 6, marginBottom: 2 },
@@ -1534,46 +1551,36 @@ const styles = StyleSheet.create({
   applicationFilters: { flexDirection: "row", gap: 8, paddingTop: 10, paddingBottom: 14 },
   applicationFilterChip: { minHeight: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, flexDirection: "row", alignItems: "center", gap: 5 },
   applicationFilterText: { fontFamily: typography.medium, fontSize: 11 },
-  applicationCard: { borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 12, gap: 10 },
-  applicationAvatar: { width: 44, height: 44, borderRadius: 22 },
-  applicationInfo: { flex: 1, minWidth: 0, marginLeft: 10 },
-  applicationName: { fontFamily: typography.heading, fontSize: 15, lineHeight: 20 },
-  applicationStatus: { borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4 },
-  applicationStatusText: { fontFamily: typography.semibold, fontSize: 10, textTransform: "capitalize" },
-  applicationMessageBlock: { marginTop: 2 },
-  applicationMetaLabel: { fontFamily: typography.semibold, fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 },
-  applicationMetaText: { fontFamily: typography.body, fontSize: 11, lineHeight: 17 },
+  applicationCard: { ...managementCardStyles.surface, marginBottom: 12, gap: 10 },
+  applicationAvatar: { ...managementCardStyles.thumbnail },
+  applicationInfo: { flex: 1, marginLeft: 10, minWidth: 90 },
+  applicationName: { ...managementCardStyles.title },
+  applicationStatus: { borderRadius: 7, paddingHorizontal: 8, paddingVertical: 4, alignSelf: "flex-start" },
+  applicationStatusText: {
+    fontFamily: typography.semibold,
+    fontSize: 10,
+    textTransform: "capitalize",
+    lineHeight: 15,
+    flexShrink: 1,
+  },
+  applicationMessageBlock: { marginTop: 0 },
+  applicationMetaLabel: { ...managementCardStyles.label, marginBottom: 2 },
+  applicationMetaText: { ...managementCardStyles.metadata },
   applicationAppliedRow: { flexDirection: "row", alignItems: "center", gap: 5 },
-  applicationPitch: { fontFamily: typography.body, fontSize: 13, lineHeight: 19 },
-  applicationContext: { fontFamily: typography.body, fontSize: 12, lineHeight: 18, fontStyle: "italic" },
-  attachmentRow: { flexDirection: "row", gap: 8, marginTop: 10 },
-  attachmentButton: { flexDirection: "row", alignItems: "center", gap: 5, borderWidth: 1, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 7 },
+  applicationPitch: { ...managementCardStyles.body },
+  applicationContext: { ...managementCardStyles.body, fontStyle: "normal" },
+  attachmentRow: { flexDirection: "row", marginTop: 0, gap: 8 },
+  attachmentButton: { ...managementCardStyles.attachment, paddingVertical: 7 },
   attachmentText: { fontFamily: typography.medium, fontSize: 12 },
-  applicationActions: { flexDirection: "row", gap: 10, marginTop: 12 },
-  applicationDecision: { flex: 1, minHeight: 42, borderWidth: 1, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  applicationDecisionText: { fontFamily: typography.semibold, fontSize: 13 },
-  viewApplicantButton: { minHeight: 42, marginTop: 12, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  applicationActions: { flexDirection: "row", gap: 8, marginTop: 0 },
+  applicationDecision: { ...managementCardStyles.button, flex: 1, borderWidth: 1 },
+  applicationDecisionText: { fontSize: 13, fontFamily: typography.semibold },
+  viewApplicantButton: { ...managementCardStyles.button, flexDirection: "row", marginTop: 0, gap: 8 },
 
   // Buttons
-  reviewCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    paddingHorizontal: 18,
-    paddingVertical: 24,
-    alignItems: "center",
-  },
-  reviewTitle: {
-    marginTop: 10,
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 16,
-  },
-  reviewDescription: {
-    marginTop: 6,
-    textAlign: "center",
-    fontFamily: "Poppins_400Regular",
-    fontSize: 13,
-    lineHeight: 20,
-  },
+  reviewCard: { ...managementCardStyles.surface, alignItems: "center" },
+  reviewTitle: { marginTop: 10, fontSize: 16, fontFamily: typography.semibold },
+  reviewDescription: { ...managementCardStyles.body, marginTop: 6, textAlign: "center" },
   backBtn: { alignItems: "center", padding: 14, borderRadius: 12, borderWidth: 1, marginTop: 10 },
   backBtnText: { fontFamily: "Poppins_500Medium", fontSize: 14 },
 
@@ -1648,6 +1655,4 @@ const styles = StyleSheet.create({
   submitBtn: { marginTop: 20, paddingVertical: 14, borderRadius: 12, alignItems: "center" },
   submitBtnText: { color: "#fff", fontFamily: typography.semibold, fontSize: 15 },
 });
-
-
 

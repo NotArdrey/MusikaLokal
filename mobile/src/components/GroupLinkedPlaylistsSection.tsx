@@ -1,3 +1,5 @@
+import { managementCardStyles } from "../theme/managementCards";
+import { typography } from "../theme/tokens";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
@@ -29,7 +31,7 @@ export default function GroupLinkedPlaylistsSection({
     <View style={{ gap: 12 }}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
-          <Text style={{ color: colors.text, fontSize: 18, fontFamily: "Poppins_600SemiBold", flexShrink: 1 }}>
+          <Text style={{ color: colors.text, fontSize: 18, fontFamily: typography.semibold, flexShrink: 1 }}>
             {title}
           </Text>
           {playlists.length > 0 ? (
@@ -41,7 +43,7 @@ export default function GroupLinkedPlaylistsSection({
                 borderRadius: 999,
               }}
             >
-              <Text style={{ color: colors.primary, fontSize: 10, fontFamily: "Poppins_600SemiBold" }}>
+              <Text style={{ color: colors.primary, fontSize: 10, fontFamily: typography.semibold }}>
                 {playlists.length}
               </Text>
             </View>
@@ -65,7 +67,7 @@ export default function GroupLinkedPlaylistsSection({
             }}
           >
             <Ionicons name="cloud-upload-outline" size={14} color="#fff" />
-            <Text style={{ color: "#fff", fontSize: 11, fontFamily: "Poppins_600SemiBold" }}>
+            <Text style={{ color: "#fff", fontSize: 11, fontFamily: typography.semibold }}>
               {createButtonLabel}
             </Text>
           </TouchableOpacity>
@@ -86,7 +88,7 @@ export default function GroupLinkedPlaylistsSection({
           }}
         >
           <ActivityIndicator size="small" color={colors.primary} />
-          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular" }}>
+          <Text style={{ color: colors.textSecondary, fontFamily: typography.body }}>
             Loading playlists...
           </Text>
         </View>
@@ -106,11 +108,9 @@ export default function GroupLinkedPlaylistsSection({
                 activeOpacity={1}
                 onPress={() => onPlaylistPress(playlistId)}
                 style={{
-                  borderRadius: 14,
-                  borderWidth: 1,
+                  ...managementCardStyles.surface,
                   borderColor: colors.border,
-                  backgroundColor: isDark ? "#111827" : "#FFFFFF",
-                  padding: 14,
+                  backgroundColor: colors.surface,
                   flexDirection: "row",
                   alignItems: "center",
                   gap: 12,
@@ -118,9 +118,7 @@ export default function GroupLinkedPlaylistsSection({
               >
                 <View
                   style={{
-                    width: 42,
-                    height: 42,
-                    borderRadius: 12,
+                    ...managementCardStyles.thumbnail,
                     backgroundColor: colors.primary + "18",
                     alignItems: "center",
                     justifyContent: "center",
@@ -129,13 +127,12 @@ export default function GroupLinkedPlaylistsSection({
                   <Ionicons name="musical-notes-outline" size={18} color={colors.primary} />
                 </View>
 
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, minWidth: 0 }}>
                   <Text
-                    numberOfLines={1}
+                    numberOfLines={2}
                     style={{
                       color: colors.text,
-                      fontSize: 14,
-                      fontFamily: "Poppins_600SemiBold",
+                      ...managementCardStyles.title,
                     }}
                   >
                     {playlist.title || "Untitled Playlist"}
@@ -146,7 +143,7 @@ export default function GroupLinkedPlaylistsSection({
                         marginTop: 2,
                         color: colors.textSecondary,
                         fontSize: 12,
-                        fontFamily: "Poppins_400Regular",
+                        fontFamily: typography.body,
                       }}
                     >
                       {playlist.genre}
@@ -157,7 +154,7 @@ export default function GroupLinkedPlaylistsSection({
                       marginTop: 3,
                       color: colors.textSecondary,
                       fontSize: 11,
-                      fontFamily: "Poppins_400Regular",
+                      fontFamily: typography.body,
                     }}
                   >
                     {itemCount} track{itemCount === 1 ? "" : "s"}
@@ -179,7 +176,7 @@ export default function GroupLinkedPlaylistsSection({
             padding: 18,
           }}
         >
-          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, lineHeight: 18 }}>
+          <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 12, lineHeight: 18 }}>
             {emptyMessage}
           </Text>
         </View>

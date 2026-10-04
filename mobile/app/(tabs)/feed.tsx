@@ -272,15 +272,15 @@ const POST_MIME_BY_EXTENSION: Record<string, string> = {
 };
 
 const FEED_GROUP_CARD_SELECT =
-  "id, owner_id, name, genre, description, members, location, images, latitude, longitude, rate, created_at, group_type, rating, review_count, completion_rate";
+  "management_status, id, owner_id, name, genre, description, members, location, images, latitude, longitude, rate, created_at, group_type, rating, review_count, completion_rate";
 const FEED_STUDIO_CARD_SELECT =
-  "id, owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude, created_at, rate, type, types, rehearsal_rate, recording_rate, rating, review_count, permit_status, location, availability, open_dates";
+  "management_status, id, owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude, created_at, rate, type, types, rehearsal_rate, recording_rate, rating, review_count, permit_status, location, availability, open_dates";
 const FEED_GIG_CARD_SELECT =
-  "id, organizer_id, name, location, budget, description, event_date, requirements, images, status, latitude, longitude, created_at, rate, rating, review_count, permit_status";
+  "management_status, id, organizer_id, name, location, budget, description, event_date, requirements, images, status, latitude, longitude, created_at, rate, rating, review_count, permit_status";
 const FEED_PROFILE_CARD_SELECT =
   "id, full_name, avatar_url, address, location, role, bio, created_at";
 const FEED_PRODUCTION_TEAM_CARD_SELECT =
-  "id, owner_id, name, description, logo_url, created_at, updated_at, open_production_applications";
+  "management_status, id, owner_id, name, description, logo_url, created_at, updated_at, open_production_applications";
 
 const isFeedStudioAcceptingBookings = (item: any, today = new Date()) => {
   const hasWeeklyHours = Array.isArray(item?.availability) && item.availability.some(
@@ -343,6 +343,7 @@ const getGigEndTimestamp = (item: any): number | null => {
 
 const isOpenFeedRecommendation = (item: any) => {
   if (!item || item.__feedKind && item.__feedKind !== "ai_card" && item.__feedKind !== "following_entity") return true;
+  if (item.management_status && item.management_status !== "active") return false;
   const type = String(item?.type || "").trim().toLowerCase();
   if (type === "group" || type === "duo") return item?.open_group_applications === true;
   if (type === "production" || type === "production team") return item?.open_production_applications === true;
@@ -1120,6 +1121,7 @@ const normalizeFollowingEntity = (row: any, ownerAvatarById: Map<string, string>
 
     return {
       __feedKind: "following_entity",
+      management_status: group?.management_status,
       followed_type: "group" as const,
       id,
       name: group?.name || formatGroupTypeLabel(group?.group_type),
@@ -1681,6 +1683,7 @@ const normalizeFeedAiRecommendationCard = (item: any) => {
   return ensureFeedCardImage({
     ...item,
     __feedKind: "ai_card",
+    management_status: item?.management_status,
     id: itemId,
     type,
     name: displayName,
@@ -4245,17 +4248,20 @@ export default function FeedScreen() {
         supabase
           .from("groups_with_stats")
           .select(FEED_GROUP_CARD_SELECT)
+          .eq("management_status", "active")
           .order("created_at", { ascending: false })
           .limit(TALENT_CARD_LIMIT),
         supabase
           .from("studios_with_stats")
           .select(FEED_STUDIO_CARD_SELECT)
+          .eq("management_status", "active")
           .eq("permit_status", "approved")
           .order("created_at", { ascending: false })
           .limit(TALENT_CARD_LIMIT),
         supabase
           .from("gigs_with_stats")
           .select(FEED_GIG_CARD_SELECT)
+          .eq("management_status", "active")
           .eq("status", "open")
           .eq("permit_status", "approved")
           .order("created_at", { ascending: false })
@@ -4272,6 +4278,7 @@ export default function FeedScreen() {
         supabase
           .from("production_teams")
           .select(FEED_PRODUCTION_TEAM_CARD_SELECT)
+          .eq("management_status", "active")
           .eq("open_production_applications", true)
           .order("created_at", { ascending: false })
           .limit(TALENT_CARD_LIMIT),
@@ -4399,6 +4406,7 @@ export default function FeedScreen() {
         );
         return withFavoriteState({
           id: item.id,
+          management_status: item.management_status,
           type: listingType,
           name: item.name || `Unnamed ${listingType}`,
           image: images[0] || null,
@@ -4438,6 +4446,7 @@ export default function FeedScreen() {
 
         return withFavoriteState({
           id: item.id,
+          management_status: item.management_status,
           type: listingType,
           name: item.name || `Unnamed ${displayListingType}`,
           image: images[0] || null,
@@ -4477,6 +4486,7 @@ export default function FeedScreen() {
         );
         return withFavoriteState({
           id: item.id,
+          management_status: item.management_status,
           type: "Gig",
           name: item.name || "Untitled Gig",
           image: images[0] || null,
@@ -4550,6 +4560,7 @@ export default function FeedScreen() {
 
         return withFavoriteState({
           id: item.id,
+          management_status: item.management_status,
           type: "Production",
           name: item.name || "Production Team",
           image: primaryImage,
@@ -4713,6 +4724,7 @@ export default function FeedScreen() {
         ? supabase
             .from("groups_with_stats")
             .select(FEED_GROUP_CARD_SELECT)
+          .eq("management_status", "active")
             .in("id", followedGroupIds)
             .order("created_at", { ascending: false })
             .limit(AI_CARD_LIMIT)
@@ -4721,6 +4733,7 @@ export default function FeedScreen() {
         ? supabase
             .from("groups_with_stats")
             .select(FEED_GROUP_CARD_SELECT)
+          .eq("management_status", "active")
             .in("owner_id", followedProfileIds)
             .order("created_at", { ascending: false })
             .limit(AI_CARD_LIMIT)
@@ -4729,6 +4742,7 @@ export default function FeedScreen() {
         ? supabase
             .from("studios_with_stats")
             .select(FEED_STUDIO_CARD_SELECT)
+          .eq("management_status", "active")
             .eq("permit_status", "approved")
             .in("owner_id", followedProfileIds)
             .order("created_at", { ascending: false })
@@ -4738,6 +4752,7 @@ export default function FeedScreen() {
         ? supabase
             .from("gigs_with_stats")
             .select(FEED_GIG_CARD_SELECT)
+          .eq("management_status", "active")
             .eq("status", "open")
             .eq("permit_status", "approved")
             .in("organizer_id", followedProfileIds)
@@ -4748,6 +4763,7 @@ export default function FeedScreen() {
         ? supabase
             .from("production_teams")
             .select(FEED_PRODUCTION_TEAM_CARD_SELECT)
+          .eq("management_status", "active")
             .eq("open_production_applications", true)
             .in("owner_id", followedProfileIds)
             .order("created_at", { ascending: false })
@@ -4848,6 +4864,7 @@ export default function FeedScreen() {
       );
       return ensureFeedCardImage({
         __feedKind: "ai_card",
+        management_status: item?.management_status,
         id: item.id,
         type: "Group",
         name: item.name || "Unnamed Group",
@@ -4888,6 +4905,7 @@ export default function FeedScreen() {
 
       return ensureFeedCardImage({
         __feedKind: "ai_card",
+        management_status: item?.management_status,
         id: item.id,
         type: listingType,
         name: item.name || `Unnamed ${displayListingType}`,
@@ -4928,6 +4946,7 @@ export default function FeedScreen() {
       );
       return ensureFeedCardImage({
         __feedKind: "ai_card",
+        management_status: item?.management_status,
         id: item.id,
         type: "Gig",
         name: item.name || "Untitled Gig",
@@ -4973,6 +4992,7 @@ export default function FeedScreen() {
 
       return ensureFeedCardImage({
         __feedKind: "ai_card",
+        management_status: item?.management_status,
         id: item.id,
         type: "Production",
         name: item.name || "Production Team",
@@ -5598,18 +5618,15 @@ export default function FeedScreen() {
   useEffect(() => queryClient.getQueryCache().subscribe((event) => {
     if (
       event.query.queryKey[0] !== "feed" ||
-      !event.query.state.isInvalidated ||
-      !isFeedFocusedRef.current
+      event.type !== "updated" ||
+      event.action.type !== "invalidate"
     ) {
       return;
     }
 
-    if (activeTabRef.current === "talent") {
-      return;
-    }
-
-    scheduleRealtimeFeedRefresh();
-  }), [queryClient, scheduleRealtimeFeedRefresh]);
+    (Object.keys(feedCacheRef.current) as FeedTab[]).forEach(invalidateFeedCache);
+    if (isFeedFocusedRef.current) scheduleRealtimeFeedRefresh();
+  }), [invalidateFeedCache, queryClient, scheduleRealtimeFeedRefresh]);
 
   useEffect(() => () => {
     if (realtimeRefreshTimerRef.current) {

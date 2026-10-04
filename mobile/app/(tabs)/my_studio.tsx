@@ -1,7 +1,10 @@
+import ManagedListingContent, { ManagedListingScreenProps } from "../../src/components/ManagedListingContent";
+import ManageWorkspaceTabs from "../../src/components/ManageWorkspaceTabs";
+import { managementCardStyles } from "../../src/theme/managementCards";
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { runAfterUIIdle } from '../../src/utils/idleTask';
 import CachedImage from '../../src/components/CachedImage';
@@ -15,7 +18,6 @@ import InlineErrorBanner from '../../src/components/InlineErrorBanner';
 import Modal, { normalizeConfirmationInput } from '../../src/components/modal';
 import Navbar from '../../src/components/navbar';
 import Skeleton from '../../src/components/Skeleton';
-import StaffWorkspaceTabs from '../../src/components/StaffWorkspaceTabs';
 import { useBottomBarClearance } from '../../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -25,7 +27,7 @@ import { isE2EFixtureMode } from '../../src/utils/e2eFixtures';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
 import { clearListingDetailsCache } from '../../src/utils/listingDetailsCache';
 import { createRealtimeChannelTopic } from '../../src/utils/realtimeChannel';
-import { palette, radius, typography } from '../../src/theme/tokens';
+import { palette, typography } from '../../src/theme/tokens';
 
 const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
@@ -37,7 +39,7 @@ const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     return normalizedPermitStatus;
 };
 
-export default function MyStudioScreen() {
+export default function MyStudioScreen({ historyOnly = false, embedded = false }: ManagedListingScreenProps = {}) {
     const { colors, isDark } = useTheme();
     const { contentBottomPadding } = useBottomBarClearance(24);
     const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
@@ -51,6 +53,7 @@ export default function MyStudioScreen() {
     const [selectedName, setSelectedName] = useState('');
     const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
     const [studios, setStudios] = useState<any[]>([]);
+    const visibleStudios = studios.filter((item) => historyOnly ? item.management_status === 'inactive' : !(item.management_status === 'inactive'));
     const [staffAssignments, setStaffAssignments] = useState<StaffAssignment[]>([]);
     const [staffAddOwnerState, setStaffAddOwnerState] = useState<{
         userId: string;
@@ -78,7 +81,7 @@ export default function MyStudioScreen() {
     const showAlert = useCallback((type: AlertType, title: string, message: string, buttons?: any[]) => {
         setAlertConfig({ type, title, message, buttons });
         setAlertVisible(true);
-    }, []);
+    }, [setAlertConfig, setAlertVisible]);
 
     const fetchStudios = useCallback(async (options?: { showAlertOnError?: boolean }) => {
         if (!userId) return;
@@ -99,7 +102,7 @@ export default function MyStudioScreen() {
 
             let studioQuery = supabase
                 .from('studios')
-                .select('id, owner_id, name, description, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
+                .select('id, owner_id, name, description, created_at, management_status, permit_status, permit_rejection_reason, permit_reviewed_at')
                 .order('created_at', { ascending: false });
 
             const assignedStudioIds = activeStaffAssignments.map((assignment) => assignment.studio_id).filter(Boolean) as string[];
@@ -253,7 +256,7 @@ export default function MyStudioScreen() {
 
     const onRefresh = () => {
         setRefreshing(true);
-        void fetchStudios({ showAlertOnError: true });
+        return fetchStudios({ showAlertOnError: true });
     };
 
     const staffAddOwnerIds = staffAddOwnerState?.userId === userId
@@ -612,32 +615,32 @@ export default function MyStudioScreen() {
 
     return (
         <>
-            <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header
+            <View style={[!embedded && styles.flex1, { backgroundColor: colors.background }]}>
+                {!embedded && (<Header
                     title="My Studios"
                     overline="MusikaLokal"
                     showTitle={false}
                     onAddPress={staffHeaderAddOwnerId ? openStaffAddStudio : undefined}
                     addButtonAccessibilityLabel="Add studio"
-                />
+                />)}
 
-                <ScrollView
+                <ManagedListingContent embedded={embedded} listingType="studio" loading={loading} itemCount={visibleStudios.length} error={loadError}
                     showsVerticalScrollIndicator={false}
-                    contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
+                    contentContainerStyle={[styles.scrollContent, { paddingBottom: embedded ? 16 : contentBottomPadding }]}
                     style={styles.flex1}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 >
-                    {userRole === 'staff' && <StaffWorkspaceTabs activeKey="studio" />}
+                    {!embedded && <ManageWorkspaceTabs activeKey={historyOnly ? "history" : "studio"} />}
 
-                    <Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>SPACES & SESSIONS</Text>
+                    {!embedded && (<Text style={[styles.sectionHeading, { color: colors.textSecondary }]}>SPACES & SESSIONS</Text>)}
 
-                    <InlineErrorBanner
+                    {!embedded && (<InlineErrorBanner
                         message={loadError}
                         onRetry={() => {
                             if (studios.length === 0) setLoading(true);
                             void fetchStudios({ showAlertOnError: true });
                         }}
-                    />
+                    />)}
 
                     {loading ? (
                         <View style={styles.skeletonList}>
@@ -646,25 +649,30 @@ export default function MyStudioScreen() {
                                     key={`studio-skeleton-${index}`}
                                     style={[styles.skeletonCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
                                 >
-                                    <Skeleton width="100%" height={192} borderRadius={18} />
-                                    <Skeleton width="64%" height={22} style={{ marginTop: 14 }} />
+                                    <View style={styles.cardIdentity}>
+                                        <Skeleton width={64} height={64} borderRadius={10} />
+                                        <View style={styles.cardHeading}>
+                                            <Skeleton width="80%" height={22} />
+                                            <Skeleton width="65%" height={14} style={{ marginTop: 6 }} />
+                                        </View>
+                                    </View>
                                     <Skeleton width="100%" height={14} style={{ marginTop: 10 }} />
                                     <Skeleton width="82%" height={14} style={{ marginTop: 6 }} />
                                     <View style={styles.skeletonActionRow}>
-                                        <Skeleton width={124} height={40} borderRadius={12} />
-                                        <Skeleton width={40} height={40} borderRadius={12} />
-                                        <Skeleton width={40} height={40} borderRadius={12} />
+                                        <Skeleton width={124} height={44} borderRadius={9} />
+                                        <Skeleton width={44} height={44} borderRadius={9} />
+                                        <Skeleton width={44} height={44} borderRadius={9} />
                                     </View>
                                 </View>
                             ))}
                         </View>
-                    ) : studios.length === 0 ? (
+                    ) : visibleStudios.length === 0 ? (
                         <View style={styles.emptyState}>
                             <Ionicons name="mic-outline" size={48} color={colors.textSecondary} />
-                            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No studios found</Text>
+                            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{historyOnly ? 'No inactive studios yet' : 'No active studios found'}</Text>
                         </View>
                     ) : (
-                        studios.map((studio) => (
+                        visibleStudios.map((studio) => (
                             <View
                                 key={studio.id}
                                 testID={`mobile-studio-card-${studio.id}`}
@@ -673,18 +681,18 @@ export default function MyStudioScreen() {
                                     styles.cardContainer,
                                     {
                                         backgroundColor: colors.surface,
-                                        shadowColor: colors.primary,
+                                        borderColor: colors.border,
                                     },
                                 ]}
                             >
-                            {(() => {
-                                const staffAssignment = staffAssignments.find((assignment) => assignment.studio_id === studio.id);
-                                const staffPermissions = userRole === 'staff'
-                                    ? getStaffPermissions(staffAssignment?.access_level, staffAssignment)
-                                    : null;
-                                const canManageBookings = !staffPermissions || staffPermissions.canManageBookings;
-                                const canEditListing = !staffPermissions || staffPermissions.canEditListing;
-                                const normalizedPermitStatus = normalizePermitStatus(studio.permit_status);
+                                {(() => {
+                                    const staffAssignment = staffAssignments.find((assignment) => assignment.studio_id === studio.id);
+                                    const staffPermissions = userRole === 'staff'
+                                        ? getStaffPermissions(staffAssignment?.access_level, staffAssignment)
+                                        : null;
+                                    const canManageBookings = !staffPermissions || staffPermissions.canManageBookings;
+                                    const canEditListing = !staffPermissions || staffPermissions.canEditListing;
+                                    const normalizedPermitStatus = normalizePermitStatus(studio.permit_status);
                                     const isRejected = normalizedPermitStatus === 'rejected';
                                     const isApproved = normalizedPermitStatus === 'approved';
                                     const isResubmitted = normalizedPermitStatus === 'resubmitted';
@@ -709,125 +717,136 @@ export default function MyStudioScreen() {
 
                                     return (
                                         <>
-                                <View style={styles.imageWrapper}>
-                                    <CachedImage
-                                        uri={(studio.images && studio.images[0]) || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=800&fit=crop'}
-                                        style={styles.cardImage}
-                                        width={800}
-                                        height={384}
-                                        quality={72}
-                                        cacheVersion={studio.updated_at || studio.created_at || studio.id}
-                                    />
-                                    {!isApproved && (
-                                        <View style={[styles.activeBadge, { backgroundColor: permitBadgeBackground }]}>
-                                            <Text style={[styles.activeText, { color: permitBadgeColor }]}>{permitStatusLabel}</Text>
-                                        </View>
-                                    )}
-                                </View>
+                                            <View style={styles.cardIdentity}>
+                                                <View style={styles.imageWrapper}>
+                                                    <CachedImage
+                                                        uri={(studio.images && studio.images[0]) || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=800&fit=crop'}
+                                                        style={styles.cardImage}
+                                                        width={128}
+                                                        height={128}
+                                                        quality={72}
+                                                        cacheVersion={studio.updated_at || studio.created_at || studio.id}
+                                                    />
+                                                </View>
+                                                <View style={styles.cardHeading}>
+                                                    <Text style={[styles.cardTitle, { color: colors.text }]}>{studio.name}</Text>
+                                                    <Text numberOfLines={1} style={[styles.studioMeta, { color: colors.primary }]}>
+                                                        {studio.studio_type || 'Studio details'}
+                                                    </Text>
+                                                    {studio.location ? (
+                                                        <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.cardLocation, { color: colors.textSecondary }]}>
+                                                            {studio.location}
+                                                        </Text>
+                                                    ) : null}
+                                                    {studio.management_status === 'inactive' ? (
+                                                        <View style={[styles.activeBadge, { backgroundColor: colors.inputBackground }]}>
+                                                            <Text style={[styles.activeText, { color: colors.textSecondary }]}>Inactive</Text>
+                                                        </View>
+                                                    ) : null}
+                                                    {!isApproved && (
+                                                        <View style={[styles.activeBadge, { backgroundColor: permitBadgeBackground }]}>
+                                                            <Text style={[styles.activeText, { color: permitBadgeColor }]}>{permitStatusLabel}</Text>
+                                                        </View>
+                                                    )}
+                                                </View>
+                                            </View>
 
-                                <View style={styles.cardContent}>
-                                    <Text style={[styles.cardTitle, { color: colors.text }]}>{studio.name}</Text>
-                                    <Text style={[styles.studioMeta, { color: colors.primary }]}>
-                                        {[studio.studio_type, studio.location].filter(Boolean).join(' · ') || 'Studio details'}
-                                    </Text>
-                                    <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
-                                        {studio.description}
-                                    </Text>
+                                            <View style={styles.cardContent}>
+                                                {isRejected && !!studio.permit_rejection_reason && (
+                                                    <Text style={styles.rejectionReasonText} numberOfLines={3}>
+                                                        Rejection reason: {studio.permit_rejection_reason}
+                                                    </Text>
+                                                )}
 
-                                    {isRejected && !!studio.permit_rejection_reason && (
-                                        <Text style={styles.rejectionReasonText} numberOfLines={3}>
-                                            Rejection reason: {studio.permit_rejection_reason}
-                                        </Text>
-                                    )}
+                                                {(normalizedPermitStatus === 'pending' || normalizedPermitStatus === 'pending_review' || normalizedPermitStatus === 'resubmitted') && (
+                                                    <Text style={[styles.permitHintText, { color: colors.textSecondary }]}>
+                                                        Hidden from Home right now.
+                                                    </Text>
+                                                )}
 
-                                    {(normalizedPermitStatus === 'pending' || normalizedPermitStatus === 'pending_review' || normalizedPermitStatus === 'resubmitted') && (
-                                        <Text style={[styles.permitHintText, { color: colors.textSecondary }]}>
-                                            Hidden from Home right now.
-                                        </Text>
-                                    )}
+                                                <View style={[styles.actionRow, { borderColor: colors.border }]}>
+                                                    <View style={styles.actionLeft}>
+                                                        <TouchableOpacity
+                                                            activeOpacity={1}
+                                                            testID={`mobile-studio-manage-${studio.id}`}
+                                                            accessibilityLabel={`mobile-studio-manage-${studio.id}`}
+                                                            onPress={() => router.push({ pathname: '/manage_studio', params: { id: studio.id } })}
+                                                            style={[styles.manageBtn, { borderColor: colors.primary }]}
+                                                        >
+                                                            <Text style={[styles.manageBtnText, { color: colors.primary }]}>{canManageBookings ? 'Manage' : 'View'}</Text>
+                                                        </TouchableOpacity>
 
-                                    <View style={[styles.actionRow, { borderColor: colors.border }]}>
-                                        <View style={styles.actionLeft}>
-                                            <TouchableOpacity
-                                                activeOpacity={1}
-                                                testID={`mobile-studio-manage-${studio.id}`}
-                                                accessibilityLabel={`mobile-studio-manage-${studio.id}`}
-                                                onPress={() => router.push({ pathname: '/manage_studio', params: { id: studio.id } })}
-                                                style={[styles.manageBtn, { borderColor: colors.primary }]}
-                                            >
-                                                <Text style={[styles.manageBtnText, { color: colors.primary }]}>{canManageBookings ? 'Manage' : 'View'}</Text>
-                                            </TouchableOpacity>
+                                                        {canEditListing ? (
+                                                            <>
+                                                                {isRejected ? (
+                                                                    <TouchableOpacity
+                                                                        activeOpacity={1}
+                                                                        onPress={() =>
+                                                                            router.push({
+                                                                                pathname: '/edit_studio',
+                                                                                params: { id: studio.id, reapply: '1' },
+                                                                            })
+                                                                        }
+                                                                        style={[
+                                                                            styles.reapplyBtn,
+                                                                            {
+                                                                                borderColor: '#F97316',
+                                                                                backgroundColor: isDark ? 'rgba(249,115,22,0.12)' : '#FFF7ED',
+                                                                            },
+                                                                        ]}
+                                                                    >
+                                                                        <Ionicons name="refresh-outline" size={16} color="#EA580C" />
+                                                                        <Text style={styles.reapplyBtnText}>Edit & Reapply</Text>
+                                                                    </TouchableOpacity>
+                                                                ) : (
+                                                                    <TouchableOpacity
+                                                                        activeOpacity={1}
+                                                                        testID={`mobile-studio-edit-${studio.id}`}
+                                                                        accessibilityLabel={`mobile-studio-edit-${studio.id}`}
+                                                                        onPress={() => router.push({ pathname: '/edit_studio', params: { id: studio.id } })}
+                                                                        style={[styles.editBtn, { borderColor: colors.border }]}
+                                                                    >
+                                                                        <Ionicons name="pencil-outline" size={20} color={colors.text} style={styles.editBtnIcon} />
+                                                                    </TouchableOpacity>
+                                                                )}
+                                                            </>
+                                                        ) : null}
+                                                        {staffPermissions?.canAddListing && !staffHeaderAddOwnerId ? (
+                                                            <TouchableOpacity
+                                                                activeOpacity={1}
+                                                                testID={`mobile-studio-add-for-owner-${studio.id}`}
+                                                                accessibilityLabel={`Add studio for ${studio.name}`}
+                                                                onPress={() => router.push({ pathname: '/add_studio', params: { ownerId: studio.owner_id } })}
+                                                                style={[styles.editBtn, { borderColor: colors.border }]}
+                                                            >
+                                                                <Ionicons name="add-outline" size={20} color={colors.text} />
+                                                            </TouchableOpacity>
+                                                        ) : null}
+                                                    </View>
 
-                                            {canEditListing ? (
-                                            <>
-                                            {isRejected ? (
-                                                <TouchableOpacity
-                                                    activeOpacity={1}
-                                                    onPress={() =>
-                                                        router.push({
-                                                            pathname: '/edit_studio',
-                                                            params: { id: studio.id, reapply: '1' },
-                                                        })
-                                                    }
-                                                    style={[
-                                                        styles.reapplyBtn,
-                                                        {
-                                                            borderColor: '#F97316',
-                                                            backgroundColor: isDark ? 'rgba(249,115,22,0.12)' : '#FFF7ED',
-                                                        },
-                                                    ]}
-                                                >
-                                                    <Ionicons name="refresh-outline" size={16} color="#EA580C" />
-                                                    <Text style={styles.reapplyBtnText}>Edit & Reapply</Text>
-                                                </TouchableOpacity>
-                                            ) : (
-                                                <TouchableOpacity
-                                                    activeOpacity={1}
-                                                    testID={`mobile-studio-edit-${studio.id}`}
-                                                    accessibilityLabel={`mobile-studio-edit-${studio.id}`}
-                                                    onPress={() => router.push({ pathname: '/edit_studio', params: { id: studio.id } })}
-                                                    style={[styles.editBtn, { borderColor: colors.border }]}
-                                                >
-                                                    <Ionicons name="pencil-outline" size={20} color={colors.text} style={styles.editBtnIcon} />
-                                                </TouchableOpacity>
-                                            )}
-                                            </>
-                                            ) : null}
-                                            {staffPermissions?.canAddListing && !staffHeaderAddOwnerId ? (
-                                                <TouchableOpacity
-                                                    activeOpacity={1}
-                                                    testID={`mobile-studio-add-for-owner-${studio.id}`}
-                                                    accessibilityLabel={`Add studio for ${studio.name}`}
-                                                    onPress={() => router.push({ pathname: '/add_studio', params: { ownerId: studio.owner_id } })}
-                                                    style={[styles.editBtn, { borderColor: colors.border }]}
-                                                >
-                                                    <Ionicons name="add-outline" size={20} color={colors.text} />
-                                                </TouchableOpacity>
-                                            ) : null}
-                                        </View>
+                                                    {!staffPermissions || staffPermissions.canDeleteListing ? (
+                                                        <TouchableOpacity
+                                                            activeOpacity={1}
+                                                            testID={`mobile-studio-delete-${studio.id}`}
+                                                            accessibilityLabel={`mobile-studio-delete-${studio.id}`}
+                                                            onPress={() => confirmDelete(studio.id, studio.name)}
+                                                            style={styles.deleteBtn}
+                                                        >
+                                                            <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                                                        </TouchableOpacity>
+                                                    ) : null}
+                                                </View>
 
-                                        {!staffPermissions || staffPermissions.canDeleteListing ? (
-                                        <TouchableOpacity
-                                            activeOpacity={1}
-                                            testID={`mobile-studio-delete-${studio.id}`}
-                                            accessibilityLabel={`mobile-studio-delete-${studio.id}`}
-                                            onPress={() => confirmDelete(studio.id, studio.name)}
-                                            style={styles.deleteBtn}
-                                        >
-                                            <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                                        </TouchableOpacity>
-                                        ) : null}
-                                    </View>
-                                </View>
+                                            </View>
                                         </>
                                     );
                                 })()}
                             </View>
                         ))
                     )}
-                </ScrollView>
+                </ManagedListingContent>
 
-                <Navbar />
+                {!embedded && <Navbar />}
             </View>
             <Modal
                 visible={modalVisible}
@@ -878,11 +897,7 @@ const styles = StyleSheet.create({
     flex1: {
         flex: 1,
     },
-    scrollContent: {
-        paddingHorizontal: 24,
-        paddingBottom: 180,
-        paddingTop: 16,
-    },
+    scrollContent: { paddingBottom: 180, paddingTop: 0, paddingHorizontal: 16 },
     sectionHeading: {
         fontFamily: typography.bold,
         fontSize: 12,
@@ -897,11 +912,7 @@ const styles = StyleSheet.create({
     skeletonList: {
         gap: 16,
     },
-    skeletonCard: {
-        borderRadius: radius.card,
-        borderWidth: 1,
-        padding: 16,
-    },
+    skeletonCard: { ...managementCardStyles.surface },
     skeletonActionRow: {
         marginTop: 16,
         flexDirection: 'row',
@@ -916,98 +927,57 @@ const styles = StyleSheet.create({
         marginTop: 16,
         fontFamily: 'Poppins_400Regular',
     },
-    cardContainer: {
-        marginBottom: 16,
-        borderRadius: radius.card,
-        overflow: 'hidden',
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: palette.line,
-    },
-    imageWrapper: {
-        height: 160,
-        position: 'relative',
-    },
-    cardImage: {
-        width: '100%',
-        height: '100%',
-    },
-    activeBadge: {
-        position: 'absolute',
-        top: 16,
-        right: 16,
-        paddingHorizontal: 12,
-        paddingVertical: 4,
-        borderRadius: 100,
-    },
-    activeText: {
-        fontSize: 12,
-        fontFamily: 'Poppins_600SemiBold',
-    },
-    cardContent: {
-        padding: 16,
-    },
-    cardTitle: {
-        fontFamily: typography.title,
-        fontSize: 20,
-        letterSpacing: -0.4,
-        marginBottom: 4,
-    },
-    studioMeta: {
-        fontFamily: typography.bold,
-        fontSize: 11,
-        letterSpacing: 0.7,
-        textTransform: 'uppercase',
-        marginBottom: 8,
-    },
-    cardDescription: {
-        fontFamily: typography.body,
-        fontSize: 13,
-        lineHeight: 20,
-    },
+    cardContainer: { ...managementCardStyles.surface, overflow: 'hidden', borderColor: palette.line, marginBottom: 12 },
+    imageWrapper: { width: 64, height: 64, borderRadius: 10, overflow: "hidden" },
+    cardImage: { ...managementCardStyles.thumbnail },
+    activeBadge: { alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7 },
+    activeText: { fontSize: 12, fontFamily: typography.semibold },
+    cardContent: { padding: 0, paddingTop: 8 },
+    cardTitle: { ...managementCardStyles.title, marginBottom: 0 },
+    studioMeta: { ...managementCardStyles.metadata, textTransform: "none", letterSpacing: 0, marginBottom: 0 },
+    cardLocation: { ...managementCardStyles.metadata },
     rejectionReasonText: {
         marginTop: 8,
         color: '#DC2626',
-        fontFamily: 'Poppins_500Medium',
         fontSize: 12,
         lineHeight: 18,
+        fontFamily: typography.medium,
     },
-    permitHintText: {
-        marginTop: 8,
-        fontFamily: 'Poppins_400Regular',
-        fontSize: 12,
-        lineHeight: 18,
-    },
+    permitHintText: { marginTop: 8, fontSize: 12, lineHeight: 18, fontFamily: typography.body },
     actionRow: {
         flexDirection: 'row',
-        alignItems: 'center',
         justifyContent: 'space-between',
-        marginTop: 16,
         borderTopWidth: 1,
-        paddingTop: 16,
+        gap: 8,
+        marginTop: 8,
+        paddingTop: 8,
+        flexWrap: "wrap",
+        alignItems: "flex-start",
     },
     actionLeft: {
         flexDirection: 'row',
-        gap: 12,
+        flex: 1,
+        gap: 8,
+        alignItems: "center",
+        flexWrap: "wrap",
     },
     manageBtn: {
+        ...managementCardStyles.button,
         flexDirection: 'row',
-        alignItems: 'center',
         gap: 8,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 12,
         borderWidth: 1,
+        flex: 1,
+        minWidth: 88,
+        paddingVertical: 8,
     },
-    manageBtnText: {
-        fontFamily: typography.semibold,
-    },
+    manageBtnText: { fontFamily: typography.semibold },
     editBtn: {
-        width: 38,
-        height: 38,
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 12,
         borderWidth: 1,
+        width: 44,
+        height: 44,
+        borderRadius: 9,
     },
     editBtnIcon: {
         width: 20,
@@ -1018,21 +988,24 @@ const styles = StyleSheet.create({
         textAlignVertical: 'center',
     },
     reapplyBtn: {
+        ...managementCardStyles.button,
         flexDirection: 'row',
-        alignItems: 'center',
         gap: 6,
-        paddingHorizontal: 12,
         paddingVertical: 8,
-        borderRadius: 12,
         borderWidth: 1,
+        paddingHorizontal: 10,
+        flex: 1,
+        minWidth: 120,
     },
-    reapplyBtnText: {
-        color: '#EA580C',
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: 12,
-    },
+    reapplyBtnText: { color: '#EA580C', fontSize: 12, fontFamily: typography.semibold },
     deleteBtn: {
-        padding: 8,
+        width: 44,
+        height: 44,
+        padding: 0,
+        alignItems: "center",
+        justifyContent: "center",
     },
+    cardIdentity: { ...managementCardStyles.identity },
+    cardHeading: { flex: 1, minWidth: 0, gap: 4 },
 });
 

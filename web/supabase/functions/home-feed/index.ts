@@ -121,6 +121,7 @@ interface RecommendationItem {
     availability?: any[];
     open_dates?: string[];
     requirements?: Record<string, unknown> | null;
+    management_status?: string | null;
     status?: string | null;
     event_date?: string | null;
     featured_performers?: any[];
@@ -910,16 +911,19 @@ const fetchCandidates = async (supabaseClient: any, includePosts = false): Promi
             : Promise.resolve({ data: [], error: null }),
         supabaseClient
             .from("groups_with_stats")
-            .select("id, name, description, images, location, genre, group_type, rate, rating, review_count, owner_id, created_at")
+            .select("management_status, id, name, description, images, location, genre, group_type, rate, rating, review_count, owner_id, created_at")
+            .eq("management_status", "active")
             .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
         supabaseClient
             .from("studios_with_stats")
-            .select("id, name, description, amenities, images, address, location, type, types, hourly_rate, rehearsal_rate, recording_rate, rating, review_count, owner_id, created_at, permit_status, availability, open_dates")
+            .select("management_status, id, name, description, amenities, images, address, location, type, types, hourly_rate, rehearsal_rate, recording_rate, rating, review_count, owner_id, created_at, permit_status, availability, open_dates")
+            .eq("management_status", "active")
             .eq("permit_status", "approved")
             .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
         supabaseClient
             .from("gigs_with_stats")
-            .select("id, name, description, images, location, budget, rate, requirements, rating, review_count, organizer_id, created_at, event_date, status, permit_status")
+            .select("management_status, id, name, description, images, location, budget, rate, requirements, rating, review_count, organizer_id, created_at, event_date, status, permit_status")
+            .eq("management_status", "active")
             .neq("status", "cancelled")
             .eq("permit_status", "approved")
             .order("event_date", { ascending: false, nullsFirst: false })
@@ -933,7 +937,8 @@ const fetchCandidates = async (supabaseClient: any, includePosts = false): Promi
             .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
         supabaseClient
             .from("production_teams")
-            .select("id, owner_id, name, description, logo_url, created_at, updated_at, open_production_applications")
+            .select("management_status, id, owner_id, name, description, logo_url, created_at, updated_at, open_production_applications")
+            .eq("management_status", "active")
             .eq("open_production_applications", true)
             .limit(HOME_FEED_CANDIDATE_SOURCE_LIMIT),
     ]);
@@ -1050,6 +1055,7 @@ const fetchCandidates = async (supabaseClient: any, includePosts = false): Promi
         const type: RecommendationItemType = groupType.includes("duo") ? "Duo" : "Group";
         return {
             id: item.id,
+            management_status: item.management_status,
             type,
             name: item.name || `Unnamed ${type}`,
             image: Array.isArray(item.images) ? item.images[0] || null : null,
@@ -1081,6 +1087,7 @@ const fetchCandidates = async (supabaseClient: any, includePosts = false): Promi
 
         return {
             id: item.id,
+            management_status: item.management_status,
             type,
             name: item.name || `Unnamed ${type}`,
             image: Array.isArray(item.images) ? item.images[0] || null : null,
@@ -1138,6 +1145,7 @@ const fetchCandidates = async (supabaseClient: any, includePosts = false): Promi
 
         return {
             id: item.id,
+            management_status: item.management_status,
             type: "Gig",
             name: item.name || "Untitled Gig",
             image: Array.isArray(item.images) ? item.images[0] || null : null,
@@ -1196,6 +1204,7 @@ const fetchCandidates = async (supabaseClient: any, includePosts = false): Promi
 
     const productionItems: CandidateItem[] = (productionTeamsResult.data || []).map((item: any) => ({
         id: item.id,
+        management_status: item.management_status,
         type: "Production",
         name: item.name || "Production Team",
         image: item.logo_url || null,
@@ -1327,6 +1336,7 @@ const getFeaturedPayload = async (supabaseClient: any) => {
         supabaseClient
             .from("gigs_with_stats")
             .select("*")
+            .eq("management_status", "active")
             .eq("status", "open")
             .eq("permit_status", "approved")
             .order("event_date", { ascending: false, nullsFirst: false })
@@ -1335,12 +1345,14 @@ const getFeaturedPayload = async (supabaseClient: any) => {
         supabaseClient
             .from("studios_with_stats")
             .select("*")
+            .eq("management_status", "active")
             .eq("permit_status", "approved")
             .order("rating", { ascending: false })
             .limit(5),
         supabaseClient
             .from("groups_with_stats")
             .select("*")
+            .eq("management_status", "active")
             .order("created_at", { ascending: false })
             .limit(20),
     ]);

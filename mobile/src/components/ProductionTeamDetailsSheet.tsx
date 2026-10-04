@@ -1,3 +1,4 @@
+import { useListingLifecycle } from '../hooks/useListingLifecycle';
 import { Ionicons } from "@expo/vector-icons";
 import {
   BottomSheetBackdrop,
@@ -224,6 +225,8 @@ const ProductionTeamDetailsSheet = forwardRef<
 
   const [loading, setLoading] = useState(false);
   const [team, setTeam] = useState<ProductionTeamRecord | null>(null);
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const listingLifecycle = useListingLifecycle({ type: 'Production', id: teamId, enabled: isSheetOpen });
   const [members, setMembers] = useState<ProductionTeamMember[]>([]);
   const [membershipRole, setMembershipRole] = useState<string | null>(null);
   const [staffAssignment, setStaffAssignment] = useState<StaffAssignment | null>(null);
@@ -293,12 +296,14 @@ const ProductionTeamDetailsSheet = forwardRef<
   }, [ref]);
 
   const handleDismiss = useCallback(() => {
+    setIsSheetOpen(false);
     onDismiss?.();
   }, [onDismiss]);
 
   const handleSheetChange = useCallback((index: number) => {
     const wasHidden = previousSheetIndexRef.current < 0;
     previousSheetIndexRef.current = index;
+    setIsSheetOpen(index >= 0);
 
     if (wasHidden && index >= 0) {
       onOpened?.();
@@ -645,6 +650,7 @@ const ProductionTeamDetailsSheet = forwardRef<
   }, [reviews]);
   const canShowConnectTab = Boolean(
     team &&
+      listingLifecycle.canAcceptNewRequests &&
       team.open_production_applications !== false &&
       membershipRole == null &&
       currentUserRole === "musician" &&
@@ -777,7 +783,7 @@ const ProductionTeamDetailsSheet = forwardRef<
       return;
     }
 
-    if (team.open_production_applications === false) {
+    if (!listingLifecycle.canAcceptNewRequests || team.open_production_applications === false) {
       showSheetAlert("warning", "Applications Closed", "This production team is not accepting applications right now.");
       return;
     }
@@ -930,6 +936,7 @@ const ProductionTeamDetailsSheet = forwardRef<
     team?.logo_url,
     team?.name,
     team?.open_production_applications,
+    listingLifecycle.canAcceptNewRequests,
     team?.owner_id,
     showSheetAlert,
     userId,
@@ -1452,6 +1459,9 @@ const ProductionTeamDetailsSheet = forwardRef<
             ) : null}
 
             {showTabs ? renderTabs() : null}
+            {listingLifecycle.status === 'inactive' ? (
+              <Text style={[styles.stateMessage, { color: colors.textSecondary }]}>This production team is inactive and is not accepting new applications.</Text>
+            ) : null}
             <SmoothTabTransition
               activeKey={activeTab}
               activeIndex={activeTabIndex}

@@ -1138,6 +1138,7 @@ export default function HomeScreen() {
       const { data: gData, error: gError } = await supabase
         .from("groups_with_stats")
         .select("*")
+            .eq("management_status", "active")
         .order("created_at", { ascending: false })
         .limit(20);
       if (gError) debugLog("Error fetching groups:", gError);
@@ -1305,6 +1306,7 @@ export default function HomeScreen() {
         const { data: sData, error: sError } = await supabase
           .from("studios_with_stats")
           .select("*")
+            .eq("management_status", "active")
           .eq("permit_status", "approved")
           .order("created_at", { ascending: false })
           .limit(20);
@@ -1360,6 +1362,7 @@ export default function HomeScreen() {
         const { data: gigData, error: gigError } = await supabase
           .from("gigs_with_stats")
           .select("*")
+            .eq("management_status", "active")
           .eq("status", "open") // Only show open gigs to musicians
           .eq("permit_status", "approved")
           .order("created_at", { ascending: false })

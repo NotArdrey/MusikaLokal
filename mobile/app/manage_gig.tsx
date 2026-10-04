@@ -1,3 +1,7 @@
+import { canMarkGigDone } from "../src/utils/listingHistory";
+import ListingLifecycleAction from "../src/components/ListingLifecycleAction";
+import { typography } from "../src/theme/tokens";
+import { managementCardStyles } from "../src/theme/managementCards";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import {
@@ -90,6 +94,7 @@ export default function GigDetailsScreen() {
 
   const [authorized, setAuthorized] = useState(false);
   const [canManageGig, setCanManageGig] = useState(false);
+  const [canChangeLifecycle, setCanChangeLifecycle] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
@@ -413,11 +418,13 @@ export default function GigDetailsScreen() {
       if (ownedGigError) throw ownedGigError;
 
       let canManageAssignedGig = !!ownedGig?.id && profile?.role === "venue-owner";
+      let canEditGig = canManageAssignedGig;
       let canViewAssignedGig = canManageAssignedGig;
 
       if (!canManageAssignedGig && profile?.role === "staff") {
         const assignment = await fetchActiveStaffAssignment(supabase, user.id, 'venue', gigId);
         const permissions = getStaffPermissions(assignment?.access_level);
+        canEditGig = assignment?.entity_type === "venue" && assignment.gig_id === gigId && getStaffPermissions(assignment?.access_level, assignment).canEditListing;
         canViewAssignedGig =
           assignment?.entity_type === "venue" &&
           assignment.gig_id === gigId;
@@ -435,6 +442,7 @@ export default function GigDetailsScreen() {
       }
 
       setCanManageGig(canManageAssignedGig);
+      setCanChangeLifecycle(canEditGig);
       setAuthorized(true);
       fetchData(user.id, canManageAssignedGig);
     } catch (e) {
@@ -455,7 +463,6 @@ export default function GigDetailsScreen() {
         router.replace("/home");
         return;
       }
-
 
       // Load 3NF sources first so newly created gigs are visible immediately.
       const [
@@ -880,7 +887,7 @@ export default function GigDetailsScreen() {
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title={canManageGig ? "Manage Gig" : "View Gig"} />
+        <Header title={canManageGig ? "Manage Gig" : "View Gig"} onBackPress={() => router.canGoBack() ? router.back() : router.replace("/my_venue")} />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -896,7 +903,6 @@ export default function GigDetailsScreen() {
                 style={[styles.headerImage, { backgroundColor: colors.border }]}
                 resizeMode="cover"
               />
-
             </View>
 
             <Text style={[styles.headerTitle, { color: colors.text }]}>
@@ -924,6 +930,12 @@ export default function GigDetailsScreen() {
                 <Text style={styles.navigateButtonText}>Navigate</Text>
               </TouchableOpacity>
             )}
+            {gig && canChangeLifecycle && canMarkGigDone(gig) ? (
+              <ListingLifecycleAction
+                type="gig" id={gig.id} name={gig.name} status={gig.management_status}
+                onChanged={(management_status) => setGig((current: any) => current ? { ...current, management_status, status: 'closed' } : current)}
+              />
+            ) : null}
           </View>
 
           {/* Tabs */}
@@ -1578,7 +1590,7 @@ export default function GigDetailsScreen() {
                           <View style={styles.compactApplicantHeader}>
                             <ProfileAvatar
                               uri={displayAvatar}
-                              size={52}
+                              size={64}
                               backgroundColor={colors.inputBackground}
                               iconColor={colors.textSecondary}
                             />
@@ -1586,6 +1598,15 @@ export default function GigDetailsScreen() {
                               <Text numberOfLines={2} style={[styles.compactApplicantName, { color: colors.text }]}>
                                 {displayName}
                               </Text>
+                              <Text numberOfLines={1} style={[styles.compactMeta, { color: colors.textSecondary }]}>
+                                {role} | {primarySpecialty}
+                              </Text>
+                              <View style={styles.compactLocationRow}>
+                                <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
+                                <Text numberOfLines={1} style={[styles.compactMeta, { color: colors.textSecondary, flex: 1 }]}>
+                                  {compactLocation}
+                                </Text>
+                              </View>
                               <View style={styles.compactStatusRow}>
                                 <Text style={[styles.compactMeta, { color: statusMeta.color }]}>{statusMeta.label}</Text>
                                 {verified ? <Text style={[styles.compactMeta, { color: "#10B981" }]}>Verified</Text> : null}
@@ -1593,15 +1614,6 @@ export default function GigDetailsScreen() {
                             </View>
                           </View>
 
-                          <Text numberOfLines={1} style={[styles.compactMeta, { color: colors.textSecondary }]}>
-                            {role} | {primarySpecialty}
-                          </Text>
-                          <View style={styles.compactLocationRow}>
-                            <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
-                            <Text numberOfLines={1} style={[styles.compactMeta, { color: colors.textSecondary, flex: 1 }]}>
-                              {compactLocation}
-                            </Text>
-                          </View>
                           {hasPriorApplicationCounts ? (
                             <View
                               testID={`prior-application-counts-${app.id}`}
@@ -1655,7 +1667,7 @@ export default function GigDetailsScreen() {
                               accessibilityLabel="Fire performer"
                               disabled={updatingApplication}
                               onPress={() => confirmAction(app.id, "fired")}
-                              style={{ marginTop: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: "#EF4444", alignItems: "center", opacity: updatingApplication ? 0.5 : 1 }}
+                              style={[managementCardStyles.button, { marginTop: 10, borderWidth: 1, borderColor: "#EF4444", opacity: updatingApplication ? 0.5 : 1 }]}
                             >
                               <Text style={{ color: "#EF4444", fontFamily: "Poppins_600SemiBold" }}>Fire</Text>
                             </TouchableOpacity>
@@ -1707,7 +1719,7 @@ export default function GigDetailsScreen() {
                       key={review.id}
                       style={[
                         styles.reviewCard,
-                        { backgroundColor: colors.surface },
+                        { backgroundColor: colors.surface, borderColor: colors.border },
                       ]}
                     >
                       <View style={styles.reviewUserHeader}>
@@ -1723,7 +1735,8 @@ export default function GigDetailsScreen() {
                           />
                           <Text
                             style={{
-                              fontFamily: "Poppins_600SemiBold",
+                              fontFamily: typography.semibold,
+                              flex: 1,
                               color: colors.text,
                             }}
                           >
@@ -1734,7 +1747,8 @@ export default function GigDetailsScreen() {
                           style={{
                             fontSize: 12,
                             color: colors.textSecondary,
-                            fontFamily: "Poppins_400Regular",
+                            fontFamily: typography.body,
+                            flexShrink: 1,
                           }}
                         >
                           {formatFriendlyDateTime(review.created_at)}
@@ -1963,12 +1977,13 @@ const styles = StyleSheet.create({
   },
   navigateButton: {
     marginTop: 12,
+    minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderRadius: 999,
+    borderRadius: 12,
   },
   navigateButtonText: {
     color: "#FFF",
@@ -2001,21 +2016,14 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     fontFamily: "Poppins_400Regular",
   },
-  offerCard: {
-    padding: 20,
-    borderRadius: 24,
-    borderWidth: 1,
-  },
+  offerCard: { ...managementCardStyles.surface },
   offerHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     marginBottom: 8,
   },
-  offerTitle: {
-    fontSize: 18,
-    fontFamily: "Poppins_700Bold",
-  },
+  offerTitle: { fontSize: 18, fontFamily: typography.semibold },
   offerInfo: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -2035,29 +2043,10 @@ const styles = StyleSheet.create({
   detailList: {
     gap: 12,
   },
-  detailCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 14,
-  },
-  detailCardTitle: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 14,
-  },
-  detailCardText: {
-    marginTop: 4,
-    fontFamily: "Poppins_400Regular",
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  slotDetailCard: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 14,
-  },
+  detailCard: { ...managementCardStyles.surface, flexDirection: "row", alignItems: "center", gap: 12 },
+  detailCardTitle: { fontSize: 14, fontFamily: typography.semibold },
+  detailCardText: { ...managementCardStyles.body, marginTop: 4 },
+  slotDetailCard: { ...managementCardStyles.surface },
   slotDetailHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -2065,10 +2054,7 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 8,
   },
-  slotDetailTitle: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 15,
-  },
+  slotDetailTitle: { fontSize: 15, fontFamily: typography.semibold },
   slotDetailCount: {
     fontFamily: "Poppins_700Bold",
     fontSize: 13,
@@ -2153,23 +2139,9 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 24,
   },
-  compactApplicantCard: {
-    borderWidth: 1,
-    borderRadius: 18,
-    padding: 14,
-    marginBottom: 12,
-    gap: 7,
-  },
-  compactApplicantHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 11,
-  },
-  compactApplicantName: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 15,
-    lineHeight: 21,
-  },
+  compactApplicantCard: { ...managementCardStyles.surface, marginBottom: 12, gap: 10 },
+  compactApplicantHeader: { ...managementCardStyles.identity },
+  compactApplicantName: { ...managementCardStyles.title },
   compactStatusRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -2177,11 +2149,7 @@ const styles = StyleSheet.create({
     gap: 4,
     marginTop: 2,
   },
-  compactMeta: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 11,
-    lineHeight: 17,
-  },
+  compactMeta: { ...managementCardStyles.metadata },
   compactLocationRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -2189,36 +2157,25 @@ const styles = StyleSheet.create({
   },
   aiMatchReviewScoreRow: {
     minHeight: 36,
-    borderRadius: 10,
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
     gap: 7,
     marginTop: 2,
+    flexWrap: "wrap",
+    paddingVertical: 8,
+    borderRadius: 9,
   },
   aiMatchReviewScoreLabel: {
     flex: 1,
-    fontFamily: "Poppins_500Medium",
     fontSize: 11,
+    fontFamily: typography.medium,
+    lineHeight: 17,
+    minWidth: 100,
   },
-  aiMatchReviewScoreValue: {
-    fontFamily: "Poppins_700Bold",
-    fontSize: 13,
-  },
-  viewApplicantButton: {
-    minHeight: 42,
-    borderRadius: 11,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 7,
-    marginTop: 3,
-  },
-  viewApplicantButtonText: {
-    color: "#FFFFFF",
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 12,
-  },
+  aiMatchReviewScoreValue: { fontFamily: typography.semibold, fontSize: 12, lineHeight: 18, flexShrink: 1 },
+  viewApplicantButton: { ...managementCardStyles.button, flexDirection: "row", marginTop: 0, gap: 8 },
+  viewApplicantButtonText: { color: "#FFFFFF", fontSize: 12, fontFamily: typography.semibold },
   applicantHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -2274,38 +2231,29 @@ const styles = StyleSheet.create({
     gap: 4,
     marginBottom: 8,
   },
-  reviewCard: {
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 16,
-  },
+  reviewCard: { ...managementCardStyles.surface, marginBottom: 16 },
   reviewUserHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
     marginBottom: 8,
+    flexWrap: "wrap",
+    gap: 8,
   },
   userInfo: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    flex: 1,
+    minWidth: 120,
   },
   userAvatar: {
     width: 32,
     height: 32,
     borderRadius: 16,
   },
-  reviewText: {
-    lineHeight: 20,
-  },
-  contractCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 16,
-  },
+  reviewText: { ...managementCardStyles.body },
+  contractCard: { ...managementCardStyles.surface, flexDirection: "row", alignItems: "center", marginBottom: 16 },
   contractIcon: {
     width: 48,
     height: 48,
@@ -2313,23 +2261,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  contractTitle: {
-    fontSize: 16,
-    fontFamily: "Poppins_600SemiBold",
-    marginBottom: 2,
-  },
-  contractSubtitle: {
-    fontSize: 12,
-    fontFamily: "Poppins_400Regular",
-  },
-  noContractCard: {
-    padding: 24,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderStyle: "dashed",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  contractTitle: { fontSize: 16, marginBottom: 2, fontFamily: typography.semibold },
+  contractSubtitle: { ...managementCardStyles.metadata },
+  noContractCard: { ...managementCardStyles.surface, borderStyle: "dashed", alignItems: "center", justifyContent: "center" },
   noContractText: {
     fontSize: 14,
     fontFamily: "Poppins_500Medium",
@@ -2402,12 +2336,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   mediaButton: {
+    ...managementCardStyles.button,
     flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
     paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
     borderWidth: 1,
     marginBottom: 12,
   },
@@ -2415,11 +2346,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontFamily: "Poppins_600SemiBold",
   },
-  documentMetaCard: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 16,
-  },
+  documentMetaCard: { ...managementCardStyles.surface },
   documentMetaRow: {
     flexDirection: "row",
     alignItems: "center",

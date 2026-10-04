@@ -83,7 +83,7 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
     );
 
     const isMyListingPath = useMemo(
-        () => routePathname === "/my_group" || routePathname === "/my_venue" || routePathname === "/my_studio" || routePathname === "/my_production",
+        () => routePathname === "/my_group" || routePathname === "/my_venue" || routePathname === "/my_studio" || routePathname === "/my_production" || routePathname === "/my_history",
         [routePathname],
     );
     const isManageWorkspacePath = routePathname.startsWith('/manage') || isMyListingPath;
