@@ -125,6 +125,7 @@ const GIG_APPLICATION_SUMMARY_SELECT = `
     slot_type,
     created_at,
     member_cv_status,
+    leader_approval_status,
     member_cv_required_count,
     member_cv_submitted_count,
     ai_portfolio_review_consent,
@@ -182,6 +183,7 @@ function toApplicationSummary(application: any) {
         slot_type: application.slot_type,
         created_at: application.created_at,
         member_cv_status: application.member_cv_status || 'not_required',
+        leader_approval_status: application.leader_approval_status || null,
         member_cv_required_count: Number(application.member_cv_required_count || 0),
         member_cv_submitted_count: Number(application.member_cv_submitted_count || 0),
         ai_portfolio_review_consent: application.ai_portfolio_review_consent === true,
@@ -2457,13 +2459,19 @@ Deno.serve(async (req: Request) => {
                 .from('gig_applications')
                 .select(GIG_APPLICATION_SUMMARY_SELECT)
                 .eq('gig_id', gigId)
-                .in('member_cv_status', ORGANIZER_VISIBLE_MEMBER_CV_STATUSES)
                 .or('leader_approval_status.is.null,leader_approval_status.eq.approved')
                 .order('created_at', { ascending: false })
 
             if (error) throw error
             const hydratedData = await hydrateLegacyApplicationFields(supabaseClient, data || [])
-            const rankedData = await attachGigApplicationRecommendations(supabaseClient, gigId, hydratedData)
+            // Incomplete group applications have a visible summary, but their
+            // documents and recommendations stay gated until the group sends them.
+            const completeData = hydratedData.filter((application: any) =>
+                ORGANIZER_VISIBLE_MEMBER_CV_STATUSES.includes(application.member_cv_status || 'not_required'))
+            const rankedCompleteData = await attachGigApplicationRecommendations(supabaseClient, gigId, completeData)
+            const completeById = new Map(rankedCompleteData.map((application: any) => [application.id, application]))
+            const rankedData = hydratedData.map((application: any) =>
+                completeById.get(application.id) || { ...application, ai_recommendation: null })
             const rankedDataWithHistory = await attachPriorApplicationCounts(
                 supabaseClient,
                 gigRecord.organizer_id,

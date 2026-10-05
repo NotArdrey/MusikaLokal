@@ -132,6 +132,8 @@ test('exported website supports public downloads, themes and protected admin rou
     let requests = 0;
     let truncateOnce = true;
     let delayTransfer = false;
+    let releaseDelayedTransfer;
+    const delayedTransfer = new Promise((resolve) => { releaseDelayedTransfer = resolve; });
     await page.unroute('**/android-release.json');
     await page.route('**/android-release.json', (route) => route.fulfill({ json: downloadRelease }));
     await page.route(release.downloadUrl, async (route) => {
@@ -142,7 +144,7 @@ test('exported website supports public downloads, themes and protected admin rou
       const end = Number(range[2]);
       let body = apkBytes.subarray(start, end + 1);
       if (truncateOnce && start === 0) { body = body.subarray(0, 100); truncateOnce = false; }
-      if (delayTransfer) await new Promise((ready) => setTimeout(ready, 500));
+      if (delayTransfer) await delayedTransfer;
       await route.fulfill({ status: 206, headers: {
         'content-type': 'application/vnd.android.package-archive',
         'content-range': `bytes ${start}-${end}/${apkBytes.length}`,
@@ -174,8 +176,12 @@ test('exported website supports public downloads, themes and protected admin rou
     await page.locator('#installation').scrollIntoViewIfNeeded();
     await page.getByRole('button', { name: 'Download app', exact: true }).click();
     await page.getByRole('progressbar', { name: 'Quick download progress', exact: true }).waitFor();
-    await screenshot({ path: resolve(output, 'responsive-download-progress.png') });
-    await page.getByRole('button', { name: 'Cancel download', exact: true }).click();
+    try {
+      await screenshot({ path: resolve(output, 'responsive-download-progress.png') });
+      await page.getByRole('button', { name: 'Cancel download', exact: true }).click();
+    } finally {
+      releaseDelayedTransfer();
+    }
     await page.getByText('Download canceled.', { exact: true }).waitFor();
     assert.equal(savedDownloads, 1, 'a canceled download must never save an APK');
     await page.getByRole('link', { name: 'Download Android APK' }).waitFor();

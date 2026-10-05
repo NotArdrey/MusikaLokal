@@ -12,7 +12,7 @@
     "test:member-verification": "node --test scripts/test-gig-member-verification.mjs",
     "test:connection-member-verification": "node --test scripts/test-connection-member-verification.mjs",
     "test:connection-recommendations": "npx -y deno test scripts/test-connection-application-recommendations.ts",
-    "test:applicant-review": "node --test scripts/test-submitted-genre-fit.mjs scripts/test-group-application-confirmation.mjs",
+    "test:applicant-review": "node --test scripts/test-submitted-genre-fit.mjs scripts/test-group-application-confirmation.mjs scripts/test-gig-group-visibility.mjs",
     "test:cv-documents": "node --test scripts/test-cv-documents.mjs scripts/test-native-upload-uri-handling.cjs",
     "test:security": "node --test scripts/test-authorization-hardening.mjs",
     "test:accounts": "node --test scripts/test-separate-role-accounts.mjs scripts/test-didit-review-state.mjs",

@@ -1,3 +1,4 @@
+import { useGroupGigApplication } from "../hooks/useGroupGigApplication";
 import { useListingLifecycle } from "../hooks/useListingLifecycle";
 import { buildListingShareUrl } from "../utils/shareLinks";
 import { Ionicons } from "@expo/vector-icons";
@@ -603,9 +604,13 @@ const ListingDetailsSheet = forwardRef<
     useState<"unknown" | "member" | "not-member">("unknown");
 
   // Group Deduplication State (prevent same group applying twice)
-  const [groupAlreadyApplied, setGroupAlreadyApplied] = useState(false);
-  const [groupApplicationBy, setGroupApplicationBy] = useState<string | null>(
-    null,
+  const {
+    groupAlreadyApplied, groupApplicationBy, groupApplicationChecking,
+    groupApplicationCheckError, retryGroupApplicationCheck,
+  } = useGroupGigApplication(
+    group?.type === "Gig" && userRole !== "producer" ? listingId : null,
+    selectedGroupId,
+    userId,
   );
 
   // Spam Block State
@@ -1904,45 +1909,6 @@ const ListingDetailsSheet = forwardRef<
     }
   };
 
-  // Check if selected group has already applied to this gig
-  const checkGroupApplication = async (groupId: string) => {
-    if (!groupId || !listingId) {
-      setGroupAlreadyApplied(false);
-      setGroupApplicationBy(null);
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from("gig_applications")
-        .select("id, applicant_id, status, profiles:applicant_id(full_name)")
-        .eq("gig_id", listingId)
-        .eq("group_id", groupId)
-        .in("status", ["pending", "accepted", "approved"])
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (error) {
-        console.error("Error checking group application:", error);
-        return;
-      }
-
-      if (data && data.applicant_id !== userId) {
-        debugLog("?? Group already applied by another member:", data);
-        setGroupAlreadyApplied(true);
-        setGroupApplicationBy(
-          (data.profiles as any)?.full_name || "Another member",
-        );
-      } else {
-        setGroupAlreadyApplied(false);
-        setGroupApplicationBy(null);
-      }
-    } catch (err) {
-      console.error("Error checking group application:", err);
-    }
-  };
-
   // Check if user has an unpaid booking for this studio (blocks new bookings until paid)
   const checkExistingStudioBooking = async () => {
     if (
@@ -2320,22 +2286,6 @@ const ListingDetailsSheet = forwardRef<
   useEffect(() => {
     checkReapplicationCooldown();
   }, [checkReapplicationCooldown]);
-
-  // Check if selected group has already applied (group-level deduplication)
-  useEffect(() => {
-    if (userRole === "producer") {
-      setGroupAlreadyApplied(false);
-      setGroupApplicationBy(null);
-      return;
-    }
-
-    if (selectedGroupId) {
-      checkGroupApplication(selectedGroupId);
-    } else {
-      setGroupAlreadyApplied(false);
-      setGroupApplicationBy(null);
-    }
-  }, [selectedGroupId, listingId]);
 
   // Debug effect to monitor application state changes
   useEffect(() => {
@@ -3863,6 +3813,9 @@ const ListingDetailsSheet = forwardRef<
       selectedSlotType={selectedSlotType}
       setSelectedSlotType={setSelectedSlotType}
       groupAlreadyApplied={groupAlreadyApplied}
+      groupApplicationChecking={groupApplicationChecking}
+      groupApplicationCheckError={groupApplicationCheckError}
+      retryGroupApplicationCheck={retryGroupApplicationCheck}
       groupApplicationBy={groupApplicationBy}
       handleSubmitApplication={handleSubmitApplication}
     />
@@ -3914,6 +3867,9 @@ const ListingDetailsSheet = forwardRef<
       selectedSlotType={selectedSlotType}
       setSelectedSlotType={setSelectedSlotType}
       groupAlreadyApplied={groupAlreadyApplied}
+      groupApplicationChecking={groupApplicationChecking}
+      groupApplicationCheckError={groupApplicationCheckError}
+      retryGroupApplicationCheck={retryGroupApplicationCheck}
       groupApplicationBy={groupApplicationBy}
       handleSubmitApplication={handleSubmitApplication}
     />

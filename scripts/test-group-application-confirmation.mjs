@@ -41,6 +41,7 @@ function confirmationButton(onConfirm) {
       if (name === "react-native-reanimated") return { useSharedValue: (value) => ({ value }), useAnimatedStyle: () => ({}) };
       if (name.endsWith("ThemeContext")) return { useTheme: () => ({ colors: {} }) };
       if (name.endsWith("e2eFixtures")) return { isE2EFixtureMode: () => false };
+      if (name.endsWith("theme/tokens")) return { typography: {} };
       return {};
     },
   });

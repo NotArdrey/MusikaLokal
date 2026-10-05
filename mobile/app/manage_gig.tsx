@@ -286,6 +286,10 @@ export default function GigDetailsScreen() {
         production_team_id,
         production_roster_id,
         status,
+        member_cv_status,
+        member_cv_required_count,
+        member_cv_submitted_count,
+        leader_approval_status,
         slot_type,
         created_at,
         performer_snapshot,
@@ -536,30 +540,12 @@ export default function GigDetailsScreen() {
               },
             });
 
-          let directApps: any[] | null = null;
-          try {
-            directApps = await fetchApplicationsFallback(gigId);
-          } catch (directReadError) {
-            console.warn("Direct gig application read failed; using edge response.", directReadError);
-          }
-
-          if (directApps) {
-            const edgeApps = Array.isArray(appData) ? appData : [];
-            const edgeAppById = new Map(edgeApps.map((application: any) => [application.id, application]));
-
-            // The direct list is authoritative for membership and status. Edge
-            // data only enriches those same rows with recommendations/history.
-            setApplications(directApps.map((application: any) => ({
-              ...application,
-              ...(edgeAppById.get(application.id) || {}),
-              id: application.id,
-              status: application.status,
-              created_at: application.created_at,
-            })));
-          } else if (!appError && Array.isArray(appData)) {
+          // The authorized summary endpoint includes incomplete groups. Direct
+          // RLS reads intentionally hide their documents until submission.
+          if (!appError && Array.isArray(appData)) {
             setApplications(appData);
           } else {
-            setApplications([]);
+            setApplications(await fetchApplicationsFallback(gigId));
           }
         } catch (appErr) {
           try {
@@ -918,9 +904,13 @@ export default function GigDetailsScreen() {
                 gig?.requirements?.event_end_time
                 ? ` at ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
                 : ""}
-              {" - "}
-              {gig?.location || "Location N/A"}
             </Text>
+            <View style={styles.headerAddressRow}>
+              <Ionicons name="location-outline" size={16} color={colors.textSecondary} />
+              <Text numberOfLines={2} style={[styles.headerAddress, { color: colors.textSecondary }]}>
+                {gig?.location || "Location N/A"}
+              </Text>
+            </View>
             {hasValidCoordinates(gig?.latitude, gig?.longitude) && (
               <TouchableOpacity activeOpacity={1}
                 style={[styles.navigateButton, { backgroundColor: colors.primary }]}
@@ -1471,7 +1461,7 @@ export default function GigDetailsScreen() {
                     APPLICANTS ({applicationCounts["All"]})
                   </Text>
                   {canManageGig ? (
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <View style={styles.applicantActions}>
                       <TouchableOpacity
                         activeOpacity={1}
                         testID="configure-ai-recommendations"
@@ -1580,6 +1570,7 @@ export default function GigDetailsScreen() {
                       const hasPriorApplicationCounts =
                         Number.isInteger(priorApplicationCounts?.this_gig) &&
                         Number.isInteger(priorApplicationCounts?.owner_gigs);
+                      const waitingForGroup = ["collecting", "ready"].includes(app.member_cv_status);
 
                       return (
                         <View
@@ -1651,6 +1642,16 @@ export default function GigDetailsScreen() {
                               <Text style={[styles.aiMatchReviewScoreLabel, { color: "#B45309", flex: 1 }]}>Important verification needed</Text>
                             </View>
                           ) : null}
+                          {waitingForGroup ? (
+                            <View style={[styles.aiMatchReviewScoreRow, { backgroundColor: colors.inputBackground }]}>
+                              <Ionicons name="time-outline" size={18} color={colors.primary} />
+                              <Text style={[styles.aiMatchReviewScoreLabel, { color: colors.text, flex: 1 }]}>
+                                {app.member_cv_status === "ready"
+                                  ? "All member CVs submitted. Waiting for the group to send the complete application."
+                                  : `${app.member_cv_submitted_count || 0} of ${app.member_cv_required_count || 0} member CVs submitted. Waiting for members.`}
+                              </Text>
+                            </View>
+                          ) : (
                           <TouchableOpacity
                             testID={`view-applicant-${app.id}`}
                             accessibilityRole="button"
@@ -1660,6 +1661,7 @@ export default function GigDetailsScreen() {
                             <Text style={styles.viewApplicantButtonText}>View Applicant</Text>
                             <Ionicons name="arrow-forward" size={17} color="#FFF" />
                           </TouchableOpacity>
+                          )}
                           {canManageGig && isActiveApplication(app.status) ? (
                             <TouchableOpacity
                               testID={`fire-applicant-${app.id}`}
@@ -1950,7 +1952,7 @@ const styles = StyleSheet.create({
   headerContainer: {
     paddingHorizontal: 24,
     marginTop: 16,
-    alignItems: "center",
+    alignItems: "flex-start",
   },
   headerImageContainer: {
     width: "100%",
@@ -1966,15 +1968,17 @@ const styles = StyleSheet.create({
   },
 
   headerTitle: {
-    fontSize: 24,
-    textAlign: "center",
+    fontSize: 22,
     fontFamily: typography.heading,
   },
   headerLocation: {
-    textAlign: "center",
-    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 8,
     fontFamily: typography.body,
   },
+  headerAddressRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, marginTop: 6 },
+  headerAddress: { flex: 1, fontSize: 13, lineHeight: 20, fontFamily: typography.body },
   navigateButton: {
     marginTop: 12,
     minHeight: 44,
@@ -2117,7 +2121,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
+    flexWrap: "wrap",
   },
+  applicantActions: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
   applicantsTitle: {
     fontSize: 13,
     letterSpacing: 0.5,

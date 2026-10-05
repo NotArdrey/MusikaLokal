@@ -67,6 +67,9 @@ interface GigApplyTabProps {
   selectedSlotType: "solo" | "duo" | "band" | null;
   setSelectedSlotType: (value: "solo" | "duo" | "band" | null) => void;
   groupAlreadyApplied: boolean;
+  groupApplicationChecking: boolean;
+  groupApplicationCheckError: string | null;
+  retryGroupApplicationCheck: () => void;
   groupApplicationBy: string | null;
   handleSubmitApplication: () => void;
 }
@@ -115,6 +118,9 @@ const GigApplyTab = ({
   selectedSlotType,
   setSelectedSlotType,
   groupAlreadyApplied,
+  groupApplicationChecking,
+  groupApplicationCheckError,
+  retryGroupApplicationCheck,
   groupApplicationBy,
   handleSubmitApplication,
 }: GigApplyTabProps) => {
@@ -297,6 +303,8 @@ const GigApplyTab = ({
     isReapplicationCooldownActive ||
     isBlocked ||
     groupAlreadyApplied ||
+    groupApplicationChecking ||
+    Boolean(groupApplicationCheckError) ||
     isFormIncomplete;
 
   return (
@@ -989,6 +997,15 @@ const GigApplyTab = ({
         </View>
       )}
 
+      {groupApplicationCheckError && (
+        <View style={[styles.infoBox, { borderColor: colors.border, marginBottom: 16 }]}>
+          <Text style={[styles.infoText, { color: colors.text, flex: 1 }]}>{groupApplicationCheckError}</Text>
+          <TouchableOpacity accessibilityRole="button" onPress={retryGroupApplicationCheck}>
+            <Text style={{ color: colors.primary, fontFamily: typography.semibold }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {!isGroupApplicationFlow && groupAlreadyApplied && selectedGroupId && (
         <View
           style={[
@@ -1040,6 +1057,10 @@ const GigApplyTab = ({
                   : reapplicationCooldownRemainingLabel
                   ? `Reapply in ${reapplicationCooldownRemainingLabel}`
                   : "Reapply Later"
+              : groupApplicationChecking
+                ? "Checking Application..."
+              : groupApplicationCheckError
+                ? "Retry Application Check"
               : groupAlreadyApplied
                 ? "Group Already Applied"
                 : isApplicationsClosed
