@@ -262,8 +262,8 @@ test('exported website supports public downloads, themes and protected admin rou
     await sidebarLogo.evaluate((image) => image.decode());
     await screenshot({ path: resolve(output, 'admin-dashboard-desktop-dark.png') });
     const darkLogoUrl = await sidebarLogo.getAttribute('src');
-    await page.getByRole('button', { name: 'Switch to light mode', exact: true }).click();
-    await page.getByRole('button', { name: 'Switch to dark mode', exact: true }).waitFor();
+    await page.getByTestId('admin-dashboard-page').getByRole('button', { name: 'Switch to light mode', exact: true }).click();
+    await page.getByTestId('admin-dashboard-page').getByRole('button', { name: 'Switch to dark mode', exact: true }).waitFor();
     assert.notEqual(await sidebarLogo.getAttribute('src'), darkLogoUrl);
     await sidebarLogo.evaluate((image) => image.decode());
     await screenshot({ path: resolve(output, 'admin-dashboard-desktop-light.png') });
