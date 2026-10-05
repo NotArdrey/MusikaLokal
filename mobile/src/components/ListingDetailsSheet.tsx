@@ -1,4 +1,5 @@
 import { useListingLifecycle } from "../hooks/useListingLifecycle";
+import { buildListingShareUrl } from "../utils/shareLinks";
 import { Ionicons } from "@expo/vector-icons";
 import {
     BottomSheetBackdrop,
@@ -81,6 +82,7 @@ import StudioSetupTab from "./listingDetails/StudioSetupTab";
 import { isRecordingStudioMode, normalizeAvailability, normalizeStudioType, type DaySchedule } from "./listingDetails/availability";
 import Modal from "./modal";
 import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
+import { typography } from "../theme/tokens";
 
 const debugLog = (..._args: unknown[]) => { };
 
@@ -1286,36 +1288,12 @@ const ListingDetailsSheet = forwardRef<
     setShowListingReportModal(true);
   };
 
-  const buildListingShareUrl = () => {
-    if (!group?.id) return ExpoLinking.createURL("/home");
-
-    const normalizedType = String(group?.type || "").toLowerCase();
-
-    if (normalizedType === "group") {
-      return ExpoLinking.createURL("/group_details", {
-        queryParams: { id: group.id },
-      });
-    }
-
-    if (normalizedType === "artist") {
-      return ExpoLinking.createURL("/profile", {
-        queryParams: { userId: group.id },
-      });
-    }
-
-    return ExpoLinking.createURL("/home", {
-      queryParams: {
-        listingId: group.id,
-        listingType: normalizedType || "listing",
-      },
-    });
-  };
-
   const handleShare = async () => {
+    if (!group?.id) return;
     try {
       const name = group?.name || 'this listing';
       const type = group?.type || 'Listing';
-      const shareUrl = buildListingShareUrl();
+      const shareUrl = buildListingShareUrl(group.id, group.type || "");
       await Share.share({
         message: `Check out ${name} (${type}) on MusikaLokal!\n${shareUrl}`,
         url: shareUrl,
@@ -4314,7 +4292,7 @@ const ListingDetailsSheet = forwardRef<
             <Text
               style={{
                 color: isSelected ? "#FFF" : colors.text,
-                fontFamily: "Poppins_500Medium",
+                fontFamily: typography.medium,
                 fontSize: 12,
                 lineHeight: 14,
                 includeFontPadding: false,
@@ -5061,7 +5039,7 @@ const ListingDetailsSheet = forwardRef<
                 }}
                 style={{ marginTop: 16, alignItems: 'center' }}
               >
-                <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_500Medium' }}>Cancel</Text>
+                <Text style={{ color: colors.textSecondary, fontFamily: typography.medium }}>Cancel</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -5096,7 +5074,7 @@ const styles = StyleSheet.create({
   },
   staffPrimaryActionText: {
     color: "#FFFFFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 13,
   },
   staffSecondaryAction: {
@@ -5111,7 +5089,7 @@ const styles = StyleSheet.create({
     gap: 7,
   },
   staffSecondaryActionText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 13,
   },
   loadingContainer: {
@@ -5173,7 +5151,7 @@ const styles = StyleSheet.create({
     right: scale(24),
   },
   heroTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: height < 700 ? moderateScale(24) : moderateScale(28),
     color: "#FFF",
     textShadowColor: "rgba(0,0,0,0.5)",
@@ -5182,7 +5160,7 @@ const styles = StyleSheet.create({
   },
   heroLocation: {
     color: "#FFF",
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: moderateScale(14),
     marginLeft: scale(4),
   },
@@ -5203,7 +5181,7 @@ const styles = StyleSheet.create({
     paddingVertical: moderateScale(16),
   },
   tabText: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: moderateScale(14),
   },
   contentBody: {
@@ -5219,10 +5197,11 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: height < 700 ? moderateScale(16) : moderateScale(18),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     marginBottom: moderateScale(12),
   },
   description: {
+    fontFamily: typography.body,
     fontSize: moderateScale(14),
     lineHeight: moderateScale(22),
   },
@@ -5235,12 +5214,12 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 11,
     textTransform: "uppercase",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     marginBottom: 4,
   },
   statValue: {
     fontSize: 16,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   offerCard: {
     padding: 16,
@@ -5285,13 +5264,13 @@ const styles = StyleSheet.create({
   dateTimeLabel: {
     fontSize: 11,
     textTransform: "uppercase",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     letterSpacing: 0.5,
     marginBottom: 2,
   },
   dateTimeValue: {
     fontSize: 15,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   timeCard: {
     flexDirection: "row",
@@ -5316,13 +5295,13 @@ const styles = StyleSheet.create({
   timeLabel: {
     fontSize: 10,
     textTransform: "uppercase",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     letterSpacing: 0.5,
     marginBottom: 2,
   },
   timeValue: {
     fontSize: 16,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
   },
   durationBadge: {
     flexDirection: "row",
@@ -5347,11 +5326,11 @@ const styles = StyleSheet.create({
   pickerLabel: {
     fontSize: 10,
     textTransform: "uppercase",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   pickerValue: {
     fontSize: 15,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   durationWrapper: {
     flexDirection: "row",
@@ -5372,7 +5351,7 @@ const styles = StyleSheet.create({
   },
   durationVal: {
     fontSize: 20,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
 
   // Reviews
@@ -5384,7 +5363,7 @@ const styles = StyleSheet.create({
   },
   ratingBig: {
     fontSize: 56,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     lineHeight: 64,
     letterSpacing: -1,
   },
@@ -5410,15 +5389,16 @@ const styles = StyleSheet.create({
     borderRadius: 22,
   },
   reviewName: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 15,
   },
   reviewDate: {
+    fontFamily: typography.body,
     fontSize: 12,
     opacity: 0.7,
   },
   reviewBody: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
     lineHeight: 22,
   },
@@ -5458,7 +5438,7 @@ const styles = StyleSheet.create({
     marginBottom: moderateScale(16),
   },
   label: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     marginBottom: moderateScale(8),
   },
   inputWrapper: {
@@ -5468,7 +5448,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   input: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: moderateScale(14),
     padding: 0,
     textAlignVertical: "center",
@@ -5512,7 +5492,7 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: moderateScale(16),
   },
   secondaryBtn: {
@@ -5524,7 +5504,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   secondaryBtnText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: moderateScale(14),
   },
   groupSelectChip: {
@@ -5561,7 +5541,7 @@ const styles = StyleSheet.create({
   },
   infoText: {
     flex: 1,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 13,
     lineHeight: 20,
   },
@@ -5574,12 +5554,12 @@ const styles = StyleSheet.create({
   infoLabel: {
     fontSize: 11,
     textTransform: "uppercase",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     marginBottom: 4,
   },
   infoValue: {
     fontSize: 18,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   checkRow: {
     flexDirection: "row",
@@ -5627,7 +5607,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   priceText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: moderateScale(18),
   },
   bookBtn: {
@@ -5637,7 +5617,7 @@ const styles = StyleSheet.create({
   },
   bookBtnText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: moderateScale(15),
   },
   rowCenter: {
@@ -5654,6 +5634,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   managerLabel: {
+    fontFamily: typography.body,
     fontSize: 10,
     textTransform: "uppercase",
   },
@@ -5663,7 +5644,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   managerName: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 14,
   },
   visitBtn: {
@@ -5697,7 +5678,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   roleTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 12,
     textTransform: "uppercase",
   },
@@ -5734,12 +5715,12 @@ const styles = StyleSheet.create({
   },
   rowLabel: {
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     marginBottom: 2,
   },
   rowValue: {
     fontSize: 15,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   timeContainer: {
     flex: 1,
@@ -5772,7 +5753,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   durationText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 13,
     marginLeft: 4,
   },
@@ -5804,13 +5785,13 @@ const styles = StyleSheet.create({
     maxWidth: 320,
   },
   paymentLoadingTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 18,
     marginTop: 20,
     textAlign: "center",
   },
   paymentLoadingSubtitle: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
     marginTop: 8,
     textAlign: "center",
@@ -5827,19 +5808,19 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   paymentOptionTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 22,
     marginBottom: 6,
     textAlign: "center",
   },
   paymentOptionSubtitle: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
     marginBottom: 6,
     textAlign: "center",
   },
   paymentOptionHint: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
     lineHeight: 18,
     marginBottom: 20,
@@ -5878,16 +5859,16 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   paymentOptionLabel: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 16,
     flex: 1,
   },
   paymentOptionAmount: {
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     fontSize: 18,
   },
   paymentOptionDesc: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 13,
     lineHeight: 18,
     marginLeft: 34,
@@ -5909,7 +5890,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   paymentOptionConfirmText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 16,
     color: "#FFFFFF",
   },

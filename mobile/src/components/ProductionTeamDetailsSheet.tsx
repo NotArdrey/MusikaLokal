@@ -1,4 +1,5 @@
 import { useListingLifecycle } from '../hooks/useListingLifecycle';
+import { buildListingShareUrl } from "../utils/shareLinks";
 import { Ionicons } from "@expo/vector-icons";
 import {
   BottomSheetBackdrop,
@@ -38,6 +39,7 @@ import SlidingTabBar from "./SlidingTabBar";
 import SmoothTabTransition from "./SmoothTabTransition";
 import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
 import VideoUploader from "./VideoUploader";
+import { typography } from "../theme/tokens";
 
 type ProductionTeamRecord = {
   id: string;
@@ -675,7 +677,7 @@ const ProductionTeamDetailsSheet = forwardRef<
     if (!team) return;
     try {
       await Share.share({
-        message: `Check out ${team.name} (Production Team) on MusikaLokal!`,
+        message: `Check out ${team.name} (Production Team) on MusikaLokal!\n${buildListingShareUrl(team.id, "production_team")}`,
       });
     } catch {
       // user cancelled or share failed
@@ -1521,7 +1523,7 @@ const styles = StyleSheet.create({
   },
   staffPrimaryActionText: {
     color: "#FFFFFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 13,
   },
   staffSecondaryAction: {
@@ -1536,7 +1538,7 @@ const styles = StyleSheet.create({
     gap: 7,
   },
   staffSecondaryActionText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 13,
   },
   stateContainer: {
@@ -1555,12 +1557,12 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   stateTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 18,
     textAlign: "center",
   },
   stateMessage: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
     lineHeight: 21,
     textAlign: "center",
@@ -1633,11 +1635,11 @@ const styles = StyleSheet.create({
   },
   heroPillText: {
     color: "#FFF",
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 12,
   },
   heroTitle: {
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.title,
     fontSize: 28,
     color: "#FFF",
     textShadowColor: "rgba(0,0,0,0.5)",
@@ -1653,12 +1655,12 @@ const styles = StyleSheet.create({
   },
   heroMetaText: {
     color: "#FFF",
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
   },
   heroMetaBullet: {
     color: "#FFF",
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 14,
     marginHorizontal: 2,
   },
@@ -1685,11 +1687,11 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   tabText: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 14,
   },
   aboutDescription: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
     lineHeight: 21,
     textAlign: "left",
@@ -1706,7 +1708,7 @@ const styles = StyleSheet.create({
   },
   aboutActionButtonText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 12,
   },
   statsRow: {
@@ -1721,12 +1723,12 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 11,
     textTransform: "uppercase",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     marginBottom: 4,
   },
   statValue: {
     fontSize: 16,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   chipRow: {
     flexDirection: "row",
@@ -1741,14 +1743,14 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   chipText: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 12,
   },
   sectionBlock: {
     marginTop: 18,
   },
   sectionTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 17,
     marginBottom: 12,
   },
@@ -1788,11 +1790,11 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   optionTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 14,
   },
   optionSubtitle: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
     marginTop: 1,
   },
@@ -1802,12 +1804,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   infoLabel: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 12,
     marginBottom: 6,
   },
   infoValue: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 15,
   },
   membersHeader: {
@@ -1817,7 +1819,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   membersCount: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 13,
   },
   memberCard: {
@@ -1848,12 +1850,12 @@ const styles = StyleSheet.create({
     paddingRight: 10,
   },
   memberName: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 15,
     marginBottom: 2,
   },
   memberRole: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 13,
   },
   ownerBadge: {
@@ -1862,7 +1864,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   ownerBadgeText: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 12,
   },
   emptyMembersCard: {
@@ -1871,7 +1873,7 @@ const styles = StyleSheet.create({
     padding: 18,
   },
   emptyMembersText: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
     lineHeight: 21,
   },
@@ -1884,7 +1886,7 @@ const styles = StyleSheet.create({
   },
   reviewRatingBig: {
     fontSize: 56,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     lineHeight: 64,
     letterSpacing: -1,
   },
@@ -1909,15 +1911,16 @@ const styles = StyleSheet.create({
     borderRadius: 22,
   },
   reviewName: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 15,
   },
   reviewDate: {
+    fontFamily: typography.body,
     fontSize: 12,
     opacity: 0.7,
   },
   reviewBody: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
     lineHeight: 22,
   },
@@ -1932,7 +1935,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: "#FFFFFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 15,
   },
   footerActions: {
@@ -1965,7 +1968,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   selectorChipText: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 12,
   },
   messageBox: {
@@ -1978,7 +1981,7 @@ const styles = StyleSheet.create({
   },
   messageInput: {
     minHeight: 92,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
   },
   uploadFieldWrap: {
@@ -2000,11 +2003,11 @@ const styles = StyleSheet.create({
   },
   consentCopy: { flex: 1 },
   consentTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 13,
   },
   consentBody: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 11,
     lineHeight: 17,
     marginTop: 2,
@@ -2019,7 +2022,7 @@ const styles = StyleSheet.create({
   },
   compactInput: {
     minHeight: 42,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
     textAlignVertical: "center",
   },

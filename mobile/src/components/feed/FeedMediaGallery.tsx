@@ -1,6 +1,7 @@
 import React, { memo } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import CachedImage from "../CachedImage";
+import { typography } from "../../theme/tokens";
 
 const GALLERY_GAP = 3;
 const VISIBLE_MEDIA_LIMIT = 4;
@@ -116,5 +117,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(15,23,42,0.56)",
   },
-  moreText: { color: "#FFFFFF", fontSize: 28, fontFamily: "Poppins_700Bold" },
+  moreText: { color: "#FFFFFF", fontSize: 28, fontFamily: typography.bold },
 });

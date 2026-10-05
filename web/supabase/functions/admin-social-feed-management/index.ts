@@ -82,7 +82,7 @@ Deno.serve(async (req: Request) => {
 
       let query = supabaseAdmin
         .from("feed_posts")
-        .select("id, author_id, content, post_type, visibility, is_reported, is_hidden, created_at, updated_at, author:profiles!author_id(id, full_name, email, avatar_url)")
+        .select("id, author_id, content, post_type, visibility, is_reported, is_hidden, comment_count, reaction_count, created_at, updated_at, author:profiles!author_id(id, full_name, email, avatar_url), media:post_media(id, media_type, storage_path, thumbnail_path, mime_type, display_order)")
         .order("created_at", { ascending: false })
         .limit(pageSize);
 
@@ -105,6 +105,7 @@ Deno.serve(async (req: Request) => {
         author_name: post.author?.full_name || null,
         author_email: post.author?.email || null,
         report_count: post.is_reported ? 1 : 0,
+        media: (post.media || []).sort((a: any, b: any) => (a.display_order || 0) - (b.display_order || 0)),
       }));
 
       return jsonResponse({ success: true, data: rows });
@@ -136,13 +137,21 @@ Deno.serve(async (req: Request) => {
 
     if (action === "admin_list_comments") {
       const filter = typeof params.filter === "string" ? params.filter.trim() : "review";
-      const pageSize = Math.min(Number(params.limit) || 100, 200);
+      const pageSize = Math.max(1, Math.min(Number(params.limit) || 100, 200));
+      const offset = Math.max(0, Math.floor(Number(params.offset) || 0));
+      const postId = typeof params.post_id === "string" ? params.post_id.trim() : "";
+      if (filter === "all" && !postId) {
+        return jsonResponse({ error: "post_id is required to list all comments" }, 400);
+      }
 
       let query = supabaseAdmin
         .from("post_comments")
-        .select("id, post_id, author_id, content, is_hidden, moderation_status, moderation_reason, moderation_categories, moderation_score, moderation_provider, moderated_at, created_at, updated_at, author:profiles!author_id(id, full_name, email, avatar_url), post:feed_posts!post_id(id, author_id, content, visibility, is_hidden)")
+        .select("id, post_id, parent_comment_id, author_id, content, is_hidden, moderation_status, moderation_reason, moderation_categories, moderation_score, moderation_provider, moderated_at, created_at, updated_at, author:profiles!author_id(id, full_name, email, avatar_url), post:feed_posts!post_id(id, author_id, content, visibility, is_hidden)")
         .order("created_at", { ascending: false })
-        .limit(pageSize);
+        .order("id", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+
+      if (postId) query = query.eq("post_id", postId);
 
       if (filter === "pending_review") {
         query = query.eq("moderation_status", "pending_review");
@@ -152,7 +161,7 @@ Deno.serve(async (req: Request) => {
         query = query.eq("is_hidden", true);
       } else if (filter === "approved") {
         query = query.eq("moderation_status", "approved").eq("is_hidden", false);
-      } else {
+      } else if (filter !== "all") {
         query = query.or("moderation_status.eq.pending_review,moderation_status.eq.blocked,is_hidden.eq.true");
       }
 

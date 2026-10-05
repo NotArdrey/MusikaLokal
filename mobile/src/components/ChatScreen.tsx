@@ -1222,6 +1222,7 @@ const styles = StyleSheet.create({
         letterSpacing: -0.35,
     },
     headerStatus: {
+        fontFamily: typography.medium,
         fontSize: 12,
         fontWeight: '500',
     },
@@ -1260,11 +1261,13 @@ const styles = StyleSheet.create({
         marginBottom: 16,
     },
     emptyText: {
+        fontFamily: typography.bold,
         fontSize: 18,
         fontWeight: '700',
         marginBottom: 8,
     },
     emptySubtext: {
+        fontFamily: typography.body,
         fontSize: 14,
         textAlign: 'center',
         lineHeight: 20,
@@ -1291,6 +1294,7 @@ const styles = StyleSheet.create({
         borderRadius: 12,
     },
     dateText: {
+        fontFamily: typography.semibold,
         fontSize: 11,
         fontWeight: '600',
         letterSpacing: 0.3,
@@ -1320,6 +1324,7 @@ const styles = StyleSheet.create({
         flexShrink: 1,
     },
     senderName: {
+        fontFamily: typography.semibold,
         fontSize: 12,
         fontWeight: '600',
         marginBottom: 2,
@@ -1346,6 +1351,7 @@ const styles = StyleSheet.create({
         borderBottomLeftRadius: 4,
     },
     messageText: {
+        fontFamily: typography.body,
         fontSize: 15,
         lineHeight: 20,
     },
@@ -1356,6 +1362,7 @@ const styles = StyleSheet.create({
         marginTop: 4,
     },
     messageTime: {
+        fontFamily: typography.body,
         fontSize: 11,
     },
     inputContainer: {
@@ -1387,6 +1394,7 @@ const styles = StyleSheet.create({
         minHeight: 44,
     },
     input: {
+        fontFamily: typography.body,
         flex: 1,
         fontSize: 15,
         minHeight: 44,
@@ -1456,6 +1464,7 @@ const styles = StyleSheet.create({
         fontSize: 14,
     },
     reactionCount: {
+        fontFamily: typography.body,
         fontSize: 11,
         marginLeft: 2,
     },
@@ -1530,10 +1539,12 @@ const styles = StyleSheet.create({
         maxWidth: 220,
     },
     fileName: {
+        fontFamily: typography.medium,
         fontSize: 13,
         fontWeight: '500',
     },
     fileSubtext: {
+        fontFamily: typography.body,
         fontSize: 11,
         marginTop: 2,
     },
@@ -1550,6 +1561,7 @@ const styles = StyleSheet.create({
         elevation: 16,
     },
     optionsSheetTitle: {
+        fontFamily: typography.bold,
         fontSize: 16,
         fontWeight: '700',
         textAlign: 'center',
@@ -1570,6 +1582,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     optionLabel: {
+        fontFamily: typography.medium,
         fontSize: 15,
         fontWeight: '500',
         flex: 1,
@@ -1581,6 +1594,7 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
     },
     optionCancelText: {
+        fontFamily: typography.semibold,
         fontSize: 15,
         fontWeight: '600',
     },
@@ -1606,6 +1620,7 @@ const styles = StyleSheet.create({
         marginBottom: 16,
     },
     attachmentPickerTitle: {
+        fontFamily: typography.heading,
         fontSize: 18,
         fontWeight: '600',
         marginBottom: 20,
@@ -1628,6 +1643,7 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     attachmentOptionText: {
+        fontFamily: typography.medium,
         fontSize: 12,
         fontWeight: '500',
     },

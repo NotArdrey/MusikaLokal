@@ -33,9 +33,9 @@ const lightColors: ThemeColors = {
   text: '#111827', // gray-900
   textSecondary: '#6B7280', // gray-500
   secondary: '#6B7280',
-  primary: '#4F46E5', // Indigo 600
-  primaryLight: '#E0E7FF', // Indigo 100
-  primaryDark: '#4338CA', // Indigo 700
+  primary: '#5546F4',
+  primaryLight: '#ECEAFE',
+  primaryDark: '#4034C9',
   border: '#E5E7EB', // gray-200
   muted: '#9CA3AF',
   card: '#FFFFFF',
@@ -49,7 +49,7 @@ const darkColors: ThemeColors = {
   text: '#F8FAFC', // Slate 50
   textSecondary: '#94A3B8', // Slate 400
   secondary: '#94A3B8',
-  primary: '#6366F1', // Indigo 500
+  primary: '#5546F4',
   primaryLight: '#312E81', // Indigo 900
   primaryDark: '#4F46E5', // Indigo 600
   border: '#334155', // Slate 700

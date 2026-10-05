@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { formatFriendlyDateTime } from '../utils/friendlyDateTime';
+import { typography } from "../theme/tokens";
 
 export interface RelocationSlot {
   date: string;
@@ -683,13 +684,13 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 20,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
     textAlign: 'center',
     marginBottom: 4,
   },
   subtitle: {
     fontSize: 14,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     textAlign: 'center',
   },
   quickActions: {
@@ -698,7 +699,7 @@ const styles = StyleSheet.create({
   },
   quickActionsLabel: {
     fontSize: 12,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
     marginBottom: 8,
   },
   quickActionsButtons: {
@@ -716,7 +717,7 @@ const styles = StyleSheet.create({
   },
   quickActionText: {
     fontSize: 13,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   conflictList: {
     maxHeight: 350,
@@ -741,16 +742,16 @@ const styles = StyleSheet.create({
   },
   conflictDate: {
     fontSize: 15,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     marginBottom: 2,
   },
   conflictTime: {
     fontSize: 13,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   conflictUser: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     marginTop: 4,
   },
   statusBadge: {
@@ -760,7 +761,7 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 11,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
     textTransform: 'capitalize',
   },
   actionOptions: {
@@ -779,11 +780,11 @@ const styles = StyleSheet.create({
   },
   actionOptionTitle: {
     fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   actionOptionSubtitle: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   slotPicker: {
     borderWidth: 1,
@@ -798,7 +799,7 @@ const styles = StyleSheet.create({
   },
   slotPickerTitle: {
     fontSize: 12,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
   },
   slotOptions: {
     flexDirection: 'row',
@@ -815,11 +816,11 @@ const styles = StyleSheet.create({
   },
   slotOptionDate: {
     fontSize: 12,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   slotOptionTime: {
     fontSize: 11,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   footer: {
     flexDirection: 'row',
@@ -837,7 +838,7 @@ const styles = StyleSheet.create({
   },
   cancelBtnText: {
     fontSize: 15,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   resolveBtn: {
     flex: 2,
@@ -850,7 +851,7 @@ const styles = StyleSheet.create({
   },
   resolveBtnText: {
     fontSize: 15,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     color: '#fff',
   },
 });

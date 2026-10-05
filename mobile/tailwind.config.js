@@ -12,7 +12,7 @@ module.exports = {
         sans: ['Manrope_400Regular'],
         medium: ['Manrope_500Medium'],
         semibold: ['Manrope_600SemiBold'],
-        bold: ['SpaceGrotesk_700Bold'],
+        bold: ['Manrope_700Bold'],
       },
       colors: {
         primary: {

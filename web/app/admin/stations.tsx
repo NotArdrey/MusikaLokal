@@ -1,17 +1,8 @@
+import useAdminLayout from '../../src/hooks/useAdminLayout';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import Header from '../../src/components/header';
+import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import Header from '../../src/components/admin/AdminPageHeader';
 import LoadingState from '../../src/components/LoadingState';
 import CustomAlert from '../../src/components/CustomAlert';
 import { AdminFilterBar } from '../../src/components/admin/filters';
@@ -132,6 +123,7 @@ const getErrorMessage = (error: unknown, fallback: string) => {
 
 export default function AdminStationsPage() {
   const { colors, isDark } = useTheme();
+  const { height, isCompact, contentPadding } = useAdminLayout();
   const { loading, isAdmin, roleResolved } = useAuth();
 
   const [stations, setStations] = useState<any[]>([]);
@@ -469,7 +461,7 @@ export default function AdminStationsPage() {
   if (loading || !roleResolved) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Admin" hideBackButton />
+        <Header title="Stations" hideBackButton />
         <LoadingState message="Checking admin access..." style={{ flex: 1 }} />
       </View>
     );
@@ -478,7 +470,7 @@ export default function AdminStationsPage() {
   if (!isAdmin) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Admin" hideBackButton />
+        <Header title="Stations" hideBackButton />
         <View style={styles.centered}>
           <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>Access denied</Text>
         </View>
@@ -494,17 +486,17 @@ export default function AdminStationsPage() {
       accessibilityLabel="admin-stations-page"
       style={[styles.container, { backgroundColor: colors.background }]}
     >
-      <Header title="Admin" hideBackButton />
+      <Header title="Stations" hideBackButton />
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={[styles.sectionHeader, { borderBottomColor: colors.border }]}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: contentPadding }]}>
+        <View style={[styles.sectionHeader, isCompact && { flexDirection: 'column', alignItems: 'stretch' }, { borderBottomColor: colors.border }]}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Existing Stations</Text>
             <Text style={[styles.sectionSub, { color: colors.textSecondary }]}>
               Live stations appear in the user feed radio playlist.
             </Text>
           </View>
-          <View style={styles.headerActions}>
+          <View style={[styles.headerActions, isCompact && { justifyContent: 'flex-start' }]}>
             <TouchableOpacity
               testID="admin-stations-add-button"
               accessibilityLabel="admin-stations-add-button"
@@ -770,11 +762,11 @@ export default function AdminStationsPage() {
       </ScrollView>
 
       <Modal visible={sourcePickerVisible} animationType="fade" transparent onRequestClose={closeSourcePicker}>
-        <View style={styles.modalBackdrop}>
+        <View style={[styles.modalBackdrop, { padding: isCompact ? 8 : 20 }]}>
           <View
             testID="admin-station-source-picker-modal"
             accessibilityLabel="admin-station-source-picker-modal"
-            style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+            style={[styles.modalCard, { maxHeight: Math.max(180, height - (isCompact ? 16 : 40)), ...(isCompact ? { padding: 14 } : {}) }, { backgroundColor: colors.card, borderColor: colors.border }]}
           >
             <View style={styles.modalHeader}>
               <View style={{ flex: 1 }}>
@@ -873,11 +865,11 @@ export default function AdminStationsPage() {
       </Modal>
 
       <Modal visible={!!editingSource} animationType="fade" transparent onRequestClose={closeEditor}>
-        <View style={styles.modalBackdrop}>
+        <View style={[styles.modalBackdrop, { padding: isCompact ? 8 : 20 }]}>
           <View
             testID="admin-station-editor-modal"
             accessibilityLabel="admin-station-editor-modal"
-            style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+            style={[styles.modalCard, { maxHeight: Math.max(180, height - (isCompact ? 16 : 40)), ...(isCompact ? { padding: 14 } : {}) }, { backgroundColor: colors.card, borderColor: colors.border }]}
           >
             <View style={styles.modalHeader}>
               <View style={{ flex: 1 }}>
@@ -899,6 +891,7 @@ export default function AdminStationsPage() {
               </TouchableOpacity>
             </View>
 
+            <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled">
             <View style={styles.field}>
               <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Station name</Text>
               <TextInput
@@ -924,7 +917,7 @@ export default function AdminStationsPage() {
                 style={[styles.modalInput, styles.descriptionInput, { color: colors.text, borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}
               />
             </View>
-            <View style={styles.modalInputRow}>
+            <View style={[styles.modalInputRow, isCompact && { flexDirection: 'column' }]}>
               <View style={styles.halfField}>
                 <Text style={[styles.fieldLabel, { color: colors.textSecondary }]}>Genre</Text>
                 <GigPresetDropdown options={GIG_GENRE_OPTIONS} selectedValues={stationGenre ? [stationGenre] : []} onSelect={setStationGenre} placeholder="Choose a genre" />
@@ -1046,6 +1039,7 @@ export default function AdminStationsPage() {
               )}
             </ScrollView>
 
+            </ScrollView>
             <View style={styles.modalActions}>
               <TouchableOpacity
                 testID="admin-station-editor-cancel-button"
@@ -1102,7 +1096,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   primaryBtn: {
-    minHeight: 40,
+    minHeight: 44,
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 7,
@@ -1113,7 +1107,7 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: { color: '#FFFFFF', fontSize: 13, fontFamily: 'Poppins_700Bold' },
   secondaryBtn: {
-    minHeight: 40,
+    minHeight: 44,
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 7,
@@ -1285,7 +1279,7 @@ const styles = StyleSheet.create({
   modalInputRow: { flexDirection: 'row', gap: 10 },
   field: { marginBottom: 10 },
   fieldLabel: { fontSize: 12, fontFamily: 'Poppins_700Bold', marginBottom: 6 },
-  halfField: { flex: 1 },
+  halfField: { flex: 1, minWidth: 0 },
   statusSelectorRow: { flexDirection: 'row', gap: 8 },
   statusSelectorButton: {
     flex: 1,
@@ -1306,5 +1300,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 12 },
+  modalActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 10, marginTop: 12 },
 });

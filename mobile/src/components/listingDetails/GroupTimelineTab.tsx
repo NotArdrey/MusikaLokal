@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { supabase } from "../../../lib/supabase";
+import { typography } from "../../theme/tokens";
 
 interface GroupTimelineTabProps {
   group: any;
@@ -138,7 +139,7 @@ const GroupTimelineTab = ({
         }}
       >
         <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
-          <Text style={{ flex: 1, color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 15 }}>
+          <Text style={{ flex: 1, color: colors.text, fontFamily: typography.semibold, fontSize: 15 }}>
             {gig.name || "Untitled Gig"}
           </Text>
           <View
@@ -149,7 +150,7 @@ const GroupTimelineTab = ({
               backgroundColor: `${accent}20`,
             }}
           >
-            <Text style={{ color: accent, fontFamily: "Poppins_600SemiBold", fontSize: 11 }}>
+            <Text style={{ color: accent, fontFamily: typography.semibold, fontSize: 11 }}>
               {String(gig.status || "open").toUpperCase()}
             </Text>
           </View>
@@ -157,14 +158,14 @@ const GroupTimelineTab = ({
 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Ionicons name="calendar-outline" size={14} color={colors.textSecondary} />
-          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12 }}>
+          <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 12 }}>
             {eventDate}
           </Text>
         </View>
 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
-          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12 }} numberOfLines={1}>
+          <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 12 }} numberOfLines={1}>
             {gig.location || "Location TBA"}
           </Text>
         </View>
@@ -183,7 +184,7 @@ const GroupTimelineTab = ({
     <View style={{ marginBottom: 18 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <Ionicons name={icon} size={16} color={accent} />
-        <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 15 }}>
+        <Text style={{ color: colors.text, fontFamily: typography.semibold, fontSize: 15 }}>
           {title} ({items.length})
         </Text>
       </View>
@@ -200,7 +201,7 @@ const GroupTimelineTab = ({
             backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
           }}
         >
-          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12 }}>
+          <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 12 }}>
             No {title.toLowerCase()} gigs yet.
           </Text>
         </View>
@@ -216,7 +217,7 @@ const GroupTimelineTab = ({
         </Text>
 
         {loading ? (
-          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 13 }}>
+          <Text style={{ color: colors.textSecondary, fontFamily: typography.medium, fontSize: 13 }}>
             Loading gigs...
           </Text>
         ) : gigs.length > 0 ? (
@@ -246,7 +247,7 @@ const GroupTimelineTab = ({
               style={{
                 color: colors.textSecondary,
                 marginTop: 12,
-                fontFamily: "Poppins_500Medium",
+                fontFamily: typography.medium,
                 fontSize: 14,
               }}
             >
@@ -256,7 +257,7 @@ const GroupTimelineTab = ({
               style={{
                 color: colors.textSecondary,
                 marginTop: 4,
-                fontFamily: "Poppins_400Regular",
+                fontFamily: typography.body,
                 fontSize: 12,
                 textAlign: "center",
               }}

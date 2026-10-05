@@ -1,11 +1,13 @@
 node_modules/
 .expo/
+.vercel/
 expo-env.d.ts
 .env
 .env.*
 !.env*.example
 dist/
 build/
+output/android-testing/
 tmp/
 
 # Local editor and operating-system state

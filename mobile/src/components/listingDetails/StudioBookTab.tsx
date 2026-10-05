@@ -17,6 +17,7 @@ import {
 } from "../../utils/recordingRule";
 import { formatDashedNumericDate } from "../../utils/friendlyDateTime";
 import { isRecordingStudioMode, normalizeStudioType } from "./availability";
+import { typography } from "../../theme/tokens";
 
 const debugLog = (...args: unknown[]) => {
   if (__DEV__) {
@@ -1300,7 +1301,7 @@ const StudioBookTab = ({
               />
               <Text
                 style={{
-                  fontFamily: "Poppins_600SemiBold",
+                  fontFamily: typography.semibold,
                   fontSize: 14,
                   color: isDark ? "#F59700" : "#D97706",
                 }}
@@ -1310,7 +1311,7 @@ const StudioBookTab = ({
             </View>
             <Text
               style={{
-                fontFamily: "Poppins_400Regular",
+                fontFamily: typography.body,
                 fontSize: 12,
                 color: colors.textSecondary,
                 lineHeight: 18,
@@ -1343,7 +1344,7 @@ const StudioBookTab = ({
             <Text
               style={{
                 color: "#FFFFFF",
-                fontFamily: "Poppins_600SemiBold",
+                fontFamily: typography.semibold,
                 fontSize: 12,
               }}
             >
@@ -1371,7 +1372,7 @@ const StudioBookTab = ({
             <Text
               style={{
                 color: isDark ? "#6EE7B7" : "#065F46",
-                fontFamily: "Poppins_600SemiBold",
+                fontFamily: typography.semibold,
                 fontSize: 13,
                 marginLeft: 6,
               }}
@@ -1395,7 +1396,7 @@ const StudioBookTab = ({
                 <Text
                   style={{
                     color: colors.text,
-                    fontFamily: "Poppins_600SemiBold",
+                    fontFamily: typography.semibold,
                     fontSize: 12,
                   }}
                 >
@@ -1404,7 +1405,7 @@ const StudioBookTab = ({
                 <Text
                   style={{
                     color: isDark ? "#A7F3D0" : "#047857",
-                    fontFamily: "Poppins_500Medium",
+                    fontFamily: typography.medium,
                     fontSize: 12,
                     marginTop: 1,
                   }}
@@ -1414,7 +1415,7 @@ const StudioBookTab = ({
                 <Text
                   style={{
                     color: colors.textSecondary,
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                     fontSize: 11,
                     marginTop: 1,
                   }}
@@ -1425,7 +1426,7 @@ const StudioBookTab = ({
                   <Text
                     style={{
                       color: colors.textSecondary,
-                      fontFamily: "Poppins_400Regular",
+                      fontFamily: typography.body,
                       fontSize: 10,
                       marginTop: 1,
                     }}
@@ -1494,7 +1495,7 @@ const StudioBookTab = ({
                     <Text
                       style={{
                         color: colors.text,
-                        fontFamily: "Poppins_600SemiBold",
+                        fontFamily: typography.semibold,
                         marginLeft: 6,
                         fontSize: 13,
                       }}
@@ -1515,7 +1516,7 @@ const StudioBookTab = ({
                           style={{
                             color: "#10B981",
                             fontSize: 10,
-                            fontFamily: "Poppins_600SemiBold",
+                            fontFamily: typography.semibold,
                           }}
                         >
                           {slots.length} slots
@@ -1554,7 +1555,7 @@ const StudioBookTab = ({
                     <Text
                       style={{
                         color: colors.primary,
-                        fontFamily: "Poppins_600SemiBold",
+                        fontFamily: typography.semibold,
                       }}
                     >
                       PHP {cost.toLocaleString()}
@@ -1622,7 +1623,7 @@ const StudioBookTab = ({
                               ? "#FCD34D"
                               : "#92400E",
                           flex: 1,
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                           fontSize: 11,
                           lineHeight: 16,
                         }}
@@ -1708,7 +1709,7 @@ const StudioBookTab = ({
                 <Text
                   style={{
                     color: colors.primary,
-                    fontFamily: "Poppins_600SemiBold",
+                    fontFamily: typography.semibold,
                     fontSize: 13,
                     marginLeft: 8,
                   }}
@@ -1731,7 +1732,7 @@ const StudioBookTab = ({
                 <Text
                   style={{
                     color: colors.text,
-                    fontFamily: "Poppins_600SemiBold",
+                    fontFamily: typography.semibold,
                     fontSize: 12,
                   }}
                 >
@@ -1807,7 +1808,7 @@ const StudioBookTab = ({
                           : isDark
                             ? "#FCD34D"
                             : "#92400E",
-                        fontFamily: "Poppins_600SemiBold",
+                        fontFamily: typography.semibold,
                         fontSize: 12,
                       }}
                     >
@@ -1818,7 +1819,7 @@ const StudioBookTab = ({
                     <Text
                       style={{
                         color: colors.textSecondary,
-                        fontFamily: "Poppins_400Regular",
+                        fontFamily: typography.body,
                         fontSize: 11,
                         lineHeight: 16,
                         marginTop: 2,
@@ -2239,7 +2240,7 @@ const StudioBookTab = ({
             <Text
               style={{
                 color: isDark ? "#FCD34D" : "#92400E",
-                fontFamily: "Poppins_600SemiBold",
+                fontFamily: typography.semibold,
                 fontSize: 13,
               }}
             >
@@ -2248,7 +2249,7 @@ const StudioBookTab = ({
             <Text
               style={{
                 color: colors.textSecondary,
-                fontFamily: "Poppins_400Regular",
+                fontFamily: typography.body,
                 fontSize: 12,
                 lineHeight: 18,
                 marginTop: 2,
@@ -2286,7 +2287,7 @@ const StudioBookTab = ({
             <Text
               style={{
                 color: colors.text,
-                fontFamily: "Poppins_600SemiBold",
+                fontFamily: typography.semibold,
               }}
             >
               Total
@@ -2294,7 +2295,7 @@ const StudioBookTab = ({
             <Text
               style={{
                 color: colors.primary,
-                fontFamily: "Poppins_600SemiBold",
+                fontFamily: typography.heading,
                 fontSize: 18,
               }}
             >

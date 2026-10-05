@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { WebView } from "react-native-webview";
 import { logLoadTime } from "../utils/loadTimeLogger";
+import { typography } from "../theme/tokens";
 
 type InAppMediaType = "image" | "video" | "document" | "web";
 
@@ -258,7 +259,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: "#FFFFFF",
     fontSize: 15,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   closeButton: {
     width: 42,
@@ -311,12 +312,12 @@ const styles = StyleSheet.create({
   openExternalButtonText: {
     color: "#FFFFFF",
     fontSize: 14,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   unsupportedText: {
     color: "#FFFFFF",
     fontSize: 14,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     textAlign: "center",
   },
 });

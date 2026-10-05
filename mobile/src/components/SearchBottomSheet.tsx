@@ -1275,7 +1275,7 @@ const styles = StyleSheet.create({
     marginTop: 0,
   },
   resetButtonText: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 12,
   },
   chipsRow: {

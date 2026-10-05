@@ -261,6 +261,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   label: {
+    fontFamily: typography.body,
     fontSize: 13,
     lineHeight: 18,
     includeFontPadding: false,

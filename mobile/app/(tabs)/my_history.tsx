@@ -90,7 +90,8 @@ export default function MyHistoryScreen() {
     : userRole === "staff"
       ? staffTypes.some((staffType) => (staffType === "venue" ? "gig" : staffType) === type)
       : type === ownerType);
-  const activeFilter = filter === "all" || availableListings.some(({ type }) => type === filter) ? filter : "all";
+  const showFilters = availableListings.length > 1;
+  const activeFilter = showFilters && (filter === "all" || availableListings.some(({ type }) => type === filter)) ? filter : "all";
   const visibleListings = availableListings.filter(({ type }) => activeFilter === "all" || activeFilter === type);
   const historyLoading = loading || visibleListings.some(({ type }) => !listStates[type] || listStates[type]?.loading);
   const historyError = loadError || visibleListings.map(({ type }) => listStates[type]?.error).find(Boolean) || null;
@@ -102,7 +103,7 @@ export default function MyHistoryScreen() {
       <Header title="My History" overline="MusikaLokal" showTitle={false} />
       <ScrollView contentContainerStyle={{ paddingBottom: contentBottomPadding }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         <View style={{ paddingHorizontal: 16 }}><ManageWorkspaceTabs activeKey="history" /></View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 16 }}>
+        {showFilters && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 16 }}>
           {filterItems.map(({ type, label }) => (
             <TouchableOpacity
               key={type}
@@ -116,7 +117,7 @@ export default function MyHistoryScreen() {
               <Text style={{ fontFamily: typography.semibold, fontSize: 12, color: activeFilter === type ? "#fff" : colors.textSecondary }}>{label}</Text>
             </TouchableOpacity>
           ))}
-        </ScrollView>
+        </ScrollView>}
         <InlineErrorBanner message={historyError} onRetry={onRefresh} />
         {historyLoading && <LoadingState message="Loading your history..." compact />}
         {!historyLoading && !historyError && historyCount === 0 && (

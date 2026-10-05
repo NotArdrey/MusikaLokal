@@ -157,10 +157,32 @@ tree = render(history, {}, false);
 assert.equal(findAll(tree, 'my_venue').length, 1);
 assert.equal(findAll(tree, 'my_studio').length, 0);
 assert.equal(findAll(tree, 'my_production').length, 0);
-role = 'studio-owner';
+assert.equal(findAll(tree, 'TouchableOpacity').length, 0, 'Single-workspace staff do not need category filters');
+for (const [owner, section] of [
+  ['studio-owner', 'my_studio'], ['venue-owner', 'my_venue'], ['producer', 'my_production'],
+  ['production', 'my_production'], ['production-user', 'my_production'], ['manager', 'my_group'],
+]) {
+  role = owner;
+  tree = render(history);
+  assert.equal(findAll(tree, section)[0].historyOnly, true);
+  assert.equal(findAll(tree, 'TouchableOpacity').length, 0, 'A single history category has no redundant All/type filters');
+}
+
+role = 'staff';
+assignments = [{ entity_type: 'production' }, { entity_type: 'studio' }];
 tree = render(history);
-assert.equal(findAll(tree, 'my_studio')[0].historyOnly, true);
-assert.deepEqual(findAll(tree, 'TouchableOpacity').map((button) => button.testID), ['history-filter-all', 'history-filter-studio']);
+assert.deepEqual(findAll(tree, 'TouchableOpacity').map((button) => button.testID), [
+  'history-filter-all', 'history-filter-production', 'history-filter-studio',
+]);
+findAll(tree, 'TouchableOpacity').find((button) => button.testID === 'history-filter-production').onPress();
+tree = render(history, {}, false);
+assert.equal(findAll(tree, 'View').find((view) => view.testID === 'history-list-studio').style.display, 'none');
+assignments = [{ entity_type: 'studio' }];
+effects.forEach((effect) => effect());
+await new Promise((resolve) => setTimeout(resolve, 0));
+tree = render(history, {}, false);
+assert.equal(findAll(tree, 'TouchableOpacity').length, 0);
+assert.equal(findAll(tree, 'View').find((view) => view.testID === 'history-list-studio').style, undefined, 'Losing a workspace resets the hidden category filter');
 
 let contentModule;
 const reported = [];

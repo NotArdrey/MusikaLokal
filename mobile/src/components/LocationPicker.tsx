@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react'; // Added useEffect
 import { ActivityIndicator, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import CustomAlert, { AlertType } from './CustomAlert';
+import { typography } from "../theme/tokens";
 
 const debugLog = (..._args: unknown[]) => {};
 const LOCATION_UNAVAILABLE_MESSAGE =
@@ -400,6 +401,7 @@ const styles = StyleSheet.create({
         padding: 4,
     },
     headerTitle: {
+        fontFamily: typography.heading,
         fontSize: 16,
         fontWeight: '600',
     },
@@ -441,6 +443,7 @@ const styles = StyleSheet.create({
         elevation: 3,
     },
     currentLocationBtnText: {
+        fontFamily: typography.semibold,
         color: '#4F46E5',
         fontSize: 12,
         fontWeight: '600',
@@ -449,7 +452,7 @@ const styles = StyleSheet.create({
         flex: 1,
         height: 24,
         fontSize: 15,
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: typography.medium,
         lineHeight: 20,
         includeFontPadding: false,
         padding: 0,
@@ -465,6 +468,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff',
     },
     addressPreview: {
+        fontFamily: typography.body,
         fontSize: 13,
         color: '#666',
         marginBottom: 12,
@@ -481,6 +485,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#a5b4fc',
     },
     confirmBtnText: {
+        fontFamily: typography.semibold,
         color: '#fff',
         fontWeight: '600',
         fontSize: 16,

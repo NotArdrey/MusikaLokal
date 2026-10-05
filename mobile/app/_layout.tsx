@@ -1,12 +1,4 @@
 import {
-    Poppins_300Light,
-    Poppins_400Regular,
-    Poppins_500Medium,
-    Poppins_600SemiBold,
-    Poppins_700Bold,
-    useFonts,
-} from "@expo-google-fonts/poppins";
-import {
   SpaceGrotesk_500Medium,
   SpaceGrotesk_600SemiBold,
   SpaceGrotesk_700Bold,
@@ -17,12 +9,15 @@ import {
   Manrope_600SemiBold,
   Manrope_700Bold,
   Manrope_800ExtraBold,
+  useFonts,
 } from "@expo-google-fonts/manrope";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { PortalProvider } from "@gorhom/portal";
 import { useQueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import * as Linking from "expo-linking";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getShareDestination, PENDING_SHARE_STORAGE_KEY } from "../src/utils/shareLinks";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -193,11 +188,6 @@ const logNotificationToastDebug = (...args: unknown[]) => {
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
-    Poppins_300Light,
-    Poppins_400Regular,
-    Poppins_500Medium,
-    Poppins_600SemiBold,
-    Poppins_700Bold,
     SpaceGrotesk_500Medium,
     SpaceGrotesk_600SemiBold,
     SpaceGrotesk_700Bold,
@@ -772,6 +762,20 @@ function RootContent() {
     showNotificationToastFromRecord,
   ]);
 
+  // Resume shared content after sign-in or the required identity check.
+  useEffect(() => {
+    if (loading || !session || segments.some((segment) => String(segment) === "shared")) return;
+    if (session && (!roleResolved || !identityChecked || identityRequired)) return;
+    let active = true;
+    void AsyncStorage.getItem(PENDING_SHARE_STORAGE_KEY).then((stored) => {
+      const destination = stored ? getShareDestination(stored) : null;
+      if (active && destination) {
+        router.replace({ pathname: "/shared", params: { destination } } as any);
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [identityChecked, identityRequired, loading, roleResolved, segments, session]);
+
   // Handle global identity gate
   useEffect(() => {
     if (loading) return;
@@ -826,6 +830,7 @@ function RootContent() {
         : "index";
     const allowedScreens = new Set([
       "index",
+      "shared",
       "feed",
       "profile",
       "edit_profile",

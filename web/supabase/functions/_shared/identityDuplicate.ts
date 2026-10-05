@@ -52,6 +52,18 @@ function firstNonEmptyText(paths: string[][], source: any) {
   return "";
 }
 
+export function resolveIdentityDocument(source: any, depth = 0): any {
+  if (!source || typeof source !== "object" || depth > 6) return null;
+  if (source.id_verifications?.[0]) return source.id_verifications[0];
+  for (const key of ["id_verification", "idVerification", "raw_data", "decision", "result", "session", "verification_data"]) {
+    if (source[key] && typeof source[key] === "object") {
+      const document = resolveIdentityDocument(source[key], depth + 1);
+      if (document) return document;
+    }
+  }
+  return source;
+}
+
 function findLikelyDocumentNumber(source: any, depth = 0): string {
   if (!source || typeof source !== "object" || depth > 5) return "";
 
@@ -90,6 +102,7 @@ function findLikelyDocumentNumber(source: any, depth = 0): string {
 }
 
 export function extractIdentityDocumentNumber(rawDocument: any) {
+  rawDocument = resolveIdentityDocument(rawDocument);
   const direct = firstNonEmpty(
     [
       ["document_number"],
@@ -129,6 +142,7 @@ export function extractIdentityDocumentNumber(rawDocument: any) {
 }
 
 export function extractIdentityDocumentType(rawDocument: any, fallback?: unknown) {
+  rawDocument = resolveIdentityDocument(rawDocument);
   const value =
     normalizeText(fallback) ||
     normalizeText(rawDocument?.document_type) ||
@@ -141,6 +155,7 @@ export function extractIdentityDocumentType(rawDocument: any, fallback?: unknown
 }
 
 export function extractIdentityDocumentCountry(rawDocument: any, fallback?: unknown) {
+  rawDocument = resolveIdentityDocument(rawDocument);
   const value =
     normalizeText(fallback) ||
     normalizeText(rawDocument?.issuing_country) ||
@@ -224,6 +239,7 @@ function extractIdentityBirthDate(rawDocument: any) {
 }
 
 export function prepareIdentityNameBirthDateDuplicateInput(rawDocument: any, options: Record<string, unknown> = {}) {
+  rawDocument = resolveIdentityDocument(rawDocument);
   const fullLegalName = normalizeText(options.fullLegalName || extractIdentityFullName(rawDocument)).replace(/\s+/g, " ");
   const normalizedFullLegalName = normalizeFullLegalName(options.normalizedFullLegalName || fullLegalName);
   const birthDate = normalizeBirthDate(options.birthDate || extractIdentityBirthDate(rawDocument));

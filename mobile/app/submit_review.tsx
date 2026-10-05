@@ -10,6 +10,7 @@ import Navbar from '../src/components/navbar';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { typography } from "../src/theme/tokens";
 
 export default function SubmitReviewScreen() {
   const { colors, isDark } = useTheme();
@@ -312,13 +313,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     marginBottom: 8,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
   },
   subtitle: {
     fontSize: 14,
     textAlign: 'center',
     paddingHorizontal: 16,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   starsContainer: {
     flexDirection: 'row',
@@ -330,7 +331,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 8,
     marginLeft: 4,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   textArea: {
     borderRadius: 12,
@@ -339,7 +340,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     height: 150,
     textAlignVertical: 'top',
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   submitButton: {
     marginTop: 32,
@@ -356,7 +357,7 @@ const styles = StyleSheet.create({
   submitButtonText: {
     color: 'white',
     fontSize: 16,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   navbar: {
     position: 'absolute',

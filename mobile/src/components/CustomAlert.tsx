@@ -11,6 +11,7 @@ import Animated, {
 import { emitToast } from "../events/toastBus";
 import { useTheme } from "../context/ThemeContext";
 import { motion } from "../utils/motion";
+import { typography } from "../theme/tokens";
 
 export type AlertType = "error" | "success" | "warning" | "info";
 
@@ -303,14 +304,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     marginBottom: 12,
-    fontFamily: 'Poppins_700Bold',
+    fontFamily: typography.title,
   },
   message: {
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 24,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   messageStructured: {
     width: '100%',
@@ -339,7 +340,7 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: 15,
     fontWeight: '600',
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     textAlign: 'center',
   },
 });

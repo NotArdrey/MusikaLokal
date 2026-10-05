@@ -4,6 +4,7 @@ import { Text, TouchableOpacity, View } from "react-native";
 import { Calendar } from "../CenteredCalendar";
 import styles from "../ListingDetailsSheet.styles";
 import { normalizeStudioType } from "./availability";
+import { typography } from "../../theme/tokens";
 
 export type SlotAvailabilityReason = "booked" | "lead_time" | "unavailable";
 
@@ -231,8 +232,8 @@ const BookingControls = ({
                 style={{
                   fontFamily:
                     selectedSessionType === "Rehearsal"
-                      ? "Poppins_600SemiBold"
-                      : "Poppins_500Medium",
+                      ? typography.semibold
+                      : typography.medium,
                   color:
                     selectedSessionType === "Rehearsal"
                       ? colors.primary
@@ -289,8 +290,8 @@ const BookingControls = ({
                 style={{
                   fontFamily:
                     selectedSessionType === "Recording"
-                      ? "Poppins_600SemiBold"
-                      : "Poppins_500Medium",
+                      ? typography.semibold
+                      : typography.medium,
                   color:
                     selectedSessionType === "Recording"
                       ? colors.primary
@@ -338,7 +339,7 @@ const BookingControls = ({
             <Ionicons name="time-outline" size={14} color={colors.primary} />
             <Text
               style={{
-                fontFamily: "Poppins_600SemiBold",
+                fontFamily: typography.semibold,
                 color: colors.primary,
                 marginLeft: 4,
                 fontSize: 12,
@@ -367,7 +368,7 @@ const BookingControls = ({
                 style={{
                   color: isDark ? "#BFDBFE" : "#1E40AF",
                   fontSize: 13,
-                  fontFamily: "Poppins_600SemiBold",
+                  fontFamily: typography.semibold,
                   marginLeft: 6,
                 }}
               >
@@ -381,11 +382,11 @@ const BookingControls = ({
                   style={{
                     color: isDark ? "#D1D5DB" : "#4B5563",
                     fontSize: 12,
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                     flex: 1,
                   }}
                 >
-                  <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Rehearsal</Text> — Book by the hour, pick your time slots
+                  <Text style={{ fontFamily: typography.semibold }}>Rehearsal</Text> — Book by the hour, pick your time slots
                 </Text>
               </View>
               <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
@@ -394,11 +395,11 @@ const BookingControls = ({
                   style={{
                     color: isDark ? "#D1D5DB" : "#4B5563",
                     fontSize: 12,
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                     flex: 1,
                   }}
                 >
-                  <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Recording</Text> — Pick time slots, priced per song
+                  <Text style={{ fontFamily: typography.semibold }}>Recording</Text> — Pick time slots, priced per song
                 </Text>
               </View>
             </View>
@@ -424,7 +425,7 @@ const BookingControls = ({
                 style={{
                   color: "#D97706",
                   fontSize: 12,
-                  fontFamily: "Poppins_500Medium",
+                  fontFamily: typography.medium,
                   flex: 1,
                 }}
               >
@@ -486,9 +487,9 @@ const BookingControls = ({
               arrowColor: colors.primary,
               monthTextColor: colors.text,
               indicatorColor: colors.primary,
-              textDayFontFamily: "Poppins_500Medium",
-              textMonthFontFamily: "Poppins_600SemiBold",
-              textDayHeaderFontFamily: "Poppins_500Medium",
+              textDayFontFamily: typography.medium,
+              textMonthFontFamily: typography.heading,
+              textDayHeaderFontFamily: typography.medium,
               textDayFontSize: 14,
               textMonthFontSize: 16,
               textDayHeaderFontSize: 12,
@@ -516,7 +517,7 @@ const BookingControls = ({
             <View>
               <Text
                 style={{
-                  fontFamily: "Poppins_500Medium",
+                  fontFamily: typography.medium,
                   color: colors.textSecondary,
                   fontSize: 13,
                   marginBottom: 12,
@@ -548,7 +549,7 @@ const BookingControls = ({
                       <Ionicons name="calendar" size={20} color={colors.primary} />
                       <Text
                         style={{
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                           fontSize: 16,
                           color: colors.primary,
                           marginLeft: 8,
@@ -559,7 +560,7 @@ const BookingControls = ({
                     </View>
                     <Text
                       style={{
-                        fontFamily: "Poppins_400Regular",
+                        fontFamily: typography.body,
                         fontSize: 13,
                         color: colors.textSecondary,
                         marginBottom: 8,
@@ -571,7 +572,7 @@ const BookingControls = ({
                       <Ionicons name="time-outline" size={16} color={colors.text} />
                       <Text
                         style={{
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                           fontSize: 14,
                           color: colors.text,
                         }}
@@ -600,17 +601,17 @@ const BookingControls = ({
                         }}
                       >
                         <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
-                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular" }}>Duration</Text>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>{durationHours} hours</Text>
+                          <Text style={{ color: colors.textSecondary, fontFamily: typography.body }}>Duration</Text>
+                          <Text style={{ color: colors.text, fontFamily: typography.medium }}>{durationHours} hours</Text>
                         </View>
                         <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular" }}>Rate</Text>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>PHP {displayRate}/song</Text>
+                          <Text style={{ color: colors.textSecondary, fontFamily: typography.body }}>Rate</Text>
+                          <Text style={{ color: colors.text, fontFamily: typography.medium }}>PHP {displayRate}/song</Text>
                         </View>
                         <Text
                           style={{
                             color: colors.textSecondary,
-                            fontFamily: "Poppins_400Regular",
+                            fontFamily: typography.body,
                             fontSize: 11,
                             marginTop: 8,
                           }}
@@ -632,7 +633,7 @@ const BookingControls = ({
                   <Text
                     style={{
                       color: colors.textSecondary,
-                      fontFamily: "Poppins_500Medium",
+                      fontFamily: typography.medium,
                       fontSize: 14,
                       textAlign: "center",
                     }}
@@ -642,7 +643,7 @@ const BookingControls = ({
                   <Text
                     style={{
                       color: colors.textSecondary,
-                      fontFamily: "Poppins_400Regular",
+                      fontFamily: typography.body,
                       fontSize: 12,
                       textAlign: "center",
                       marginTop: 4,
@@ -657,7 +658,7 @@ const BookingControls = ({
             <View>
               <Text
                 style={{
-                  fontFamily: "Poppins_500Medium",
+                  fontFamily: typography.medium,
                   color: colors.textSecondary,
                   fontSize: 13,
                   marginBottom: 12,
@@ -693,7 +694,7 @@ const BookingControls = ({
                           <View key={period} style={{ marginBottom: 16 }}>
                             <Text
                               style={{
-                                fontFamily: "Poppins_600SemiBold",
+                                fontFamily: typography.semibold,
                                 color: colors.textSecondary,
                                 fontSize: 12,
                                 marginBottom: 8,
@@ -797,8 +798,8 @@ const BookingControls = ({
                                             ? colors.primary
                                             : colors.text,
                                         fontFamily: isSelected
-                                          ? "Poppins_600SemiBold"
-                                          : "Poppins_500Medium",
+                                          ? typography.semibold
+                                          : typography.medium,
                                         fontSize: 13,
                                       }}
                                     >
@@ -808,7 +809,7 @@ const BookingControls = ({
                                       <Text
                                         style={{
                                           color: isDark ? "#6B7280" : "#9CA3AF",
-                                          fontFamily: "Poppins_500Medium",
+                                          fontFamily: typography.medium,
                                           fontSize: 9,
                                           marginTop: 2,
                                         }}
@@ -831,7 +832,7 @@ const BookingControls = ({
                   <Text
                     style={{
                       color: colors.textSecondary,
-                      fontFamily: "Poppins_400Regular",
+                      fontFamily: typography.body,
                       fontSize: 13,
                     }}
                   >
@@ -844,7 +845,7 @@ const BookingControls = ({
                 <View style={{ marginTop: 8 }}>
                   <Text
                     style={{
-                      fontFamily: "Poppins_500Medium",
+                      fontFamily: typography.medium,
                       color: colors.textSecondary,
                       fontSize: 13,
                       marginBottom: 12,
@@ -889,8 +890,8 @@ const BookingControls = ({
                             style={{
                               color: isSelected ? "#FFFFFF" : colors.text,
                               fontFamily: isSelected
-                                ? "Poppins_600SemiBold"
-                                : "Poppins_500Medium",
+                                ? typography.semibold
+                                : typography.medium,
                               fontSize: 13,
                             }}
                           >

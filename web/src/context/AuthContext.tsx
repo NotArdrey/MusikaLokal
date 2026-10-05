@@ -116,14 +116,14 @@ export const useRequireAuth = () => {
       if (!isGuest) {
         supabase.auth.getSession().then(({ data: { session: directSession } }) => {
           if (!directSession) {
-            router.replace("/");
+            router.replace("/admin/login");
           }
           // If directSession exists, context will catch up — don't redirect.
         }).catch(() => {
-          router.replace("/");
+          router.replace("/admin/login");
         });
       } else {
-        router.replace("/feed");
+        router.replace("/admin/login");
       }
     }
   }, [session, loading, isGuest]);
@@ -298,7 +298,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     clearAuthenticatedStateForBan();
     router.replace({
-      pathname: "/",
+      pathname: "/admin/login",
       params: {
         banned: "true",
         banned_until: activeBan.bannedUntil || "",
@@ -333,7 +333,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
 
     clearAuthenticatedStateForBan();
-    router.replace({ pathname: "/", params: { role_changed: "true" } } as any);
+    router.replace({ pathname: "/admin/login", params: { role_changed: "true" } } as any);
     return true;
   }, [clearAuthenticatedStateForBan, session?.user?.id, userRole]);
 

@@ -5,6 +5,7 @@ import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
+import { typography } from "../src/theme/tokens";
 
 export default function ToReviewScreen() {
   const { colors } = useTheme();
@@ -50,7 +51,7 @@ const styles = StyleSheet.create({
   message: {
     marginTop: 12,
     fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
     textAlign: 'center',
   },
   navbarContainer: {

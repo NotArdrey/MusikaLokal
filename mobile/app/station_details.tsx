@@ -27,6 +27,7 @@ import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import { getStationLiveTimelineState } from "../src/utils/radioTimeline";
+import { typography } from "../src/theme/tokens";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const LIVE_STATION_REFRESH_MS = 30_000;
@@ -681,34 +682,34 @@ const styles = StyleSheet.create({
   cover: { width: "100%", height: "100%" },
   coverPlaceholder: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center" },
   metaSection: { marginTop: 16 },
-  stationName: { fontSize: moderateScale(20), fontWeight: "800" },
-  creatorName: { fontSize: moderateScale(13), marginTop: 4 },
-  description: { fontSize: moderateScale(13), lineHeight: 20, marginTop: 8 },
+  stationName: { fontFamily: typography.title, fontSize: moderateScale(20), fontWeight: "800" },
+  creatorName: { fontFamily: typography.body, fontSize: moderateScale(13), marginTop: 4 },
+  description: { fontFamily: typography.body, fontSize: moderateScale(13), lineHeight: 20, marginTop: 8 },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 8 },
-  rotationSummary: { fontSize: moderateScale(12), marginTop: 10, lineHeight: 18 },
+  rotationSummary: { fontFamily: typography.body, fontSize: moderateScale(12), marginTop: 10, lineHeight: 18 },
   badge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6 },
-  genreText: { fontSize: moderateScale(12) },
+  genreText: { fontFamily: typography.body, fontSize: moderateScale(12) },
   section: { marginTop: 24 },
-  sectionTitle: { fontSize: moderateScale(16), fontWeight: "700", marginBottom: 12 },
-  sectionSubtitle: { fontSize: moderateScale(12), marginTop: 4, lineHeight: 18 },
+  sectionTitle: { fontFamily: typography.title, fontSize: moderateScale(16), fontWeight: "700", marginBottom: 12 },
+  sectionSubtitle: { fontFamily: typography.body, fontSize: moderateScale(12), marginTop: 4, lineHeight: 18 },
   slotCard: { flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 8 },
-  slotPlaylist: { fontSize: moderateScale(14), fontWeight: "600" },
-  slotTime: { fontSize: moderateScale(12), marginTop: 2 },
+  slotPlaylist: { fontFamily: typography.semibold, fontSize: moderateScale(14), fontWeight: "600" },
+  slotTime: { fontFamily: typography.body, fontSize: moderateScale(12), marginTop: 2 },
   liveNowBadge: { backgroundColor: "#22c55e20", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, marginRight: 8 },
-  liveNowBadgeText: { color: "#16a34a", fontSize: moderateScale(11), fontWeight: "700" },
+  liveNowBadgeText: { fontFamily: typography.bold, color: "#16a34a", fontSize: moderateScale(11), fontWeight: "700" },
   actionBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 12 },
-  actionBtnText: { color: "#fff", fontSize: moderateScale(15), fontWeight: "700" },
-  emptyText: { textAlign: "center", fontSize: moderateScale(13), marginTop: 12 },
+  actionBtnText: { fontFamily: typography.bold, color: "#fff", fontSize: moderateScale(15), fontWeight: "700" },
+  emptyText: { fontFamily: typography.body, textAlign: "center", fontSize: moderateScale(13), marginTop: 12 },
   // Player bar
   playerBar: { flexDirection: "row", alignItems: "center", marginTop: 20, padding: 12, borderRadius: 14, borderWidth: 1 },
   playerBtn: { padding: 6 },
-  radioModeLabel: { fontSize: moderateScale(12), fontWeight: "700", textTransform: "uppercase" },
+  radioModeLabel: { fontFamily: typography.bold, fontSize: moderateScale(12), fontWeight: "700", textTransform: "uppercase" },
   // Modal styles
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 24 },
   modalContent: { width: "100%", borderRadius: 16, padding: 20 },
-  modalTitle: { fontSize: moderateScale(18), fontWeight: "700", marginBottom: 16 },
-  modalLabel: { fontSize: moderateScale(13), fontWeight: "600", marginBottom: 6, marginTop: 12 },
-  modalInput: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14) },
+  modalTitle: { fontFamily: typography.title, fontSize: moderateScale(18), fontWeight: "700", marginBottom: 16 },
+  modalLabel: { fontFamily: typography.semibold, fontSize: moderateScale(13), fontWeight: "600", marginBottom: 6, marginTop: 12 },
+  modalInput: { fontFamily: typography.body, borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14) },
   modalTextArea: { minHeight: 80, textAlignVertical: "top" },
   modalButtons: { flexDirection: "row", gap: 10, marginTop: 20 },
   modalBtn: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: "transparent" },

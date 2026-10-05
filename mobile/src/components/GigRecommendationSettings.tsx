@@ -7,6 +7,7 @@ import {
   View,
 } from "react-native";
 import { useTheme } from "../context/ThemeContext";
+import { typography } from "../theme/tokens";
 
 export type GigRecommendationCriterionMode =
   | "required"
@@ -280,9 +281,9 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: "row", alignItems: "center", gap: 14 },
   headerCopy: { flex: 1 },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  title: { fontFamily: "Poppins_600SemiBold", fontSize: 15 },
+  title: { fontFamily: typography.heading, fontSize: 15 },
   description: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
     lineHeight: 18,
     marginTop: 5,
@@ -302,9 +303,9 @@ const styles = StyleSheet.create({
   },
   toggleThumbOn: { alignSelf: "flex-end" },
   settingsBody: { marginTop: 16 },
-  smallCopy: { fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 16 },
+  smallCopy: { fontFamily: typography.body, fontSize: 11, lineHeight: 16 },
   sectionLabel: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 13,
     marginTop: 16,
     marginBottom: 8,
@@ -317,7 +318,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 11,
   },
   criterion: { borderTopWidth: 1, paddingTop: 12, marginTop: 12 },
-  criterionTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 12 },
+  criterionTitle: { fontFamily: typography.semibold, fontSize: 12 },
   modeRow: { flexDirection: "row", gap: 6, marginTop: 9 },
   modeOption: {
     flex: 1,
@@ -326,5 +327,5 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     alignItems: "center",
   },
-  modeText: { fontFamily: "Poppins_500Medium", fontSize: 10 },
+  modeText: { fontFamily: typography.medium, fontSize: 10 },
 });

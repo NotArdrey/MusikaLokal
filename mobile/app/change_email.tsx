@@ -7,6 +7,7 @@ import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import { useTheme } from '../src/context/ThemeContext';
+import { typography } from "../src/theme/tokens";
 
 export default function ChangeEmailScreen() {
     const { colors } = useTheme();
@@ -193,7 +194,7 @@ const styles = StyleSheet.create({
     label: {
         fontSize: 16,
         marginBottom: 8,
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: typography.medium,
     },
     inputContainer: {
         width: '100%',
@@ -208,7 +209,7 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 16,
         marginLeft: 4,
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
         textAlignVertical: 'center',
         paddingVertical: 0,
     },
@@ -216,7 +217,7 @@ const styles = StyleSheet.create({
         fontSize: 12,
         marginTop: 8,
         marginLeft: 4,
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
     },
     buttonContainer: {
         marginTop: 32,
@@ -236,6 +237,6 @@ const styles = StyleSheet.create({
     buttonText: {
         color: 'white',
         fontSize: 16,
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: typography.semibold,
     },
 });

@@ -21,6 +21,7 @@ import { supabase } from "../../lib/supabase";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
 import { addFavoriteChangedListener, emitFavoriteChanged } from "../utils/favoriteEvents";
 import { isFanUserRole } from "../utils/roleRouting";
+import { buildListingShareUrl } from "../utils/shareLinks";
 import { getSpecificSlotRequirementLines } from "../utils/gigSlotRequirements";
 import CachedImage from "./CachedImage";
 import PagerView from "./PagerView";
@@ -571,9 +572,10 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   // Shared actions
   const handleShare = async () => {
+    if (!item?.id) return;
     try {
       await Share.share({
-        message: `Check out ${item.name} on MusikaLokal!`,
+        message: `Check out ${item.name} on MusikaLokal!\n${buildListingShareUrl(item.id, item.type || "")}`,
       });
     } catch (error) {
       debugLog("Error sharing:", error);
@@ -2258,7 +2260,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   typeMini: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 10,
     textTransform: "uppercase",
     letterSpacing: 0.5,
@@ -2279,7 +2281,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(15,23,42,0.08)",
   },
   price: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 15,
   },
   priceList: {
@@ -2354,7 +2356,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   reviewCount: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
     color: "#9CA3AF",
   },
@@ -2375,7 +2377,7 @@ const styles = StyleSheet.create({
   typeOverlayText: {
     color: "white",
     fontSize: 10,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
@@ -2413,7 +2415,7 @@ const styles = StyleSheet.create({
   moreInstrumentsText: {
     color: "#FFF",
     fontSize: 10,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   // Instruments styles for vertical cards
   instrumentsRowVertical: {
@@ -2442,7 +2444,7 @@ const styles = StyleSheet.create({
   moreInstrumentsTextSmall: {
     color: "#6B7280",
     fontSize: 9,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   gigSummaryRowImmersive: {
     flexDirection: "row",
@@ -2463,7 +2465,7 @@ const styles = StyleSheet.create({
   },
   gigSummaryChipText: {
     color: "#FFFFFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 10,
     textShadowColor: "rgba(0,0,0,0.25)",
     textShadowOffset: { width: 0, height: 1 },

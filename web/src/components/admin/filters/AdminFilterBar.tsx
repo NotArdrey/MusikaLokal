@@ -7,10 +7,11 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { useTheme } from '../../../context/ThemeContext';
+import useAdminLayout from '../../../hooks/useAdminLayout';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ActiveFilterChips, { ActiveFilterChip } from './ActiveFilterChips';
 import FilterDropdown from './FilterDropdown';
 import SegmentedFilter from './SegmentedFilter';
@@ -57,10 +58,10 @@ const isEmptyValue = (definition: AdminFilterDefinition, value: AdminFilterValue
 
 export default function AdminFilterBar({ filters, values, onChange, sortElement }: AdminFilterBarProps) {
   const { colors } = useTheme();
-  const { width } = useWindowDimensions();
+  const { isCompact: isMobile } = useAdminLayout();
+  const insets = useSafeAreaInsets();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const isMobile = width < 640;
   const primaryFilters = filters.filter((filter) => !filter.advanced);
   const advancedFilters = filters.filter((filter) => filter.advanced);
 
@@ -181,7 +182,7 @@ export default function AdminFilterBar({ filters, values, onChange, sortElement 
         <Pressable style={styles.mobileBackdrop} onPress={() => setMobileOpen(false)}>
           <Pressable
             onPress={(event) => event.stopPropagation()}
-            style={[styles.mobileSheet, { backgroundColor: colors.card, borderColor: colors.border }]}
+            style={[styles.mobileSheet, { backgroundColor: colors.card, borderColor: colors.border, paddingBottom: Math.max(18, insets.bottom) }]}
           >
             <View style={styles.sheetHeader}>
               <Text style={[styles.sheetTitle, { color: colors.text }]}>Filters</Text>
@@ -189,7 +190,7 @@ export default function AdminFilterBar({ filters, values, onChange, sortElement 
                 <Ionicons name="close" size={22} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
-            <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
+            <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
               {filtersContent(filters)}
             </ScrollView>
             <View style={[styles.sheetFooter, { borderTopColor: colors.border }]}>
@@ -236,7 +237,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   mobileFilterButton: {
-    minHeight: 42,
+    minHeight: 44,
     borderWidth: 1,
     borderRadius: 10,
     flexDirection: 'row',
@@ -257,6 +258,7 @@ const styles = StyleSheet.create({
   },
   mobileToolbar: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,

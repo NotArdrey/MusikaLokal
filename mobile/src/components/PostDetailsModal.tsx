@@ -30,6 +30,7 @@ import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
 import ReportModal from "./ReportModal";
 import ProfileAvatar from "./ProfileAvatar";
+import { typography } from "../theme/tokens";
 
 const KNOWN_FEED_MEDIA_BUCKETS = [
   "post-media",
@@ -1211,7 +1212,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  title: { flex: 1, textAlign: "center", fontSize: 16, fontWeight: "700" },
+  title: { fontFamily: typography.title, flex: 1, textAlign: "center", fontSize: 16, fontWeight: "700" },
   iconCircle: {
     width: 36,
     height: 36,
@@ -1242,13 +1243,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarInitials: { fontSize: 14, fontWeight: "700" },
+  avatarInitials: { fontFamily: typography.bold, fontSize: 14, fontWeight: "700" },
   authorText: { flex: 1, marginLeft: 10 },
-  authorName: { fontSize: 14, fontWeight: "700" },
+  authorName: { fontFamily: typography.bold, fontSize: 14, fontWeight: "700" },
   authorMetaRow: { flexDirection: "row", alignItems: "center", marginTop: 2, gap: 4 },
-  authorMetaText: { fontSize: 12 },
-  dot: { fontSize: 12 },
+  authorMetaText: { fontFamily: typography.body, fontSize: 12 },
+  dot: { fontFamily: typography.body, fontSize: 12 },
   postBody: {
+    fontFamily: typography.body,
     fontSize: 15,
     lineHeight: 22,
     paddingTop: 4,
@@ -1288,6 +1290,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   actionCountText: {
+    fontFamily: typography.bold,
     minWidth: 18,
     fontSize: 14,
     lineHeight: 18,
@@ -1295,7 +1298,7 @@ const styles = StyleSheet.create({
     textAlignVertical: "center",
   },
   commentsSection: { paddingTop: 16 },
-  commentsTitle: { fontSize: 15, fontWeight: "700", marginBottom: 8 },
+  commentsTitle: { fontFamily: typography.title, fontSize: 15, fontWeight: "700", marginBottom: 8 },
   commentRow: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 6 },
   commentListItem: { paddingHorizontal: 16 },
   commentAvatar: { width: 32, height: 32, borderRadius: 16 },
@@ -1306,7 +1309,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  commentAvatarInitials: { fontSize: 12, fontWeight: "700" },
+  commentAvatarInitials: { fontFamily: typography.bold, fontSize: 12, fontWeight: "700" },
   commentBodyWrap: { flex: 1, marginLeft: 8 },
   commentBubble: {
     paddingHorizontal: 12,
@@ -1315,8 +1318,8 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     maxWidth: "100%",
   },
-  commentAuthor: { fontSize: 13, fontWeight: "700", marginBottom: 2 },
-  commentBody: { fontSize: 14, lineHeight: 19 },
+  commentAuthor: { fontFamily: typography.bold, fontSize: 13, fontWeight: "700", marginBottom: 2 },
+  commentBody: { fontFamily: typography.body, fontSize: 14, lineHeight: 19 },
   commentMetaRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1324,9 +1327,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
     paddingHorizontal: 12,
   },
-  commentMeta: { fontSize: 12, fontWeight: "600" },
+  commentMeta: { fontFamily: typography.semibold, fontSize: 12, fontWeight: "600" },
   emptyComments: { paddingVertical: 28, paddingHorizontal: 16 },
-  noComments: { fontSize: 13, textAlign: "center" },
+  noComments: { fontFamily: typography.body, fontSize: 13, textAlign: "center" },
   commentNotice: {
     marginHorizontal: 12,
     marginTop: 10,
@@ -1340,8 +1343,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   commentNoticeTextWrap: { flex: 1, minWidth: 0 },
-  commentNoticeTitle: { fontSize: 12, fontWeight: "700", marginBottom: 2 },
-  commentNoticeMessage: { fontSize: 12, lineHeight: 16 },
+  commentNoticeTitle: { fontFamily: typography.title, fontSize: 12, fontWeight: "700", marginBottom: 2 },
+  commentNoticeMessage: { fontFamily: typography.body, fontSize: 12, lineHeight: 16 },
   footer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1367,6 +1370,7 @@ const styles = StyleSheet.create({
     paddingRight: 4,
   },
   footerInput: {
+    fontFamily: typography.body,
     flex: 1,
     fontSize: 14,
     paddingVertical: 8,

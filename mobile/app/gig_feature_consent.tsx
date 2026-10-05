@@ -17,6 +17,7 @@ import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
 import { LoadingButtonContent } from "../src/components/LoadingState";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
+import { typography } from "../src/theme/tokens";
 
 const acceptedStatuses = new Set(["accepted", "approved"]);
 
@@ -233,30 +234,30 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   content: { paddingHorizontal: 20, paddingTop: 14 },
   centerState: { alignItems: "center", paddingTop: 50 },
-  stateText: { fontFamily: "Poppins_400Regular", fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: 10 },
+  stateText: { fontFamily: typography.body, fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: 10 },
   messageCard: { borderWidth: 1, borderRadius: 16, padding: 22, alignItems: "center" },
-  messageTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 16, marginTop: 10 },
+  messageTitle: { fontFamily: typography.heading, fontSize: 16, marginTop: 10 },
   heroCard: { borderWidth: 1, borderRadius: 18, padding: 20, alignItems: "center" },
   heroIcon: { width: 50, height: 50, borderRadius: 25, backgroundColor: "#14B8A61A", alignItems: "center", justifyContent: "center" },
-  heroTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 19, marginTop: 12, textAlign: "center" },
-  heroCopy: { fontFamily: "Poppins_400Regular", fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: 7 },
+  heroTitle: { fontFamily: typography.heading, fontSize: 19, marginTop: 12, textAlign: "center" },
+  heroCopy: { fontFamily: typography.body, fontSize: 13, lineHeight: 20, textAlign: "center", marginTop: 7 },
   performerCard: { flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderRadius: 15, padding: 14, marginTop: 16 },
   avatar: { width: 48, height: 48, borderRadius: 24 },
   avatarPlaceholder: { alignItems: "center", justifyContent: "center" },
-  performerName: { fontFamily: "Poppins_600SemiBold", fontSize: 14 },
-  performerMeta: { fontFamily: "Poppins_400Regular", fontSize: 11, marginTop: 2 },
+  performerName: { fontFamily: typography.semibold, fontSize: 14 },
+  performerMeta: { fontFamily: typography.body, fontSize: 11, marginTop: 2 },
   acceptedBadge: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
-  acceptedBadgeText: { color: "#10B981", fontFamily: "Poppins_600SemiBold", fontSize: 10 },
+  acceptedBadgeText: { color: "#10B981", fontFamily: typography.semibold, fontSize: 10 },
   optionCard: { flexDirection: "row", alignItems: "center", gap: 14, borderWidth: 1, borderRadius: 15, padding: 16, marginTop: 12 },
   optionCopy: { flex: 1 },
-  optionTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 14 },
-  optionDescription: { fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginTop: 4 },
+  optionTitle: { fontFamily: typography.semibold, fontSize: 14 },
+  optionDescription: { fontFamily: typography.body, fontSize: 11, lineHeight: 17, marginTop: 4 },
   privacyNote: { flexDirection: "row", gap: 10, borderRadius: 12, padding: 13, marginTop: 14 },
-  privacyText: { flex: 1, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17 },
-  errorText: { color: "#EF4444", fontFamily: "Poppins_500Medium", fontSize: 12, textAlign: "center", marginTop: 12 },
-  successText: { color: "#10B981", fontFamily: "Poppins_500Medium", fontSize: 12, textAlign: "center", marginTop: 12 },
+  privacyText: { flex: 1, fontFamily: typography.body, fontSize: 11, lineHeight: 17 },
+  errorText: { color: "#EF4444", fontFamily: typography.medium, fontSize: 12, textAlign: "center", marginTop: 12 },
+  successText: { color: "#10B981", fontFamily: typography.medium, fontSize: 12, textAlign: "center", marginTop: 12 },
   primaryButton: { minHeight: 48, borderRadius: 12, alignItems: "center", justifyContent: "center", marginTop: 18, paddingHorizontal: 18 },
-  primaryButtonText: { color: "#FFFFFF", fontFamily: "Poppins_600SemiBold", fontSize: 14 },
+  primaryButtonText: { color: "#FFFFFF", fontFamily: typography.semibold, fontSize: 14 },
   secondaryButton: { minHeight: 46, borderWidth: 1, borderRadius: 12, alignItems: "center", justifyContent: "center", marginTop: 10, paddingHorizontal: 18 },
-  secondaryButtonText: { fontFamily: "Poppins_600SemiBold", fontSize: 13 },
+  secondaryButtonText: { fontFamily: typography.semibold, fontSize: 13 },
 });

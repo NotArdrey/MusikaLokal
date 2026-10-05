@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import { Image, Text, View } from "react-native";
 import { supabase } from "../../../lib/supabase";
+import { typography } from "../../theme/tokens";
 
 interface GigInfoTabProps {
   group: any;
@@ -90,7 +91,7 @@ const GigInfoTab = ({ group, colors, isDark, styles, embedded = false }: GigInfo
             <Ionicons name="people-circle-outline" size={22} color={colors.primary} />
             <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Featured Accepted Performers</Text>
           </View>
-          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginBottom: 10 }}>
+          <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 11, lineHeight: 17, marginBottom: 10 }}>
             These performers gave permission to appear on this gig page.
           </Text>
           {featuredPerformers.map((performer) => (
@@ -106,8 +107,8 @@ const GigInfoTab = ({ group, colors, isDark, styles, embedded = false }: GigInfo
                 </View>
               )}
               <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 13 }}>{performer.display_name}</Text>
-                <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 10 }}>
+                <Text style={{ color: colors.text, fontFamily: typography.semibold, fontSize: 13 }}>{performer.display_name}</Text>
+                <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 10 }}>
                   {performer.entity_type === "group" ? "Accepted group" : "Accepted musician"}
                 </Text>
               </View>

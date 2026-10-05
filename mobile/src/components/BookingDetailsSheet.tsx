@@ -29,6 +29,7 @@ import ConnectionApplicantReview from "./ConnectionApplicantReview";
 import InAppMediaViewer, { isInAppMediaUrl } from "./InAppMediaViewer";
 import ProfileAvatar from "./ProfileAvatar";
 import TrackedBottomSheetModal from "./TrackedBottomSheetModal";
+import { typography } from "../theme/tokens";
 
 const debugLog = (..._args: unknown[]) => { };
 
@@ -991,7 +992,7 @@ const BookingDetailsSheet = forwardRef<
                             Applied by{" "}
                             <Text
                               style={{
-                                fontFamily: "Poppins_600SemiBold",
+                                fontFamily: typography.semibold,
                                 color: colors.primary,
                               }}
                             >
@@ -1035,7 +1036,7 @@ const BookingDetailsSheet = forwardRef<
                           Applied as{" "}
                           <Text
                             style={{
-                              fontFamily: "Poppins_600SemiBold",
+                              fontFamily: typography.semibold,
                               color: colors.primary,
                             }}
                           >
@@ -1271,7 +1272,7 @@ const BookingDetailsSheet = forwardRef<
                                 <Text
                                   style={{
                                     color: colors.text,
-                                    fontFamily: "Poppins_500Medium",
+                                    fontFamily: typography.medium,
                                     fontSize: 14,
                                   }}
                                 >
@@ -1349,7 +1350,7 @@ const BookingDetailsSheet = forwardRef<
                         style={{
                           color: "#F59E0B",
                           fontSize: 10,
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                         }}
                       >
                         Special Hours
@@ -1546,7 +1547,7 @@ const BookingDetailsSheet = forwardRef<
                           style={{
                             color: colors.textSecondary,
                             fontSize: 12,
-                            fontFamily: "Poppins_400Regular",
+                            fontFamily: typography.body,
                             marginTop: 2,
                           }}
                         >
@@ -1975,7 +1976,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: moderateScale(17),
     lineHeight: moderateScale(23),
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.title,
   },
   closeBtn: {
     width: moderateScale(40),
@@ -1993,7 +1994,7 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(9),
     lineHeight: moderateScale(13),
     letterSpacing: 1.2,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   statusBadge: {
     flexDirection: "row",
@@ -2008,7 +2009,7 @@ const styles = StyleSheet.create({
   statusText: {
     flexShrink: 1,
     fontSize: moderateScale(10),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   loadingContainer: {
     paddingVertical: verticalScale(60),
@@ -2031,7 +2032,7 @@ const styles = StyleSheet.create({
   },
   studioName: {
     fontSize: height < 700 ? moderateScale(18) : moderateScale(20),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   ownerRow: {
     flexDirection: "row",
@@ -2056,7 +2057,7 @@ const styles = StyleSheet.create({
   },
   ownerName: {
     fontSize: moderateScale(14),
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   locationRow: {
     flexDirection: "row",
@@ -2065,7 +2066,7 @@ const styles = StyleSheet.create({
   },
   locationText: {
     fontSize: moderateScale(13),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   cardHeader: {
     flexDirection: "row",
@@ -2076,7 +2077,7 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: moderateScale(13),
     lineHeight: moderateScale(18),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   detailsGrid: {
     gap: moderateScale(12),
@@ -2087,12 +2088,12 @@ const styles = StyleSheet.create({
   detailLabel: {
     fontSize: moderateScale(9),
     lineHeight: moderateScale(13),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   detailValue: {
     fontSize: moderateScale(12),
     lineHeight: moderateScale(17),
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   notesSection: {
     marginTop: moderateScale(16),
@@ -2101,19 +2102,19 @@ const styles = StyleSheet.create({
   },
   notesLabel: {
     fontSize: moderateScale(12),
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     textTransform: "uppercase",
     marginBottom: moderateScale(4),
   },
   notesText: {
     fontSize: moderateScale(14),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     lineHeight: moderateScale(20),
   },
   lateReportMeta: {
     marginTop: moderateScale(8),
     fontSize: moderateScale(12),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   pricingRow: {
     flexDirection: "row",
@@ -2123,11 +2124,11 @@ const styles = StyleSheet.create({
   },
   pricingLabel: {
     fontSize: moderateScale(14),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   pricingValue: {
     fontSize: moderateScale(14),
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   divider: {
     height: 1,
@@ -2135,11 +2136,11 @@ const styles = StyleSheet.create({
   },
   totalLabel: {
     fontSize: moderateScale(16),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   totalValue: {
     fontSize: moderateScale(20),
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
   },
   actions: {
     gap: moderateScale(12),
@@ -2188,7 +2189,7 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: moderateScale(13),
     lineHeight: moderateScale(18),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     textAlign: "center",
     includeFontPadding: false,
     textAlignVertical: "center",
@@ -2197,7 +2198,7 @@ const styles = StyleSheet.create({
     color: "#EF4444",
     fontSize: moderateScale(13),
     lineHeight: moderateScale(18),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     textAlign: "center",
     includeFontPadding: false,
     textAlignVertical: "center",
@@ -2205,7 +2206,7 @@ const styles = StyleSheet.create({
   viewStudioBtnText: {
     fontSize: moderateScale(13),
     lineHeight: moderateScale(18),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     includeFontPadding: false,
     textAlign: "center",
     textAlignVertical: "center",

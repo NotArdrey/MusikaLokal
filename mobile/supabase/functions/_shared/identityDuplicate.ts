@@ -22,7 +22,9 @@ export function isUuid(value: unknown) {
 }
 
 function normalizeDocumentToken(value: unknown) {
-  return normalizeText(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const rawValue = normalizeText(value);
+  if (!rawValue || /^\[?redacted\]?$/i.test(rawValue)) return "";
+  return rawValue.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 function readPath(source: any, path: string[]) {
@@ -48,6 +50,18 @@ function firstNonEmptyText(paths: string[][], source: any) {
     if (value) return value;
   }
   return "";
+}
+
+export function resolveIdentityDocument(source: any, depth = 0): any {
+  if (!source || typeof source !== "object" || depth > 6) return null;
+  if (source.id_verifications?.[0]) return source.id_verifications[0];
+  for (const key of ["id_verification", "idVerification", "raw_data", "decision", "result", "session", "verification_data"]) {
+    if (source[key] && typeof source[key] === "object") {
+      const document = resolveIdentityDocument(source[key], depth + 1);
+      if (document) return document;
+    }
+  }
+  return source;
 }
 
 function findLikelyDocumentNumber(source: any, depth = 0): string {
@@ -88,6 +102,7 @@ function findLikelyDocumentNumber(source: any, depth = 0): string {
 }
 
 export function extractIdentityDocumentNumber(rawDocument: any) {
+  rawDocument = resolveIdentityDocument(rawDocument);
   const direct = firstNonEmpty(
     [
       ["document_number"],
@@ -127,6 +142,7 @@ export function extractIdentityDocumentNumber(rawDocument: any) {
 }
 
 export function extractIdentityDocumentType(rawDocument: any, fallback?: unknown) {
+  rawDocument = resolveIdentityDocument(rawDocument);
   const value =
     normalizeText(fallback) ||
     normalizeText(rawDocument?.document_type) ||
@@ -139,6 +155,7 @@ export function extractIdentityDocumentType(rawDocument: any, fallback?: unknown
 }
 
 export function extractIdentityDocumentCountry(rawDocument: any, fallback?: unknown) {
+  rawDocument = resolveIdentityDocument(rawDocument);
   const value =
     normalizeText(fallback) ||
     normalizeText(rawDocument?.issuing_country) ||
@@ -222,6 +239,7 @@ function extractIdentityBirthDate(rawDocument: any) {
 }
 
 export function prepareIdentityNameBirthDateDuplicateInput(rawDocument: any, options: Record<string, unknown> = {}) {
+  rawDocument = resolveIdentityDocument(rawDocument);
   const fullLegalName = normalizeText(options.fullLegalName || extractIdentityFullName(rawDocument)).replace(/\s+/g, " ");
   const normalizedFullLegalName = normalizeFullLegalName(options.normalizedFullLegalName || fullLegalName);
   const birthDate = normalizeBirthDate(options.birthDate || extractIdentityBirthDate(rawDocument));
@@ -260,6 +278,28 @@ function dbErrorMessage(context: string, error: any) {
 
 function isUniqueViolation(error: any) {
   return error?.code === "23505" || /duplicate key value/i.test(error?.message || "");
+}
+
+const RAW_ID_KEY_RE = /(^|_)(document|doc|id|identity|identification|personal|passport|license|licence|national|tax|tin|ssn|mrz)(_|$).*?(number|no|num|code|value|identifier|id)$|^(mrz|raw_mrz|document_number|documentnumber|id_number|idnumber|personal_number|personalnumber|passport_number|passportnumber|license_number|licensenumber|national_id_number|nationalidnumber)$/i;
+
+export function sanitizeIdentityVerificationData(value: any, depth = 0): any {
+  if (depth > 12) return null;
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeIdentityVerificationData(item, depth + 1));
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, nestedValue] of Object.entries(value)) {
+    if (RAW_ID_KEY_RE.test(key)) {
+      sanitized[key] = "[redacted]";
+      continue;
+    }
+    sanitized[key] = sanitizeIdentityVerificationData(nestedValue, depth + 1);
+  }
+  return sanitized;
 }
 
 export async function buildIdentityDocumentFingerprint(rawDocument: any, options: Record<string, unknown> = {}) {

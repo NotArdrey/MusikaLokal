@@ -10,6 +10,7 @@ import { bottomSheetSpringConfig } from '../utils/motion';
 import { getRecentlyViewedStorageKey } from '../utils/recentlyViewed';
 import ListingCard from './ListingCard';
 import TrackedBottomSheetModal from './TrackedBottomSheetModal';
+import { typography } from "../theme/tokens";
 
 const { width, height } = Dimensions.get('window');
 
@@ -289,12 +290,12 @@ const styles = StyleSheet.create({
     },
     title: {
         fontSize: moderateScale(24),
-        fontFamily: 'Poppins_700Bold',
+        fontFamily: typography.title,
         marginBottom: moderateScale(4),
     },
     subtitle: {
         fontSize: moderateScale(14),
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
     },
     closeBtn: {
         width: moderateScale(40),
@@ -312,7 +313,7 @@ const styles = StyleSheet.create({
     loadingText: {
         marginTop: moderateScale(16),
         fontSize: moderateScale(14),
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
     },
     emptyContainer: {
         flex: 1,
@@ -323,13 +324,13 @@ const styles = StyleSheet.create({
     },
     emptyTitle: {
         fontSize: moderateScale(18),
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: typography.heading,
         marginTop: moderateScale(16),
         marginBottom: moderateScale(8),
     },
     emptySubtitle: {
         fontSize: moderateScale(14),
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
         textAlign: 'center',
     },
 });

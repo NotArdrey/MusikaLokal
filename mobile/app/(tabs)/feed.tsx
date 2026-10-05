@@ -63,6 +63,7 @@ import { useGigFeaturedPerformers } from "../../src/hooks/useGigFeaturedPerforme
 import { useTheme } from "../../src/context/ThemeContext";
 import { resolveRadioMediaUrl } from "../../src/audio/radioTrackPlayer";
 import { buildPostShareMessage } from "../../src/utils/postShare";
+import { buildListingShareUrl } from "../../src/utils/shareLinks";
 import {
   buildSocialFollowKey,
   getListingSocialFollowTarget,
@@ -3548,7 +3549,10 @@ export default function FeedScreen() {
   const { session, userId, isGuest, loading: authLoading, roleResolved, userRole } = useAuth();
   const resolvedUserId = session?.user?.id ?? userId ?? null;
   const canUseSocialActions = Boolean(session?.access_token && resolvedUserId && !isGuest);
-  const params = useLocalSearchParams<{ reopenListingId?: string; returnToProfileId?: string }>();
+  const params = useLocalSearchParams<{
+    reopenListingId?: string; returnToProfileId?: string;
+    postId?: string; listingId?: string; listingType?: string;
+  }>();
   const { clearBottomOverlays } = useBottomOverlayActions();
   const { activeStation } = useRadioPlayerPresence();
   const insets = useSafeAreaInsets();
@@ -6878,7 +6882,7 @@ export default function FeedScreen() {
 
     try {
       const shareResult = await Share.share({
-        message: `${name}\n\nCheck out this ${label.toLowerCase()} on MusikaLokal: ${card.id}`,
+        message: `${name}\n\nCheck out this ${label.toLowerCase()} on MusikaLokal:\n${buildListingShareUrl(card.id, card.type || "")}`,
       });
 
       if (shareResult.action === Share.dismissedAction) return;
@@ -6948,6 +6952,26 @@ export default function FeedScreen() {
     openProfileDetails,
     trackFeedActivity,
   ]);
+
+  useEffect(() => {
+    if (authLoading || !session || !roleResolved) return;
+    if (!params.postId && !params.listingId) return;
+    // Wait for the feed's modal hosts to mount before presenting shared content.
+    const frame = requestAnimationFrame(() => {
+      if (params.postId) {
+        openPostDetails(params.postId);
+      } else if (params.listingId) {
+        openFeedOptionTarget({
+          id: params.listingId,
+          type: params.listingType === "production_team" ? "production" : params.listingType,
+          __feedKind: "ai_card",
+        });
+      }
+      // Consume the link so returning to the feed does not reopen the content.
+      router.setParams({ postId: undefined, listingId: undefined, listingType: undefined });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [authLoading, openFeedOptionTarget, openPostDetails, params.listingId, params.listingType, params.postId, roleResolved, session]);
 
   const timeAgo = useCallback((dateStr: string) => {
     const diff = Date.now() - new Date(dateStr).getTime();
@@ -8219,7 +8243,7 @@ const styles = StyleSheet.create({
   },
   liveRadioSubtitle: {
     fontSize: moderateScale(11),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     lineHeight: 15,
     marginTop: 2,
   },
@@ -8249,7 +8273,7 @@ const styles = StyleSheet.create({
     marginTop: 3,
     fontSize: moderateScale(10),
     lineHeight: moderateScale(13),
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
   },
   liveRadioThumbnail: {
     width: 48,
@@ -8292,16 +8316,16 @@ const styles = StyleSheet.create({
   liveRadioBadgeText: {
     color: "#FFFFFF",
     fontSize: moderateScale(8),
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
   },
   liveRadioStation: {
     fontSize: moderateScale(15),
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     lineHeight: 20,
   },
   liveRadioNowPlayingLine: {
     fontSize: moderateScale(11),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     lineHeight: 16,
     marginTop: 2,
   },
@@ -8313,11 +8337,11 @@ const styles = StyleSheet.create({
   },
   liveRadioMetaLabel: {
     fontSize: moderateScale(9),
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   liveRadioMetaDot: {
     fontSize: moderateScale(10),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     lineHeight: 12,
   },
   liveRadioTrackCount: {
@@ -8333,7 +8357,7 @@ const styles = StyleSheet.create({
   liveRadioListenerText: {
     flexShrink: 1,
     fontSize: moderateScale(9),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   liveRadioActions: {
     width: 42,
@@ -8352,7 +8376,7 @@ const styles = StyleSheet.create({
   /* Tabs */
   tabRow: { flexDirection: "row", borderBottomWidth: 1 },
   tab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 12 },
-  tabText: { fontSize: moderateScale(13), fontWeight: "600" },
+  tabText: { fontFamily: typography.semibold, fontSize: moderateScale(13), fontWeight: "600" },
 
   socialPostCard: {
     marginHorizontal: 0,
@@ -8415,7 +8439,7 @@ const styles = StyleSheet.create({
   socialHeaderBadgeText: {
     fontSize: moderateScale(9),
     lineHeight: 12,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     includeFontPadding: false,
     textAlignVertical: "center",
   },
@@ -8434,10 +8458,11 @@ const styles = StyleSheet.create({
   socialMetaText: {
     maxWidth: "48%",
     fontSize: moderateScale(12),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     lineHeight: 16,
   },
   socialMetaDot: {
+    fontFamily: typography.body,
     fontSize: moderateScale(10),
     lineHeight: 14,
   },
@@ -8456,7 +8481,7 @@ const styles = StyleSheet.create({
   socialFollowText: {
     fontSize: moderateScale(10),
     lineHeight: 14,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     includeFontPadding: false,
     textAlign: "center",
     textAlignVertical: "center",
@@ -8495,7 +8520,7 @@ const styles = StyleSheet.create({
   socialBadgeText: {
     fontSize: moderateScale(10),
     lineHeight: 14,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     includeFontPadding: false,
     textAlignVertical: "center",
   },
@@ -8512,7 +8537,7 @@ const styles = StyleSheet.create({
   socialPriceText: {
     fontSize: moderateScale(10),
     lineHeight: 14,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     includeFontPadding: false,
     textAlignVertical: "center",
   },
@@ -8530,7 +8555,7 @@ const styles = StyleSheet.create({
   socialLinkedText: {
     flex: 1,
     fontSize: moderateScale(12),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   socialEntityModule: {
     marginHorizontal: 16,
@@ -8559,14 +8584,14 @@ const styles = StyleSheet.create({
   socialGigType: {
     fontSize: moderateScale(10),
     lineHeight: 14,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     letterSpacing: 0.8,
   },
   socialGigFee: {
     flexShrink: 1,
     fontSize: moderateScale(13),
     lineHeight: 18,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     textAlign: "right",
   },
   socialGigFeeGroup: {
@@ -8583,13 +8608,13 @@ const styles = StyleSheet.create({
   socialGigEyebrow: {
     fontSize: moderateScale(9),
     lineHeight: 13,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     letterSpacing: 0.7,
   },
   socialGigNeed: {
     fontSize: moderateScale(14),
     lineHeight: 20,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
   },
   socialGigRequirementLine: {
     marginTop: 5,
@@ -8598,12 +8623,12 @@ const styles = StyleSheet.create({
   socialGigRequirementLabel: {
     fontSize: moderateScale(11),
     lineHeight: 16,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   socialGigRequirementDetails: {
     fontSize: moderateScale(11),
     lineHeight: 17,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   socialGigMetaList: {
     borderTopWidth: 1,
@@ -8620,7 +8645,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     fontSize: moderateScale(11),
     lineHeight: 16,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   socialQuickInfoRow: {
     flexDirection: "row",
@@ -8667,7 +8692,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     fontSize: moderateScale(11),
     lineHeight: 15,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     includeFontPadding: false,
     textAlignVertical: "center",
   },
@@ -8693,7 +8718,7 @@ const styles = StyleSheet.create({
     minWidth: 18,
     fontSize: moderateScale(13),
     lineHeight: moderateScale(18),
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     includeFontPadding: false,
     textAlignVertical: "center",
   },
@@ -8710,20 +8735,20 @@ const styles = StyleSheet.create({
   modalHeaderSide: { width: 86, alignItems: "flex-start", justifyContent: "center" },
   modalHeaderSideRight: { alignItems: "flex-end" },
   modalIconButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  modalTitle: { flex: 1, textAlign: "center", fontSize: moderateScale(17), fontFamily: "Poppins_700Bold", includeFontPadding: false, lineHeight: 24 },
+  modalTitle: { flex: 1, textAlign: "center", fontSize: moderateScale(17), fontFamily: typography.title, includeFontPadding: false, lineHeight: 24 },
   postBtn: { width: "100%", minHeight: 38, borderRadius: 10, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" },
-  postBtnText: { color: "#fff", fontSize: moderateScale(13), fontFamily: "Poppins_700Bold", includeFontPadding: false, lineHeight: 18 },
+  postBtnText: { color: "#fff", fontSize: moderateScale(13), fontFamily: typography.bold, includeFontPadding: false, lineHeight: 18 },
   composerAuthorRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 18, paddingTop: 16, paddingBottom: 8 },
   composerAuthorText: { flex: 1, minWidth: 0 },
-  composerAuthorName: { fontSize: moderateScale(15), fontFamily: "Poppins_700Bold", includeFontPadding: false, lineHeight: 20 },
+  composerAuthorName: { fontSize: moderateScale(15), fontFamily: typography.bold, includeFontPadding: false, lineHeight: 20 },
   visibilityChip: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginTop: 4, gap: 4 },
-  visibilityChipText: { fontSize: moderateScale(11), fontFamily: "Poppins_500Medium", includeFontPadding: false, lineHeight: 14 },
+  visibilityChipText: { fontSize: moderateScale(11), fontFamily: typography.medium, includeFontPadding: false, lineHeight: 14 },
   modalContent: { flex: 1, minHeight: 0 },
-  modalTextArea: { flex: 1, minHeight: 132, fontSize: moderateScale(18), fontFamily: "Poppins_400Regular", lineHeight: 26, paddingHorizontal: 18, paddingTop: 12, paddingBottom: 12, textAlignVertical: "top", includeFontPadding: false },
+  modalTextArea: { flex: 1, minHeight: 132, fontSize: moderateScale(18), fontFamily: typography.body, lineHeight: 26, paddingHorizontal: 18, paddingTop: 12, paddingBottom: 12, textAlignVertical: "top", includeFontPadding: false },
   composerToolRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 18, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },
   composerToolButton: { minHeight: 44, borderRadius: 14, borderWidth: 1, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  composerToolText: { fontSize: moderateScale(12), fontFamily: "Poppins_700Bold", includeFontPadding: false, lineHeight: 16 },
-  composerMediaStatus: { flex: 1, fontSize: moderateScale(11), fontFamily: "Poppins_500Medium" },
+  composerToolText: { fontSize: moderateScale(12), fontFamily: typography.bold, includeFontPadding: false, lineHeight: 16 },
+  composerMediaStatus: { flex: 1, fontSize: moderateScale(11), fontFamily: typography.medium },
   composerMediaScroller: { flexGrow: 0, maxHeight: 230 },
   composerMediaList: { paddingHorizontal: 18, paddingBottom: 18, gap: 10 },
   composerMediaCard: { width: 176, minHeight: 212, borderWidth: 2, borderRadius: 12, overflow: "hidden", backgroundColor: "#0F172A" },
@@ -8731,11 +8756,11 @@ const styles = StyleSheet.create({
   composerVideoBadge: { position: "absolute", left: 8, top: 8, width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15,23,42,0.78)" },
   composerRemoveMedia: { position: "absolute", right: 8, top: 8, width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15,23,42,0.78)" },
   composerCoverButton: { margin: 8, minHeight: 28, borderRadius: 8, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
-  composerCoverText: { color: "#FFFFFF", fontSize: moderateScale(11), fontFamily: "Poppins_700Bold" },
+  composerCoverText: { color: "#FFFFFF", fontSize: moderateScale(11), fontFamily: typography.bold },
   composerThumbStrip: { flexDirection: "row", gap: 5, paddingHorizontal: 8, paddingBottom: 8 },
   composerThumbOption: { width: 34, height: 28, borderRadius: 6, borderWidth: 2, overflow: "hidden" },
   composerThumbImage: { width: "100%", height: "100%" },
-  emptyText: { textAlign: "center", marginTop: 60, fontSize: moderateScale(14) },
+  emptyText: { fontFamily: typography.body, textAlign: "center", marginTop: 60, fontSize: moderateScale(14) },
 
   /* Empty state redesign */
   emptyStateContainer: {
@@ -8756,13 +8781,13 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: moderateScale(17),
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.title,
     textAlign: "center",
     marginBottom: 8,
   },
   emptySubtitle: {
     fontSize: moderateScale(13),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     textAlign: "center",
     lineHeight: 20,
     paddingHorizontal: 8,
@@ -8786,11 +8811,11 @@ const styles = StyleSheet.create({
   emptyActionBtnText: {
     color: "#fff",
     fontSize: moderateScale(13),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   emptyActionBtnTextAlt: {
     fontSize: moderateScale(13),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   followingProfileCard: {
     marginHorizontal: 16,
@@ -8835,7 +8860,7 @@ const styles = StyleSheet.create({
   },
   followingRoleText: {
     fontSize: moderateScale(10),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     lineHeight: moderateScale(12),
     includeFontPadding: false,
     textAlignVertical: "center",
@@ -8843,11 +8868,11 @@ const styles = StyleSheet.create({
   },
   followingProfileName: {
     fontSize: moderateScale(14),
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
   },
   followingProfileHint: {
     fontSize: moderateScale(12),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     lineHeight: 18,
   },
   followingProfileBtn: {
@@ -8861,6 +8886,6 @@ const styles = StyleSheet.create({
   },
   followingProfileBtnText: {
     fontSize: moderateScale(11),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
 });

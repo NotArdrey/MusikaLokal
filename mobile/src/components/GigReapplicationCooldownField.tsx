@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { typography } from "../theme/tokens";
 
 type CooldownUnit = "hours" | "days";
 
@@ -86,7 +87,7 @@ export default function GigReapplicationCooldownField({
             paddingHorizontal: 14,
             color: colors.text,
             backgroundColor: colors.inputBackground,
-            fontFamily: "Poppins_500Medium",
+            fontFamily: typography.medium,
           }}
         />
         {(["hours", "days"] as CooldownUnit[]).map((option) => {
@@ -114,7 +115,7 @@ export default function GigReapplicationCooldownField({
               <Text
                 style={{
                   color: selected ? "#FFFFFF" : colors.text,
-                  fontFamily: "Poppins_500Medium",
+                  fontFamily: typography.medium,
                   fontSize: 12,
                   textTransform: "capitalize",
                 }}
@@ -126,7 +127,7 @@ export default function GigReapplicationCooldownField({
         })}
       </View>
 
-      <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11 }}>
+      <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 11 }}>
         {hours === 0
           ? "Musicians can reapply immediately after rejection."
           : `Musicians can reapply exactly ${formatGigReapplicationCooldown(hours)} after rejection.`}
@@ -158,7 +159,7 @@ export default function GigReapplicationCooldownField({
               <Text
                 style={{
                   color: selected ? "#FFFFFF" : colors.text,
-                  fontFamily: "Poppins_500Medium",
+                  fontFamily: typography.medium,
                   fontSize: 11,
                 }}
               >

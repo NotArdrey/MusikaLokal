@@ -4,6 +4,7 @@ import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
+import { typography } from "../src/theme/tokens";
 
 export default function PrivacyPolicyScreen() {
   const { colors } = useTheme();
@@ -73,12 +74,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 24,
     marginBottom: 16,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   textLast: {
     fontSize: 14,
     lineHeight: 24,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   navbarContainer: {
     position: 'absolute',

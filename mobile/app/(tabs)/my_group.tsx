@@ -555,7 +555,7 @@ const styles = StyleSheet.create({
     },
     scrollContent: { paddingBottom: 180, paddingTop: 0, paddingHorizontal: 16 },
     sectionHeading: {
-        fontFamily: typography.bold,
+        fontFamily: typography.title,
         fontSize: 12,
         letterSpacing: 1.4,
         marginBottom: 16,
@@ -578,13 +578,13 @@ const styles = StyleSheet.create({
         borderColor: 'transparent',
     },
     pageTabText: {
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: typography.semibold,
         fontSize: 12,
     },
     loadingText: {
         textAlign: 'center',
         marginTop: 20,
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
     },
     skeletonList: {
         gap: 16,
@@ -602,7 +602,7 @@ const styles = StyleSheet.create({
     },
     emptyText: {
         marginTop: 16,
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
     },
     cardContainer: { ...managementCardStyles.surface, overflow: 'hidden', borderColor: palette.line, marginBottom: 12 },
     imageWrapper: { width: 64, height: 64, borderRadius: 10, overflow: "hidden" },

@@ -29,6 +29,7 @@ import { profileFormStyles } from "../src/theme/formStyles";
 import { isE2EFixtureMode } from "../src/utils/e2eFixtures";
 import { isFanUserRole, normalizeUserRole } from "../src/utils/roleRouting";
 import { uploadStorageObject } from "../src/utils/storageUpload";
+import { typography } from "../src/theme/tokens";
 
 
 const DISALLOWED_PROFILE_SKILLS = new Set(["producer"]);
@@ -1094,7 +1095,7 @@ export default function EditProfileScreen() {
           <Text
             style={{
               color: "#F59E0B",
-              fontFamily: "Poppins_500Medium",
+              fontFamily: typography.medium,
               fontSize: 12,
               marginBottom: 10,
               textAlign: "center",
@@ -1170,7 +1171,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     fontSize: 14,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   scroll: { flex: 1 },
   scrollContent: { padding: 20, paddingBottom: 150 },
@@ -1202,13 +1203,13 @@ const styles = StyleSheet.create({
   changePhotoText: {
     marginTop: 10,
     fontSize: 14,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
 
   field: { marginBottom: 20 },
   label: {
     fontSize: 11,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     letterSpacing: 0.5,
     marginBottom: 10,
   },
@@ -1221,12 +1222,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
     includeFontPadding: false,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     textAlignVertical: "center",
   },
   disabledInput: { borderWidth: 1, borderRadius: 10, padding: 14 },
-  disabledText: { fontSize: 15, fontFamily: "Poppins_500Medium" },
-  helper: { fontSize: 11, fontFamily: "Poppins_400Regular", marginTop: 4 },
+  disabledText: { fontSize: 15, fontFamily: typography.medium },
+  helper: { fontSize: 11, fontFamily: typography.body, marginTop: 4 },
   textArea: {
     borderWidth: 1,
     borderRadius: 10,
@@ -1235,7 +1236,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
     includeFontPadding: false,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     minHeight: 100,
     textAlign: "left",
     textAlignVertical: "top",
@@ -1247,7 +1248,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
   },
-  chipText: { fontSize: 13, fontFamily: "Poppins_500Medium" },
+  chipText: { fontSize: 13, fontFamily: typography.medium },
   selectedChips: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1268,7 +1269,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
   },
-  chipTextCompact: { fontSize: 12, fontFamily: "Poppins_500Medium" },
+  chipTextCompact: { fontSize: 12, fontFamily: typography.medium },
   searchInputWrap: {
     flexDirection: "row",
     alignItems: "center",
@@ -1285,13 +1286,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
     includeFontPadding: false,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     textAlign: "left",
     textAlignVertical: "center",
   },
   moreText: {
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontStyle: "italic",
     marginTop: 4,
   },
@@ -1306,7 +1307,7 @@ const styles = StyleSheet.create({
   saveBtnText: {
     color: "#fff",
     fontSize: 16,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   cancelBtn: {
     paddingVertical: 15,
@@ -1316,7 +1317,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginTop: 10,
   },
-  cancelBtnText: { fontSize: 16, fontFamily: "Poppins_600SemiBold" },
+  cancelBtnText: { fontSize: 16, fontFamily: typography.semibold },
 
   // Resume upload styles
   uploadBtn: {
@@ -1330,7 +1331,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   uploadText: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 14,
   },
   fileContainer: {
@@ -1347,7 +1348,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   fileName: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 14,
   },
   removeBtn: {

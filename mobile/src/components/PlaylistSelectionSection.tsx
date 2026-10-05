@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
+import { typography } from "../theme/tokens";
 
 type PlaylistSelectionSectionProps = {
   colors: any;
@@ -40,7 +41,7 @@ export default function PlaylistSelectionSection({
           <Text
             style={{
               fontSize: 13,
-              fontFamily: "Poppins_600SemiBold",
+              fontFamily: typography.semibold,
               color: colors.textSecondary,
               textTransform: "uppercase",
               letterSpacing: 0.5,
@@ -61,7 +62,7 @@ export default function PlaylistSelectionSection({
                 style={{
                   color: colors.primary,
                   fontSize: 10,
-                  fontFamily: "Poppins_600SemiBold",
+                  fontFamily: typography.semibold,
                 }}
               >
                 {selectedPlaylistIds.length} linked
@@ -86,7 +87,7 @@ export default function PlaylistSelectionSection({
             }}
           >
             <Ionicons name="add" size={14} color="#fff" />
-            <Text style={{ color: "#fff", fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
+            <Text style={{ color: "#fff", fontSize: 12, fontFamily: typography.semibold }}>
               {createButtonLabel}
             </Text>
           </TouchableOpacity>
@@ -99,7 +100,7 @@ export default function PlaylistSelectionSection({
             color: colors.textSecondary,
             fontSize: 11,
             lineHeight: 16,
-            fontFamily: "Poppins_400Regular",
+            fontFamily: typography.body,
           }}
         >
           {subtitle}
@@ -120,7 +121,7 @@ export default function PlaylistSelectionSection({
           }}
         >
           <ActivityIndicator size="small" color={colors.primary} />
-          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular" }}>
+          <Text style={{ color: colors.textSecondary, fontFamily: typography.body }}>
             Loading playlists...
           </Text>
         </View>
@@ -180,7 +181,7 @@ export default function PlaylistSelectionSection({
                         flex: 1,
                         color: colors.text,
                         fontSize: 14,
-                        fontFamily: "Poppins_600SemiBold",
+                        fontFamily: typography.semibold,
                       }}
                     >
                       {playlist.title || "Untitled Playlist"}
@@ -194,7 +195,7 @@ export default function PlaylistSelectionSection({
                           borderRadius: 999,
                         }}
                       >
-                        <Text style={{ color: "#fff", fontSize: 9, fontFamily: "Poppins_600SemiBold" }}>
+                        <Text style={{ color: "#fff", fontSize: 9, fontFamily: typography.semibold }}>
                           LINKED
                         </Text>
                       </View>
@@ -207,7 +208,7 @@ export default function PlaylistSelectionSection({
                         marginTop: 2,
                         color: colors.textSecondary,
                         fontSize: 12,
-                        fontFamily: "Poppins_400Regular",
+                        fontFamily: typography.body,
                       }}
                     >
                       {playlist.genre}
@@ -219,7 +220,7 @@ export default function PlaylistSelectionSection({
                       marginTop: 3,
                       color: colors.textSecondary,
                       fontSize: 11,
-                      fontFamily: "Poppins_400Regular",
+                      fontFamily: typography.body,
                     }}
                   >
                     {itemCount} track{itemCount === 1 ? "" : "s"} • {playlist.visibility === "private" ? "Private" : "Public"}
@@ -246,10 +247,10 @@ export default function PlaylistSelectionSection({
             gap: 8,
           }}
         >
-          <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 14 }}>
+          <Text style={{ color: colors.text, fontFamily: typography.semibold, fontSize: 14 }}>
             No playlists yet
           </Text>
-          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, lineHeight: 18 }}>
+          <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 12, lineHeight: 18 }}>
             {emptyMessage}
           </Text>
         </View>

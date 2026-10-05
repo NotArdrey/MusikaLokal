@@ -1,0 +1,123 @@
+.download-site { --paper: #fff; --surface: #f6f5f1; --ink: #121318; --muted: #62646d; --line: #deddd7; --wash: #eceafe; --violet: #5546f4; --mango: #ffb627; background: var(--paper); color: var(--ink); min-height: 100vh; min-height: 100dvh; overflow-y: auto; overflow-x: clip; font-family: "Manrope_400Regular", sans-serif; }
+.download-site.dark { --paper: #111218; --surface: #1a1b22; --ink: #f8f7f2; --muted: #aaaab3; --line: #34353f; --wash: #242039; }
+.download-site * { box-sizing: border-box; }
+.download-site a { color: inherit; text-decoration: none; }
+.download-site button { font: inherit; cursor: pointer; }
+.download-site :is(a, button, summary):focus-visible { outline: 3px solid var(--violet); outline-offset: 5px; border-radius: 6px; }
+.download-site .skip-link { position: absolute; top: -100px; left: 24px; z-index: 10; padding: 12px; background: var(--paper); }
+.download-site .skip-link:focus { top: 12px; }
+.download-header, .download-footer { max-width: 1240px; margin: auto; padding: 20px 40px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.download-header { border-bottom: 1px solid var(--line); }
+.download-site :is(#main, #installation) { scroll-margin-top: 24px; }
+.hero-copy { min-width: 0; }
+.brand { display: flex; align-items: center; gap: 8px; font: 22px "SpaceGrotesk_700Bold", sans-serif; }
+.brand img { width: 58px; height: 58px; object-fit: contain; }
+.download-header nav { display: flex; align-items: center; gap: 28px; font: 13px "Manrope_600SemiBold", sans-serif; }
+.download-header nav a { padding: 12px 0; }
+.theme-toggle { background: var(--surface); border: 1px solid var(--line); color: var(--ink); width: 44px; height: 44px; border-radius: 50%; font-size: 22px !important; }
+.download-hero { max-width: 1240px; margin: auto; padding: 88px 40px 76px; display: grid; grid-template-columns: 1.15fr 1fr; gap: 42px; align-items: center; }
+.eyebrow { display: inline-flex; align-items: center; gap: 9px; font: 11px "Manrope_700Bold", sans-serif; letter-spacing: 1.8px; }
+.status-dot { width: 8px; height: 8px; background: var(--mango); border-radius: 50%; }
+.hero-copy h1 { font: 64px/1.08 "SpaceGrotesk_700Bold", sans-serif; letter-spacing: -3px; margin: 24px 0; }
+.violet-text { color: var(--violet); }
+.dark .violet-text { color: #a99bff; }
+.hero-description { max-width: 490px; color: var(--muted); font-size: 17px; line-height: 1.8; margin: 0 0 30px; }
+.download-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.primary-download { display: inline-flex; align-items: center; justify-content: center; gap: 14px; min-height: 56px; padding: 16px 24px; background: var(--violet); color: #fff !important; border: 0; border-radius: 12px; font: 14px "Manrope_700Bold", sans-serif !important; }
+.primary-download:hover { background: #4034c9; }
+.primary-download:disabled { background: var(--surface); color: var(--muted) !important; border: 1px solid var(--line); cursor: default; }
+.primary-download span { font-size: 24px; }
+.primary-download[aria-disabled="true"] { cursor: wait; }
+.cancel-download { min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); }
+.download-notice { font-size: 12px; line-height: 1.8; color: var(--muted); }
+.download-notice:empty { display: none; }
+.release-description { color: var(--muted); font-size: 12px; line-height: 1.8; margin: 16px 0 8px; }
+.standalone-note { color: var(--muted); font-size: 12px; }
+.device-note { color: var(--muted); font-size: 12px; line-height: 1.8; max-width: 460px; }
+.download-progress { display: grid; gap: 8px; margin-top: 18px; max-width: 460px; color: var(--muted); font-size: 12px; }
+.download-site progress { display: block; width: 100%; height: 8px; border: 0; border-radius: 10px; overflow: hidden; background: var(--wash); accent-color: var(--violet); }
+.download-site progress::-webkit-progress-bar { background: var(--wash); border-radius: 10px; }
+.download-site progress::-webkit-progress-value { background: var(--violet); border-radius: 10px; }
+.download-site progress::-moz-progress-bar { background: var(--violet); border-radius: 10px; }
+.hero-art { position: relative; min-height: 410px; display: grid; place-items: center; }
+.logo-card { width: 320px; max-width: 100%; padding: 12px 12px 26px; border-radius: 28px; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 20px 65px #5546f414; text-align: center; z-index: 1; transform: rotate(-4deg); }
+.logo-card img { width: 100%; height: 290px; object-fit: contain; }
+.logo-caption { font: 12px "Manrope_600SemiBold", sans-serif; color: var(--muted); }
+.orbit { position: absolute; border: 1px solid var(--line); border-radius: 50%; width: 410px; height: 410px; }
+.orbit-two { width: 470px; height: 470px; border-style: dashed; opacity: .5; }
+.scene-tag { position: absolute; z-index: 2; padding: 12px 18px; border-radius: 10px; font: 11px "Manrope_700Bold", sans-serif; box-shadow: 0 6px 20px #12131810; }
+.tag-top { top: 22px; right: 0; background: var(--mango); color: #121318; transform: rotate(5deg); }
+.tag-bottom { bottom: 4px; left: -4px; background: var(--violet); color: white; transform: rotate(3deg); }
+.feature-strip { max-width: 1160px; margin: 0 auto; padding: 32px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; }
+.feature-strip article { padding: 0 24px; }
+.feature-number { color: var(--muted); font-size: 11px; }
+.feature-strip h2 { font: 18px "SpaceGrotesk_600SemiBold", sans-serif; margin: 12px 0 8px; }
+.feature-strip p { color: var(--muted); font-size: 13px; line-height: 1.7; margin: 0; }
+.installation-section { max-width: 1240px; margin: auto; padding: 76px 40px; }
+.section-heading { max-width: 660px; }
+.section-heading h2 { font: 36px/1.2 "SpaceGrotesk_700Bold", sans-serif; letter-spacing: -1px; margin: 16px 0; }
+.section-heading p { color: var(--muted); font-size: 14px; line-height: 1.8; }
+.installation-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 30px; }
+.installation-step { align-self: start; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.installation-step summary { display: flex; align-items: center; gap: 12px; padding: 20px; min-height: 76px; list-style: none; cursor: pointer; }
+.installation-step summary::-webkit-details-marker { display: none; }
+.installation-step summary::marker { content: ""; }
+.installation-step[open] { border-color: var(--violet); }
+.step-toggle { margin-left: auto; font-size: 22px; color: var(--muted); }
+.installation-step[open] .step-toggle { transform: rotate(45deg); }
+.step-number { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; background: var(--wash); color: var(--violet); font: 13px "Manrope_700Bold", sans-serif; }
+.dark .step-number { color: #b4aaff; }
+.installation-grid h3 { flex: 1; font: 16px "SpaceGrotesk_600SemiBold", sans-serif; margin: 0; }
+.installation-grid p { margin: 0; padding: 0 20px 20px; color: var(--muted); font-size: 14px; line-height: 1.8; }
+.file-details { margin-top: 28px; color: var(--muted); font-size: 12px; }
+.file-details summary { min-height: 44px; padding: 14px 0; cursor: pointer; }
+.file-details dl { display: grid; grid-template-columns: 80px 1fr; gap: 12px; }
+.file-details dd { margin: 0; overflow-wrap: anywhere; }
+.download-footer { border-top: 1px solid var(--line); color: var(--muted); padding-top: 28px; padding-bottom: 28px; font-size: 12px; }
+.mobile-download { display: none; }
+@media (max-width: 1100px) { .hero-copy h1 { font-size: 52px; } .orbit { width: 340px; height: 340px; } .orbit-two { width: 390px; height: 390px; } .logo-card { width: 280px; } .logo-card img { height: 250px; } .installation-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 760px) {
+  .download-site { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+  .download-header, .download-footer { padding: 14px 20px; gap: 12px; }
+  .brand { font-size: 18px; gap: 4px; }
+  .download-header nav { gap: 12px; }
+  .download-header nav a { font-size: 12px; }
+  .download-hero { padding: 36px 20px 40px; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .hero-copy h1 { font-size: clamp(34px, 9vw, 52px); letter-spacing: -1.8px; margin: 20px 0; }
+  .hero-description { font-size: 15px; line-height: 1.7; margin-bottom: 24px; }
+  .download-actions { gap: 12px; }
+  .download-actions .primary-download { width: 100%; min-height: 56px; }
+  .release-description, .standalone-note, .device-note, .download-notice { font-size: 13px; line-height: 1.7; }
+  .hero-art { min-height: 300px; }
+  .logo-card { width: 260px; }
+  .orbit-two { width: min(340px, 100%); height: 300px; }
+  .orbit-one { width: min(300px, 90%); height: 270px; }
+  .tag-top { right: 0; top: 12px; }
+  .tag-bottom { position: relative; left: auto; bottom: auto; justify-self: start; margin-top: 12px; transform: none; }
+  .feature-strip { margin: 0 20px; grid-template-columns: 1fr; gap: 22px; padding: 28px 0; }
+  .feature-strip article { padding: 0; }
+  .feature-strip h2 { margin: 6px 0; }
+  .feature-strip p { font-size: 14px; }
+  .installation-section { padding: 40px 20px; }
+  .section-heading h2 { font-size: 30px; }
+  .section-heading p { font-size: 15px; }
+  .installation-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 24px; }
+  .file-details { font-size: 13px; }
+  .file-details dl { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .file-details dd { margin-bottom: 12px; }
+  .download-footer { flex-wrap: wrap; }
+  .mobile-download { display: flex; align-items: center; gap: 12px; position: fixed; bottom: 0; left: 0; right: 0; z-index: 5; border-top: 1px solid var(--line); background: var(--paper); box-shadow: 0 -8px 24px #12131810; padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+  .mobile-download .primary-download { flex: 1; min-width: 0; min-height: 52px; padding: 12px 16px; }
+  .mobile-install-link { display: inline-flex; align-items: center; min-height: 48px; padding: 8px; font: 13px "Manrope_600SemiBold", sans-serif; }
+  .mobile-download-progress { flex: 1; display: grid; gap: 8px; font-size: 13px; }
+}
+@media (max-width: 390px) {
+  .download-header nav a { display: none; }
+  .hero-art { min-height: 280px; }
+  .logo-card { width: 230px; }
+  .tag-top, .tag-bottom { font-size: 10px; padding: 10px 12px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .download-site :is(.primary-download, .theme-toggle, .installation-step) { transition: background-color 160ms ease, border-color 160ms ease; }
+  .step-toggle { transition: transform 160ms ease; }
+}

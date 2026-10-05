@@ -715,14 +715,14 @@ const styles = StyleSheet.create({
     taskTitle: {
         fontSize: 13,
         lineHeight: 18,
-        fontFamily: typography.bold,
+        fontFamily: typography.title,
         letterSpacing: 1.8,
         textTransform: 'uppercase',
     },
     compactTitle: {
         fontSize: 13,
         lineHeight: 18,
-        fontFamily: typography.bold,
+        fontFamily: typography.title,
         letterSpacing: 1.8,
         textTransform: 'uppercase',
     },
@@ -733,6 +733,7 @@ const styles = StyleSheet.create({
         letterSpacing: -0.8,
     },
     compactMainTitle: {
+        fontFamily: typography.title,
         fontSize: 22,
         lineHeight: 28,
         letterSpacing: -0.5,

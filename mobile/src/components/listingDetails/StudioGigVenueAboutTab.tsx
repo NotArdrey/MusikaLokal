@@ -11,6 +11,7 @@ import {
 } from "../../utils/recordingRule";
 import CachedImage from "../CachedImage";
 import ListingMediaCarousel from "./ListingMediaCarousel";
+import { typography } from "../../theme/tokens";
 
 const PROMOTION_CRITERIA_PREFIX = "how to get promo:";
 const PROMOTION_MIN_HOURS_PREFIX = "minimum booking hours:";
@@ -243,7 +244,7 @@ const StudioGigVenueAboutTab = ({
             <Text
               style={{
                 color: "#FFF",
-                fontFamily: "Poppins_600SemiBold",
+                fontFamily: typography.semibold,
                 fontSize: 12,
               }}
             >
@@ -353,7 +354,7 @@ const StudioGigVenueAboutTab = ({
             <Text
               style={{
                 color: "#FFF",
-                fontFamily: "Poppins_600SemiBold",
+                fontFamily: typography.semibold,
                 fontSize: 12,
               }}
             >
@@ -605,7 +606,7 @@ const StudioGigVenueAboutTab = ({
                 <Ionicons name="pricetag-outline" size={16} color={colors.primary} />
                 <Text
                   style={{
-                    fontFamily: "Poppins_600SemiBold",
+                    fontFamily: typography.semibold,
                     color: isDark ? "#c7d2fe" : "#3730a3",
                     fontSize: 14,
                   }}
@@ -616,7 +617,7 @@ const StudioGigVenueAboutTab = ({
               {conditionLabels.length > 0 ? (
                 <Text
                   style={{
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                     color: isDark ? "#a5b4fc" : "#4338ca",
                     fontSize: 11,
                     marginBottom: 2,
@@ -627,7 +628,7 @@ const StudioGigVenueAboutTab = ({
               ) : null}
               <Text
                 style={{
-                  fontFamily: "Poppins_500Medium",
+                  fontFamily: typography.medium,
                   color: isDark ? "#a5b4fc" : "#4338ca",
                   fontSize: 13,
                 }}
@@ -640,7 +641,7 @@ const StudioGigVenueAboutTab = ({
               {metadata.description ? (
                 <Text
                   style={{
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                     color: isDark ? "#a5b4fc" : "#4338ca",
                     fontSize: 12,
                     marginTop: 2,
@@ -651,7 +652,7 @@ const StudioGigVenueAboutTab = ({
               ) : null}
               <Text
                 style={{
-                  fontFamily: "Poppins_400Regular",
+                  fontFamily: typography.body,
                   color: isDark ? "#818cf8" : "#6366f1",
                   fontSize: 11,
                   marginTop: 4,
@@ -720,7 +721,7 @@ const StudioGigVenueAboutTab = ({
             style={{
               color: colors.primary,
               fontSize: 12,
-              fontFamily: "Poppins_600SemiBold",
+              fontFamily: typography.semibold,
             }}
           >
             {managerId === currentUserId ? "Manage Profile" : "Visit Profile"}
@@ -776,7 +777,7 @@ const StudioGigVenueAboutTab = ({
             style={{
               color: colors.primary,
               fontSize: 12,
-              fontFamily: "Poppins_600SemiBold",
+              fontFamily: typography.semibold,
             }}
           >
             {managerId === currentUserId ? "Manage Profile" : "Visit Profile"}

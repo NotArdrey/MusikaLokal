@@ -14,6 +14,7 @@ import {
   uploadStorageObject,
 } from '../utils/storageUpload';
 import CustomAlert, { AlertType } from './CustomAlert';
+import { typography } from "../theme/tokens";
 
 const debugLog = (..._args: unknown[]) => {};
 const MAX_CONCURRENT_IMAGE_UPLOADS = 3;
@@ -601,7 +602,7 @@ const styles = StyleSheet.create({
   },
   addImageText: {
     fontSize: 12,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   imageWrapper: {
     width: 120,
@@ -637,7 +638,7 @@ const styles = StyleSheet.create({
   },
   helpText: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     textAlign: 'center',
   },
   loadingOverlay: {
@@ -662,14 +663,14 @@ const styles = StyleSheet.create({
   loadingTitle: {
     marginTop: 14,
     fontSize: 15,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
     textAlign: 'center',
   },
   loadingSubtitle: {
     marginTop: 6,
     fontSize: 12,
     lineHeight: 18,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     textAlign: 'center',
   },
 });

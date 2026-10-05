@@ -15,7 +15,7 @@
     "test:applicant-review": "node --test scripts/test-submitted-genre-fit.mjs scripts/test-group-application-confirmation.mjs",
     "test:cv-documents": "node --test scripts/test-cv-documents.mjs scripts/test-native-upload-uri-handling.cjs",
     "test:security": "node --test scripts/test-authorization-hardening.mjs",
-    "test:accounts": "node --test scripts/test-separate-role-accounts.mjs",
+    "test:accounts": "node --test scripts/test-separate-role-accounts.mjs scripts/test-didit-review-state.mjs",
     "test:security-migration": "node scripts/validate-security-migration.mjs",
     "test:booking-reports": "node --test scripts/test-booking-report-refund.mjs",
     "test:upload-files": "node --test scripts/test-native-upload-uri-handling.cjs",
@@ -23,7 +23,10 @@
     "e2e:admin-crud": "playwright test -c e2e/playwright.config.ts --project=admin",
     "e2e:mobile-crud": "playwright test -c e2e/playwright.config.ts --project=mobile",
     "e2e:cross-app": "playwright test -c e2e/playwright.config.ts --project=cross-app",
-    "e2e:crud-full": "playwright test -c e2e/playwright.config.ts"
+    "e2e:crud-full": "playwright test -c e2e/playwright.config.ts",
+    "test:android-release": "node --test scripts/test-android-release.mjs",
+    "test:apk-website": "node --test scripts/test-apk-website.mjs",
+    "test:share-links": "node --test scripts/test-share-links.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",

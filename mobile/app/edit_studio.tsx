@@ -4014,7 +4014,7 @@ export default function EditStudioScreen() {
           style={[
             styles.input,
             {
-              fontFamily: "Poppins_400Regular",
+              fontFamily: typography.body,
               color: colors.text,
               height: multiline ? 120 : "auto",
               textAlign: "left",
@@ -4043,7 +4043,7 @@ export default function EditStudioScreen() {
           color: colors.textSecondary,
           fontSize: 11,
           marginBottom: 8,
-          fontFamily: "Poppins_600SemiBold",
+          fontFamily: typography.semibold,
         }}
       >
         {daySchedule.day.toUpperCase()} WEEKLY HOURS APPLY
@@ -4053,7 +4053,7 @@ export default function EditStudioScreen() {
           color: colors.textSecondary,
           fontSize: 12,
           marginBottom: 10,
-          fontFamily: "Poppins_400Regular",
+          fontFamily: typography.body,
         }}
       >
         Choose how long {daySchedule.day} weekly hours should stay active. Date overrides still take priority.
@@ -4093,7 +4093,7 @@ export default function EditStudioScreen() {
                   fontSize: 11,
                   lineHeight: 16,
                   includeFontPadding: false,
-                  fontFamily: "Poppins_500Medium",
+                  fontFamily: typography.medium,
                 }}
               >
                 {option.label}
@@ -4158,7 +4158,7 @@ export default function EditStudioScreen() {
                   style={{
                     color: colors.textSecondary,
                     fontSize: 10,
-                    fontFamily: "Poppins_600SemiBold",
+                    fontFamily: typography.semibold,
                     textTransform: "uppercase",
                   }}
                 >
@@ -4172,7 +4172,7 @@ export default function EditStudioScreen() {
                       : colors.textSecondary,
                     fontSize: 14,
                     marginTop: 2,
-                    fontFamily: "Poppins_600SemiBold",
+                    fontFamily: typography.semibold,
                   }}
                 >
                   {daySchedule.weeklyScheduleEndDate
@@ -4220,7 +4220,7 @@ export default function EditStudioScreen() {
                 style={{
                   color: colors.textSecondary,
                   fontSize: 12,
-                  fontFamily: "Poppins_500Medium",
+                  fontFamily: typography.medium,
                 }}
               >
                 Clear date
@@ -4294,7 +4294,7 @@ export default function EditStudioScreen() {
           style={{
             marginTop: 16,
             color: colors.textSecondary,
-            fontFamily: "Poppins_400Regular",
+            fontFamily: typography.body,
           }}
         >
           Checking permissions...
@@ -4376,7 +4376,7 @@ export default function EditStudioScreen() {
                     style={{
                       color:
                         studioType === type ? "#FFF" : colors.textSecondary,
-                      fontFamily: "Poppins_600SemiBold",
+                      fontFamily: typography.semibold,
                       fontSize: type === "Both" ? 14 : 12,
                     }}
                   >
@@ -4429,7 +4429,7 @@ export default function EditStudioScreen() {
                   style={{
                     flex: 1,
                     color: address ? colors.text : colors.textSecondary,
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                   }}
                 >
                   {address || "Tap to select location on map"}
@@ -4480,7 +4480,7 @@ export default function EditStudioScreen() {
                     <Text
                       style={{
                         color: colors.textSecondary,
-                        fontFamily: "Poppins_500Medium",
+                        fontFamily: typography.medium,
                         minWidth: 80,
                       }}
                     >
@@ -4490,7 +4490,7 @@ export default function EditStudioScreen() {
                   <Text
                     style={{
                       color: colors.text,
-                      fontFamily: "Poppins_600SemiBold",
+                      fontFamily: typography.semibold,
                       marginRight: 4,
                     }}
                   >
@@ -4504,7 +4504,7 @@ export default function EditStudioScreen() {
                     keyboardType="numeric"
                     style={{
                       color: colors.text,
-                      fontFamily: "Poppins_600SemiBold",
+                      fontFamily: typography.semibold,
                       fontSize: 16,
                       minWidth: 80,
                       textAlign: "center",
@@ -4515,7 +4515,7 @@ export default function EditStudioScreen() {
                   <Text
                     style={{
                       color: colors.textSecondary,
-                      fontFamily: "Poppins_400Regular",
+                      fontFamily: typography.body,
                       marginLeft: 4,
                     }}
                   >
@@ -4552,7 +4552,7 @@ export default function EditStudioScreen() {
                     <Text
                       style={{
                         color: colors.textSecondary,
-                        fontFamily: "Poppins_500Medium",
+                        fontFamily: typography.medium,
                         minWidth: 80,
                       }}
                     >
@@ -4562,7 +4562,7 @@ export default function EditStudioScreen() {
                   <Text
                     style={{
                       color: colors.text,
-                      fontFamily: "Poppins_600SemiBold",
+                      fontFamily: typography.semibold,
                       marginRight: 4,
                     }}
                   >
@@ -4576,7 +4576,7 @@ export default function EditStudioScreen() {
                     keyboardType="numeric"
                     style={{
                       color: colors.text,
-                      fontFamily: "Poppins_600SemiBold",
+                      fontFamily: typography.semibold,
                       fontSize: 16,
                       minWidth: 80,
                       textAlign: "center",
@@ -4587,7 +4587,7 @@ export default function EditStudioScreen() {
                   <Text
                     style={{
                       color: colors.textSecondary,
-                      fontFamily: "Poppins_400Regular",
+                      fontFamily: typography.body,
                       marginLeft: 4,
                     }}
                   >
@@ -4599,7 +4599,7 @@ export default function EditStudioScreen() {
                   <Text
                     style={{
                       color: colors.textSecondary,
-                      fontFamily: "Poppins_500Medium",
+                      fontFamily: typography.medium,
                       fontSize: 12,
                       marginBottom: 6,
                     }}
@@ -4635,7 +4635,7 @@ export default function EditStudioScreen() {
                       style={{
                         flex: 1,
                         color: colors.text,
-                        fontFamily: "Poppins_500Medium",
+                        fontFamily: typography.medium,
                         fontSize: 15,
                         paddingVertical: 14,
                         textAlignVertical: "center",
@@ -4644,7 +4644,7 @@ export default function EditStudioScreen() {
                     <Text
                       style={{
                         color: colors.textSecondary,
-                        fontFamily: "Poppins_400Regular",
+                        fontFamily: typography.body,
                       }}
                     >
                       songs
@@ -4656,7 +4656,7 @@ export default function EditStudioScreen() {
                   <Text
                     style={{
                       color: colors.textSecondary,
-                      fontFamily: "Poppins_500Medium",
+                      fontFamily: typography.medium,
                       fontSize: 12,
                       marginBottom: 6,
                     }}
@@ -4700,7 +4700,7 @@ export default function EditStudioScreen() {
                       style={{
                         flex: 1,
                         color: colors.text,
-                        fontFamily: "Poppins_500Medium",
+                        fontFamily: typography.medium,
                         fontSize: 15,
                         paddingVertical: 14,
                         textAlignVertical: "center",
@@ -4709,7 +4709,7 @@ export default function EditStudioScreen() {
                     <Text
                       style={{
                         color: colors.textSecondary,
-                        fontFamily: "Poppins_400Regular",
+                        fontFamily: typography.body,
                       }}
                     >
                       hrs
@@ -4718,7 +4718,7 @@ export default function EditStudioScreen() {
                   <Text
                     style={{
                       color: colors.textSecondary,
-                      fontFamily: "Poppins_400Regular",
+                      fontFamily: typography.body,
                       fontSize: 11,
                       marginTop: 6,
                     }}
@@ -4759,7 +4759,7 @@ export default function EditStudioScreen() {
                   }}
                 >
                   <Ionicons name="add" size={16} color={colors.primary} />
-                  <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
+                  <Text style={{ color: colors.primary, fontFamily: typography.semibold, fontSize: 12 }}>
                     Add
                   </Text>
                 </TouchableOpacity>
@@ -4783,16 +4783,16 @@ export default function EditStudioScreen() {
                   <View style={{ flex: 1, minWidth: 150, marginRight: 8 }}>
                     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
                       <Ionicons name="pricetag-outline" size={14} color={colors.primary} />
-                      <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, fontSize: 14 }}>
+                      <Text style={{ fontFamily: typography.semibold, color: colors.text, fontSize: 14 }}>
                         {promo.name}
                       </Text>
                     </View>
-                    <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                    <Text style={{ fontFamily: typography.body, color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
                       {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `PHP ${promo.discount_value}/hr off`}
                       {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
                     </Text>
                     {(promo.criteria || promo.minimum_booking_hours || promo.minimum_spend) && (
-                      <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                      <Text style={{ fontFamily: typography.body, color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                         {[
                           promo.criteria ? `How to get promo: ${promo.criteria}` : null,
                           promo.minimum_booking_hours ? `Min ${promo.minimum_booking_hours} hr(s)` : null,
@@ -4802,7 +4802,7 @@ export default function EditStudioScreen() {
                           .join(" | ")}
                       </Text>
                     )}
-                    <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                    <Text style={{ fontFamily: typography.body, color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                       {promo.is_permanent
                         ? "Always available"
                         : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} - ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
@@ -4821,7 +4821,7 @@ export default function EditStudioScreen() {
             ))}
 
             {promotions.length >= 5 && !showPromotionForm && (
-              <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
+              <Text style={{ fontFamily: typography.body, color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
                 Maximum of 5 promotions reached.
               </Text>
             )}
@@ -4838,12 +4838,12 @@ export default function EditStudioScreen() {
                   borderColor: isDark ? "#374151" : "#E5E7EB",
                 }}
               >
-                <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, fontSize: 14, marginBottom: 12 }}>
+                <Text style={{ fontFamily: typography.semibold, color: colors.text, fontSize: 14, marginBottom: 12 }}>
                   {editingPromotion ? "Edit Promotion" : "New Promotion"}
                 </Text>
 
                 {/* Name */}
-                <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                <Text style={{ fontFamily: typography.medium, color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
                   Promotion Name *
                 </Text>
                 <TextInput
@@ -4858,7 +4858,7 @@ export default function EditStudioScreen() {
                     borderRadius: 10,
                     padding: 12,
                     color: colors.text,
-                    fontFamily: "Poppins_500Medium",
+                    fontFamily: typography.medium,
                     fontSize: 14,
                     marginBottom: 12,
                     textAlignVertical: "center",
@@ -4866,7 +4866,7 @@ export default function EditStudioScreen() {
                 />
 
                 {/* Description */}
-                <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                <Text style={{ fontFamily: typography.medium, color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
                   Description (Optional)
                 </Text>
                 <TextInput
@@ -4882,7 +4882,7 @@ export default function EditStudioScreen() {
                     borderRadius: 10,
                     padding: 12,
                     color: colors.text,
-                    fontFamily: "Poppins_500Medium",
+                    fontFamily: typography.medium,
                     fontSize: 14,
                     marginBottom: 12,
                     minHeight: 60,
@@ -4890,7 +4890,7 @@ export default function EditStudioScreen() {
                   }}
                 />
 
-                <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                <Text style={{ fontFamily: typography.medium, color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
                   How to Get This Promo (Optional)
                 </Text>
                 <TextInput
@@ -4905,7 +4905,7 @@ export default function EditStudioScreen() {
                     borderRadius: 10,
                     padding: 12,
                     color: colors.text,
-                    fontFamily: "Poppins_500Medium",
+                    fontFamily: typography.medium,
                     fontSize: 14,
                     marginBottom: 12,
                     textAlignVertical: "center",
@@ -4914,7 +4914,7 @@ export default function EditStudioScreen() {
 
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                    <Text style={{ fontFamily: typography.medium, color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
                       Min Hours (Optional)
                     </Text>
                     <TextInput
@@ -4935,14 +4935,14 @@ export default function EditStudioScreen() {
                         borderRadius: 10,
                         padding: 12,
                         color: colors.text,
-                        fontFamily: "Poppins_500Medium",
+                        fontFamily: typography.medium,
                         fontSize: 14,
                         textAlignVertical: "center",
                       }}
                     />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                    <Text style={{ fontFamily: typography.medium, color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
                       Min Spend (Optional)
                     </Text>
                     <TextInput
@@ -4963,7 +4963,7 @@ export default function EditStudioScreen() {
                         borderRadius: 10,
                         padding: 12,
                         color: colors.text,
-                        fontFamily: "Poppins_500Medium",
+                        fontFamily: typography.medium,
                         fontSize: 14,
                         textAlignVertical: "center",
                       }}
@@ -4972,7 +4972,7 @@ export default function EditStudioScreen() {
                 </View>
 
                 {/* Discount Type Toggle */}
-                <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
+                <Text style={{ fontFamily: typography.medium, color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
                   Discount Type
                 </Text>
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
@@ -4993,7 +4993,7 @@ export default function EditStudioScreen() {
                     >
                       <Text
                         style={{
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                           fontSize: 12,
                           color: promotionForm.discount_type === dt ? colors.primary : colors.textSecondary,
                         }}
@@ -5005,7 +5005,7 @@ export default function EditStudioScreen() {
                 </View>
 
                 {/* Value */}
-                <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                <Text style={{ fontFamily: typography.medium, color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
                   Discount Value *
                 </Text>
                 <View
@@ -5021,7 +5021,7 @@ export default function EditStudioScreen() {
                   }}
                 >
                   {promotionForm.discount_type === "fixed_amount" && (
-                    <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>PHP</Text>
+                    <Text style={{ fontFamily: typography.semibold, color: colors.text, marginRight: 4 }}>PHP</Text>
                   )}
                   <TextInput
                     value={promotionForm.discount_value}
@@ -5033,21 +5033,21 @@ export default function EditStudioScreen() {
                       flex: 1,
                       padding: 12,
                       color: colors.text,
-                      fontFamily: "Poppins_500Medium",
+                      fontFamily: typography.medium,
                       fontSize: 14,
                       textAlignVertical: "center",
                     }}
                   />
                   {promotionForm.discount_type === "percentage" && (
-                    <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginLeft: 4 }}>%</Text>
+                    <Text style={{ fontFamily: typography.semibold, color: colors.text, marginLeft: 4 }}>%</Text>
                   )}
                   {promotionForm.discount_type === "fixed_amount" && (
-                    <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 12, marginLeft: 4 }}>/hr</Text>
+                    <Text style={{ fontFamily: typography.body, color: colors.textSecondary, fontSize: 12, marginLeft: 4 }}>/hr</Text>
                   )}
                 </View>
 
                 {/* Duration Toggle */}
-                <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
+                <Text style={{ fontFamily: typography.medium, color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
                   Duration
                 </Text>
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
@@ -5071,7 +5071,7 @@ export default function EditStudioScreen() {
                     >
                       <Text
                         style={{
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                           fontSize: 12,
                           color: promotionForm.is_permanent === opt.key ? colors.primary : colors.textSecondary,
                         }}
@@ -5102,7 +5102,7 @@ export default function EditStudioScreen() {
                         }}
                       >
                         <Ionicons name="calendar-outline" size={16} color={colors.primary} />
-                        <Text style={{ fontFamily: "Poppins_500Medium", fontSize: 12, color: promotionForm.start_date ? colors.text : colors.textSecondary }}>
+                        <Text style={{ fontFamily: typography.medium, fontSize: 12, color: promotionForm.start_date ? colors.text : colors.textSecondary }}>
                           {promotionForm.start_date
                             ? new Date(promotionForm.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                             : "Start Date"}
@@ -5124,7 +5124,7 @@ export default function EditStudioScreen() {
                         }}
                       >
                         <Ionicons name="calendar-outline" size={16} color={colors.primary} />
-                        <Text style={{ fontFamily: "Poppins_500Medium", fontSize: 12, color: promotionForm.end_date ? colors.text : colors.textSecondary }}>
+                        <Text style={{ fontFamily: typography.medium, fontSize: 12, color: promotionForm.end_date ? colors.text : colors.textSecondary }}>
                           {promotionForm.end_date
                             ? new Date(promotionForm.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                             : "End Date"}
@@ -5179,7 +5179,7 @@ export default function EditStudioScreen() {
                 )}
 
                 {/* Applies to Toggle */}
-                <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
+                <Text style={{ fontFamily: typography.medium, color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
                   Applies To
                 </Text>
                 <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
@@ -5200,7 +5200,7 @@ export default function EditStudioScreen() {
                     >
                       <Text
                         style={{
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                           fontSize: 11,
                           color: effectiveAppliesTo === at ? colors.primary : colors.textSecondary,
                         }}
@@ -5225,7 +5225,7 @@ export default function EditStudioScreen() {
                       alignItems: "center",
                     }}
                   >
-                    <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 13, color: colors.textSecondary }}>Cancel</Text>
+                    <Text style={{ fontFamily: typography.semibold, fontSize: 13, color: colors.textSecondary }}>Cancel</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     activeOpacity={1}
@@ -5238,7 +5238,7 @@ export default function EditStudioScreen() {
                       alignItems: "center",
                     }}
                   >
-                    <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 13, color: "#FFF" }}>
+                    <Text style={{ fontFamily: typography.semibold, fontSize: 13, color: "#FFF" }}>
                       {editingPromotion ? "Update" : "Save"}
                     </Text>
                   </TouchableOpacity>
@@ -5284,7 +5284,7 @@ export default function EditStudioScreen() {
                 style={{
                   flex: 1,
                   color: colors.text,
-                  fontFamily: "Poppins_500Medium",
+                  fontFamily: typography.medium,
                   fontSize: 16,
                   textAlign: "left",
                   paddingVertical: 16,
@@ -5294,7 +5294,7 @@ export default function EditStudioScreen() {
               <Text
                 style={{
                   color: colors.textSecondary,
-                  fontFamily: "Poppins_400Regular",
+                  fontFamily: typography.body,
                 }}
               >
                 persons
@@ -5416,7 +5416,7 @@ export default function EditStudioScreen() {
                 placeholderTextColor={colors.textSecondary}
                 style={[
                   styles.input,
-                  { fontFamily: "Poppins_400Regular", color: colors.text },
+                  { fontFamily: typography.body, color: colors.text },
                 ]}
               />
             </View>
@@ -5489,7 +5489,7 @@ export default function EditStudioScreen() {
             <Text
               style={{
                 color: colors.primary,
-                fontFamily: "Poppins_600SemiBold",
+                fontFamily: typography.semibold,
                 marginLeft: 8,
               }}
             >
@@ -5545,7 +5545,7 @@ export default function EditStudioScreen() {
                         style={{
                           color: colors.textSecondary,
                           fontSize: 12,
-                          fontFamily: "Poppins_400Regular",
+                          fontFamily: typography.body,
                         }}
                       >
                         Qty: {item.quantity}
@@ -5555,7 +5555,7 @@ export default function EditStudioScreen() {
                           style={{
                             color: colors.textSecondary,
                             fontSize: 11,
-                            fontFamily: "Poppins_400Regular",
+                            fontFamily: typography.body,
                             marginTop: 4,
                           }}
                           numberOfLines={2}
@@ -5719,7 +5719,7 @@ export default function EditStudioScreen() {
               style={{
                 color: colors.textSecondary,
                 fontSize: 12,
-                fontFamily: "Poppins_400Regular",
+                fontFamily: typography.body,
                 marginBottom: 12,
               }}
             >
@@ -5792,7 +5792,7 @@ export default function EditStudioScreen() {
                                 ? "#4B5563"
                                 : "#D1D5DB"
                               : colors.text,
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                           fontSize: 14,
                           lineHeight: 32,
                           textAlign: "center",
@@ -5819,9 +5819,9 @@ export default function EditStudioScreen() {
                   arrowColor: colors.primary,
                   monthTextColor: colors.text,
                   indicatorColor: colors.primary,
-                  textDayFontFamily: "Poppins_500Medium",
-                  textMonthFontFamily: "Poppins_600SemiBold",
-                  textDayHeaderFontFamily: "Poppins_500Medium",
+                  textDayFontFamily: typography.medium,
+                  textMonthFontFamily: typography.heading,
+                  textDayHeaderFontFamily: typography.medium,
                   textDayFontSize: 14,
                   textMonthFontSize: 16,
                   textDayHeaderFontSize: 12,
@@ -5847,7 +5847,7 @@ export default function EditStudioScreen() {
                     <Text
                       style={{
                         color: colors.text,
-                        fontFamily: "Poppins_500Medium",
+                        fontFamily: typography.medium,
                         fontSize: 13,
                       }}
                     >
@@ -5870,7 +5870,7 @@ export default function EditStudioScreen() {
                     style={{
                       color: colors.textSecondary,
                       fontSize: 12,
-                      fontFamily: "Poppins_600SemiBold",
+                      fontFamily: typography.semibold,
                       marginBottom: 8,
                     }}
                   >
@@ -5931,7 +5931,7 @@ export default function EditStudioScreen() {
                               <Text
                                 style={{
                                   color: colors.text,
-                                  fontFamily: "Poppins_600SemiBold",
+                                  fontFamily: typography.semibold,
                                 }}
                               >
                                 {date.toLocaleDateString("en-US", {
@@ -5953,7 +5953,7 @@ export default function EditStudioScreen() {
                                     style={{
                                       color: "#F59E0B",
                                       fontSize: 10,
-                                      fontFamily: "Poppins_500Medium",
+                                      fontFamily: typography.medium,
                                     }}
                                   >
                                     Override
@@ -5983,7 +5983,7 @@ export default function EditStudioScreen() {
                                   color: colors.textSecondary,
                                   fontSize: 11,
                                   marginBottom: 6,
-                                  fontFamily: "Poppins_600SemiBold",
+                                  fontFamily: typography.semibold,
                                 }}
                               >
                                 SESSION TYPE FOR THIS DATE
@@ -6035,7 +6035,7 @@ export default function EditStudioScreen() {
                                           fontSize: 11,
                                           lineHeight: 16,
                                           includeFontPadding: false,
-                                          fontFamily: "Poppins_500Medium",
+                                          fontFamily: typography.medium,
                                         }}
                                       >
                                         {option.label}
@@ -6059,7 +6059,7 @@ export default function EditStudioScreen() {
                                     color: colors.textSecondary,
                                     fontSize: 11,
                                     marginBottom: 4,
-                                    fontFamily: "Poppins_600SemiBold",
+                                    fontFamily: typography.semibold,
                                   }}
                                 >
                                   START
@@ -6125,7 +6125,7 @@ export default function EditStudioScreen() {
                                     color: colors.textSecondary,
                                     fontSize: 11,
                                     marginBottom: 4,
-                                    fontFamily: "Poppins_600SemiBold",
+                                    fontFamily: typography.semibold,
                                   }}
                                 >
                                   END
@@ -6227,7 +6227,7 @@ export default function EditStudioScreen() {
                                 style={{
                                   color: colors.primary,
                                   fontSize: 12,
-                                  fontFamily: "Poppins_500Medium",
+                                  fontFamily: typography.medium,
                                 }}
                               >
                                 Add Time Slot
@@ -6240,7 +6240,7 @@ export default function EditStudioScreen() {
                               style={{
                                 color: "#F59E0B",
                                 fontSize: 11,
-                                fontFamily: "Poppins_400Regular",
+                                fontFamily: typography.body,
                                 marginTop: 8,
                               }}
                             >
@@ -6275,7 +6275,7 @@ export default function EditStudioScreen() {
             style={{
               color: colors.textSecondary,
               fontSize: 12,
-              fontFamily: "Poppins_400Regular",
+              fontFamily: typography.body,
               marginBottom: 16,
             }}
           >
@@ -6342,7 +6342,7 @@ export default function EditStudioScreen() {
                           ? "#FFFFFF"
                           : colors.textSecondary,
                       fontSize: 12,
-                      fontFamily: "Poppins_600SemiBold",
+                      fontFamily: typography.semibold,
                     }}
                   >
                     {daySchedule.slots.length > 0 ? "Available" : "Closed"}
@@ -6357,7 +6357,7 @@ export default function EditStudioScreen() {
                       color: colors.textSecondary,
                       fontSize: 11,
                       marginBottom: 6,
-                      fontFamily: "Poppins_600SemiBold",
+                      fontFamily: typography.semibold,
                     }}
                   >
                     SESSION TYPE FOR THIS DAY
@@ -6406,7 +6406,7 @@ export default function EditStudioScreen() {
                               fontSize: 11,
                               lineHeight: 16,
                               includeFontPadding: false,
-                              fontFamily: "Poppins_500Medium",
+                              fontFamily: typography.medium,
                             }}
                           >
                             {option.label}
@@ -6435,7 +6435,7 @@ export default function EditStudioScreen() {
                           color: colors.textSecondary,
                           fontSize: 11,
                           marginBottom: 4,
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                         }}
                       >
                         START
@@ -6494,7 +6494,7 @@ export default function EditStudioScreen() {
                           color: colors.textSecondary,
                           fontSize: 11,
                           marginBottom: 4,
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                         }}
                       >
                         END
@@ -6587,7 +6587,7 @@ export default function EditStudioScreen() {
                     style={{
                       color: colors.primary,
                       fontSize: 12,
-                      fontFamily: "Poppins_500Medium",
+                      fontFamily: typography.medium,
                     }}
                   >
                   Add Time Slot
@@ -6630,7 +6630,7 @@ export default function EditStudioScreen() {
             >
               <Text
                 style={{
-                  fontFamily: "Poppins_600SemiBold",
+                  fontFamily: typography.semibold,
                   color: colors.text,
                 }}
               >
@@ -6722,7 +6722,7 @@ export default function EditStudioScreen() {
               <Text
                 style={{
                   fontSize: 18,
-                  fontFamily: "Poppins_600SemiBold",
+                  fontFamily: typography.heading,
                   color: colors.text,
                 }}
               >
@@ -6740,7 +6740,7 @@ export default function EditStudioScreen() {
                   style={{
                     color: colors.textSecondary,
                     fontSize: 12,
-                    fontFamily: "Poppins_600SemiBold",
+                    fontFamily: typography.semibold,
                     marginBottom: 8,
                   }}
                 >
@@ -6758,7 +6758,7 @@ export default function EditStudioScreen() {
                     borderRadius: 12,
                     padding: 16,
                     color: colors.text,
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                     borderWidth: 1,
                     borderColor: isDark ? "#374151" : "#E5E7EB",
                     textAlignVertical: "center",
@@ -6772,7 +6772,7 @@ export default function EditStudioScreen() {
                   style={{
                     color: colors.textSecondary,
                     fontSize: 12,
-                    fontFamily: "Poppins_600SemiBold",
+                    fontFamily: typography.semibold,
                     marginBottom: 8,
                   }}
                 >
@@ -6794,7 +6794,7 @@ export default function EditStudioScreen() {
                     borderRadius: 12,
                     padding: 16,
                     color: colors.text,
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                     borderWidth: 1,
                     borderColor: isDark ? "#374151" : "#E5E7EB",
                     textAlignVertical: "center",
@@ -6808,7 +6808,7 @@ export default function EditStudioScreen() {
                   style={{
                     color: colors.textSecondary,
                     fontSize: 12,
-                    fontFamily: "Poppins_600SemiBold",
+                    fontFamily: typography.semibold,
                     marginBottom: 8,
                   }}
                 >
@@ -6828,7 +6828,7 @@ export default function EditStudioScreen() {
                     borderRadius: 12,
                     padding: 16,
                     color: colors.text,
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                     borderWidth: 1,
                     borderColor: isDark ? "#374151" : "#E5E7EB",
                     height: 80,
@@ -6843,7 +6843,7 @@ export default function EditStudioScreen() {
                   style={{
                     color: colors.textSecondary,
                     fontSize: 12,
-                    fontFamily: "Poppins_600SemiBold",
+                    fontFamily: typography.semibold,
                     marginBottom: 8,
                   }}
                 >
@@ -6898,7 +6898,7 @@ export default function EditStudioScreen() {
                         <Text
                           style={{
                             color: colors.textSecondary,
-                            fontFamily: "Poppins_400Regular",
+                            fontFamily: typography.body,
                             marginTop: 8,
                           }}
                         >
@@ -6962,7 +6962,7 @@ export default function EditStudioScreen() {
                 }}
               >
                 <Text
-                  style={{ color: "#FFF", fontFamily: "Poppins_600SemiBold" }}
+                  style={{ color: "#FFF", fontFamily: typography.semibold }}
                 >
                   {editingEquipment ? "Update Equipment" : "Add Equipment"}
                 </Text>
@@ -7059,7 +7059,7 @@ const styles = StyleSheet.create({
   },
   amenityText: {
     marginRight: 8,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   footerActions: {
     marginTop: 32,
@@ -7079,7 +7079,7 @@ const styles = StyleSheet.create({
   saveButtonText: {
     fontSize: 16,
     color: "white",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   cancelButton: {
     borderRadius: 12,
@@ -7090,7 +7090,7 @@ const styles = StyleSheet.create({
   },
   inputSubLabel: {
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     marginBottom: 8,
   },
   uploadContractBtn: {
@@ -7104,12 +7104,12 @@ const styles = StyleSheet.create({
   },
   uploadText: {
     fontSize: 14,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     marginTop: 8,
   },
   uploadSubText: {
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   permitWarningBox: {
     borderWidth: 1,
@@ -7122,13 +7122,13 @@ const styles = StyleSheet.create({
   permitWarningTitle: {
     color: "#B91C1C",
     fontSize: 13,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   permitWarningText: {
     color: "#991B1B",
     fontSize: 12,
     lineHeight: 18,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   contractPreview: {
     flexDirection: "row",
@@ -7147,11 +7147,11 @@ const styles = StyleSheet.create({
   },
   contractFileName: {
     fontSize: 14,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   contractFileSize: {
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     marginTop: 2,
   },
   removeContractBtn: {
@@ -7164,7 +7164,7 @@ const styles = StyleSheet.create({
   },
   dayLabel: {
     fontSize: 14,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   toggleBtn: {
     paddingHorizontal: 12,
@@ -7178,7 +7178,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 14,
     textAlign: "center",
     textAlignVertical: "center",
@@ -7196,13 +7196,13 @@ const styles = StyleSheet.create({
   ampmBtnText: {
     fontSize: 12,
     lineHeight: 16,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     textAlign: "center",
     includeFontPadding: false,
   },
   subtitle: {
     fontSize: 13,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   // Instruments styles
   instrumentsGrid: {
@@ -7228,7 +7228,7 @@ const styles = StyleSheet.create({
   },
   instrumentName: {
     fontSize: 10,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     textAlign: "center",
   },
   instrumentCheckmark: {
@@ -7243,7 +7243,7 @@ const styles = StyleSheet.create({
   },
   selectedCount: {
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     marginTop: 12,
     textAlign: "center",
   },
@@ -7270,7 +7270,7 @@ const styles = StyleSheet.create({
   },
   equipmentName: {
     fontSize: 14,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   // Calendar styles
   calendarContainer: {
@@ -7356,7 +7356,7 @@ const styles = StyleSheet.create({
   },
   sectionSubtitle: {
     fontSize: 14,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   ...editFormStyles,
 });

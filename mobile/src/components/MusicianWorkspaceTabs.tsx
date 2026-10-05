@@ -3,6 +3,7 @@ import React, { useMemo } from "react";
 import { StyleProp, StyleSheet, TextStyle, ViewStyle } from "react-native";
 import SlidingTabBar from "./SlidingTabBar";
 import { useTheme } from "../context/ThemeContext";
+import { typography } from "../theme/tokens";
 
 type MusicianWorkspaceTabKey = "group" | "producer" | "venue" | "history";
 
@@ -72,6 +73,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   label: {
+    fontFamily: typography.body,
     fontSize: 11,
   },
 });

@@ -11,6 +11,7 @@ import {
 import CachedImage from "../CachedImage";
 import GroupLinkedPlaylistsSection from "../GroupLinkedPlaylistsSection";
 import ListingMediaCarousel from "./ListingMediaCarousel";
+import { typography } from "../../theme/tokens";
 
 interface GroupAboutTabProps {
   group: any;
@@ -203,7 +204,7 @@ const GroupAboutTab = ({
             <Text
               style={{
                 color: "#FFF",
-                fontFamily: "Poppins_600SemiBold",
+                fontFamily: typography.semibold,
                 fontSize: 12,
               }}
             >
@@ -346,7 +347,7 @@ const GroupAboutTab = ({
                             }}>
                               <Text style={{
                                 fontSize: 11,
-                                fontFamily: "Poppins_600SemiBold",
+                                fontFamily: typography.semibold,
                                 color: isLeader ? "#FFF" : colors.textSecondary,
                               }}>
                                 {memberRole}
@@ -394,7 +395,7 @@ const GroupAboutTab = ({
                       <Text
                         style={{
                           fontSize: 11,
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                           color:
                             memberCompletion === 100 ? "#10B981" : colors.textSecondary,
                         }}
@@ -414,7 +415,7 @@ const GroupAboutTab = ({
                         style={{
                           color: colors.primary,
                           fontSize: 12,
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                         }}
                       >
                         {memberId === currentUserId ? "My Profile" : "Visit Profile"}
@@ -428,7 +429,7 @@ const GroupAboutTab = ({
                         style={{
                           color: colors.textSecondary,
                           fontSize: 12,
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                         }}
                       >
                         No Profile Linked
@@ -500,7 +501,7 @@ const GroupAboutTab = ({
               <Text
                 style={{
                   fontSize: 11,
-                  fontFamily: "Poppins_600SemiBold",
+                  fontFamily: typography.semibold,
                   color:
                     completionRate === 100 ? "#10B981" : colors.textSecondary,
                 }}
@@ -513,7 +514,7 @@ const GroupAboutTab = ({
               style={{
                 marginTop: 12,
                 fontSize: 11,
-                fontFamily: "Poppins_500Medium",
+                fontFamily: typography.medium,
                 color: colors.textSecondary,
               }}
             >
@@ -530,7 +531,7 @@ const GroupAboutTab = ({
             style={{
               color: colors.primary,
               fontSize: 12,
-              fontFamily: "Poppins_600SemiBold",
+              fontFamily: typography.semibold,
             }}
           >
             {managerId === currentUserId ? "Manage Profile" : "Visit Profile"}

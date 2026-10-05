@@ -229,7 +229,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1, // tracking-wider
     paddingLeft: 4,
-    fontFamily: typography.bold,
+    fontFamily: typography.title,
   },
   card: {
     padding: 16,

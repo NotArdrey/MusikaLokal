@@ -89,6 +89,40 @@ Deno.test("normalizeFullLegalName handles spaces, casing, punctuation, and diacr
   assertEquals(normalizeFullLegalName(""), null);
 });
 
+Deno.test("wrapped Didit decisions preserve the document fingerprint and name/birthdate", async () => {
+  const document = {
+    document_number: "A123456",
+    document_type: "passport",
+    issuing_country: "PHL",
+    full_name: "Maria Reyes",
+    date_of_birth: "1991-05-06",
+  };
+  const directFingerprint = await buildIdentityDocumentFingerprint(document);
+  assert(directFingerprint);
+  for (const wrapped of [
+    { id_verifications: [document] },
+    { raw_data: { decision: { id_verifications: [document] } } },
+    { verification_data: { raw_data: { id_verifications: [document] } } },
+    { id_verification: document },
+  ]) {
+    assertEquals(await buildIdentityDocumentFingerprint(wrapped), directFingerprint);
+    assertEquals(
+      prepareIdentityNameBirthDateDuplicateInput(wrapped),
+      prepareIdentityNameBirthDateDuplicateInput(document),
+    );
+  }
+});
+
+Deno.test("redacted document numbers cannot become shared fingerprints", async () => {
+  for (const document_number of ["[redacted]", "REDACTED"]) {
+    assertEquals(await buildIdentityDocumentFingerprint({
+      document_number,
+      document_type: "passport",
+      issuing_country: "PHL",
+    }), null);
+  }
+});
+
 Deno.test("normalizeBirthDate returns YYYY-MM-DD or null", () => {
   assertEquals(normalizeBirthDate("1990-2-3"), "1990-02-03");
   assertEquals(normalizeBirthDate("1990-02-31"), null);

@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Text, View } from "react-native";
 import CachedImage from "../CachedImage";
+import { typography } from "../../theme/tokens";
 
 interface StudioSetupTabProps {
   group: any;
@@ -77,7 +78,7 @@ const StudioSetupTab = ({ group, colors, isDark, styles }: StudioSetupTabProps) 
                     color: colors.text,
                     fontSize: 13,
                     lineHeight: 18,
-                    fontFamily: "Poppins_600SemiBold",
+                    fontFamily: typography.semibold,
                     flexShrink: 1,
                     includeFontPadding: false,
                     textAlignVertical: "center",
@@ -148,7 +149,7 @@ const StudioSetupTab = ({ group, colors, isDark, styles }: StudioSetupTabProps) 
                       <Text
                         style={{
                           color: colors.text,
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                           fontSize: 14,
                         }}
                       >
@@ -158,7 +159,7 @@ const StudioSetupTab = ({ group, colors, isDark, styles }: StudioSetupTabProps) 
                         <Text
                           style={{
                             color: colors.textSecondary,
-                            fontFamily: "Poppins_400Regular",
+                            fontFamily: typography.body,
                             fontSize: 12,
                           }}
                         >
@@ -171,7 +172,7 @@ const StudioSetupTab = ({ group, colors, isDark, styles }: StudioSetupTabProps) 
                     <Text
                       style={{
                         color: colors.textSecondary,
-                        fontFamily: "Poppins_400Regular",
+                        fontFamily: typography.body,
                         fontSize: 13,
                         marginTop: 8,
                       }}
@@ -208,7 +209,7 @@ const StudioSetupTab = ({ group, colors, isDark, styles }: StudioSetupTabProps) 
                   style={{
                     color: colors.text,
                     marginLeft: 12,
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                   }}
                 >
                   {item}

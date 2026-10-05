@@ -23,6 +23,7 @@ import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { useMarketplaceProductDetailsQuery } from "../src/data/hooks";
 import { isFanUserRole } from "../src/utils/roleRouting";
+import { typography } from "../src/theme/tokens";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -452,24 +453,24 @@ const styles = StyleSheet.create({
   imagePlaceholder: { width: "100%", height: 240, borderRadius: 12, marginTop: 12, alignItems: "center", justifyContent: "center" },
   titleSection: { marginTop: 16 },
   titleRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
-  productTitle: { fontSize: moderateScale(20), fontWeight: "800" },
+  productTitle: { fontFamily: typography.title, fontSize: moderateScale(20), fontWeight: "800" },
   statusPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, marginTop: 3 },
-  statusPillText: { fontSize: moderateScale(11), fontWeight: "700" },
+  statusPillText: { fontFamily: typography.bold, fontSize: moderateScale(11), fontWeight: "700" },
   priceActionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 4 },
-  price: { fontSize: moderateScale(22), fontWeight: "800", marginTop: 4 },
+  price: { fontFamily: typography.extraBold, fontSize: moderateScale(22), fontWeight: "800", marginTop: 4 },
   inlineMessageBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12, maxWidth: 188 },
-  inlineMessageBtnText: { color: "#fff", fontSize: moderateScale(13), fontWeight: "700", flexShrink: 1 },
-  seller: { fontSize: moderateScale(13), marginTop: 4 },
-  marketNote: { fontSize: moderateScale(12), marginTop: 8, lineHeight: 18 },
+  inlineMessageBtnText: { fontFamily: typography.bold, color: "#fff", fontSize: moderateScale(13), fontWeight: "700", flexShrink: 1 },
+  seller: { fontFamily: typography.body, fontSize: moderateScale(13), marginTop: 4 },
+  marketNote: { fontFamily: typography.body, fontSize: moderateScale(12), marginTop: 8, lineHeight: 18 },
   section: { marginTop: 20 },
-  sectionTitle: { fontSize: moderateScale(15), fontWeight: "700", marginBottom: 10 },
+  sectionTitle: { fontFamily: typography.title, fontSize: moderateScale(15), fontWeight: "700", marginBottom: 10 },
   variantPill: { borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 8, marginRight: 10, minWidth: 80 },
-  description: { fontSize: moderateScale(14), lineHeight: 22 },
+  description: { fontFamily: typography.body, fontSize: moderateScale(14), lineHeight: 22 },
   metaRow: { flexDirection: "row", gap: 8, marginTop: 16 },
   metaBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8 },
   sellerActionRow: { gap: 10 },
   sellerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 12, borderWidth: 1, borderRadius: 10 },
   primarySellerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 10 },
-  primarySellerBtnText: { color: "#fff", fontSize: moderateScale(13), fontWeight: "700" },
+  primarySellerBtnText: { fontFamily: typography.bold, color: "#fff", fontSize: moderateScale(13), fontWeight: "700" },
   headerReportBtn: { width: 40, height: 40, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" },
 });

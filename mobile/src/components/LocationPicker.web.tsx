@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { ActivityIndicator, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import CustomAlert, { AlertType } from './CustomAlert';
+import { typography } from "../theme/tokens";
 
 const debugLog = (..._args: unknown[]) => {};
 const BROWSER_LOCATION_UNAVAILABLE_MESSAGE =
@@ -276,6 +277,7 @@ const styles = StyleSheet.create({
         padding: 4,
     },
     headerTitle: {
+        fontFamily: typography.heading,
         fontSize: 16,
         fontWeight: '600',
     },
@@ -283,6 +285,7 @@ const styles = StyleSheet.create({
         padding: 24,
     },
     webNote: {
+        fontFamily: typography.body,
         fontSize: 14,
         color: '#666',
         marginBottom: 16,
@@ -301,7 +304,7 @@ const styles = StyleSheet.create({
         flex: 1,
         height: 24,
         fontSize: 15,
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: typography.medium,
         lineHeight: 20,
         includeFontPadding: false,
         padding: 0,
@@ -332,6 +335,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#EEF2FF',
     },
     currentLocationBtnText: {
+        fontFamily: typography.semibold,
         color: '#4F46E5',
         fontWeight: '600',
         fontSize: 12,
@@ -346,6 +350,7 @@ const styles = StyleSheet.create({
         borderColor: '#BAE6FD',
     },
     resultAddress: {
+        fontFamily: typography.semibold,
         fontSize: 14,
         fontWeight: '600',
         textAlign: 'center',
@@ -353,6 +358,7 @@ const styles = StyleSheet.create({
         color: '#0C4A6E',
     },
     resultCoords: {
+        fontFamily: typography.body,
         fontSize: 12,
         color: '#64748B',
         marginTop: 4,
@@ -374,6 +380,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#a5b4fc',
     },
     confirmBtnText: {
+        fontFamily: typography.semibold,
         color: '#fff',
         fontWeight: '600',
         fontSize: 16,

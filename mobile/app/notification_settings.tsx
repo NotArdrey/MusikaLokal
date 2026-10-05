@@ -8,6 +8,7 @@ import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { emitToast } from '../src/events/toastBus';
 import { useTheme } from '../src/context/ThemeContext';
+import { typography } from "../src/theme/tokens";
 
 const DEFAULT_PREFERENCES = {
   push_enabled: true,
@@ -200,10 +201,10 @@ export default function NotificationSettingsScreen() {
       key={option.key}
     >
       <View style={styles.textContainer}>
-        <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>
+        <Text style={{ fontFamily: typography.semibold, fontSize: 15, color: colors.text }}>
           {option.label}
         </Text>
-        <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary, marginTop: 4, lineHeight: 20 }}>
+        <Text style={{ fontFamily: typography.body, fontSize: 13, color: colors.textSecondary, marginTop: 4, lineHeight: 20 }}>
           {option.description}
         </Text>
       </View>
@@ -284,14 +285,14 @@ const styles = StyleSheet.create({
   guestTitle: {
     marginTop: 10,
     fontSize: 16,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
   },
   guestMessage: {
     marginTop: 6,
     textAlign: 'center',
     lineHeight: 20,
     fontSize: 13,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   signInButton: {
     marginTop: 14,
@@ -302,7 +303,7 @@ const styles = StyleSheet.create({
   signInButtonText: {
     color: '#FFFFFF',
     fontSize: 13,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   row: {
     flexDirection: 'row',
@@ -324,7 +325,7 @@ const styles = StyleSheet.create({
   savingText: {
     marginLeft: 8,
     fontSize: 12,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   navbarContainer: {
     position: 'absolute',

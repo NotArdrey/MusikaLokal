@@ -5,6 +5,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { useProfileCompletion } from '../hooks/useProfileCompletion';
+import { typography } from "../theme/tokens";
 
 export const ProfileCompletionBanner = () => {
     const { isProfileComplete, checking } = useProfileCompletion();
@@ -59,11 +60,11 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
         marginBottom: 4,
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: typography.heading,
     },
     subtitle: {
         fontSize: 13,
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
         lineHeight: 18,
     },
     button: {
@@ -76,6 +77,6 @@ const styles = StyleSheet.create({
         color: 'white',
         fontSize: 13,
         fontWeight: '600',
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: typography.semibold,
     },
 });

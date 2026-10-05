@@ -868,7 +868,7 @@ export default function AddGroupScreen() {
           style={{
             marginTop: 16,
             color: colors.textSecondary,
-            fontFamily: "Poppins_400Regular",
+            fontFamily: typography.body,
           }}
         >
           Checking permissions...
@@ -1235,10 +1235,10 @@ export default function AddGroupScreen() {
                     {/* Info about selected type */}
                     {groupType && (
                       <View style={{ marginTop: 8, paddingHorizontal: 4 }}>
-                        <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular" }}>
+                        <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: typography.body }}>
                           Minimum Members: {PH_MUSIC_GROUP_TYPES.find(t => t.id === groupType)?.minMembers || 1}
                         </Text>
-                        <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular", marginTop: 2 }}>
+                        <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: typography.body, marginTop: 2 }}>
                           Roles: {PH_MUSIC_GROUP_TYPES.find(t => t.id === groupType)?.requiredRoles.join(", ")}
                         </Text>
                       </View>
@@ -1418,7 +1418,7 @@ export default function AddGroupScreen() {
                         style={{
                           flex: 1,
                           color: address ? colors.text : colors.textSecondary,
-                          fontFamily: "Poppins_400Regular",
+                          fontFamily: typography.body,
                           textAlignVertical: "center",
                         }}
                       >
@@ -1440,7 +1440,7 @@ export default function AddGroupScreen() {
                     color: colors.textSecondary,
                     fontSize: 13,
                     marginBottom: 16,
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                   }}
                 >
                   {isDuoSelection
@@ -1769,7 +1769,7 @@ export default function AddGroupScreen() {
                               style={{
                                 fontSize: 13,
                                 color: colors.text,
-                                fontFamily: "Poppins_500Medium",
+                                fontFamily: typography.medium,
                               }}
                             >
                               {m.name}
@@ -1823,7 +1823,7 @@ export default function AddGroupScreen() {
                   style={{
                     textAlign: "center",
                     color: "#F59E0B",
-                    fontFamily: "Poppins_500Medium",
+                    fontFamily: typography.medium,
                     fontSize: 12,
                   }}
                 >
@@ -2076,6 +2076,7 @@ const styles = StyleSheet.create({
     borderWidth: 4,
   },
   stepText: {
+    fontFamily: typography.body,
     fontSize: 11,
     marginTop: 8,
     textAlign: "center",
@@ -2139,7 +2140,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 14,
     textAlign: "center",
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   membersList: {
     gap: 8,
@@ -2195,7 +2196,7 @@ const styles = StyleSheet.create({
     color: "#312E81", // primaryDark approx
   },
   memberName: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   reviewContainer: {
     padding: 16,
@@ -2204,6 +2205,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   reviewLabel: {
+    fontFamily: typography.bold,
     fontSize: 12,
     textTransform: "uppercase",
     color: "#9CA3AF",
@@ -2211,6 +2213,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   reviewValue: {
+    fontFamily: typography.bold,
     fontSize: 18,
     fontWeight: "bold",
   },
@@ -2229,6 +2232,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   termsText: {
+    fontFamily: typography.body,
     textAlign: "center",
     fontSize: 12,
     color: "#9CA3AF",
@@ -2254,7 +2258,7 @@ const styles = StyleSheet.create({
     height: 56,
   },
   backBtnText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 16,
   },
   nextBtn: {
@@ -2267,7 +2271,7 @@ const styles = StyleSheet.create({
     height: 56,
   },
   nextBtnText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     color: "#fff",
     fontSize: 16,
   },
@@ -2292,12 +2296,12 @@ const styles = StyleSheet.create({
   },
   genreChipText: {
     fontSize: 13,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   genreHelperText: {
     marginBottom: 6,
     fontSize: 12,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   showMoreButton: {
     flexDirection: "row",
@@ -2308,7 +2312,7 @@ const styles = StyleSheet.create({
   },
   showMoreText: {
     fontSize: 13,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   groupTypeSheet: {
     flex: 1,
@@ -2334,7 +2338,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     textAlign: "center",
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.title,
   },
   groupTypeSheetHeaderSpacer: {
     width: 38,
@@ -2361,17 +2365,17 @@ const styles = StyleSheet.create({
   groupTypeSheetOptionTitle: {
     fontSize: 15,
     lineHeight: 20,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   groupTypeSheetOptionDescription: {
     fontSize: 12,
     lineHeight: 17,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   groupTypeSheetOptionMeta: {
     fontSize: 11,
     lineHeight: 15,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     textTransform: "uppercase",
   },
   groupTypeSheetOptionCheck: {

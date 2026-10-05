@@ -12,7 +12,7 @@ import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { createVideoPlayer, type VideoThumbnail } from "expo-video";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   BackHandler,
@@ -69,7 +69,6 @@ import { emitToast } from "../../src/events/toastBus";
 import { resolveRadioMediaUrl } from "../../src/audio/radioTrackPlayer";
 import { useTheme } from "../../src/context/ThemeContext";
 import { screenUploadsWithAi } from "../../src/services/uploadSafetyScreen";
-import { buildSocialFollowKey } from "../../src/utils/socialFollow";
 import { getSmoothTabIndex, setSmoothTab } from "../../src/utils/smoothTabs";
 import { runAfterUIIdle } from "../../src/utils/idleTask";
 import { bottomSheetSpringConfig, motion } from "../../src/utils/motion";
@@ -1154,6 +1153,10 @@ export default function ProfileScreen() {
   const [playlistActionId, setPlaylistActionId] = useState<string | null>(null);
   const [isProfileFollowing, setIsProfileFollowing] = useState(false);
   const [isProfileFollowBusy, setIsProfileFollowBusy] = useState(false);
+  const [isProfileFollowLoading, setIsProfileFollowLoading] = useState(false);
+  const [resolvedProfileFollowKey, setResolvedProfileFollowKey] = useState<string | null>(null);
+  const profileFollowRequestIdRef = useRef(0);
+  const profileFollowTargetRef = useRef("");
   const [profileFollowerCount, setProfileFollowerCount] = useState(0);
   const [profileFollowingCount, setProfileFollowingCount] = useState(0);
   const [profileFollowers, setProfileFollowers] = useState<ProfileConnectionItem[]>([]);
@@ -2109,6 +2112,10 @@ export default function ProfileScreen() {
     useCallback(() => {
       if (!authLoading) {
         const cacheTargetId = normalizedParamUserId || currentUserId;
+        if (profileFetchInFlightRef.current !== cacheTargetId) {
+          profileFetchRequestIdRef.current += 1;
+          profileFetchInFlightRef.current = null;
+        }
         const refreshToken =
           typeof normalizedRefresh === "string" && normalizedRefresh.trim().length > 0
             ? normalizedRefresh.trim()
@@ -2132,8 +2139,9 @@ export default function ProfileScreen() {
           Date.now() - cached.fetchedAt < PROFILE_FOCUS_REFRESH_COOLDOWN_MS;
 
         if (cached) {
+          displayedProfileIdRef.current = cacheTargetId || null;
           setProfile(cached.profile);
-          setIsOwner(cached.isOwner);
+          setIsOwner(cacheTargetId === currentUserId);
           setGigStats(cached.gigStats);
           setGigTimeline(cached.gigTimeline);
           setSupportsGigVisibilityPreference(cached.supportsGigVisibilityPreference);
@@ -2867,7 +2875,11 @@ export default function ProfileScreen() {
   const portfolioCount = profile?.portfolio_urls?.length ?? 0;
   const profileAvatarUrl = sanitizeAvatarUrl(profile?.avatar_url);
   const viewedProfileId = typeof profile?.id === "string" ? profile.id.trim() : "";
-  const profileFollowKey = buildSocialFollowKey("profile", viewedProfileId);
+  const profileFollowKey = `${currentUserId || ""}:${viewedProfileId}`;
+  useLayoutEffect(() => {
+    profileFollowTargetRef.current = profileFollowKey;
+  }, [profileFollowKey]);
+  const isProfileFollowReady = resolvedProfileFollowKey === profileFollowKey;
   const canFollowProfile =
     Boolean(currentUserId) &&
     !isGuest &&
@@ -3107,35 +3119,48 @@ export default function ProfileScreen() {
     (hasStation && userStation?.id && loadingStationId === userStation.id),
   );
   const loadProfileFollowState = useCallback(async () => {
-    if (!canFollowProfile || !profileFollowKey) {
+    const requestId = ++profileFollowRequestIdRef.current;
+    setResolvedProfileFollowKey(null);
+    if (!canFollowProfile) {
       setIsProfileFollowing(false);
-      return;
+      setIsProfileFollowLoading(false);
+      return null;
     }
 
+    setIsProfileFollowLoading(true);
+    const isCurrentRequest = () =>
+      profileFollowRequestIdRef.current === requestId &&
+      profileFollowTargetRef.current === profileFollowKey;
     try {
-      const { data: followingResponse, error } = await supabase.functions.invoke("manage-social-feed", {
-        body: { action: "get_following" },
-      });
+      const { data: followRow, error } = await supabase
+        .from("follows")
+        .select("id")
+        .eq("follower_id", currentUserId)
+        .eq("followed_id", viewedProfileId)
+        .eq("followed_type", "profile")
+        .maybeSingle();
 
       if (error) {
         throw error;
       }
 
-      const nextFollowingKeys = new Set<string>(
-        (Array.isArray(followingResponse?.data) ? followingResponse.data : [])
-          .map((row: any) => buildSocialFollowKey(row?.followed_type, row?.followed_id))
-          .filter((value: string) => value.length > 0),
-      );
-
-      setIsProfileFollowing(nextFollowingKeys.has(profileFollowKey));
+      if (!isCurrentRequest()) return null;
+      const following = Boolean(followRow);
+      setIsProfileFollowing(following);
+      setResolvedProfileFollowKey(profileFollowKey);
+      return following;
     } catch {
-      // Keep the current profile follow state when lookup fails.
+      return null;
+    } finally {
+      if (isCurrentRequest()) setIsProfileFollowLoading(false);
     }
-  }, [canFollowProfile, profileFollowKey]);
+  }, [canFollowProfile, currentUserId, profileFollowKey, viewedProfileId]);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
+    setIsProfileFollowBusy(false);
     void loadProfileFollowState();
-  }, [loadProfileFollowState]);
+    return () => { profileFollowRequestIdRef.current += 1; };
+  }, [loadProfileFollowState]));
 
   const refreshProfileFollowLists = useCallback(async () => {
     const targetId = viewedProfileId || currentUserId || normalizedParamUserId || "";
@@ -3182,10 +3207,18 @@ export default function ProfileScreen() {
   }, [followListModal]);
 
   const handleProfileFollowToggle = useCallback(async () => {
-    if (!canFollowProfile || !viewedProfileId || isProfileFollowBusy) {
+    if (!canFollowProfile || !viewedProfileId || isProfileFollowBusy || isProfileFollowLoading) {
+      return;
+    }
+    if (!isProfileFollowReady) {
+      void loadProfileFollowState();
       return;
     }
 
+    let requestId = ++profileFollowRequestIdRef.current;
+    const isCurrentRequest = () =>
+      profileFollowRequestIdRef.current === requestId &&
+      profileFollowTargetRef.current === profileFollowKey;
     const wasFollowing = isProfileFollowing;
     const previousFollowerCount = profileFollowerCount;
     setIsProfileFollowBusy(true);
@@ -3204,15 +3237,30 @@ export default function ProfileScreen() {
       if (error) {
         throw error;
       }
+      if (!isCurrentRequest()) return;
 
+      profileScreenCache.delete(viewedProfileId);
+      if (currentUserId) profileScreenCache.delete(currentUserId);
       emitToast({
         type: "success",
         title: wasFollowing ? "Unfollowed" : "Following",
         message: "",
       });
-      void fetchProfile({ showLoading: false });
+      void fetchProfile({ showLoading: false, force: true });
     } catch (error: any) {
-      setIsProfileFollowing(wasFollowing);
+      if (!isCurrentRequest()) return;
+      const reconciliation = loadProfileFollowState();
+      requestId = profileFollowRequestIdRef.current;
+      const actualFollowing = await reconciliation;
+      if (!isCurrentRequest()) return;
+      // Another session may already have completed the requested change.
+      if (actualFollowing === !wasFollowing) {
+        profileScreenCache.delete(viewedProfileId);
+        if (currentUserId) profileScreenCache.delete(currentUserId);
+        void fetchProfile({ showLoading: false, force: true });
+        return;
+      }
+      if (actualFollowing === null) setIsProfileFollowing(wasFollowing);
       setProfileFollowerCount(previousFollowerCount);
       emitToast({
         type: "error",
@@ -3220,9 +3268,9 @@ export default function ProfileScreen() {
         message: error?.message || "Please try again.",
       });
     } finally {
-      setIsProfileFollowBusy(false);
+      if (isCurrentRequest()) setIsProfileFollowBusy(false);
     }
-  }, [canFollowProfile, fetchProfile, isProfileFollowBusy, isProfileFollowing, profileFollowerCount, viewedProfileId]);
+  }, [canFollowProfile, currentUserId, fetchProfile, isProfileFollowBusy, isProfileFollowLoading, isProfileFollowReady, isProfileFollowing, loadProfileFollowState, profileFollowKey, profileFollowerCount, viewedProfileId]);
 
   const playlistSectionHint = hasStation
     ? canManageStations
@@ -3595,18 +3643,18 @@ export default function ProfileScreen() {
             {canFollowProfile ? (
               <TouchableOpacity
                 activeOpacity={1}
-                disabled={isProfileFollowBusy}
+                disabled={isProfileFollowBusy || isProfileFollowLoading}
                 onPress={() => void handleProfileFollowToggle()}
                 style={[
                   styles.profileFollowBtn,
                   {
                     backgroundColor: isProfileFollowing ? (isDark ? "#111827" : "#FFFFFF") : colors.primary,
                     borderColor: isProfileFollowing ? (isDark ? "#374151" : "#CBD5E1") : colors.primary,
-                    opacity: isProfileFollowBusy ? 0.7 : 1,
+                    opacity: isProfileFollowBusy || isProfileFollowLoading ? 0.7 : 1,
                   },
                 ]}
               >
-                {isProfileFollowBusy ? (
+                {isProfileFollowBusy || isProfileFollowLoading ? (
                   <ActivityIndicator size="small" color={isProfileFollowing ? colors.textSecondary : "#FFFFFF"} />
                 ) : (
                   <Text
@@ -3615,7 +3663,7 @@ export default function ProfileScreen() {
                       { color: isProfileFollowing ? colors.textSecondary : "#FFFFFF" },
                     ]}
                   >
-                    {isProfileFollowing ? "Following" : "Follow"}
+                    {isProfileFollowReady ? (isProfileFollowing ? "Following" : "Follow") : "Check Follow Status"}
                   </Text>
                 )}
               </TouchableOpacity>
@@ -3872,7 +3920,7 @@ export default function ProfileScreen() {
                           const isActive = bookmarkFilter === key;
                           return (
                             <TouchableOpacity activeOpacity={1} key={key} onPress={() => setBookmarkFilter(key as any)} style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: isActive ? colors.primary : isDark ? "#1E293B" : "#F3F4F6", justifyContent: "center" }}>
-                               <Text style={{ color: isActive ? "#fff" : colors.textSecondary, fontFamily: "Poppins_500Medium" }}>{key.charAt(0).toUpperCase() + key.slice(1)}</Text>
+                               <Text style={{ color: isActive ? "#fff" : colors.textSecondary, fontFamily: typography.medium }}>{key.charAt(0).toUpperCase() + key.slice(1)}</Text>
                             </TouchableOpacity>
                           )
                        })}
@@ -3938,7 +3986,7 @@ export default function ProfileScreen() {
                                       <Text numberOfLines={1} style={[styles.bookmarkCardSubtitle, { color: colors.textSecondary }]}>
                                         {item.subtitle}
                                       </Text>
-                                      <Text style={[styles.bookmarkCardTitle, { color: colors.primary, fontSize: 12, marginTop: 4, fontFamily: "Poppins_600SemiBold" }]}>
+                                      <Text style={[styles.bookmarkCardTitle, { color: colors.primary, fontSize: 12, marginTop: 4, fontFamily: typography.semibold }]}>
                                         {item.type}
                                       </Text>
                                   </View>
@@ -3960,12 +4008,12 @@ export default function ProfileScreen() {
                 <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 }}>
-                    <Text style={{ fontSize: 13, fontFamily: "Poppins_600SemiBold", color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    <Text style={{ fontSize: 13, fontFamily: typography.semibold, color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 }}>
                       Playlists
                     </Text>
                     {stationSlotCount > 0 && (
                       <View style={{ backgroundColor: "#22C55E20", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 }}>
-                        <Text style={{ fontSize: 10, fontFamily: "Poppins_600SemiBold", color: "#22C55E" }}>
+                        <Text style={{ fontSize: 10, fontFamily: typography.semibold, color: "#22C55E" }}>
                           {stationSlotCount} on air
                         </Text>
                       </View>
@@ -3987,7 +4035,7 @@ export default function ProfileScreen() {
                       onPress={openCreatePlaylist}
                     >
                       <Ionicons name="add" size={14} color="#fff" />
-                      <Text style={{ color: "#fff", fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>New Playlist</Text>
+                      <Text style={{ color: "#fff", fontSize: 12, fontFamily: typography.semibold }}>New Playlist</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -4040,7 +4088,7 @@ export default function ProfileScreen() {
 
                         <View style={{ flex: 1 }}>
                           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
-                            <Text style={{ flexShrink: 1, fontSize: 15, fontFamily: "Poppins_600SemiBold", color: colors.text }} numberOfLines={1}>
+                            <Text style={{ flexShrink: 1, fontSize: 15, fontFamily: typography.semibold, color: colors.text }} numberOfLines={1}>
                               {stationName}
                             </Text>
                             <View
@@ -4051,13 +4099,13 @@ export default function ProfileScreen() {
                                 backgroundColor: stationIsLive ? "#22C55E20" : (isDark ? "#334155" : "#E2E8F0"),
                               }}
                             >
-                              <Text style={{ color: stationIsLive ? "#22C55E" : colors.textSecondary, fontSize: 10, fontFamily: "Poppins_600SemiBold" }}>
+                              <Text style={{ color: stationIsLive ? "#22C55E" : colors.textSecondary, fontSize: 10, fontFamily: typography.semibold }}>
                                 {stationStatusLabel}
                               </Text>
                             </View>
                           </View>
 
-                          <Text style={{ fontSize: 12, color: colors.textSecondary, fontFamily: "Poppins_400Regular" }} numberOfLines={1}>
+                          <Text style={{ fontSize: 12, color: colors.textSecondary, fontFamily: typography.body }} numberOfLines={1}>
                             {canManageStations ? "Managed station" : `${stationCreatorName}'s radio station`}
                           </Text>
 
@@ -4113,7 +4161,7 @@ export default function ProfileScreen() {
                             color={canPlayStationFromProfile ? "#fff" : colors.text}
                           />
                         )}
-                        <Text style={{ color: canPlayStationFromProfile ? "#fff" : colors.text, fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
+                        <Text style={{ color: canPlayStationFromProfile ? "#fff" : colors.text, fontSize: 12, fontFamily: typography.semibold }}>
                           {stationPrimaryLabel}
                         </Text>
                       </TouchableOpacity>
@@ -4134,7 +4182,7 @@ export default function ProfileScreen() {
                             paddingHorizontal: 12,
                           }}
                         >
-                          <Text style={{ color: colors.text, fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
+                          <Text style={{ color: colors.text, fontSize: 12, fontFamily: typography.semibold }}>
                             {canManageStations ? "Manage Station" : "Open Station"}
                           </Text>
                         </TouchableOpacity>
@@ -4167,7 +4215,7 @@ export default function ProfileScreen() {
                       </View>
 
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 15, fontFamily: "Poppins_600SemiBold", color: colors.text }}>
+                        <Text style={{ fontSize: 15, fontFamily: typography.semibold, color: colors.text }}>
                           {canManageStations ? "Create your radio station" : "Station managed by admin"}
                         </Text>
                         <Text style={{ fontSize: 11, color: colors.textSecondary, lineHeight: 17, marginTop: 4 }}>
@@ -4194,7 +4242,7 @@ export default function ProfileScreen() {
                         }}
                       >
                         <Ionicons name="add" size={16} color="#fff" />
-                        <Text style={{ color: "#fff", fontSize: 12, fontFamily: "Poppins_600SemiBold" }}>
+                        <Text style={{ color: "#fff", fontSize: 12, fontFamily: typography.semibold }}>
                           Create Station
                         </Text>
                       </TouchableOpacity>
@@ -4248,7 +4296,7 @@ export default function ProfileScreen() {
 
                             <View style={{ flex: 1, minWidth: 0 }}>
                               <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                                <Text style={{ fontSize: 14, fontFamily: "Poppins_600SemiBold", color: colors.text, flexShrink: 1 }} numberOfLines={1}>
+                                <Text style={{ fontSize: 14, fontFamily: typography.semibold, color: colors.text, flexShrink: 1 }} numberOfLines={1}>
                                   {pl.title}
                                 </Text>
                                 {isOnRadio && (
@@ -4256,7 +4304,7 @@ export default function ProfileScreen() {
                                     backgroundColor: "#22C55E",
                                     paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4,
                                   }}>
-                                    <Text style={{ fontSize: 9, fontFamily: "Poppins_600SemiBold", color: "#fff" }}>ON AIR</Text>
+                                    <Text style={{ fontSize: 9, fontFamily: typography.semibold, color: "#fff" }}>ON AIR</Text>
                                   </View>
                                 )}
                               </View>
@@ -4296,7 +4344,7 @@ export default function ProfileScreen() {
                                   style={{
                                     color: isOnRadio ? "#22C55E" : colors.textSecondary,
                                     fontSize: 11,
-                                    fontFamily: "Poppins_600SemiBold",
+                                    fontFamily: typography.semibold,
                                   }}
                                 >
                                   {isOnRadio ? "On Radio" : "Add to Radio"}
@@ -4334,7 +4382,7 @@ export default function ProfileScreen() {
                                   color: "#EF4444",
                                   fontSize: 11,
                                   lineHeight: 14,
-                                  fontFamily: "Poppins_600SemiBold",
+                                  fontFamily: typography.semibold,
                                   includeFontPadding: false,
                                   textAlignVertical: "center",
                                 }}
@@ -4375,11 +4423,11 @@ export default function ProfileScreen() {
                       <Ionicons name="musical-notes-outline" size={24} color={colors.textSecondary} />
                     </View>
 
-                    <Text style={{ color: colors.text, fontSize: 15, fontFamily: "Poppins_600SemiBold", textAlign: "center", marginTop: 14 }}>
+                    <Text style={{ color: colors.text, fontSize: 15, fontFamily: typography.semibold, textAlign: "center", marginTop: 14 }}>
                       {isOwner && !isGuest ? "No playlists yet" : "No playlists to show"}
                     </Text>
 
-                    <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular", textAlign: "center", lineHeight: 18, marginTop: 6 }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: typography.body, textAlign: "center", lineHeight: 18, marginTop: 6 }}>
                       {isOwner && !isGuest
                         ? "Your playlists will appear here once they are added to your profile."
                         : "This profile has not shared any playlists yet."}
@@ -4481,7 +4529,7 @@ export default function ProfileScreen() {
                           size={32}
                           color={colors.primary}
                         />
-                        <Text style={{ fontSize: 12, color: colors.primary, marginTop: 4, fontFamily: "Poppins_500Medium" }}>
+                        <Text style={{ fontSize: 12, color: colors.primary, marginTop: 4, fontFamily: typography.medium }}>
                           {uploading ? "Uploading..." : "Upload"}
                         </Text>
                       </TouchableOpacity>
@@ -4982,11 +5030,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   gigVisibilityTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 13,
   },
   gigVisibilitySubtitle: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 11,
     marginTop: 2,
   },
@@ -5028,11 +5076,11 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   followersTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 14,
   },
   followersCountLabel: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 12,
   },
   followersList: {
@@ -5051,7 +5099,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   followersEmptyText: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
   },
   followerRow: {
@@ -5082,11 +5130,11 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   followerName: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 13,
   },
   followerRole: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 11,
     marginTop: 1,
   },
@@ -5103,11 +5151,11 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   followModalTitle: {
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.title,
     fontSize: 20,
   },
   followModalCount: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
     marginTop: 2,
   },
@@ -5157,6 +5205,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   tabText: {
+    fontFamily: typography.body,
     fontSize: 12,
     marginTop: 4,
   },
@@ -5183,7 +5232,7 @@ const styles = StyleSheet.create({
   gigSearchInput: {
     flex: 1,
     height: 24,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 15,
     lineHeight: 20,
     includeFontPadding: false,
@@ -5203,7 +5252,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   gigSectionTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 13,
   },
   gigTimelineCard: {
@@ -5221,7 +5270,7 @@ const styles = StyleSheet.create({
   },
   gigCardTitle: {
     flex: 1,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 14,
   },
   gigStatusBadge: {
@@ -5230,11 +5279,11 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   gigStatusBadgeText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 10,
   },
   gigCardMeta: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
   },
   gigTimelineEmpty: {
@@ -5245,12 +5294,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   gigTimelineEmptyText: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
   },
   gigHiddenText: {
     marginTop: 10,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
   },
   bookmarkSection: {
@@ -5262,7 +5311,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   bookmarkBlockTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 13,
   },
   bookmarkHorizontalList: {
@@ -5290,11 +5339,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   bookmarkCardTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 13,
   },
   bookmarkCardSubtitle: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 11,
   },
   bookmarkEmptyState: {
@@ -5305,7 +5354,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   bookmarkEmptyText: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
   },
   menuContainer: {
@@ -5339,11 +5388,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   menuLabel: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 15,
   },
   guestHintText: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
     marginTop: 2,
     flexShrink: 1,
@@ -5404,13 +5453,13 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 18,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   sectionSubtitle: {
     marginTop: 2,
     fontSize: 12,
     lineHeight: 18,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   mediaSectionActions: {
     flexDirection: "row",
@@ -5428,7 +5477,7 @@ const styles = StyleSheet.create({
   },
   mediaCountBadgeText: {
     fontSize: 12,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   addMediaBtn: {
     minHeight: 36,
@@ -5442,7 +5491,7 @@ const styles = StyleSheet.create({
   addMediaBtnText: {
     color: "#fff",
     fontSize: 12,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   emptyMedia: {
     alignItems: "center",
@@ -5464,12 +5513,12 @@ const styles = StyleSheet.create({
   emptyMediaText: {
     marginTop: 12,
     fontSize: 16,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   emptyMediaSubtext: {
     marginTop: 4,
     fontSize: 13,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     textAlign: "center",
     paddingHorizontal: 32,
   },
@@ -5482,7 +5531,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   uploadBtnText: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     color: "#fff",
     fontSize: 14,
   },
@@ -5565,7 +5614,7 @@ const styles = StyleSheet.create({
   gridVideoPlaceholderText: {
     color: "rgba(255,255,255,0.82)",
     fontSize: 11,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   gridDocumentPlaceholder: {
     flex: 1,
@@ -5576,7 +5625,7 @@ const styles = StyleSheet.create({
   },
   gridDocumentExtension: {
     fontSize: 12,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     textAlign: "center",
   },
   gridMeta: {
@@ -5599,7 +5648,7 @@ const styles = StyleSheet.create({
   mediaTypeText: {
     color: "#fff",
     fontSize: 10,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   mediaRemoveBtn: {
     position: "absolute",
@@ -5628,11 +5677,11 @@ const styles = StyleSheet.create({
   },
   profilePostsTitle: {
     fontSize: 16,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.title,
   },
   profilePostsEmpty: {
     fontSize: 13,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     paddingVertical: 10,
   },
   profilePostCard: {
@@ -5679,7 +5728,7 @@ const styles = StyleSheet.create({
   profilePostText: {
     fontSize: 13,
     lineHeight: 19,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   profilePostMetaRow: {
     marginTop: 8,
@@ -5689,7 +5738,7 @@ const styles = StyleSheet.create({
   },
   profilePostMeta: {
     fontSize: 11,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   profilePostOpenIcon: {
     marginLeft: "auto",
@@ -5733,14 +5782,14 @@ const styles = StyleSheet.create({
   uploadLoadingTitle: {
     marginTop: 14,
     fontSize: 15,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     textAlign: "center",
   },
   uploadLoadingSubtitle: {
     marginTop: 6,
     fontSize: 12,
     lineHeight: 18,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     textAlign: "center",
   },
   resumeSection: {
@@ -5767,11 +5816,11 @@ const styles = StyleSheet.create({
   },
   resumeTitle: {
     fontSize: 15,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.heading,
   },
   resumeSubtitle: {
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     marginTop: 2,
   },
   // Header button styles
@@ -5865,11 +5914,11 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   drawerName: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 15,
   },
   drawerRole: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
     marginTop: 1,
   },
@@ -5903,7 +5952,7 @@ const styles = StyleSheet.create({
   },
   drawerMenuLabel: {
     flex: 1,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 14,
   },
 });

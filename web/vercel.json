@@ -1,9 +1,39 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "installCommand": "npm install",
+  "installCommand": "npm ci",
   "framework": null,
+  "headers": [
+    {
+      "source": "/.well-known/assetlinks.json",
+      "headers": [
+        { "key": "Content-Type", "value": "application/json" },
+        { "key": "Cache-Control", "value": "public, max-age=300" }
+      ]
+    },
+    {
+      "source": "/android-release.json",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, max-age=0, must-revalidate" }]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [{ "key": "X-Content-Type-Options", "value": "nosniff" }]
+    }
+  ],
+  "redirects": [
+    { "source": "/feed", "destination": "/", "permanent": false },
+    { "source": "/home", "destination": "/", "permanent": false },
+    { "source": "/group_details", "destination": "/", "permanent": false },
+    { "source": "/profile", "destination": "/", "permanent": false },
+    { "source": "/production_team", "destination": "/", "permanent": false },
+    { "source": "/product_details", "destination": "/", "permanent": false },
+    { "source": "/playlist_details", "destination": "/", "permanent": false }
+  ],
   "rewrites": [
+    {
+      "source": "/.well-known/assetlinks.json",
+      "destination": "/.well-known/assetlinks.json"
+    },
     {
       "source": "/(.*)",
       "destination": "/"

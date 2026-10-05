@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
     color: '#F8FAFC',
     fontSize: 56,
     lineHeight: 62,
-    fontFamily: 'Poppins_700Bold',
+    fontFamily: 'SpaceGrotesk_700Bold',
     marginBottom: 14,
   },
   subtitle: {
@@ -122,7 +122,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
     lineHeight: 30,
     maxWidth: 470,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: 'Manrope_400Regular',
     marginBottom: 22,
   },
   caption: {
@@ -130,6 +130,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     letterSpacing: 1.2,
     textTransform: 'uppercase',
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: 'Manrope_600SemiBold',
   },
 });

@@ -835,7 +835,7 @@ const styles = StyleSheet.create({
     },
     scrollContent: { paddingBottom: 180, paddingTop: 0, paddingHorizontal: 16 },
     sectionHeading: {
-        fontFamily: typography.bold,
+        fontFamily: typography.title,
         fontSize: 12,
         letterSpacing: 1.4,
         marginBottom: 16,
@@ -858,13 +858,13 @@ const styles = StyleSheet.create({
         borderColor: 'transparent',
     },
     pageTabText: {
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: typography.semibold,
         fontSize: 12,
     },
     loadingText: {
         textAlign: 'center',
         marginTop: 20,
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
     },
     skeletonList: {
         gap: 16,
@@ -881,12 +881,12 @@ const styles = StyleSheet.create({
     },
     emptyTitle: {
         marginTop: 16,
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: typography.heading,
         fontSize: 20,
     },
     emptyText: {
         marginTop: 10,
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
         textAlign: 'center',
     },
     cardContainer: { ...managementCardStyles.surface, overflow: 'hidden', borderColor: palette.line, marginBottom: 12 },
@@ -913,7 +913,7 @@ const styles = StyleSheet.create({
         paddingVertical: 4,
     },
     permitStatusChipText: {
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: typography.semibold,
         fontSize: 11,
     },
     rejectionReasonText: {

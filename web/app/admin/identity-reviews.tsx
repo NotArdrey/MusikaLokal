@@ -1,21 +1,11 @@
+import useAdminLayout from '../../src/hooks/useAdminLayout';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import AudioPreviewPlayer from '../../src/components/AudioPreviewPlayer';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
-import Header from '../../src/components/header';
+import Header from '../../src/components/admin/AdminPageHeader';
 import LoadingState from '../../src/components/LoadingState';
 import InAppMediaViewer from '../../src/components/InAppMediaViewer';
 import { useAuth } from '../../src/context/AuthContext';
@@ -130,7 +120,6 @@ const cleanManualReviewEmailError = (rawError: string) => {
   return withoutQueueSuffix;
 };
 
-type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
 type ManualReviewAssetKind = 'front' | 'back' | 'selfie' | 'musicVideo';
 
 interface IdentityMatchAccount {
@@ -250,24 +239,6 @@ interface ManualIdentityReviewEntry {
 }
 
 type IdentityMatchWarning = NonNullable<ManualIdentityReviewEntry['identity_match_warning']>;
-
-const adminTabRoutes: Record<Tab, string> = {
-  dashboard: '/admin',
-  users: '/admin/users',
-  reports: '/admin/reports',
-  audit: '/admin/audit',
-  posts: '/admin/posts',
-  products: '/admin/products',
-};
-
-const tabItems: { key: Tab; label: string; icon: string }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' },
-  { key: 'users', label: 'Users', icon: 'people-outline' },
-  { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
-  { key: 'audit', label: 'Audit', icon: 'time-outline' },
-  { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
-  { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
-];
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return '-';
@@ -660,6 +631,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   modalButton: {
+    flexShrink: 1,
     minWidth: 108,
     borderRadius: 10,
     paddingHorizontal: 14,
@@ -812,6 +784,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   smallActionButton: {
+    minHeight: 44,
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 10,
@@ -819,19 +792,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 40,
+
     minWidth: 132,
     flexGrow: 1,
     flexBasis: 0,
     gap: 4,
   },
   smallActionButtonFilled: {
+    minHeight: 44,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 40,
+
     minWidth: 132,
     flexGrow: 1,
     flexBasis: 0,
@@ -849,31 +823,13 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     textAlign: 'center',
   },
-  tabButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    position: 'relative',
-  },
-  tabsRow: {
-    gap: 8,
-    paddingBottom: 4,
-  },
-  tabText: {
-    fontSize: 12,
-    fontFamily: 'Poppins_600SemiBold',
-    textTransform: 'capitalize',
-  },
+
 });
 
 export default function AdminIdentityReviewsPage() {
   const { colors, isDark } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
-  const { width } = useWindowDimensions();
+  const { width, height, isCompact, contentPadding } = useAdminLayout();
 
   const [initializingReviews, setInitializingReviews] = useState(false);
   const [manualReviews, setManualReviews] = useState<ManualIdentityReviewEntry[]>([]);
@@ -902,14 +858,8 @@ export default function AdminIdentityReviewsPage() {
     message: '',
   });
 
-  const showInlineTabNav = !(Platform.OS === 'web' && width >= 768);
-
   const showAlert = useCallback((type: AlertType, title: string, message: string) => {
     setAlertState({ visible: true, type, title, message });
-  }, []);
-
-  const handleTabChange = useCallback((nextTab: Tab) => {
-    router.replace(adminTabRoutes[nextTab] as any);
   }, []);
 
   const invokeAdminUsersManagement = useCallback(
@@ -1331,47 +1281,17 @@ export default function AdminIdentityReviewsPage() {
       accessibilityLabel="admin-identity-reviews-page"
       style={[styles.flex1, { backgroundColor: colors.background }]}
     >
-      <Header title="Admin" hideBackButton />
+      <Header title="Identity reviews" hideBackButton />
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingHorizontal: contentPadding }]}
         showsVerticalScrollIndicator={false}
         showsHorizontalScrollIndicator={false}
       >
-        {showInlineTabNav && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
-            {tabItems.map((item) => {
-              const active = item.key === 'users';
-              return (
-                <TouchableOpacity
-                  key={item.key}
-                  activeOpacity={1}
-                  onPress={() => handleTabChange(item.key)}
-                  style={[
-                    styles.tabButton,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#F3F4F6'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={item.icon as any}
-                    size={16}
-                    color={active ? '#FFFFFF' : colors.textSecondary}
-                  />
-                  <Text style={[styles.tabText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        )}
 
         <View style={styles.sectionGap}>
           <View style={[styles.queueHeaderCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.queueHeaderTop}>
+            <View style={[styles.queueHeaderTop, isCompact && { flexDirection: 'column', alignItems: 'stretch' }]}>
               <View style={styles.queueHeaderTitleRow}>
                 <View style={[styles.queueHeaderIcon, { backgroundColor: `${colors.primary}1A` }]}>
                   <Ionicons name="id-card-outline" size={22} color={colors.primary} />
@@ -1394,7 +1314,7 @@ export default function AdminIdentityReviewsPage() {
             <View style={styles.queueToolbar}>
               <View
                 style={[
-                  styles.queueSearchBox,
+                  styles.queueSearchBox, isCompact && { minWidth: 0, flexBasis: '100%' },
                   {
                     backgroundColor: colors.inputBackground,
                     borderColor: colors.inputBorder,
@@ -1718,11 +1638,11 @@ export default function AdminIdentityReviewsPage() {
       </ScrollView>
 
       <Modal visible={manualReviewModalVisible} transparent animationType="fade" onRequestClose={closeManualReviewDecisionModal}>
-        <View style={styles.modalBackdrop}>
+        <View style={[styles.modalBackdrop, { padding: isCompact ? 8 : 20 }]}>
           <View
             testID="admin-identity-review-decision-modal"
             accessibilityLabel="admin-identity-review-decision-modal"
-            style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+            style={[styles.modalCard, { maxHeight: Math.max(180, height - (isCompact ? 16 : 40)), ...(isCompact ? { padding: 14 } : {}) }, { backgroundColor: colors.card, borderColor: colors.border }]}
           >
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {manualReviewIsOwnership
@@ -1900,7 +1820,7 @@ export default function AdminIdentityReviewsPage() {
               ]}
             />
 
-            <View style={styles.modalActionsRow}>
+            <View style={[styles.modalActionsRow, isCompact && { flexDirection: 'column' }]}>
               <TouchableOpacity
                 testID="admin-identity-review-cancel-button"
                 accessibilityLabel="admin-identity-review-cancel-button"
@@ -1942,8 +1862,8 @@ export default function AdminIdentityReviewsPage() {
       </Modal>
 
       <Modal visible={Boolean(identityMatchPreview)} transparent animationType="fade" onRequestClose={() => setIdentityMatchPreview(null)}>
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[styles.modalBackdrop, { padding: isCompact ? 8 : 20 }]}>
+          <View style={[styles.modalCard, { maxHeight: Math.max(180, height - (isCompact ? 16 : 40)), ...(isCompact ? { padding: 14 } : {}) }, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>Possible Identity Match</Text>
             <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
               Applicant: {identityMatchPreview?.profile?.full_name || identityMatchPreview?.submitted_by_email || '-'}
@@ -2176,7 +2096,7 @@ export default function AdminIdentityReviewsPage() {
               </View>
             </ScrollView>
 
-            <View style={styles.modalActionsRow}>
+            <View style={[styles.modalActionsRow, isCompact && { flexDirection: 'column' }]}>
               <TouchableOpacity
                 activeOpacity={1}
                 onPress={() => setIdentityMatchPreview(null)}

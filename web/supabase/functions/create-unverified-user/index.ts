@@ -12,6 +12,7 @@ import {
     queueIdentityReview,
     recordIdentityDocumentClaim,
     revokeOrphanSameRoleIdentityClaims,
+    resolveIdentityDocument,
     stripPrivateSessionFields,
     verifySessionNonce,
 } from '../_shared/identityDuplicate.ts'
@@ -649,12 +650,7 @@ function formatDocumentTypeLabel(rawType: unknown, fallbackType: unknown) {
 }
 
 function resolveDiditDocumentInfo(verificationData: any, selectedDocumentType: unknown, selectedDocumentTypeKey: unknown) {
-    const decision = findDecisionObject(verificationData)
-    const idVerification = decision?.id_verifications?.[0]
-        || verificationData?.id_verification
-        || verificationData?.idVerification
-        || verificationData?.raw_data
-        || verificationData
+    const idVerification = resolveIdentityDocument(verificationData)
 
     const diditDocumentType = firstNonEmptyString(
         verificationData?.document_type,

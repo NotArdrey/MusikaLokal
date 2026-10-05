@@ -13,6 +13,7 @@ import { isE2EFixtureMode } from '../utils/e2eFixtures';
 import { motion } from '../utils/motion';
 import CustomAlert from './CustomAlert';
 import InAppMediaViewer from './InAppMediaViewer';
+import { typography } from "../theme/tokens";
 
 type CustomModalProps = {
   visible: boolean;
@@ -547,14 +548,14 @@ const styles = StyleSheet.create({
     fontSize: 19,
     marginBottom: 10,
     textAlign: 'center',
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
   },
   message: {
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 18,
     lineHeight: 22,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   buttonContainer: {
     width: '100%',
@@ -570,7 +571,7 @@ const styles = StyleSheet.create({
   confirmButtonText: {
     color: 'white',
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   cancelButton: {
     width: '100%',
@@ -581,7 +582,7 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: {
     fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   input: {
     width: '100%',
@@ -591,7 +592,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     minHeight: 80,
     textAlignVertical: 'top',
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   summaryCard: {
     width: '100%',
@@ -615,13 +616,13 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   summaryLabel: {
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
     fontSize: 12,
   },
   summaryValue: {
     flex: 1,
     textAlign: 'right',
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     fontSize: 12,
     lineHeight: 17,
   },
@@ -649,13 +650,13 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   termsStrong: {
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   termsText: {
     flex: 1,
     fontSize: 12.5,
     lineHeight: 19,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   inlineLinkButton: {
     flexDirection: 'row',
@@ -670,7 +671,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     fontSize: 12.5,
     lineHeight: 18,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
     textDecorationLine: 'underline',
   },
   termsOverlay: {
@@ -695,25 +696,25 @@ const styles = StyleSheet.create({
   },
   termsTitle: {
     fontSize: 16,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
   },
   closeTermsText: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   termsScrollContent: {
     paddingBottom: 8,
   },
   termsSectionTitle: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
     marginTop: 12,
     marginBottom: 6,
   },
   termsBody: {
     fontSize: 13,
     lineHeight: 20,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
 });
 

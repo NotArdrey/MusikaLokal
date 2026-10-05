@@ -451,7 +451,7 @@ export default function HomeScreen() {
 
   // AI Recommendation Mode
   const aiModeEnabled = true;
-  const strictLlmModeForAiPages = true;
+  const strictLlmModeForAiPages = false;
   const showRecommendationDiagnostics =
     __DEV__ && process.env.EXPO_PUBLIC_SHOW_RECOMMENDATION_DIAGNOSTICS === "true";
   const [aiRecommendations, setAiRecommendations] = useState<any[]>(() =>
@@ -1568,7 +1568,7 @@ export default function HomeScreen() {
                   return;
                 }
 
-                if (llmResult.aiPowered && llmResult.recommendations.length > 0) {
+                if (llmResult.recommendations.length > 0) {
                   lastHomeAiRerankAtRef.current = Date.now();
                   setAiRecommendations(llmResult.recommendations);
                   setAiFeedProvider(llmResult.aiProvider || groqModelLabel);
@@ -3598,7 +3598,7 @@ const styles = StyleSheet.create({
   },
   featuredTitle: {
     color: "#FFF",
-    fontFamily: typography.bold,
+    fontFamily: typography.title,
     fontSize: moderateScale(26), // Large Typography
     marginBottom: 4,
     textShadowColor: "rgba(0,0,0,0.5)",

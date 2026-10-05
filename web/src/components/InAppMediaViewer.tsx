@@ -168,7 +168,7 @@ const InAppMediaViewer = ({ visible, uri, title, onClose }: InAppMediaViewerProp
           <Text style={styles.title} numberOfLines={1}>
             {title || (mediaType === "video" ? "Video" : "Media")}
           </Text>
-          <TouchableOpacity activeOpacity={1} onPress={onClose} style={styles.closeButton}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close media preview" activeOpacity={1} onPress={onClose} style={styles.closeButton}>
             <Ionicons name="close" size={26} color="#FFFFFF" />
           </TouchableOpacity>
         </View>

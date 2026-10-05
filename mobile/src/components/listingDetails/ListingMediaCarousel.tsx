@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import CachedImage from "../CachedImage";
+import { typography } from "../../theme/tokens";
 
 interface ListingMediaCarouselProps {
   mediaItems: string[];
@@ -59,7 +60,7 @@ const ListingMediaCarousel = ({
           backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
         }}
       >
-        <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium" }}>
+        <Text style={{ color: colors.textSecondary, fontFamily: typography.medium }}>
           No media uploaded yet
         </Text>
       </View>

@@ -1,28 +1,12 @@
+import useAdminLayout from '../../src/hooks/useAdminLayout';
 import { Ionicons } from '@expo/vector-icons';
-import {
-  BottomSheetBackdrop,
-  BottomSheetModal,
-  BottomSheetScrollView,
-  useBottomSheetTimingConfigs,
-} from '@gorhom/bottom-sheet';
-import { router } from 'expo-router';
+import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView, useBottomSheetTimingConfigs } from '@gorhom/bottom-sheet';
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Animated,
-  Easing,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Animated, Easing, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import { FilterDropdown } from '../../src/components/admin/filters';
-import Header from '../../src/components/header';
+import Header from '../../src/components/admin/AdminPageHeader';
 import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -33,14 +17,7 @@ import type {
   AdminPaymentTransaction,
   AdminPaymentTotals,
 } from '../../src/admin/payments';
-import {
-  downloadPaymentTransactionsExcel,
-  downloadPaymentTransactionsPdf,
-  fetchAdminPaymentTransactions,
-  getPaymentStatusColor,
-  normalizePaymentActionLabel,
-  PAYMENT_STATUS_FILTERS,
-} from '../../src/admin/payments';
+import { downloadPaymentTransactionsExcel, downloadPaymentTransactionsPdf, fetchAdminPaymentTransactions, getPaymentStatusColor, normalizePaymentActionLabel, PAYMENT_STATUS_FILTERS } from '../../src/admin/payments';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -110,17 +87,6 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   } catch {
     return null;
   }
-};
-
-type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
-
-const adminTabRoutes: Record<Tab, string> = {
-  dashboard: '/admin',
-  users: '/admin/users',
-  reports: '/admin/reports',
-  audit: '/admin/audit',
-  posts: '/admin/posts',
-  products: '/admin/products',
 };
 
 const DASHBOARD_CACHE_TTL_MS = 30_000;
@@ -657,6 +623,7 @@ const styles = StyleSheet.create({
   },
   chartLegendHorizontal: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'center',
     gap: 16,
   },
@@ -671,7 +638,7 @@ const styles = StyleSheet.create({
     minHeight: 220,
   },
   dashboardActionButton: {
-    minHeight: 36,
+    minHeight: 44,
     borderRadius: 8,
     borderWidth: 1,
     paddingHorizontal: 12,
@@ -909,6 +876,7 @@ const styles = StyleSheet.create({
   },
   pulseRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'baseline',
     gap: 8,
   },
@@ -987,16 +955,7 @@ const styles = StyleSheet.create({
   sectionGap: {
     gap: 12,
   },
-  tabButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    position: 'relative',
-  },
+
   tableCell: {
     flex: 1,
     fontSize: 12,
@@ -1014,15 +973,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     paddingVertical: 12,
   },
-  tabsRow: {
-    gap: 8,
-    paddingBottom: 4,
-  },
-  tabText: {
-    fontSize: 12,
-    fontFamily: 'Poppins_600SemiBold',
-    textTransform: 'capitalize',
-  },
+
   th: {
     fontFamily: 'Poppins_600SemiBold',
     fontSize: 11,
@@ -1091,19 +1042,10 @@ const styles = StyleSheet.create({
   },
 });
 
-const tabItems: { key: Tab; label: string; icon: string }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' },
-  { key: 'users', label: 'Users', icon: 'people-outline' },
-  { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
-  { key: 'audit', label: 'Audit', icon: 'time-outline' },
-  { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
-  { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
-];
-
 export default function AdminDashboardPage() {
   const { colors, isDark } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
-  const { width } = useWindowDimensions();
+  const { isCompact, isNarrow, contentPadding } = useAdminLayout();
   const hasHydratedDashboardRef = useRef(false);
   const latestMetricsRequestRef = useRef(0);
   const adminWithdrawSheetRef = useRef<BottomSheetModal>(null);
@@ -1140,8 +1082,6 @@ export default function AdminDashboardPage() {
     message: '',
   });
 
-  const showInlineTabNav = !(Platform.OS === 'web' && width >= 768);
-
   const showAlert = useCallback((type: AlertType, title: string, message: string) => {
     setAlertState({ visible: true, type, title, message });
   }, []);
@@ -1172,11 +1112,6 @@ export default function AdminDashboardPage() {
     }),
     [dashboardDateRange, dashboardSearchQuery],
   );
-
-  const handleTabChange = useCallback((nextTab: Tab) => {
-    if (nextTab === 'dashboard') return;
-    router.replace(adminTabRoutes[nextTab] as any);
-  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -1809,47 +1744,17 @@ export default function AdminDashboardPage() {
       accessibilityLabel="admin-dashboard-page"
       style={[styles.flex1, { backgroundColor: colors.background }]}
     >
-      <Header title="Admin" hideBackButton />
+      <Header title="Dashboard" hideBackButton />
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingHorizontal: contentPadding }]}
         showsVerticalScrollIndicator={false}
         showsHorizontalScrollIndicator={false}
       >
-        {showInlineTabNav && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
-            {tabItems.map((item) => {
-              const active = item.key === 'dashboard';
-              return (
-                <TouchableOpacity
-                  key={item.key}
-                  activeOpacity={1}
-                  onPress={() => handleTabChange(item.key)}
-                  style={[
-                    styles.tabButton,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#F3F4F6'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={item.icon as any}
-                    size={16}
-                    color={active ? '#FFFFFF' : colors.textSecondary}
-                  />
-                  <Text style={[styles.tabText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        )}
 
         <View style={styles.sectionGap}>
           <View style={{ flexDirection: 'row', gap: 12, marginBottom: 8, zIndex: 10, flexWrap: 'wrap' }}>
-            <View style={{ flex: 1, minWidth: 200 }}>
+            <View style={{ flex: 1, minWidth: isCompact ? '100%' : 200 }}>
               <TextInput
                 testID="admin-dashboard-global-search-input"
                 accessibilityLabel="admin-dashboard-global-search-input"
@@ -1909,7 +1814,7 @@ export default function AdminDashboardPage() {
             </View>
           )}
 
-          <View style={styles.pulseGrid}>
+          <View style={[styles.pulseGrid, isCompact && { flexDirection: 'column' }]}>
             <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.pulseHeader}>
                 <Text style={[styles.pulseTitle, { color: colors.textSecondary }]}>Users & Engagement</Text>
@@ -1982,7 +1887,7 @@ export default function AdminDashboardPage() {
                   Gross: {formatCurrency(paymentTotals.grossAmount)} | Refunds: {formatCurrency(paymentTotals.refundedAmount)} | Collected: {formatCurrency(paymentTotals.netAmount)}
                 </Text>
               </View>
-              <View style={styles.withdrawalButtonRow}>
+              <View style={[styles.withdrawalButtonRow, isCompact && { justifyContent: 'flex-start' }]}>
                 <TouchableOpacity
                   testID="admin-payment-transactions-export-button"
                   accessibilityLabel="admin-payment-transactions-export-button"
@@ -2046,30 +1951,32 @@ export default function AdminDashboardPage() {
               </View>
             </View>
 
-            <FilterDropdown
-              label="Payment status"
-              options={PAYMENT_STATUS_FILTERS.map((filter) => ({ value: filter.key, label: filter.label }))}
-              value={paymentStatusFilter}
-              emptyValue="all"
-              emptyLabel="All payments"
-              onChange={(value) => {
-                if (!Array.isArray(value)) setPaymentStatusFilter(value as AdminPaymentStatusFilter);
-              }}
-            />
+            <View style={{ gap: 12, marginBottom: 16 }}>
+              <FilterDropdown
+                label="Payment status"
+                options={PAYMENT_STATUS_FILTERS.map((filter) => ({ value: filter.key, label: filter.label }))}
+                value={paymentStatusFilter}
+                emptyValue="all"
+                emptyLabel="All payments"
+                onChange={(value) => {
+                  if (!Array.isArray(value)) setPaymentStatusFilter(value as AdminPaymentStatusFilter);
+                }}
+              />
 
-            <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#064E3B' : '#ECFDF5' }]}>
-                <Text style={styles.badgeTextGreen}>{formatMetricCount(paymentTotals.count)} records</Text>
-              </View>
-              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#172554' : '#EFF6FF' }]}>
-                <Text style={[styles.badgeTextGreen, { color: '#0ea5e9' }]}>{formatMetricCount(paymentTotals.refundedCount)} refund events</Text>
-              </View>
-              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#450A0A' : '#FEF2F2' }]}>
-                <Text style={[styles.badgeTextGreen, { color: '#ef4444' }]}>{formatMetricCount(paymentTotals.cancelledCount)} cancelled</Text>
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#064E3B' : '#ECFDF5' }]}>
+                  <Text style={styles.badgeTextGreen}>{formatMetricCount(paymentTotals.count)} {paymentTotals.count === 1 ? 'record' : 'records'}</Text>
+                </View>
+                <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#172554' : '#EFF6FF' }]}>
+                  <Text style={[styles.badgeTextGreen, { color: '#0ea5e9' }]}>{formatMetricCount(paymentTotals.refundedCount)} {paymentTotals.refundedCount === 1 ? 'refund event' : 'refund events'}</Text>
+                </View>
+                <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#450A0A' : '#FEF2F2' }]}>
+                  <Text style={[styles.badgeTextGreen, { color: '#ef4444' }]}>{formatMetricCount(paymentTotals.cancelledCount)} cancelled</Text>
+                </View>
               </View>
             </View>
 
-            <View style={styles.tableHeader}>
+            <View style={[styles.tableHeader, isNarrow && { display: 'none' }]}>
               <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.4 }]}>Customer</Text>
               <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.4 }]}>Studio</Text>
               <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary }]}>Action</Text>
@@ -2094,22 +2001,22 @@ export default function AdminDashboardPage() {
                     key={transaction.id}
                     testID={`admin-payment-transaction-row-${transaction.booking_id}`}
                     accessibilityLabel={`admin-payment-transaction-row-${transaction.booking_id}`}
-                    style={[styles.tableRow, { borderBottomColor: colors.border }]}
+                    style={[styles.tableRow, isNarrow && { flexDirection: 'column', gap: 10 }, { borderBottomColor: colors.border }]}
                   >
-                    <View style={[styles.tableCell, { flex: 1.4 }]}>
-                      <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>{customerLabel}</Text>
+                    <View style={[styles.tableCell, isNarrow && { minWidth: 0 }, { flex: 1.4 }]}>
+                      <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>{isNarrow ? `Customer: ${customerLabel}` : customerLabel}</Text>
                       <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>{formatDateTime(transaction.event_at)}</Text>
                     </View>
-                    <View style={[styles.tableCell, { flex: 1.4 }]}>
-                      <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>{studioLabel}</Text>
+                    <View style={[styles.tableCell, isNarrow && { minWidth: 0 }, { flex: 1.4 }]}>
+                      <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>{isNarrow ? `Studio: ${studioLabel}` : studioLabel}</Text>
                       <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>{transaction.reference || 'No reference'}</Text>
                     </View>
-                    <View style={[styles.tableCell, { justifyContent: 'center' }]}>
+                    <View style={[styles.tableCell, isNarrow && { minWidth: 0 }, { justifyContent: 'center' }]}>
                       <View style={[styles.badgeGreen, { alignSelf: 'flex-start', backgroundColor: `${statusColor}26` }]}>
                         <Text style={[styles.badgeTextGreen, { color: statusColor }]}>{normalizePaymentActionLabel(transaction.action)}</Text>
                       </View>
                     </View>
-                    <View style={[styles.tableCell, { justifyContent: 'center' }]}>
+                    <View style={[styles.tableCell, isNarrow && { minWidth: 0 }, { justifyContent: 'center' }]}>
                       <Text style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_600SemiBold', textAlign: 'right' }}>
                         {formatCurrency(transaction.net_amount)}
                       </Text>
@@ -2125,7 +2032,7 @@ export default function AdminDashboardPage() {
                         accessibilityLabel={`admin-payment-transaction-details-${transaction.booking_id}`}
                         activeOpacity={0.88}
                         onPress={() => handlePaymentDetails(transaction)}
-                        style={[styles.miniActionButton, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}
+                        style={[styles.miniActionButton, isNarrow && { minHeight: 44 }, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}
                       >
                         <Ionicons name="document-text-outline" size={13} color={colors.primary} />
                         <Text style={[styles.miniActionText, { color: colors.primary }]}>Details</Text>
@@ -2149,7 +2056,7 @@ export default function AdminDashboardPage() {
                   Completed: {formatCurrency(withdrawalTotals.completedAmount)} | Pending: {formatCurrency(withdrawalTotals.pendingAmount)} | Platform records: {formatMetricCount(withdrawalTotals.platformCount)}
                 </Text>
               </View>
-              <View style={styles.withdrawalButtonRow}>
+              <View style={[styles.withdrawalButtonRow, isCompact && { justifyContent: 'flex-start' }]}>
                 <TouchableOpacity
                   testID="admin-platform-withdrawal-open-button"
                   accessibilityLabel="admin-platform-withdrawal-open-button"
@@ -2205,7 +2112,7 @@ export default function AdminDashboardPage() {
               </View>
             </View>
 
-            <View style={styles.withdrawalSignalGrid}>
+            <View style={[styles.withdrawalSignalGrid, isCompact && { flexDirection: 'column' }]}>
               <View style={[styles.withdrawalSignalCard, { backgroundColor: isDark ? '#102A22' : '#ECFDF5', borderColor: isDark ? '#14532D' : '#BBF7D0' }]}>
                 <Text style={[styles.withdrawalSignalLabel, { color: isDark ? '#86EFAC' : '#047857' }]}>Paid Booking Revenue</Text>
                 <Text style={[styles.withdrawalSignalValue, { color: isDark ? '#D1FAE5' : '#065F46' }]}>{formatCurrency(metrics.grossRevenue)}</Text>
@@ -2249,7 +2156,7 @@ export default function AdminDashboardPage() {
               </View>
             </View>
 
-            <View style={styles.tableHeader}>
+            <View style={[styles.tableHeader, isNarrow && { display: 'none' }]}>
               <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.3 }]}>Owner</Text>
               <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary, flex: 1.5 }]}>Destination</Text>
               <Text style={[styles.tableCell, styles.th, { color: colors.textSecondary }]}>Status</Text>
@@ -2280,13 +2187,13 @@ export default function AdminDashboardPage() {
                     key={withdrawal.id}
                     testID={`admin-withdrawal-row-${withdrawal.id}`}
                     accessibilityLabel={`admin-withdrawal-row-${withdrawal.id}`}
-                    style={[styles.tableRow, { borderBottomColor: colors.border }]}
+                    style={[styles.tableRow, isNarrow && { flexDirection: 'column', gap: 10 }, { borderBottomColor: colors.border }]}
                   >
-                    <View style={[styles.tableCell, { flex: 1.3 }]}>
+                    <View style={[styles.tableCell, isNarrow && { minWidth: 0 }, { flex: 1.3 }]}>
                       <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>{ownerLabel}</Text>
                       <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>{formatDateTime(withdrawal.created_at)}</Text>
                     </View>
-                    <View style={[styles.tableCell, { flex: 1.5 }]}>
+                    <View style={[styles.tableCell, isNarrow && { minWidth: 0 }, { flex: 1.5 }]}>
                       <Text numberOfLines={1} style={{ color: colors.text, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>
                         {destinationLabel} {maskAccountNumber(withdrawal.payout_account_number)}
                       </Text>
@@ -2294,12 +2201,12 @@ export default function AdminDashboardPage() {
                         {withdrawal.reference_number || 'No reference'}
                       </Text>
                     </View>
-                    <View style={[styles.tableCell, { justifyContent: 'center' }]}>
+                    <View style={[styles.tableCell, isNarrow && { minWidth: 0 }, { justifyContent: 'center' }]}>
                       <View style={[styles.badgeGreen, { alignSelf: 'flex-start', backgroundColor: `${statusColor}26` }]}>
                         <Text style={[styles.badgeTextGreen, { color: statusColor }]}>{formatWithdrawalStatus(withdrawal.status)}</Text>
                       </View>
                     </View>
-                    <View style={[styles.tableCell, { justifyContent: 'center' }]}>
+                    <View style={[styles.tableCell, isNarrow && { minWidth: 0 }, { justifyContent: 'center' }]}>
                       <Text
                         testID={`admin-withdrawal-amount-${withdrawal.id}`}
                         accessibilityLabel={`admin-withdrawal-amount-${withdrawal.id}`}
@@ -2318,7 +2225,7 @@ export default function AdminDashboardPage() {
                         accessibilityLabel={`admin-withdrawal-details-${withdrawal.id}`}
                         activeOpacity={0.88}
                         onPress={() => handleWithdrawalDetails(withdrawal)}
-                        style={[styles.miniActionButton, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}
+                        style={[styles.miniActionButton, isNarrow && { minHeight: 44 }, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}
                       >
                         <Ionicons name="document-text-outline" size={13} color={colors.primary} />
                         <Text style={[styles.miniActionText, { color: colors.primary }]}>Details</Text>
@@ -2328,7 +2235,7 @@ export default function AdminDashboardPage() {
                         accessibilityLabel={`admin-withdrawal-copy-${withdrawal.id}`}
                         activeOpacity={0.88}
                         onPress={() => handleCopyWithdrawalReference(withdrawal.reference_number)}
-                        style={[styles.miniActionButton, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}
+                        style={[styles.miniActionButton, isNarrow && { minHeight: 44 }, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#FFFFFF' }]}
                       >
                         <Ionicons name="copy-outline" size={13} color={colors.primary} />
                         <Text style={[styles.miniActionText, { color: colors.primary }]}>Copy</Text>
@@ -2340,7 +2247,7 @@ export default function AdminDashboardPage() {
             )}
           </View>
 
-          <View style={styles.dataEngineRow}>
+          <View style={[styles.dataEngineRow, isNarrow && { flexDirection: 'column' }]}>
             <View style={[styles.dataEnginePanel, styles.dataEnginePanelLeft, { backgroundColor: colors.card, borderColor: colors.border, flex: Platform.OS === 'web' ? 5 : 1 }]}>
               <View style={[styles.pulseHeader, { marginBottom: 12, flexWrap: 'wrap', gap: 10 }]}>
                 <View>
@@ -2410,7 +2317,7 @@ export default function AdminDashboardPage() {
 
           </View>
 
-          <View style={styles.actionCenterRow}>
+          <View style={[styles.actionCenterRow, isNarrow && { flexDirection: 'column' }]}>
             <View style={[styles.actionCenterPanel, { backgroundColor: colors.card, borderColor: colors.border, flex: 1 }]}>
               <View style={[styles.pulseHeader, { marginBottom: 16, alignItems: 'flex-start' }]}>
                 <View>
@@ -2589,4 +2496,3 @@ export default function AdminDashboardPage() {
     </View>
   );
 }
-

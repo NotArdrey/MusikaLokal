@@ -1,0 +1,17 @@
+/mobile/
+/supabase/
+/services/
+/infra/
+/fixtures/
+/output/
+/tmp/
+/scripts/
+/.agents/
+/.vscode/
+/.git/
+**/node_modules/
+**/.expo/
+**/.env*
+**/*.log
+**/.tmp_*
+eng.traineddata

@@ -291,6 +291,15 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
     const useIconOnlyNavbar = useNarrowMainNavbar && windowWidth < 390;
 
     const handleNavPress = useCallback((item: NavItem) => {
+        const targetParams = item.id === 'profile'
+            ? {
+                userId: session?.user?.id,
+                refresh: undefined,
+                returnToHome: undefined,
+                returnListingId: undefined,
+                returnToProfileId: undefined,
+            }
+            : undefined;
         const targetRoute = navigation && state
             ? state.routes.find((route) => route.name === item.routeName)
             : null;
@@ -302,10 +311,10 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
                 canPreventDefault: true,
             });
 
-            if (event.defaultPrevented || activeTab === item.id) {
+            if (event.defaultPrevented || (activeTab === item.id && item.id !== 'profile')) {
                 return;
             }
-        } else if (activeTab === item.id) {
+        } else if (activeTab === item.id && item.id !== 'profile') {
             return;
         }
 
@@ -333,7 +342,7 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
         if (!navigation || !state) {
             navigationFrameRef.current = requestAnimationFrame(() => {
                 navigationFrameRef.current = null;
-                router.replace(item.route as any);
+                router.replace({ pathname: item.route, params: targetParams } as any);
                 resetPendingTab();
             });
             return;
@@ -342,7 +351,7 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
         if (!targetRoute) {
             navigationFrameRef.current = requestAnimationFrame(() => {
                 navigationFrameRef.current = null;
-                router.replace(item.route as any);
+                router.replace({ pathname: item.route, params: targetParams } as any);
                 resetPendingTab();
             });
             return;
@@ -350,10 +359,10 @@ export function GlobalNavbar({ forceVisible = false, navigation, state }: Global
 
         navigationFrameRef.current = requestAnimationFrame(() => {
             navigationFrameRef.current = null;
-            navigation.navigate(targetRoute.name, targetRoute.params);
+            navigation.navigate(targetRoute.name, targetParams ?? targetRoute.params);
             resetPendingTab();
         });
-    }, [activeTab, navigation, state]);
+    }, [activeTab, navigation, session?.user?.id, state]);
 
     useEffect(() => {
         const timing = tabPressTimingRef.current;
@@ -588,6 +597,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 0,
     },
     activeLabel: {
+        fontFamily: typography.body,
         flexShrink: 1,
         fontSize: 11,
         lineHeight: 14,

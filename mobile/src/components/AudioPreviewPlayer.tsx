@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../context/ThemeContext";
+import { typography } from "../theme/tokens";
 
 const SIGNED_URL_SECONDS = 60 * 30;
 const SEEK_STEP_SECONDS = 15;
@@ -415,6 +416,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   helperText: {
+    fontFamily: typography.body,
     fontSize: 11,
     lineHeight: 16,
   },
@@ -451,19 +453,23 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   skipText: {
+    fontFamily: typography.bold,
     fontSize: 11,
     fontWeight: "700",
   },
   subtitle: {
+    fontFamily: typography.body,
     fontSize: 11,
     lineHeight: 15,
   },
   timeText: {
+    fontFamily: typography.semibold,
     marginLeft: "auto",
     fontSize: 11,
     fontWeight: "600",
   },
   title: {
+    fontFamily: typography.title,
     fontSize: 13,
     fontWeight: "700",
   },

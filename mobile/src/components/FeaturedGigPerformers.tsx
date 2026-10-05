@@ -3,6 +3,7 @@ import React, { memo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import type { GigFeaturedPerformer } from "../hooks/useGigFeaturedPerformers";
 import CachedImage from "./CachedImage";
+import { typography } from "../theme/tokens";
 
 type FeaturedGigPerformersProps = {
   performers: GigFeaturedPerformer[];
@@ -68,13 +69,13 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: "row", alignItems: "flex-start", gap: 7 },
   headingText: { flex: 1, minWidth: 0 },
   title: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 12,
     lineHeight: 17,
     includeFontPadding: false,
   },
   subtitle: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 10,
     lineHeight: 14,
     includeFontPadding: false,
@@ -86,10 +87,10 @@ const styles = StyleSheet.create({
   name: {
     minWidth: 0,
     flexShrink: 1,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 10,
     lineHeight: 15,
     includeFontPadding: false,
   },
-  more: { fontFamily: "Poppins_600SemiBold", fontSize: 10, lineHeight: 15, includeFontPadding: false },
+  more: { fontFamily: typography.semibold, fontSize: 10, lineHeight: 15, includeFontPadding: false },
 });

@@ -973,8 +973,8 @@ export default function StudioDetailsScreen() {
                     ? colors.text
                     : colors.textSecondary,
                 fontFamily: hasActiveBooking
-                  ? "Poppins_600SemiBold"
-                  : "Poppins_500Medium",
+                  ? typography.semibold
+                  : typography.medium,
               },
             },
           };
@@ -1001,7 +1001,7 @@ export default function StudioDetailsScreen() {
             text: {
               ...(selectedMark.customStyles?.text || {}),
               color: "#FFFFFF",
-              fontFamily: "Poppins_700Bold",
+              fontFamily: typography.bold,
             },
           },
         };
@@ -1127,7 +1127,7 @@ export default function StudioDetailsScreen() {
           style={{
             marginTop: 16,
             color: colors.textSecondary,
-            fontFamily: "Poppins_400Regular",
+            fontFamily: typography.body,
           }}
         >
           Checking permissions...
@@ -1486,7 +1486,7 @@ export default function StudioDetailsScreen() {
                         <Text
                           style={{
                             color: colors.primary,
-                            fontFamily: "Poppins_500Medium",
+                            fontFamily: typography.medium,
                             fontSize: 13,
                           }}
                         >
@@ -1613,7 +1613,7 @@ export default function StudioDetailsScreen() {
                       <View key={i} style={{ marginBottom: 8 }}>
                         <Text
                           style={{
-                            fontFamily: "Poppins_600SemiBold",
+                            fontFamily: typography.semibold,
                             color: colors.text,
                           }}
                         >
@@ -1621,7 +1621,7 @@ export default function StudioDetailsScreen() {
                         </Text>
                         <Text
                           style={{
-                            fontFamily: "Poppins_400Regular",
+                            fontFamily: typography.body,
                             color: colors.textSecondary,
                           }}
                         >
@@ -1646,7 +1646,7 @@ export default function StudioDetailsScreen() {
                     <View style={{ marginTop: 12 }}>
                       <Text
                         style={{
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                           color: colors.text,
                           marginBottom: 6,
                         }}
@@ -1659,7 +1659,7 @@ export default function StudioDetailsScreen() {
                           <View key={entry?.date || i} style={{ marginBottom: 8 }}>
                             <Text
                               style={{
-                                fontFamily: "Poppins_500Medium",
+                                fontFamily: typography.medium,
                                 color: colors.text,
                               }}
                             >
@@ -1667,7 +1667,7 @@ export default function StudioDetailsScreen() {
                             </Text>
                             <Text
                               style={{
-                                fontFamily: "Poppins_400Regular",
+                                fontFamily: typography.body,
                                 color: colors.textSecondary,
                               }}
                             >
@@ -1685,7 +1685,7 @@ export default function StudioDetailsScreen() {
                       {studio.calendar_availability.length > CUSTOM_DATE_PREVIEW_LIMIT ? (
                         <Text
                           style={{
-                            fontFamily: "Poppins_500Medium",
+                            fontFamily: typography.medium,
                             color: colors.textSecondary,
                             marginTop: 2,
                           }}
@@ -1710,7 +1710,7 @@ export default function StudioDetailsScreen() {
                     <View style={{ gap: 8 }}>
                       <Text
                         style={{
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                           color: colors.textSecondary,
                         }}
                       >
@@ -1719,7 +1719,7 @@ export default function StudioDetailsScreen() {
                       </Text>
                       <Text
                         style={{
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                           color: colors.textSecondary,
                         }}
                       >
@@ -1728,7 +1728,7 @@ export default function StudioDetailsScreen() {
                       </Text>
                       <Text
                         style={{
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                           color: colors.textSecondary,
                         }}
                       >
@@ -1737,7 +1737,7 @@ export default function StudioDetailsScreen() {
                       </Text>
                       <Text
                         style={{
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                           color: colors.textSecondary,
                         }}
                       >
@@ -1747,7 +1747,7 @@ export default function StudioDetailsScreen() {
                       {studio.booking_settings.peak_season_dates?.length ? (
                         <Text
                           style={{
-                            fontFamily: "Poppins_400Regular",
+                            fontFamily: typography.body,
                             color: colors.textSecondary,
                           }}
                         >
@@ -1762,7 +1762,7 @@ export default function StudioDetailsScreen() {
                       ) : null}
                       <Text
                         style={{
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                           color: colors.textSecondary,
                         }}
                       >
@@ -1772,7 +1772,7 @@ export default function StudioDetailsScreen() {
                       {studio.booking_settings.off_peak_dates?.length ? (
                         <Text
                           style={{
-                            fontFamily: "Poppins_400Regular",
+                            fontFamily: typography.body,
                             color: colors.textSecondary,
                           }}
                         >
@@ -1826,7 +1826,7 @@ export default function StudioDetailsScreen() {
                 >
                   <Text
                     style={{
-                      fontFamily: "Poppins_600SemiBold",
+                      fontFamily: typography.semibold,
                       fontSize: 13,
                       color: colors.textSecondary,
                       letterSpacing: 0.5,
@@ -1928,9 +1928,9 @@ export default function StudioDetailsScreen() {
                           arrowColor: colors.primary,
                           monthTextColor: colors.text,
                           indicatorColor: colors.primary,
-                          textDayFontFamily: "Poppins_500Medium",
-                          textMonthFontFamily: "Poppins_600SemiBold",
-                          textDayHeaderFontFamily: "Poppins_500Medium",
+                          textDayFontFamily: typography.medium,
+                          textMonthFontFamily: typography.heading,
+                          textDayHeaderFontFamily: typography.medium,
                           textDayFontSize: 14,
                           textMonthFontSize: 16,
                           textDayHeaderFontSize: 12,
@@ -2320,7 +2320,7 @@ export default function StudioDetailsScreen() {
                           <View style={{ marginTop: 12, gap: 8 }}>
                             <Text
                               style={{
-                                fontFamily: "Poppins_500Medium",
+                                fontFamily: typography.medium,
                                 fontSize: 12,
                                 color: colors.textSecondary,
                                 marginBottom: 4,
@@ -2350,7 +2350,7 @@ export default function StudioDetailsScreen() {
                                   />
                                   <Text
                                     style={{
-                                      fontFamily: "Poppins_500Medium",
+                                      fontFamily: typography.medium,
                                       color: colors.text,
                                       flex: 1,
                                     }}
@@ -2410,7 +2410,7 @@ export default function StudioDetailsScreen() {
                                   />
                                   <Text
                                     style={{
-                                      fontFamily: "Poppins_500Medium",
+                                      fontFamily: typography.medium,
                                       color: colors.primary,
                                       marginLeft: 8,
                                     }}
@@ -2432,7 +2432,7 @@ export default function StudioDetailsScreen() {
                               >
                                 <Text
                                   style={{
-                                    fontFamily: "Poppins_600SemiBold",
+                                    fontFamily: typography.semibold,
                                     color: colors.text,
                                   }}
                                 >
@@ -2450,7 +2450,7 @@ export default function StudioDetailsScreen() {
                               >
                                 <Text
                                   style={{
-                                    fontFamily: "Poppins_600SemiBold",
+                                    fontFamily: typography.semibold,
                                     color: "#FFF",
                                   }}
                                 >
@@ -2487,7 +2487,7 @@ export default function StudioDetailsScreen() {
                   </View>
                   <Text
                     style={{
-                      fontFamily: "Poppins_400Regular",
+                      fontFamily: typography.body,
                       color: colors.textSecondary,
                     }}
                   >
@@ -2733,7 +2733,7 @@ export default function StudioDetailsScreen() {
                 <Text
                   style={{
                     color: colors.text,
-                    fontFamily: "Poppins_500Medium",
+                    fontFamily: typography.medium,
                   }}
                 >
                   Accepting:{" "}
@@ -2751,7 +2751,7 @@ export default function StudioDetailsScreen() {
                 <Text
                   style={{
                     color: colors.text,
-                    fontFamily: "Poppins_500Medium",
+                    fontFamily: typography.medium,
                   }}
                 >
                   Declining:{" "}
@@ -2774,7 +2774,7 @@ export default function StudioDetailsScreen() {
               <Text
                 style={{
                   color: "#FFF",
-                  fontFamily: "Poppins_600SemiBold",
+                  fontFamily: typography.semibold,
                   fontSize: 16,
                 }}
               >
@@ -2823,12 +2823,12 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 24,
     textAlign: "center",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   headerLocation: {
     textAlign: "center",
     marginTop: 4,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   navigateButton: {
     marginTop: 12,
@@ -2842,7 +2842,7 @@ const styles = StyleSheet.create({
   },
   navigateButtonText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 13,
   },
   tabsContainer: {
@@ -2857,6 +2857,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   tabText: {
+    fontFamily: typography.body,
     fontSize: 13,
   },
   contentContainer: {
@@ -2869,7 +2870,7 @@ const styles = StyleSheet.create({
   aboutText: {
     fontSize: 16,
     lineHeight: 24,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   infoCard: { ...managementCardStyles.surface, flex: 1 },
   infoLabel: {
@@ -2887,7 +2888,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 18,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   galleryContainer: {
     gap: 12,
@@ -2908,12 +2909,12 @@ const styles = StyleSheet.create({
   searchText: {
     marginLeft: 12,
     fontSize: 14,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   categoryTitle: {
     fontSize: 18,
     marginBottom: 12,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   tagsContainer: {
     flexDirection: "row",
@@ -2937,12 +2938,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   equipmentDetailName: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 14,
   },
   equipmentDetailDescription: {
     marginTop: 4,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
     lineHeight: 18,
   },
@@ -2956,17 +2957,17 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   promotionTitle: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     fontSize: 14,
   },
   promotionDescription: {
     marginTop: 4,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
     lineHeight: 18,
   },
   promotionDiscount: {
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     fontSize: 14,
   },
   promotionMetaText: { ...managementCardStyles.body, marginTop: 8 },
@@ -2983,7 +2984,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   tagText: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 13,
   },
   addGearButton: {
@@ -2995,7 +2996,7 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
   },
   addGearText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   mediaButton: { ...managementCardStyles.button, flexDirection: "row", paddingVertical: 12, borderWidth: 1 },
   roomProfileCard: {
@@ -3005,7 +3006,7 @@ const styles = StyleSheet.create({
   roomProfileTitle: {
     fontSize: 18,
     marginBottom: 16,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   roomProfileTags: {
     flexDirection: "row",
@@ -3019,6 +3020,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   roomProfileTagText: {
+    fontFamily: typography.semibold,
     fontSize: 12,
     fontWeight: "600",
   },
@@ -3029,10 +3031,10 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
   },
   roomProfileStatLabel: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   roomProfileStatValue: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   graphContainer: {
     height: 160,
@@ -3043,7 +3045,7 @@ const styles = StyleSheet.create({
   graphText: {
     marginTop: 8,
     fontSize: 12,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   bookingCard: { ...managementCardStyles.surface },
   calendarBookingCard: { ...managementCardStyles.surface, width: "100%", marginBottom: 10, gap: 12 },
@@ -3078,7 +3080,7 @@ const styles = StyleSheet.create({
   },
   calendarStatusBadgeText: {
     flexShrink: 1,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 10,
     lineHeight: 14,
   },
@@ -3112,7 +3114,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   calendarSlotMiniText: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 11,
     lineHeight: 15,
   },
@@ -3127,7 +3129,7 @@ const styles = StyleSheet.create({
   },
   calendarNotesText: {
     flex: 1,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 11,
     lineHeight: 16,
   },
@@ -3159,14 +3161,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   bookingDate: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 13,
   },
   bookingMessage: {
     marginBottom: 16,
     fontStyle: "italic",
     fontSize: 14,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   actionButtons: { flexDirection: "row", gap: 8 },
   declineButton: { ...managementCardStyles.button, flex: 1, paddingVertical: 12, borderWidth: 1 },
@@ -3178,7 +3180,7 @@ const styles = StyleSheet.create({
   ratingText: {
     fontSize: 48,
     marginBottom: 8,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   starsRow: {
     flexDirection: "row",
@@ -3223,12 +3225,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  contractTitle: { fontSize: 16, marginBottom: 2, fontFamily: typography.semibold },
+  contractTitle: { fontSize: 16, marginBottom: 2, fontFamily: typography.heading },
   contractSubtitle: { ...managementCardStyles.metadata },
   noContractCard: { ...managementCardStyles.surface, borderStyle: "dashed", alignItems: "center", justifyContent: "center" },
   noContractText: {
     fontSize: 14,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     marginTop: 8,
   },
   // Partial Approval Styles
@@ -3258,11 +3260,11 @@ const styles = StyleSheet.create({
   },
   partialModalTitle: {
     fontSize: 20,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   partialModalSubtitle: {
     fontSize: 14,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     marginBottom: 20,
   },
   slotDecisionCard: {
@@ -3281,7 +3283,7 @@ const styles = StyleSheet.create({
   },
   slotTimeText: {
     fontSize: 16,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   slotDecisionButtons: {
     flexDirection: "row",

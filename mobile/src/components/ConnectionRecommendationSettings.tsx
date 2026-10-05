@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useTheme } from "../context/ThemeContext";
+import { typography } from "../theme/tokens";
 
 export type ConnectionRecommendationCriterionMode = "required" | "ignore";
 
@@ -255,24 +256,24 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: "row", alignItems: "center", gap: 14 },
   headerCopy: { flex: 1 },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  title: { fontFamily: "Poppins_600SemiBold", fontSize: 15 },
-  description: { fontFamily: "Poppins_400Regular", fontSize: 12, lineHeight: 18, marginTop: 5 },
+  title: { fontFamily: typography.heading, fontSize: 15 },
+  description: { fontFamily: typography.body, fontSize: 12, lineHeight: 18, marginTop: 5 },
   toggle: { width: 48, height: 28, borderRadius: 14, padding: 3, justifyContent: "center" },
   toggleThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: "#FFFFFF" },
   toggleThumbOn: { alignSelf: "flex-end" },
   settingsBody: { marginTop: 4 },
   criterion: { borderTopWidth: 1, paddingTop: 12, marginTop: 12 },
-  criterionTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 12 },
-  smallCopy: { fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 16, marginTop: 2 },
+  criterionTitle: { fontFamily: typography.semibold, fontSize: 12 },
+  smallCopy: { fontFamily: typography.body, fontSize: 11, lineHeight: 16, marginTop: 2 },
   modeRow: { flexDirection: "row", gap: 7, marginTop: 9 },
   modeOption: { flex: 1, borderWidth: 1, borderRadius: 9, paddingVertical: 8, alignItems: "center" },
-  modeText: { fontFamily: "Poppins_500Medium", fontSize: 10 },
+  modeText: { fontFamily: typography.medium, fontSize: 10 },
   tagEditor: { marginTop: 9, gap: 8 },
   tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   tag: { borderWidth: 1, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 9, flexDirection: "row", alignItems: "center", gap: 5 },
-  tagText: { fontFamily: "Poppins_500Medium", fontSize: 10 },
+  tagText: { fontFamily: typography.medium, fontSize: 10 },
   tagInputRow: { flexDirection: "row", alignItems: "center", gap: 7 },
-  input: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontFamily: "Poppins_400Regular", fontSize: 12 },
+  input: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontFamily: typography.body, fontSize: 12 },
   addButton: { width: 42, height: 42, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   rangeRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 9 },
   rangeOption: { borderWidth: 1, borderRadius: 9, paddingVertical: 7, paddingHorizontal: 11 },

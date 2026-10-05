@@ -13,6 +13,7 @@ import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
+import { typography } from "../src/theme/tokens";
 
 export default function AccountDetailsScreen() {
   const { colors, isDark } = useTheme();
@@ -290,7 +291,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1, // tracking-wider
     marginBottom: 12, // mb-3
     marginLeft: 4, // ml-1
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
   },
   card: {
     borderRadius: 16,
@@ -328,12 +329,12 @@ const styles = StyleSheet.create({
   itemLabel: {
     fontSize: 14,
     fontWeight: '500',
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   itemValue: {
     fontSize: 12,
     marginTop: 2,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   profileHeader: {
     alignItems: 'center',
@@ -355,11 +356,11 @@ const styles = StyleSheet.create({
   nameText: {
     fontSize: 20,
     fontWeight: '700',
-    fontFamily: 'Poppins_700Bold',
+    fontFamily: typography.bold,
   },
   roleText: {
     fontSize: 14,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   actionRow: {
     flexDirection: 'row',
@@ -380,7 +381,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 16,
     marginBottom: 32,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   navbarContainer: {
     position: 'absolute',

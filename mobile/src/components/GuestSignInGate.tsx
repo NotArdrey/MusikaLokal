@@ -4,6 +4,7 @@ import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../context/ThemeContext";
+import { typography } from "../theme/tokens";
 
 type GuestSignInGateProps = {
   message: string;
@@ -59,12 +60,12 @@ const styles = StyleSheet.create({
   title: {
     marginTop: 12,
     fontSize: 20,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   message: {
     marginTop: 6,
     fontSize: 13,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     textAlign: "center",
   },
   button: {
@@ -76,6 +77,6 @@ const styles = StyleSheet.create({
   buttonText: {
     color: "#FFFFFF",
     fontSize: 14,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
 });

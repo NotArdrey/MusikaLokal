@@ -4,7 +4,7 @@ export const managementCardStyles = {
   surface: { borderWidth: 1, borderRadius: 16, padding: 16 },
   identity: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   thumbnail: { width: 64, height: 64, borderRadius: 10 },
-  title: { fontFamily: typography.semibold, fontSize: 18, lineHeight: 24 },
+  title: { fontFamily: typography.heading, fontSize: 18, lineHeight: 24 },
   metadata: { fontFamily: typography.body, fontSize: 12, lineHeight: 18 },
   label: {
     fontFamily: typography.semibold,

@@ -19,6 +19,7 @@ import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
+import { typography } from "../src/theme/tokens";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -228,12 +229,12 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
   heroSection: { alignItems: "center", marginBottom: 8 },
   heroIcon: { width: 80, height: 80, borderRadius: 40, alignItems: "center", justifyContent: "center", marginBottom: 12 },
-  heroText: { fontSize: moderateScale(13), textAlign: "center", lineHeight: 20 },
-  label: { fontSize: moderateScale(13), fontWeight: "600", marginBottom: 6, marginTop: 16 },
-  input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14), textAlignVertical: "center" },
+  heroText: { fontFamily: typography.body, fontSize: moderateScale(13), textAlign: "center", lineHeight: 20 },
+  label: { fontFamily: typography.semibold, fontSize: moderateScale(13), fontWeight: "600", marginBottom: 6, marginTop: 16 },
+  input: { fontFamily: typography.body, borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14), textAlignVertical: "center" },
   textArea: { minHeight: 100, textAlignVertical: "top" },
   saveBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 16, borderRadius: 12, marginTop: 32 },
-  saveBtnText: { color: "#fff", fontSize: moderateScale(16), fontWeight: "700" },
-  lockedTitle: { fontSize: moderateScale(18), fontWeight: "700", marginTop: 14 },
-  lockedText: { fontSize: moderateScale(13), textAlign: "center", lineHeight: 20, marginTop: 8 },
+  saveBtnText: { fontFamily: typography.bold, color: "#fff", fontSize: moderateScale(16), fontWeight: "700" },
+  lockedTitle: { fontFamily: typography.title, fontSize: moderateScale(18), fontWeight: "700", marginTop: 14 },
+  lockedText: { fontFamily: typography.body, fontSize: moderateScale(13), textAlign: "center", lineHeight: 20, marginTop: 8 },
 });

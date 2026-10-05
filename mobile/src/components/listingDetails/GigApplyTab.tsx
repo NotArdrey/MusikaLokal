@@ -18,6 +18,7 @@ import DocumentUploader from "../DocumentUploader";
 import InAppMediaViewer from "../InAppMediaViewer";
 import styles from "../ListingDetailsSheet.styles";
 import VideoUploader from "../VideoUploader";
+import { typography } from "../../theme/tokens";
 
 const debugLog = (..._args: unknown[]) => {};
 
@@ -316,7 +317,7 @@ const GigApplyTab = ({
             <Text
               style={[
                 styles.infoText,
-                { color: colors.text, fontFamily: "Poppins_600SemiBold" },
+                { color: colors.text, fontFamily: typography.semibold },
               ]}
             >
               Action Restricted
@@ -351,7 +352,7 @@ const GigApplyTab = ({
               <Ionicons name="information-circle" size={20} color="#F59E0B" />
               <Text style={[styles.infoText, { color: colors.text }]}>
                 This gig is looking for{" "}
-                <Text style={{ fontFamily: "Poppins_600SemiBold" }}>
+                <Text style={{ fontFamily: typography.semibold }}>
                   bands/groups only
                 </Text>
                 . Create a group first to apply.
@@ -414,7 +415,7 @@ const GigApplyTab = ({
                         style={{
                           color: isSelected ? "#FFF" : colors.text,
                           marginLeft: 8,
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                         }}
                       >
                         {label} ({needed})
@@ -451,7 +452,7 @@ const GigApplyTab = ({
                   >
                     {selectedSlotRequirements.preferredGroupTypeLabels.length > 0 && (
                       <Text style={[styles.infoText, gigApplyStyles.slotRequirementText, { color: colors.text }]}>
-                        <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Preferred group types: </Text>
+                        <Text style={{ fontFamily: typography.semibold }}>Preferred group types: </Text>
                         {selectedSlotRequirements.preferredGroupTypeLabels.join(", ")}
                       </Text>
                     )}
@@ -463,7 +464,7 @@ const GigApplyTab = ({
                         <Text key={item.slot_id || index} style={[styles.infoText, gigApplyStyles.slotRequirementText, { color: colors.text }]}>
                           {labelEnd >= 0 ? (
                             <>
-                              <Text style={{ fontFamily: "Poppins_600SemiBold" }}>{line.slice(0, labelEnd + 2)}</Text>
+                              <Text style={{ fontFamily: typography.semibold }}>{line.slice(0, labelEnd + 2)}</Text>
                               {line.slice(labelEnd + 2)}
                             </>
                           ) : line}
@@ -472,13 +473,13 @@ const GigApplyTab = ({
                     })}
                     {selectedSlotRequirements.preferredGenres.length > 0 && (
                       <Text style={[styles.infoText, gigApplyStyles.slotRequirementText, { color: colors.text }]}>
-                        <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Shared genres: </Text>
+                        <Text style={{ fontFamily: typography.semibold }}>Shared genres: </Text>
                         {selectedSlotRequirements.preferredGenres.join(", ")}
                       </Text>
                     )}
                     {selectedSlotRequirements.preferredInstruments.length > 0 && (
                       <Text style={[styles.infoText, gigApplyStyles.slotRequirementText, { color: colors.text }]}>
-                        <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Shared instruments: </Text>
+                        <Text style={{ fontFamily: typography.semibold }}>Shared instruments: </Text>
                         {selectedSlotRequirements.preferredInstruments.join(", ")}
                       </Text>
                     )}
@@ -547,10 +548,10 @@ const GigApplyTab = ({
                             <Ionicons name="briefcase" size={16} color={isSelected ? "#FFF" : colors.primary} />
                           </View>
                           <View style={{ marginLeft: 12, flex: 1 }}>
-                            <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 14 }}>
+                            <Text style={{ color: colors.text, fontFamily: typography.semibold, fontSize: 14 }}>
                               {team.name}
                             </Text>
-                            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, marginTop: 1 }}>
+                            <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 12, marginTop: 1 }}>
                               {team.member_role === "owner" ? "Owner" : team.member_role === "manager" ? "Manager" : "Team member"}
                             </Text>
                           </View>
@@ -622,10 +623,10 @@ const GigApplyTab = ({
                               <Ionicons name={entry.entity_kind === "musician" ? "person" : "people"} size={16} color={isSelected ? "#FFF" : colors.primary} />
                             </View>
                             <View style={{ marginLeft: 12, flex: 1 }}>
-                              <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 14 }}>
+                              <Text style={{ color: colors.text, fontFamily: typography.semibold, fontSize: 14 }}>
                                 {entry.display_name}
                               </Text>
-                              <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, marginTop: 1 }}>
+                              <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 12, marginTop: 1 }}>
                                 {entryType}
                               </Text>
                             </View>
@@ -664,7 +665,7 @@ const GigApplyTab = ({
                   <Ionicons name="person" size={16} color={colors.primary} />
                   <Text style={[styles.infoText, { color: colors.text }]}>
                     This gig is for{" "}
-                    <Text style={{ fontFamily: "Poppins_600SemiBold" }}>
+                    <Text style={{ fontFamily: typography.semibold }}>
                       solo artists only
                     </Text>
                   </Text>
@@ -717,10 +718,10 @@ const GigApplyTab = ({
                           <Ionicons name="people" size={16} color={isSelected ? "#FFF" : colors.primary} />
                         </View>
                         <View style={{ marginLeft: 12, flex: 1 }}>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 14 }}>
+                          <Text style={{ color: colors.text, fontFamily: typography.semibold, fontSize: 14 }}>
                             {g.name}
                           </Text>
-                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, marginTop: 1 }}>
+                          <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 12, marginTop: 1 }}>
                             {g.group_type === "duo" ? "Duo" : "Band"}
                           </Text>
                         </View>
@@ -789,10 +790,10 @@ const GigApplyTab = ({
                           <Ionicons name={opt.icon} size={16} color={isSelected ? "#FFF" : colors.primary} />
                         </View>
                         <View style={{ marginLeft: 12, flex: 1 }}>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 14 }}>
+                          <Text style={{ color: colors.text, fontFamily: typography.semibold, fontSize: 14 }}>
                             {opt.name}
                           </Text>
-                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, marginTop: 1 }}>
+                          <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 12, marginTop: 1 }}>
                             {opt.subtitle}
                           </Text>
                         </View>
@@ -897,7 +898,7 @@ const GigApplyTab = ({
               <View style={{ flex: 1 }}>
                 <Text style={[gigApplyStyles.termsText, { color: colors.text }]}>
                   I have read and agree to{' '}
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>
+                  <Text style={{ fontFamily: typography.semibold }}>
                     {`${group?.name || 'the organizer'}'s`}
                   </Text>
                   {' '}{`custom contract.\u00A0*`}
@@ -948,7 +949,7 @@ const GigApplyTab = ({
                   event.stopPropagation();
                   setTermsVisible(true);
                 }}
-                style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary, textDecorationLine: 'underline' }}
+                style={{ fontFamily: typography.semibold, color: colors.primary, textDecorationLine: 'underline' }}
               >
                 Terms and Conditions
               </Text>
@@ -975,7 +976,7 @@ const GigApplyTab = ({
             <Text
               style={[
                 styles.infoText,
-                { color: colors.text, fontFamily: "Poppins_600SemiBold" },
+                { color: colors.text, fontFamily: typography.semibold },
               ]}
             >
               Reapplication Cooldown
@@ -1002,7 +1003,7 @@ const GigApplyTab = ({
           <Ionicons name="warning" size={20} color="#F59E0B" />
           <Text style={[styles.infoText, { color: colors.text }]}>
             This group has already applied via{" "}
-            <Text style={{ fontFamily: "Poppins_600SemiBold" }}>{groupApplicationBy}</Text>
+            <Text style={{ fontFamily: typography.semibold }}>{groupApplicationBy}</Text>
             . Only one application per group is allowed.
           </Text>
         </View>
@@ -1132,18 +1133,18 @@ const gigApplyStyles = StyleSheet.create({
   checkboxTick: {
     color: '#FFFFFF',
     fontSize: 13,
-    fontFamily: 'Poppins_700Bold',
+    fontFamily: typography.bold,
     lineHeight: 14,
   },
   termsText: {
     flex: 1,
     fontSize: 13,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     lineHeight: 20,
   },
   termsLink: {
     fontSize: 12,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
     textDecorationLine: 'underline',
     marginTop: 4,
     alignSelf: 'flex-start',
@@ -1170,25 +1171,25 @@ const gigApplyStyles = StyleSheet.create({
   },
   termsModalTitle: {
     fontSize: 16,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
   },
   termsCloseText: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   termsModalBody: {
     paddingBottom: 18,
   },
   termsSectionTitle: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
     marginTop: 12,
     marginBottom: 6,
   },
   termsBody: {
     fontSize: 13,
     lineHeight: 20,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
 });
 

@@ -403,17 +403,8 @@ const formatApiKeySignature = (apiKey: string) => {
 const getResolvedGroqConfig = () => {
   const extraSources = getConstantsExtraSources();
 
-  const apiKey = resolveConfigValue([
-    {
-      source: "process.env.EXPO_PUBLIC_GROQ_API_KEY",
-      value: process.env.EXPO_PUBLIC_GROQ_API_KEY,
-    },
-    ...extraSources.flatMap(({ source, data }) => [
-      { source: `${source}.groqApiKey`, value: data.groqApiKey },
-      { source: `${source}.expoPublicGroqApiKey`, value: data.expoPublicGroqApiKey },
-      { source: `${source}.EXPO_PUBLIC_GROQ_API_KEY`, value: data.EXPO_PUBLIC_GROQ_API_KEY },
-    ]),
-  ]);
+  // Provider credentials belong to Edge Functions, never the client bundle.
+  const apiKey = { value: "", source: "server-only" };
 
   const model = resolveConfigValue(
     [
@@ -494,7 +485,7 @@ export const getGroqModelInfo = (): GroqModelInfo => {
     transportLabel: "Network (Groq)",
     statusMessage: configured
       ? `Uses Groq model routing over the network: ${GROQ_FALLBACK_CHAIN}.`
-      : "Set EXPO_PUBLIC_GROQ_API_KEY in .env to enable Groq routing.",
+      : "Recommendations use server ranking with a local fallback.",
     modelSource: resolvedConfig.model.source,
     apiKeySource: resolvedConfig.apiKey.source,
     apiKeySignature: formatApiKeySignature(resolvedConfig.apiKey.value),
@@ -1042,7 +1033,7 @@ const formatGroqFallbackMessage = (error: unknown, fallbackLabel: string) => {
   }
 
   if (/api key not valid|invalid api key|unauthorized|invalid authentication/i.test(message)) {
-    return `${providerLabel} API key is invalid. Replace EXPO_PUBLIC_GROQ_API_KEY in .env. ${fallbackLabel}`;
+    return `${providerLabel} API key is invalid. Check the server provider configuration. ${fallbackLabel}`;
   }
 
   if (message === "groq_request_timeout") {

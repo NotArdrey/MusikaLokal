@@ -17,6 +17,7 @@ import { Conversation, isConversationMuted, useConversations } from '../hooks/us
 import Header from './header';
 import ProfileAvatar from './ProfileAvatar';
 import UserSearchModal from './UserSearchModal';
+import { typography } from "../theme/tokens";
 
 interface ConversationsListProps {
     currentUserId: string;
@@ -343,7 +344,7 @@ const styles = StyleSheet.create({
     searchBarText: {
         flex: 1,
         fontSize: 15,
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: typography.medium,
         lineHeight: 20,
         includeFontPadding: false,
     },
@@ -367,11 +368,13 @@ const styles = StyleSheet.create({
         marginBottom: 16,
     },
     emptyText: {
+        fontFamily: typography.bold,
         fontSize: 19,
         fontWeight: '700',
         marginBottom: 8,
     },
     emptySubtext: {
+        fontFamily: typography.body,
         fontSize: 14,
         textAlign: 'center',
         lineHeight: 20,
@@ -429,6 +432,7 @@ const styles = StyleSheet.create({
         marginRight: 8,
     },
     conversationName: {
+        fontFamily: typography.body,
         fontSize: 15.5,
         flex: 1,
     },
@@ -436,6 +440,7 @@ const styles = StyleSheet.create({
         marginLeft: 6,
     },
     conversationTime: {
+        fontFamily: typography.body,
         fontSize: 12,
     },
     previewRow: {
@@ -444,6 +449,7 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
     },
     lastMessage: {
+        fontFamily: typography.body,
         fontSize: 13.5,
         flex: 1,
         marginRight: 8,
@@ -466,6 +472,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 5,
     },
     unreadCount: {
+        fontFamily: typography.bold,
         color: '#FFFFFF',
         fontSize: 11,
         fontWeight: '700',
@@ -484,6 +491,7 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     newMessageButtonText: {
+        fontFamily: typography.semibold,
         color: '#FFF',
         fontSize: 15,
         fontWeight: '600',

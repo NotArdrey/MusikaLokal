@@ -27,6 +27,7 @@ import {
     buildNotificationRouteMeta,
     resolveNotificationNavigationTarget,
 } from '../../src/utils/notificationNavigation';
+import { typography } from "../../src/theme/tokens";
 
 const KNOWN_IMAGE_BUCKETS = ['listings', 'avatars', 'profile-images', 'group-images', 'studio-images', 'gig-images', 'documents', 'portfolio', 'images', 'public-assets'];
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -1027,7 +1028,7 @@ export default function NotificationsScreen() {
                                     styles.titleText,
                                     {
                                         color: colors.text,
-                                        fontFamily: isRead ? 'Poppins_500Medium' : 'Poppins_600SemiBold'
+                                        fontFamily: isRead ? typography.medium : typography.semibold
                                     }
                                 ]}
                             >
@@ -1171,11 +1172,11 @@ const styles = StyleSheet.create({
         borderBottomColor: 'rgba(0,0,0,0.05)',
     },
     unreadText: {
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: typography.semibold,
         fontSize: 14,
     },
     markReadText: {
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: typography.medium,
         fontSize: 12,
     },
     listContent: {
@@ -1187,7 +1188,7 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
     },
     sectionHeaderText: {
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: typography.heading,
         fontSize: 13,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
@@ -1233,6 +1234,7 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
     titleText: {
+        fontFamily: typography.body,
         fontSize: 14,
         flex: 1,
         flexShrink: 1,
@@ -1240,13 +1242,13 @@ const styles = StyleSheet.create({
     },
     timeText: {
         fontSize: 11,
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
         flexShrink: 0,
     },
     messageText: {
         fontSize: 13,
         lineHeight: 20,
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
     },
     actionButtonsContainer: {
         marginTop: 12,
@@ -1271,7 +1273,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#10B981',
     },
     actionButtonText: {
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: typography.medium,
         fontSize: 13,
     },
     emptyState: {
@@ -1290,14 +1292,14 @@ const styles = StyleSheet.create({
     },
     emptyTitle: {
         fontSize: 18,
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: typography.heading,
         marginBottom: 8,
     },
     emptySubtitle: {
         fontSize: 14,
         textAlign: 'center',
         lineHeight: 20,
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: typography.body,
     },
     navbarContainer: {
         position: 'absolute',

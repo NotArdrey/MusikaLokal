@@ -13,6 +13,7 @@ import {
 import { WebView } from "react-native-webview";
 import { useTheme } from "../context/ThemeContext";
 import LoadingState from "./LoadingState";
+import { typography } from "../theme/tokens";
 
 const LOCATION_UNAVAILABLE_MESSAGE =
     "Current location is unavailable. Turn on Location Services or search/tap the map to choose the address.";
@@ -375,7 +376,7 @@ const styles = StyleSheet.create({
     pickerText: {
         flex: 1,
         fontSize: 15,
-        fontFamily: "Poppins_400Regular",
+        fontFamily: typography.body,
     },
     modalContainer: {
         flex: 1,
@@ -393,14 +394,14 @@ const styles = StyleSheet.create({
     },
     modalTitle: {
         fontSize: 17,
-        fontFamily: "Poppins_600SemiBold",
+        fontFamily: typography.heading,
     },
     confirmBtn: {
         padding: 4,
     },
     confirmText: {
         fontSize: 16,
-        fontFamily: "Poppins_600SemiBold",
+        fontFamily: typography.semibold,
     },
     searchContainer: {
         flexDirection: "row",
@@ -421,7 +422,7 @@ const styles = StyleSheet.create({
         flex: 1,
         height: 24,
         fontSize: 15,
-        fontFamily: "Poppins_500Medium",
+        fontFamily: typography.medium,
         lineHeight: 20,
         includeFontPadding: false,
         padding: 0,
@@ -445,7 +446,7 @@ const styles = StyleSheet.create({
     addressText: {
         flex: 1,
         fontSize: 13,
-        fontFamily: "Poppins_400Regular",
+        fontFamily: typography.body,
     },
     locationMessage: {
         flexDirection: "row",
@@ -460,7 +461,7 @@ const styles = StyleSheet.create({
     locationMessageText: {
         flex: 1,
         fontSize: 12,
-        fontFamily: "Poppins_400Regular",
+        fontFamily: typography.body,
         lineHeight: 17,
     },
     mapContainer: {
@@ -484,7 +485,7 @@ const styles = StyleSheet.create({
     },
     helpText: {
         fontSize: 12,
-        fontFamily: "Poppins_400Regular",
+        fontFamily: typography.body,
         textAlign: "center",
     },
 });

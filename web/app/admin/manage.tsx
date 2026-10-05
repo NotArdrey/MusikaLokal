@@ -1,24 +1,12 @@
+import useAdminLayout from '../../src/hooks/useAdminLayout';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  Linking,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Image, Linking, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Calendar } from '../../src/components/CenteredCalendar';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import { AdminFilterBar } from '../../src/components/admin/filters';
-import Header from '../../src/components/header';
+import Header from '../../src/components/admin/AdminPageHeader';
 import LoadingState from '../../src/components/LoadingState';
 import ImageUploader from '../../src/components/ImageUploader';
 import { useAuth } from '../../src/context/AuthContext';
@@ -655,8 +643,8 @@ const normalizeTestPart = (value: string) => (
 export default function AdminManagePage() {
   const { colors, isDark } = useTheme();
   const { loading, isAdmin, roleResolved, userId: adminUserId } = useAuth();
-  const { width } = useWindowDimensions();
-  const isWide = width >= 1040;
+  const { width, height, isCompact, contentPadding } = useAdminLayout();
+  const resourceColumns = width >= 1040 ? 3 : width >= 680 ? 2 : 1;
 
   const [resources, setResources] = useState<AdminResource[]>([]);
   const [resourceFilter, setResourceFilter] = useState<ResourceFilter>('all');
@@ -1108,7 +1096,7 @@ export default function AdminManagePage() {
   if (loading || !roleResolved) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Admin" onBackPress={() => router.back()} />
+        <Header title="Manage listings" onBackPress={() => router.back()} />
         <View style={styles.centered}>
           <LoadingState message="Checking admin access..." />
         </View>
@@ -1119,7 +1107,7 @@ export default function AdminManagePage() {
   if (!isAdmin) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Admin" onBackPress={() => router.back()} />
+        <Header title="Manage listings" onBackPress={() => router.back()} />
         <View style={styles.centered}>
           <Text style={{ color: colors.textSecondary }}>Access denied</Text>
         </View>
@@ -1133,9 +1121,9 @@ export default function AdminManagePage() {
       accessibilityLabel="admin-manage-page"
       style={[styles.container, { backgroundColor: colors.background }]}
     >
-      <Header title="Admin Manage" onBackPress={() => router.replace('/admin')} />
+      <Header title="Manage listings" onBackPress={() => router.replace('/admin')} />
 
-      <View style={styles.topBand}>
+      <View style={[styles.topBand, { paddingHorizontal: contentPadding }]}>
         <View style={styles.titleRow}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={[styles.pageTitle, { color: colors.text }]}>Manage Listings</Text>
@@ -1209,7 +1197,7 @@ export default function AdminManagePage() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: contentPadding }]} showsVerticalScrollIndicator={false}>
         {loadingResources ? (
           <View style={styles.loadingBlock}>
             <ActivityIndicator color={colors.primary} />
@@ -1222,7 +1210,7 @@ export default function AdminManagePage() {
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Try another filter or search term.</Text>
           </View>
         ) : (
-          <View style={[styles.grid, isWide && styles.gridWide]}>
+          <View style={[styles.grid, resourceColumns > 1 && styles.gridWide]}>
             {visibleResources.map((resource) => {
               const status = getResourceStatus(resource);
               const testPart = `${resource.resource_type}-${resource.id}`;
@@ -1241,7 +1229,7 @@ export default function AdminManagePage() {
                       borderColor: colors.border,
                       backgroundColor: colors.card,
                     },
-                    isWide && styles.resourceCardWide,
+                    resourceColumns > 1 && { width: (width - contentPadding * 2 - 12 * (resourceColumns - 1)) / resourceColumns },
                   ]}
                 >
                   <View style={styles.cardHeader}>
@@ -1365,8 +1353,8 @@ export default function AdminManagePage() {
         animationType="fade"
         onRequestClose={closeEditor}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.editor, { backgroundColor: colors.background, borderColor: colors.border }]}>
+        <View style={[styles.modalOverlay, { padding: isCompact ? 8 : 20 }]}>
+          <View style={[styles.editor, { maxHeight: Math.max(180, height - (isCompact ? 16 : 40)) }, { backgroundColor: colors.background, borderColor: colors.border }]}>
             <View style={styles.editorHeader}>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={[styles.editorTitle, { color: colors.text }]}>
@@ -1759,8 +1747,8 @@ export default function AdminManagePage() {
         animationType="fade"
         onRequestClose={closeDetails}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.detailPanel, { backgroundColor: colors.background, borderColor: colors.border }]}>
+        <View style={[styles.modalOverlay, { padding: isCompact ? 8 : 20 }]}>
+          <View style={[styles.detailPanel, { maxHeight: Math.max(180, height - (isCompact ? 16 : 40)) }, { backgroundColor: colors.background, borderColor: colors.border }]}>
             {detailResource ? (
               <>
                 <View style={styles.editorHeader}>
@@ -2411,7 +2399,7 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, minWidth: 0, paddingVertical: 9, fontSize: 14, fontFamily: 'Poppins_400Regular' },
   tabRow: { gap: 8, paddingVertical: 2 },
   tabButton: {
-    minHeight: 36,
+    minHeight: 44,
     borderRadius: 8,
     borderWidth: 1,
     paddingHorizontal: 12,
@@ -2422,7 +2410,7 @@ const styles = StyleSheet.create({
   tabText: { fontSize: 12, fontFamily: 'Poppins_600SemiBold' },
   createRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   createButton: {
-    minHeight: 36,
+    minHeight: 44,
     borderRadius: 8,
     paddingHorizontal: 12,
     flexDirection: 'row',
@@ -2449,10 +2437,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 14,
     gap: 12,
-  },
-  resourceCardWide: {
-    width: '32.3%',
-    minWidth: 290,
   },
   cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   resourceIcon: {
@@ -2547,8 +2531,8 @@ const styles = StyleSheet.create({
   detailCardTitle: { fontSize: 14, fontFamily: 'Poppins_700Bold' },
   detailRows: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   detailRow: {
-    minWidth: 220,
-    flexBasis: '31%',
+    minWidth: 0,
+    flexBasis: 220,
     flexGrow: 1,
   },
   detailLabel: { fontSize: 10, textTransform: 'uppercase', fontFamily: 'Poppins_700Bold' },

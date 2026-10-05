@@ -867,19 +867,7 @@ export default function EditGroupScreen() {
       );
       return false;
     }
-    // Validate member count based on group type
-    const selectedType = PH_MUSIC_GROUP_TYPES.find((t) => t.id === groupType);
-    if (selectedType) {
-      if (members.length < selectedType.minMembers) {
-        const remainingMembers = selectedType.minMembers - members.length;
-        showAlert(
-          "warning",
-          `${selectedType.label} Requirement`,
-          `A ${selectedType.label} must have at least ${selectedType.minMembers} members. You currently have ${members.length}. Add ${remainingMembers} more member${remainingMembers === 1 ? "" : "s"} or change the group type.`,
-        );
-        return false;
-      }
-    }
+    // Existing groups can save roster changes while recruiting replacements.
     return true;
   };
 
@@ -1166,6 +1154,11 @@ export default function EditGroupScreen() {
     if (removedMemberCount > 0) {
       cautionPoints.push(
         `- ${removedMemberCount} synced member(s) will lose active membership access.`,
+      );
+    }
+    if (remainingMemberCount > 0) {
+      cautionPoints.push(
+        `- ${selectedGroupType?.label || "This group type"} normally requires at least ${requiredMemberCount} members. Changes will be saved with ${members.length} member${members.length === 1 ? "" : "s"}; invite ${remainingMemberCount} more to complete the lineup.`,
       );
     }
     if (hasActiveEngagements && (typeChanged || removedMemberCount > 0)) {
@@ -1504,7 +1497,7 @@ export default function EditGroupScreen() {
           style={[
             styles.input,
             {
-              fontFamily: "Poppins_400Regular",
+              fontFamily: typography.body,
               color: colors.text,
               height: multiline ? 120 : "auto",
               textAlign: "left",
@@ -1548,7 +1541,7 @@ export default function EditGroupScreen() {
     description.trim().length > 0 &&
     Boolean(address && latitude && longitude) &&
     images.length > 0 &&
-    remainingMemberCount === 0 &&
+    leaderIndexForSave >= 0 &&
     !disableSaveForMissingInstruments;
   const footerClearance = NAVBAR_CLEARANCE + insets.bottom + 24;
 
@@ -1567,7 +1560,7 @@ export default function EditGroupScreen() {
           style={{
             marginTop: 16,
             color: colors.textSecondary,
-            fontFamily: "Poppins_400Regular",
+            fontFamily: typography.body,
           }}
         >
           Checking permissions...
@@ -1649,10 +1642,10 @@ export default function EditGroupScreen() {
             {/* Info about selected type */}
             {groupType && PH_MUSIC_GROUP_TYPES.find(t => t.id === groupType) && (
               <View style={{ marginTop: 8, paddingHorizontal: 4 }}>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular" }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: typography.body }}>
                   Minimum Members: {PH_MUSIC_GROUP_TYPES.find(t => t.id === groupType)?.minMembers || 1}
                 </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular", marginTop: 2 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: typography.body, marginTop: 2 }}>
                   Roles: {PH_MUSIC_GROUP_TYPES.find(t => t.id === groupType)?.requiredRoles.join(", ")}
                 </Text>
               </View>
@@ -1688,7 +1681,7 @@ export default function EditGroupScreen() {
                   style={{
                     flex: 1,
                     color: address ? colors.text : colors.textSecondary,
-                    fontFamily: "Poppins_400Regular",
+                    fontFamily: typography.body,
                   }}
                 >
                   {address || "Tap to select location on map"}
@@ -1903,7 +1896,7 @@ export default function EditGroupScreen() {
                   style={{
                     color: colors.textSecondary,
                     fontSize: 12,
-                    fontFamily: "Poppins_500Medium",
+                    fontFamily: typography.medium,
                     marginBottom: 8,
                   }}
                 >
@@ -1926,7 +1919,7 @@ export default function EditGroupScreen() {
                   <Text
                     style={{
                       color: colors.text,
-                      fontFamily: "Poppins_500Medium",
+                      fontFamily: typography.medium,
                       fontSize: 16,
                     }}
                   >
@@ -2038,7 +2031,7 @@ export default function EditGroupScreen() {
                           styles.memberText,
                           {
                             color: colors.text,
-                            fontFamily: "Poppins_600SemiBold",
+                            fontFamily: typography.semibold,
                             fontSize: 14,
                           },
                         ]}
@@ -2249,20 +2242,16 @@ export default function EditGroupScreen() {
           />
 
           <View style={styles.footerActions}>
-            {(remainingMemberCount > 0 || disableSaveForMissingInstruments) && (
+            {remainingMemberCount > 0 && (
+              <Text style={styles.footerWarningText}>
+                {`${selectedGroupType?.label || "This group type"} normally requires at least ${requiredMemberCount} members. You can save these changes and invite ${remainingMemberCount} more member${remainingMemberCount === 1 ? "" : "s"} to complete the lineup.`}
+              </Text>
+            )}
+            {disableSaveForMissingInstruments && (
               <Text
-                style={{
-                  width: "100%",
-                  textAlign: "center",
-                  marginBottom: 8,
-                  color: "#F59E0B",
-                  fontFamily: "Poppins_500Medium",
-                  fontSize: 12,
-                }}
+                style={styles.footerWarningText}
               >
-                {remainingMemberCount > 0
-                  ? `${selectedGroupType?.label || "This group type"} requires at least ${requiredMemberCount} members. Add ${remainingMemberCount} more member${remainingMemberCount === 1 ? "" : "s"} before saving.`
-                  : leaderNeedsFinalization
+                {leaderNeedsFinalization
                     ? "Tap the check icon to finalize the leader instrument before saving."
                     : nonLeaderNeedsFinalizationCount > 0
                       ? "Tap each check icon to finalize member instruments before saving."
@@ -2299,7 +2288,7 @@ export default function EditGroupScreen() {
             >
               <Text
                 style={{
-                  fontFamily: "Poppins_600SemiBold",
+                  fontFamily: typography.semibold,
                   color: colors.text,
                 }}
               >
@@ -2488,7 +2477,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   genreText: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   genreChipsContainer: {
     flexDirection: "row",
@@ -2503,12 +2492,12 @@ const styles = StyleSheet.create({
   },
   genreChipText: {
     fontSize: 13,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   genreHelperText: {
     marginBottom: 6,
     fontSize: 12,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   showMoreButton: {
     flexDirection: "row",
@@ -2519,7 +2508,7 @@ const styles = StyleSheet.create({
   },
   showMoreText: {
     fontSize: 13,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   addMemberSection: {
     marginBottom: 20,
@@ -2551,7 +2540,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
     includeFontPadding: false,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     textAlignVertical: "center",
   },
   searchSpinner: {
@@ -2578,10 +2567,11 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   resultName: {
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     fontSize: 14,
   },
   resultRole: {
+    fontFamily: typography.body,
     fontSize: 12,
   },
   pendingMemberCard: {
@@ -2636,7 +2626,7 @@ const styles = StyleSheet.create({
   },
   memberText: {
     marginRight: 8,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   avatarPlaceholder: {
     width: 36,
@@ -2646,12 +2636,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   avatarText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 16,
   },
   footerActions: {
     marginTop: 32,
     marginBottom: 20,
+  },
+  footerWarningText: {
+    width: "100%",
+    textAlign: "center",
+    marginBottom: 8,
+    color: "#F59E0B",
+    fontFamily: typography.medium,
+    fontSize: 12,
   },
   saveButton: {
     borderRadius: 12,
@@ -2667,7 +2665,7 @@ const styles = StyleSheet.create({
   saveButtonText: {
     fontSize: 16,
     color: "white",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   cancelButton: {
     borderRadius: 12,
@@ -2708,7 +2706,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     textAlign: "center",
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.title,
   },
   groupTypeSheetHeaderSpacer: {
     width: 38,
@@ -2735,17 +2733,17 @@ const styles = StyleSheet.create({
   groupTypeSheetOptionTitle: {
     fontSize: 15,
     lineHeight: 20,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   groupTypeSheetOptionDescription: {
     fontSize: 12,
     lineHeight: 17,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   groupTypeSheetOptionMeta: {
     fontSize: 11,
     lineHeight: 15,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     textTransform: "uppercase",
   },
   groupTypeSheetOptionCheck: {

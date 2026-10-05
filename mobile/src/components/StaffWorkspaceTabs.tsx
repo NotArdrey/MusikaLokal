@@ -10,6 +10,7 @@ import {
 } from "../utils/staffAccess";
 import SlidingTabBar from "./SlidingTabBar";
 import { useTheme } from "../context/ThemeContext";
+import { typography } from "../theme/tokens";
 
 type StaffWorkspaceTabsProps = {
   activeKey: StaffEntityType | "history";
@@ -117,6 +118,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   label: {
+    fontFamily: typography.body,
     fontSize: 11,
   },
 });

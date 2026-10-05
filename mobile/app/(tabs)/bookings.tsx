@@ -1061,7 +1061,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
             backgroundColor: isDark ? "rgba(245,158,11,0.08)" : "#FFFBEB",
           }}
         >
-          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
+          <Text style={{ color: colors.textSecondary, fontFamily: typography.medium, fontSize: 11 }}>
             Requirements matching is temporarily unavailable. Open Review Applicant to refresh it.
           </Text>
         </View>
@@ -1081,7 +1081,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
             backgroundColor: colors.card,
           }}
         >
-          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
+          <Text style={{ color: colors.textSecondary, fontFamily: typography.medium, fontSize: 11 }}>
             Requirements matching is not enabled for this gig. Open Review Applicant to configure it.
           </Text>
         </View>
@@ -1092,7 +1092,7 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
       return (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
           <Ionicons name="shield-checkmark" size={16} color="#10B981" />
-          <Text style={{ color: "#10B981", fontFamily: "Poppins_600SemiBold", fontSize: 11 }}>
+          <Text style={{ color: "#10B981", fontFamily: typography.semibold, fontSize: 11 }}>
             Verified applicant
           </Text>
         </View>
@@ -1141,41 +1141,41 @@ const ManagerRecommendationSummary = React.memo(function ManagerRecommendationSu
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
           <Ionicons name="sparkles" size={16} color={isRecommended ? "#10B981" : colors.primary} />
-          <Text style={{ color: isRecommended ? "#10B981" : colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
+          <Text style={{ color: isRecommended ? "#10B981" : colors.text, fontFamily: typography.semibold, fontSize: 12 }}>
             Match to gig requirements
           </Text>
           {recommendation.is_verified === true ? (
             <Ionicons name="shield-checkmark" size={15} color="#10B981" />
           ) : null}
         </View>
-        <Text style={{ color: isRecommended ? "#10B981" : colors.primary, fontFamily: "Poppins_700Bold", fontSize: 14 }}>
+        <Text style={{ color: isRecommended ? "#10B981" : colors.primary, fontFamily: typography.bold, fontSize: 14 }}>
           {recommendation.score == null ? "—" : `${Math.round(Number(recommendation.score))}%`}
         </Text>
       </View>
       {needsReview ? (
-        <Text style={{ color: "#B45309", fontFamily: "Poppins_600SemiBold", fontSize: 10, lineHeight: 15 }}>
+        <Text style={{ color: "#B45309", fontFamily: typography.semibold, fontSize: 10, lineHeight: 15 }}>
           {memberVerificationNeedsReview
             ? "Registered member verification needs manual review. The match score is unchanged."
             : "Important document verification needs manual review. The match score is unchanged."}
         </Text>
       ) : null}
       {recommendation.explanation ? (
-        <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 16 }}>
+        <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 11, lineHeight: 16 }}>
           {recommendation.explanation}
         </Text>
       ) : null}
       {matched ? (
-        <Text style={{ color: "#10B981", fontFamily: "Poppins_500Medium", fontSize: 10 }} numberOfLines={2}>
+        <Text style={{ color: "#10B981", fontFamily: typography.medium, fontSize: 10 }} numberOfLines={2}>
           Requirements met: {matched}
         </Text>
       ) : null}
       {missing ? (
-        <Text style={{ color: "#F59E0B", fontFamily: "Poppins_500Medium", fontSize: 10 }} numberOfLines={2}>
+        <Text style={{ color: "#F59E0B", fontFamily: typography.medium, fontSize: 10 }} numberOfLines={2}>
           Review: {missing}
         </Text>
       ) : null}
       {matched.includes("Application media provided") ? (
-        <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 9, lineHeight: 14 }}>
+        <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 9, lineHeight: 14 }}>
           Media points confirm an upload only. Open Review Applicant for CV/content analysis and the separate optional registered-member check.
         </Text>
       ) : null}
@@ -8041,8 +8041,8 @@ export default function BookingsScreen() {
                                   style={{
                                     color: isGigReconfirmationItem(item) ? "#EF4444" : colors.textSecondary,
                                     fontFamily: isGigReconfirmationItem(item)
-                                      ? "Poppins_600SemiBold"
-                                      : "Poppins_500Medium",
+                                      ? typography.semibold
+                                      : typography.medium,
                                     fontSize: 12,
                                   }}
                                 >
@@ -10004,9 +10004,9 @@ export default function BookingsScreen() {
                           arrowColor: colors.primary,
                           monthTextColor: colors.text,
                           indicatorColor: colors.primary,
-                          textDayFontFamily: "Poppins_500Medium",
-                          textMonthFontFamily: "Poppins_600SemiBold",
-                          textDayHeaderFontFamily: "Poppins_500Medium",
+                          textDayFontFamily: typography.medium,
+                          textMonthFontFamily: typography.heading,
+                          textDayHeaderFontFamily: typography.medium,
                           textDayFontSize: 12,
                           textMonthFontSize: 14,
                           textDayHeaderFontSize: 10,
@@ -10357,7 +10357,7 @@ export default function BookingsScreen() {
               onPress={() => setShowPaymentOptionModal(false)}
               style={{ marginTop: 16, alignItems: 'center' }}
             >
-              <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_500Medium' }}>Cancel</Text>
+              <Text style={{ color: colors.textSecondary, fontFamily: typography.medium }}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -10415,6 +10415,7 @@ const styles = StyleSheet.create({
     paddingVertical: moderateScale(10),
   },
   animatedTabText: {
+    fontFamily: typography.body,
     fontSize: moderateScale(10.5),
     lineHeight: moderateScale(15),
   },
@@ -10442,7 +10443,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: moderateScale(24),
     fontSize: moderateScale(15),
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     lineHeight: moderateScale(20),
     includeFontPadding: false,
     padding: 0,
@@ -10469,7 +10470,7 @@ const styles = StyleSheet.create({
   activityFilterBadgeText: {
     color: "#FFFFFF",
     fontSize: moderateScale(10),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     includeFontPadding: false,
   },
   filterScrollView: {
@@ -10493,7 +10494,7 @@ const styles = StyleSheet.create({
   filterChipText: {
     fontSize: moderateScale(13),
     lineHeight: moderateScale(17),
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     includeFontPadding: false,
     textAlignVertical: "center",
   },
@@ -10535,16 +10536,16 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: moderateScale(14),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   emptyTitle: {
     marginTop: moderateScale(16),
     fontSize: moderateScale(14),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.heading,
   },
   emptySubtitle: {
     fontSize: moderateScale(12),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     opacity: 0.7,
   },
   gigGroupHeader: {
@@ -10592,7 +10593,7 @@ const styles = StyleSheet.create({
   gigGroupTitle: {
     fontSize: moderateScale(18),
     lineHeight: moderateScale(24),
-    fontFamily: typography.semibold,
+    fontFamily: typography.heading,
   },
   gigGroupMeta: {
     marginTop: moderateScale(10),
@@ -10933,7 +10934,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: moderateScale(18),
     lineHeight: moderateScale(24),
-    fontFamily: typography.semibold,
+    fontFamily: typography.heading,
   },
   requestSummarySubtitleRow: {
     flexDirection: "row",
@@ -11073,12 +11074,12 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: moderateScale(18),
     lineHeight: moderateScale(24),
-    fontFamily: typography.semibold,
+    fontFamily: typography.heading,
   },
   cardDate: {
     fontSize: moderateScale(12),
     marginTop: moderateScale(4),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   cardFooter: {
     flexDirection: "row",
@@ -11119,7 +11120,7 @@ const styles = StyleSheet.create({
   },
   permitNoticeTitle: {
     fontSize: moderateScale(12),
-    fontFamily: typography.semibold,
+    fontFamily: typography.heading,
   },
   permitNoticeReason: {
     marginTop: moderateScale(4),
@@ -11219,14 +11220,14 @@ const styles = StyleSheet.create({
   relocationPickerTitle: {
     fontSize: moderateScale(20),
     lineHeight: moderateScale(26),
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.title,
     paddingRight: scale(36),
   },
   relocationPickerSubtitle: {
     marginTop: moderateScale(6),
     fontSize: moderateScale(12),
     lineHeight: moderateScale(18),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     paddingRight: scale(10),
   },
   relocationPickerState: {
@@ -11239,7 +11240,7 @@ const styles = StyleSheet.create({
   relocationPickerStateText: {
     fontSize: moderateScale(12),
     lineHeight: moderateScale(18),
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     textAlign: "center",
   },
   relocationCalendarContainer: {
@@ -11256,7 +11257,7 @@ const styles = StyleSheet.create({
     marginTop: moderateScale(6),
     fontSize: moderateScale(11),
     lineHeight: moderateScale(15),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   relocationSlotList: {
     marginTop: moderateScale(8),
@@ -11279,13 +11280,13 @@ const styles = StyleSheet.create({
   relocationSlotDate: {
     fontSize: moderateScale(13),
     lineHeight: moderateScale(18),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   relocationSlotTime: {
     marginTop: moderateScale(2),
     fontSize: moderateScale(11),
     lineHeight: moderateScale(15),
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   relocationModalActions: {
     marginTop: moderateScale(10),
@@ -11304,7 +11305,7 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: moderateScale(13),
     lineHeight: moderateScale(18),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   qrContainer: {
     width: "100%",
@@ -11313,12 +11314,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   qrTitle: {
+    fontFamily: typography.title,
     fontSize: 24,
     fontWeight: "bold",
     marginBottom: 8,
     color: "black",
   },
   qrSubtitle: {
+    fontFamily: typography.body,
     fontSize: 14,
     color: "#666",
     marginBottom: 20,
@@ -11337,6 +11340,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   closeButtonText: {
+    fontFamily: typography.bold,
     color: "white",
     fontWeight: "bold",
     fontSize: 16,
@@ -11355,6 +11359,7 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   scanText: {
+    fontFamily: typography.body,
     color: "white",
     fontSize: 16,
     marginTop: 20,
@@ -11427,7 +11432,7 @@ const styles = StyleSheet.create({
   lateReportBadgeText: {
     color: "#B91C1C",
     fontSize: moderateScale(10),
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     lineHeight: moderateScale(12),
   },
   defaultButtons: {
@@ -11494,19 +11499,19 @@ const styles = StyleSheet.create({
   },
   paymentOptionTitle: {
     fontSize: 20,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     marginBottom: 4,
     marginTop: 8,
     paddingRight: 32,
   },
   paymentOptionSubtitle: {
     fontSize: 14,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     marginBottom: 6,
   },
   paymentOptionHint: {
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     lineHeight: 18,
     marginBottom: 18,
   },
@@ -11536,18 +11541,18 @@ const styles = StyleSheet.create({
   },
   paymentOptionLabel: {
     fontSize: 14,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     flex: 1,
     flexShrink: 1,
   },
   paymentOptionAmount: {
     fontSize: 16,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     flexShrink: 0,
   },
   paymentOptionDesc: {
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     marginTop: 4,
   },
   paymentOptionButtons: {
@@ -11570,7 +11575,7 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 16,
     lineHeight: 20,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     includeFontPadding: false,
     textAlign: "center",
     textAlignVertical: "center",

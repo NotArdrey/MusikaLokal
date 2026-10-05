@@ -1,30 +1,16 @@
+import useAdminLayout from '../../src/hooks/useAdminLayout';
 
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import { AdminFilterBar, FilterDropdown } from '../../src/components/admin/filters';
-import Header from '../../src/components/header';
+import Header from '../../src/components/admin/AdminPageHeader';
 import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from '../../src/admin/cache';
-import {
-  fetchAdminPaymentTransactions,
-  normalizePaymentActionLabel,
-} from '../../src/admin/payments';
+import { fetchAdminPaymentTransactions, normalizePaymentActionLabel } from '../../src/admin/payments';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -96,20 +82,9 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   }
 };
 
-type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
-
 type AuditEntityFilter = string;
 
 type AuditActionFilter = string;
-
-const adminTabRoutes: Record<Tab, string> = {
-  dashboard: '/admin',
-  users: '/admin/users',
-  reports: '/admin/reports',
-  audit: '/admin/audit',
-  posts: '/admin/posts',
-  products: '/admin/products',
-};
 
 const AUDIT_CACHE_TTL_MS = 45_000;
 
@@ -500,40 +475,13 @@ const styles = StyleSheet.create({
   sectionGap: {
     gap: 12,
   },
-  tabButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    position: 'relative',
-  },
-  tabsRow: {
-    gap: 8,
-    paddingBottom: 4,
-  },
-  tabText: {
-    fontSize: 12,
-    fontFamily: 'Poppins_600SemiBold',
-    textTransform: 'capitalize',
-  },
+
 });
 
-const tabItems: { key: Tab; label: string; icon: string }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' },
-  { key: 'users', label: 'Users', icon: 'people-outline' },
-  { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
-  { key: 'audit', label: 'Audit', icon: 'time-outline' },
-  { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
-  { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
-];
-
 export default function AdminAuditPage() {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
-  const { width } = useWindowDimensions();
+  const { contentPadding } = useAdminLayout();
   const hasHydratedAuditRef = useRef(false);
 
   const [initializingAudit, setInitializingAudit] = useState(false);
@@ -556,18 +504,11 @@ export default function AdminAuditPage() {
     message: '',
   });
 
-  const showInlineTabNav = !(Platform.OS === 'web' && width >= 768);
-
   const showAlert = useCallback((type: AlertType, title: string, message: string) => {
     setAlertState({ visible: true, type, title, message });
   }, []);
 
   const auditCacheKey = useMemo(() => getAdminPageCacheKey('audit'), []);
-
-  const handleTabChange = useCallback((nextTab: Tab) => {
-    if (nextTab === 'audit') return;
-    router.replace(adminTabRoutes[nextTab] as any);
-  }, []);
 
   const mapAuditRows = useCallback(async (rows: any[]) => {
     const normalizedRows = Array.isArray(rows) ? rows : [];
@@ -847,43 +788,13 @@ export default function AdminAuditPage() {
 
   return (
     <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-      <Header title="Admin" hideBackButton />
+      <Header title="Audit log" hideBackButton />
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingHorizontal: contentPadding }]}
         showsVerticalScrollIndicator={false}
         showsHorizontalScrollIndicator={false}
       >
-        {showInlineTabNav && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
-            {tabItems.map((item) => {
-              const active = item.key === 'audit';
-              return (
-                <TouchableOpacity
-                  key={item.key}
-                  activeOpacity={1}
-                  onPress={() => handleTabChange(item.key)}
-                  style={[
-                    styles.tabButton,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#F3F4F6'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={item.icon as any}
-                    size={16}
-                    color={active ? '#FFFFFF' : colors.textSecondary}
-                  />
-                  <Text style={[styles.tabText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        )}
 
         <View style={styles.sectionGap}>
           <Text style={[styles.pageTitle, { color: colors.text }]}>Audit Logs</Text>

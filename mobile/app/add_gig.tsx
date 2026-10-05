@@ -949,7 +949,7 @@ export default function AddGigScreen() {
           style={{
             marginTop: 16,
             color: colors.textSecondary,
-            fontFamily: "Poppins_400Regular",
+            fontFamily: typography.body,
           }}
         >
           Checking permissions...
@@ -1489,7 +1489,7 @@ export default function AddGigScreen() {
                       style={{
                         flex: 1,
                         color: address ? colors.text : colors.textSecondary,
-                        fontFamily: "Poppins_400Regular",
+                        fontFamily: typography.body,
                         textAlignVertical: "center",
                       }}
                     >
@@ -1532,10 +1532,10 @@ export default function AddGigScreen() {
                         <Ionicons name="checkmark" size={16} color="#fff" />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
+                        <Text style={{ color: colors.primary, fontFamily: typography.semibold, fontSize: 12 }}>
                           Verified Address
                         </Text>
-                        <Text style={{ color: colors.text, fontFamily: "Poppins_400Regular", fontSize: 14, marginTop: 2 }}>
+                        <Text style={{ color: colors.text, fontFamily: typography.body, fontSize: 14, marginTop: 2 }}>
                           {address}
                         </Text>
                       </View>
@@ -1569,10 +1569,10 @@ export default function AddGigScreen() {
                             <Ionicons name="document-text-outline" size={28} color={colors.primary} />
                           </View>
                           <View style={{ alignItems: 'center' }}>
-                            <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 14 }}>
+                            <Text style={{ color: colors.text, fontFamily: typography.semibold, fontSize: 14 }}>
                               Verify Your Gig Address
                             </Text>
-                            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+                            <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 12, textAlign: 'center', marginTop: 4 }}>
                               Upload a recent utility bill to verify and auto-fill your gig address
                             </Text>
                           </View>
@@ -1644,9 +1644,9 @@ export default function AddGigScreen() {
                       arrowColor: colors.primary,
                       monthTextColor: colors.text,
                       indicatorColor: colors.primary,
-                      textDayFontFamily: "Poppins_500Medium",
-                      textMonthFontFamily: "Poppins_600SemiBold",
-                      textDayHeaderFontFamily: "Poppins_500Medium",
+                      textDayFontFamily: typography.medium,
+                      textMonthFontFamily: typography.heading,
+                      textDayHeaderFontFamily: typography.medium,
                       textDayFontSize: 14,
                       textMonthFontSize: 16,
                       textDayHeaderFontSize: 12,
@@ -1692,7 +1692,7 @@ export default function AddGigScreen() {
                       <Text
                         style={{
                           color: colors.text,
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                         }}
                       >
                         Selected:{" "}
@@ -1731,7 +1731,7 @@ export default function AddGigScreen() {
                           color: colors.textSecondary,
                           fontSize: 11,
                           marginBottom: 4,
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                         }}
                       >
                         START TIME
@@ -1788,7 +1788,7 @@ export default function AddGigScreen() {
                           color: colors.textSecondary,
                           fontSize: 11,
                           marginBottom: 4,
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                         }}
                       >
                         END TIME
@@ -1851,7 +1851,7 @@ export default function AddGigScreen() {
                     }}
                   >
                     <Ionicons name="add-circle-outline" size={18} color="#fff" />
-                    <Text style={{ color: "#fff", fontFamily: "Poppins_600SemiBold", fontSize: 13 }}>
+                    <Text style={{ color: "#fff", fontFamily: typography.semibold, fontSize: 13 }}>
                       Add Date & Time Condition
                     </Text>
                   </TouchableOpacity>
@@ -1867,7 +1867,7 @@ export default function AddGigScreen() {
                 </Text>
                 {eventSchedules.length === 0 ? (
                   <View style={[styles.dayCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: colors.border, padding: 12 }]}>
-                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12 }}>
+                    <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 12 }}>
                       No conditions added yet.
                     </Text>
                   </View>
@@ -1879,7 +1879,7 @@ export default function AddGigScreen() {
                         style={[styles.dayCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: colors.border, padding: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}
                       >
                         <View style={{ flex: 1, minWidth: 150, paddingRight: 8 }}>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
+                          <Text style={{ color: colors.text, fontFamily: typography.semibold, fontSize: 12 }}>
                             {new Date(item.date).toLocaleDateString("en-US", {
                               weekday: "short",
                               month: "short",
@@ -1887,7 +1887,7 @@ export default function AddGigScreen() {
                               year: "numeric",
                             })}
                           </Text>
-                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11, marginTop: 2 }}>
+                          <Text style={{ color: colors.textSecondary, fontFamily: typography.medium, fontSize: 11, marginTop: 2 }}>
                             {item.start_time} - {item.end_time}
                           </Text>
                         </View>
@@ -2239,7 +2239,7 @@ export default function AddGigScreen() {
                       <Text style={[styles.slotTitle, { color: colors.text }]}>Cooldown Period</Text>
                     </View>
                     <View style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: colors.primary + '20' }}>
-                      <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', fontSize: 14 }}>
+                      <Text style={{ color: colors.primary, fontFamily: typography.semibold, fontSize: 14 }}>
                         {formatGigReapplicationCooldown(reapplicationCooldownHours)}
                       </Text>
                     </View>
@@ -2280,7 +2280,7 @@ export default function AddGigScreen() {
                   <Text
                     style={{
                       color: colors.primary,
-                      fontFamily: "Poppins_600SemiBold",
+                      fontFamily: typography.semibold,
                       marginTop: 4,
                     }}
                   >
@@ -2359,7 +2359,7 @@ export default function AddGigScreen() {
                         {soloSlotsNeeded > 0 && (
                           <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                             <Ionicons name="person" size={16} color="#EC4899" />
-                            <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>
+                            <Text style={{ color: colors.text, fontFamily: typography.medium }}>
                               {soloSlotsNeeded} Solo Artist{soloSlotsNeeded > 1 ? "s" : ""}
                             </Text>
                           </View>
@@ -2372,7 +2372,7 @@ export default function AddGigScreen() {
                         {duoSlotsNeeded > 0 && (
                           <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                             <Ionicons name="people" size={16} color="#8B5CF6" />
-                            <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>
+                            <Text style={{ color: colors.text, fontFamily: typography.medium }}>
                               {duoSlotsNeeded} Duo{duoSlotsNeeded > 1 ? "s" : ""}
                             </Text>
                           </View>
@@ -2385,7 +2385,7 @@ export default function AddGigScreen() {
                         {bandSlotsNeeded > 0 && (
                           <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                             <Ionicons name="people-circle" size={16} color="#3B82F6" />
-                            <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>
+                            <Text style={{ color: colors.text, fontFamily: typography.medium }}>
                               {bandSlotsNeeded} Group{bandSlotsNeeded > 1 ? "s" : ""}
                             </Text>
                           </View>
@@ -2634,6 +2634,7 @@ const styles = StyleSheet.create({
     borderWidth: 3,
   },
   stepText: {
+    fontFamily: typography.body,
     fontSize: 11,
     marginTop: 6,
     textAlign: "center",
@@ -2689,7 +2690,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 14,
     textAlign: "center",
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   reviewContainer: {
     padding: 16,
@@ -2698,6 +2699,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   reviewLabel: {
+    fontFamily: typography.bold,
     fontSize: 12,
     textTransform: "uppercase",
     color: "#9CA3AF",
@@ -2705,16 +2707,18 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   reviewValue: {
+    fontFamily: typography.bold,
     fontSize: 18,
     fontWeight: "bold",
   },
   reviewDescription: {
+    fontFamily: typography.body,
     fontSize: 13,
     lineHeight: 20,
   },
   requirementSubLabel: {
     fontSize: 11,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     textTransform: "uppercase",
     marginBottom: 2,
   },
@@ -2761,7 +2765,7 @@ const styles = StyleSheet.create({
   },
   chipTextCompact: {
     fontSize: 12,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
   },
   searchInputWrap: {
     flexDirection: "row",
@@ -2780,13 +2784,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 20,
     includeFontPadding: false,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     textAlign: "left",
     textAlignVertical: "center",
   },
   moreText: {
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontStyle: "italic",
     marginTop: 4,
   },
@@ -2801,9 +2805,10 @@ const styles = StyleSheet.create({
   },
   chipText: {
     fontSize: 13,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   termsText: {
+    fontFamily: typography.body,
     textAlign: "center",
     fontSize: 12,
     color: "#9CA3AF",
@@ -2829,7 +2834,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   backBtnText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   nextBtn: {
     flex: 1,
@@ -2843,12 +2848,12 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   nextBtnText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     color: "#fff",
   },
   inputSubLabel: {
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     marginBottom: 8,
   },
   uploadContractBtn: {
@@ -2862,12 +2867,12 @@ const styles = StyleSheet.create({
   },
   uploadText: {
     fontSize: 14,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     marginTop: 8,
   },
   uploadSubText: {
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   contractPreview: {
     flexDirection: "row",
@@ -2886,11 +2891,11 @@ const styles = StyleSheet.create({
   },
   contractFileName: {
     fontSize: 14,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   contractFileSize: {
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     marginTop: 2,
   },
   removeContractBtn: {
@@ -2909,7 +2914,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     fontSize: 14,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     textAlign: "center",
     textAlignVertical: "center",
     includeFontPadding: false,
@@ -2926,7 +2931,7 @@ const styles = StyleSheet.create({
   ampmBtnText: {
     fontSize: 12,
     lineHeight: 16,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     textAlign: "center",
     includeFontPadding: false,
   },
@@ -2987,14 +2992,14 @@ const styles = StyleSheet.create({
   },
   verificationModalTitle: {
     fontSize: 18,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
   },
   skipButton: {
     padding: 8,
   },
   skipButtonText: {
     fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   verificationInfoBanner: {
     flexDirection: 'row',
@@ -3008,7 +3013,7 @@ const styles = StyleSheet.create({
   verificationInfoText: {
     flex: 1,
     fontSize: 13,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     lineHeight: 18,
   },
   webviewContainer: {
@@ -3040,7 +3045,7 @@ const styles = StyleSheet.create({
   verificationCompleteBtnText: {
     color: '#fff',
     fontSize: 16,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   // Slot Card Styles
   slotCard: {
@@ -3055,11 +3060,11 @@ const styles = StyleSheet.create({
   },
   slotTitle: {
     fontSize: 15,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   slotSubLabel: {
     fontSize: 12,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   counterContainer: {
     flexDirection: "row",
@@ -3075,7 +3080,7 @@ const styles = StyleSheet.create({
   },
   counterValue: {
     fontSize: 18,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     minWidth: 24,
     textAlign: "center",
   },
@@ -3088,7 +3093,7 @@ const styles = StyleSheet.create({
   },
   totalSummaryText: {
     fontSize: 14,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   ...wizardFormStyles,
 });

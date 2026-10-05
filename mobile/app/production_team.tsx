@@ -1404,8 +1404,8 @@ const styles = StyleSheet.create({
   detailScrollContent: { paddingBottom: 180 },
   loadingContainer: { marginTop: 8 },
   emptyContainer: { alignItems: "center", paddingTop: 60 },
-  emptyTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 18, marginTop: 16 },
-  emptyText: { fontFamily: "Poppins_400Regular", fontSize: 14, textAlign: "center", marginTop: 8, paddingHorizontal: 32 },
+  emptyTitle: { fontFamily: typography.heading, fontSize: 18, marginTop: 16 },
+  emptyText: { fontFamily: typography.body, fontSize: 14, textAlign: "center", marginTop: 8, paddingHorizontal: 32 },
 
   // Team list
   teamCard: { ...managementCardStyles.surface, marginBottom: 10 },
@@ -1444,16 +1444,16 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 24,
     textAlign: "center",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   headerSubTitle: {
     textAlign: "center",
     marginTop: 4,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 14,
   },
   roleBadgeSmall: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
-  roleBadgeSmallText: { fontFamily: "Poppins_500Medium", fontSize: 11 },
+  roleBadgeSmallText: { fontFamily: typography.medium, fontSize: 11 },
   tabsContainer: {
     marginHorizontal: 24,
     marginTop: 24,
@@ -1466,6 +1466,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   tabText: {
+    fontFamily: typography.body,
     fontSize: 13,
   },
   contentContainer: {
@@ -1478,7 +1479,7 @@ const styles = StyleSheet.create({
   aboutText: {
     fontSize: 16,
     lineHeight: 24,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   visibilityCard: {
     ...managementCardStyles.surface,
@@ -1489,12 +1490,12 @@ const styles = StyleSheet.create({
   },
   visibilityTextWrap: { flex: 1 },
   visibilityTitle: {
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     fontSize: 16,
     marginBottom: 6,
   },
   visibilitySubtitle: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 13,
     lineHeight: 20,
   },
@@ -1523,11 +1524,11 @@ const styles = StyleSheet.create({
   sectionTitle: { fontFamily: typography.heading, fontSize: 16, lineHeight: 22 },
   subsectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
   memberSubsectionSpacing: { marginTop: 18 },
-  subsectionTitle: { fontFamily: "Poppins_600SemiBold", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.6 },
+  subsectionTitle: { fontFamily: typography.heading, fontSize: 12, textTransform: "uppercase", letterSpacing: 0.6 },
   subsectionCount: { fontFamily: typography.semibold, fontSize: 12 },
   emptyInlineText: { fontFamily: typography.body, fontSize: 13, marginBottom: 10 },
   inviteBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
-  inviteBtnText: { color: "#FFFFFF", fontFamily: "Poppins_600SemiBold", fontSize: 12 },
+  inviteBtnText: { color: "#FFFFFF", fontFamily: typography.semibold, fontSize: 12 },
   memberCard: { ...managementCardStyles.surface, marginBottom: 8 },
   memberRow: { flexDirection: "row", alignItems: "flex-start" },
   avatar: { width: 36, height: 36, borderRadius: 18 },
@@ -1579,10 +1580,10 @@ const styles = StyleSheet.create({
 
   // Buttons
   reviewCard: { ...managementCardStyles.surface, alignItems: "center" },
-  reviewTitle: { marginTop: 10, fontSize: 16, fontFamily: typography.semibold },
+  reviewTitle: { marginTop: 10, fontSize: 16, fontFamily: typography.heading },
   reviewDescription: { ...managementCardStyles.body, marginTop: 6, textAlign: "center" },
   backBtn: { alignItems: "center", padding: 14, borderRadius: 12, borderWidth: 1, marginTop: 10 },
-  backBtnText: { fontFamily: "Poppins_500Medium", fontSize: 14 },
+  backBtnText: { fontFamily: typography.medium, fontSize: 14 },
 
   // FAB
   fab: { position: "absolute", bottom: 100, right: 20, width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center", elevation: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4 },

@@ -1,39 +1,20 @@
+import useAdminLayout from '../../src/hooks/useAdminLayout';
 
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
-import { router } from 'expo-router';
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  Alert,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Image, Alert, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import { AdminFilterBar } from '../../src/components/admin/filters';
-import Header from '../../src/components/header';
+import Header from '../../src/components/admin/AdminPageHeader';
 import LoadingState from '../../src/components/LoadingState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { getAdminPageCacheKey, invalidateAdminPageCache, readAdminPageCache, writeAdminPageCache } from '../../src/admin/cache';
 import { getFriendlyDetailEntries, getFriendlyDetailImage } from '../../src/admin/formatters';
-import {
-  STAFF_ENTITY_LABELS,
-  StaffAccessLevel,
-  StaffAssignment,
-  StaffEntityType,
-  normalizeStaffAccessLevel,
-  normalizeStaffEntityType,
-} from '../../src/utils/staffAccess';
+import { STAFF_ENTITY_LABELS, StaffAccessLevel, StaffAssignment, StaffEntityType, normalizeStaffAccessLevel, normalizeStaffEntityType } from '../../src/utils/staffAccess';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -118,20 +99,9 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   }
 };
 
-type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
-
 type UserRole = 'fan' | 'musician' | 'studio-owner' | 'venue-owner' | 'producer' | 'admin' | 'staff';
 
 type UserFilter = 'all' | 'fan' | 'musicians' | 'studio-owner' | 'venue-owner' | 'producer' | 'staff';
-
-const adminTabRoutes: Record<Tab, string> = {
-  dashboard: '/admin',
-  users: '/admin/users',
-  reports: '/admin/reports',
-  audit: '/admin/audit',
-  posts: '/admin/posts',
-  products: '/admin/products',
-};
 
 const USERS_CACHE_TTL_MS = 45_000;
 
@@ -921,6 +891,7 @@ const styles = StyleSheet.create({
   modalActionsRow: {
     marginTop: 8,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'flex-end',
     gap: 10,
   },
@@ -932,6 +903,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   modalButton: {
+    flexShrink: 1,
     minWidth: 132,
     borderRadius: 12,
     paddingHorizontal: 18,
@@ -1045,6 +1017,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   smallActionButton: {
+    minHeight: 44,
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 10,
@@ -1054,6 +1027,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   smallActionButtonFilled: {
+    minHeight: 44,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -1067,25 +1041,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Poppins_600SemiBold',
   },
-  tabButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    position: 'relative',
-  },
-  tabsRow: {
-    gap: 8,
-    paddingBottom: 4,
-  },
-  tabText: {
-    fontSize: 12,
-    fontFamily: 'Poppins_600SemiBold',
-    textTransform: 'capitalize',
-  },
+
   userFormScroll: {
     maxHeight: 680,
   },
@@ -1095,19 +1051,10 @@ const styles = StyleSheet.create({
   },
 });
 
-const tabItems: { key: Tab; label: string; icon: string }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' },
-  { key: 'users', label: 'Users', icon: 'people-outline' },
-  { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
-  { key: 'audit', label: 'Audit', icon: 'time-outline' },
-  { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
-  { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
-];
-
 export default function AdminUsersPage() {
   const { colors, isDark } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
-  const { width } = useWindowDimensions();
+  const { height, isCompact, contentPadding } = useAdminLayout();
   const hasHydratedUsersRef = useRef(false);
 
   const [initializingUsers, setInitializingUsers] = useState(false);
@@ -1174,8 +1121,6 @@ export default function AdminUsersPage() {
     title: '',
     message: '',
   });
-
-  const showInlineTabNav = !(Platform.OS === 'web' && width >= 768);
 
   const userFormErrors = useMemo(() => {
     const errors: Record<string, string> = {};
@@ -1247,11 +1192,6 @@ export default function AdminUsersPage() {
   }, []);
 
   const usersCacheKey = useMemo(() => getAdminPageCacheKey('users'), []);
-
-  const handleTabChange = useCallback((nextTab: Tab) => {
-    if (nextTab === 'users') return;
-    router.replace(adminTabRoutes[nextTab] as any);
-  }, []);
 
   const invokeAdminUsersManagement = useCallback(
     async (payload: Record<string, unknown>) => {
@@ -2157,15 +2097,15 @@ export default function AdminUsersPage() {
                   <View
                     key={`${title}-${entry.key}`}
                     style={[
-                      styles.detailRow,
+                      styles.detailRow, isCompact && { flexDirection: 'column' },
                       {
                         backgroundColor: isDark ? '#111827' : '#F8FAFC',
                         borderColor: colors.border,
                       },
                     ]}
                   >
-                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{entry.label}</Text>
-                    <Text selectable style={[styles.detailValue, { color: colors.text }]}>
+                    <Text style={[styles.detailLabel, isCompact && { flexBasis: 'auto' }, { color: colors.textSecondary }]}>{entry.label}</Text>
+                    <Text selectable style={[styles.detailValue, isCompact && { flex: 0, width: '100%' }, { color: colors.text }]}>
                       {entry.value}
                     </Text>
                   </View>
@@ -2176,7 +2116,7 @@ export default function AdminUsersPage() {
         )}
       </View>
     );
-  }, [colors.border, colors.primary, colors.text, colors.textSecondary, isDark]);
+  }, [colors.border, colors.primary, colors.text, colors.textSecondary, isCompact, isDark]);
 
   if (loading || !roleResolved || initializingUsers) {
     return (
@@ -2196,43 +2136,13 @@ export default function AdminUsersPage() {
       accessibilityLabel="admin-users-page"
       style={[styles.flex1, { backgroundColor: colors.background }]}
     >
-      <Header title="Admin" hideBackButton />
+      <Header title="Users" hideBackButton />
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingHorizontal: contentPadding }]}
         showsVerticalScrollIndicator={false}
         showsHorizontalScrollIndicator={false}
       >
-        {showInlineTabNav && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
-            {tabItems.map((item) => {
-              const active = item.key === 'users';
-              return (
-                <TouchableOpacity
-                  key={item.key}
-                  activeOpacity={1}
-                  onPress={() => handleTabChange(item.key)}
-                  style={[
-                    styles.tabButton,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#F3F4F6'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={item.icon as any}
-                    size={16}
-                    color={active ? '#FFFFFF' : colors.textSecondary}
-                  />
-                  <Text style={[styles.tabText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        )}
 
         <View style={styles.sectionGap}>
           <TextInput
@@ -2420,18 +2330,18 @@ export default function AdminUsersPage() {
       </ScrollView>
 
       <Modal visible={userModalVisible} transparent animationType="fade" onRequestClose={closeUserModal}>
-        <View style={styles.modalBackdrop}>
+        <View style={[styles.modalBackdrop, { padding: isCompact ? 8 : 20 }]}>
           <View
             testID="admin-user-form-modal"
             accessibilityLabel="admin-user-form-modal"
-            style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+            style={[styles.modalCard, { maxHeight: Math.max(180, height - (isCompact ? 16 : 40)), ...(isCompact ? { padding: 14 } : {}) }, { backgroundColor: colors.card, borderColor: colors.border }]}
           >
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {userModalMode === 'create' ? 'Create User' : 'Edit User'}
             </Text>
 
             <ScrollView
-              style={styles.userFormScroll}
+              style={[styles.userFormScroll, { flexShrink: 1 }]}
               contentContainerStyle={styles.userFormScrollContent}
               showsVerticalScrollIndicator={false}
             >
@@ -3137,7 +3047,7 @@ export default function AdminUsersPage() {
               </View>
             </ScrollView>
 
-            <View style={styles.modalActionsRow}>
+            <View style={[styles.modalActionsRow, isCompact && { flexDirection: 'column' }]}>
               <TouchableOpacity
                 testID="admin-user-form-cancel"
                 accessibilityLabel="admin-user-form-cancel"
@@ -3175,12 +3085,12 @@ export default function AdminUsersPage() {
       </Modal>
 
       <Modal visible={!!userDetailsTarget} transparent animationType="fade" onRequestClose={closeUserDetailsModal}>
-        <View style={styles.modalBackdrop}>
+        <View style={[styles.modalBackdrop, { padding: isCompact ? 8 : 20 }]}>
           <View
             testID="admin-user-details-modal"
             accessibilityLabel="admin-user-details-modal"
-            style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}
-          > 
+            style={[styles.modalCardLarge, { maxHeight: Math.max(180, height - (isCompact ? 16 : 40)), ...(isCompact ? { padding: 14 } : {}) }, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
             <View style={styles.detailsModalHeader}>
               <View style={[styles.detailsModalIcon, { backgroundColor: `${colors.primary}18` }]}>
                 <Ionicons name="person-circle-outline" size={24} color={colors.primary} />
@@ -3194,14 +3104,14 @@ export default function AdminUsersPage() {
             </View>
 
             <ScrollView
-              style={styles.detailsScroll}
+              style={[styles.detailsScroll, { flexShrink: 1 }]}
               contentContainerStyle={styles.detailsScrollContent}
               showsVerticalScrollIndicator={false}
             >
               {renderDetailsSection('Account', userDetailsTarget?.profile || null, 'Account details are unavailable.')}
             </ScrollView>
 
-            <View style={styles.modalActionsRow}>
+            <View style={[styles.modalActionsRow, isCompact && { flexDirection: 'column' }]}>
               <TouchableOpacity
                 testID="admin-user-details-close"
                 accessibilityLabel="admin-user-details-close"

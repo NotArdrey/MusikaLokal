@@ -295,6 +295,7 @@ const styles = StyleSheet.create({
   },
   optionList: {
     maxHeight: 340,
+    flexShrink: 1,
   },
   optionListContent: {
     gap: 2,
@@ -345,7 +346,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   trigger: {
-    minHeight: 42,
+    minHeight: 44,
     maxWidth: 260,
     borderWidth: 1,
     borderRadius: 10,
@@ -356,7 +357,9 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   triggerText: {
+    flexGrow: 1,
     flexShrink: 1,
+    minWidth: 0,
     fontFamily: 'Poppins_500Medium',
     fontSize: 12,
   },

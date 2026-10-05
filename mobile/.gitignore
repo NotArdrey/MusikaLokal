@@ -46,6 +46,7 @@ app-example
 # generated native folders
 /ios
 /android
+.testing-signing/
 
 # Database schema (local only)
 supabase_schema.sql

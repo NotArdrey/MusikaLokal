@@ -76,8 +76,7 @@ const FALLBACK_REPEAT_MODE = {
 let nativeModule: TrackPlayerModuleLike | null = null;
 
 try {
-  const dynamicRequire = eval("require") as (id: string) => any;
-  nativeModule = dynamicRequire("react-native-track-player");
+  nativeModule = require("react-native-track-player");
 } catch (error) {
   if (__DEV__) {
     console.info(

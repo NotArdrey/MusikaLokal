@@ -7,6 +7,7 @@ import { supabase, supabaseUrl } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { BRAND_LOGOS } from '../src/constants/Images';
 import { typography } from '../src/theme/tokens';
 
 
@@ -661,9 +662,7 @@ export default function LoginScreen() {
     await signInWithCredentials(email, password);
   };
 
-  const logoSource = isDark
-    ? require('../assets/images/musika-lokal-logo-modern-wordmark-dark.png')
-    : require('../assets/images/musika-lokal-logo-modern-wordmark.png');
+  const logoSource = isDark ? BRAND_LOGOS.dark : BRAND_LOGOS.light;
 
   // Derived styles based on theme
   const themeStyles = {

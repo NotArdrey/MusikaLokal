@@ -127,7 +127,7 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
     const handleGuestSignIn = useCallback(async () => {
         closeGuestMenu();
         await setGuestMode(false);
-        router.replace('/');
+        router.replace("/admin/login");
     }, [closeGuestMenu, setGuestMode]);
 
     useFocusEffect(
@@ -242,27 +242,6 @@ function Header({ title, overline, transparent, onBackPress, hideBackButton = fa
                         >
                             <Ionicons name="menu-outline" size={isWebDesktop ? 26 : 24} color={colors.text} />
                         </TouchableOpacity>
-                    ) : notifVisible ? (
-                        <View style={styles.iconRow}>
-                            {!isFan && (
-                                <TouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, {
-                                    backgroundColor: isDark ? colors.surface : '#F3F4F6',
-                                    padding: isWebDesktop ? 12 : 8,
-                                }]}>
-                                    <Ionicons name="chatbubbles" size={isWebDesktop ? 26 : 24} color={colors.text} />
-                                </TouchableOpacity>
-                            )}
-                            {/* Notifications Button */}
-                            <TouchableOpacity activeOpacity={1} onPress={() => router.push('/notifications')} style={[styles.iconButton, {
-                                backgroundColor: isDark ? colors.surface : '#F3F4F6',
-                                padding: isWebDesktop ? 12 : 8,
-                            }]}>
-                                <Ionicons name="notifications" size={isWebDesktop ? 26 : 24} color={colors.text} />
-                                {hasUnread && (
-                                    <View style={styles.badge} />
-                                )}
-                            </TouchableOpacity>
-                        </View>
                     ) : addbtnvisible ? (
                         <TouchableOpacity activeOpacity={1}
                             onPress={() => router.push(btn as any)}
@@ -330,6 +309,7 @@ export default memo(Header);
 const styles = StyleSheet.create({
     container: {
         flexDirection: 'row',
+        flexShrink: 0,
         justifyContent: 'space-between',
         alignItems: 'center',
         paddingBottom: 16,

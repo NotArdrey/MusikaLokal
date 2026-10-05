@@ -4,6 +4,7 @@ import { Modal, PermissionsAndroid, Platform, StyleSheet, Text, TouchableOpacity
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../context/ThemeContext';
 import LoadingState from './LoadingState';
+import { typography } from "../theme/tokens";
 
 const debugLog = (..._args: unknown[]) => {};
 
@@ -120,7 +121,7 @@ const styles = StyleSheet.create({
     title: {
         fontSize: 18,
         fontWeight: '600',
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: typography.heading,
     },
     loadingContainer: {
         position: 'absolute',

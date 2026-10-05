@@ -428,7 +428,7 @@ const styles = StyleSheet.create({
   productCard: { flexDirection: "row", alignItems: "center", padding: 12, borderRadius: radius.card, borderWidth: 1, marginBottom: 12 },
   productThumb: { width: 56, height: 56, borderRadius: 8 },
   productThumbPlaceholder: { width: 56, height: 56, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-  productTitle: { fontSize: moderateScale(14), fontFamily: typography.semibold },
+  productTitle: { fontSize: moderateScale(14), fontFamily: typography.heading },
   productPrice: { fontSize: moderateScale(13), marginTop: 2, fontFamily: typography.bold },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
   orderCard: { padding: 14, borderRadius: radius.card, borderWidth: 1, marginBottom: 12 },

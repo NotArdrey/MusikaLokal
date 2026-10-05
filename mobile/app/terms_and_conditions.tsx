@@ -4,6 +4,7 @@ import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
+import { typography } from "../src/theme/tokens";
 
 export default function TermsAndConditionsScreen() {
   const { colors } = useTheme();
@@ -115,10 +116,10 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { paddingBottom: 24, paddingHorizontal: 24 },
   contentContainer: { paddingTop: 24 },
-  headerText: { fontSize: 20, fontWeight: '700', marginBottom: 12, fontFamily: 'Poppins_700Bold' },
-  subHeader: { fontSize: 16, fontWeight: '600', marginTop: 20, marginBottom: 8, color: '#333' },
-  smallHeader: { fontSize: 14, fontWeight: '600', marginTop: 10, marginBottom: 4 },
-  text: { fontSize: 14, lineHeight: 22, marginBottom: 12, fontFamily: 'Poppins_400Regular' },
-  textLargeMarginBottom: { fontSize: 14, lineHeight: 22, marginBottom: 40 },
+  headerText: { fontSize: 20, fontWeight: '700', marginBottom: 12, fontFamily: typography.title },
+  subHeader: { fontFamily: typography.heading, fontSize: 16, fontWeight: '600', marginTop: 20, marginBottom: 8, color: '#333' },
+  smallHeader: { fontFamily: typography.heading, fontSize: 14, fontWeight: '600', marginTop: 10, marginBottom: 4 },
+  text: { fontSize: 14, lineHeight: 22, marginBottom: 12, fontFamily: typography.body },
+  textLargeMarginBottom: { fontFamily: typography.body, fontSize: 14, lineHeight: 22, marginBottom: 40 },
   navbarContainer: { position: 'absolute', bottom: 0, left: 0, right: 0 },
 });

@@ -138,7 +138,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 8,
   },
-  optionText: { flex: 1, fontSize: 13, fontFamily: "Poppins_400Regular" },
-  emptyText: { padding: 12, fontSize: 12, fontFamily: "Poppins_400Regular" },
-  manualLabel: { marginTop: 8, fontSize: 11, fontFamily: "Poppins_500Medium" },
+  optionText: { flex: 1, fontSize: 13, fontFamily: typography.body },
+  emptyText: { padding: 12, fontSize: 12, fontFamily: typography.body },
+  manualLabel: { marginTop: 8, fontSize: 11, fontFamily: typography.medium },
 });

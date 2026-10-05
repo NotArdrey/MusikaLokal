@@ -26,6 +26,7 @@ import { useAuth } from "../src/context/AuthContext";
 import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
+import { typography } from "../src/theme/tokens";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const ANDROID_KEYBOARD_ANIMATION_MS = 220;
@@ -513,23 +514,23 @@ const styles = StyleSheet.create({
   authorRow: { flexDirection: "row", alignItems: "center", marginTop: 16, marginBottom: 12 },
   authorProfileButton: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center" },
   authorAvatar: { width: 44, height: 44, borderRadius: 22 },
-  authorName: { fontSize: moderateScale(15), fontWeight: "700" },
-  postTime: { fontSize: moderateScale(12), marginTop: 2 },
-  postBody: { fontSize: moderateScale(15), lineHeight: 24, marginBottom: 12 },
+  authorName: { fontFamily: typography.bold, fontSize: moderateScale(15), fontWeight: "700" },
+  postTime: { fontFamily: typography.body, fontSize: moderateScale(12), marginTop: 2 },
+  postBody: { fontFamily: typography.body, fontSize: moderateScale(15), lineHeight: 24, marginBottom: 12 },
   mediaRow: { marginBottom: 12 },
   mediaImage: { width: 240, height: 180, borderRadius: 10, marginRight: 10 },
   reactionsBar: { flexDirection: "row", gap: 24, paddingVertical: 12, borderTopWidth: 1, borderBottomWidth: 1 },
   reactionItem: { flexDirection: "row", alignItems: "center", gap: 6 },
-  reactionCount: { fontSize: moderateScale(13) },
+  reactionCount: { fontFamily: typography.body, fontSize: moderateScale(13) },
   commentsSection: { marginTop: 16 },
-  sectionTitle: { fontSize: moderateScale(16), fontWeight: "700", marginBottom: 12 },
+  sectionTitle: { fontFamily: typography.title, fontSize: moderateScale(16), fontWeight: "700", marginBottom: 12 },
   commentCard: { flexDirection: "row", paddingVertical: 10, borderBottomWidth: 0.5, alignItems: "flex-start" },
   commentAvatar: { width: 28, height: 28, borderRadius: 14, marginTop: 2 },
-  commentAuthor: { fontSize: moderateScale(12), fontWeight: "600" },
-  commentBody: { fontSize: moderateScale(13), marginTop: 2, lineHeight: 20 },
-  commentTime: { fontSize: moderateScale(10), marginTop: 4 },
-  emptyText: { textAlign: "center", fontSize: moderateScale(13), marginTop: 20 },
+  commentAuthor: { fontFamily: typography.semibold, fontSize: moderateScale(12), fontWeight: "600" },
+  commentBody: { fontFamily: typography.body, fontSize: moderateScale(13), marginTop: 2, lineHeight: 20 },
+  commentTime: { fontFamily: typography.body, fontSize: moderateScale(10), marginTop: 4 },
+  emptyText: { fontFamily: typography.body, textAlign: "center", fontSize: moderateScale(13), marginTop: 20 },
   commentInputRow: { flexDirection: "row", alignItems: "center", padding: 10, paddingBottom: 20, borderTopWidth: 1 },
-  commentInput: { flex: 1, borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8, fontSize: moderateScale(14), maxHeight: 100 },
+  commentInput: { fontFamily: typography.body, flex: 1, borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8, fontSize: moderateScale(14), maxHeight: 100 },
   sendBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", marginLeft: 8 },
 });

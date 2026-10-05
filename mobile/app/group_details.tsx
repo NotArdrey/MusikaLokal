@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as ExpoLinking from 'expo-linking';
+import { buildListingShareUrl } from '../src/utils/shareLinks';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -31,6 +31,7 @@ import {
     hasValidCoordinates,
     openNavigationDirections,
 } from '../src/utils/navigation';
+import { typography } from "../src/theme/tokens";
 
 const { width: SCREEN_WIDTH, height } = Dimensions.get('window');
 const IMG_HEIGHT = height * 0.5;
@@ -228,19 +229,10 @@ export default function GroupDetailsScreen() {
     };
   }, [group?.id]);
 
-  const buildShareUrl = () => {
-    if (!group?.id) {
-      return ExpoLinking.createURL('/home');
-    }
-
-    return ExpoLinking.createURL('/group_details', {
-      queryParams: { id: group.id },
-    });
-  };
-
   const handleShare = async () => {
+    if (!group?.id) return;
     try {
-      const shareUrl = buildShareUrl();
+      const shareUrl = buildListingShareUrl(group.id, 'group');
       await Share.share({
         message: `Check out ${group?.name || 'this group'} on MusikaLokal!\n${shareUrl}`,
         url: shareUrl,
@@ -621,7 +613,7 @@ export default function GroupDetailsScreen() {
                           iconColor={isLeader ? '#FFF' : colors.textSecondary}
                         />
                         <View style={{ flex: 1 }}>
-                          <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 15 }}>{memberName}</Text>
+                          <Text style={{ color: colors.text, fontFamily: typography.medium, fontSize: 15 }}>{memberName}</Text>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                             <Ionicons name="musical-note" size={12} color={colors.primary} />
                             <Text style={{ color: colors.textSecondary, fontSize: 13 }}>{memberInstrument}</Text>
@@ -771,7 +763,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 26,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
     marginBottom: 8,
   },
   ratingLocationRow: {
@@ -781,11 +773,11 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   ratingText: {
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
     fontSize: 14,
   },
   locationText: {
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     fontSize: 14,
   },
   navigatePill: {
@@ -800,7 +792,7 @@ const styles = StyleSheet.create({
   },
   navigatePillText: {
     color: '#FFF',
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     fontSize: 13,
   },
   divider: {
@@ -819,11 +811,11 @@ const styles = StyleSheet.create({
   },
   hostedBy: {
     fontSize: 16,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   hostSub: {
     fontSize: 14,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     marginBottom: 4,
   },
   hostAvatar: {
@@ -836,11 +828,11 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 20,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
   },
   description: {
     fontSize: 15,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     lineHeight: 24,
   },
   featuresGrid: {
@@ -852,7 +844,7 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   featureText: {
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     fontSize: 15,
   },
   reviewHeader: {
@@ -883,14 +875,15 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   reviewName: {
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     fontSize: 14,
   },
   reviewDate: {
+    fontFamily: typography.body,
     fontSize: 12,
   },
   reviewBody: {
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     fontSize: 14,
     lineHeight: 20,
   },
@@ -903,7 +896,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   showAllText: {
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     fontSize: 15,
   },
   bottomBar: {
@@ -922,7 +915,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   priceText: {
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     fontSize: 18,
   },
   bookBtn: {
@@ -932,7 +925,7 @@ const styles = StyleSheet.create({
   },
   bookBtnText: {
     color: '#FFF',
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     fontSize: 16,
   },
 });

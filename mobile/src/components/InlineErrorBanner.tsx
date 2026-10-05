@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useTheme } from "../context/ThemeContext";
+import { typography } from "../theme/tokens";
 
 type InlineErrorBannerProps = {
   message: string | null;
@@ -54,7 +55,7 @@ const styles = StyleSheet.create({
   },
   message: {
     flex: 1,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 12,
     lineHeight: 18,
   },
@@ -63,7 +64,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   retryText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 12,
   },
 });

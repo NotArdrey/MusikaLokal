@@ -1,217 +1,123 @@
-import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
-} from "react-native";
-import { supabase } from "../lib/supabase";
-import AuthMusicHero from "../src/components/AuthMusicHero";
-import { useAuth } from "../src/context/AuthContext";
+import Head from "expo-router/head";
+import { useEffect, useRef, useState } from "react";
+import { Image } from "react-native";
 import { useTheme } from "../src/context/ThemeContext";
+import { BRAND_LOGOS } from "../src/constants/Images";
+import { parseAndroidRelease, type AndroidRelease } from "../src/utils/androidRelease";
+import { downloadAndroidApk } from "../src/utils/downloadAndroidApk";
+import "../src/theme/download.css";
 
-const normalizeRole = (value: unknown) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
+const installationSteps = [
+  ["Download the APK", "Tap Download Android APK and wait for the file to finish downloading."],
+  ["Open the download", "Open the APK from your browser downloads or Files app."],
+  ["Allow this installation", "If Android asks, allow installs from this browser or Files app, then return to the installer."],
+  ["Install and join in", "Tap Install, then open MusikaLokal and join your local music community."],
+];
 
-export default function AdminLoginScreen() {
-  const { colors, isDark } = useTheme();
-  const { session, loading: authLoading, roleResolved, isAdmin } = useAuth();
-  const { width } = useWindowDimensions();
-  const showHero = Platform.OS === "web" && width >= 900;
-
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
+export default function DownloadHomepage() {
+  const { isDark, setTheme } = useTheme();
+  const [release, setRelease] = useState<AndroidRelease | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+  const [downloadNotice, setDownloadNotice] = useState("");
+  const [device, setDevice] = useState<"android" | "ios" | "other" | null>(null);
+  const [showMobileDownload, setShowMobileDownload] = useState(false);
+  const downloadActions = useRef<HTMLDivElement | null>(null);
+  const downloadController = useRef<AbortController | null>(null);
   useEffect(() => {
-    if (!authLoading && session && roleResolved && isAdmin) {
-      router.replace("/admin");
-    }
-  }, [authLoading, isAdmin, roleResolved, session]);
-
-  const handleLogin = async () => {
-    const normalizedEmail = email.trim().toLowerCase();
-    if (!normalizedEmail || !password) {
-      setErrorMessage("Enter your admin email and password.");
-      return;
-    }
-
-    setSubmitting(true);
-    setErrorMessage(null);
-
+    const agent = navigator.userAgent;
+    setDevice(/Android/i.test(agent) ? "android" : /iPhone|iPad|iPod/i.test(agent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) ? "ios" : "other");
+  }, []);
+  useEffect(() => {
+    if (!release || !downloadActions.current || !("IntersectionObserver" in window)) return;
+    const observer = new IntersectionObserver(([entry]) => setShowMobileDownload(!entry.isIntersecting));
+    observer.observe(downloadActions.current);
+    return () => observer.disconnect();
+  }, [release]);
+  useEffect(() => () => downloadController.current?.abort(), []);
+  useEffect(() => {
+    let mounted = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    fetch("/android-release.json", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => response.ok ? parseAndroidRelease(await response.json()) : null)
+      .then((value) => { if (mounted) setRelease(value); })
+      .catch(() => { if (mounted) setRelease(null); })
+      .finally(() => { clearTimeout(timeout); if (mounted) setLoading(false); });
+    return () => { mounted = false; clearTimeout(timeout); controller.abort(); };
+  }, []);
+  const logo = isDark ? BRAND_LOGOS.dark : BRAND_LOGOS.light;
+  const startDownload = async () => {
+    if (!release || downloadController.current) return;
+    const controller = new AbortController();
+    downloadController.current = controller;
+    setDownloadProgress(0);
+    setDownloadNotice("");
     try {
-      await supabase.auth.signOut({ scope: "local" });
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
-
-      if (error || !data.user) {
-        setErrorMessage(
-          error?.message === "Invalid login credentials"
-            ? "Invalid email or password."
-            : error?.message || "Unable to sign in.",
-        );
-        return;
-      }
-
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", data.user.id)
-        .maybeSingle();
-
-      const role = normalizeRole(profile?.role || data.user.app_metadata?.role);
-      if (profileError || role !== "admin") {
-        await supabase.auth.signOut({ scope: "local" });
-        setErrorMessage("This portal is restricted to administrator accounts.");
-        return;
-      }
-
-      router.replace("/admin");
+      const file = await downloadAndroidApk(release, setDownloadProgress, controller.signal);
+      if (controller.signal.aborted) return;
+      const url = URL.createObjectURL(file);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "MusikaLokal.apk";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      setDownloadNotice("Download ready. Open MusikaLokal.apk from your browser downloads to install.");
     } catch {
-      setErrorMessage("Unable to sign in right now. Please try again.");
+      setDownloadNotice(controller.signal.aborted ? "Download canceled." : "The download did not finish. Please try again.");
     } finally {
-      setSubmitting(false);
+      downloadController.current = null;
+      setDownloadProgress(null);
     }
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={[styles.screen, { backgroundColor: colors.background }]}
-    >
-      {showHero ? (
-        <View style={styles.heroColumn}>
-          <AuthMusicHero
-            title="Manage Musika Lokal"
-            subtitle="A secure workspace for platform administrators."
-          />
-        </View>
-      ) : null}
-
-      <View style={styles.formColumn}>
-        <View style={styles.formShell}>
-          <Image
-            source={
-              isDark
-                ? require("../assets/images/musika-lokal-logo-modern-wordmark-dark.png")
-                : require("../assets/images/musika-lokal-logo-modern-wordmark.png")
-            }
-            resizeMode="contain"
-            style={styles.logo}
-          />
-
-          <Text style={[styles.eyebrow, { color: colors.primary }]}>ADMIN PORTAL</Text>
-          <Text style={[styles.title, { color: colors.text }]}>Welcome back</Text>
-          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>Sign in with your administrator credentials.</Text>
-
-          <View style={styles.form}>
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.label, { color: colors.text }]}>Email</Text>
-              <View style={[styles.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Ionicons name="mail-outline" size={19} color={colors.textSecondary} />
-                <TextInput
-                  testID="admin-email-input"
-                  accessibilityLabel="Admin email"
-                  autoCapitalize="none"
-                  autoComplete="email"
-                  keyboardType="email-address"
-                  onChangeText={setEmail}
-                  placeholder="admin@example.com"
-                  placeholderTextColor={colors.textSecondary}
-                  style={[styles.input, { color: colors.text }]}
-                  value={email}
-                />
-              </View>
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.label, { color: colors.text }]}>Password</Text>
-              <View style={[styles.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Ionicons name="lock-closed-outline" size={19} color={colors.textSecondary} />
-                <TextInput
-                  testID="admin-password-input"
-                  accessibilityLabel="Admin password"
-                  autoCapitalize="none"
-                  autoComplete="current-password"
-                  onChangeText={setPassword}
-                  onSubmitEditing={() => void handleLogin()}
-                  placeholder="Enter your password"
-                  placeholderTextColor={colors.textSecondary}
-                  secureTextEntry={!showPassword}
-                  style={[styles.input, { color: colors.text }]}
-                  value={password}
-                />
-                <TouchableOpacity
-                  accessibilityLabel={showPassword ? "Hide password" : "Show password"}
-                  onPress={() => setShowPassword((current) => !current)}
-                  style={styles.visibilityButton}
-                >
-                  <Ionicons
-                    name={showPassword ? "eye-off-outline" : "eye-outline"}
-                    size={20}
-                    color={colors.textSecondary}
-                  />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {errorMessage ? (
-              <View style={styles.errorBox}>
-                <Ionicons name="alert-circle-outline" size={18} color="#DC2626" />
-                <Text style={styles.errorText}>{errorMessage}</Text>
-              </View>
-            ) : null}
-
-            <TouchableOpacity
-              testID="admin-login-button"
-              accessibilityLabel="Sign in to admin portal"
-              activeOpacity={0.85}
-              disabled={submitting}
-              onPress={() => void handleLogin()}
-              style={[styles.submitButton, { backgroundColor: colors.primary, opacity: submitting ? 0.7 : 1 }]}
-            >
-              {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Ionicons name="log-in-outline" size={20} color="#FFFFFF" />}
-              <Text style={styles.submitText}>{submitting ? "Signing in..." : "Sign in"}</Text>
-            </TouchableOpacity>
-          </View>
-
-          <Text style={[styles.restrictedNote, { color: colors.textSecondary }]}>Authorized administrators only</Text>
-        </View>
-      </View>
-    </KeyboardAvoidingView>
+    <div className={`download-site${isDark ? " dark" : ""}`}>
+      <Head><title>MusikaLokal — Your local music scene</title><meta name="description" content="Discover your local music scene with MusikaLokal. Download the Android app." /></Head>
+      <a className="skip-link" href="#main">Skip to content</a>
+      <header className="download-header">
+        <a className="brand" href="/" aria-label="MusikaLokal home"><Image source={logo} style={{ width: 48, height: 48 }} resizeMode="contain" /><span>Musika<span className="violet-text">Lokal</span></span></a>
+        <nav aria-label="Main navigation"><a href="#installation">How to install</a><button className="theme-toggle" onClick={() => setTheme(isDark ? "light" : "dark")} aria-label={`Switch to ${isDark ? "light" : "dark"} theme`}>{isDark ? "☀" : "☾"}</button></nav>
+      </header>
+      <main id="main">
+        <section className="download-hero" aria-labelledby="hero-title">
+          <div className="hero-copy">
+            <span className="eyebrow"><span className="status-dot" /> YOUR LOCAL MUSIC SCENE</span>
+            <h1 id="hero-title">Find your sound.<br /><span className="violet-text">Find your people.</span></h1>
+            <p className="hero-description">Local artists. New connections. Your next gig. Bring your music community together with MusikaLokal.</p>
+            <div className="download-actions" ref={downloadActions}>
+              {release ? <a className="primary-download" href={release.downloadUrl} aria-disabled={downloadProgress !== null} onClick={(event) => { event.preventDefault(); void startDownload(); }}><span aria-hidden="true">↓</span> {downloadProgress !== null ? `Downloading… ${downloadProgress}%` : "Download Android APK"}</a> : <button className="primary-download" disabled>{loading ? "Checking availability…" : "Download unavailable"}</button>}
+              {downloadProgress !== null ? <button className="cancel-download" onClick={() => downloadController.current?.abort()}>Cancel</button> : null}
+            </div>
+            <p className="release-description" role="status">{release ? `Version ${release.versionName} · ${(release.sizeBytes / 1024 / 1024).toFixed(1)} MB · ${release.minSdk === 24 ? "Android 7.0+" : `Android API ${release.minSdk}+`}` : loading ? "Finding the latest Android download." : "The Android app is not available to download right now. Please check back soon."}</p>
+            <p className="standalone-note">Available for 64-bit Android devices.</p>
+            {device ? <p className="device-note">{device === "android" ? "Keep this page open until your download is ready." : device === "ios" ? "This app is for Android. Open this page on your Android phone to install." : "Open this page on your Android phone, or download here and transfer the APK."}</p> : null}
+            {downloadProgress !== null ? <div className="download-progress"><progress aria-label="APK download progress" value={downloadProgress} max={100} /><span>{downloadProgress === 100 ? "Preparing your file…" : `${downloadProgress}% downloaded`}</span></div> : null}
+            <p className="download-notice" aria-live="polite">{downloadProgress !== null ? "Keep this page open. Your file will be saved when the download is complete." : downloadNotice}</p>
+          </div>
+          <div className="hero-art" aria-label="MusikaLokal logo">
+            <div className="orbit orbit-one" /><div className="orbit orbit-two" />
+            <div className="logo-card"><Image source={logo} accessibilityLabel="MusikaLokal" style={{ width: 250, height: 250, maxWidth: "100%" }} resizeMode="contain" /><span className="logo-caption">Made for the local scene.</span></div>
+            <span className="scene-tag tag-top">♫ Music brings us together</span><span className="scene-tag tag-bottom">Your next connection starts here ↗</span>
+          </div>
+        </section>
+        <section className="feature-strip" aria-label="Explore MusikaLokal">
+          <article><span className="feature-number">01</span><h2>Discover local talent</h2><p>Explore the artists and sounds around you.</p></article>
+          <article><span className="feature-number">02</span><h2>Connect through music</h2><p>Meet musicians and find your community.</p></article>
+          <article><span className="feature-number">03</span><h2>Find your next gig</h2><p>Discover opportunities to take the stage.</p></article>
+        </section>
+        <section className="installation-section" id="installation" aria-labelledby="installation-title">
+          <div className="section-heading"><span className="eyebrow">READY WHEN YOU ARE</span><h2 id="installation-title">From download to your first note.</h2><p>Get MusikaLokal on your Android phone. Download the APK, then follow these steps to install the app.</p></div>
+          <div className="installation-grid">{installationSteps.map(([title, detail], index) => <details className="installation-step" key={title} open={index === 0}><summary><span className="step-number">{index + 1}</span><h3>{title}</h3><span className="step-toggle" aria-hidden="true">+</span></summary><p>{detail}</p></details>)}</div>
+          {release ? <details className="file-details"><summary>File information</summary><dl><dt>Updated</dt><dd>{new Date(release.builtAt).toLocaleDateString("en-PH", { timeZone: "Asia/Manila", year: "numeric", month: "long", day: "numeric" })}</dd><dt>SHA-256</dt><dd><code>{release.sha256}</code></dd></dl></details> : null}
+        </section>
+      </main>
+      <footer className="download-footer"><span>MusikaLokal · Local sounds. Shared stories.</span></footer>
+      {release && showMobileDownload ? <aside className="mobile-download" aria-label="Quick download">
+        {downloadProgress !== null ? <><div className="mobile-download-progress"><span>{downloadProgress === 100 ? "Preparing your file…" : `Downloading… ${downloadProgress}%`}</span><progress aria-label="Quick download progress" value={downloadProgress} max={100} /></div><button className="cancel-download" onClick={() => downloadController.current?.abort()}>Cancel download</button></> : <><a className="mobile-install-link" href="#installation">Install guide</a><button className="primary-download" onClick={() => void startDownload()}><span aria-hidden="true">↓</span> Download app</button></>}
+      </aside> : null}
+    </div>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, flexDirection: "row" },
-  heroColumn: { flex: 1.05, minWidth: 0 },
-  formColumn: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, paddingVertical: 40 },
-  formShell: { width: "100%", maxWidth: 430 },
-  logo: { width: 190, height: 58, marginBottom: 28 },
-  eyebrow: { fontFamily: "Poppins_700Bold", fontSize: 12, letterSpacing: 1.7, marginBottom: 8 },
-  title: { fontFamily: "Poppins_700Bold", fontSize: 34, lineHeight: 42 },
-  subtitle: { fontFamily: "Poppins_400Regular", fontSize: 14, lineHeight: 22, marginTop: 6 },
-  form: { gap: 18, marginTop: 30 },
-  fieldGroup: { gap: 8 },
-  label: { fontFamily: "Poppins_600SemiBold", fontSize: 13 },
-  inputWrap: { alignItems: "center", borderRadius: 12, borderWidth: 1, flexDirection: "row", minHeight: 52, paddingHorizontal: 15 },
-  input: { flex: 1, fontFamily: "Poppins_400Regular", fontSize: 14, paddingHorizontal: 11, paddingVertical: 12, outlineStyle: "none" } as any,
-  visibilityButton: { alignItems: "center", justifyContent: "center", padding: 6 },
-  errorBox: { alignItems: "flex-start", backgroundColor: "#FEF2F2", borderColor: "#FECACA", borderRadius: 10, borderWidth: 1, flexDirection: "row", gap: 9, padding: 12 },
-  errorText: { color: "#B91C1C", flex: 1, fontFamily: "Poppins_400Regular", fontSize: 13, lineHeight: 19 },
-  submitButton: { alignItems: "center", borderRadius: 12, flexDirection: "row", gap: 9, justifyContent: "center", minHeight: 52, paddingHorizontal: 18 },
-  submitText: { color: "#FFFFFF", fontFamily: "Poppins_600SemiBold", fontSize: 15 },
-  restrictedNote: { fontFamily: "Poppins_400Regular", fontSize: 12, marginTop: 22, textAlign: "center" },
-});

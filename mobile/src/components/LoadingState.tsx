@@ -8,6 +8,7 @@ import {
   ViewStyle,
 } from "react-native";
 import { useTheme } from "../context/ThemeContext";
+import { typography } from "../theme/tokens";
 
 type LoadingStateProps = {
   message: string;
@@ -98,12 +99,12 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   message: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 15,
     textAlign: "center",
   },
   detail: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 13,
     lineHeight: 19,
     marginTop: 4,
@@ -121,7 +122,7 @@ const styles = StyleSheet.create({
   },
   buttonMessage: {
     flexShrink: 1,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 14,
     minWidth: 0,
   },

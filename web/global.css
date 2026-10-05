@@ -25,3 +25,9 @@ select:focus,
   outline: none !important;
   box-shadow: none !important;
 }
+
+[data-testid="admin-login-page"] :is(input, button, [tabindex]):focus-visible {
+  outline: 3px solid #5546f4 !important;
+  outline-offset: 3px;
+  border-radius: 6px;
+}

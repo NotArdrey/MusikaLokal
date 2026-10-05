@@ -10,6 +10,7 @@ import { router, useFocusEffect } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
+import { typography } from "../theme/tokens";
 
 type Applicant = {
   id: string;
@@ -202,8 +203,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  heading: { fontSize: 21, fontWeight: "700" },
-  title: { fontSize: 16, fontWeight: "600" },
+  heading: { fontFamily: typography.title, fontSize: 21, fontWeight: "700" },
+  title: { fontFamily: typography.heading, fontSize: 16, fontWeight: "600" },
   card: { padding: 16, gap: 10, borderWidth: 1, borderRadius: 14 },
   applicant: { borderTopWidth: 1, paddingTop: 10, gap: 5 },
 });

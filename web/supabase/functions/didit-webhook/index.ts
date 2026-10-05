@@ -12,6 +12,7 @@ import {
     prepareIdentityNameBirthDateDuplicateInput,
     queueIdentityReview,
     recordIdentityDocumentClaim,
+    resolveIdentityDocument,
     sanitizeIdentityVerificationData,
 } from '../_shared/identityDuplicate.ts';
 
@@ -895,7 +896,7 @@ serve(async (req) => {
                         context: 'review_without_document_fingerprint',
                     });
                 } else {
-                    await handleInReview(supabaseAdmin, finalUserReference, sessionId);
+                    await handleInReview(supabaseAdmin, finalUserReference, sessionId, idVerification);
                 }
             }
             // 3b. Missing Face Match: ID-only approval is not enough for MusikaLokal identity verification.
@@ -1679,8 +1680,37 @@ async function handleAbandoned(supabaseAdmin: any, userReference: string, sessio
  * Handle IN REVIEW - manual review needed, block new attempts
  * Don't store profile details yet - wait for manual review result
  */
-async function handleInReview(supabaseAdmin: any, userReference: string, sessionId: string | null) {
+async function handleInReview(supabaseAdmin: any, userReference: string, sessionId: string | null, idVerification: any = null) {
     console.log('Verification in review for user:', userReference);
+
+    let existingIdentityData: any = {};
+    if (!idVerification && sessionId) {
+        const { data: session } = await supabaseAdmin
+            .from('verification_sessions')
+            .select('verification_data')
+            .eq('session_ref', sessionId)
+            .maybeSingle();
+        existingIdentityData = session?.verification_data || {};
+        idVerification = resolveIdentityDocument(existingIdentityData.raw_data);
+    }
+    const documentType = idVerification?.document_type || idVerification?.documentType || idVerification?.type || existingIdentityData.document_type || 'Government ID';
+    const documentCountry = idVerification?.issuing_country || idVerification?.issuingCountry || idVerification?.country || existingIdentityData.document_country || 'PHL';
+    const identityNameBirthDate = prepareIdentityNameBirthDateDuplicateInput(idVerification, {
+        fullLegalName: existingIdentityData.verified_full_legal_name,
+        normalizedFullLegalName: existingIdentityData.normalized_full_legal_name,
+        birthDate: existingIdentityData.birth_date,
+    });
+    const documentFingerprint = existingIdentityData.document_fingerprint
+        || await buildIdentityDocumentFingerprint(idVerification, { documentType, documentCountry });
+    const identityData = idVerification ? {
+        raw_data: sanitizeIdentityVerificationData(idVerification),
+        document_type: documentType,
+        document_country: documentCountry,
+        document_fingerprint: documentFingerprint,
+        verified_full_legal_name: identityNameBirthDate.fullLegalName,
+        normalized_full_legal_name: identityNameBirthDate.normalizedFullLegalName,
+        birth_date: identityNameBirthDate.birthDate,
+    } : {};
 
     // ALWAYS store status in verification_sessions for frontend polling
     if (sessionId) {
@@ -1689,6 +1719,7 @@ async function handleInReview(supabaseAdmin: any, userReference: string, session
             sessionId,
             'PENDING_REVIEW',
             {
+                    ...identityData,
                     user_ref: userReference,
                     review_started_at: new Date().toISOString()
             },
@@ -1708,7 +1739,12 @@ async function handleInReview(supabaseAdmin: any, userReference: string, session
             userId: userReference,
             email: profile?.email || '',
             role: profile?.role || 'musician',
-            documentType: 'Government ID',
+            documentType,
+            documentCountry,
+            documentFingerprint,
+            verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+            normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+            birthDate: identityNameBirthDate.birthDate,
             source: 'DIDIT_PENDING',
             diditSessionId: sessionId,
             metadata: {

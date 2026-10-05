@@ -28,6 +28,7 @@ import {
 } from "../events/toastBus";
 import { isE2EFixtureMode } from "../utils/e2eFixtures";
 import { useTheme } from "./ThemeContext";
+import { typography } from "../theme/tokens";
 
 export type TopToastType = ToastType;
 export type TopToastPayload = ToastPayload;
@@ -445,7 +446,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 14,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
     alignSelf: "stretch",
     textAlign: "center",
   },
@@ -453,7 +454,7 @@ const styles = StyleSheet.create({
     marginTop: 3,
     fontSize: 12,
     lineHeight: 18,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     alignSelf: "stretch",
     textAlign: "center",
   },

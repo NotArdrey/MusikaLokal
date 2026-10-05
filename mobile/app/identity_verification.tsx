@@ -13,6 +13,7 @@ import { useTheme } from '../src/context/ThemeContext';
 import { LoadingButtonContent } from '../src/components/LoadingState';
 import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
 import { createRealtimeChannelTopic } from '../src/utils/realtimeChannel';
+import { typography } from "../src/theme/tokens";
 
 type IdentityProfile = {
   is_verified: boolean | null;
@@ -376,7 +377,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: 12,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
   },
   card: {
     borderRadius: 16,
@@ -391,7 +392,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginLeft: 10,
     fontSize: 13,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   statusRow: {
     flexDirection: 'row',
@@ -407,7 +408,7 @@ const styles = StyleSheet.create({
   statusLabel: {
     marginLeft: 8,
     fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   badge: {
     paddingHorizontal: 10,
@@ -416,7 +417,7 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     fontSize: 11,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   detailRow: {
     paddingHorizontal: 16,
@@ -426,18 +427,18 @@ const styles = StyleSheet.create({
   detailLabel: {
     fontSize: 12,
     marginBottom: 4,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   detailValue: {
     fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   hintText: {
     paddingHorizontal: 16,
     paddingBottom: 16,
     fontSize: 12,
     lineHeight: 18,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   actionButton: {
     borderRadius: 14,
@@ -449,14 +450,14 @@ const styles = StyleSheet.create({
   actionButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   pendingReviewHint: {
     marginTop: 10,
     fontSize: 12,
     lineHeight: 18,
     textAlign: 'center',
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   emptyState: {
     flex: 1,
@@ -467,14 +468,14 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     marginBottom: 8,
-    fontFamily: 'Poppins_700Bold',
+    fontFamily: typography.title,
   },
   emptyMessage: {
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 20,
     lineHeight: 20,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   navbarContainer: {
     position: 'absolute',

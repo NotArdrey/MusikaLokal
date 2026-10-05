@@ -870,7 +870,7 @@ export default function GigDetailsScreen() {
           style={{
             marginTop: 16,
             color: colors.textSecondary,
-            fontFamily: "Poppins_400Regular",
+            fontFamily: typography.body,
           }}
         >
           Checking permissions...
@@ -1026,7 +1026,7 @@ export default function GigDetailsScreen() {
                     <View>
                       <Text
                         style={{
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                           color: colors.textSecondary,
                           marginBottom: 6,
                         }}
@@ -1052,7 +1052,7 @@ export default function GigDetailsScreen() {
                               >
                                 <Text
                                   style={{
-                                    fontFamily: "Poppins_500Medium",
+                                    fontFamily: typography.medium,
                                     fontSize: 12,
                                     color: colors.text,
                                   }}
@@ -1073,7 +1073,7 @@ export default function GigDetailsScreen() {
                     <View>
                       <Text
                         style={{
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                           color: colors.textSecondary,
                           marginBottom: 6,
                         }}
@@ -1099,7 +1099,7 @@ export default function GigDetailsScreen() {
                               >
                                 <Text
                                   style={{
-                                    fontFamily: "Poppins_500Medium",
+                                    fontFamily: typography.medium,
                                     fontSize: 12,
                                     color: colors.text,
                                   }}
@@ -1120,7 +1120,7 @@ export default function GigDetailsScreen() {
                     <View>
                       <Text
                         style={{
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                           color: colors.textSecondary,
                           marginBottom: 6,
                         }}
@@ -1129,7 +1129,7 @@ export default function GigDetailsScreen() {
                       </Text>
                       <Text
                         style={{
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                           color: colors.text,
                         }}
                       >
@@ -1234,7 +1234,7 @@ export default function GigDetailsScreen() {
                     <View>
                       <Text
                         style={{
-                          fontFamily: "Poppins_500Medium",
+                          fontFamily: typography.medium,
                           color: colors.textSecondary,
                         }}
                       >
@@ -1242,7 +1242,7 @@ export default function GigDetailsScreen() {
                       </Text>
                       <Text
                         style={{
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                           color: colors.text,
                           fontSize: 16,
                         }}
@@ -1392,7 +1392,7 @@ export default function GigDetailsScreen() {
                         <Text
                           style={{
                             color: colors.primary,
-                            fontFamily: "Poppins_500Medium",
+                            fontFamily: typography.medium,
                             fontSize: 13,
                           }}
                         >
@@ -1496,7 +1496,7 @@ export default function GigDetailsScreen() {
                   ) : null}
                 </View>
 
-                <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, marginBottom: 10 }}>
+                <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 12, marginBottom: 10 }}>
                   {applicationCounts["Pending"]} pending | {applicationCounts["Accepted"]} accepted | {applicationCounts["Declined"]} declined
                 </Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 14 }}>
@@ -1519,7 +1519,7 @@ export default function GigDetailsScreen() {
                           paddingVertical: 7,
                         }}
                       >
-                        <Text style={{ color: selected ? colors.primary : colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11 }}>
+                        <Text style={{ color: selected ? colors.primary : colors.textSecondary, fontFamily: typography.medium, fontSize: 11 }}>
                           {filter} ({count})
                         </Text>
                       </TouchableOpacity>
@@ -1669,7 +1669,7 @@ export default function GigDetailsScreen() {
                               onPress={() => confirmAction(app.id, "fired")}
                               style={[managementCardStyles.button, { marginTop: 10, borderWidth: 1, borderColor: "#EF4444", opacity: updatingApplication ? 0.5 : 1 }]}
                             >
-                              <Text style={{ color: "#EF4444", fontFamily: "Poppins_600SemiBold" }}>Fire</Text>
+                              <Text style={{ color: "#EF4444", fontFamily: typography.semibold }}>Fire</Text>
                             </TouchableOpacity>
                           ) : null}
 
@@ -1705,7 +1705,7 @@ export default function GigDetailsScreen() {
                   </View>
                   <Text
                     style={{
-                      fontFamily: "Poppins_400Regular",
+                      fontFamily: typography.body,
                       color: colors.textSecondary,
                     }}
                   >
@@ -1968,12 +1968,12 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 24,
     textAlign: "center",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   headerLocation: {
     textAlign: "center",
     marginTop: 4,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   navigateButton: {
     marginTop: 12,
@@ -1987,7 +1987,7 @@ const styles = StyleSheet.create({
   },
   navigateButtonText: {
     color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 13,
   },
   tabsContainer: {
@@ -2002,6 +2002,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   tabText: {
+    fontFamily: typography.body,
     fontSize: 13,
   },
   contentContainer: {
@@ -2014,7 +2015,7 @@ const styles = StyleSheet.create({
   aboutText: {
     fontSize: 16,
     lineHeight: 24,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   offerCard: { ...managementCardStyles.surface },
   offerHeader: {
@@ -2023,7 +2024,7 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
   },
-  offerTitle: { fontSize: 18, fontFamily: typography.semibold },
+  offerTitle: { fontSize: 18, fontFamily: typography.heading },
   offerInfo: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -2034,17 +2035,17 @@ const styles = StyleSheet.create({
   },
   payoutAmount: {
     fontSize: 24,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
   },
   sectionTitle: {
     fontSize: 18,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   detailList: {
     gap: 12,
   },
   detailCard: { ...managementCardStyles.surface, flexDirection: "row", alignItems: "center", gap: 12 },
-  detailCardTitle: { fontSize: 14, fontFamily: typography.semibold },
+  detailCardTitle: { fontSize: 14, fontFamily: typography.heading },
   detailCardText: { ...managementCardStyles.body, marginTop: 4 },
   slotDetailCard: { ...managementCardStyles.surface },
   slotDetailHeader: {
@@ -2054,9 +2055,9 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 8,
   },
-  slotDetailTitle: { fontSize: 15, fontFamily: typography.semibold },
+  slotDetailTitle: { fontSize: 15, fontFamily: typography.heading },
   slotDetailCount: {
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
     fontSize: 13,
   },
   galleryContainer: {
@@ -2089,7 +2090,7 @@ const styles = StyleSheet.create({
   techSpecsTitle: {
     fontSize: 18,
     marginBottom: 16,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   techSpecItem: {
     flexDirection: "row",
@@ -2120,7 +2121,7 @@ const styles = StyleSheet.create({
   applicantsTitle: {
     fontSize: 13,
     letterSpacing: 0.5,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.heading,
   },
   inviteBtn: {
     flexDirection: "row",
@@ -2132,7 +2133,7 @@ const styles = StyleSheet.create({
   },
   inviteBtnText: {
     color: "#FFFFFF",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 12,
   },
   applicantCard: {
@@ -2196,7 +2197,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     fontStyle: "italic",
     fontSize: 14,
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
   },
   actionButtons: {
     flexDirection: "row",
@@ -2224,7 +2225,7 @@ const styles = StyleSheet.create({
   ratingText: {
     fontSize: 48,
     marginBottom: 8,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   starsRow: {
     flexDirection: "row",
@@ -2261,12 +2262,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  contractTitle: { fontSize: 16, marginBottom: 2, fontFamily: typography.semibold },
+  contractTitle: { fontSize: 16, marginBottom: 2, fontFamily: typography.heading },
   contractSubtitle: { ...managementCardStyles.metadata },
   noContractCard: { ...managementCardStyles.surface, borderStyle: "dashed", alignItems: "center", justifyContent: "center" },
   noContractText: {
     fontSize: 14,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: typography.medium,
     marginTop: 8,
   },
   statusBadge: {
@@ -2282,12 +2283,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 1.4,
     textTransform: "uppercase",
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.bold,
   },
   sheetTitle: {
     marginTop: 2,
     fontSize: 20,
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.title,
   },
   sheetCloseButton: {
     width: 36,
@@ -2321,7 +2322,7 @@ const styles = StyleSheet.create({
   },
   submitBtnText: {
     color: "#fff",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 15,
   },
   skillTag: {
@@ -2344,7 +2345,7 @@ const styles = StyleSheet.create({
   },
   mediaButtonText: {
     marginLeft: 8,
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
   },
   documentMetaCard: { ...managementCardStyles.surface },
   documentMetaRow: {

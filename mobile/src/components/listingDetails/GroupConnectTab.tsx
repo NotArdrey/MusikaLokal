@@ -8,6 +8,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { typography } from "../../theme/tokens";
 
   const debugLog = (..._args: unknown[]) => {};
 
@@ -88,7 +89,7 @@ const GroupConnectTab = ({
                       style={{
                         color: selectedVenueId === v.id ? "#FFF" : colors.text,
                         marginLeft: 8,
-                        fontFamily: "Poppins_500Medium",
+                        fontFamily: typography.medium,
                       }}
                     >
                       {v.name}
@@ -147,7 +148,7 @@ const GroupConnectTab = ({
             ]}
           >
             <Ionicons name="attach-outline" size={24} color={colors.primary} />
-            <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>
+            <Text style={{ color: colors.text, fontFamily: typography.medium }}>
               Attach Event Proposal
             </Text>
           </TouchableOpacity>
@@ -185,7 +186,7 @@ const GroupConnectTab = ({
               >
                 <Text
                   style={{
-                    fontFamily: "Poppins_600SemiBold",
+                    fontFamily: typography.semibold,
                     color: colors.text,
                   }}
                 >
@@ -244,7 +245,7 @@ const GroupConnectTab = ({
                       <Text
                         style={{
                           color: colors.text,
-                          fontFamily: "Poppins_600SemiBold",
+                          fontFamily: typography.semibold,
                           fontSize: 14,
                         }}
                       >
@@ -253,7 +254,7 @@ const GroupConnectTab = ({
                       <Text
                         style={{
                           color: colors.textSecondary,
-                          fontFamily: "Poppins_400Regular",
+                          fontFamily: typography.body,
                           fontSize: 12,
                           marginTop: 1,
                         }}

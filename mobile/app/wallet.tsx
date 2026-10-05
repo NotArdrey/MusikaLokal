@@ -18,6 +18,7 @@ import { useWalletSummaryQuery } from '../src/data/hooks';
 import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
 import { isE2EFixtureMode } from '../src/utils/e2eFixtures';
 import { usePageLoadLogger } from '../src/utils/loadTimeLogger';
+import { typography } from "../src/theme/tokens";
 
 // Payout Method Type
 interface PayoutMethod {
@@ -739,7 +740,7 @@ export default function WalletScreen() {
                 ]}
               >
                 <Ionicons name="arrow-down-circle-outline" size={20} color={colors.primary} />
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Withdraw</Text>
+                <Text style={{ fontFamily: typography.semibold, color: colors.primary }}>Withdraw</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -880,7 +881,7 @@ export default function WalletScreen() {
                   }}
                 >
                   <Text style={{
-                    fontFamily: 'Poppins_500Medium', fontSize: 12,
+                    fontFamily: typography.medium, fontSize: 12,
                     color: txFilter === opt.key ? '#fff' : colors.textSecondary,
                   }}>
                     {opt.label}
@@ -896,7 +897,7 @@ export default function WalletScreen() {
                 </View>
               ) : filteredTransactions.length === 0 ? (
                 <View style={{ padding: 20, alignItems: 'center' }}>
-                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No wallet activity yet</Text>
+                  <Text style={{ color: colors.textSecondary, fontFamily: typography.body }}>No wallet activity yet</Text>
                 </View>
               ) : (
                 filteredTransactions.map((tx, index) => {
@@ -937,7 +938,7 @@ export default function WalletScreen() {
                         </Text>
                         {txCategoryLabel && getTransactionCategory(tx) !== 'booking' && (
                           <Text
-                            style={{ fontFamily: 'Poppins_400Regular', fontSize: 11, color: colors.primary }}
+                            style={{ fontFamily: typography.body, fontSize: 11, color: colors.primary }}
                             numberOfLines={1}
                           >
                             {txCategoryLabel}
@@ -1372,13 +1373,13 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.8)',
     fontSize: 14,
     marginBottom: 4,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   balanceValue: {
     color: 'white',
     fontSize: 36, // text-4xl
     marginBottom: 24,
-    fontFamily: 'Poppins_700Bold',
+    fontFamily: typography.bold,
   },
   balanceRow: {
     flexDirection: 'row',
@@ -1391,12 +1392,12 @@ const styles = StyleSheet.create({
   balanceSubLabel: {
     color: 'rgba(255,255,255,0.7)',
     fontSize: 12, // text-xs
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   balanceSubValue: {
     color: 'white',
     fontSize: 18, // text-lg
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   actionButtonsRow: {
     flexDirection: 'row',
@@ -1420,7 +1421,7 @@ const styles = StyleSheet.create({
   historyTitle: {
     marginBottom: 16,
     fontSize: 16, // text-base
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
   },
   historyContainer: {
     borderRadius: 16,
@@ -1452,15 +1453,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   transactionType: {
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
     fontSize: 14,
   },
   transactionDate: {
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     fontSize: 12,
   },
   transactionAmount: {
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     fontSize: 14,
     flexShrink: 0,
   },
@@ -1496,18 +1497,18 @@ const styles = StyleSheet.create({
   },
   unpaidTitle: {
     fontSize: 16,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
     color: '#DC2626',
   },
   unpaidSubtitle: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     color: '#B91C1C',
   },
   unpaidTotal: {
     fontSize: 18,
     lineHeight: 24,
-    fontFamily: 'Poppins_700Bold',
+    fontFamily: typography.bold,
     color: '#DC2626',
     flexShrink: 0,
     maxWidth: 132,
@@ -1530,17 +1531,17 @@ const styles = StyleSheet.create({
   },
   unpaidName: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     color: '#1F2937',
   },
   unpaidDate: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     color: '#6B7280',
   },
   unpaidAmount: {
     fontSize: 13,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     color: '#DC2626',
   },
   payNowBtn: {
@@ -1554,12 +1555,12 @@ const styles = StyleSheet.create({
   },
   payNowText: {
     fontSize: 13,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     color: 'white',
   },
   unpaidWarning: {
     fontSize: 12,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
     color: '#B91C1C',
     textAlign: 'center',
     marginTop: 12,
@@ -1600,11 +1601,11 @@ const styles = StyleSheet.create({
   },
   withdrawModalTitle: {
     fontSize: 24,
-    fontFamily: 'Poppins_700Bold',
+    fontFamily: typography.title,
   },
   withdrawModalSubtitle: {
     fontSize: 14,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     marginTop: 2,
   },
   inputSection: {
@@ -1612,7 +1613,7 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     marginBottom: 8,
   },
   amountInputContainer: {
@@ -1626,7 +1627,7 @@ const styles = StyleSheet.create({
   currencyPrefix: {
     fontSize: 24,
     lineHeight: 32,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     marginRight: 8,
     includeFontPadding: false,
     textAlignVertical: 'center',
@@ -1636,14 +1637,14 @@ const styles = StyleSheet.create({
     height: 56,
     fontSize: 24,
     lineHeight: 32,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     includeFontPadding: false,
     paddingVertical: 0,
     textAlignVertical: 'center',
   },
   inputHint: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     marginTop: 6,
   },
   quickAmounts: {
@@ -1662,7 +1663,7 @@ const styles = StyleSheet.create({
   },
   quickAmountText: {
     fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   methodOption: {
     padding: 16,
@@ -1673,11 +1674,11 @@ const styles = StyleSheet.create({
   },
   methodOptionTitle: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   methodOptionDesc: {
     fontSize: 11,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     textAlign: 'center',
   },
   payoutMethodHeader: {
@@ -1688,7 +1689,7 @@ const styles = StyleSheet.create({
   },
   addMethodLink: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   addPayoutBtn: {
     flexDirection: 'row',
@@ -1702,7 +1703,7 @@ const styles = StyleSheet.create({
   },
   addPayoutText: {
     fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   payoutMethodsList: {
     gap: 10,
@@ -1731,7 +1732,7 @@ const styles = StyleSheet.create({
   },
   payoutMethodName: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   payoutMethodTextBlock: {
     flex: 1,
@@ -1739,7 +1740,7 @@ const styles = StyleSheet.create({
   },
   payoutMethodAccount: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     marginTop: 2,
   },
   summaryCard: {
@@ -1756,11 +1757,11 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 14,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
   },
   summaryValue: {
     fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   summaryDivider: {
     height: 1,
@@ -1768,11 +1769,11 @@ const styles = StyleSheet.create({
   },
   summaryLabelBold: {
     fontSize: 15,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   summaryValueBold: {
     fontSize: 18,
-    fontFamily: 'Poppins_700Bold',
+    fontFamily: typography.bold,
   },
   noteCard: {
     flexDirection: 'row',
@@ -1785,7 +1786,7 @@ const styles = StyleSheet.create({
   noteText: {
     flex: 1,
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     lineHeight: 18,
   },
   withdrawSubmitBtn: {
@@ -1800,7 +1801,7 @@ const styles = StyleSheet.create({
   withdrawSubmitText: {
     color: 'white',
     fontSize: 16,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   // Add Payout Modal
   addPayoutModal: {
@@ -1827,7 +1828,7 @@ const styles = StyleSheet.create({
   },
   payoutTypeBtnText: {
     fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
   },
   textInput: {
     height: 56,
@@ -1837,7 +1838,7 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
     fontSize: 16,
     lineHeight: 22,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     includeFontPadding: false,
     textAlignVertical: 'center',
   },
@@ -1866,14 +1867,14 @@ const styles = StyleSheet.create({
   },
   withdrawalStatusText: {
     fontSize: 10,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
   },
   withdrawalRight: {
     alignItems: 'flex-end',
   },
   cancelWithdrawalText: {
     fontSize: 12,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
     color: '#DC2626',
     marginTop: 4,
   },

@@ -1,7 +1,6 @@
-const MUSIKALOKAL_WEB_URL = "https://musikalokal.app";
+import { buildPostShareUrl } from "./shareLinks";
 
-export const buildPostShareUrl = (postId: string) =>
-  `${MUSIKALOKAL_WEB_URL}/feed?postId=${encodeURIComponent(postId)}`;
+export { buildPostShareUrl } from "./shareLinks";
 
 export const buildPostShareMessage = (post: any) => {
   const caption =
@@ -13,4 +12,3 @@ export const buildPostShareMessage = (post: any) => {
 
   return `${caption}\n\nView this post on MusikaLokal:\n${buildPostShareUrl(String(post?.id || ""))}`;
 };
-

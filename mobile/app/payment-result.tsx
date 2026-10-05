@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { supabase } from "../lib/supabase";
 import { useTheme } from "../src/context/ThemeContext";
+import { typography } from "../src/theme/tokens";
 
 type VerificationState = "idle" | "checking" | "verified" | "delayed" | "failed";
 
@@ -187,13 +188,13 @@ const styles = StyleSheet.create({
     width: 100,
   },
   title: {
-    fontFamily: "Poppins_700Bold",
+    fontFamily: typography.title,
     fontSize: 24,
     marginBottom: 12,
     textAlign: "center",
   },
   description: {
-    fontFamily: "Poppins_400Regular",
+    fontFamily: typography.body,
     fontSize: 15,
     lineHeight: 22,
     marginBottom: 28,
@@ -210,7 +211,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: "white",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 16,
   },
   secondaryButton: {
@@ -220,7 +221,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   secondaryButtonText: {
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: typography.semibold,
     fontSize: 16,
   },
 });

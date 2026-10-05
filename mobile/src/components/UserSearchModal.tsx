@@ -14,6 +14,7 @@ import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 import LoadingState from './LoadingState';
 import ProfileAvatar from './ProfileAvatar';
+import { typography } from "../theme/tokens";
 
 interface User {
     id: string;
@@ -311,6 +312,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     headerTitle: {
+        fontFamily: typography.heading,
         fontSize: 18,
         fontWeight: '600',
     },
@@ -327,7 +329,7 @@ const styles = StyleSheet.create({
         flex: 1,
         height: 24,
         fontSize: 15,
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: typography.medium,
         lineHeight: 20,
         includeFontPadding: false,
         padding: 0,
@@ -360,10 +362,12 @@ const styles = StyleSheet.create({
         marginLeft: 12,
     },
     userName: {
+        fontFamily: typography.medium,
         fontSize: 16,
         fontWeight: '500',
     },
     userRole: {
+        fontFamily: typography.body,
         fontSize: 13,
         marginTop: 2,
     },
@@ -374,10 +378,12 @@ const styles = StyleSheet.create({
         padding: 32,
     },
     emptyText: {
+        fontFamily: typography.body,
         fontSize: 16,
         marginTop: 12,
     },
     sectionTitle: {
+        fontFamily: typography.heading,
         fontSize: 13,
         fontWeight: '600',
         marginLeft: 16,
@@ -386,6 +392,7 @@ const styles = StyleSheet.create({
         textTransform: 'uppercase',
     },
     hintText: {
+        fontFamily: typography.body,
         fontSize: 14,
         textAlign: 'center',
         marginTop: 24,

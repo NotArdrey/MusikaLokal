@@ -5,6 +5,7 @@ import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useTheme } from '../src/context/ThemeContext';
+import { typography } from "../src/theme/tokens";
 
 const isFabricEnabled = Boolean((globalThis as { nativeFabricUIManager?: unknown }).nativeFabricUIManager);
 
@@ -113,7 +114,7 @@ export default function HelpSupportScreen() {
                                             { backgroundColor: isDark ? 'rgba(30, 41, 59, 0.5)' : '#F9FAFB', borderColor: colors.border }
                                         ]}
                                     >
-                                        <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, lineHeight: 20 }}>{faq.answer}</Text>
+                                        <Text style={{ fontFamily: typography.body, color: colors.textSecondary, lineHeight: 20 }}>{faq.answer}</Text>
                                     </View>
                                 )}
                             </View>
@@ -124,10 +125,10 @@ export default function HelpSupportScreen() {
                 {/* Links */}
                 <View style={styles.linksSection}>
                     <TouchableOpacity activeOpacity={1} style={[styles.linkItem, { borderColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-                        <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.primary }}>Terms of Service</Text>
+                        <Text style={{ fontFamily: typography.medium, color: colors.primary }}>Terms of Service</Text>
                     </TouchableOpacity>
                     <TouchableOpacity activeOpacity={1} style={styles.linkItemLast}>
-                        <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.primary }}>Privacy Policy</Text>
+                        <Text style={{ fontFamily: typography.medium, color: colors.primary }}>Privacy Policy</Text>
                     </TouchableOpacity>
                 </View>
 
@@ -155,7 +156,7 @@ const styles = StyleSheet.create({
         fontSize: 18, // text-lg
         fontWeight: 'bold',
         marginBottom: 16,
-        fontFamily: 'Poppins_700Bold',
+        fontFamily: typography.title,
     },
     contactButtons: {
         flexDirection: 'row',
@@ -180,7 +181,7 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: 'bold',
         marginBottom: 16,
-        fontFamily: 'Poppins_700Bold',
+        fontFamily: typography.title,
     },
     faqItem: {
         marginBottom: 12,
@@ -197,7 +198,7 @@ const styles = StyleSheet.create({
         flex: 1,
         fontWeight: '500',
         marginRight: 8,
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: typography.medium,
     },
     faqContent: {
         padding: 16,

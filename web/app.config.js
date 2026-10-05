@@ -11,7 +11,7 @@ const shouldUseE2EEnv =
 
 require("dotenv").config({
   path: shouldUseE2EEnv ? e2eEnvPath : defaultEnvPath,
-  override: true,
+  override: false,
   quiet: true,
 });
 
@@ -22,7 +22,10 @@ const readPublicOrE2EEnv = (publicName, e2eName, fallback = "") =>
   readEnv(publicName, readEnv(e2eName, fallback));
 
 module.exports = ({ config: expoConfig }) => {
-  const existingExtra = expoConfig.extra || {};
+  const existingExtra = { ...(expoConfig.extra || {}) };
+  delete existingExtra.groqApiKey;
+  delete existingExtra.expoPublicGroqApiKey;
+  delete existingExtra.EXPO_PUBLIC_GROQ_API_KEY;
 
   return {
     ...expoConfig,
@@ -39,10 +42,6 @@ module.exports = ({ config: expoConfig }) => {
         sanitize(existingExtra.supabaseAnonKey),
       ),
       e2eMode: readEnv("EXPO_PUBLIC_E2E", sanitize(existingExtra.e2eMode)),
-      groqApiKey: readEnv(
-        "EXPO_PUBLIC_GROQ_API_KEY",
-        sanitize(existingExtra.groqApiKey),
-      ),
     },
   };
 };

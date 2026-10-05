@@ -22,6 +22,7 @@ import {
 } from '../utils/storageUpload';
 import { generateNativeVideoFrame } from '../utils/videoFrames';
 import CustomAlert, { AlertType } from './CustomAlert';
+import { typography } from "../theme/tokens";
 
 const debugLog = (..._args: unknown[]) => {};
 const ALLOWED_VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'webm', 'm4v']);
@@ -952,14 +953,14 @@ export default function VideoUploader({
           {uploading || loadingPortfolioVideos ? (
             <>
               <ActivityIndicator size="large" color={colors.primary} />
-              <Text style={{ color: colors.text, marginTop: 8, fontFamily: 'Poppins_500Medium' }}>
+              <Text style={{ color: colors.text, marginTop: 8, fontFamily: typography.medium }}>
                 {loadingPortfolioVideos ? 'Loading My Media...' : `Uploading... ${uploadProgress}%`}
               </Text>
             </>
           ) : (
             <>
               <Ionicons name="videocam-outline" size={32} color={colors.primary} />
-              <Text style={{ color: colors.text, marginTop: 8, fontFamily: 'Poppins_500Medium' }}>
+              <Text style={{ color: colors.text, marginTop: 8, fontFamily: typography.medium }}>
                 Upload Performance Video (Required)
               </Text>
               <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
@@ -1016,12 +1017,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   videoText: {
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     fontSize: 14,
     marginBottom: 4,
   },
   videoSubtext: {
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     fontSize: 12,
   },
   removeButton: {
@@ -1064,11 +1065,11 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   portfolioPickerTitle: {
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
     fontSize: 17,
   },
   portfolioPickerSubtitle: {
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: typography.body,
     fontSize: 11,
     lineHeight: 17,
     marginTop: 3,
@@ -1093,7 +1094,7 @@ const styles = StyleSheet.create({
   },
   portfolioVideoName: {
     flex: 1,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: typography.medium,
     fontSize: 12,
   },
   deviceVideoButton: {
@@ -1107,13 +1108,13 @@ const styles = StyleSheet.create({
   },
   deviceVideoButtonText: {
     color: '#FFF',
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.semibold,
     fontSize: 13,
   },
   loadingTitle: {
     marginTop: 14,
     fontSize: 15,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: typography.heading,
     textAlign: 'center',
   },
 });

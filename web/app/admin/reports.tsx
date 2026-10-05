@@ -1,23 +1,12 @@
+import useAdminLayout from '../../src/hooks/useAdminLayout';
 import UploadModerationPanel, { UploadModerationStatusCounts } from '../../src/components/UploadModerationPanel';
 ﻿
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
-import Header from '../../src/components/header';
+import Header from '../../src/components/admin/AdminPageHeader';
 import LoadingState from '../../src/components/LoadingState';
 import { AdminFilterBar, FilterDropdown } from '../../src/components/admin/filters';
 import { useAuth } from '../../src/context/AuthContext';
@@ -96,8 +85,6 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   }
 };
 
-type Tab = 'dashboard' | 'users' | 'reports' | 'audit' | 'posts' | 'products';
-
 type ReportStatus = 'pending' | 'resolved' | 'dismissed';
 
 type ReportFilter = 'all' | ReportStatus;
@@ -125,15 +112,6 @@ type ReportTargetAccountAction =
   | 'ban_30_days'
   | 'ban_permanent'
   | 'lift_ban';
-
-const adminTabRoutes: Record<Tab, string> = {
-  dashboard: '/admin',
-  users: '/admin/users',
-  reports: '/admin/reports',
-  audit: '/admin/audit',
-  posts: '/admin/posts',
-  products: '/admin/products',
-};
 
 interface ReportEntry {
   id: string;
@@ -617,6 +595,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   modalButton: {
+    flexShrink: 1,
     minWidth: 108,
     borderRadius: 10,
     paddingHorizontal: 14,
@@ -818,6 +797,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_500Medium',
   },
   smallActionButton: {
+    minHeight: 44,
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 10,
@@ -825,13 +805,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 40,
+
     minWidth: 132,
     flexGrow: 1,
     flexBasis: 0,
     gap: 4,
   },
   smallActionButtonFilled: {
+    minHeight: 44,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -839,7 +820,7 @@ const styles = StyleSheet.create({
     gap: 5,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 40,
+
     minWidth: 132,
     flexGrow: 1,
     flexBasis: 0,
@@ -867,40 +848,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'Poppins_600SemiBold',
   },
-  tabButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    position: 'relative',
-  },
-  tabsRow: {
-    gap: 8,
-    paddingBottom: 4,
-  },
-  tabText: {
-    fontSize: 12,
-    fontFamily: 'Poppins_600SemiBold',
-    textTransform: 'capitalize',
-  },
-});
 
-const tabItems: { key: Tab; label: string; icon: string }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' },
-  { key: 'users', label: 'Users', icon: 'people-outline' },
-  { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
-  { key: 'audit', label: 'Audit', icon: 'time-outline' },
-  { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
-  { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
-];
+});
 
 export default function AdminReportsPage() {
   const { colors, isDark } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
-  const { width } = useWindowDimensions();
+  const { height, isCompact, contentPadding } = useAdminLayout();
 
   const [initializingReports, setInitializingReports] = useState(false);
   const [reportSearch, setReportSearch] = useState('');
@@ -944,8 +898,6 @@ export default function AdminReportsPage() {
     message: '',
   });
 
-  const showSidebarLayout = Platform.OS === 'web' && width >= 768;
-  const showInlineTabNav = !showSidebarLayout;
   const hasInitializedRef = useRef(false);
 
   const showAlert = useCallback((
@@ -992,11 +944,6 @@ export default function AdminReportsPage() {
 
   const updateReportFilter = useCallback((nextFilter: ReportFilter) => {
     setReportFilter(nextFilter);
-  }, []);
-
-  const handleTabChange = useCallback((nextTab: Tab) => {
-    if (nextTab === 'reports') return;
-    router.replace(adminTabRoutes[nextTab] as any);
   }, []);
 
   const invokeAdminUsersManagement = useCallback(
@@ -1702,15 +1649,15 @@ export default function AdminReportsPage() {
                   <View
                     key={`${title}-${entry.key}`}
                     style={[
-                      styles.detailRow,
+                      styles.detailRow, isCompact && { flexDirection: 'column' },
                       {
                         backgroundColor: isDark ? '#111827' : '#F8FAFC',
                         borderColor: colors.border,
                       },
                     ]}
                   >
-                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{entry.label}</Text>
-                    <Text selectable style={[styles.detailValue, { color: colors.text }]}>
+                    <Text style={[styles.detailLabel, isCompact && { flexBasis: 'auto' }, { color: colors.textSecondary }]}>{entry.label}</Text>
+                    <Text selectable style={[styles.detailValue, isCompact && { flex: 0, width: '100%' }, { color: colors.text }]}>
                       {entry.value}
                     </Text>
                   </View>
@@ -1721,7 +1668,7 @@ export default function AdminReportsPage() {
         )}
       </View>
     );
-  }, [colors.border, colors.primary, colors.text, colors.textSecondary, isDark]);
+  }, [colors.border, colors.primary, colors.text, colors.textSecondary, isCompact, isDark]);
 
   const getReportStatusTone = (status: ReportStatus) => {
     if (status === 'pending') {
@@ -2090,53 +2037,23 @@ export default function AdminReportsPage() {
       accessibilityLabel="admin-reports-page"
       style={[styles.flex1, { backgroundColor: colors.background }]}
     >
-      <Header title="Admin" hideBackButton />
+      <Header title="Reports" hideBackButton />
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingHorizontal: contentPadding }]}
         showsVerticalScrollIndicator={false}
         showsHorizontalScrollIndicator={false}
       >
-        {showInlineTabNav && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
-            {tabItems.map((item) => {
-              const active = item.key === 'reports';
-              return (
-                <TouchableOpacity
-                  key={item.key}
-                  activeOpacity={1}
-                  onPress={() => handleTabChange(item.key)}
-                  style={[
-                    styles.tabButton,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#F3F4F6'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={item.icon as any}
-                    size={16}
-                    color={active ? '#FFFFFF' : colors.textSecondary}
-                  />
-                  <Text style={[styles.tabText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        )}
 
         {renderReportsManagementSection()}
       </ScrollView>
 
       <Modal visible={!!userDetailsTarget} transparent animationType="fade" onRequestClose={closeUserDetailsModal}>
-        <View style={styles.modalBackdrop}>
+        <View style={[styles.modalBackdrop, { padding: isCompact ? 8 : 20 }]}>
           <View
             testID="admin-user-details-modal"
             accessibilityLabel="admin-user-details-modal"
-            style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}
+            style={[styles.modalCardLarge, { maxHeight: Math.max(180, height - (isCompact ? 16 : 40)), ...(isCompact ? { padding: 14 } : {}) }, { backgroundColor: colors.card, borderColor: colors.border }]}
           >
             <View style={styles.detailsModalHeader}>
               <View style={[styles.detailsModalIcon, { backgroundColor: `${colors.primary}18` }]}>
@@ -2151,14 +2068,14 @@ export default function AdminReportsPage() {
             </View>
 
             <ScrollView
-              style={styles.detailsScroll}
+              style={[styles.detailsScroll, { flexShrink: 1 }]}
               contentContainerStyle={styles.detailsScrollContent}
               showsVerticalScrollIndicator={false}
             >
               {renderDetailsSection('Account', userDetailsTarget?.profile || null, 'Account details are unavailable.')}
             </ScrollView>
 
-            <View style={styles.modalActionsRow}>
+            <View style={[styles.modalActionsRow, isCompact && { flexDirection: 'column' }]}>
               <TouchableOpacity
                 activeOpacity={1}
                 onPress={closeUserDetailsModal}
@@ -2172,11 +2089,11 @@ export default function AdminReportsPage() {
       </Modal>
 
       <Modal visible={!!reportDetailsTarget} transparent animationType="fade" onRequestClose={closeReportDetailsModal}>
-        <View style={styles.modalBackdrop}>
+        <View style={[styles.modalBackdrop, { padding: isCompact ? 8 : 20 }]}>
           <View
             testID="admin-report-details-modal"
             accessibilityLabel="admin-report-details-modal"
-            style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}
+            style={[styles.modalCardLarge, { maxHeight: Math.max(180, height - (isCompact ? 16 : 40)), ...(isCompact ? { padding: 14 } : {}) }, { backgroundColor: colors.card, borderColor: colors.border }]}
           >
             <View style={styles.detailsModalHeader}>
               <View style={[styles.detailsModalIcon, { backgroundColor: `${colors.primary}18` }]}>
@@ -2191,7 +2108,7 @@ export default function AdminReportsPage() {
             </View>
 
             <ScrollView
-              style={styles.detailsScroll}
+              style={[styles.detailsScroll, { flexShrink: 1 }]}
               contentContainerStyle={styles.detailsScrollContent}
               showsVerticalScrollIndicator={false}
             >
@@ -2247,7 +2164,7 @@ export default function AdminReportsPage() {
               )}
             </ScrollView>
 
-            <View style={styles.modalActionsRow}>
+            <View style={[styles.modalActionsRow, isCompact && { flexDirection: 'column' }]}>
               <TouchableOpacity
                 testID="admin-report-details-reporter-button"
                 accessibilityLabel="admin-report-details-reporter-button"
@@ -2339,18 +2256,19 @@ export default function AdminReportsPage() {
       </Modal>
 
       <Modal visible={!!reportModerationTarget} transparent animationType="fade" onRequestClose={closeReportModerationModal}>
-        <View style={styles.modalBackdrop}>
+        <View style={[styles.modalBackdrop, { padding: isCompact ? 8 : 20 }]}>
           <View
             testID="admin-report-moderation-modal"
             accessibilityLabel="admin-report-moderation-modal"
-            style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}
+            style={[styles.modalCardLarge, { maxHeight: Math.max(180, height - (isCompact ? 16 : 40)), ...(isCompact ? { padding: 14 } : {}) }, { backgroundColor: colors.card, borderColor: colors.border }]}
           >
             <Text style={[styles.modalTitle, { color: colors.text }]}>Moderate Report</Text>
             <Text style={[styles.modalDescription, { color: colors.textSecondary }]}>
               {reportModerationTarget?.reason || 'Select moderation outcome and action.'}
             </Text>
 
-            <Text style={[styles.formLabel, { color: colors.textSecondary }]}>Status</Text>
+            <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled">
+              <Text style={[styles.formLabel, { color: colors.textSecondary }]}>Status</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
               {(['pending', 'resolved', 'dismissed'] as ReportStatus[]).map((status) => {
                 const active = reportModerationStatus === status;
@@ -2449,7 +2367,8 @@ export default function AdminReportsPage() {
               ]}
             />
 
-            <View style={styles.modalActionsRow}>
+            </ScrollView>
+            <View style={[styles.modalActionsRow, isCompact && { flexDirection: 'column' }]}>
               <TouchableOpacity
                 testID="admin-report-moderation-cancel-button"
                 accessibilityLabel="admin-report-moderation-cancel-button"

@@ -14,6 +14,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 import BottomModal from "../../src/components/BottomModal";
 import CachedImage from "../../src/components/CachedImage";
@@ -72,6 +73,7 @@ const getProductImage = (product: any) => product?.cover_image_url || product?.p
 
 export default function MarketplaceScreen() {
   const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
   const { contentBottomPadding } = useBottomBarClearance(24);
   const { width: viewportWidth } = useWindowDimensions();
   const { session, isGuest, userId, userRole, roleResolved, loading: authLoading } = useAuth();
@@ -946,7 +948,8 @@ export default function MarketplaceScreen() {
       {/* Add Product Modal */}
       <BottomModal
         visible={showAddProduct}
-        bottomInsetBackgroundColor={colors.surface}
+        contentContainerStyle={{ height: "80%" }}
+        keyboardAvoiding
         navigationBarStyleWhileVisible={isDark ? "dark" : "light"}
         overlayLabel="MarketplaceAddProductModal"
         onClose={() => {
@@ -957,7 +960,7 @@ export default function MarketplaceScreen() {
           <View
             testID="mobile-marketplace-listing-modal"
             accessibilityLabel="mobile-marketplace-listing-modal"
-            style={[styles.modalBox, { backgroundColor: colors.surface }]}
+            style={[styles.modalBox, { backgroundColor: colors.surface, paddingBottom: Math.max(20, insets.bottom) }]}
           >
             <View style={styles.modalHeader}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>{editingProductId ? "Edit Listing" : "Create Listing"}</Text>
@@ -973,7 +976,12 @@ export default function MarketplaceScreen() {
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingBottom: 20 }}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
               <Text style={[styles.inputLabel, { color: colors.text }]}>Photos</Text>
               <ImageUploader
                 enableAiSafetyScreening={false}
@@ -1125,7 +1133,7 @@ const styles = StyleSheet.create({
   soldBadge: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 999, backgroundColor: "#F97316", paddingHorizontal: 10, paddingVertical: 6 },
   soldBadgeText: { color: "#fff", fontSize: moderateScale(11), fontFamily: typography.bold },
   productInfo: { padding: 10 },
-  productTitle: { fontSize: moderateScale(13), fontFamily: typography.semibold },
+  productTitle: { fontSize: moderateScale(13), fontFamily: typography.heading },
   productSeller: { fontSize: moderateScale(11), fontFamily: typography.body, marginTop: 2 },
   productPrice: { fontSize: moderateScale(14), fontFamily: typography.bold, marginTop: 4 },
   variantCount: { flex: 1, minWidth: 0, fontSize: moderateScale(10), fontFamily: typography.medium },
@@ -1150,7 +1158,7 @@ const styles = StyleSheet.create({
   sellerProductCard: { flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 12, borderWidth: 1, marginBottom: 10 },
   productThumb: { width: 56, height: 56, borderRadius: 8 },
   productThumbPlaceholder: { width: 56, height: 56, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-  sellerProductTitle: { fontSize: moderateScale(14), fontFamily: typography.semibold },
+  sellerProductTitle: { fontSize: moderateScale(14), fontFamily: typography.heading },
   sellerProductPrice: { fontSize: moderateScale(13), marginTop: 2, fontFamily: typography.bold },
   sellerProductMeta: { fontSize: moderateScale(11), fontFamily: typography.body, marginTop: 4 },
   sellerActionButtons: { flexDirection: "row", gap: 8 },
@@ -1159,7 +1167,7 @@ const styles = StyleSheet.create({
   emptyContainer: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 400 },
   emptyText: { textAlign: "center", marginTop: 12, fontSize: moderateScale(15), fontFamily: typography.medium },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  modalBox: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: "80%" as any },
+  modalBox: { flex: 1, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
   sectionTitle: {
     fontSize: moderateScale(17),

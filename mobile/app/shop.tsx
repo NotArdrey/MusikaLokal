@@ -258,7 +258,7 @@ const styles = StyleSheet.create({
   productImage: { width: "100%" },
   productImagePlaceholder: { width: "100%", alignItems: "center", justifyContent: "center" },
   productInfo: { padding: 10 },
-  productTitle: { fontSize: moderateScale(13), fontFamily: typography.semibold },
+  productTitle: { fontSize: moderateScale(13), fontFamily: typography.heading },
   productSeller: { fontSize: moderateScale(11), fontFamily: typography.body, marginTop: 2 },
   productPrice: { fontSize: moderateScale(14), fontFamily: typography.bold, marginTop: 4 },
   variantCount: { fontSize: moderateScale(10), fontFamily: typography.body, marginTop: 2 },

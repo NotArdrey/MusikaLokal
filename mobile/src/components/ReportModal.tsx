@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
 import BottomModal from './BottomModal';
 import CustomAlert from './CustomAlert';
+import { typography } from "../theme/tokens";
 
 export const REPORT_REASONS_BY_TYPE: Record<string, string[]> = {
     group: [
@@ -404,6 +405,7 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     errorText: {
+        fontFamily: typography.medium,
         fontSize: 13,
         fontWeight: '500',
         marginTop: 10,
@@ -443,16 +445,19 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(156,163,175,0.15)',
     },
     headerTitle: {
+        fontFamily: typography.title,
         fontSize: 18,
         fontWeight: '700',
         textAlign: 'center',
     },
     subheading: {
+        fontFamily: typography.heading,
         fontSize: 15,
         fontWeight: '600',
         marginBottom: 4,
     },
     subheadingNote: {
+        fontFamily: typography.body,
         fontSize: 12,
         lineHeight: 18,
         marginBottom: 12,
@@ -476,6 +481,7 @@ const styles = StyleSheet.create({
         borderWidth: 1.5,
     },
     reasonText: {
+        fontFamily: typography.medium,
         fontSize: 14,
         fontWeight: '500',
         flex: 1,
@@ -490,6 +496,7 @@ const styles = StyleSheet.create({
         marginLeft: 12,
     },
     detailsInput: {
+        fontFamily: typography.body,
         borderWidth: 1,
         borderRadius: 12,
         paddingHorizontal: 14,
@@ -511,6 +518,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     submitBtnText: {
+        fontFamily: typography.bold,
         fontSize: 16,
         fontWeight: '700',
     },
@@ -522,6 +530,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     cancelBtnText: {
+        fontFamily: typography.medium,
         fontSize: 15,
         fontWeight: '500',
     },
@@ -540,12 +549,14 @@ const styles = StyleSheet.create({
         marginBottom: 20,
     },
     successTitle: {
+        fontFamily: typography.title,
         fontSize: 22,
         fontWeight: '700',
         marginBottom: 10,
         textAlign: 'center',
     },
     successSub: {
+        fontFamily: typography.body,
         fontSize: 14,
         lineHeight: 22,
         textAlign: 'center',
@@ -559,6 +570,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     doneBtnText: {
+        fontFamily: typography.bold,
         color: '#FFF',
         fontSize: 16,
         fontWeight: '700',

@@ -20,7 +20,7 @@ test("web and mobile signup reject email reuse and same-role identity reuse", as
     assert.doesNotMatch(manualReview, /roleAddedToExistingAccount/);
   }
 
-  const settings = await read("web/app/settings.tsx");
+  const settings = await read("mobile/app/settings.tsx");
   const authContext = await read("web/src/context/AuthContext.tsx");
   const manageProfile = await read("web/supabase/functions/manage-profile/index.ts");
   assert.doesNotMatch(settings, /Both roles belong to this same email/);
