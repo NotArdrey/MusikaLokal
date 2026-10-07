@@ -5,6 +5,7 @@ import TrackPlayer, {
   isTrackPlayerAvailable,
 } from "./safeTrackPlayer";
 import { supabase } from "../../lib/supabase";
+import {getStationQueueEntries} from '../utils/stationQueue';
 
 type RadioQueueEntry = {
   slotIndex: number;
@@ -270,6 +271,8 @@ const readNonNegativeNumber = (value: unknown) => {
 };
 
 const getStationAnchorTimestampMs = (stationData: any) => {
+  const savedAnchor = readTimestampMs(stationData?.queue_anchor_at);
+  if (savedAnchor !== null) return savedAnchor;
   const liveAnchorMs = readTimestampMs(stationData?.live_anchor_at);
   if (liveAnchorMs !== null) {
     return liveAnchorMs;
@@ -308,6 +311,8 @@ const getSyncedLiveOffsetSeconds = (
   resolvedTrackDurations: number[],
   nowMs: number,
 ) => {
+  const savedAnchor = readTimestampMs(stationData?.queue_anchor_at);
+  if (savedAnchor !== null) return Math.max(0, Math.floor((nowMs - savedAnchor) / 1000));
   const queueIndex = readNonNegativeNumber(stationData?.live_current_queue_index);
   const positionSeconds = readNonNegativeNumber(stationData?.live_position_seconds);
 
@@ -374,24 +379,7 @@ const resolveAudioUri = async (item: any) => {
 };
 
 const buildStationQueueEntries = (stationData: any): RadioQueueEntry[] => {
-  const slots = Array.isArray(stationData?.live_slots)
-    ? stationData.live_slots
-    : Array.isArray(stationData?.slots)
-      ? stationData.slots
-      : [];
-
-  return slots.flatMap((slot: any, slotIndex: number) => {
-    const playlist = slot?.playlist || null;
-    const items = Array.isArray(playlist?.items) ? playlist.items : [];
-
-    return items.map((item: any, itemIndex: number) => ({
-      slotIndex,
-      itemIndex,
-      slot,
-      playlist,
-      item,
-    }));
-  });
+  return getStationQueueEntries(stationData);
 };
 
 const buildPlayerOptions = (_canSkipPrevious: boolean, _canSkipNext: boolean) => {

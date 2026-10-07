@@ -25,6 +25,7 @@ import { useTheme } from "../context/ThemeContext";
 import LoadingState from "./LoadingState";
 import { emitToast } from "../events/toastBus";
 import { buildPostShareMessage } from "../utils/postShare";
+import { normalizePostMedia } from "../utils/postMedia";
 import BottomModal from "./BottomModal";
 import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
@@ -204,13 +205,7 @@ const normalizePostDetailsPayload = (rawPost: any) => {
         rawPost?.visibility === "followers_only"
           ? "followers"
           : rawPost?.visibility || "public",
-      media: Array.isArray(rawPost?.media)
-        ? rawPost.media.map((item: any) => ({
-            ...item,
-            url: resolvePostMediaUrl(item?.url || item?.storage_path || item?.public_url),
-            thumbnail_url: resolvePostMediaUrl(item?.thumbnail_url || item?.thumbnail_path || item?.url || item?.storage_path || item?.public_url),
-          }))
-        : [],
+      media: normalizePostMedia(rawPost, resolvePostMediaUrl),
       comments: normalizedComments,
     },
     comments: normalizedComments,

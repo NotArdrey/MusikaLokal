@@ -4,12 +4,13 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import * as shareLinks from '../mobile/src/utils/shareLinks.ts';
+import * as passwordRecovery from '../mobile/src/utils/passwordRecovery.ts';
 const { buildListingShareUrl, buildPostShareUrl, getShareDestination } = shareLinks;
 
 const postId = '9d28c58a-7f1e-4fcb-8091-b8f1b65f79cc';
 
 test('the reported post URL keeps the exact post destination', () => {
-  const url = `https://musikalokal.app/feed?postId=${postId}`;
+  const url = `https://musika-lokal.vercel.app/feed?postId=${postId}`;
   assert.equal(buildPostShareUrl(postId), url);
   assert.equal(getShareDestination(url), `/feed?postId=${postId}`);
 });
@@ -30,7 +31,7 @@ test('all shared content types round-trip with encoded IDs', () => {
 });
 
 test('old custom-scheme and website shares reach the same content', () => {
-  for (const prefix of ['musikalokal://', 'musikalokal:///', 'https://musikalokal.app/', 'http://musikalokal.app/']) {
+  for (const prefix of ['musikalokal://', 'musikalokal:///', 'https://musikalokal.app/', 'http://musikalokal.app/', 'https://musika-lokal.vercel.app/']) {
     for (const [path, destination] of [
       [`feed?postId=${postId}`, `/feed?postId=${postId}`],
       ['home?listingId=123&listingType=studio', '/feed?listingId=123&listingType=studio'],
@@ -68,6 +69,7 @@ test('cold and warm native links save the destination before routing through the
     exports,
     require(name) {
       if (name === '../src/utils/shareLinks') return shareLinks;
+      if (name === '../src/utils/passwordRecovery') return passwordRecovery;
       if (name === '@react-native-async-storage/async-storage') return { default: {
         async setItem(key, value) {
           if (rejectStorage) throw new Error('Storage unavailable');
@@ -108,7 +110,8 @@ test('Android association uses the published APK certificate and all share paths
   assert.equal(target.sha256_cert_fingerprints[0].replaceAll(':', '').toLowerCase(), release.certificateSha256);
   assert.ok(association[0].relation.includes('delegate_permission/common.handle_all_urls'));
   for (const entry of filter.data.filter((data) => data.host)) {
-    assert.equal(entry.host, 'musikalokal.app');
-    assert.ok(vercel.redirects.some((redirect) => redirect.source === entry.path && redirect.destination === '/'));
+    assert.equal(entry.host, 'musika-lokal.vercel.app');
+    assert.ok(vercel.rewrites.some((rewrite) => rewrite.source === entry.path &&
+      rewrite.destination === (entry.path === '/recovery' ? '/recovery/index.html' : '/share/index.html')));
   }
 });

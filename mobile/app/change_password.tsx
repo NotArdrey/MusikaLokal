@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { router } from "expo-router";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   StyleSheet,
@@ -18,11 +18,6 @@ import { typography } from "../src/theme/tokens";
 
 export default function ChangePasswordScreen() {
   const { colors } = useTheme();
-  const params = useLocalSearchParams();
-
-  // Check if this is a password reset flow (from email link)
-  const isResetFlow = params.type === "recovery" || params.access_token;
-
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -55,31 +50,6 @@ export default function ChangePasswordScreen() {
     setAlertVisible(true);
   };
 
-  // Handle the recovery token if present
-  useEffect(() => {
-    const handleRecoveryToken = async () => {
-      if (params.access_token && params.refresh_token) {
-        try {
-          const { error } = await supabase.auth.setSession({
-            access_token: params.access_token as string,
-            refresh_token: params.refresh_token as string,
-          });
-          if (error) {
-            console.error("Error setting session from recovery:", error);
-            showAlert(
-              "warning",
-              "Link Expired",
-              "Invalid or expired reset link. Please request a new one.",
-            );
-          }
-        } catch (e) {
-          console.error("Recovery token error:", e);
-        }
-      }
-    };
-    handleRecoveryToken();
-  }, [params]);
-
   const validatePassword = (password: string) => {
     if (password.length < 6) {
       return "Password must be at least 6 characters";
@@ -106,55 +76,41 @@ export default function ChangePasswordScreen() {
 
     setLoading(true);
     try {
-      if (isResetFlow) {
-        // Password reset flow - just update the password
-        const { error } = await supabase.auth.updateUser({
-          password: newPassword,
-        });
+      // Regular password change - verify current password first
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-        if (error) {
-          console.error("Password update error:", error);
-          showAlert("warning", "Update Failed", error.message || "Failed to update password.");
-        } else {
-          setSuccessModalVisible(true);
-        }
+      if (!user?.email) {
+        showAlert("warning", "Verification Failed", "Unable to verify user. Please log in again.");
+        return;
+      }
+
+      // Verify current password by attempting to sign in
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword,
+      });
+
+      if (signInError) {
+        showAlert("warning", "Incorrect Password", "Current password is incorrect.");
+        return;
+      }
+
+      // Update to new password
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (updateError) {
+        console.error("Password update error:", updateError);
+        showAlert(
+          "warning",
+          "Update Failed",
+          updateError.message || "Failed to update password.",
+        );
       } else {
-        // Regular password change - verify current password first
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-
-        if (!user?.email) {
-          showAlert("warning", "Verification Failed", "Unable to verify user. Please log in again.");
-          return;
-        }
-
-        // Verify current password by attempting to sign in
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: user.email,
-          password: currentPassword,
-        });
-
-        if (signInError) {
-          showAlert("warning", "Incorrect Password", "Current password is incorrect.");
-          return;
-        }
-
-        // Update to new password
-        const { error: updateError } = await supabase.auth.updateUser({
-          password: newPassword,
-        });
-
-        if (updateError) {
-          console.error("Password update error:", updateError);
-          showAlert(
-            "warning",
-            "Update Failed",
-            updateError.message || "Failed to update password.",
-          );
-        } else {
-          setSuccessModalVisible(true);
-        }
+        setSuccessModalVisible(true);
       }
     } catch (e: any) {
       console.error("Password change exception:", e);
@@ -166,13 +122,7 @@ export default function ChangePasswordScreen() {
 
   const handleSuccessClose = () => {
     setSuccessModalVisible(false);
-    if (isResetFlow) {
-      // Go to login after password reset
-      router.replace("/");
-    } else {
-      // Go back to settings after regular password change
-      router.back();
-    }
+    router.back();
   };
 
   const renderPasswordInput = (
@@ -214,7 +164,7 @@ export default function ChangePasswordScreen() {
   );
 
   const canSubmit =
-    (isResetFlow || currentPassword.length > 0) &&
+    (currentPassword.length > 0) &&
     newPassword.length > 0 &&
     confirmPassword.length > 0 &&
     newPassword === confirmPassword;
@@ -223,11 +173,10 @@ export default function ChangePasswordScreen() {
   return (
     <>
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title={isResetFlow ? "Reset Password" : "Change Password"} />
+        <Header title={"Change Password"} />
 
         <View style={styles.formContainer}>
-          {/* Only show current password field if not in reset flow */}
-          {!isResetFlow &&
+          {
             renderPasswordInput(
               "Current Password",
               currentPassword,
@@ -268,7 +217,7 @@ export default function ChangePasswordScreen() {
             ]}
             onPress={() => {
               // Validate before showing modal
-              if (!isResetFlow && !currentPassword) {
+              if (!currentPassword) {
                 showAlert("warning", "Current Password Required", "Please enter your current password.");
                 return;
               }
@@ -292,7 +241,7 @@ export default function ChangePasswordScreen() {
               <ActivityIndicator color="white" />
             ) : (
               <Text style={[styles.buttonText, { color: canSubmit ? "#FFFFFF" : colors.textSecondary }]}>
-                {isResetFlow ? "Reset Password" : "Update Password"}
+                {"Update Password"}
               </Text>
             )}
           </TouchableOpacity>
@@ -302,12 +251,8 @@ export default function ChangePasswordScreen() {
       <Modal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
-        title={isResetFlow ? "Reset Password" : "Confirm Password Change"}
-        message={
-          isResetFlow
-            ? "Set your new password?"
-            : "Are you sure you want to change your password?"
-        }
+        title={"Confirm Password Change"}
+        message="Are you sure you want to change your password?"
         buttonText="Confirm"
         onConfirm={handleUpdatePassword}
       />
@@ -316,11 +261,7 @@ export default function ChangePasswordScreen() {
         visible={successModalVisible}
         onClose={handleSuccessClose}
         title="Success!"
-        message={
-          isResetFlow
-            ? "Your password has been reset successfully. You can now log in with your new password."
-            : "Your password has been updated successfully."
-        }
+        message="Your password has been updated successfully."
         buttonText="OK"
         onConfirm={handleSuccessClose}
       />

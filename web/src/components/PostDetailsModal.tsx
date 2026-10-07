@@ -20,6 +20,7 @@ import { emitToast } from "../events/toastBus";
 import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
 import ProfileAvatar from "./ProfileAvatar";
+import { normalizePostMedia } from "../utils/postMedia";
 
 const KNOWN_FEED_MEDIA_BUCKETS = [
   "post-media",
@@ -61,38 +62,7 @@ const resolvePostMediaUrl = (value: unknown) => {
 };
 
 const normalizePostMediaItems = (rawPost: any) => {
-  const sourceItems = Array.isArray(rawPost?.media)
-    ? rawPost.media
-    : Array.isArray(rawPost?.post_media)
-      ? rawPost.post_media
-      : [];
-  const normalized = sourceItems
-    .map((item: any) => {
-      const url = resolvePostMediaUrl(
-        item?.url ||
-          item?.media_url ||
-          item?.public_url ||
-          item?.storage_path ||
-          item?.thumbnail_url ||
-          item?.thumbnail_path,
-      );
-      return url ? { ...item, url } : null;
-    })
-    .filter(Boolean);
-
-  if (normalized.length > 0) return normalized;
-
-  const fallbackUrls = [
-    rawPost?.image,
-    rawPost?.image_url,
-    rawPost?.media_url,
-    rawPost?.thumbnail_url,
-    ...(Array.isArray(rawPost?.images) ? rawPost.images : []),
-  ]
-    .map(resolvePostMediaUrl)
-    .filter(Boolean);
-
-  return Array.from(new Set(fallbackUrls)).map((url, index) => ({ id: `fallback-${index}`, url }));
+  return normalizePostMedia(rawPost, resolvePostMediaUrl);
 };
 
 const formatTimestamp = (raw: string | null | undefined) => {

@@ -1,3 +1,4 @@
+import { useStudioPaymentEligibility } from '../../hooks/useStudioPaymentEligibility';
 import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import React from "react";
@@ -84,6 +85,12 @@ const decodeJwtClaims = (token?: string | null): Record<string, any> | null => {
   }
 };
 
+type StudioReservationInput = {
+  studio_id: string; user_id: string; date: string | null;
+  time_slots: { start: string; end: string }[]; notes: string | null;
+  session_type: 'rehearsal' | 'recording'; song_count: number | null;
+};
+
 interface StudioBookTabProps {
   group: any;
   bookings: any[];
@@ -135,6 +142,7 @@ interface StudioBookTabProps {
     type: "success" | "error" | "warning" | "info",
     title: string,
     message: string,
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[],
   ) => void;
 }
 
@@ -145,8 +153,6 @@ const StudioBookTab = ({
   displayRate,
   isDark,
   colors,
-  hasExistingStudioBooking,
-  existingStudioBookingStatus,
   sheetRef,
   router,
   renderBookingControls,
@@ -191,20 +197,10 @@ const StudioBookTab = ({
     group?.studio_type,
     selectedSessionType,
   );
-  const normalizedExistingStudioPaymentStatus = String(
-    existingStudioBookingStatus || "",
-  ).toLowerCase();
-  const hasBlockingPaymentBooking =
-    hasExistingStudioBooking &&
-    ["unpaid", "pending", "failed"].includes(normalizedExistingStudioPaymentStatus);
-  const blockingPaymentTitle =
-    normalizedExistingStudioPaymentStatus === "failed"
-      ? "Payment Failed"
-      : "Payment Pending";
-  const blockingPaymentMessage =
-    normalizedExistingStudioPaymentStatus === "failed"
-      ? "Retry payment for your existing booking to unlock new sessions."
-      : "Complete payment for your existing booking to unlock new sessions.";
+  const paymentEligibility = useStudioPaymentEligibility(userId);
+  const hasBlockingPaymentBooking = paymentEligibility.hasOutstanding;
+  const blockingPaymentTitle = "Outstanding Studio Payment";
+  const blockingPaymentMessage = "Complete or cancel your outstanding studio payments before reserving any studio.";
   const [recordingSongCountInput, setRecordingSongCountInput] = React.useState("1");
   const [editingBookingDraft, setEditingBookingDraft] = React.useState<{
     booking: any;
@@ -802,23 +798,6 @@ const StudioBookTab = ({
     return null;
   };
 
-  const isExpectedBookingValidationError = (
-    status: number | undefined,
-    message: string,
-  ) => {
-    const normalized = String(message || "").toLowerCase();
-    return (
-      status === 409 ||
-      normalized.includes("advance booking") ||
-      normalized.includes("cannot create a booking in the past") ||
-      normalized.includes("bookings can only be made up to") ||
-      normalized.includes("time slot") ||
-      normalized.includes("already have a pending booking") ||
-      normalized.includes("outside operating hours") ||
-      normalized.includes("weekly schedule")
-    );
-  };
-
   const getReadableBookingSubmissionError = (message: string): string => {
     const rawMessage = message || "Failed to create bookings";
     const normalizedMessage = rawMessage.toLowerCase();
@@ -1182,14 +1161,7 @@ const StudioBookTab = ({
   };
 
   const invokeManageBookingsCreate = async (payload: {
-    action: "create";
-    studio_id: string;
-    user_id: string;
-    date: string;
-    time_slots: { start: string; end: string }[];
-    notes: string | null;
-    session_type: "recording" | "rehearsal";
-    song_count?: number | null;
+    action: 'create'; reservations: StudioReservationInput[];
   }, accessToken: string) => {
     if (!supabaseUrl || !supabaseAnonKey) {
       warnLog("⚠️ Missing Supabase URL/Anon key for direct function fetch; falling back to invoke().");
@@ -2551,256 +2523,42 @@ const StudioBookTab = ({
                       return;
                     }
 
-                    for (const booking of bookings) {
-                      const bookingDate = toDateKey(booking.date) || toDateKey(booking.startTime);
-
-                      if (!bookingDate) {
-                        errors.push({
-                          booking,
-                          error: { message: "Invalid booking date. Please reselect your schedule.", serverError: null },
-                        });
-                        continue;
+                    try {
+                      const reservations = bookings.map(booking => ({
+                        studio_id: group.id, user_id: bookingUserId,
+                        date: toDateKey(booking.date) || toDateKey(booking.startTime),
+                        time_slots: (booking.timeSlots?.length ? booking.timeSlots : [{
+                          start: toTimeLabel(booking.startTime), end: toTimeLabel(booking.endTime),
+                        }]).map((slot: { start: string; end: string }) => ({ start: String(slot.start).slice(0, 5), end: String(slot.end).slice(0, 5) })),
+                        notes: bookingNotes || null,
+                        session_type: getBookingSessionType(booking),
+                        song_count: getBookingSessionType(booking) === "recording" ? getBookingSongCount(booking) : null,
+                      }));
+                      const result = await invokeManageBookingsCreate({ action: "create", reservations }, bookingAccessToken);
+                      if (result.error) throw result.error;
+                      if (result.data?.error) throw { message: result.data.error, serverError: result.data };
+                      if (!Array.isArray(result.data?.bookings) || result.data.bookings.length !== reservations.length) {
+                        throw new Error("The booking response was incomplete. Please check Activity before trying again.");
                       }
-
-                      const timeSlots =
-                        booking.timeSlots && booking.timeSlots.length > 0
-                          ? booking.timeSlots
-                          : [
-                            {
-                              start: toTimeLabel(booking.startTime),
-                              end: toTimeLabel(booking.endTime),
-                            },
-                          ];
-
-                      const sessionType = getBookingSessionType(booking);
-                      const bookingSongCount =
-                        sessionType === "recording"
-                          ? getBookingSongCount(booking)
-                          : null;
-
-                      if (sessionType === "recording" && !bookingSongCount) {
-                        errors.push({
-                          booking,
-                          error: {
-                            message: "Recording bookings require a valid song count.",
-                            serverError: null,
-                          },
-                        });
-                        continue;
+                      results.push(...result.data.bookings);
+                    } catch (error: any) {
+                      let detail = error.serverError;
+                      if (!detail && error.context?.json) {
+                        try { detail = await error.context.json(); } catch { /* Use the original error. */ }
                       }
-
-                      debugLog("📤 Creating multi-slot booking:", {
-                        studio_id: group.id,
-                        user_id: bookingUserId,
-                        date: bookingDate,
-                        time_slots: timeSlots,
-                        notes: bookingNotes,
-                        session_type: sessionType,
-                        song_count: bookingSongCount,
-                      });
-
-                      let data: any = null;
-                      let error: any = null;
-
-                      try {
-                        const normalizedSlots = [...timeSlots]
-                          .map((slot) => ({
-                            start: String(slot.start || "").slice(0, 5),
-                            end: String(slot.end || "").slice(0, 5),
-                          }))
-                          .filter((slot) => slot.start && slot.end);
-
-                        if (normalizedSlots.length === 0) {
-                          throw new Error("At least one valid time slot is required.");
-                        }
-
-                        const sortedByStart = [...normalizedSlots].sort((a, b) =>
-                          a.start.localeCompare(b.start),
-                        );
-
-                        const leadTimeViolationMessage = getLeadTimeViolationMessage(
-                          bookingDate,
-                          sortedByStart,
-                        );
-                        if (leadTimeViolationMessage) {
-                          warnLog("⚠️ Lead-time validation blocked booking before submit", {
-                            bookingDate,
-                            slots: sortedByStart,
-                            leadTimeHours: getStudioLeadTimeHours(),
-                          });
-                          errors.push({
-                            booking,
-                            error: {
-                              message: leadTimeViolationMessage,
-                              serverError: null,
-                            },
-                          });
-                          continue;
-                        }
-
-                        if (sessionType === "recording" && bookingSongCount) {
-                          const totalSelectedHours = getTotalSlotDurationHours(sortedByStart);
-                          const requiredHours =
-                            getRecordingRequiredTotalHours(bookingSongCount);
-
-                          if (totalSelectedHours + HOURS_EPSILON < requiredHours) {
-                            errors.push({
-                              booking,
-                              error: {
-                                message: `Recording booking requires at least ${formatRecordingHours(requiredHours)} hour(s) for ${bookingSongCount} song(s), but only ${formatRecordingHours(totalSelectedHours)} hour(s) are selected.`,
-                                serverError: null,
-                              },
-                            });
-                            continue;
-                          }
-                        }
-
-                        debugLog("📡 Invoking manage-bookings:create", {
-                          bookingDate,
-                          studioId: group.id,
-                          userId: bookingUserId,
-                          slots: sortedByStart,
-                        });
-
-                        const invokeResult = await invokeManageBookingsCreate({
-                          action: "create",
-                          studio_id: group.id,
-                          user_id: bookingUserId,
-                          date: bookingDate,
-                          time_slots: sortedByStart,
-                          notes: bookingNotes || null,
-                          session_type: sessionType,
-                          song_count: sessionType === "recording" ? bookingSongCount : null,
-                        }, bookingAccessToken);
-
-                        data = invokeResult.data;
-                        error = invokeResult.error;
-
-                        if (
-                          !error &&
-                          data &&
-                          typeof data === "object" &&
-                          (data.error || data.success === false)
-                        ) {
-                          error = {
-                            name: "FunctionsHttpError",
-                            message:
-                              data.error ||
-                              data.message ||
-                              "Booking request failed. Please try again.",
-                            status: typeof data.status === "number" ? data.status : 400,
-                            serverError: data,
-                          };
-                        }
-                      } catch (localBookingError: any) {
-                        error = localBookingError;
+                      if (detail?.code === "OUTSTANDING_STUDIO_PAYMENT") {
+                        setLoading(false);
+                        void paymentEligibility.refresh();
+                        showAlert("warning", "Outstanding Studio Payment", detail.error, [
+                          { text: "Cancel", style: "cancel" },
+                          { text: "Pay Now", onPress: () => {
+                            (sheetRef as any)?.current?.dismiss();
+                            router.push({ pathname: "/bookings", params: { tab: "Pending" } } as any);
+                          } },
+                        ]);
+                        return;
                       }
-
-                      debugLog("📥 Booking response:", { data, error });
-
-                      if (error) {
-                        let errorMessage = error.message || "Unknown error";
-                        let serverError: any = null;
-
-                        if (error?.serverError && typeof error.serverError === "object") {
-                          serverError = error.serverError;
-                          if (serverError?.error) {
-                            errorMessage = serverError.error;
-                          }
-                        }
-
-                        let shouldLogAsError = !isExpectedBookingValidationError(
-                          Number(error?.status),
-                          errorMessage,
-                        );
-
-                        if (shouldLogAsError) {
-                          console.error("❌ Booking invoke error details:", {
-                            name: error?.name,
-                            message: error?.message,
-                            status: error?.status,
-                            code: error?.code,
-                            details: error?.details,
-                            hint: error?.hint,
-                            hasContext: Boolean(error?.context),
-                            contextType: error?.context?.constructor?.name || null,
-                          });
-                        } else {
-                          warnLog("⚠️ Booking validation rejected by server", {
-                            status: error?.status,
-                            message: errorMessage,
-                          });
-                        }
-
-                        if (!serverError && error.context && typeof error.context === "object") {
-                          try {
-                            const response = error.context;
-                            debugLog("📥 Error response status:", response.status);
-                            debugLog("📥 Error response (raw):", response);
-
-                            if (response?.headers && typeof response.headers?.entries === "function") {
-                              const responseHeaders = Object.fromEntries(response.headers.entries());
-                              debugLog("📥 Error response headers:", responseHeaders);
-                            }
-
-                            if (response.json && typeof response.json === "function") {
-                              serverError = await response.json();
-                              debugLog("📥 Parsed server error:", serverError);
-                              if (serverError?.error) {
-                                errorMessage = serverError.error;
-                              }
-                              if (serverError?.debug) {
-                                debugLog("📥 Debug info:", serverError.debug);
-                              }
-                            } else if (response.text && typeof response.text === "function") {
-                              const textBody = await response.text();
-                              debugLog("📥 Error body (text):", textBody);
-                              try {
-                                serverError = JSON.parse(textBody);
-                                if (serverError?.error) {
-                                  errorMessage = serverError.error;
-                                }
-                              } catch {
-                                if (typeof textBody === "string" && textBody.trim().length > 0) {
-                                  errorMessage = textBody.trim();
-                                }
-                                debugLog("📥 Could not parse as JSON");
-                              }
-                            }
-                          } catch (e) {
-                            console.error("Failed to parse error response:", e);
-                          }
-                        }
-
-                        shouldLogAsError = !isExpectedBookingValidationError(
-                          Number(error?.status),
-                          errorMessage,
-                        );
-
-                        errors.push({
-                          booking,
-                          error: { message: errorMessage, serverError },
-                        });
-                        if (shouldLogAsError) {
-                          console.error("❌ Booking error:", errorMessage);
-                        } else {
-                          warnLog("⚠️ Booking blocked:", errorMessage);
-                        }
-                        if (serverError && shouldLogAsError) {
-                          console.error("❌ Full server error:", JSON.stringify(serverError, null, 2));
-                        }
-
-                        if (
-                          String(errorMessage).toLowerCase().includes("invalid jwt") ||
-                          error?.status === 401 ||
-                          serverError?.message === "Invalid JWT"
-                        ) {
-                          await logAuthDiagnostics("after-401-invalid-jwt");
-                        }
-                      } else {
-                        results.push(data);
-                        debugLog("✅ Booking created successfully");
-                      }
+                      errors.push({ booking: bookings[0], error: { message: detail?.error || error.message || "Failed to create bookings", serverError: detail } });
                     }
 
                     setLoading(false);

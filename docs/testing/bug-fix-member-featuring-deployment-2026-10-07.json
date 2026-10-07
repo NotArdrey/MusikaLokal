@@ -1,0 +1,32 @@
+{
+  "projectRef": "aefldxegsvzecshlayza",
+  "verifiedAt": "2026-10-07T05:12:24.603Z",
+  "functionVersion": 122,
+  "verifyJwt": false,
+  "unchangedOtherFunctions": true,
+  "existingProductionDependenciesPreserved": true,
+  "deployedEntrypointMatches": true,
+  "signedInMemberControls": true,
+  "leaderGroupControls": true,
+  "independentPersistedProfileChoices": true,
+  "guestPublicTimeline": true,
+  "concurrentMemberChoices": true,
+  "oneBandInGigAndFeedLineups": true,
+  "preferenceRlsIsolation": true,
+  "serviceOnlyIdentityRpc": true,
+  "directBandUpdateGuard": true,
+  "combinedStatusAndBandUpdateGuard": true,
+  "existingUniqueBandConstraintRetained": true,
+  "removedMemberRevokedAccess": true,
+  "completedConsentRetained": true,
+  "cancelledWriteRejected": true,
+  "noFixtureNotificationsOrEmails": true,
+  "fixturesRemoved": true,
+  "migrationVersions": [
+    "20261007160000",
+    "20261007160500"
+  ],
+  "migrationHistoryMatchesSource": true,
+  "historicalExplicitChoicesPreserved": 2,
+  "finalFixtureCleanupVerified": true
+}

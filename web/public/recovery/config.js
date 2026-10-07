@@ -1,0 +1,1 @@
+export const config = {"url":"https://aefldxegsvzecshlayza.supabase.co","anonKey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFlZmxkeGVnc3Z6ZWNzaGxheXphIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg2NTgyOTUsImV4cCI6MjA4NDIzNDI5NX0._BKyxjyqHKHaheMWkBk8mMalzSPy_gm1ImsT_RQaOB0"};

@@ -9,6 +9,8 @@ import React, {
   type ReactNode,
 } from "react";
 import { supabase } from "../../lib/supabase";
+import {getStationQueueEntries, getStationQueueFingerprint, mergeStationSnapshot} from '../utils/stationQueue';
+import {useStationQueueRefresh} from '../hooks/useStationQueueRefresh';
 
 export const RADIO_MINI_PLAYER_HEIGHT = 60;
 export const RADIO_MINI_PLAYER_STACK_GAP = 8;
@@ -173,6 +175,8 @@ const readNonNegativeNumber = (value: unknown) => {
 };
 
 const getStationAnchorTimestampMs = (stationData: any) => {
+  const savedAnchor = readTimestampMs(stationData?.queue_anchor_at);
+  if (savedAnchor !== null) return savedAnchor;
   const liveAnchorMs = readTimestampMs(stationData?.live_anchor_at);
   if (liveAnchorMs !== null) {
     return liveAnchorMs;
@@ -202,6 +206,8 @@ const getSyncedLiveOffsetSeconds = (
   resolvedTrackDurations: number[],
   nowMs: number,
 ) => {
+  const savedAnchor = readTimestampMs(stationData?.queue_anchor_at);
+  if (savedAnchor !== null) return Math.max(0, Math.floor((nowMs - savedAnchor) / 1000));
   const queueIndex = readNonNegativeNumber(stationData?.live_current_queue_index);
   const positionSeconds = readNonNegativeNumber(stationData?.live_position_seconds);
 
@@ -222,11 +228,6 @@ const getSyncedLiveOffsetSeconds = (
     .reduce((total, duration) => total + duration, 0);
 
   return offsetBeforeTrack + Math.floor(positionSeconds) + elapsedSinceSyncSeconds;
-};
-
-const getStationSlots = (stationData: any) => {
-  if (Array.isArray(stationData?.live_slots)) return stationData.live_slots;
-  return Array.isArray(stationData?.slots) ? stationData.slots : [];
 };
 
 const resolveAudioUri = async (item: any) => {
@@ -276,13 +277,7 @@ const resolveAudioUri = async (item: any) => {
 };
 
 const buildStationQueue = async (stationData: any): Promise<RadioQueueTrack[]> => {
-  const slots = getStationSlots(stationData);
-  const entries = slots.flatMap((slot: any, slotIndex: number) => {
-    const playlist = slot?.playlist || null;
-    const items = Array.isArray(playlist?.items) ? playlist.items : [];
-
-    return items.map((item: any, itemIndex: number) => ({ slot, slotIndex, playlist, item, itemIndex }));
-  });
+  const entries = getStationQueueEntries(stationData);
 
   const tracks = await Promise.all(entries.map(async (entry: any, queueIndex: number) => {
     const url = await resolveAudioUri(entry.item);
@@ -528,7 +523,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     const stationId = typeof stationData?.id === "string" ? stationData.id : "";
     const audio = ensureAudio();
 
-    if (activeStationRef.current?.id === stationId && queueRef.current.length > 0 && audio) {
+    if (activeStationRef.current?.id === stationId && queueRef.current.length > 0 && audio && (!stationData.__queueReady || getStationQueueFingerprint(activeStationRef.current) === getStationQueueFingerprint(stationData))) {
       if (!audio.paused) {
         return;
       }
@@ -648,25 +643,34 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
   }, [beginRequest]);
 
   const syncStationData = useCallback((stationData: any) => {
-    if (!stationData?.id) return;
+    const previous = activeStationRef.current;
+    if (previous?.id === stationData?.id && stationData.__queueUnavailable) {
+      stationData = {...previous, is_active: false, playback_queue: [], __queueReady: true};
+    }
+    if (!previous || previous.id !== stationData?.id || Number(stationData.queue_revision || 0) < Number(previous.queue_revision || 0)) return;
+    if (stationData.__queueReady && getStationQueueFingerprint(previous) !== getStationQueueFingerprint(stationData)) {
+      const requestId = beginRequest();
+      const shouldPlay = audioRef.current ? !audioRef.current.paused : false;
+      void (async () => {
+        const queue = await buildStationQueue(stationData);
+        if (requestId !== requestIdRef.current || activeStationRef.current?.id !== stationData.id) return;
+        const cursor = getLiveStationCursor(stationData, queue);
+        if (queue.length === 0) {
+          audioRef.current?.pause();
+          if (audioRef.current) {audioRef.current.removeAttribute("src"); audioRef.current.load();}
+          setIsPlaying(false);
+        }
+        setQueueState(stationData, queue, cursor.queueIndex);
+        if (queue.length > 0) await playQueueIndex(cursor.queueIndex, shouldPlay, cursor.positionSeconds);
+      })().catch(error => console.warn("Station queue update failed", error));
+      return;
+    }
+    const nextStation = mergeStationSnapshot(previous, stationData);
+    activeStationRef.current = nextStation;
+    setActiveStation(nextStation);
+  }, [beginRequest, playQueueIndex, setQueueState]);
 
-    setActiveStation((previous: any) => {
-      if (!previous || previous.id !== stationData.id) return previous;
-      const nextStation = {
-        ...previous,
-        ...stationData,
-        live_slots: previous.__queueReady && !stationData.__queueReady
-          ? previous.live_slots || stationData.live_slots || []
-          : stationData.live_slots || previous.live_slots || [],
-        slots: previous.__queueReady && !stationData.__queueReady
-          ? previous.slots || stationData.slots || []
-          : stationData.slots || previous.slots || [],
-        __queueReady: previous.__queueReady || stationData.__queueReady,
-      };
-      activeStationRef.current = nextStation;
-      return nextStation;
-    });
-  }, []);
+  useStationQueueRefresh(readUuidString(activeStation?.id) || null, syncStationData);
 
   useEffect(() => {
     const audio = ensureAudio();

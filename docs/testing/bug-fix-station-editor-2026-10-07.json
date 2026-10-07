@@ -1,0 +1,64 @@
+{
+  "component": "web/app/admin/stations.tsx",
+  "checks": [
+    "saved track exclusions",
+    "track inclusion",
+    "track ordering",
+    "playlist ordering",
+    "shuffle permutation",
+    "failed save retains selection",
+    "duplicate presses send one save",
+    "reopen retains exact saved order",
+    "empty queue disables save"
+  ],
+  "layouts": [
+    {
+      "width": 1280,
+      "scale": 1,
+      "dark": false,
+      "overflow": 0
+    },
+    {
+      "width": 1280,
+      "scale": 1.6,
+      "dark": false,
+      "overflow": 0
+    },
+    {
+      "width": 320,
+      "scale": 1,
+      "dark": false,
+      "overflow": 0
+    },
+    {
+      "width": 320,
+      "scale": 1.6,
+      "dark": false,
+      "overflow": 0
+    },
+    {
+      "width": 1280,
+      "scale": 1,
+      "dark": true,
+      "overflow": 0
+    },
+    {
+      "width": 1280,
+      "scale": 1.6,
+      "dark": true,
+      "overflow": 0
+    },
+    {
+      "width": 320,
+      "scale": 1,
+      "dark": true,
+      "overflow": 0
+    },
+    {
+      "width": 320,
+      "scale": 1.6,
+      "dark": true,
+      "overflow": 0
+    }
+  ]
+}

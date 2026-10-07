@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { cancelDiditAttempt, readDiditAttempt, isInvalidatedDiditAttempt, summarizeDiditWorkflow } from "../_shared/diditAttempt.ts";
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { sendEmailWithGmail } from "../_shared/gmailEmail.ts";
@@ -950,6 +951,28 @@ serve(async (req) => {
     const normalizedEmail = normalizeIdentityEmail(email);
     const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
 
+    if (action === 'get_workflow') {
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+      if (!serviceKey || req.headers.get('Authorization') !== `Bearer ${serviceKey}`) return jsonResponse({ error: 'Unauthorized' }, 401);
+      const response = await fetch(`https://verification.didit.me/v3/workflows/${DIDIT_WORKFLOW_ID}/`, {
+        headers: { 'x-api-key': DIDIT_API_KEY }, signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) return jsonResponse({ success: false, providerStatus: response.status }, 502);
+      return jsonResponse({ success: true, workflow: summarizeDiditWorkflow(await response.json(), DIDIT_WORKFLOW_ID) });
+    }
+    if ((action === 'cancel_session' || action === 'get_session') && session_id) {
+      const attemptClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      try {
+        if (action === 'cancel_session') return jsonResponse(await cancelDiditAttempt(attemptClient, String(session_id), providedSessionNonce));
+        const attempt = await readDiditAttempt(attemptClient, String(session_id), providedSessionNonce);
+        if (isInvalidatedDiditAttempt(attempt.status)) return jsonResponse({ status: 'SUPERSEDED', businessStatus: 'SUPERSEDED' });
+      } catch (error) {
+        const invalidCredential = /could not be validated/.test(String(error.message));
+        return jsonResponse({ success: false, code: invalidCredential ? 'SESSION_VALIDATION_FAILED' : 'SESSION_READ_FAILED',
+          status: invalidCredential ? 'SUPERSEDED' : undefined, error: error.message }, invalidCredential ? 200 : 503);
+      }
+    }
+
     // HANDLE GET SESSION ACTION
     if (action === 'get_session' && session_id) {
       console.log(`Fetching Didit session: ${session_id}`);
@@ -1402,11 +1425,11 @@ serve(async (req) => {
           .from('verification_sessions')
           .update({ status: 'SUPERSEDED' })
           .eq('verification_data->>email', normalizedEmail)
-          .in('status', ['PENDING', 'Not Started', 'In Progress'])
+          .like('verification_data->>user_ref', 'TEMP_%')
           .neq('session_ref', createdSessionId);
 
         if (supersedeError) {
-          console.error('Failed to supersede older Didit sessions:', supersedeError);
+          throw new Error('Could not invalidate the previous verification attempts.');
         }
       }
 
@@ -1429,7 +1452,7 @@ serve(async (req) => {
         });
 
       if (sessionStoreError) {
-        console.error('Failed to store pending Didit session:', sessionStoreError);
+        throw new Error('Could not save the verification attempt.');
       }
 
       // Update user profile with the session ID.

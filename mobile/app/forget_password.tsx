@@ -1,4 +1,3 @@
-import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -15,9 +14,10 @@ import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import { useTheme } from "../src/context/ThemeContext";
 import { typography } from "../src/theme/tokens";
+import { PASSWORD_RECOVERY_URL } from "../src/utils/passwordRecovery";
 
 export default function ForgetPasswordScreen() {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const [email, setEmail] = useState("");
   const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -49,13 +49,6 @@ export default function ForgetPasswordScreen() {
     return emailRegex.test(email);
   };
 
-  // Get the Expo deep link URL for password reset
-  const getRedirectUrl = () => {
-    // This creates exp://192.168.x.x:8082/--/change_password
-    const url = Linking.createURL("change_password");
-    return url;
-  };
-
   const handleSendResetLink = async () => {
     if (loading) return;
     setModalVisible(false);
@@ -72,13 +65,11 @@ export default function ForgetPasswordScreen() {
 
     setLoading(true);
     try {
-      const redirectUrl = getRedirectUrl();
-
       const { data, error } = await supabase.functions.invoke("account-email", {
         body: {
           action: "send_password_reset",
           email: email.trim(),
-          redirectTo: redirectUrl,
+          redirectTo: PASSWORD_RECOVERY_URL,
         },
       });
 
@@ -183,7 +174,7 @@ export default function ForgetPasswordScreen() {
         visible={successModalVisible}
         onClose={handleSuccessClose}
         title="Email Sent!"
-        message="Check your inbox for a password reset link. When you tap the link, it should open directly in Expo Go. If you don't see the email, check your spam folder."
+        message="Check your inbox for a password reset link. Open it to choose a new password in your browser or the app. If you don't see the email, check your spam folder."
         buttonText="Back to Login"
         onConfirm={handleSuccessClose}
       />

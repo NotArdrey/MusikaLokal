@@ -1,4 +1,6 @@
 import { useListingLifecycle } from '../hooks/useListingLifecycle';
+import { useListingFavorite } from "../hooks/useListingFavorite";
+import { useListingReviews } from "../hooks/useListingReviews";
 import { buildListingShareUrl } from "../utils/shareLinks";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -65,19 +67,6 @@ type UserGroup = {
   images?: string[] | null;
   genre?: string | null;
   group_type?: string | null;
-};
-
-type ReviewRecord = {
-  id: string;
-  rating: number | null;
-  content: string | null;
-  created_at: string;
-  author?: {
-    full_name?: string | null;
-    avatar_url?: string | null;
-    updated_at?: string | null;
-  } | null;
-  updated_at?: string | null;
 };
 
 interface ProductionTeamDetailsSheetProps {
@@ -183,37 +172,6 @@ const loadProductionTeamBaseDetails = async (
   };
 };
 
-const loadProductionTeamFavoriteMetadata = async (
-  targetTeamId: string,
-  targetUserId?: string | null,
-) => {
-  const totalFavoritePromise = supabase
-    .from("favorites")
-    .select("id", { count: "exact", head: true })
-    .eq("production_team_id", targetTeamId);
-
-  const userFavoritePromise = targetUserId
-    ? supabase
-        .from("favorites")
-        .select("id", { count: "exact", head: true })
-        .eq("production_team_id", targetTeamId)
-        .eq("user_id", targetUserId)
-    : Promise.resolve({ count: 0, error: null } as any);
-
-  const [totalFavoriteResult, userFavoriteResult] = await Promise.all([
-    totalFavoritePromise,
-    userFavoritePromise,
-  ]);
-
-  if (totalFavoriteResult.error) throw totalFavoriteResult.error;
-  if (userFavoriteResult.error) throw userFavoriteResult.error;
-
-  return {
-    count: Math.max(0, totalFavoriteResult.count || 0),
-    isFavorited: (userFavoriteResult.count || 0) > 0,
-  };
-};
-
 const ProductionTeamDetailsSheet = forwardRef<
   BottomSheetModal,
   ProductionTeamDetailsSheetProps
@@ -239,8 +197,8 @@ const ProductionTeamDetailsSheet = forwardRef<
   const [userGroups, setUserGroups] = useState<UserGroup[]>([]);
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [reviews, setReviews] = useState<ReviewRecord[]>([]);
-  const [loadingReviews, setLoadingReviews] = useState(false);
+  const { reviews, loading: loadingReviews, error: reviewError, refresh: retryReviews } =
+    useListingReviews("profile", team?.id === teamId ? team?.owner_id : null);
   const [requestMessage, setRequestMessage] = useState("");
   const [requestApplicationContext, setRequestApplicationContext] = useState("");
   const [requestDocumentFile, setRequestDocumentFile] = useState<any>(null);
@@ -250,8 +208,8 @@ const ProductionTeamDetailsSheet = forwardRef<
   const [isSendingRequest, setIsSendingRequest] = useState(false);
   const requestInFlightRef = useRef(false);
   const previousSheetIndexRef = useRef(-1);
-  const [isFavorited, setIsFavorited] = useState(false);
-  const [favoriteCount, setFavoriteCount] = useState(0);
+  const { isFavorited, favoriteCount, busy: favoriteBusy, toggle: toggleTeamFavorite } =
+    useListingFavorite("production_team", teamId, userId, true);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -323,7 +281,6 @@ const ProductionTeamDetailsSheet = forwardRef<
       setActiveTab("About");
       setUserGroups([]);
       setSelectedGroupId(null);
-      setReviews([]);
       setErrorMessage("");
       setRequestMessage("");
       setRequestApplicationContext("");
@@ -331,8 +288,6 @@ const ProductionTeamDetailsSheet = forwardRef<
       setRequestDocumentUrl("");
       setRequestVideoUrl("");
       setMemberVerificationConsent(true);
-      setIsFavorited(false);
-      setFavoriteCount(0);
       return () => {
         active = false;
       };
@@ -417,36 +372,6 @@ const ProductionTeamDetailsSheet = forwardRef<
         if (active) {
           setLoading(false);
         }
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [teamId, userId]);
-
-  useEffect(() => {
-    let active = true;
-
-    if (!teamId) {
-      setIsFavorited(false);
-      setFavoriteCount(0);
-      return () => {
-        active = false;
-      };
-    }
-
-    void (async () => {
-      try {
-        const metadata = await loadProductionTeamFavoriteMetadata(teamId, userId);
-        if (!active) return;
-        setIsFavorited(metadata.isFavorited);
-        setFavoriteCount(metadata.count);
-      } catch (error) {
-        console.error("Error loading production team favorites:", error);
-        if (!active) return;
-        setIsFavorited(false);
-        setFavoriteCount(0);
       }
     })();
 
@@ -573,52 +498,6 @@ const ProductionTeamDetailsSheet = forwardRef<
     };
   }, [currentUserRole, teamId, userId]);
 
-  useEffect(() => {
-    let active = true;
-
-    if (!team?.owner_id) {
-      setReviews([]);
-      setLoadingReviews(false);
-      return () => {
-        active = false;
-      };
-    }
-
-    void (async () => {
-      setLoadingReviews(true);
-      try {
-        const reviewSelect = "*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url)";
-        const { data } = await supabase
-          .from("reviews")
-          .select(reviewSelect)
-          .eq("user_id", team.owner_id)
-          .order("created_at", { ascending: false })
-          .limit(5);
-
-        if (!active) return;
-
-        setReviews(
-          ((data || []) as any[]).map((row) => ({
-            ...row,
-            content: row?.content ?? row?.comment ?? null,
-          })) as ReviewRecord[],
-        );
-      } catch (error) {
-        console.error("Error loading production team reviews:", error);
-        if (!active) return;
-        setReviews([]);
-      } finally {
-        if (active) {
-          setLoadingReviews(false);
-        }
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [team?.owner_id]);
-
   const renderBackdrop = useCallback(
     (props: any) => (
       <BottomSheetBackdrop
@@ -691,32 +570,16 @@ const ProductionTeamDetailsSheet = forwardRef<
       return;
     }
 
-    const prev = isFavorited;
-    const prevCount = favoriteCount;
-    setIsFavorited(!prev);
-    setFavoriteCount(Math.max(0, prevCount + (prev ? -1 : 1)));
     try {
-      const { data, error } = await supabase.functions.invoke("manage-details", {
-        body: { action: "toggle_favorite", type: "production_team", id: team.id, userId },
-      });
-      if (error) throw error;
-
-      if (typeof data?.is_favorited === "boolean") {
-        setIsFavorited(data.is_favorited);
-      }
-      if (typeof data?.favorites_count === "number") {
-        setFavoriteCount(Math.max(0, data.favorites_count));
-      }
+      await toggleTeamFavorite();
     } catch (error: any) {
-      setIsFavorited(prev);
-      setFavoriteCount(prevCount);
       showSheetAlert(
         "error",
         "Bookmark Failed",
         error?.message || "Unable to update bookmark right now.",
       );
     }
-  }, [favoriteCount, isFavorited, showSheetAlert, team?.id, userId]);
+  }, [showSheetAlert, team?.id, toggleTeamFavorite, userId]);
 
   const handleOpenFullPage = useCallback(() => {
     if (!team?.id) return;
@@ -1248,7 +1111,15 @@ const ProductionTeamDetailsSheet = forwardRef<
         </View>
       </View>
 
-      {loadingReviews ? (
+      {reviewError ? (
+        <View accessibilityRole="alert" style={{ marginBottom: 12 }}>
+          <Text style={{ color: colors.textSecondary }}>{reviewError}</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading reviews" onPress={retryReviews}>
+            <Text style={{ color: colors.primary, marginTop: 8 }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      {loadingReviews && reviews.length === 0 ? (
         <View style={styles.selectorLoadingWrap}>
           <ActivityIndicator color={colors.primary} />
         </View>
@@ -1278,7 +1149,7 @@ const ProductionTeamDetailsSheet = forwardRef<
             </View>
           ))}
         </View>
-      ) : (
+      ) : reviewError ? null : (
         <Text style={{ color: colors.textSecondary, fontStyle: "italic" }}>No reviews yet.</Text>
       )}
     </View>
@@ -1371,7 +1242,15 @@ const ProductionTeamDetailsSheet = forwardRef<
                     <Ionicons name="share-outline" size={22} color="#000" />
                   </TouchableOpacity>
                   {!isAssignedStaffTeam ? (
-                    <TouchableOpacity activeOpacity={1} onPress={toggleFavorite} style={styles.roundBtn}>
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      onPress={toggleFavorite}
+                      disabled={favoriteBusy}
+                      accessibilityRole="button"
+                      accessibilityLabel={isFavorited ? "Remove production team bookmark" : "Bookmark production team"}
+                      accessibilityState={{ selected: isFavorited, busy: favoriteBusy }}
+                      style={styles.roundBtn}
+                    >
                       <Ionicons name={isFavorited ? "bookmark" : "bookmark-outline"} size={22} color={isFavorited ? "#6366F1" : "#000"} />
                     </TouchableOpacity>
                   ) : null}

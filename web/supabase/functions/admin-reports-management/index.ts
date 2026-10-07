@@ -384,42 +384,14 @@ const reportTargetTableMap: Record<string, string> = {
   booking: "studio_bookings",
 };
 
-async function insertNotificationIfMissing(
-  client: any,
-  payload: {
-    user_id: string;
-    type: "success" | "info" | "warning" | "error";
-    title: string;
-    message: string;
-    image?: string | null;
-    meta?: Record<string, unknown>;
-  },
-) {
-  const eventType = payload.meta?.event_type;
-  const reportId = payload.meta?.report_id;
-
-  if (typeof eventType === "string" && typeof reportId === "string") {
-    const { data: existing } = await client
-      .from("notifications")
-      .select("id")
-      .eq("user_id", payload.user_id)
-      .contains("meta", { event_type: eventType, report_id: reportId })
-      .limit(1);
-
-    if (Array.isArray(existing) && existing.length > 0) return;
+async function scheduleSavedReportEmails(client: any, reportId: string, revision: unknown) {
+  if (!revision) return;
+  const { data, error } = await client.from("notifications").select("*")
+    .contains("meta", { event_type: "report_moderation_saved", report_id: reportId, report_revision: revision });
+  if (error) { console.error("report_notification_email_read_failed", { message: error.message }); return; }
+  for (const notification of data || []) {
+    scheduleCoreActionEmailForNotification(client, notification, { source: "admin-reports-management" });
   }
-
-  const notificationPayload = {
-    ...payload,
-    read: false,
-  };
-
-  const { error } = await client.from("notifications").insert(notificationPayload);
-  if (error) {
-    console.error("admin_reports_notification_failed", { message: error.message });
-    return;
-  }
-  scheduleCoreActionEmailForNotification(client, notificationPayload, { source: "admin-reports-management" });
 }
 
 async function fetchProfilesMap(client: any, profileIds: string[]) {
@@ -991,7 +963,7 @@ serve(async (req: Request) => {
       {
         const { data, error } = await client
           .from("reports")
-          .select("id, status, reporter_id, target_type, target_id, target_account_action, target_account_action_expires_at")
+          .select("id, status, reporter_id, target_type, target_id, moderation_revision, target_account_action, target_account_action_expires_at")
           .eq("id", reportId)
           .maybeSingle();
 
@@ -1052,7 +1024,7 @@ serve(async (req: Request) => {
             target_account_action_expires_at: null,
           })
           .eq("id", reportId)
-          .select("id, status, target_type, target_id, reviewed_by, reviewed_at, target_account_action, target_account_action_expires_at")
+          .select("id, status, target_type, target_id, moderation_revision, reviewed_by, reviewed_at, target_account_action, target_account_action_expires_at")
           .maybeSingle();
 
         if (error) {
@@ -1066,25 +1038,8 @@ serve(async (req: Request) => {
         }
       }
 
-      const accountActionConfig = reportTargetAccountActionConfigs.lift_ban;
-      try {
-        await insertNotificationIfMissing(client, {
-          user_id: targetOwnerId,
-          type: accountActionConfig.notificationType,
-          title: accountActionConfig.notificationTitle,
-          message: accountActionConfig.notificationMessage,
-          image: null,
-          meta: {
-            report_id: reportId,
-            target_type: existingReport.target_type,
-            target_id: existingReport.target_id,
-            target_account_action: "lift_ban",
-            target_account_action_label: accountActionConfig.label,
-            event_type: "report_target_account_lift_ban",
-          },
-        });
-      } catch {
-        // Do not block unban if notification insert fails.
+      if (updatedReport.moderation_revision > existingReport.moderation_revision) {
+        await scheduleSavedReportEmails(client, reportId, updatedReport.moderation_revision);
       }
 
       return jsonResponse({
@@ -1127,7 +1082,7 @@ serve(async (req: Request) => {
 
       const { data: updatedReport, error: updatedReportError } = await client
         .from("reports")
-        .select("id, status, target_type, target_id, reviewed_by, reviewed_at, moderation_action, moderation_notes, escalation_status, escalated_at, escalation_reason")
+        .select("id, status, target_type, target_id, moderation_revision, reviewed_by, reviewed_at, moderation_action, moderation_notes, escalation_status, escalated_at, escalation_reason")
         .eq("id", reportId)
         .maybeSingle();
 
@@ -1167,7 +1122,7 @@ serve(async (req: Request) => {
 
       const { data: existingReport, error: existingReportError } = await client
         .from("reports")
-        .select("id, status, reporter_id, target_type, target_id, escalation_status")
+        .select("id, status, reporter_id, target_type, target_id, escalation_status, moderation_revision")
         .eq("id", reportId)
         .maybeSingle();
 
@@ -1176,7 +1131,6 @@ serve(async (req: Request) => {
         return jsonResponse({ error: "Report not found" }, 404);
       }
 
-      const reporterId = String(existingReport.reporter_id || "").trim();
       const targetOwnerId = await resolveReportTargetOwnerId(client, existingReport);
 
       const now = new Date();
@@ -1250,8 +1204,8 @@ serve(async (req: Request) => {
 
       {
         const updateSelect = targetAccountAction !== "none" && supportsTargetAccountActionColumns
-          ? "id, status, target_type, target_id, reviewed_by, reviewed_at, moderation_action, moderation_notes, target_account_action, target_account_action_expires_at, escalation_status, escalated_at, escalation_reason"
-          : "id, status, target_type, target_id, reviewed_by, reviewed_at, moderation_action, moderation_notes, escalation_status, escalated_at, escalation_reason";
+          ? "id, status, target_type, target_id, moderation_revision, reviewed_by, reviewed_at, moderation_action, moderation_notes, target_account_action, target_account_action_expires_at, escalation_status, escalated_at, escalation_reason"
+          : "id, status, target_type, target_id, moderation_revision, reviewed_by, reviewed_at, moderation_action, moderation_notes, escalation_status, escalated_at, escalation_reason";
 
         const { data, error } = await client
           .from("reports")
@@ -1299,85 +1253,9 @@ serve(async (req: Request) => {
         return jsonResponse({ error: "Report not found" }, 404);
       }
 
-      const recipients = new Set<string>();
-
-      if (moderationAction === "warn_reporter" || moderationAction === "warn_both") {
-        if (reporterId) recipients.add(reporterId);
-      }
-
-      if (moderationAction === "warn_target_owner" || moderationAction === "warn_both") {
-        if (targetOwnerId) recipients.add(targetOwnerId);
-      }
-
-      if (moderationAction === "manual_review") {
-        if (reporterId) recipients.add(reporterId);
-        if (targetOwnerId) recipients.add(targetOwnerId);
-      }
-
-      if (recipients.size > 0) {
-        const notificationTitle =
-          moderationAction === "manual_review"
-            ? "Report Escalated"
-            : "Report Moderation Update";
-
-        const notificationMessage =
-          moderationAction === "manual_review"
-            ? "A report related to your account or content was escalated for manual review by an administrator."
-            : `An administrator reviewed a report related to your account or content and set it to ${nextStatus}.`;
-
-        const eventType =
-          moderationAction === "manual_review"
-            ? "report_manual_review_escalated"
-            : "report_moderation_updated";
-
-        for (const recipientId of recipients) {
-          try {
-            await insertNotificationIfMissing(client, {
-              user_id: recipientId,
-              type: moderationAction === "manual_review" ? "warning" : "info",
-              title: notificationTitle,
-              message: notificationMessage,
-              image: null,
-              meta: {
-                report_id: reportId,
-                target_type: existingReport.target_type,
-                target_id: existingReport.target_id,
-                next_status: nextStatus,
-                moderation_action: moderationAction,
-                target_account_action: targetAccountAction,
-                event_type: eventType,
-              },
-            });
-          } catch {
-            // Do not block moderation if notification insert fails.
-          }
-        }
-      }
-
-      if (targetAccountAction !== "none" && targetOwnerId) {
-        const accountActionConfig = reportTargetAccountActionConfigs[targetAccountAction];
-        try {
-          await insertNotificationIfMissing(client, {
-            user_id: targetOwnerId,
-            type: accountActionConfig.notificationType,
-            title: accountActionConfig.notificationTitle,
-            message: accountActionConfig.notificationMessage,
-            image: null,
-            meta: {
-              report_id: reportId,
-              target_type: existingReport.target_type,
-              target_id: existingReport.target_id,
-              next_status: nextStatus,
-              moderation_action: moderationAction,
-              target_account_action: targetAccountAction,
-              target_account_action_label: accountActionConfig.label,
-              target_account_action_expires_at: targetAccountActionExpiresAt,
-              event_type: `report_target_account_${targetAccountAction}`,
-            },
-          });
-        } catch {
-          // Do not block moderation if account action notification insert fails.
-        }
+      // The report trigger commits inbox notifications with this saved revision.
+      if (Number(updatedReport.moderation_revision) > Number(existingReport.moderation_revision)) {
+        await scheduleSavedReportEmails(client, reportId, updatedReport.moderation_revision);
       }
 
       return jsonResponse({

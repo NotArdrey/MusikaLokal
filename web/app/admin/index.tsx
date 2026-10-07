@@ -2133,26 +2133,28 @@ export default function AdminDashboardPage() {
               </Text>
             )}
 
-            <FilterDropdown
-              label="Withdrawal status"
-              options={WITHDRAWAL_STATUS_FILTERS.map((filter) => ({ value: filter.key, label: filter.label }))}
-              value={withdrawalStatusFilter}
-              emptyValue="all"
-              emptyLabel="All withdrawals"
-              onChange={(value) => {
-                if (!Array.isArray(value)) setWithdrawalStatusFilter(value as WithdrawalStatusFilter);
-              }}
-            />
+            <View style={{ gap: 12, marginBottom: 16 }}>
+              <FilterDropdown
+                label="Withdrawal status"
+                options={WITHDRAWAL_STATUS_FILTERS.map((filter) => ({ value: filter.key, label: filter.label }))}
+                value={withdrawalStatusFilter}
+                emptyValue="all"
+                emptyLabel="All withdrawals"
+                onChange={(value) => {
+                  if (!Array.isArray(value)) setWithdrawalStatusFilter(value as WithdrawalStatusFilter);
+                }}
+              />
 
-            <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#064E3B' : '#ECFDF5' }]}>
-                <Text style={styles.badgeTextGreen}>{formatMetricCount(withdrawalTotals.count)} records</Text>
-              </View>
-              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#172554' : '#EFF6FF' }]}>
-                <Text style={[styles.badgeTextGreen, { color: '#0ea5e9' }]}>Requested {formatCurrency(withdrawalTotals.totalAmount)}</Text>
-              </View>
-              <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#312E81' : '#EEF2FF' }]}>
-                <Text style={[styles.badgeTextGreen, { color: colors.primary }]}>Net {formatCurrency(withdrawalTotals.totalNetAmount)}</Text>
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#064E3B' : '#ECFDF5' }]}>
+                  <Text style={styles.badgeTextGreen}>{formatMetricCount(withdrawalTotals.count)} records</Text>
+                </View>
+                <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#172554' : '#EFF6FF' }]}>
+                  <Text style={[styles.badgeTextGreen, { color: '#0ea5e9' }]}>Requested {formatCurrency(withdrawalTotals.totalAmount)}</Text>
+                </View>
+                <View style={[styles.badgeGreen, styles.badgeInline, { backgroundColor: isDark ? '#312E81' : '#EEF2FF' }]}>
+                  <Text style={[styles.badgeTextGreen, { color: colors.primary }]}>Net {formatCurrency(withdrawalTotals.totalNetAmount)}</Text>
+                </View>
               </View>
             </View>
 

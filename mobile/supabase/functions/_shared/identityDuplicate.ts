@@ -3,7 +3,7 @@
 const DUPLICATE_REVIEW_SOURCE = "DIDIT_DUPLICATE";
 const DIDIT_PENDING_SOURCE = "DIDIT_PENDING";
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function normalizeText(value: unknown) {
   return String(value || "").trim();
@@ -254,10 +254,26 @@ export function prepareIdentityNameBirthDateDuplicateInput(rawDocument: any, opt
 
 async function hmacSha256Hex(message: string) {
   const encoder = new TextEncoder();
-  const secret =
-    Deno.env.get("IDENTITY_DOCUMENT_HASH_SECRET") ||
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ||
-    "musikalokal-identity-document-fingerprint";
+  const secret = Deno.env.get("IDENTITY_DOCUMENT_HASH_SECRET");
+  if (!secret) {
+    throw new Error("IDENTITY_DOCUMENT_HASH_SECRET is required for identity document fingerprinting");
+  }
+
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(message));
+  return Array.from(new Uint8Array(signature))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function hmacSha256HexWithSecret(message: string, secret: string) {
+  const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
     encoder.encode(secret),
@@ -280,6 +296,69 @@ function isUniqueViolation(error: any) {
   return error?.code === "23505" || /duplicate key value/i.test(error?.message || "");
 }
 
+function getSessionNonceSecret() {
+  const secret =
+    Deno.env.get("DIDIT_SESSION_NONCE_SECRET") ||
+    Deno.env.get("IDENTITY_DOCUMENT_HASH_SECRET") ||
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+  if (!secret) {
+    throw new Error("DIDIT_SESSION_NONCE_SECRET or IDENTITY_DOCUMENT_HASH_SECRET is required for Didit session nonce hashing");
+  }
+
+  return secret;
+}
+
+function getSessionNonceSecretCandidates() {
+  return [
+    Deno.env.get("DIDIT_SESSION_NONCE_SECRET"),
+    Deno.env.get("IDENTITY_DOCUMENT_HASH_SECRET"),
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
+  ].map(normalizeText).filter(Boolean);
+}
+
+export function createSessionNonce() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export async function hashSessionNonce(sessionRef: unknown, nonce: unknown) {
+  const normalizedSessionRef = normalizeText(sessionRef);
+  const normalizedNonce = normalizeText(nonce);
+  if (!normalizedSessionRef || !normalizedNonce) return "";
+  return hmacSha256HexWithSecret(`${normalizedSessionRef}:${normalizedNonce}`, getSessionNonceSecret());
+}
+
+export async function verifySessionNonce(sessionRef: unknown, nonce: unknown, expectedHash: unknown) {
+  const normalizedExpected = normalizeText(expectedHash).toLowerCase();
+  if (!normalizedExpected) return false;
+
+  const normalizedSessionRef = normalizeText(sessionRef);
+  const normalizedNonce = normalizeText(nonce);
+  if (!normalizedSessionRef || !normalizedNonce) return false;
+
+  for (const secret of getSessionNonceSecretCandidates()) {
+    const actual = await hmacSha256HexWithSecret(`${normalizedSessionRef}:${normalizedNonce}`, secret);
+    if (actual.length === normalizedExpected.length && constantTimeEqual(actual, normalizedExpected)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function constantTimeEqual(a: string, b: string) {
+  if (a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
+}
+
 const RAW_ID_KEY_RE = /(^|_)(document|doc|id|identity|identification|personal|passport|license|licence|national|tax|tin|ssn|mrz)(_|$).*?(number|no|num|code|value|identifier|id)$|^(mrz|raw_mrz|document_number|documentnumber|id_number|idnumber|personal_number|personalnumber|passport_number|passportnumber|license_number|licensenumber|national_id_number|nationalidnumber)$/i;
 
 export function sanitizeIdentityVerificationData(value: any, depth = 0): any {
@@ -300,6 +379,12 @@ export function sanitizeIdentityVerificationData(value: any, depth = 0): any {
     sanitized[key] = sanitizeIdentityVerificationData(nestedValue, depth + 1);
   }
   return sanitized;
+}
+
+export function stripPrivateSessionFields(value: any) {
+  if (!value || typeof value !== "object") return value;
+  const { session_nonce_hash: _sessionNonceHash, ...rest } = value;
+  return rest;
 }
 
 export async function buildIdentityDocumentFingerprint(rawDocument: any, options: Record<string, unknown> = {}) {
@@ -685,6 +770,7 @@ export async function queueIdentityReview(
     .eq("user_id", userId)
     .eq("status", "PENDING_REVIEW")
     .eq("source", reviewSource)
+    .eq("submitted_role", normalizedRole)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -721,6 +807,7 @@ export async function queueIdentityReview(
         .eq("user_id", userId)
         .eq("status", "PENDING_REVIEW")
         .eq("source", reviewSource)
+        .eq("submitted_role", normalizedRole)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();

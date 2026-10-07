@@ -1,6 +1,19 @@
 // @ts-nocheck
+import { cancelDiditAttempt, readDiditAttempt, isInvalidatedDiditAttempt, summarizeDiditWorkflow } from "../_shared/diditAttempt.ts";
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { sendEmailWithGmail } from "../_shared/gmailEmail.ts";
+import {
+  buildIdentityDocumentFingerprint,
+  createSessionNonce,
+  hashSessionNonce,
+  isUuid,
+  normalizeIdentityEmail,
+  prepareIdentityNameBirthDateDuplicateInput,
+  sanitizeIdentityVerificationData,
+  stripPrivateSessionFields,
+  verifySessionNonce,
+} from "../_shared/identityDuplicate.ts";
 import {
   enforceRegistrationRateLimit,
   getRegistrationRateLimitStatus,
@@ -18,6 +31,330 @@ function jsonResponse(payload: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+async function assertSessionNonce(
+  supabaseAdmin: any,
+  sessionRef: string,
+  sessionNonce: unknown,
+) {
+  const { data: localData, error } = await supabaseAdmin
+    .from("verification_sessions")
+    .select("status, verification_data")
+    .eq("session_ref", sessionRef)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to validate verification session: ${error.message}`);
+  }
+
+  const expectedHash = localData?.verification_data?.session_nonce_hash;
+  if (localData && !expectedHash) {
+    console.warn("didit_session_legacy_nonce_missing", { sessionRef });
+    return localData;
+  }
+
+  const valid = await verifySessionNonce(sessionRef, sessionNonce, expectedHash);
+  if (!localData || !valid) {
+    throw new Error("Verification session could not be validated. Please start verification again.");
+  }
+
+  return localData;
+}
+
+async function enforceDiditSessionRateLimit(supabaseAdmin: any, normalizedEmail: string) {
+  if (!normalizedEmail) return;
+
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  const [{ count: hourlyCount, error: hourlyError }, { count: dailyCount, error: dailyError }] = await Promise.all([
+    supabaseAdmin
+      .from("verification_sessions")
+      .select("session_ref", { count: "exact", head: true })
+      .eq("verification_data->>email", normalizedEmail)
+      .not("verification_data->>session_url", "is", null)
+      .gte("created_at", oneHourAgo),
+    supabaseAdmin
+      .from("verification_sessions")
+      .select("session_ref", { count: "exact", head: true })
+      .eq("verification_data->>email", normalizedEmail)
+      .not("verification_data->>session_url", "is", null)
+      .gte("created_at", oneDayAgo),
+  ]);
+
+  if (hourlyError || dailyError) {
+    console.error("didit_rate_limit_lookup_failed", hourlyError || dailyError);
+    return;
+  }
+
+  if ((hourlyCount || 0) >= 3 || (dailyCount || 0) >= 8) {
+    throw new Error("Too many verification attempts. Please wait before trying again.");
+  }
+}
+
+async function resolveReusableDiditSession(
+  supabaseAdmin: any,
+  {
+    normalizedEmail,
+    existingSessionId,
+    sessionNonce,
+  }: Record<string, unknown>,
+) {
+  const sessionRef = String(existingSessionId || "").trim();
+  const providedNonce = String(sessionNonce || "").trim();
+  if (!sessionRef || !providedNonce) return null;
+
+  let localSessionData = null;
+  try {
+    localSessionData = await assertSessionNonce(supabaseAdmin, sessionRef, providedNonce);
+  } catch (reuseValidationError) {
+    console.warn("didit_reuse_session_validation_failed", {
+      sessionId: sessionRef,
+      message: reuseValidationError?.message || String(reuseValidationError),
+    });
+    return null;
+  }
+
+  const storedEmail = normalizeIdentityEmail(localSessionData?.verification_data?.email);
+  if (normalizedEmail && storedEmail && storedEmail !== normalizedEmail) {
+    console.warn("didit_reuse_session_email_mismatch", { sessionId: sessionRef });
+    return null;
+  }
+
+  const status = normalizeDiditStatus(localSessionData?.status) || "PENDING";
+  if (isFinalSessionStatus(status)) return null;
+
+  const verificationUrl = firstNonEmptyString([
+    localSessionData?.verification_data?.session_url,
+    localSessionData?.verification_data?.verification_url,
+    localSessionData?.verification_data?.url,
+  ]);
+  if (!isPublicHttpUrl(verificationUrl)) return null;
+
+  return {
+    success: true,
+    reused: true,
+    sessionId: sessionRef,
+    sessionNonce: providedNonce,
+    verificationUrl,
+    workflowId: firstNonEmptyString([
+      localSessionData?.verification_data?.workflow_id,
+      localSessionData?.verification_data?.workflowId,
+      Deno.env.get("DIDIT_WORKFLOW_ID"),
+    ]) || null,
+    status,
+  };
+}
+
+const FINAL_SESSION_STATUSES = new Set([
+  "APPROVED",
+  "DECLINED",
+  "ABANDONED",
+  "PENDING_REVIEW",
+  "SUPERSEDED",
+  "SUPERSEDED_APPROVED",
+]);
+
+const FAILED_SESSION_STATUSES = new Set([
+  "DECLINED",
+  "ABANDONED",
+  "SUPERSEDED",
+  "SUPERSEDED_APPROVED",
+]);
+
+const MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON = "MISSING_DOCUMENT_FINGERPRINT_RETRY_REQUIRED";
+const MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE =
+  "We could not read the document number needed to verify this ID. Please repeat identity verification with a clear, valid ID.";
+
+function normalizeDiditStatus(value: unknown) {
+  const normalized = String(value || "").trim().replace(/[\s-]+/g, "_").toUpperCase();
+  if (!normalized) return "";
+
+  if (normalized === "APPROVED") return "APPROVED";
+  if (["DECLINED", "REJECTED", "DENIED", "FAILED", "FAILURE", "NOT_APPROVED", "NOT_VERIFIED"].includes(normalized)) return "DECLINED";
+  if (["ABANDONED", "EXPIRED", "CANCELLED", "CANCELED"].includes(normalized)) return "ABANDONED";
+  if (normalized === "IN_REVIEW") return "PENDING";
+  if ([
+    "PENDING_REVIEW",
+    "PENDING_REVIEW_REQUIRED",
+    "REVIEW",
+    "MANUAL_REVIEW",
+    "PENDING_MANUAL_REVIEW",
+  ].includes(normalized)) return "PENDING_REVIEW";
+  if (["NOT_STARTED", "IN_PROGRESS", "PENDING", "PROCESSING", "SUBMITTED", "CREATED", "STARTED"].includes(normalized)) {
+    return "PENDING";
+  }
+
+  return normalized;
+}
+
+function isFinalSessionStatus(value: unknown) {
+  return FINAL_SESSION_STATUSES.has(normalizeDiditStatus(value));
+}
+
+function isFailedDiditStatus(value: unknown) {
+  return FAILED_SESSION_STATUSES.has(normalizeDiditStatus(value));
+}
+
+function findDecisionObject(source: any) {
+  const candidates = [
+    source?.decision,
+    source?.result,
+    source?.session,
+    source?.verification_data?.decision,
+    source?.verification_data?.result,
+    source?.verification_data?.session,
+    source?.verification_data,
+    source?.extracted_data?.decision,
+    source?.extracted_data?.result,
+    source?.extracted_data,
+    source?.details?.decision,
+    source?.details?.result,
+    source?.details,
+    source,
+  ];
+
+  return candidates.find((candidate) => (
+    candidate &&
+    typeof candidate === "object" &&
+    (Array.isArray(candidate.id_verifications) || Array.isArray(candidate.face_matches))
+  )) || null;
+}
+
+function collectStatusValues(values: any[], seen = new Set<any>()) {
+  const statuses: string[] = [];
+
+  for (const value of values) {
+    if (typeof value === "string" || typeof value === "number") {
+      const normalized = String(value).trim();
+      if (normalized) statuses.push(normalized);
+      continue;
+    }
+
+    if (value && typeof value === "object") {
+      if (seen.has(value)) continue;
+      seen.add(value);
+      statuses.push(...collectStatusValues([
+        value.status,
+        value.verification_status,
+        value.businessStatus,
+        value.diditResolvedStatus,
+        value.rawDiditStatus,
+        value.result,
+        value.outcome,
+        value.state,
+        value.verdict,
+        value.decision,
+      ], seen));
+    }
+  }
+
+  return statuses;
+}
+
+function resolveStatusValue(values: any[]) {
+  const statuses = collectStatusValues(values).map(normalizeDiditStatus).filter(Boolean);
+  return (
+    statuses.find(isFailedDiditStatus) ||
+    statuses.find((status) => status === "PENDING_REVIEW") ||
+    statuses.find((status) => status === "APPROVED") ||
+    statuses[0] ||
+    ""
+  );
+}
+
+function resolveSourceStatus(source: any) {
+  if (!source) return "";
+  if (typeof source === "string" || typeof source === "number") return normalizeDiditStatus(source);
+  if (typeof source !== "object") return "";
+
+  return resolveStatusValue([
+    source.status || source.verification_status || source.verification_data?.status,
+    source.session?.status,
+    source.session,
+    source.result?.status,
+    source.result,
+    source.decision,
+  ]);
+}
+
+function shouldReviewMissingFaceMatch(sourceStatus: unknown) {
+  const normalized = normalizeDiditStatus(sourceStatus);
+  return normalized === "PENDING_REVIEW";
+}
+
+function resolveDecisionStatus(decision: any, sourceStatus: unknown = "") {
+  if (!decision) return "";
+
+  const idVerification = decision.id_verifications?.[0];
+  const faceMatch = decision.face_matches?.[0];
+  const idStatus = normalizeDiditStatus(idVerification?.status);
+  const faceStatus = normalizeDiditStatus(faceMatch?.status);
+
+  if (idStatus === "DECLINED" || faceStatus === "DECLINED") return "DECLINED";
+  if (idStatus === "ABANDONED" || faceStatus === "ABANDONED") return "ABANDONED";
+  if (idStatus === "APPROVED" && !faceMatch) {
+    return "PENDING";
+  }
+  if (idStatus === "PENDING_REVIEW" || faceStatus === "PENDING_REVIEW") return "PENDING_REVIEW";
+  if (idStatus === "APPROVED" && faceStatus === "APPROVED") return "APPROVED";
+
+  return resolveStatusValue([
+    decision.status,
+    decision.verification_status,
+    decision.result,
+    decision.outcome,
+    decision.state,
+    decision.verdict,
+    decision.decision,
+    sourceStatus,
+  ]);
+}
+
+function resolveDiditStatusFromSource(source: any) {
+  if (!source || typeof source !== "object") return "";
+
+  const fallbackStatus = resolveSourceStatus(source);
+  const decisionStatus = resolveDecisionStatus(findDecisionObject(source), fallbackStatus);
+  if (decisionStatus) return decisionStatus;
+
+  return fallbackStatus === "APPROVED" ? "PENDING" : fallbackStatus;
+}
+
+function resolveDiditSessionStatus(...sources: any[]) {
+  const statuses = sources.map(resolveDiditStatusFromSource).filter(Boolean);
+  const hasApprovedRequiredChecks = sources.some((source) => {
+    const decision = findDecisionObject(source);
+    const idStatus = normalizeDiditStatus(decision?.id_verifications?.[0]?.status);
+    const faceStatus = normalizeDiditStatus(decision?.face_matches?.[0]?.status);
+    return idStatus === "APPROVED" && faceStatus === "APPROVED";
+  });
+
+  if (hasApprovedRequiredChecks && statuses.some(isFailedDiditStatus)) {
+    return (
+      statuses.find((status) => normalizeDiditStatus(status) === "PENDING_REVIEW") ||
+      statuses.find((status) => normalizeDiditStatus(status) === "APPROVED") ||
+      "APPROVED"
+    );
+  }
+
+  return (
+    statuses.find(isFailedDiditStatus) ||
+    statuses.find((status) => normalizeDiditStatus(status) === "PENDING_REVIEW") ||
+    statuses.find(isFinalSessionStatus) ||
+    statuses[0] ||
+    ""
+  );
 }
 
 function firstNonEmptyString(values: any[]) {
@@ -223,261 +560,341 @@ function resolveDiditVerificationUrl(diditData: any) {
   return sessionToken ? `https://verify.didit.me/session/${encodeURIComponent(sessionToken)}` : "";
 }
 
-const FINAL_SESSION_STATUSES = new Set([
-  "APPROVED",
-  "DECLINED",
-  "ABANDONED",
-  "PENDING_REVIEW",
-  "SUPERSEDED",
-  "SUPERSEDED_APPROVED",
-]);
-
-const FAILED_SESSION_STATUSES = new Set([
-  "DECLINED",
-  "ABANDONED",
-  "SUPERSEDED",
-  "SUPERSEDED_APPROVED",
-]);
-
-function normalizeDiditStatus(value: unknown) {
-  const normalized = String(value || "").trim().replace(/[\s-]+/g, "_").toUpperCase();
-  if (!normalized) return "";
-
-  if (normalized === "APPROVED") return "APPROVED";
-  if (["DECLINED", "REJECTED", "DENIED", "FAILED", "FAILURE", "NOT_APPROVED", "NOT_VERIFIED"].includes(normalized)) return "DECLINED";
-  if (["ABANDONED", "EXPIRED", "CANCELLED", "CANCELED"].includes(normalized)) return "ABANDONED";
-  if (normalized === "IN_REVIEW") return "PENDING";
-  if ([
-    "PENDING_REVIEW",
-    "PENDING_REVIEW_REQUIRED",
-    "REVIEW",
-    "MANUAL_REVIEW",
-    "PENDING_MANUAL_REVIEW",
-  ].includes(normalized)) return "PENDING_REVIEW";
-  if (["NOT_STARTED", "IN_PROGRESS", "PENDING", "PROCESSING", "SUBMITTED", "CREATED", "STARTED"].includes(normalized)) {
-    return "PENDING";
-  }
-
-  return normalized;
-}
-
-function isFinalSessionStatus(value: unknown) {
-  return FINAL_SESSION_STATUSES.has(normalizeDiditStatus(value));
-}
-
-function isFailedDiditStatus(value: unknown) {
-  return FAILED_SESSION_STATUSES.has(normalizeDiditStatus(value));
-}
-
-function findDecisionObject(source: any) {
-  const candidates = [
-    source?.decision,
-    source?.result,
-    source?.session,
-    source?.verification_data?.decision,
-    source?.verification_data?.result,
-    source?.verification_data?.session,
-    source?.verification_data,
-    source?.extracted_data?.decision,
-    source?.extracted_data?.result,
-    source?.extracted_data,
-    source?.details?.decision,
-    source?.details?.result,
-    source?.details,
-    source,
-  ];
-
-  return candidates.find((candidate) => (
-    candidate &&
-    typeof candidate === "object" &&
-    (Array.isArray(candidate.id_verifications) || Array.isArray(candidate.face_matches))
-  )) || null;
-}
-
-function collectStatusValues(values: any[], seen = new Set<any>()) {
-  const statuses: string[] = [];
-
-  for (const value of values) {
-    if (typeof value === "string" || typeof value === "number") {
-      const normalized = String(value).trim();
-      if (normalized) statuses.push(normalized);
-      continue;
-    }
-
-    if (value && typeof value === "object") {
-      if (seen.has(value)) continue;
-      seen.add(value);
-      statuses.push(...collectStatusValues([
-        value.status,
-        value.verification_status,
-        value.businessStatus,
-        value.diditResolvedStatus,
-        value.rawDiditStatus,
-        value.result,
-        value.outcome,
-        value.state,
-        value.verdict,
-        value.decision,
-      ], seen));
-    }
-  }
-
-  return statuses;
-}
-
-function resolveStatusValue(values: any[]) {
-  const statuses = collectStatusValues(values).map(normalizeDiditStatus).filter(Boolean);
-  return (
-    statuses.find(isFailedDiditStatus) ||
-    statuses.find((status) => status === "PENDING_REVIEW") ||
-    statuses.find((status) => status === "APPROVED") ||
-    statuses[0] ||
-    ""
-  );
-}
-
-function resolveSourceStatus(source: any) {
-  if (!source) return "";
-  if (typeof source === "string" || typeof source === "number") return normalizeDiditStatus(source);
-  if (typeof source !== "object") return "";
-
-  return resolveStatusValue([
-    source.status ||
-    source.verification_status ||
-    source.verification_data?.status ||
-    source.session?.status,
-    source.session,
-    source.result?.status,
-    source.result,
-    source.decision,
-  ]);
-}
-
-function shouldReviewMissingFaceMatch(sourceStatus: unknown) {
-  const normalized = normalizeDiditStatus(sourceStatus);
-  return normalized === "PENDING_REVIEW";
-}
-
-function resolveDecisionStatus(decision: any, sourceStatus: unknown = "") {
-  if (!decision) return "";
-
-  const idVerification = decision.id_verifications?.[0];
-  const faceMatch = decision.face_matches?.[0];
-  const idStatus = normalizeDiditStatus(idVerification?.status);
-  const faceStatus = normalizeDiditStatus(faceMatch?.status);
-
-  if (idStatus === "DECLINED" || faceStatus === "DECLINED") return "DECLINED";
-  if (idStatus === "ABANDONED" || faceStatus === "ABANDONED") return "ABANDONED";
-  if (idStatus === "APPROVED" && !faceMatch) {
-    return "PENDING";
-  }
-  if (idStatus === "PENDING_REVIEW" || faceStatus === "PENDING_REVIEW") return "PENDING_REVIEW";
-  if (idStatus === "APPROVED" && faceStatus === "APPROVED") return "APPROVED";
-
-  return resolveStatusValue([
-    decision.status,
-    decision.verification_status,
-    decision.result,
-    decision.outcome,
-    decision.state,
-    decision.verdict,
-    decision.decision,
-    sourceStatus,
-  ]);
-}
-
-function resolveDiditStatusFromSource(source: any) {
-  if (!source || typeof source !== "object") return "";
-
-  const fallbackStatus = resolveSourceStatus(source);
-  const decisionStatus = resolveDecisionStatus(findDecisionObject(source), fallbackStatus);
-  if (decisionStatus) return decisionStatus;
-
-  return fallbackStatus === "APPROVED" ? "PENDING" : fallbackStatus;
-}
-
-function resolveDiditSessionStatus(...sources: any[]) {
-  const statuses = sources.map(resolveDiditStatusFromSource).filter(Boolean);
-  const hasApprovedRequiredChecks = sources.some((source) => {
+function extractDiditIdVerification(...sources: any[]) {
+  for (const source of sources) {
     const decision = findDecisionObject(source);
-    const idStatus = normalizeDiditStatus(decision?.id_verifications?.[0]?.status);
-    const faceStatus = normalizeDiditStatus(decision?.face_matches?.[0]?.status);
-    return idStatus === "APPROVED" && faceStatus === "APPROVED";
-  });
+    const idVerification = decision?.id_verifications?.[0] || source?.id_verification || source?.idVerification;
+    if (idVerification && typeof idVerification === "object") return idVerification;
+  }
+  return null;
+}
 
-  if (hasApprovedRequiredChecks && statuses.some(isFailedDiditStatus)) {
-    return (
-      statuses.find((status) => normalizeDiditStatus(status) === "PENDING_REVIEW") ||
-      statuses.find((status) => normalizeDiditStatus(status) === "APPROVED") ||
-      "APPROVED"
-    );
+function extractDocumentExpiry(idVerification: any) {
+  const rawExpiry = firstNonEmptyString([
+    idVerification?.expiration_date,
+    idVerification?.expiry_date,
+    idVerification?.date_of_expiry,
+    idVerification?.document_expiration_date,
+    idVerification?.document_expiry,
+    idVerification?.valid_until,
+    idVerification?.expires_at,
+    idVerification?.id_document_expiry,
+  ]);
+
+  const match = rawExpiry.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match?.[1] || null;
+}
+
+async function buildDiditSessionSyncData(
+  rawDecisionData: any,
+  rawBaseData: any,
+  resolvedStatus: string,
+  localSessionData: any,
+) {
+  const decision = findDecisionObject(rawDecisionData) || findDecisionObject(rawBaseData);
+  const idVerification = extractDiditIdVerification(rawDecisionData, rawBaseData);
+  const firstName = firstNonEmptyString([idVerification?.first_name, idVerification?.firstName]);
+  const middleName = firstNonEmptyString([idVerification?.extra_fields?.middle_name, idVerification?.middle_name, idVerification?.middleName]);
+  const lastName = firstNonEmptyString([
+    idVerification?.last_name,
+    idVerification?.lastName,
+    idVerification?.extra_fields?.first_surname,
+  ]);
+  const secondSurname = firstNonEmptyString([idVerification?.extra_fields?.second_surname]);
+  const fullName = firstNonEmptyString([
+    idVerification?.full_name,
+    idVerification?.fullName,
+    [firstName, middleName, lastName, secondSurname].filter(Boolean).join(" "),
+  ]);
+  const identityNameBirthDate = prepareIdentityNameBirthDateDuplicateInput(idVerification, {
+    fullLegalName: fullName,
+  });
+  const documentCountry = firstNonEmptyString([
+    idVerification?.issuing_country,
+    idVerification?.issuingCountry,
+    idVerification?.country,
+  ]) || "PHL";
+  let documentFingerprint = null;
+
+  if (idVerification) {
+    try {
+      documentFingerprint = await buildIdentityDocumentFingerprint(idVerification, {
+        documentType: idVerification?.document_type || idVerification?.documentType || idVerification?.type,
+        documentCountry,
+      });
+    } catch (fingerprintError) {
+      console.warn("Failed to build Didit document fingerprint during session sync:", fingerprintError?.message || fingerprintError);
+    }
   }
 
-  return (
-    statuses.find(isFailedDiditStatus) ||
-    statuses.find((status) => normalizeDiditStatus(status) === "PENDING_REVIEW") ||
-    statuses.find(isFinalSessionStatus) ||
-    statuses[0] ||
-    ""
-  );
+  const existingVerificationData = localSessionData?.verification_data || {};
+
+  return {
+    user_ref: existingVerificationData.user_ref,
+    email: existingVerificationData.email,
+    signup_role: existingVerificationData.signup_role,
+    full_name: fullName,
+    first_name: firstName,
+    middle_name: middleName,
+    last_name: lastName,
+    features: sanitizeIdentityVerificationData(rawDecisionData?.features || rawBaseData?.features || decision?.features),
+    face_matches: sanitizeIdentityVerificationData(decision?.face_matches),
+    liveness_checks: sanitizeIdentityVerificationData(decision?.liveness_checks),
+    id_verifications: sanitizeIdentityVerificationData(decision?.id_verifications),
+    raw_data: sanitizeIdentityVerificationData(idVerification || rawDecisionData || rawBaseData || {}),
+    document_fingerprint: documentFingerprint,
+    document_country: documentCountry,
+    verified_full_legal_name: identityNameBirthDate.fullLegalName,
+    normalized_full_legal_name: identityNameBirthDate.normalizedFullLegalName,
+    birth_date: identityNameBirthDate.birthDate,
+    id_document_expiry: extractDocumentExpiry(idVerification),
+    id_verified_at: resolvedStatus === "APPROVED" ? new Date().toISOString() : undefined,
+    source_session_status: firstNonEmptyString([rawDecisionData?.status, rawBaseData?.status]),
+    didit_status_synced_at: new Date().toISOString(),
+  };
 }
 
-function isReusableDiditSessionStatus(value: unknown) {
-  const normalized = normalizeDiditStatus(value);
-  return !normalized || normalized === "PENDING";
+function hasNameBirthDateDuplicateKey(verificationData: Record<string, unknown> | null | undefined) {
+  if (!verificationData || typeof verificationData !== "object") return false;
+  return prepareIdentityNameBirthDateDuplicateInput(verificationData.raw_data || verificationData, {
+    fullLegalName: verificationData.verified_full_legal_name || verificationData.full_legal_name || verificationData.full_name,
+    normalizedFullLegalName: verificationData.normalized_full_legal_name,
+    birthDate: verificationData.birth_date || verificationData.date_of_birth,
+  }).hasNameBirthDate;
 }
 
-async function resolveReusableDiditSession(
-  supabaseAdmin: any,
-  {
-    normalizedEmail,
-    existingSessionId,
-  }: Record<string, unknown>,
+function addMissingDocumentFingerprintRetryData(verificationData: Record<string, unknown> | null | undefined) {
+  return {
+    ...(verificationData && typeof verificationData === "object" ? verificationData : {}),
+    missing_document_fingerprint: true,
+    retry_required: true,
+    retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+    retry_message: MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE,
+    declined_at: new Date().toISOString(),
+  };
+}
+
+function addMissingDocumentFingerprintReviewData(verificationData: Record<string, unknown> | null | undefined) {
+  return {
+    ...(verificationData && typeof verificationData === "object" ? verificationData : {}),
+    missing_document_fingerprint: true,
+    review_required: true,
+    review_reason: "MISSING_DOCUMENT_FINGERPRINT",
+    retry_required: false,
+    pending_review_at: new Date().toISOString(),
+  };
+}
+
+async function mergeVerificationSessionData(
+  client: any,
+  sessionRef: string,
+  updates: Record<string, unknown>,
 ) {
-  const sessionRef = String(existingSessionId || "").trim();
-  if (!sessionRef) return null;
+  if (!sessionRef) return;
 
-  const { data: localSessionData, error } = await supabaseAdmin
+  const { data: existing } = await client
     .from("verification_sessions")
-    .select("status, verification_data")
+    .select("verification_data")
     .eq("session_ref", sessionRef)
     .maybeSingle();
 
-  if (error) {
-    console.warn("didit_reuse_session_lookup_failed", {
-      sessionId: sessionRef,
-      message: error.message,
-      code: error.code,
+  const existingVerificationData =
+    existing?.verification_data && typeof existing.verification_data === "object"
+      ? existing.verification_data
+      : {};
+
+  await client
+    .from("verification_sessions")
+    .update({
+      verification_data: {
+        ...existingVerificationData,
+        ...updates,
+      },
+    })
+    .eq("session_ref", sessionRef);
+}
+
+async function sendMissingDocumentFingerprintRetryEmail(
+  client: any,
+  {
+    email,
+    displayName,
+    diditSessionId,
+  }: {
+    email: string,
+    displayName?: string,
+    diditSessionId?: string,
+  },
+) {
+  const recipientEmail = String(email || "").trim().toLowerCase();
+  if (!recipientEmail) return { sent: false, queued: false, provider: "none", skipped: true, error: "Missing recipient email" };
+
+  if (diditSessionId) {
+    const { data: existing } = await client
+      .from("verification_sessions")
+      .select("verification_data")
+      .eq("session_ref", diditSessionId)
+      .maybeSingle();
+    const existingData =
+      existing?.verification_data && typeof existing.verification_data === "object"
+        ? existing.verification_data
+        : {};
+    if (existingData.missing_document_fingerprint_email_sent_at || existingData.missing_document_fingerprint_email_queued_at) {
+      return { sent: false, queued: false, provider: "dedupe", skipped: true };
+    }
+  }
+
+  const safeName = escapeHtml(displayName || "there");
+  const safeMessage = escapeHtml(MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE);
+  const subject = "Identity Verification Retry Needed - MusikaLokal";
+  const html = `
+<h1>MusikaLokal</h1>
+<p>Hi ${safeName},</p>
+<p>${safeMessage}</p>
+<p>Please start identity verification again and use a clear, readable government ID. Make sure the document number is visible and not covered by glare, blur, cropping, or a finger.</p>
+<p>Your email is not blocked. You can retry registration with the same email address.</p>
+<p>Thank you,<br>MusikaLokal Team</p>`.trim();
+
+  const gmailDelivery = await sendEmailWithGmail({
+    to: recipientEmail,
+    subject,
+    html,
+    recipientName: displayName || "User",
+    source: "missing-document-fingerprint-retry",
+  });
+
+  if (gmailDelivery.sent) {
+    await mergeVerificationSessionData(client, String(diditSessionId || ""), {
+      missing_document_fingerprint_email_sent_at: new Date().toISOString(),
+      missing_document_fingerprint_email_provider: gmailDelivery.provider,
     });
-    return null;
+    return { sent: true, queued: false, provider: gmailDelivery.provider };
   }
 
-  const storedEmail = String(localSessionData?.verification_data?.email || "").trim().toLowerCase();
-  if (!localSessionData || (normalizedEmail && storedEmail && storedEmail !== normalizedEmail)) {
-    return null;
+  const gmailError = gmailDelivery.error || "Gmail sender is not configured";
+  console.error("missing_document_fingerprint_retry_gmail_failed", {
+    provider: gmailDelivery.provider,
+    message: gmailError,
+  });
+
+  const { error: queueError } = await client.from("email_notifications").insert({
+    recipient_email: recipientEmail,
+    recipient_name: displayName || "User",
+    subject,
+    html_content: html,
+    template_type: "identity_verification_retry_required",
+    status: "pending",
+    created_at: new Date().toISOString(),
+  });
+
+  if (queueError) {
+    console.error("missing_document_fingerprint_retry_queue_failed", { message: queueError.message });
+    await mergeVerificationSessionData(client, String(diditSessionId || ""), {
+      missing_document_fingerprint_email_error: `${gmailError}; ${queueError.message}`,
+    });
+    return { sent: false, queued: false, provider: "email_notifications", error: `${gmailError}; ${queueError.message}` };
   }
 
-  const status = normalizeDiditStatus(localSessionData.status) || "PENDING";
-  if (!isReusableDiditSessionStatus(status)) return null;
+  await mergeVerificationSessionData(client, String(diditSessionId || ""), {
+    missing_document_fingerprint_email_queued_at: new Date().toISOString(),
+    missing_document_fingerprint_email_provider: "email_notifications",
+  });
+  return { sent: false, queued: true, provider: "email_notifications", error: `${gmailError}; queued in email_notifications` };
+}
 
-  const verificationUrl = firstNonEmptyString([
-    localSessionData?.verification_data?.session_url,
-    localSessionData?.verification_data?.verification_url,
-    localSessionData?.verification_data?.url,
-  ]);
-  if (!isPublicHttpUrl(verificationUrl)) return null;
+async function markLinkedAccountDeclinedForMissingFingerprint(
+  supabaseAdmin: any,
+  userReference: unknown,
+  sessionId: string,
+) {
+  const userId = String(userReference || "").trim();
+  if (!isUuid(userId)) return;
 
-  return {
-    success: true,
-    reused: true,
-    sessionId: sessionRef,
-    verificationUrl,
-    workflowId: firstNonEmptyString([
-      localSessionData?.verification_data?.workflow_id,
-      localSessionData?.verification_data?.workflowId,
-    ]) || null,
-    status,
-  };
+  const { error: profileError } = await supabaseAdmin
+    .from("profiles")
+    .update({
+      is_verified: false,
+      verification_status: "DECLINED",
+      didit_session_id: null,
+      id_verified_at: null,
+    })
+    .eq("id", userId);
+
+  if (profileError) {
+    console.error("Failed to mark linked profile declined for missing document fingerprint:", profileError.message);
+  }
+
+  const { data: authUserData, error: authUserError } = await supabaseAdmin.auth.admin.getUserById(userId);
+  if (authUserError) {
+    console.error("Failed to load auth user for missing document fingerprint decline:", authUserError.message);
+  } else if (authUserData?.user) {
+    const existingMetadata = authUserData.user.user_metadata || {};
+    const { error: authUpdateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+      user_metadata: {
+        ...existingMetadata,
+        is_verified: false,
+        verification_status: "DECLINED",
+        retry_required: true,
+        retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+        didit_session_id: null,
+      },
+    });
+
+    if (authUpdateError) {
+      console.error("Failed to mark linked auth user declined for missing document fingerprint:", authUpdateError.message);
+    }
+  }
+
+  const { error: notificationError } = await supabaseAdmin
+    .from("notifications")
+    .insert({
+      user_id: userId,
+      type: "warning",
+      title: "Identity Verification Retry Needed",
+      message: MISSING_DOCUMENT_FINGERPRINT_RETRY_MESSAGE,
+      meta: {
+        verification_status: "DECLINED",
+        retry_required: true,
+        retry_reason: MISSING_DOCUMENT_FINGERPRINT_RETRY_REASON,
+        didit_session_id: sessionId,
+      },
+    });
+
+  if (notificationError) {
+    console.error("Failed to store missing document fingerprint retry notification:", notificationError.message);
+  }
+}
+
+async function upsertVerificationSession(
+  supabaseAdmin: any,
+  sessionRef: string,
+  status: string,
+  verificationData: Record<string, unknown>,
+) {
+  const { data: existing } = await supabaseAdmin
+    .from("verification_sessions")
+    .select("verification_data")
+    .eq("session_ref", sessionRef)
+    .maybeSingle();
+
+  const existingVerificationData =
+    existing?.verification_data && typeof existing.verification_data === "object"
+      ? existing.verification_data
+      : {};
+  const nextVerificationData = { ...existingVerificationData };
+
+  for (const [key, value] of Object.entries(verificationData || {})) {
+    if (value === undefined || value === null || value === "") continue;
+    nextVerificationData[key] = value;
+  }
+
+  return supabaseAdmin
+    .from("verification_sessions")
+    .upsert({
+      session_ref: sessionRef,
+      status,
+      verification_data: nextVerificationData,
+    });
 }
 
 serve(async (req) => {
@@ -510,6 +927,13 @@ serve(async (req) => {
       );
     }
 
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
+      console.error("Missing Supabase configuration for Didit session flow");
+      return jsonResponse({ error: "Server configuration error", success: false }, 500);
+    }
+
+    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
     // Parse request body
     const {
       userId,
@@ -519,29 +943,73 @@ serve(async (req) => {
       redirect_url,
       action,
       session_id,
+      sessionNonce: providedSessionNonce,
       document_type,
       existing_session_id,
       force_new,
     } = await req.json();
-    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    const normalizedEmail = normalizeIdentityEmail(email);
     const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
+
+    if (action === 'get_workflow') {
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+      if (!serviceKey || req.headers.get('Authorization') !== `Bearer ${serviceKey}`) return jsonResponse({ error: 'Unauthorized' }, 401);
+      const response = await fetch(`https://verification.didit.me/v3/workflows/${DIDIT_WORKFLOW_ID}/`, {
+        headers: { 'x-api-key': DIDIT_API_KEY }, signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) return jsonResponse({ success: false, providerStatus: response.status }, 502);
+      return jsonResponse({ success: true, workflow: summarizeDiditWorkflow(await response.json(), DIDIT_WORKFLOW_ID) });
+    }
+    if ((action === 'cancel_session' || action === 'get_session') && session_id) {
+      const attemptClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      try {
+        if (action === 'cancel_session') return jsonResponse(await cancelDiditAttempt(attemptClient, String(session_id), providedSessionNonce));
+        const attempt = await readDiditAttempt(attemptClient, String(session_id), providedSessionNonce);
+        if (isInvalidatedDiditAttempt(attempt.status)) return jsonResponse({ status: 'SUPERSEDED', businessStatus: 'SUPERSEDED' });
+      } catch (error) {
+        const invalidCredential = /could not be validated/.test(String(error.message));
+        return jsonResponse({ success: false, code: invalidCredential ? 'SESSION_VALIDATION_FAILED' : 'SESSION_READ_FAILED',
+          status: invalidCredential ? 'SUPERSEDED' : undefined, error: error.message }, invalidCredential ? 200 : 503);
+      }
+    }
 
     // HANDLE GET SESSION ACTION
     if (action === 'get_session' && session_id) {
+      console.log(`Fetching Didit session: ${session_id}`);
 
+      let localSessionData = null;
+      try {
+        localSessionData = await assertSessionNonce(supabaseAdmin, String(session_id), providedSessionNonce);
+      } catch (validationError: any) {
+        const message = validationError?.message || "Verification session could not be validated. Please start verification again.";
+        console.warn("didit_get_session_validation_failed", {
+          sessionId: String(session_id),
+          hasSessionNonce: Boolean(providedSessionNonce),
+          message,
+        });
+        return jsonResponse({
+          error: message,
+          code: "SESSION_VALIDATION_FAILED",
+          status: "SUPERSEDED",
+          verification_data: { status: "SUPERSEDED" },
+          success: false,
+        });
+      }
       let sessionData = {};
       let rawDecisionData = null;
       let rawBaseData = null;
 
       // Try /decision/ first (contains verification results)
       try {
+        console.log(`Attempting /decision/ endpoint...`);
         const decisionResponse = await fetch(`https://verification.didit.me/v3/session/${session_id}/decision/`, {
           method: "GET",
           headers: { "Content-Type": "application/json", "x-api-key": DIDIT_API_KEY }
         });
         if (decisionResponse.ok) {
           rawDecisionData = await decisionResponse.json();
-          sessionData = { ...sessionData, ...rawDecisionData };
+          console.log('Decision fetched successfully');
+          sessionData = { ...sessionData, ...sanitizeIdentityVerificationData(rawDecisionData) };
         } else {
           console.warn(`Decision endpoint failed: ${decisionResponse.status}`);
         }
@@ -551,14 +1019,16 @@ serve(async (req) => {
 
       // Try base /session/ endpoint (contains metadata)
       try {
+        console.log(`Attempting /session/ endpoint...`);
         const baseResponse = await fetch(`https://verification.didit.me/v3/session/${session_id}`, {
           method: "GET",
           headers: { "Content-Type": "application/json", "x-api-key": DIDIT_API_KEY }
         });
         if (baseResponse.ok) {
           rawBaseData = await baseResponse.json();
+          console.log('Base session fetched successfully');
           // Merge, but don't overwrite decision data if it exists
-          sessionData = { ...rawBaseData, ...sessionData };
+          sessionData = { ...sanitizeIdentityVerificationData(rawBaseData), ...sessionData };
         } else {
           console.warn(`Base session endpoint failed: ${baseResponse.status}`);
         }
@@ -570,101 +1040,143 @@ serve(async (req) => {
 
       // FALLBACK: Check local 'verification_sessions' table
       // This is crucial if we are using a TEMP_ ref that the Webhook has processed
-      if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
-        try {
-          const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      if (localSessionData) {
+        console.log('Found data in verification_sessions table');
+        const storedStatus = normalizeDiditStatus(localSessionData.status) || 'PENDING';
+        const rawDecisionStatus = resolveSourceStatus(rawDecisionData);
+        const rawBaseStatus = resolveSourceStatus(rawBaseData);
+        const diditResolvedStatus = resolveDiditSessionStatus(rawDecisionData, rawBaseData, sessionData);
+        const diditFailureOverridesLocal = isFailedDiditStatus(diditResolvedStatus);
+        const diditRequiresReview = diditResolvedStatus === 'PENDING_REVIEW' && storedStatus === 'APPROVED';
+        const storedPendingReviewStillInProgress = storedStatus === 'PENDING_REVIEW' && diditResolvedStatus === 'PENDING';
+        const localStatusIsFinal = isFinalSessionStatus(storedStatus);
+        const diditStatusIsFinal = isFinalSessionStatus(diditResolvedStatus);
+        let syncedVerificationData = null;
+        let effectiveStatus = storedPendingReviewStillInProgress
+          ? diditResolvedStatus
+          : diditFailureOverridesLocal
+          ? diditResolvedStatus
+          : diditRequiresReview
+          ? diditResolvedStatus
+          : localStatusIsFinal
+          ? storedStatus
+          : diditStatusIsFinal
+            ? diditResolvedStatus
+            : (storedStatus || diditResolvedStatus || 'PENDING');
+        let missingDocumentFingerprintReviewData: Record<string, unknown> | null = null;
 
-          // 1. Try lookup by Session Reference (UUID)
-          let { data: localData, error } = await supabaseAdmin
+        console.log("[didit] get_session status resolved", {
+          sessionId: session_id,
+          storedStatus,
+          rawDecisionStatus: rawDecisionStatus || null,
+          rawBaseStatus: rawBaseStatus || null,
+          diditResolvedStatus: diditResolvedStatus || null,
+          effectiveStatus,
+          diditFailureOverridesLocal,
+          diditRequiresReview,
+          storedPendingReviewStillInProgress,
+        });
+
+        if (storedPendingReviewStillInProgress) {
+          const { error: pendingSyncError } = await supabaseAdmin
             .from('verification_sessions')
-            .select('status, verification_data')
-            .eq('session_ref', session_id)
-            .maybeSingle();
-
-          // 2. If not found, and session_id looks like a TEMP ref, try lookup by user_ref inside JSON
-          if (!localData && session_id && session_id.startsWith('TEMP_')) {
-            for (const refField of ['user_ref', 'vendor_data', 'signup_attempt_ref']) {
-              const { data: refData } = await supabaseAdmin
-                .from('verification_sessions')
-                .select('status, verification_data')
-                // Use JSON arrow operator to filter by field inside verification_data.
-                .eq(`verification_data->>${refField}`, session_id)
-                .maybeSingle();
-
-              if (refData) {
-                localData = refData;
-                break;
-              }
-            }
+            .update({ status: 'PENDING' })
+            .eq('session_ref', String(session_id));
+          if (pendingSyncError) {
+            console.error('Failed to restore in-progress Didit session status:', pendingSyncError.message);
           }
-
-          if (localData) {
-            // Read the ACTUAL status from the database - DO NOT hardcode 'Approved'
-            // The webhook now stores all statuses: APPROVED, DECLINED, ABANDONED, PENDING_REVIEW
-            const localStatus = normalizeDiditStatus(localData.status) || 'PENDING';
-            const rawDecisionStatus = resolveSourceStatus(rawDecisionData);
-            const rawBaseStatus = resolveSourceStatus(rawBaseData);
-            const diditResolvedStatus = resolveDiditSessionStatus(rawDecisionData, rawBaseData, sessionData);
-            const diditFailureOverridesLocal = isFailedDiditStatus(diditResolvedStatus);
-            const diditRequiresReview = diditResolvedStatus === 'PENDING_REVIEW' && localStatus === 'APPROVED';
-            const localStatusIsFinal = isFinalSessionStatus(localStatus);
-            const diditStatusIsFinal = isFinalSessionStatus(diditResolvedStatus);
-            const effectiveStatus = diditFailureOverridesLocal
-              ? diditResolvedStatus
-              : diditRequiresReview
-                ? diditResolvedStatus
-                : localStatusIsFinal
-                  ? localStatus
-                  : diditStatusIsFinal
-                    ? diditResolvedStatus
-                    : (localStatus || diditResolvedStatus || 'PENDING');
-            console.log("[didit] get_session status resolved", {
-              sessionId: session_id,
-              storedStatus: localStatus,
-              rawDecisionStatus: rawDecisionStatus || null,
-              rawBaseStatus: rawBaseStatus || null,
-              diditResolvedStatus: diditResolvedStatus || null,
-              effectiveStatus,
-              diditFailureOverridesLocal,
-              diditRequiresReview,
-            });
-
-            if ((diditFailureOverridesLocal || diditRequiresReview || (!localStatusIsFinal && diditStatusIsFinal)) && diditResolvedStatus && diditResolvedStatus !== localStatus) {
-              const { error: statusSyncError } = await supabaseAdmin
-                .from('verification_sessions')
-                .update({ status: diditResolvedStatus })
-                .eq('session_ref', String(session_id));
-
-              if (statusSyncError) {
-                console.error('Failed to sync Didit final status:', statusSyncError.message);
-              }
-            }
-
-            // Merge local data (extracted by webhook) into sessionData
-            sessionData = {
-              ...sessionData,
-              status: effectiveStatus, // Use the ACTUAL status from database/live Didit
-              rawDiditStatus: rawBaseStatus || rawDecisionStatus || null,
-              businessStatus: effectiveStatus,
-              diditResolvedStatus: diditResolvedStatus || null,
-              verification_data: {
-                status: effectiveStatus, // Also include in verification_data for frontend compatibility
-                rawDiditStatus: rawBaseStatus || rawDecisionStatus || null,
-                businessStatus: effectiveStatus,
-                diditResolvedStatus: diditResolvedStatus || null,
-              },
-              extracted_data: {
-                ...sessionData.extracted_data,
-                ...(localData.verification_data || {}),
-                firstName: localData.verification_data?.first_name,
-                lastName: localData.verification_data?.last_name,
-                fullName: localData.verification_data?.full_name
-              }
-            };
-          }
-        } catch (dbErr) {
-          console.error('Database fallback error:', dbErr);
         }
+
+        if ((diditFailureOverridesLocal || !localStatusIsFinal || diditRequiresReview) && diditStatusIsFinal && diditResolvedStatus !== storedStatus) {
+          syncedVerificationData = await buildDiditSessionSyncData(
+            rawDecisionData,
+            rawBaseData,
+            diditResolvedStatus,
+            localSessionData,
+          );
+          const { error: syncError } = await upsertVerificationSession(
+            supabaseAdmin,
+            String(session_id),
+            diditResolvedStatus,
+            syncedVerificationData,
+          );
+
+          if (syncError) {
+            console.error('Failed to sync final Didit session status:', syncError.message);
+          } else {
+            console.log('Synced final Didit session status from live API:', diditResolvedStatus);
+          }
+        }
+
+        if (effectiveStatus === 'APPROVED' || effectiveStatus === 'PENDING_REVIEW') {
+          const storedDocumentFingerprint = String(localSessionData.verification_data?.document_fingerprint || '').trim();
+          let syncedDocumentFingerprint = String(syncedVerificationData?.document_fingerprint || '').trim();
+
+          if (!storedDocumentFingerprint && !syncedDocumentFingerprint) {
+            syncedVerificationData = await buildDiditSessionSyncData(
+              rawDecisionData,
+              rawBaseData,
+              effectiveStatus,
+              localSessionData,
+            );
+            syncedDocumentFingerprint = String(syncedVerificationData?.document_fingerprint || '').trim();
+          }
+
+          const hasStoredNameBirthDateDuplicateKey = hasNameBirthDateDuplicateKey(localSessionData.verification_data);
+          const hasSyncedNameBirthDateDuplicateKey = hasNameBirthDateDuplicateKey(syncedVerificationData);
+
+          if (!storedDocumentFingerprint && !syncedDocumentFingerprint && !hasStoredNameBirthDateDuplicateKey && !hasSyncedNameBirthDateDuplicateKey) {
+            effectiveStatus = 'PENDING_REVIEW';
+            missingDocumentFingerprintReviewData = addMissingDocumentFingerprintReviewData(syncedVerificationData);
+            const { error: missingFingerprintError } = await upsertVerificationSession(
+              supabaseAdmin,
+              String(session_id),
+              'PENDING_REVIEW',
+              missingDocumentFingerprintReviewData,
+            );
+
+            if (missingFingerprintError) {
+              console.error('Failed to mark missing document fingerprint session as pending review:', missingFingerprintError.message);
+            } else {
+              console.log('Marked Didit session as pending review because document fingerprint was missing.');
+            }
+          }
+        }
+
+        const publicVerificationData = stripPrivateSessionFields(
+          sanitizeIdentityVerificationData({
+            ...(localSessionData.verification_data || {}),
+            ...(syncedVerificationData || {}),
+            ...(missingDocumentFingerprintReviewData || {}),
+          }),
+        );
+
+        sessionData = {
+          ...sessionData,
+          status: effectiveStatus,
+          rawDiditStatus: rawBaseStatus || rawDecisionStatus || null,
+          businessStatus: effectiveStatus,
+          diditResolvedStatus: diditResolvedStatus || null,
+          verification_data: {
+            status: effectiveStatus,
+            rawDiditStatus: rawBaseStatus || rawDecisionStatus || null,
+            businessStatus: effectiveStatus,
+            diditResolvedStatus: diditResolvedStatus || null,
+            review_required: Boolean(publicVerificationData?.review_required),
+            review_reason: publicVerificationData?.review_reason || null,
+            matched_on: publicVerificationData?.matched_on || null,
+            retry_required: Boolean(publicVerificationData?.retry_required),
+            retry_reason: publicVerificationData?.retry_reason || null,
+            retry_message: publicVerificationData?.retry_message || null,
+          },
+          extracted_data: {
+            ...sessionData.extracted_data,
+            ...publicVerificationData,
+            firstName: publicVerificationData?.first_name,
+            lastName: publicVerificationData?.last_name,
+            fullName: publicVerificationData?.full_name
+          }
+        };
       }
 
       // --- NORMALIZATION STEP ---
@@ -706,6 +1218,7 @@ serve(async (req) => {
         derivedName = [foundFirst, foundMiddle, foundLast].filter(Boolean).join(' ');
       }
 
+      console.log(`Derived Name: ${derivedName}`);
 
       // Return normalized data along with raw
       return new Response(JSON.stringify({
@@ -734,14 +1247,24 @@ serve(async (req) => {
     });
     const isPreAuthSignup = signupAttemptRef.startsWith("TEMP_");
 
-    const supabaseAdmin = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
-      ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-      : null;
+    console.log("[didit] creating session", {
+      workflowId: DIDIT_WORKFLOW_ID,
+      email: maskEmailForDiditLog(normalizedEmail),
+      role: normalizedRole || null,
+      documentType: document_type || null,
+      vendorData: diditVendorData,
+      vendorDataKind: diditVendorData.startsWith("TEMP_") ? "temp" : "auth_user",
+      stablePreSignupVendorData: isPreAuthSignup && diditVendorData !== signupAttemptRef,
+      existingSessionId: existing_session_id || null,
+      hasExistingSessionNonce: Boolean(providedSessionNonce),
+      forceNew: shouldForceNewSession,
+    });
 
-    if (supabaseAdmin && !shouldForceNewSession) {
+    if (!shouldForceNewSession) {
       const reusableSession = await resolveReusableDiditSession(supabaseAdmin, {
         normalizedEmail,
         existingSessionId: existing_session_id,
+        sessionNonce: providedSessionNonce,
       });
 
       if (reusableSession) {
@@ -754,78 +1277,47 @@ serve(async (req) => {
     }
 
     let registrationAttemptId: string | null = null;
-    if (supabaseAdmin) {
-      try {
-        const registrationAttempt = await enforceRegistrationRateLimit(supabaseAdmin, req, {
-          action: "create_didit_session",
-          email: normalizedEmail,
-          limits: {
-            hourlyEmail: 12,
-            dailyEmail: 24,
-            hourlyIp: 40,
-            dailyIp: 120,
-            hourlyDevice: 24,
-            dailyDevice: 60,
-          },
-          metadata: {
-            role: normalizedRole || null,
-            stable_presignup_vendor_data: isPreAuthSignup && diditVendorData !== signupAttemptRef,
-            user_ref_kind: diditVendorData.startsWith("TEMP_") ? "temp" : "auth_user",
-          },
-        });
-        registrationAttemptId = registrationAttempt?.attemptId || null;
-      } catch (rateLimitError) {
-        const status = getRegistrationRateLimitStatus(rateLimitError);
-        if (status) {
-          return new Response(JSON.stringify({ error: rateLimitError.message, success: false }), {
-            status,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        throw rateLimitError;
+    try {
+      const registrationAttempt = await enforceRegistrationRateLimit(supabaseAdmin, req, {
+        action: "create_didit_session",
+        email: normalizedEmail,
+        limits: {
+          hourlyEmail: 12,
+          dailyEmail: 24,
+          hourlyIp: 40,
+          dailyIp: 120,
+          hourlyDevice: 24,
+          dailyDevice: 60,
+        },
+        metadata: {
+          role: normalizedRole || null,
+          stable_presignup_vendor_data: isPreAuthSignup && diditVendorData !== signupAttemptRef,
+          user_ref_kind: diditVendorData.startsWith("TEMP_") ? "temp" : "auth_user",
+        },
+      });
+      registrationAttemptId = registrationAttempt?.attemptId || null;
+    } catch (rateLimitError) {
+      const status = getRegistrationRateLimitStatus(rateLimitError);
+      if (status) {
+        return jsonResponse({ error: rateLimitError.message, success: false }, status);
       }
+      throw rateLimitError;
     }
 
-    if (supabaseAdmin && normalizedEmail) {
-      try {
-        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        const [{ count: hourlyCount }, { count: dailyCount }] = await Promise.all([
-          supabaseAdmin
-            .from("verification_sessions")
-            .select("session_ref", { count: "exact", head: true })
-            .eq("verification_data->>email", normalizedEmail)
-            .not("verification_data->>session_url", "is", null)
-            .gte("created_at", oneHourAgo),
-          supabaseAdmin
-            .from("verification_sessions")
-            .select("session_ref", { count: "exact", head: true })
-            .eq("verification_data->>email", normalizedEmail)
-            .not("verification_data->>session_url", "is", null)
-            .gte("created_at", oneDayAgo),
-        ]);
-
-        if ((hourlyCount || 0) >= 3 || (dailyCount || 0) >= 8) {
-          return jsonResponse({
-            error: "Too many verification attempts. Please wait before trying again.",
-            success: false,
-          }, 429);
-        }
-      } catch (sessionRateLimitError) {
-        console.error("didit_rate_limit_lookup_failed", sessionRateLimitError);
-      }
-    }
-
-    const anonKey = SUPABASE_ANON_KEY;
-    if (!SUPABASE_URL || !anonKey) {
-      return jsonResponse({ error: "Supabase environment is not configured", success: false }, 500);
+    try {
+      await enforceDiditSessionRateLimit(supabaseAdmin, normalizedEmail);
+    } catch (sessionRateLimitError) {
+      return jsonResponse({
+        error: sessionRateLimitError?.message || "Too many verification attempts. Please wait before trying again.",
+        success: false,
+      }, 429);
     }
 
     // Build the redirect URL that Didit will use after verification
     // This is where the user's browser goes after completing verification
     // Include the client's redirect_url (e.g., exp://... or musikalokal://...)
     // so verification-redirect can send them back to the right place
-    let finalRedirectUrl = `${SUPABASE_URL}/functions/v1/verification-redirect?vendor_data=${diditVendorData}&apikey=${anonKey}`;
+    let finalRedirectUrl = `${SUPABASE_URL}/functions/v1/verification-redirect?vendor_data=${diditVendorData}&apikey=${SUPABASE_ANON_KEY}`;
 
     if (redirect_url) {
       finalRedirectUrl += `&redirect_to=${encodeURIComponent(redirect_url)}`;
@@ -835,16 +1327,7 @@ serve(async (req) => {
     }
     // Else, verification-redirect will fallback to static default
 
-
-    console.log("[didit] creating session", {
-      workflowId: DIDIT_WORKFLOW_ID,
-      email: maskEmailForDiditLog(normalizedEmail),
-      role: normalizedRole || null,
-      documentType: document_type || null,
-      vendorData: diditVendorData,
-      vendorDataKind: diditVendorData.startsWith("TEMP_") ? "temp" : "auth_user",
-      stablePreSignupVendorData: isPreAuthSignup && diditVendorData !== signupAttemptRef,
-    });
+    console.log('Callback/Redirect URL:', finalRedirectUrl);
 
     // Create session with Didit API v3
     const diditResponse = await fetch("https://verification.didit.me/v3/session/", {
@@ -873,12 +1356,10 @@ serve(async (req) => {
     if (!diditResponse.ok) {
       const errorText = await diditResponse.text();
       console.error(`Didit API error: ${diditResponse.status} - ${errorText}`);
-      if (supabaseAdmin) {
-        await markRegistrationAttempt(supabaseAdmin, registrationAttemptId, {
-          success: false,
-          reason: `didit_create_failed_${diditResponse.status}`,
-        });
-      }
+      await markRegistrationAttempt(supabaseAdmin, registrationAttemptId, {
+        success: false,
+        reason: `didit_create_failed_${diditResponse.status}`,
+      });
       return new Response(
         JSON.stringify({
           error: "Failed to create verification session",
@@ -910,13 +1391,11 @@ serve(async (req) => {
       responseKeys: typeof diditData === "object" && diditData ? Object.keys(diditData).slice(0, 30) : [],
     });
     if (!verificationUrl) {
-      if (supabaseAdmin) {
-        await markRegistrationAttempt(supabaseAdmin, registrationAttemptId, {
-          success: false,
-          reason: "didit_create_missing_verification_url",
-          didit_session_id: createdSessionId,
-        });
-      }
+      await markRegistrationAttempt(supabaseAdmin, registrationAttemptId, {
+        success: false,
+        reason: "didit_create_missing_verification_url",
+        didit_session_id: createdSessionId,
+      });
       return jsonResponse({
         error: "Didit created a session but did not return a verification URL.",
         success: false,
@@ -924,6 +1403,8 @@ serve(async (req) => {
         diditResponseKeys: typeof diditData === "object" && diditData ? Object.keys(diditData).slice(0, 30) : [],
       });
     }
+    const sessionNonce = createSessionNonce();
+    const sessionNonceHash = await hashSessionNonce(createdSessionId, sessionNonce);
 
     /*
     Expected response:
@@ -939,23 +1420,20 @@ serve(async (req) => {
     }
     */
 
-    if (supabaseAdmin) {
-      const supabase = supabaseAdmin;
-
       if (normalizedEmail) {
-        const { error: supersedeError } = await supabase
+        const { error: supersedeError } = await supabaseAdmin
           .from('verification_sessions')
           .update({ status: 'SUPERSEDED' })
           .eq('verification_data->>email', normalizedEmail)
-          .in('status', ['PENDING', 'Not Started', 'In Progress'])
+          .like('verification_data->>user_ref', 'TEMP_%')
           .neq('session_ref', createdSessionId);
 
         if (supersedeError) {
-          console.error('Failed to supersede older Didit sessions:', supersedeError);
+          throw new Error('Could not invalidate the previous verification attempts.');
         }
       }
 
-      const { error: sessionStoreError } = await supabase
+      const { error: sessionStoreError } = await supabaseAdmin
         .from('verification_sessions')
         .upsert({
           session_ref: createdSessionId,
@@ -968,18 +1446,19 @@ serve(async (req) => {
             signup_role: normalizedRole || null,
             session_url: verificationUrl || null,
             workflow_id: returnedWorkflowId || DIDIT_WORKFLOW_ID,
+            session_nonce_hash: sessionNonceHash,
             started_at: new Date().toISOString(),
           },
         });
 
       if (sessionStoreError) {
-        console.error('Failed to store pending Didit session:', sessionStoreError);
+        throw new Error('Could not save the verification attempt.');
       }
 
       // Update user profile with the session ID.
       // SKIP if it's a temp ID (user not created yet).
       if (userId && !userId.startsWith('TEMP_')) {
-        const { error: updateError } = await supabase
+        const { error: updateError } = await supabaseAdmin
           .from("profiles")
           .update({
             didit_session_id: createdSessionId,
@@ -991,11 +1470,10 @@ serve(async (req) => {
           console.error("Failed to update profile:", updateError);
           // Don't fail the request, just log the error
         } else {
+          console.log("Profile updated with session ID");
         }
       }
-    }
 
-    if (supabaseAdmin) {
       await markRegistrationAttempt(supabaseAdmin, registrationAttemptId, {
         success: true,
         didit_session_id: createdSessionId,
@@ -1006,13 +1484,13 @@ serve(async (req) => {
           user_ref_kind: diditVendorData.startsWith("TEMP_") ? "temp" : "auth_user",
         },
       });
-    }
 
     // Return the verification URL to the client
     return new Response(
       JSON.stringify({
         success: true,
         sessionId: createdSessionId,
+        sessionNonce,
         workflowId: returnedWorkflowId || DIDIT_WORKFLOW_ID,
         verificationUrl, // This is the URL to redirect the user to
       }),

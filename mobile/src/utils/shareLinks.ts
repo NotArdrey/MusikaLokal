@@ -1,4 +1,4 @@
-export const MUSIKALOKAL_WEB_URL = "https://musikalokal.app";
+export const MUSIKALOKAL_WEB_URL = "https://musika-lokal.vercel.app";
 export const PENDING_SHARE_STORAGE_KEY = "pending_share_destination";
 
 const normalizeType = (type: string) => {
@@ -26,7 +26,8 @@ export function getShareDestination(path: string): string | null {
     const url = new URL(path, MUSIKALOKAL_WEB_URL);
     if (url.username || url.password || url.port) return null;
     if (url.protocol !== "musikalokal:" &&
-        !(["https:", "http:"].includes(url.protocol) && url.hostname === "musikalokal.app")) return null;
+        !(["https:", "http:"].includes(url.protocol) &&
+          ["musika-lokal.vercel.app", "musikalokal.app"].includes(url.hostname))) return null;
     const route = (url.protocol === "musikalokal:"
       ? `${url.hostname}${url.pathname}` : url.pathname).replace(/^\/+|\/+$/g, "").replace(/^\(tabs\)\//, "");
     let postId: string | null = null;

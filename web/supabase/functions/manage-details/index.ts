@@ -274,20 +274,17 @@ serve(async (req: Request) => {
 
             const favoritesCount = await getFavoritesCount(supabaseClient, normalizedFavoriteType, id)
 
-            const reviewTargetColumn = getReviewTargetColumn(normalizedFavoriteType)
-
-            const { data: reviews, error: reviewsError } = await supabaseClient
-                .from('reviews')
-                .select('*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url, created_at)')
-                .eq(reviewTargetColumn, id)
-                .order('created_at', { ascending: false })
-                .limit(5)
-
-            if (reviewsError) {
-                console.warn('Could not fetch listing reviews:', reviewsError)
+            let mappedReviews: any[] = []
+            if (params.includeReviews !== false) {
+                const { data: reviews, error: reviewsError } = await supabaseClient
+                    .from('reviews')
+                    .select('*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url, created_at)')
+                    .eq(getReviewTargetColumn(normalizedFavoriteType), id)
+                    .order('created_at', { ascending: false })
+                    .limit(5)
+                if (reviewsError) console.warn('Could not fetch listing reviews:', reviewsError)
+                mappedReviews = (reviews || []).map(mapReviewRow)
             }
-
-            const mappedReviews = (reviews || []).map(mapReviewRow)
 
             let auxiliary: Record<string, any> = {}
 

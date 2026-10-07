@@ -14,6 +14,8 @@ import {
   type GigApplicationAudienceMember,
 } from "../_shared/gigApplicationAudience.ts";
 
+import { compareActivityItems } from "../_shared/activityOrder.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -195,6 +197,7 @@ function getRecordingRule(source: any) {
   const songsPerBlock = toPositiveInteger(source?.recording_songs_per_block) ?? 1;
   const hoursPerBlock =
     toPositiveNumber(source?.recording_hours_per_block) ??
+    toPositiveNumber(source?.min_booking_duration_hours) ??
     3;
 
   return {
@@ -800,6 +803,14 @@ const GIG_APPLICATION_BOOKING_SELECT = `
   )
 `;
 
+const GIG_APPLICATION_PROFILE_SELECT = `
+  id, status, applicant_id, submitted_by_user_id, group_id, gig_id,
+  production_team_id, production_roster_id, leader_approval_status, feature_consent_requested_at,
+  gig:gig_id(id, name, location, budget, event_date, status, gig_availability_slots(slot_date, start_time, end_time)),
+  group:group_id(id, name, owner_id),
+  production_roster:production_roster_id(id, profile_id, group_id, roster_group:group_id(id, name, owner_id))
+`;
+
 function toStringId(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
@@ -939,6 +950,7 @@ function resolveMusicianViewerForApplication(
 async function fetchGigApplicationsVisibleToMusician(
   supabaseAdmin: any,
   userId: string,
+  selection = GIG_APPLICATION_BOOKING_SELECT,
 ) {
   const groupIds = await loadGroupIdsForUser(supabaseAdmin, userId);
   const groupIdSet = new Set(groupIds);
@@ -947,7 +959,7 @@ async function fetchGigApplicationsVisibleToMusician(
 
   const directResult = await supabaseAdmin
     .from("gig_applications")
-    .select(GIG_APPLICATION_BOOKING_SELECT)
+    .select(selection)
     .eq("applicant_id", userId)
     .order("created_at", { ascending: false });
 
@@ -958,7 +970,7 @@ async function fetchGigApplicationsVisibleToMusician(
   if (rosterIds.size > 0) {
     const productionResult = await supabaseAdmin
       .from("gig_applications")
-      .select(GIG_APPLICATION_BOOKING_SELECT)
+      .select(selection)
       .in("production_roster_id", Array.from(rosterIds))
       .order("created_at", { ascending: false });
 
@@ -969,7 +981,7 @@ async function fetchGigApplicationsVisibleToMusician(
   if (groupIds.length > 0) {
     const groupResult = await supabaseAdmin
       .from("gig_applications")
-      .select(GIG_APPLICATION_BOOKING_SELECT)
+      .select(selection)
       .in("group_id", groupIds)
       .is("production_team_id", null)
       .order("created_at", { ascending: false });
@@ -1286,6 +1298,32 @@ serve(async (req: Request) => {
 
     const { action, ...params } = await req.json();
 
+    if (action === "fetch_profile_gig_timeline") {
+      if (params.userId && params.userId !== authUser.id) {
+        return new Response(JSON.stringify({ error: "Only your own private gig timeline is available" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
+        });
+      }
+      const applications = await fetchGigApplicationsVisibleToMusician(
+        supabaseAdmin, authUser.id, GIG_APPLICATION_PROFILE_SELECT,
+      );
+      const rows = applications
+        .filter((application: any) =>
+          ["accepted", "approved", "completed"].includes(application.status) ||
+          (application.status === "cancelled" && application.feature_consent_requested_at != null)
+        )
+        .map((application: any) => ({
+          id: application.id,
+          status: application.status,
+          group_id: application.group_id || application.production_roster?.group_id || null,
+          group_name: application.group?.name || application.production_roster?.roster_group?.name || null,
+          gigs: application.gig,
+        }));
+      return new Response(JSON.stringify(rows), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200,
+      });
+    }
+
     // 1. FETCH BOOKINGS & APPLICATIONS
     if (action === "fetch") {
       // Fetch is always scoped to the verified JWT identity. Ignore any legacy
@@ -1344,7 +1382,7 @@ serve(async (req: Request) => {
           .from("studio_bookings")
           .select("*, studio:studios(name, owner_id, studio_media(media_url, sort_order))")
           .eq("user_id", requesterId)
-          .order("booking_date", { ascending: false });
+          .order("activity_at", { ascending: false }).order("id", { ascending: true });
 
         if (bookingError) throw bookingError;
 
@@ -1388,6 +1426,7 @@ serve(async (req: Request) => {
           const item = {
             id: b.id,
             type_id: "studio_booking",
+            activity_at: b.activity_at || null,
             created_at: b.created_at || null,
             checkout_session_id: b.checkout_session_id || null,
             studio_id: b.studio_id,
@@ -1485,11 +1524,9 @@ serve(async (req: Request) => {
               categorized.Ongoing.push({ ...item, status: "In Progress" });
             }
           } else if (b.status === "completed") {
-            // Completed bookings that need review
-            if (!b.reviewed_by_customer) {
-              // @ts-ignore
-              categorized.Review.push({ ...item, status: "Completed" });
-            }
+            // Clients separate completed rows into Review or History.
+            // @ts-ignore
+            categorized.Review.push({ ...item, status: "Completed" });
           } else if (b.status === "cancelled") {
             // @ts-ignore
             categorized.Upcoming.push(item);
@@ -1515,7 +1552,7 @@ serve(async (req: Request) => {
               "*, studio:studios(name, owner_id, studio_media(media_url, sort_order)), profile:user_id(full_name, avatar_url, email, contact_number, address)",
             )
             .in("studio_id", studioIds)
-            .order("booking_date", { ascending: false });
+            .order("activity_at", { ascending: false }).order("id", { ascending: true });
 
           if (bookingError) throw bookingError;
 
@@ -1590,6 +1627,7 @@ serve(async (req: Request) => {
             const item = {
               id: b.id,
               type_id: "studio_booking",
+              activity_at: b.activity_at || null,
               created_at: b.created_at || null,
               checkout_session_id: b.checkout_session_id || null,
               studio_id: b.studio_id,
@@ -1695,10 +1733,8 @@ serve(async (req: Request) => {
                 categorized.Ongoing.push({ ...item, status: "In Progress" });
               }
             } else if (b.status === "completed") {
-              if (!b.reviewed_by_owner) {
-                // @ts-ignore
-                categorized.Review.push({ ...item, status: "Completed" });
-              }
+              // @ts-ignore
+              categorized.Review.push({ ...item, status: "Completed" });
             } else if (b.status === "cancelled") {
               // @ts-ignore
               categorized.Upcoming.push(item);
@@ -1745,6 +1781,8 @@ serve(async (req: Request) => {
           const item = {
             id: g.id,
             type_id: "gig_application",
+            activity_at: g.activity_at || null,
+            created_at: g.created_at || null,
             gig_id: g.gig_id,
             group_id: g.group_id, // Include group_id for musicians
             applicant_id: g.applicant_id,
@@ -1877,6 +1915,7 @@ serve(async (req: Request) => {
           const item = {
             id: app.id,
             type_id: "gig_application",
+            activity_at: app.activity_at || null,
             leader_approval_required: true,
             gig_id: app.gig_id,
             group_id: app.group_id,
@@ -1981,6 +2020,7 @@ serve(async (req: Request) => {
             const item = {
               id: app.id,
               type_id: "gig_application",
+              activity_at: app.activity_at || null,
               created_at: app.created_at,
               gig_id: app.gig_id,
               group_id: app.group_id,
@@ -2146,6 +2186,7 @@ serve(async (req: Request) => {
             const item = {
               id: app.id,
               type_id: "gig_application",
+              activity_at: app.activity_at || null,
               created_at: app.created_at,
               gig_id: app.gig_id,
               group_id: app.group_id, // Include group_id
@@ -2254,6 +2295,8 @@ serve(async (req: Request) => {
         }
       }
 
+      Object.values(categorized).forEach((items) => items.sort(compareActivityItems));
+
       if (params.includeScreenPayload === true) {
         const loadPendingPermitListings = async () => {
           if (staffAssignments.length > 0) {
@@ -2303,7 +2346,7 @@ serve(async (req: Request) => {
         };
 
         const connectionRequestSelect =
-          "id, created_at, sender_id, receiver_id, group_id, studio_id, message, status, event_details, attachment_url";
+          "id, created_at, activity_at, sender_id, receiver_id, group_id, studio_id, message, status, event_details, attachment_url";
         const loadOwnedGroupIds = async () => {
           if (staffAssignments.length > 0) return [];
 
@@ -2333,7 +2376,7 @@ serve(async (req: Request) => {
                   .select(connectionRequestSelect)
                   .in("studio_id", assignedStudioIds)
                   .in("status", ["pending", "accepted", "approved", "connected", "rejected", "declined", "cancelled"])
-                  .order("created_at", { ascending: false })
+                  .order("activity_at", { ascending: false }).order("id", { ascending: true })
                   .limit(40),
               ]
             : [
@@ -2342,7 +2385,7 @@ serve(async (req: Request) => {
                   .select(connectionRequestSelect)
                   .or(`sender_id.eq.${requesterId},receiver_id.eq.${requesterId}`)
                   .in("status", ["pending", "accepted", "approved", "connected", "rejected", "declined", "cancelled"])
-                  .order("created_at", { ascending: false })
+                  .order("activity_at", { ascending: false }).order("id", { ascending: true })
                   .limit(40),
                 ...(ownedGroupIds.length > 0
                   ? [
@@ -2351,7 +2394,7 @@ serve(async (req: Request) => {
                         .select(connectionRequestSelect)
                         .in("group_id", ownedGroupIds)
                         .in("status", ["pending", "accepted", "approved", "connected", "rejected", "declined", "cancelled"])
-                        .order("created_at", { ascending: false })
+                        .order("activity_at", { ascending: false }).order("id", { ascending: true })
                         .limit(40),
                     ]
                   : []),
@@ -2368,10 +2411,7 @@ serve(async (req: Request) => {
           });
         });
 
-        const connectionRequests = Array.from(connectionRequestsById.values()).sort(
-          (a: any, b: any) =>
-            new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime(),
-        );
+        const connectionRequests = Array.from(connectionRequestsById.values()).sort(compareActivityItems);
 
         const connectionProfileIds = Array.from(
           new Set(
@@ -2447,6 +2487,8 @@ serve(async (req: Request) => {
 
     // 2. CREATE BOOKING (Studio) - Supports multiple time slots
     if (action === "create") {
+      const prepareReservation = async (requestParams: any) => {
+
       const {
         studio_id,
         user_id,
@@ -2457,7 +2499,7 @@ serve(async (req: Request) => {
         notes,
         session_type, // "rehearsal" or "recording"
         song_count,
-      } = params;
+      } = requestParams;
 
       if (!user_id || user_id !== authUser.id) {
         return new Response(JSON.stringify({ error: "Forbidden" }), {
@@ -3275,76 +3317,57 @@ serve(async (req: Request) => {
         console.error("Non-critical: failed to attach cancellation policy:", policyErr);
       }
 
-      const { data: insertData, error: insertError } = await supabaseClient
-        .from("studio_bookings")
-        .insert(bookingInsertPayload)
-        .select()
-        .single();
 
+        return { payload: bookingInsertPayload, slots };
+      };
+      const isBatch = Array.isArray(params.reservations);
+      const requests = isBatch ? params.reservations : [params];
+      if (requests.length < 1 || requests.length > 31) {
+        return new Response(JSON.stringify({ error: "Choose between 1 and 31 sessions." }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400,
+        });
+      }
+      const reservations = [];
+      for (const request of requests) {
+        const prepared = await prepareReservation(request);
+        if (prepared instanceof Response) return prepared;
+        reservations.push(prepared);
+      }
+      const { data: bookings, error: insertError } = await supabaseAdmin.rpc("create_studio_reservation_batch", {
+        p_user_id: authUser.id, p_reservations: reservations,
+      });
       if (insertError) {
-        console.error("❌ Insert error:", insertError);
+        if (insertError.message === "OUTSTANDING_STUDIO_PAYMENT") {
+          const detail = JSON.parse(insertError.details || "{}");
+          return new Response(JSON.stringify({ ...detail,
+            code: "OUTSTANDING_STUDIO_PAYMENT",
+            error: "Complete or cancel your outstanding studio payments before making a new reservation.",
+          }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 409 });
+        }
         throw insertError;
       }
-
-      const data = insertData;
-
-      const slotRows = slots.map((slot, index) => ({
-        booking_id: data.id,
-        start_time: slot.start,
-        end_time: slot.end,
-        sort_order: index,
-      }));
-
-      const { error: slotInsertError } = await supabaseAdmin
-        .from("studio_booking_slots")
-        .insert(slotRows);
-
-      if (slotInsertError) {
-        console.error("❌ Slot insert error:", slotInsertError);
-        await supabaseAdmin.from("studio_bookings").delete().eq("id", data.id);
-        throw slotInsertError;
-      }
-
-      // Notify studio owner of new booking request
-      try {
-        const { data: studioInfo } = await supabaseClient
-          .from("studios")
-          .select("owner_id, name")
-          .eq("id", studio_id)
-          .single();
-
-        if (studioInfo?.owner_id) {
-          const notificationPayload = {
-            user_id: studioInfo.owner_id,
-            type: "info",
-            title: "New Booking Request",
-            message: `New booking request for ${studioInfo.name} on ${date}.`,
-            image: null,
-            read: false,
-            meta: buildNotificationRouteMeta("/bookings", { tab: "Pending" }, {
-              studio_id,
-              booking_id: data.id,
-              booking_date: date,
-              event_type: "booking_request_created",
-            }),
-          };
-          const { error: notifyError } = await supabaseAdmin.from("notifications").insert(notificationPayload);
-          if (notifyError) {
-            console.error("Error sending booking request notification:", notifyError);
-          } else {
-            scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "manage-bookings" });
+      // Notifications follow the successful commit of the complete batch.
+      for (const data of bookings || []) {
+        try {
+          const { data: studioInfo } = await supabaseClient.from("studios")
+            .select("owner_id, name").eq("id", data.studio_id).single();
+          if (studioInfo?.owner_id) {
+            const notificationPayload = {
+              user_id: studioInfo.owner_id, type: "info", title: "New Booking Request",
+              message: 'New booking request for ' + studioInfo.name + ' on ' + data.booking_date + '.',
+              image: null, read: false,
+              meta: buildNotificationRouteMeta("/bookings", { tab: "Pending" }, {
+                studio_id: data.studio_id, booking_id: data.id, booking_date: data.booking_date,
+                event_type: "booking_request_created",
+              }),
+            };
+            const { error: notifyError } = await supabaseAdmin.from("notifications").insert(notificationPayload);
+            if (!notifyError) scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "manage-bookings" });
           }
-        }
-      } catch (notifyError) {
-        console.error(
-          "Error sending booking request notification:",
-          notifyError,
-        );
+        } catch (error) { console.error("Booking request notification failed:", error); }
       }
-
-      return new Response(JSON.stringify(data), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 201,
+      return new Response(JSON.stringify(isBatch ? { bookings } : bookings?.[0]), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 201,
       });
     }
 
@@ -5267,99 +5290,26 @@ serve(async (req: Request) => {
 
     // 9. CONFIRM PAYMENT (Secure Server-Side Confirmation)
     if (action === "confirm_payment") {
-      const { booking_id, payment_intent_id, payment_method_id, amount } = params;
-
-
-      if (!booking_id) {
-        return new Response(JSON.stringify({ error: "Booking ID is required" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          status: 400,
-        });
-      }
-
-      // 1. Fetch current booking to check status
-      const { data: booking, error: fetchError } = await supabaseClient
-        .from("studio_bookings")
-        .select("id, status, payment_status, payment_type, remaining_balance, final_price, user_id, studio:studios(name)")
-        .eq("id", booking_id)
-        .single();
-
-      if (fetchError || !booking) {
-        return new Response(JSON.stringify({ error: "Booking not found" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          status: 404,
-        });
-      }
-
-      if (booking.user_id !== authUser.id) {
-        return new Response(JSON.stringify({ error: "Forbidden" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          status: 403,
-        });
-      }
-
-      // 2. Prepare update data
-      // If it sends 'confirmed' status, it moves to Upcoming
-      const updateData: any = {
-        paid_at: new Date().toISOString(),
-        status: 'confirmed', // Auto-confirm when paid
-      };
-
-      // Handle remaining balance logic
-      if (booking.payment_type === 'downpayment' && booking.remaining_balance > 0) {
-        // Downpayment paid, but balance remains — mark as partial
-        updateData.payment_status = 'partial';
-      } else {
-        // Full payment or Balance payment -> clear balance
-        updateData.payment_status = 'paid';
-        updateData.remaining_balance = 0;
-      }
-
-
-      // 3. Update using Admin client to bypass RLS if necessary (though service role is used here)
-      const { data: updatedBooking, error: updateError } = await supabaseAdmin
-        .from("studio_bookings")
-        .update(updateData)
-        .eq("id", booking_id)
-        .select()
-        .single();
-
-      if (updateError) {
-        console.error("❌ Notification error:", updateError);
-        return new Response(JSON.stringify({ error: "Failed to update booking status", details: updateError }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          status: 500,
-        });
-      }
-
-      // 4. Send Confirmation Notification to User
-      try {
-        const notificationPayload = {
-          user_id: booking.user_id,
-          type: "success",
-          title: "Payment Successful! 🎉",
-          message: `Your booking at ${booking.studio?.name} has been confirmed.`,
-          read: false,
-          meta: buildNotificationRouteMeta("/bookings", undefined, {
-            booking_id: booking.id,
-            type: "booking_confirmation"
-          })
-        };
-        const { error: notifyError } = await supabaseAdmin.from("notifications").insert(notificationPayload);
-        if (notifyError) {
-          console.error("❌ Notification error:", notifyError);
-        } else {
-          scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "manage-bookings" });
-        }
-      } catch (notifyError) {
-        console.error("❌ Notification error:", notifyError);
-        // Don't fail the request just because notification failed
-      }
-
-      return new Response(JSON.stringify({ success: true, booking: updatedBooking }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 200,
+      const { booking_id } = params;
+      if (!booking_id) return new Response(JSON.stringify({ error: 'Booking ID is required' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      // @ts-ignore
+      const paymentUrl = Deno.env.get('SUPABASE_URL') || '';
+      // @ts-ignore
+      const paymentKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
+      const verified = await fetch(`${paymentUrl}/functions/v1/paymongo`, {
+        method: 'POST', headers: { Authorization: authHeader, apikey: paymentKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'check_payment', booking_id }),
       });
+      const result = await verified.json();
+      if (!verified.ok || !['paid', 'partial'].includes(result.payment_status)) return new Response(JSON.stringify({
+        error: result.error || 'Payment has not been confirmed', payment_status: result.payment_status,
+      }), { status: verified.ok ? 409 : verified.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const { data: booking, error } = await supabaseClient.from('studio_bookings').select('*')
+        .eq('id', booking_id).eq('user_id', authUser.id).single();
+      if (error) throw error;
+      return new Response(JSON.stringify({ success: true, booking }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // CLEAR REMAINING BALANCE (Face-to-Face Payment)
@@ -5868,4 +5818,3 @@ serve(async (req: Request) => {
     });
   }
 });
-

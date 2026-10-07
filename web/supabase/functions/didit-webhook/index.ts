@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { isInvalidatedDiditAttempt } from "../_shared/diditAttempt.ts";
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { sendEmailWithGmail } from '../_shared/gmailEmail.ts';
@@ -542,6 +543,14 @@ serve(async (req) => {
         // Extract session info from Didit payload
         // Based on Didit docs, the session_id might be under different field names
         const sessionId = payload.session_id || payload.sessionId || payload.id;
+        if (sessionId) {
+            const { data: attempt, error: attemptError } = await supabaseAdmin.from('verification_sessions')
+                .select('status').eq('session_ref', sessionId).maybeSingle();
+            if (attemptError) throw new Error('Could not validate the current verification attempt.');
+            if (isInvalidatedDiditAttempt(attempt?.status)) return new Response(JSON.stringify({ received: true, ignored: 'superseded_attempt' }), {
+                status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+        }
         const status = payload.status;
         const webhookType = payload.webhook_type || payload.event || payload.type;
         let decision = payload.decision;

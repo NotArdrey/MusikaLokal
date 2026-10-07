@@ -74,7 +74,9 @@ import { runAfterUIIdle } from "../../src/utils/idleTask";
 import { bottomSheetSpringConfig, motion } from "../../src/utils/motion";
 import { palette, radius, typography } from "../../src/theme/tokens";
 import { isFanUserRole } from "../../src/utils/roleRouting";
+import { addFavoriteChangedListener } from "../../src/utils/favoriteEvents";
 import { isStaffRole } from "../../src/utils/staffAccess";
+import { getGigTimelineBucket, getGigTimelineLabel } from "../../src/utils/gigTimeline";
 import {
   createTemporaryUploadFile,
   DOCUMENT_PICKER_COPY_TO_CACHE_DIRECTORY,
@@ -533,6 +535,7 @@ const fetchProfileFollowingDirect = async (targetId: string): Promise<ProfileCon
 type ProfileScreenCachePayload = {
   profile: any;
   isOwner: boolean;
+  viewerId: string | null;
   gigStats: { active: number; upcoming: number; done: number };
   gigTimeline: { active: any[]; upcoming: any[]; done: any[] };
   supportsGigVisibilityPreference: boolean;
@@ -1129,8 +1132,14 @@ export default function ProfileScreen() {
     upcoming: any[];
     done: any[];
   }>({ active: [], upcoming: [], done: [] });
+  const [gigTimelineViewerId, setGigTimelineViewerId] = useState<string | null>(null);
+  const currentProfileViewerRef = useRef<string | null>(currentUserId || null);
+  useLayoutEffect(() => {
+    currentProfileViewerRef.current = currentUserId || null;
+  }, [currentUserId]);
   const [bookmarkedListings, setBookmarkedListings] = useState(() => createEmptyBookmarks());
   const [loadingBookmarks, setLoadingBookmarks] = useState(false);
+  const bookmarkRequestIdRef = useRef(0);
   const [gigSearchQuery, setGigSearchQuery] = useState("");
   const [updatingGigVisibility, setUpdatingGigVisibility] = useState(false);
   const [supportsGigVisibilityPreference, setSupportsGigVisibilityPreference] = useState(true);
@@ -1386,6 +1395,7 @@ export default function ProfileScreen() {
   };
 
   const filteredGigTimeline = useMemo(() => {
+    if (gigTimelineViewerId !== (currentUserId || null)) return { active: [], upcoming: [], done: [] };
     const query = gigSearchQuery.trim().toLowerCase();
     if (!query) return gigTimeline;
 
@@ -1399,7 +1409,7 @@ export default function ProfileScreen() {
       upcoming: gigTimeline.upcoming.filter(match),
       done: gigTimeline.done.filter(match),
     };
-  }, [gigSearchQuery, gigTimeline]);
+  }, [currentUserId, gigSearchQuery, gigTimeline, gigTimelineViewerId]);
 
   const safeBookmarkedListings = useMemo(
     () => normalizeBookmarkBuckets(bookmarkedListings),
@@ -1434,6 +1444,7 @@ export default function ProfileScreen() {
     viewerId: string,
     shouldLoad: boolean,
   ) => {
+    const requestId = ++bookmarkRequestIdRef.current;
     if (!shouldLoad) {
       setBookmarkedListings(createEmptyBookmarks());
       setLoadingBookmarks(false);
@@ -1592,6 +1603,7 @@ export default function ProfileScreen() {
           type: "Production Team",
         }));
 
+      if (bookmarkRequestIdRef.current !== requestId) return;
       setBookmarkedListings(normalizeBookmarkBuckets({
         studios: studios.slice(0, 8),
         gigs: gigs.slice(0, 8),
@@ -1600,11 +1612,28 @@ export default function ProfileScreen() {
         production: production.slice(0, 8),
       }));
     } catch (bookmarkError) {
-      setBookmarkedListings(createEmptyBookmarks());
+      if (bookmarkRequestIdRef.current === requestId) {
+        setBookmarkedListings(createEmptyBookmarks());
+      }
     } finally {
-      setLoadingBookmarks(false);
+      if (bookmarkRequestIdRef.current === requestId) setLoadingBookmarks(false);
     }
   }, []);
+
+  useFocusEffect(useCallback(() => {
+    if (authLoading) return;
+    const targetId = normalizedParamUserId || currentUserId;
+    const shouldLoad = !!currentUserId && targetId === currentUserId && !isGuest;
+    const refresh = () => { void fetchBookmarkedListings(currentUserId || "", shouldLoad); };
+    refresh();
+    const subscription = addFavoriteChangedListener((payload) => {
+      if (shouldLoad && (!payload.userId || payload.userId === currentUserId)) refresh();
+    });
+    return () => {
+      subscription.remove();
+      bookmarkRequestIdRef.current += 1;
+    };
+  }, [authLoading, currentUserId, fetchBookmarkedListings, isGuest, normalizedParamUserId]));
 
   // Fetch user playlists
   const fetchPlaylists = useCallback(async (targetUserId: string) => {
@@ -1769,6 +1798,7 @@ export default function ProfileScreen() {
     options: { showLoading?: boolean; force?: boolean } = {},
   ) => {
     let targetIdForRequest: string | null = null;
+    let requestScope: string | null = null;
     let requestId = 0;
     let skippedDuplicateFetch = false;
 
@@ -1836,44 +1866,22 @@ export default function ProfileScreen() {
       }
 
       targetIdForRequest = targetId;
-      if (!options.force && profileFetchInFlightRef.current === targetId) {
+      requestScope = `${currentUserId || "guest"}:${targetId}`;
+      if (!options.force && profileFetchInFlightRef.current === requestScope) {
         skippedDuplicateFetch = true;
         return;
       }
 
       requestId = profileFetchRequestIdRef.current + 1;
       profileFetchRequestIdRef.current = requestId;
-      profileFetchInFlightRef.current = targetId;
-      const shouldApplyFetchResult = () => profileFetchRequestIdRef.current === requestId;
+      profileFetchInFlightRef.current = requestScope;
+      const shouldApplyFetchResult = () =>
+        profileFetchRequestIdRef.current === requestId && currentProfileViewerRef.current === (currentUserId || null);
 
       // Check ownership
       const ownership = resolvedCurrentUserId && targetId === resolvedCurrentUserId;
       if (!shouldApplyFetchResult()) return;
       setIsOwner(!!ownership);
-
-      const classifyGigBucket = (gig: any): "active" | "upcoming" | "done" => {
-        const eventDate = gig?.event_date ? new Date(gig.event_date) : null;
-        const now = new Date();
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-        if (gig?.status === "closed" || gig?.status === "cancelled") {
-          return "done";
-        }
-
-        if (!eventDate || isNaN(eventDate.getTime())) {
-          return "upcoming";
-        }
-
-        if (eventDate < todayStart) {
-          return "done";
-        }
-
-        if (eventDate.toDateString() === now.toDateString()) {
-          return "active";
-        }
-
-        return "upcoming";
-      };
 
       const [profileStatsResult, profileResult, skillsResult, genresResult, portfolioResult] = await Promise.all([
         supabase
@@ -1956,28 +1964,27 @@ export default function ProfileScreen() {
           .select("id, name")
           .eq("owner_id", targetId);
 
-        const groupIds = (ownedGroups || []).map((group: any) => group.id);
         const groupNameById = new Map(
           (ownedGroups || []).map((group: any) => [group.id, group.name || "Group"]),
         );
 
-        const [{ data: soloApplications }, { data: groupApplications }] = await Promise.all([
-          supabase
-            .from("gig_applications")
-            .select("applicant_id, gigs(id,name,location,budget,event_date,status)")
-            .in("status", ["accepted", "approved"])
-            .eq("show_on_profile", true)
-            .eq("applicant_id", targetId)
-            .is("group_id", null),
-          groupIds.length > 0
-            ? supabase
-              .from("gig_applications")
-              .select("group_id, gigs(id,name,location,budget,event_date,status)")
-              .in("status", ["accepted", "approved"])
-              .eq("show_on_profile", true)
-              .in("group_id", groupIds)
-            : Promise.resolve({ data: [] as any[] }),
-        ]);
+        let soloApplications: any[];
+        let groupApplications: any[];
+        if (ownership) {
+          const { data: ownApplications, error: timelineError } = await supabase.functions.invoke("manage-bookings", {
+            body: { action: "fetch_profile_gig_timeline", userId: targetId },
+          });
+          if (timelineError) throw timelineError;
+          soloApplications = Array.isArray(ownApplications) ? ownApplications : [];
+          groupApplications = [];
+        } else {
+          const { data: publicApplications, error: timelineError } = await supabase.rpc('get_public_performer_gig_timeline', {
+            p_target_id: targetId, p_target_type: 'artist',
+          });
+          if (timelineError) throw timelineError;
+          soloApplications = publicApplications || [];
+          groupApplications = [];
+        }
 
         if (!shouldApplyFetchResult()) return;
 
@@ -1994,12 +2001,13 @@ export default function ProfileScreen() {
           if (!gig?.id || seenGigIds.has(gig.id)) return;
           seenGigIds.add(gig.id);
 
-          const bucket = classifyGigBucket(gig);
+          const entry = { ...gig, application_status: application.status };
+          const bucket = getGigTimelineBucket(entry);
           stats[bucket] += 1;
           timelineBuckets[bucket].push({
-            ...gig,
+            ...entry,
             performer_label: application.group_id
-              ? `As ${groupNameById.get(application.group_id) || "Group"}`
+              ? `As ${groupNameById.get(application.group_id) || application.group_name || "Group"}`
               : "As Solo Artist",
           });
         });
@@ -2018,9 +2026,11 @@ export default function ProfileScreen() {
         nextGigTimeline = timelineBuckets;
         setGigStats(nextGigStats);
         setGigTimeline(nextGigTimeline);
+        setGigTimelineViewerId(currentUserId || null);
       } else {
         setGigStats(nextGigStats);
         setGigTimeline(nextGigTimeline);
+        setGigTimelineViewerId(currentUserId || null);
       }
 
       if (!shouldApplyFetchResult()) return;
@@ -2075,6 +2085,7 @@ export default function ProfileScreen() {
       profileScreenCache.set(targetId, {
         profile: nextProfile,
         isOwner: !!ownership,
+        viewerId: currentUserId || null,
         gigStats: nextGigStats,
         gigTimeline: nextGigTimeline,
         supportsGigVisibilityPreference: hasGigVisibilityPreference,
@@ -2084,8 +2095,6 @@ export default function ProfileScreen() {
         profileFollowing: nextProfileFollowing,
         fetchedAt: Date.now(),
       });
-
-      void fetchBookmarkedListings(targetId, !!ownership && !isGuest);
 
       if (isFanUserRole(nextProfile.role)) {
         setUserPlaylists([]);
@@ -2099,20 +2108,21 @@ export default function ProfileScreen() {
       }
     } catch (e) {
     } finally {
-      if (!skippedDuplicateFetch && profileFetchRequestIdRef.current === requestId && targetIdForRequest && profileFetchInFlightRef.current === targetIdForRequest) {
+      if (!skippedDuplicateFetch && profileFetchRequestIdRef.current === requestId && targetIdForRequest && profileFetchInFlightRef.current === requestScope) {
         profileFetchInFlightRef.current = null;
       }
       if (!skippedDuplicateFetch && (!requestId || profileFetchRequestIdRef.current === requestId)) {
         setLoading(false);
       }
     }
-  }, [currentUserId, fetchBookmarkedListings, fetchPlaylists, fetchStation, isGuest, normalizedParamUserId]);
+  }, [currentUserId, fetchPlaylists, fetchStation, isGuest, normalizedParamUserId]);
 
   useFocusEffect(
     useCallback(() => {
       if (!authLoading) {
         const cacheTargetId = normalizedParamUserId || currentUserId;
-        if (profileFetchInFlightRef.current !== cacheTargetId) {
+        const cacheScope = `${currentUserId || "guest"}:${cacheTargetId}`;
+        if (profileFetchInFlightRef.current !== cacheScope) {
           profileFetchRequestIdRef.current += 1;
           profileFetchInFlightRef.current = null;
         }
@@ -2131,8 +2141,9 @@ export default function ProfileScreen() {
           lastHandledProfileRefreshRef.current = refreshToken;
         }
 
-        const cached =
+        const cacheCandidate =
           !shouldForceRefresh && cacheTargetId ? profileScreenCache.get(cacheTargetId) : null;
+        const cached = cacheCandidate?.viewerId === (currentUserId || null) ? cacheCandidate : null;
         const cacheIsFresh =
           !shouldForceRefresh &&
           cached &&
@@ -2144,6 +2155,7 @@ export default function ProfileScreen() {
           setIsOwner(cacheTargetId === currentUserId);
           setGigStats(cached.gigStats);
           setGigTimeline(cached.gigTimeline);
+          setGigTimelineViewerId(currentUserId || null);
           setSupportsGigVisibilityPreference(cached.supportsGigVisibilityPreference);
           setProfileFollowerCount(cached.profileFollowerCount);
           setProfileFollowingCount(cached.profileFollowingCount ?? 0);
@@ -3290,8 +3302,8 @@ export default function ProfileScreen() {
     : canPlayStationFromProfile
       ? stationIsCurrentSource
         ? isMuted
-          ? "Unmute Live Audio"
-          : "Mute Live Audio"
+          ? "Unmute"
+          : "Mute"
         : "Listen Live"
       : canManageStations
         ? "Manage Station"
@@ -3313,7 +3325,7 @@ export default function ProfileScreen() {
     () => [
       "about",
       "posts",
-      ...(profile?.role === "musician" && profile?.show_gig_statuses !== false ? ["gigs"] : []),
+      ...(profile?.role === "musician" && (isOwner || profile?.show_gig_statuses !== false) ? ["gigs"] : []),
       ...(isOwner && !isGuest ? ["bookmarks"] : []),
       ...(!isProfileFan ? ["playlists"] : []),
     ] as ProfileTabKey[],
@@ -3829,7 +3841,7 @@ export default function ProfileScreen() {
               style={styles.profileTabTransition}
             >
               {/* TAB CONTENT: GIGS */}
-              {activeTab === "gigs" && profile?.role === "musician" && profile?.show_gig_statuses !== false && (
+              {activeTab === "gigs" && profile?.role === "musician" && (isOwner || profile?.show_gig_statuses !== false) && (
                 <View style={styles.gigTimelineSection}>
                 <View
                   style={[
@@ -3878,13 +3890,14 @@ export default function ProfileScreen() {
                             <View style={styles.gigCardTopRow}>
                               <Text style={[styles.gigCardTitle, { color: colors.text }]} numberOfLines={1}>{gig.name || "Untitled Gig"}</Text>
                               <View style={[styles.gigStatusBadge, { backgroundColor: `${section.color}20` }]}>
-                                <Text style={[styles.gigStatusBadgeText, { color: section.color }]}>{section.label.toUpperCase()}</Text>
+                                <Text style={[styles.gigStatusBadgeText, { color: section.color }]}>{getGigTimelineLabel(gig).toUpperCase()}</Text>
                               </View>
                             </View>
                             <Text style={[styles.gigCardMeta, { color: colors.textSecondary }]}>{gig.performer_label}</Text>
                             <Text style={[styles.gigCardMeta, { color: colors.textSecondary }]}> 
                               {gig.event_date
                                 ? new Date(gig.event_date).toLocaleDateString("en-US", {
+                                  timeZone: "Asia/Manila",
                                   month: "short",
                                   day: "numeric",
                                   year: "numeric",
@@ -4135,14 +4148,18 @@ export default function ProfileScreen() {
                       </Text>
                     </TouchableOpacity>
 
-                    <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 14, paddingBottom: 14 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, paddingHorizontal: 14, paddingBottom: 14 }}>
                       <TouchableOpacity
                         activeOpacity={1}
                         disabled={isStationActionLoading}
+                        accessibilityRole="button"
+                        accessibilityLabel={canPlayStationFromProfile && stationIsCurrentSource ? (isMuted ? "Unmute live audio" : "Mute live audio") : stationPrimaryLabel}
+                        accessibilityState={{ disabled: isStationActionLoading }}
                         onPress={() => void handleStationPrimaryAction()}
                         style={{
                           flex: 1,
-                          minHeight: 42,
+                          minWidth: 110,
+                          minHeight: 44,
                           borderRadius: 12,
                           backgroundColor: canPlayStationFromProfile ? colors.primary : (isDark ? "#1E293B" : "#F3F4F6"),
                           flexDirection: "row",
@@ -4150,18 +4167,19 @@ export default function ProfileScreen() {
                           justifyContent: "center",
                           gap: 8,
                           paddingHorizontal: 12,
+                          paddingVertical: 10,
                         }}
                       >
                         {isStationActionLoading ? (
                           <ActivityIndicator size="small" color={canPlayStationFromProfile ? "#fff" : colors.primary} />
                         ) : (
                           <Ionicons
-                            name={canPlayStationFromProfile && stationIsCurrentSource ? (isMuted ? "volume-mute" : "volume-high") : canPlayStationFromProfile ? "radio" : "open-outline"}
+                            name={canPlayStationFromProfile && stationIsCurrentSource ? (isMuted ? "volume-high" : "volume-mute") : canPlayStationFromProfile ? "radio" : "open-outline"}
                             size={16}
                             color={canPlayStationFromProfile ? "#fff" : colors.text}
                           />
                         )}
-                        <Text style={{ color: canPlayStationFromProfile ? "#fff" : colors.text, fontSize: 12, fontFamily: typography.semibold }}>
+                        <Text style={{ color: canPlayStationFromProfile ? "#fff" : colors.text, fontSize: 12, fontFamily: typography.semibold, flexShrink: 1, textAlign: "center" }}>
                           {stationPrimaryLabel}
                         </Text>
                       </TouchableOpacity>
@@ -4170,9 +4188,11 @@ export default function ProfileScreen() {
                         <TouchableOpacity
                           activeOpacity={1}
                           onPress={openStationScreen}
+                          accessibilityRole="button"
                           style={{
-                            minWidth: 128,
-                            minHeight: 42,
+                            flex: 1,
+                            minWidth: 110,
+                            minHeight: 44,
                             borderRadius: 12,
                             borderWidth: 1,
                             borderColor: colors.border,
@@ -4180,9 +4200,10 @@ export default function ProfileScreen() {
                             alignItems: "center",
                             justifyContent: "center",
                             paddingHorizontal: 12,
+                            paddingVertical: 10,
                           }}
                         >
-                          <Text style={{ color: colors.text, fontSize: 12, fontFamily: typography.semibold }}>
+                          <Text style={{ color: colors.text, fontSize: 12, fontFamily: typography.semibold, flexShrink: 1, textAlign: "center" }}>
                             {canManageStations ? "Manage Station" : "Open Station"}
                           </Text>
                         </TouchableOpacity>

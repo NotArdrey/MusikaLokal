@@ -18,6 +18,7 @@ import { useWalletSummaryQuery } from '../src/data/hooks';
 import { formatFriendlyDateTime } from '../src/utils/friendlyDateTime';
 import { isE2EFixtureMode } from '../src/utils/e2eFixtures';
 import { usePageLoadLogger } from '../src/utils/loadTimeLogger';
+import { filterWalletTransactions, getExternalPaymentLabel, getTransactionCategory, getTransactionCategoryLabel, getTransactionTitle } from '../src/utils/walletHistory';
 import { typography } from "../src/theme/tokens";
 
 // Payout Method Type
@@ -51,51 +52,12 @@ interface WithdrawalErrorPayload {
   suggestion?: string;
 }
 
-const TRANSACTION_CATEGORY_LABELS: Record<string, string> = {
-  booking: 'Booking',
-  booking_balance: 'Balance',
-  booking_downpayment: 'Downpayment',
-  booking_payment: 'Full payment',
-  credit: 'Credit',
-  debit: 'Debit',
-  deposit: 'Deposit',
-  earning: 'Earning',
-  refund: 'Refund',
-  withdrawal: 'Withdrawal',
-};
-
-const formatTransactionText = (value: unknown) => {
-  const text = String(value || '').trim();
-  if (!text) return '';
-
-  return text
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-};
-
-const getTransactionCategory = (tx: any) => {
-  const referenceType = String(tx?.reference_type || '').trim().toLowerCase();
-  if (referenceType) return referenceType;
-
-  return String(tx?.type || '').trim().toLowerCase() || 'other';
-};
-
-const getTransactionCategoryLabel = (tx: any) => {
-  const category = getTransactionCategory(tx);
-  return TRANSACTION_CATEGORY_LABELS[category] || formatTransactionText(category);
-};
-
-const getTransactionTitle = (tx: any) => {
-  const type = String(tx?.type || '').trim().toLowerCase();
-  if (type === 'deposit') return 'Deposit';
-  if (type === 'withdrawal') return 'Withdrawal';
-  if (type === 'earning') return 'Earning';
-  if (type === 'refund') return 'Refund';
-
-  return formatTransactionText(type) || 'Wallet Transaction';
-};
-
 export default function WalletScreen() {
+  const { userId } = useAuth();
+  return <WalletContent key={userId || 'guest'} />;
+}
+
+function WalletContent() {
   const { colors, isDark } = useTheme();
   const { userId, isGuest } = useAuth();
   const { contentBottomPadding } = useBottomBarClearance(24);
@@ -652,12 +614,12 @@ export default function WalletScreen() {
   );
 
   const filteredTransactions = useMemo(() => {
-    if (txFilter === "all") return transactions;
-    return transactions.filter((tx: any) => getTransactionCategory(tx) === txFilter);
+    return filterWalletTransactions(transactions, txFilter);
   }, [transactions, txFilter]);
 
   const txFilterOptions = [
     { key: "all", label: "All activity" },
+    { key: "payments", label: "Payments" },
     { key: "deposit", label: "Deposits" },
     { key: "withdrawal", label: "Withdrawals" },
     { key: "booking_payment", label: "Full payment" },
@@ -873,6 +835,9 @@ export default function WalletScreen() {
               {txFilterOptions.map((opt) => (
                 <TouchableOpacity activeOpacity={1}
                   key={opt.key}
+                  accessibilityRole="button"
+                  accessibilityLabel={opt.label}
+                  accessibilityState={{ selected: txFilter === opt.key }}
                   onPress={() => setTxFilter(opt.key)}
                   style={{
                     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginRight: 8,
@@ -944,8 +909,13 @@ export default function WalletScreen() {
                             {txCategoryLabel}
                           </Text>
                         )}
+                        {getExternalPaymentLabel(tx) && (
+                          <Text style={[styles.transactionDate, { color: colors.textSecondary }]}>
+                            {getExternalPaymentLabel(tx)}
+                          </Text>
+                        )}
                         <Text style={[styles.transactionDate, { color: colors.textSecondary }]} numberOfLines={1}>
-                          {formatFriendlyDateTime(tx.created_at)}
+                          {tx.created_at ? formatFriendlyDateTime(tx.created_at) : 'Payment date unavailable'}
                         </Text>
                       </View>
                     </View>
@@ -1879,4 +1849,3 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 });
-

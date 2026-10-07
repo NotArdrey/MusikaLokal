@@ -257,6 +257,10 @@ async function getValidatedDiditSession(
         console.warn('didit_session_legacy_nonce_missing', { diditSessionId })
     }
 
+    if (String(sessionData.status || '').toUpperCase().startsWith('SUPERSEDED')) {
+        throw new Error('Didit verification is not approved or pending review. Please restart identity verification.');
+    }
+
     return {
         status: String(sessionData.status || '').replace(/[\s-]+/g, '_').toUpperCase(),
         verification_data: stripPrivateSessionFields(sessionData.verification_data || {}),

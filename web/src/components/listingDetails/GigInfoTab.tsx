@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
-import { Image, Text, View } from "react-native";
+import { Image, Text, TouchableOpacity, View } from "react-native";
 import { supabase } from "../../../lib/supabase";
 
 interface GigInfoTabProps {
@@ -11,8 +11,9 @@ interface GigInfoTabProps {
   embedded?: boolean;
 }
 
-const GigInfoTab = ({ group, colors, isDark, styles, embedded = false }: GigInfoTabProps) => {
+const GigInfoTabContent = ({ group, colors, isDark, styles, embedded = false }: GigInfoTabProps) => {
   const [featuredPerformers, setFeaturedPerformers] = useState<any[]>([]);
+  const [showAllPerformers, setShowAllPerformers] = useState(false);
   const requirements = group.requirements || {};
   const audioSetup =
     requirements.audio || requirements.sound_system || "Standard PA";
@@ -32,7 +33,6 @@ const GigInfoTab = ({ group, colors, isDark, styles, embedded = false }: GigInfo
     let isActive = true;
     const loadFeaturedPerformers = async () => {
       if (!group?.id) {
-        setFeaturedPerformers([]);
         return;
       }
       const { data, error } = await supabase.rpc("get_gig_featured_performers", { p_gig_id: group.id });
@@ -110,7 +110,7 @@ const GigInfoTab = ({ group, colors, isDark, styles, embedded = false }: GigInfo
           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 11, lineHeight: 17, marginBottom: 10 }}>
             These performers gave permission to appear on this gig page.
           </Text>
-          {featuredPerformers.map((performer) => (
+          {(showAllPerformers ? featuredPerformers : featuredPerformers.slice(0, 2)).map((performer) => (
             <View
               key={performer.application_id}
               style={{ flexDirection: "row", alignItems: "center", gap: 11, borderTopWidth: 1, borderTopColor: colors.border, paddingVertical: 11 }}
@@ -131,6 +131,19 @@ const GigInfoTab = ({ group, colors, isDark, styles, embedded = false }: GigInfo
               <Ionicons name="checkmark-circle" size={19} color="#10B981" />
             </View>
           ))}
+          {featuredPerformers.length > 2 ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showAllPerformers }}
+              aria-expanded={showAllPerformers}
+              onPress={() => setShowAllPerformers((expanded) => !expanded)}
+              style={{ minHeight: 44, alignItems: "center", justifyContent: "center" }}
+            >
+              <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 13 }}>
+                {showAllPerformers ? "Show less" : "Show more"}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : null}
 
@@ -162,5 +175,7 @@ const GigInfoTab = ({ group, colors, isDark, styles, embedded = false }: GigInfo
     </View>
   );
 };
+
+const GigInfoTab = (props: GigInfoTabProps) => <GigInfoTabContent key={props.group?.id} {...props} />;
 
 export default GigInfoTab;

@@ -1,5 +1,6 @@
 // @ts-ignore
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { getStationQueueEntries, isStationTrackPlayable } from "../_shared/stationQueue.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -448,6 +449,8 @@ function getStationConcurrentSlotLimit(station: any) {
 }
 
 function getStationQueueAnchorTimestampMs(station: any, slots: any[]) {
+  const savedAnchor = readTimestampMs(station?.queue_anchor_at);
+  if (savedAnchor !== null) return savedAnchor;
   const slotTimestamps = slots
     .flatMap((slot: any) => [
       slot?.updated_at,
@@ -517,7 +520,11 @@ function getStationLiveTimeline(
   nowMs = Date.now(),
 ) {
   const anchorTimestampMs = getStationQueueAnchorTimestampMs(station, slots) ?? nowMs;
-  const entries = (slots || []).flatMap((slot: any, slotIndex: number) => {
+  const entries = (Array.isArray(station?.playback_queue)
+    ? getStationQueueEntries({...station, live_slots: slots}).map(entry => ({
+        ...entry, durationSeconds: normalizeLiveTrackDurationSeconds(entry.item?.duration_seconds ?? entry.item?.teaser?.duration_seconds), queueIndex: 0,
+      }))
+    : (slots || []).flatMap((slot: any, slotIndex: number) => {
     const playlist = slot?.playlist || {};
     const items = Array.isArray(playlist?.items)
       ? playlist.items.filter(hasPlaylistItemAudioSource)
@@ -544,7 +551,7 @@ function getStationLiveTimeline(
       slot,
       slotIndex,
     }));
-  }).map((entry: any, queueIndex: number) => ({ ...entry, queueIndex }));
+  })).map((entry: any, queueIndex: number) => ({ ...entry, queueIndex }));
 
   if (entries.length === 0) {
     return {
@@ -1399,6 +1406,9 @@ function getSourceStationSummary(stationsBySourceKey: Map<string, any>, sourceKe
     is_active: station.is_active,
     is_featured: station.is_featured,
     rotation_interval_minutes: station.rotation_interval_minutes,
+    queue_item_ids: station.queue_item_ids,
+    queue_revision: station.queue_revision,
+    queue_anchor_at: station.queue_anchor_at,
     slot_count: station.slot_count || 0,
     slot_playlist_ids: station.slot_playlist_ids || [],
   };
@@ -1450,6 +1460,10 @@ async function listAdminStationSources(supabaseAdmin: any) {
   }
 
   const playlistRows = playlists || [];
+  const sourceSlots = await attachPlaylistItemsToSlots(supabaseAdmin, playlistRows.map((playlist: any) => ({playlist})));
+  sourceSlots.forEach((slot: any) => {
+    slot.playlist.items = (slot.playlist.items || []).filter(isStationTrackPlayable);
+  });
   const playlistIds = playlistRows
     .map((playlist: any) => (typeof playlist?.id === "string" ? playlist.id : ""))
     .filter((playlistId: string) => playlistId.length > 0);
@@ -1463,7 +1477,7 @@ async function listAdminStationSources(supabaseAdmin: any) {
       : Promise.resolve({ data: [], error: null }),
     supabaseAdmin
       .from("stations")
-      .select("id, creator_id, name, description, genre, cover_image_url, is_active, is_featured, rotation_interval_minutes, managed_profile_id, managed_group_id"),
+      .select("id, creator_id, name, description, genre, cover_image_url, is_active, is_featured, rotation_interval_minutes, managed_profile_id, managed_group_id, queue_item_ids, queue_revision, queue_anchor_at"),
   ]);
 
   if (groupLinksError) {
@@ -1590,7 +1604,7 @@ async function listAdminStationSources(supabaseAdmin: any) {
         station: getSourceStationSummary(stationsBySourceKey, stationKey),
       };
     })
-    .filter(Boolean);
+    .filter((source): source is NonNullable<typeof source> => source !== null);
 
   const groupSources = Array.from(playlistsByGroupId.entries())
     .map(([groupId, sourcePlaylists]) => {
@@ -1616,7 +1630,7 @@ async function listAdminStationSources(supabaseAdmin: any) {
         station: getSourceStationSummary(stationsBySourceKey, stationKey),
       };
     })
-    .filter(Boolean);
+    .filter((source): source is NonNullable<typeof source> => source !== null);
 
   return [...groupSources, ...profileSources].sort((left: any, right: any) => {
     const leftHasStation = left.station ? 1 : 0;
@@ -1764,13 +1778,13 @@ async function upsertStationFromSource(
 ) {
   const sourceInfo = await getEligibleStationSource(supabaseAdmin, sourceKind, sourceId);
   const eligiblePlaylists = sourceInfo.playlists || [];
-  const eligiblePlaylistIds = new Set(
+  const eligiblePlaylistIds = new Set<string>(
     eligiblePlaylists
       .map((playlist: any) => (typeof playlist?.id === "string" ? playlist.id : ""))
       .filter((playlistId: string) => playlistId.length > 0),
   );
 
-  const requestedPlaylistIds = Array.isArray(params.playlist_ids)
+  const requestedPlaylistIds: string[] = Array.isArray(params.playlist_ids)
     ? params.playlist_ids
         .map((playlistId: unknown) => (typeof playlistId === "string" ? playlistId.trim() : ""))
         .filter((playlistId: string) => playlistId.length > 0)
@@ -1814,58 +1828,17 @@ async function upsertStationFromSource(
     last_seen_live_at: null,
   };
 
-  let station: any;
-  if (existingStation?.id) {
-    const { data, error } = await supabaseAdmin
-      .from("stations")
-      .update(stationPatch)
-      .eq("id", existingStation.id)
-      .select()
-      .single();
-
-    if (error) {
-      throw error;
-    }
-
-    station = data;
-  } else {
-    const { data, error } = await supabaseAdmin
-      .from("stations")
-      .insert(stationPatch)
-      .select()
-      .single();
-
-    if (error) {
-      throw error;
-    }
-
-    station = data;
+  if ('selected_track_ids' in params && !Array.isArray(params.selected_track_ids)) {
+    throw new Error("selected_track_ids must be an ordered array");
   }
-
-  const { error: deleteSlotsError } = await supabaseAdmin
-    .from("station_playlist_slots")
-    .delete()
-    .eq("station_id", station.id);
-
-  if (deleteSlotsError) {
-    throw deleteSlotsError;
-  }
-
-  const slotRows = selectedPlaylistIds.map((playlistId: string, index: number) => ({
-    station_id: station.id,
-    playlist_id: playlistId,
-    position: index,
-    is_active: true,
-  }));
-
-  const { error: insertSlotsError } = await supabaseAdmin
-    .from("station_playlist_slots")
-    .insert(slotRows);
-
-  if (insertSlotsError) {
-    throw insertSlotsError;
-  }
-
+  const {data: station, error} = await supabaseAdmin.rpc("admin_save_station_queue", {
+    p_admin_id: adminUserId,
+    p_station_id: existingStation?.id || null,
+    p_patch: stationPatch,
+    p_playlist_ids: selectedPlaylistIds,
+    p_item_ids: params.selected_track_ids ?? null,
+  });
+  if (error) throw error;
   return {
     ...removeStationStreamFields(station),
     slot_count: selectedPlaylistIds.length,
@@ -2125,7 +2098,7 @@ async function fetchStationSlotsByStation(supabaseAdmin: any, stationIds: string
 
   const { data: slots, error } = await supabaseAdmin
     .from("station_playlist_slots")
-    .select("*, playlist:playlists!playlist_id(id, title, description, genre, cover_image_url, track_count, created_at, updated_at)")
+    .select("*, playlist:playlists!playlist_id(id, title, description, genre, cover_image_url, track_count, created_at, updated_at, is_hidden)")
     .in("station_id", uniqueStationIds)
     .order("station_id", { ascending: true })
     .order("position", { ascending: true });
@@ -2134,9 +2107,10 @@ async function fetchStationSlotsByStation(supabaseAdmin: any, stationIds: string
     throw error;
   }
 
+  const availableSlots = (slots || []).filter((slot: any) => slot.playlist && slot.playlist.is_hidden !== true);
   const enrichedSlots = options.includeItems
-    ? await attachPlaylistItemsToSlots(supabaseAdmin, slots || [], options.itemLimit)
-    : (slots || []).map((slot: any) => {
+    ? await attachPlaylistItemsToSlots(supabaseAdmin, availableSlots, options.itemLimit)
+    : availableSlots.map((slot: any) => {
         if (slot?.playlist) {
           slot.playlist.items = [];
         }
@@ -2209,21 +2183,23 @@ function removeStationStreamFields(station: any) {
   return sanitized;
 }
 
-function decorateStationWithLiveRotation(station: any, enrichedSlots: any[]) {
-  const liveSlotState = getStationLiveSlotState(station, enrichedSlots);
-
+function decorateStationWithLiveRotation(station: any, enrichedSlots: any[], includeQueue = true) {
+  const playbackQueue = station.is_active === false ? [] : getStationQueueEntries({...station, slots: enrichedSlots});
+  const snapshot = includeQueue ? {
+    ...station,
+    playback_queue: playbackQueue.map(entry => ({
+      slot_id: entry.slot.id, playlist_id: entry.playlist.id, item_index: entry.itemIndex, item: entry.item,
+    })),
+  } : station;
+  const liveSlotState = getStationLiveSlotState(snapshot, enrichedSlots);
   return {
-    ...removeStationStreamFields(station),
+    ...removeStationStreamFields(snapshot),
     concurrent_slot_limit: liveSlotState.concurrentSlotLimit,
     live_anchor_at: liveSlotState.liveAnchorAt,
     live_current_duration_seconds: liveSlotState.liveCurrentDurationSeconds,
     live_current_item: liveSlotState.liveCurrentItem,
     live_current_item_index: liveSlotState.liveCurrentItemIndex,
-    live_current_playlist_id: (
-      liveSlotState.liveCurrentSlot?.playlist?.id ||
-      liveSlotState.liveCurrentSlot?.playlist_id ||
-      null
-    ),
+    live_current_playlist_id: liveSlotState.liveCurrentSlot?.playlist?.id || null,
     live_current_queue_index: liveSlotState.liveCurrentQueueIndex,
     live_current_slot: liveSlotState.liveCurrentSlot,
     live_current_slot_id: liveSlotState.liveCurrentSlot?.id || null,
@@ -2236,6 +2212,48 @@ function decorateStationWithLiveRotation(station: any, enrichedSlots: any[]) {
     rotation_interval_minutes: liveSlotState.rotationIntervalMinutes,
     slot_count: enrichedSlots.length,
     slots: enrichedSlots,
+  };
+}
+
+async function signStationSnapshotSlots(supabaseAdmin: any, slots: any[]) {
+  return Promise.all(slots.map(async (slot: any) => {
+    const items = await Promise.all((slot.playlist?.items || []).map(async (item: any) => {
+      if (!isStationTrackPlayable(item)) return null;
+      const direct = typeof item.audio_url === "string" ? item.audio_url.trim() : "";
+      const storageRef = parseStorageObjectReference(direct) || (!direct && item.teaser?.storage_path
+        ? {bucket: "playlist-assets", path: item.teaser.storage_path} : null);
+      if (!storageRef) return direct ? {...item, audio_url: direct} : null;
+      const {data, error} = await supabaseAdmin.storage.from(storageRef.bucket).createSignedUrl(storageRef.path, PLAYLIST_AUDIO_SIGNED_URL_SECONDS);
+      return !error && data?.signedUrl ? {...item, audio_url: data.signedUrl} : null;
+    }));
+    return {...slot, playlist: {...slot.playlist, items: items.filter(Boolean)}};
+  }));
+}
+
+async function readStationPlayback(supabaseAdmin: any, stationId: string) {
+  const {data: snapshot, error} = await supabaseAdmin.rpc("get_station_playback_snapshot", {p_station_id: stationId});
+  if (error) throw error;
+  if (!snapshot?.station) return null;
+  const slots = await signStationSnapshotSlots(supabaseAdmin, snapshot.slots || []);
+  return {...decorateStationWithLiveRotation(snapshot.station, slots), __queueReady: true};
+}
+
+async function readStationPlaybackSummary(supabaseAdmin: any, stationId: string) {
+  const station = await readStationPlayback(supabaseAdmin, stationId);
+  if (!station) return null;
+  const itemSummary = (item: any) => item ? {
+    id: item.id, title: item.title, artist_name: item.artist_name,
+    duration_seconds: item.duration_seconds ?? item.teaser?.duration_seconds,
+    cover_image_url: item.cover_image_url,
+  } : null;
+  const slotSummary = (slot: any) => ({...slot, playlist: {...slot.playlist, items: []}});
+  return {
+    ...station,
+    slots: station.slots.map(slotSummary), live_slots: station.live_slots.map(slotSummary),
+    live_current_slot: station.live_current_slot ? slotSummary(station.live_current_slot) : null,
+    live_current_item: itemSummary(station.live_current_item),
+    playback_queue: station.playback_queue.map((entry: any) => ({...entry, item: itemSummary(entry.item)})),
+    __queueReady: false,
   };
 }
 
@@ -2484,7 +2502,7 @@ Deno.serve(async (req: Request) => {
       let { error } = await supabaseAdmin.from("playlists").delete().eq("id", playlist_id);
       const shouldRetryWithItemCleanup = error && /constraint|foreign key|referenced|trigger|tuple|cascade/i.test(error.message || "");
 
-      if (shouldRetryWithItemCleanup) {
+      if (shouldRetryWithItemCleanup && error) {
         console.warn("manage-playlists delete_playlist retrying after item cleanup", {
           playlist_id,
           message: error.message,
@@ -3230,27 +3248,16 @@ Deno.serve(async (req: Request) => {
 
     // ── get_station_details ─────────────────────────────────────────
     if (action === "get_station_details") {
-      const { station_id } = params;
-      if (!station_id) return jsonResponse({ error: "station_id is required" }, 400);
-
-      const { data: station, error: stErr } = await supabaseAdmin
-        .from("stations")
-        .select("*, creator:profiles!creator_id(id, full_name, avatar_url), managed_profile:profiles!managed_profile_id(id, full_name, avatar_url), managed_group:groups!managed_group_id(id, name, group_type, genre)")
-        .eq("id", station_id)
-        .single();
-
-      if (stErr || !station) return jsonResponse({ error: "Station not found" }, 404);
-
-      const slotsByStationId = await fetchStationSlotsByStation(supabaseAdmin, [station_id], { includeItems: true });
-      const enrichedSlots = slotsByStationId.get(station_id) || [];
-
-      return jsonResponse({
-        success: true,
-        data: {
-          ...decorateStationWithLiveRotation(station, enrichedSlots),
-          __queueReady: true,
-        },
-      });
+      const {station_id} = params;
+      if (!station_id) return jsonResponse({error: "station_id is required"}, 400);
+      const {data: snapshot, error} = await supabaseAdmin.rpc("get_station_playback_snapshot", {p_station_id: station_id});
+      if (error) throw error;
+      if (!snapshot?.station || (snapshot.station.is_active === false && requesterRole !== "admin"
+        && snapshot.station.managed_profile_id !== uid && snapshot.station.creator_id !== uid)) {
+        return jsonResponse({error: "Station not found"}, 404);
+      }
+      const slots = await signStationSnapshotSlots(supabaseAdmin, snapshot.slots || []);
+      return jsonResponse({success: true, data: {...decorateStationWithLiveRotation(snapshot.station, slots), __queueReady: true}});
     }
 
     // ── list_my_stations ────────────────────────────────────────────
@@ -3275,14 +3282,9 @@ Deno.serve(async (req: Request) => {
       if (error) return jsonResponse({ error: error.message }, 500);
 
       const stationRows = stations || [];
-      const slotsByStationId = await fetchStationSlotSummariesByStation(
-        supabaseAdmin,
-        stationRows.map((st: any) => st.id),
-      );
-
       return jsonResponse({
         success: true,
-        data: stationRows.map((st: any) => attachStationSlotSummary(st, slotsByStationId.get(st.id) || [])),
+        data: (await Promise.all(stationRows.map((st: any) => readStationPlayback(supabaseAdmin, st.id)))).filter(Boolean),
       });
     }
 
@@ -3306,14 +3308,9 @@ Deno.serve(async (req: Request) => {
       if (error) return jsonResponse({ error: error.message }, 500);
 
       const stationRows = stations || [];
-      const slotsByStationId = await fetchStationSlotSummariesByStation(
-        supabaseAdmin,
-        stationRows.map((st: any) => st.id),
-      );
-
       return jsonResponse({
         success: true,
-        data: stationRows.map((st: any) => attachStationSlotSummary(st, slotsByStationId.get(st.id) || [])),
+        data: (await Promise.all(stationRows.map((st: any) => readStationPlaybackSummary(supabaseAdmin, st.id)))).filter(Boolean),
       });
     }
 
@@ -3369,12 +3366,11 @@ Deno.serve(async (req: Request) => {
         recommendationMessage = rankedResult.message;
       }
 
-      const enriched = orderedStationRows
+      const enriched = (await Promise.all(orderedStationRows
         .slice(0, responseLimit || orderedStationRows.length)
-        .map((st: any) => ({
-          ...decorateStationWithLiveRotation(st, slotsByStationId.get(st.id) || []),
-          __queueReady: false,
-        }));
+        .map((st: any) => shouldIncludeItems
+          ? readStationPlayback(supabaseAdmin, st.id)
+          : readStationPlaybackSummary(supabaseAdmin, st.id)))).filter(Boolean);
 
       return jsonResponse({
         success: true,
@@ -3396,8 +3392,6 @@ Deno.serve(async (req: Request) => {
         .eq("id", station_id)
         .single();
       if (!st) return jsonResponse({ error: "Station not found" }, 404);
-
-      await transferStationToAdminIfNeeded(supabaseAdmin, st, uid);
 
       const stationProfileId = st.managed_profile_id || st.creator_id;
       const { data: playlist } = await supabaseAdmin
@@ -3422,31 +3416,13 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: "Playlist must belong to the profile this station represents." }, 403);
       }
 
-      const { data: lastSlot } = await supabaseAdmin
-        .from("station_playlist_slots")
-        .select("position")
-        .eq("station_id", station_id)
-        .order("position", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      const nextPos = (lastSlot?.position ?? -1) + 1;
-
-      const { data, error } = await supabaseAdmin
-        .from("station_playlist_slots")
-        .insert({
-          station_id,
-          playlist_id,
-          position: nextPos,
-          label: label || null,
-          starts_at: starts_at || null,
-          ends_at: ends_at || null,
-        })
-        .select()
-        .single();
-
-      if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ success: true, data });
+      const {data: result, error} = await supabaseAdmin.rpc("admin_change_station_playlist", {
+        p_admin_id: uid, p_station_id: station_id, p_playlist_id: playlist_id, p_remove: false,
+        p_slot_patch: {label: label || null, starts_at: starts_at || null, ends_at: ends_at || null},
+      });
+      if (error) return jsonResponse({error: error.message}, 400);
+      const {data} = await supabaseAdmin.from("station_playlist_slots").select("*").eq("id", result.slot_id).single();
+      return jsonResponse({success: true, data});
     }
 
     // ── remove_station_slot ─────────────────────────────────────────
@@ -3456,7 +3432,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: slot } = await supabaseAdmin
         .from("station_playlist_slots")
-        .select("station_id")
+        .select("station_id, playlist_id")
         .eq("id", slot_id)
         .single();
 
@@ -3469,11 +3445,11 @@ Deno.serve(async (req: Request) => {
         .single();
       if (!st) return jsonResponse({ error: "Station not found" }, 404);
 
-      await transferStationToAdminIfNeeded(supabaseAdmin, st, uid);
-
-      const { error } = await supabaseAdmin.from("station_playlist_slots").delete().eq("id", slot_id);
-      if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ success: true });
+      const {error} = await supabaseAdmin.rpc("admin_change_station_playlist", {
+        p_admin_id: uid, p_station_id: slot.station_id, p_playlist_id: slot.playlist_id, p_remove: true, p_slot_patch: {},
+      });
+      if (error) return jsonResponse({error: error.message}, 400);
+      return jsonResponse({success: true});
     }
 
     // ── toggle_radio_slot ──────────────────────────────────────────
@@ -3494,69 +3470,24 @@ Deno.serve(async (req: Request) => {
       if (!playlist) return jsonResponse({ error: "Playlist not found" }, 404);
       if (playlist.creator_id !== managedProfileId) return jsonResponse({ error: "Forbidden" }, 403);
 
-      await transferManagedProfileStationsToAdmin(supabaseAdmin, uid, managedProfileId);
-
       const existingManagedStation = await getPrimaryManagedStation(
         supabaseAdmin,
         managedProfileId,
       );
 
-      let stationId: string;
       if (!existingManagedStation) {
-        const { data: profile } = await supabaseAdmin
-          .from("profiles")
-          .select("full_name")
-          .eq("id", managedProfileId)
-          .single();
-        const stationName = `${profile?.full_name || "My"}'s Radio`;
-        const { data: newStation, error: createErr } = await supabaseAdmin
-          .from("stations")
-          .insert({
-            creator_id: uid,
-            managed_profile_id: managedProfileId,
-            managed_group_id: null,
-            name: stationName,
-            is_active: true,
-          })
-          .select("id")
-          .single();
-        if (createErr) return jsonResponse({ error: createErr.message }, 500);
-        stationId = newStation.id;
-      } else {
-        stationId = existingManagedStation.id;
+        const station = await upsertStationFromSource(supabaseAdmin, uid, "profile", managedProfileId, {playlist_ids: [playlist_id]});
+        return jsonResponse({success: true, on_radio: true, station_id: station.id});
       }
-
-      // Check if slot already exists for this playlist
-      const { data: existingSlot } = await supabaseAdmin
-        .from("station_playlist_slots")
-        .select("id")
-        .eq("station_id", stationId)
-        .eq("playlist_id", playlist_id)
-        .maybeSingle();
-
-      if (existingSlot) {
-        // Remove from radio
-        await supabaseAdmin.from("station_playlist_slots").delete().eq("id", existingSlot.id);
-        return jsonResponse({ success: true, on_radio: false, station_id: stationId });
-      } else {
-        // Add to radio at next position
-        const { data: lastSlot } = await supabaseAdmin
-          .from("station_playlist_slots")
-          .select("position")
-          .eq("station_id", stationId)
-          .order("position", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        const nextPos = (lastSlot?.position ?? -1) + 1;
-
-        const { data: newSlot, error: slotErr } = await supabaseAdmin
-          .from("station_playlist_slots")
-          .insert({ station_id: stationId, playlist_id, position: nextPos, is_active: true })
-          .select("id")
-          .single();
-        if (slotErr) return jsonResponse({ error: slotErr.message }, 500);
-        return jsonResponse({ success: true, on_radio: true, station_id: stationId, slot_id: newSlot.id });
-      }
+      const stationId = existingManagedStation.id;
+      const {data: existingSlot, error: slotError} = await supabaseAdmin.from("station_playlist_slots")
+        .select("id").eq("station_id", stationId).eq("playlist_id", playlist_id).maybeSingle();
+      if (slotError) throw slotError;
+      const {data, error} = await supabaseAdmin.rpc("admin_change_station_playlist", {
+        p_admin_id: uid, p_station_id: stationId, p_playlist_id: playlist_id, p_remove: Boolean(existingSlot), p_slot_patch: {},
+      });
+      if (error) return jsonResponse({error: error.message}, 400);
+      return jsonResponse({success: true, ...data});
     }
 
     return jsonResponse({ error: `Unknown action: ${action}` }, 400);

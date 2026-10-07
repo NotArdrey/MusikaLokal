@@ -213,8 +213,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         isGuest
           ? []
           : isOwner
-            ? ["All", "Musician", "Production Team"]
-            : ["All", "Musician", "Studio", "Gig", "Production Team"],
+            ? ["All", "Musician", "Group", "Production Team"]
+            : ["All", "Musician", "Group", "Studio", "Gig", "Production Team"],
       [isGuest, isOwner],
     );
 
@@ -686,6 +686,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                   {TYPE_FILTERS.map((filter) => (
                     <TouchableOpacity activeOpacity={1}
                       key={filter}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: activeFilter === filter }}
                       style={[
                         styles.filterChip,
                         activeFilter === filter

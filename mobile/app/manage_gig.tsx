@@ -1370,25 +1370,29 @@ export default function GigDetailsScreen() {
                       >
                         No contract uploaded
                       </Text>
-                      <TouchableOpacity activeOpacity={1}
-                        onPress={() =>
-                          router.push({
-                            pathname: "/edit_gig",
-                            params: { id: gig?.id, returnTab: "About" },
-                          })
-                        }
-                        style={{ marginTop: 8 }}
-                      >
-                        <Text
-                          style={{
-                            color: colors.primary,
-                            fontFamily: typography.medium,
-                            fontSize: 13,
-                          }}
+                      {canChangeLifecycle ? (
+                        <TouchableOpacity activeOpacity={1}
+                          accessibilityRole="button"
+                          accessibilityLabel="Add gig contract"
+                          onPress={() =>
+                            router.push({
+                              pathname: "/edit_gig",
+                              params: { id: gig?.id, returnTab: "About" },
+                            })
+                          }
+                          style={{ marginTop: 8 }}
                         >
-                          Add Contract
-                        </Text>
-                      </TouchableOpacity>
+                          <Text
+                            style={{
+                              color: colors.primary,
+                              fontFamily: typography.medium,
+                              fontSize: 13,
+                            }}
+                          >
+                            Add Contract
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
                     </View>
                   )}
                 </View>

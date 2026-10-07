@@ -1,0 +1,33 @@
+{
+  "verifiedAt": "2026-10-07T05:54:58.799Z",
+  "function": "manage-playlists",
+  "functionVersion": 76,
+  "verifyJwt": false,
+  "migrationVersion": "20261007170000",
+  "existingStationRowsAndSlotsPreserved": true,
+  "existingPoliciesAndTriggersPreserved": true,
+  "unchangedOtherFunctions": true,
+  "deployedSourcesMatch": true,
+  "concurrentCreationProducesOneStation": true,
+  "revisionSerializesConcurrentSaves": true,
+  "selectedOrderPersisted": true,
+  "playlistOnlyCompatibility": true,
+  "legacyPlaylistControlsPreserveCuratedQueue": true,
+  "nonAdminAndAnonymousEditsDenied": true,
+  "serviceOnlyRpcs": true,
+  "directQueueUpdateDenied": true,
+  "twoAuthenticatedListenersReceiveRevision": true,
+  "deliveryMs": [
+    1411,
+    1408
+  ],
+  "twoListenersShareQueueAnchorAndTimeline": true,
+  "anonymousPlaybackMatches": true,
+  "browseAndProfileNowPlayingUseAuthoritativeQueue": true,
+  "restrictedAndUnavailableTracksSkipped": true,
+  "inactiveStationStopsPublicPlayback": true,
+  "noNotificationsOrEmailsSent": true,
+  "physicalAndroidAudioCheck": "pending",
+  "clientRelease": "pending",
+  "fixturesRemoved": true
+}

@@ -18,6 +18,7 @@ import { supabase } from "../../lib/supabase";
 import TrackPlayer, { Event, RepeatMode, State, isTrackPlayerAvailable } from "../audio/safeTrackPlayer";
 import {
   buildStationQueue,
+  getLiveStationCursor,
   ensureRadioPlayerSetup,
   type RadioQueueTrack,
   updateRadioPlayerCapabilities,
@@ -32,6 +33,8 @@ import CachedImage from "../components/CachedImage";
 import { useBottomOverlay } from "./BottomOverlayContext";
 import { useTheme } from "./ThemeContext";
 import { getStationLiveTimelineState } from "../utils/radioTimeline";
+import {getStationQueueEntries, getStationQueueFingerprint, mergeStationSnapshot} from '../utils/stationQueue';
+import {useStationQueueRefresh} from '../hooks/useStationQueueRefresh';
 
 export const RADIO_MINI_PLAYER_HEIGHT = 60;
 export const RADIO_MINI_PLAYER_STACK_GAP = 8;
@@ -226,6 +229,8 @@ const getFastStationLiveCursor = (stationData: any, fallbackQueueIndex: number) 
 };
 
 type PreparedRadioStationQueue = {
+  queueRevision: number;
+  queueItemIds: string;
   fallbackPreparedAt?: number;
   fallbackPreparedPositionSeconds?: number;
   key: string;
@@ -530,7 +535,9 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       preparedQueue.key !== prepareKey ||
       preparedQueue.stationId !== stationId ||
       preparedQueue.queueIndex !== safeQueueIndex ||
-      preparedQueue.queue.length === 0
+      preparedQueue.queue.length === 0 ||
+      preparedQueue.queueRevision !== Number(stationData?.queue_revision || 0) ||
+      (Array.isArray(stationData?.playback_queue) && preparedQueue.queueItemIds !== JSON.stringify(getStationQueueEntries(stationData).map(entry => entry.item.id)))
     ) {
       return null;
     }
@@ -973,6 +980,8 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       }
 
       const preparedSnapshot = {
+        queueRevision: Number(playableStation?.queue_revision || 0),
+        queueItemIds: JSON.stringify(getStationQueueEntries(playableStation).map(entry => entry.item.id)),
         fallbackPreparedAt,
         fallbackPreparedPositionSeconds,
         key: getRadioPrepareKey(stationId, preparedQueueIndex),
@@ -1613,7 +1622,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       stationId,
     });
 
-    if (activeStationRef.current?.id === stationId && fullQueueRef.current.length > 0) {
+    if (activeStationRef.current?.id === stationId && fullQueueRef.current.length > 0 && (!stationData.__queueReady || getStationQueueFingerprint(activeStationRef.current) === getStationQueueFingerprint(stationData))) {
       if (isPlaying) {
         logRadioTuneInDebug("current-station-already-playing", {
           stationId,
@@ -2074,33 +2083,33 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
   }, [clearLocalPlaybackState, invalidatePlaybackRequests, unloadFallbackSound]);
 
   const syncStationData = useCallback((stationData: any) => {
-    if (!stationData?.id) return;
+    const previous = activeStationRef.current;
+    if (previous?.id === stationData?.id && stationData.__queueUnavailable) {
+      stationData = {...previous, is_active: false, playback_queue: [], __queueReady: true};
+    }
+    if (!previous || previous.id !== stationData?.id || Number(stationData.queue_revision || 0) < Number(previous.queue_revision || 0)) return;
+    if (stationData.__queueReady && getStationQueueFingerprint(previous) !== getStationQueueFingerprint(stationData)) {
+      const requestId = beginPlaybackRequest();
+      const shouldPlay = playWhenReadyRef.current;
+      preparedQueueRef.current = null;
+      void (async () => {
+        const queue = await buildStationQueue(stationData);
+        if (!isPlaybackRequestCurrent(requestId) || activeStationRef.current?.id !== stationData.id) return;
+        const cursor = getLiveStationCursor(stationData, queue);
+        await applyPlayerQueue(stationData, queue, cursor.queueIndex, shouldPlay, requestId, cursor.positionSeconds);
+        if (queue.length === 0 && isPlaybackRequestCurrent(requestId)) {
+          activeStationRef.current = stationData;
+          setActiveStation(stationData);
+        }
+      })().catch(error => console.warn("Station queue update failed", error));
+      return;
+    }
+    const nextStation = mergeStationSnapshot(previous, stationData);
+    activeStationRef.current = nextStation;
+    setActiveStation(nextStation);
+  }, [applyPlayerQueue, beginPlaybackRequest, isPlaybackRequestCurrent]);
 
-    setActiveStation((previous: any) => {
-      if (!previous || previous.id !== stationData.id) return previous;
-
-      const previousHasQueueData = previous.__queueReady === true;
-      const incomingHasQueueData = stationData.__queueReady === true;
-      const previousLiveSlots = Array.isArray(previous.live_slots) ? previous.live_slots : [];
-      const incomingLiveSlots = Array.isArray(stationData.live_slots) ? stationData.live_slots : [];
-
-      const nextStation = {
-        ...previous,
-        ...stationData,
-        live_slots: previousHasQueueData && !incomingHasQueueData
-          ? previousLiveSlots.length > 0 ? previousLiveSlots : incomingLiveSlots
-          : incomingLiveSlots.length > 0 ? incomingLiveSlots : previousLiveSlots,
-        slots: previousHasQueueData && !incomingHasQueueData
-          ? previous.slots || stationData.slots || []
-          : stationData.slots || previous.slots || [],
-        __queueReady: previousHasQueueData || incomingHasQueueData,
-      };
-
-      activeStationRef.current = nextStation;
-
-      return nextStation;
-    });
-  }, []);
+  useStationQueueRefresh(readUuidString(activeStation?.id) || null, syncStationData);
 
   useEffect(() => {
     if (!isTrackPlayerAvailable) {

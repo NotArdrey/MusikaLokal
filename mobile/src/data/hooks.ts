@@ -153,6 +153,7 @@ export const useListingDetailsQuery = <TData = any>(params: {
       invokeEdgeFunction<TData>("manage-details", {
         body: {
           action: "fetch",
+          includeReviews: false,
           id: params.id,
           type: String(params.type || "").toLowerCase(),
           userId: params.userId || null,

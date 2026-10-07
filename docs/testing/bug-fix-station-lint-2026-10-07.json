@@ -1,0 +1,94 @@
+[
+  {
+    "file": "mobile/src/hooks/useStationQueueRefresh.ts",
+    "baseline": {},
+    "current": {},
+    "introduced": []
+  },
+  {
+    "file": "mobile/src/utils/stationQueue.ts",
+    "baseline": {},
+    "current": {},
+    "introduced": []
+  },
+  {
+    "file": "mobile/src/utils/radioTimeline.ts",
+    "baseline": {},
+    "current": {},
+    "introduced": []
+  },
+  {
+    "file": "mobile/src/context/RadioPlayerContext.tsx",
+    "baseline": {},
+    "current": {},
+    "introduced": []
+  },
+  {
+    "file": "mobile/src/audio/radioTrackPlayer.ts",
+    "baseline": {
+      "1:@typescript-eslint/array-type": 1
+    },
+    "current": {
+      "1:@typescript-eslint/array-type": 1
+    },
+    "introduced": []
+  },
+  {
+    "file": "mobile/app/station_details.tsx",
+    "baseline": {
+      "1:import/no-named-as-default": 1,
+      "2:react-hooks/set-state-in-effect": 1,
+      "2:react-hooks/preserve-manual-memoization": 1,
+      "1:@typescript-eslint/no-unused-vars": 1
+    },
+    "current": {
+      "1:import/no-named-as-default": 1,
+      "2:react-hooks/set-state-in-effect": 1,
+      "2:react-hooks/preserve-manual-memoization": 1,
+      "1:@typescript-eslint/no-unused-vars": 1
+    },
+    "introduced": []
+  },
+  {
+    "file": "web/src/hooks/useStationQueueRefresh.ts",
+    "baseline": {},
+    "current": {},
+    "introduced": []
+  },
+  {
+    "file": "web/src/utils/stationQueue.ts",
+    "baseline": {},
+    "current": {},
+    "introduced": []
+  },
+  {
+    "file": "web/src/utils/radioTimeline.ts",
+    "baseline": {},
+    "current": {},
+    "introduced": []
+  },
+  {
+    "file": "web/src/context/RadioPlayerContext.tsx",
+    "baseline": {},
+    "current": {},
+    "introduced": []
+  },
+  {
+    "file": "web/src/utils/stationQueueEditor.ts",
+    "baseline": {},
+    "current": {},
+    "introduced": []
+  },
+  {
+    "file": "web/app/admin/stations.tsx",
+    "baseline": {
+      "2:react-hooks/set-state-in-effect": 1,
+      "2:react-hooks/preserve-manual-memoization": 1
+    },
+    "current": {
+      "2:react-hooks/set-state-in-effect": 1,
+      "2:react-hooks/preserve-manual-memoization": 1
+    },
+    "introduced": []
+  }
+]

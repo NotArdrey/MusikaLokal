@@ -52,7 +52,7 @@ export const queryKeys = {
     list: (userId: string | null | undefined) => ["notifications", userId || "guest"] as const,
   },
   search: {
-    results: (params: Record<string, unknown>) => ["search", "results", params] as const,
+    results: (params: Record<string, unknown>) => ["search", "results", "v2", params] as const,
   },
   wallet: {
     summary: (userId: string | null | undefined) => ["wallet", "summary", userId || "guest"] as const,

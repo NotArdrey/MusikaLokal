@@ -1,3 +1,5 @@
+import {getStationQueueEntries} from './stationQueue';
+
 const DEFAULT_LIVE_TRACK_DURATION_SECONDS = 180;
 
 type TimelineEntry = {
@@ -74,6 +76,12 @@ const getSlotFallbackDurationSeconds = (slot: any, station: any) => {
 };
 
 const getTimelineEntries = (station: any): TimelineEntry[] => {
+  if (Array.isArray(station?.playback_queue)) {
+    return getStationQueueEntries(station).map((entry, queueIndex) => ({
+      ...entry, queueIndex,
+      durationSeconds: normalizeLiveDurationSeconds(entry.item?.duration_seconds ?? entry.item?.teaser?.duration_seconds),
+    }));
+  }
   const slots = getStationSlots(station);
   const entries = slots.flatMap((slot: any, slotIndex: number) => {
     const playlist = slot?.playlist || {};
@@ -109,6 +117,8 @@ const sumDurationsBeforeIndex = (entries: TimelineEntry[], queueIndex: number) =
 );
 
 const getLiveOffsetSeconds = (station: any, entries: TimelineEntry[], nowMs: number) => {
+  const savedAnchor = readTimestampMs(station?.queue_anchor_at);
+  if (savedAnchor !== null) return Math.max(0, Math.floor((nowMs - savedAnchor) / 1000));
   const syncedQueueIndex = readNonNegativeIndex(station?.live_current_queue_index);
   const syncedPositionSeconds = readNonNegativeNumber(station?.live_position_seconds);
 

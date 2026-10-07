@@ -1,0 +1,23 @@
+{
+  "projectRef": "aefldxegsvzecshlayza",
+  "verifiedAt": "2026-10-07T04:35:38.268Z",
+  "function": {
+    "slug": "admin-reports-management",
+    "version": 68,
+    "verifyJwt": false
+  },
+  "migration": "transactional_report_notifications",
+  "sourceMatches": true,
+  "existingSharedRuntimeUnchanged": true,
+  "unrelatedFunctionsUnchanged": true,
+  "liveOnlineNotificationLatencyMs": [
+    1378,
+    1346
+  ],
+  "twoRecipientDelivery": true,
+  "concurrentRetriesDeduplicated": true,
+  "inboxAndUnreadReadChecks": true,
+  "crossUserRlsIsolation": true,
+  "missedEventRecovery": true,
+  "isolatedFixturesRemoved": true
+}

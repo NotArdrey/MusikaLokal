@@ -4,13 +4,13 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import ProfileAvatar from "./ProfileAvatar";
 import { isActiveApplication } from "../utils/gigApplicantFilters";
 import { typography } from "../theme/tokens";
@@ -855,7 +855,8 @@ export default function ApplicantDetailsModal({
       setShowAcceptConfirmation(false);
       onClose();
     }}>
-      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+      <SafeAreaProvider style={[styles.safeArea, { backgroundColor: colors.background }]}>
+      <SafeAreaView edges={["top", "right", "bottom", "left"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
         <View style={[styles.modalHeader, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <TouchableOpacity testID="close-applicant-details" accessibilityLabel="Close applicant details" onPress={() => {
             setShowAcceptConfirmation(false);
@@ -1596,6 +1597,7 @@ export default function ApplicantDetailsModal({
           </View>
         </Modal>
       </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }

@@ -43,6 +43,7 @@ import { useCurrentUserVenueRole } from "../hooks/useCurrentUserVenueRole";
 import { useGigApplicantCounts } from "../hooks/useGigApplicantCounts";
 import { useListingSheetDerived } from "../hooks/useListingSheetDerived";
 import { useListingSheetEffects } from "../hooks/useListingSheetEffects";
+import { useListingReviews } from "../hooks/useListingReviews";
 import { useProfileCompletion } from "../hooks/useProfileCompletion";
 import type { UploadSafetyFileDecision } from "../services/uploadSafetyScreen";
 import { emitFavoriteChanged } from "../utils/favoriteEvents";
@@ -702,7 +703,8 @@ const ListingDetailsSheet = forwardRef<
   }, [filteredRequestRoster]);
 
   // Review State
-  const [reviews, setReviews] = useState<any[]>([]);
+  const { reviews, loading: reviewsLoading, error: reviewsError, refresh: refreshReviews } =
+    useListingReviews(group?.id === listingId ? group?.type : null, listingId);
   const [existingBookings, setExistingBookings] = useState<any[]>([]); // Bookings from DB
   const [relatedListings, setRelatedListings] = useState<any[]>([]);
 
@@ -3422,7 +3424,6 @@ const ListingDetailsSheet = forwardRef<
     selectedDate,
     processAvailability,
     fetchAvailableSlots,
-    setReviews,
     setRelatedListings,
   });
 
@@ -3686,6 +3687,9 @@ const ListingDetailsSheet = forwardRef<
       colors={colors}
       styles={styles}
       reviews={reviews}
+      loading={reviewsLoading}
+      error={reviewsError}
+      onRetry={refreshReviews}
       relatedListings={relatedListings}
     />
   );

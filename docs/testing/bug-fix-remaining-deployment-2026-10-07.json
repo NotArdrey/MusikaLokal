@@ -1,0 +1,174 @@
+{
+  "checkedAt": "2026-10-07T07:30:40.749Z",
+  "noProviderSessionsCreated": true,
+  "noEmailsOrChargesSent": true,
+  "didit": {
+    "wrongNonceRejected": true,
+    "cancelledAndRetriesPass": true,
+    "delayedApprovalAndReviewIgnored": true,
+    "newAttemptApproves": true,
+    "oldAttemptReadsSuperseded": true,
+    "workflow": {
+      "success": true,
+      "workflow": {
+        "configuredId": "29190462-ef8d-46e8-9e11-299ee0e9aebe",
+        "workflowId": "29190462-ef8d-46e8-9e11-299ee0e9aebe",
+        "status": "published",
+        "archived": false,
+        "features": "OCR + LIVENESS + FACE_MATCH",
+        "livenessEnabled": true,
+        "faceMatchEnabled": true,
+        "documentsAllowed": {
+          "PHL": {
+            "P": {
+              "sides": 1,
+              "enabled": 1,
+              "subtypes": [
+                "EPASSPORT",
+                "EPASSPORT_DIPLOMATIC",
+                "EPASSPORT_SERVICE",
+                "PASSPORT_GENERIC"
+              ],
+              "preferred_characters": "latin",
+              "expiration_check_mode": "strict"
+            },
+            "DL": {
+              "sides": 2,
+              "enabled": 1,
+              "subtypes": [
+                "DRIVER_LICENSE_GENERIC"
+              ],
+              "preferred_characters": "latin",
+              "expiration_check_mode": "strict"
+            },
+            "ID": {
+              "sides": 2,
+              "enabled": 1,
+              "subtypes": [
+                "DIGITAL_ID_CARD",
+                "ID_CARD_GENERIC",
+                "SENIOR_CITIZEN_ID_CARD",
+                "UMID_CARD",
+                "VOTER_CARD"
+              ],
+              "preferred_characters": "latin",
+              "expiration_check_mode": "strict"
+            },
+            "RP": {
+              "sides": 2,
+              "enabled": 0,
+              "subtypes": [
+                "ALIEN_OR_FOREIGNER_ID",
+                "RESIDENCE_PERMIT_GENERIC",
+                "RESIDENT_CARD"
+              ],
+              "preferred_characters": "latin",
+              "expiration_check_mode": "strict"
+            },
+            "TC": {
+              "sides": 2,
+              "enabled": 0,
+              "subtypes": [
+                "TAX_CARD_STANDARD"
+              ],
+              "preferred_characters": "latin",
+              "expiration_check_mode": "strict"
+            },
+            "HIC": {
+              "sides": 2,
+              "enabled": 0,
+              "subtypes": [
+                "HEALTH_INSURANCE_CARD_STANDARD"
+              ],
+              "preferred_characters": "latin",
+              "expiration_check_mode": "strict"
+            },
+            "PSC": {
+              "sides": 1,
+              "enabled": 0,
+              "subtypes": [
+                "CRIMINAL_POLICE_PERMIT",
+                "POLICE_ID"
+              ],
+              "preferred_characters": "latin",
+              "expiration_check_mode": "strict"
+            },
+            "SSC": {
+              "sides": 2,
+              "enabled": 0,
+              "subtypes": [
+                "SOCIAL_SECURITY_CARD_STANDARD"
+              ],
+              "preferred_characters": "latin",
+              "expiration_check_mode": "strict"
+            }
+          }
+        },
+        "image_capture_methods_allowed": [
+          "CAMERA_SCAN",
+          "UPLOAD"
+        ],
+        "enabledDocumentCountries": [
+          "PHL"
+        ]
+      }
+    }
+  },
+  "migration": [
+    {
+      "version": "20261007071203",
+      "name": "guard_invalidated_didit_attempts"
+    }
+  ],
+  "fixturesRemoved": true,
+  "website": {
+    "url": "https://musika-lokal.vercel.app/feed",
+    "previousArtifactsPreserved": 95,
+    "shareFilesVerified": 4,
+    "allSharePathsServeGateway": true,
+    "deploymentId": "dpl_Bv85CKmf7YzUEE6JE2GbXABJWZAL",
+    "previousDeploymentId": "dpl_AHMRWbkoxupFFgpd1qh8TkN6VuYq"
+  },
+  "functions": [
+    {
+      "slug": "didit-webhook",
+      "version": 165,
+      "verify_jwt": false
+    },
+    {
+      "slug": "create-didit-session",
+      "version": 134,
+      "verify_jwt": false
+    },
+    {
+      "slug": "create-unverified-user",
+      "version": 126,
+      "verify_jwt": false
+    }
+  ],
+  "temporaryDiagnosticRemoved": true,
+  "unrelatedFunctionsPreserved": true,
+  "securityAdvisors": {
+    "before": 249,
+    "after": 249,
+    "newIssues": 0
+  },
+  "localVerification": {
+    "bugFixRegressionTests": 179,
+    "diditAttemptTests": 15,
+    "shareLinkTests": 6,
+    "shareGatewayBrowserTests": 1,
+    "safeAreaBrowserTests": 1,
+    "safeAreaLayouts": 16,
+    "partOneLayouts": 8,
+    "mobileAndWebTypeScript": "pass",
+    "signupAndNewClientUtilityLint": "pass"
+  },
+  "release": {
+    "clientBundleBuilt": false,
+    "apkBuilt": false,
+    "nativeReleasePending": true,
+    "physicalAndroidChecksPending": true,
+    "providerCameraAndUploadRoundtripPending": true
+  }
+}

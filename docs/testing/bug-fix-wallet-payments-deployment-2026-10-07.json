@@ -1,0 +1,46 @@
+{
+  "projectRef": "aefldxegsvzecshlayza",
+  "verifiedAt": "2026-10-07T06:25:22.836Z",
+  "functions": [
+    {
+      "slug": "paymongo",
+      "version": 125,
+      "verifyJwt": false
+    },
+    {
+      "slug": "withdrawals",
+      "version": 93,
+      "verifyJwt": true
+    },
+    {
+      "slug": "manage-bookings",
+      "version": 109,
+      "verifyJwt": false
+    }
+  ],
+  "migration": "20261007180000",
+  "historicalRecords": 8,
+  "existingRowsBalancesPoliciesAndTriggersPreserved": true,
+  "deployedSourceMatches": true,
+  "existingSharedRuntimePreserved": true,
+  "unrelatedFunctionsUnchanged": true,
+  "php6000DisplayedOnce": true,
+  "externalSpendingLeavesPayerWalletUnchanged": true,
+  "atomicOwnerEarningAndRefundReversal": true,
+  "downpaymentAndBalanceStagesAccurate": true,
+  "multiBookingPaymentAggregatedOnce": true,
+  "concurrentRetryWaitMs": 1211,
+  "retryAndRefundDeduplication": true,
+  "financialFailureRollsBackEverything": true,
+  "underpaymentRejected": true,
+  "payerOnlyHistoryRls": true,
+  "serviceOnlyFinancialRpcs": true,
+  "anonymousAndUnsignedProviderRequestsDenied": true,
+  "payerRealtimeDeliveryMs": 3265,
+  "otherUserReceivesNoPaymentEvents": true,
+  "noNotificationsEmailsOrChargesSent": true,
+  "providerChargeRoundtrip": "not exercised; signed provider envelopes verified locally",
+  "clientRelease": "pending",
+  "physicalAndroidWalletRendering": "pending",
+  "fixturesRemoved": true
+}

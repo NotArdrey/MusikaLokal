@@ -63,6 +63,7 @@ import {
   resolveRecordingRule,
 } from "../../src/utils/recordingRule";
 
+import { compareActivityItems } from "../../src/utils/activityOrder";
 const debugLog = (..._args: unknown[]) => { };
 
 const readFunctionInvokeError = async (error: any, fallback: string) => {
@@ -611,6 +612,7 @@ const mergePendingStudioBookingBatch = (items: any[]) => {
   return {
     ...first,
     id: first?.id,
+    activity_at: [...items].sort(compareActivityItems)[0]?.activity_at || null,
     booking_ids: bookingIds,
     batch_items: sorted,
     batch_count: sorted.length,
@@ -2453,6 +2455,7 @@ export default function BookingsScreen() {
       const item = {
         id: b.id,
         type_id: "studio_booking",
+        activity_at: b.activity_at || null,
         created_at: b.created_at || null,
         checkout_session_id: b.checkout_session_id || null,
         studio_id: b.studio_id,
@@ -2543,11 +2546,7 @@ export default function BookingsScreen() {
           fallback.Ongoing.push({ ...item, status: "In Progress" });
         }
       } else if (b.status === "completed") {
-        if (role === "studio-owner") {
-          if (!b.reviewed_by_owner) fallback.Review.push({ ...item, status: "Completed" });
-        } else {
-          if (!b.reviewed_by_customer) fallback.Review.push({ ...item, status: "Completed" });
-        }
+        fallback.Review.push({ ...item, status: "Completed" });
       } else if (b.status === "cancelled") {
         fallback.Upcoming.push(item);
       }
@@ -2618,6 +2617,7 @@ export default function BookingsScreen() {
       const item = {
         id: app.id,
         type_id: "gig_application",
+        activity_at: app.activity_at || null,
         created_at: app.created_at,
         gig_id: app.gig_id,
         group_id: app.group_id,
@@ -2801,6 +2801,7 @@ export default function BookingsScreen() {
       const item = {
         id: app.id,
         type_id: "gig_application",
+        activity_at: app.activity_at || null,
         created_at: app.created_at,
         gig_id: app.gig_id,
         group_id: app.group_id,
@@ -3046,7 +3047,7 @@ export default function BookingsScreen() {
       let connectionRequestItems: any[] = [];
       try {
         const connectionRequestSelect =
-          "id, created_at, sender_id, receiver_id, group_id, studio_id, message, status, event_details, attachment_url";
+          "id, created_at, activity_at, sender_id, receiver_id, group_id, studio_id, message, status, event_details, attachment_url";
         const payloadConnectionRequests = Array.isArray(screenPayload?.connectionRequests)
           ? screenPayload.connectionRequests
           : null;
@@ -3079,11 +3080,7 @@ export default function BookingsScreen() {
               requestRowsById.set(request.id, request);
             }
           });
-          requestRows = Array.from(requestRowsById.values()).sort(
-            (a: any, b: any) =>
-              new Date(b?.created_at || 0).getTime() -
-              new Date(a?.created_at || 0).getTime(),
-          );
+          requestRows = Array.from(requestRowsById.values()).sort(compareActivityItems);
         } else {
           const requestResults = await Promise.all([
             supabase
@@ -3123,11 +3120,7 @@ export default function BookingsScreen() {
             });
           });
 
-          requestRows = Array.from(requestRowsById.values()).sort(
-            (a: any, b: any) =>
-              new Date(b?.created_at || 0).getTime() -
-              new Date(a?.created_at || 0).getTime(),
-          );
+          requestRows = Array.from(requestRowsById.values()).sort(compareActivityItems);
         }
 
         if (requestRows.length > 0) {
@@ -3238,6 +3231,7 @@ export default function BookingsScreen() {
               id: request.id,
               type_id: "booking_request",
               created_at: request.created_at,
+              activity_at: request.activity_at || null,
               raw_date: request.created_at,
               date: formatFriendlyDateTime(request.created_at),
               name: counterpartyName,
@@ -3508,11 +3502,7 @@ export default function BookingsScreen() {
         ...groupedStudioPending,
       ]);
 
-      pendingItems.sort(
-        (a: any, b: any) =>
-          new Date(b.created_at || b.raw_date).getTime() -
-          new Date(a.created_at || a.raw_date).getTime(),
-      );
+      pendingItems.sort(compareActivityItems);
 
       const getPendingStudioBookingEndDate = (item: any) => {
         if (item?.type_id !== "studio_booking") return null;
@@ -3634,12 +3624,8 @@ export default function BookingsScreen() {
           (item: any, index: number, arr: any[]) =>
             arr.findIndex((candidate: any) => candidate.id === item.id && candidate.type_id === item.type_id) === index,
         );
-      // Sort history by date (most recent first)
-      historyItems.sort(
-        (a: any, b: any) =>
-          new Date(b.raw_date || b.date).getTime() -
-          new Date(a.raw_date || a.date).getTime(),
-      );
+      // Sort by the latest persisted business action.
+      historyItems.sort(compareActivityItems);
 
       // 5. Review - role-aware unreviewed items
       const unreviewedItems = [
@@ -3677,35 +3663,9 @@ export default function BookingsScreen() {
       );
 
       // Sort lists
-      applicants.sort(
-        (a: any, b: any) => {
-          const recommendationRank = (item: any) => {
-            const status = item?.ai_recommendation?.recommendation_status;
-            if (status === "recommended") return 3;
-            if (status === "needs_review") return 2;
-            return item?.ai_recommendation ? 1 : 0;
-          };
-          const rankDifference = recommendationRank(b) - recommendationRank(a);
-          if (rankDifference !== 0) return rankDifference;
-          const scoreDifference =
-            Number(b?.ai_recommendation?.score || 0) -
-            Number(a?.ai_recommendation?.score || 0);
-          if (scoreDifference !== 0) return scoreDifference;
-          return (
-            new Date(b.created_at || b.raw_date).getTime() -
-            new Date(a.created_at || a.raw_date).getTime()
-          );
-        },
-      );
-      activeGigMusicians.sort(
-        (a: any, b: any) =>
-          new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
-      ); // Closest gig first
-      unreviewedItems.sort(
-        (a: any, b: any) =>
-          new Date(b.created_at || b.raw_date).getTime() -
-          new Date(a.created_at || a.raw_date).getTime(),
-      );
+      applicants.sort(compareActivityItems);
+      activeGigMusicians.sort(compareActivityItems);
+      unreviewedItems.sort(compareActivityItems);
       const processedData = {
         Applicants: applicants,
         ActiveMusicians: activeGigMusicians,
@@ -3750,22 +3710,10 @@ export default function BookingsScreen() {
           },
         );
 
-        // Sort by date (most recent first for applied, closest first for accepted)
-        appliedApps.sort(
-          (a: any, b: any) =>
-            new Date(b.created_at || b.raw_date).getTime() -
-            new Date(a.created_at || a.raw_date).getTime(),
-        );
-        acceptedApps.sort(
-          (a: any, b: any) =>
-            new Date(a.raw_date || a.date).getTime() -
-            new Date(b.raw_date || b.date).getTime(),
-        );
-        completedApps.sort(
-          (a: any, b: any) =>
-            new Date(b.raw_date || b.date).getTime() -
-            new Date(a.raw_date || a.date).getTime(),
-        );
+        // All application tabs use the same activity order.
+        appliedApps.sort(compareActivityItems);
+        acceptedApps.sort(compareActivityItems);
+        completedApps.sort(compareActivityItems);
 
         nextApplicationData = {
           Applied: appliedApps,
@@ -6038,31 +5986,6 @@ export default function BookingsScreen() {
       Alert.alert("Error", e?.message || "An error occurred during check-in.");
     }
   };
-
-  const getItemSortTimestamp = (item: any) => {
-    const dateTimeCandidate =
-      item?.raw_date && item?.start_time
-        ? `${item.raw_date}T${item.start_time}`
-        : null;
-
-    const candidates = [
-      item?.updated_at,
-      item?.created_at,
-      item?.paid_at,
-      dateTimeCandidate,
-      item?.raw_date,
-      item?.date,
-    ];
-
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      const timestamp = new Date(candidate).getTime();
-      if (!Number.isNaN(timestamp)) return timestamp;
-    }
-
-    return 0;
-  };
-
   const hasVenueStaffWorkspace = staffBookingContexts.some((context) => context?.entity_type === "venue");
   const hasNonVenueStaffWorkspace = staffBookingContexts.some((context) => context?.entity_type === "studio" || context?.entity_type === "production");
   const usesVenueOwnerTabs =
@@ -6123,10 +6046,7 @@ export default function BookingsScreen() {
       [usesVenueOwnerTabs],
   );
   const sortedCurrentItems = React.useMemo(
-    () =>
-      [...currentItems].sort(
-        (a: any, b: any) => getItemSortTimestamp(b) - getItemSortTimestamp(a),
-      ),
+    () => [...currentItems].sort(compareActivityItems),
     [currentItems],
   );
 
@@ -7835,7 +7755,7 @@ export default function BookingsScreen() {
                       >
 
                         {renderActionLoadingIndicator(item)}
-                        {isMusicianView && isAcceptedGigApplicationItem(item) ? (
+                        {isMusicianView && item.type_id === "gig_application" && ["accepted", "approved", "completed"].includes(normalizeGigApplicationStatusValue(item.raw_status || item.status)) ? (
                           <TouchableOpacity
                             activeOpacity={1}
                             testID={bookingActionTestId(item, "feature-consent")}
@@ -7859,9 +7779,7 @@ export default function BookingsScreen() {
                         >
                           <Ionicons name="megaphone-outline" size={16} color={colors.primary} />
                           <Text style={{ color: colors.primary, fontFamily: typography.semibold, fontSize: 12 }}>
-                              {String(item.feature_consent_status || "").toLowerCase() === "pending"
-                                ? "Respond to Featuring Request"
-                                : "Manage Featuring Permission"}
+                              Manage Featuring Permission
                             </Text>
                           </TouchableOpacity>
                         ) : null}

@@ -5,6 +5,7 @@ import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { interpolateColor, useAnimatedProps, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
+import { useUnreadNotifications } from '../hooks/useUnreadNotifications';
 import { useAuth } from '../context/AuthContext';
 import { runAfterUIIdle } from '../utils/idleTask';
 import { useTheme } from '../context/ThemeContext';
@@ -66,7 +67,7 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
     const segments = useSegments();
     const routePathname = useMemo(() => normalizeHeaderPathname(pathname, segments), [pathname, segments]);
     const isTaskFlow = routePathname.startsWith('/add_') || routePathname.startsWith('/edit_');
-    const [hasUnread, setHasUnread] = useState(false);
+    const { hasUnread, refresh: checkUnreadNotifications } = useUnreadNotifications(userId, !isGuest);
     const [hasUnreadChats, setHasUnreadChats] = useState(false);
     const [guestMenuVisible, setGuestMenuVisible] = useState(false);
     const [staffAccessLevel, setStaffAccessLevel] = useState<1 | 2 | 3 | null>(null);
@@ -231,37 +232,6 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
         router.replace('/');
     }, [closeGuestMenu, setGuestMode]);
 
-    const checkUnreadNotifications = useCallback(async () => {
-        try {
-            if (!userId || isGuest) {
-                setHasUnread(false);
-                return;
-            }
-
-            // Check session first to avoid unnecessary API calls
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session?.access_token) return;
-
-            // Check if token is expired - don't make API call if it is
-            const tokenExpiry = session.expires_at ? session.expires_at * 1000 : 0;
-            if (tokenExpiry && tokenExpiry < Date.now()) return;
-
-            // This can fail with 401 if session is expired, which is fine
-            const { data, error } = await supabase.functions.invoke('manage-notifications', {
-                body: { action: 'unread_count', userId: session.user.id }
-            });
-
-            // If error (e.g., expired session), do nothing
-            if (error) return;
-
-            if (data) {
-                setHasUnread(data.count > 0);
-            }
-        } catch {
-            // Silently ignore errors - user likely not logged in
-        }
-    }, [isGuest, userId]);
-
     const checkUnreadChats = useCallback(async () => {
         try {
             if (!userId || isGuest || isFan) {
@@ -319,7 +289,6 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
 
     useEffect(() => {
         if (!userId || isGuest) {
-            setHasUnread(false);
             setHasUnreadChats(false);
             return;
         }
@@ -330,17 +299,6 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
         } else {
             checkUnreadChats();
         }
-
-        const channel = supabase
-            .channel(createRealtimeChannelTopic(`header-notifications:${userId}`))
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
-                () => {
-                    checkUnreadNotifications();
-                }
-            )
-            .subscribe();
 
         const messagesChannel = isFan
             ? null
@@ -356,7 +314,6 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
                 .subscribe();
 
         return () => {
-            supabase.removeChannel(channel);
             if (messagesChannel) {
                 supabase.removeChannel(messagesChannel);
             }

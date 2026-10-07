@@ -73,12 +73,15 @@ const getTables = (params: any): SearchTable[] => {
   const activeFilter = String(params.activeFilter || params.type || "All");
 
   if (params.isGuest) {
+    if (activeFilter === "Musician" || activeFilter === "Solo Artist") return ["profiles"];
+    if (activeFilter === "Group" || activeFilter === "Music Group") return ["groups_with_stats"];
     return ["groups_with_stats", "profiles"];
   }
 
   if (params.isOwner) {
     if (activeFilter === "All") return ["groups_with_stats", "profiles", "production_teams"];
-    if (activeFilter === "Musician") return ["groups_with_stats", "profiles"];
+    if (activeFilter === "Musician" || activeFilter === "Solo Artist") return ["profiles"];
+    if (activeFilter === "Group" || activeFilter === "Music Group") return ["groups_with_stats"];
     if (activeFilter === "Production Team") return ["production_teams"];
     return [];
   }
@@ -93,9 +96,8 @@ const getTables = (params: any): SearchTable[] => {
     ];
   }
 
-  if (activeFilter === "Musician" || activeFilter === "Music Group" || activeFilter === "Solo Artist") {
-    return ["groups_with_stats", "profiles"];
-  }
+  if (activeFilter === "Musician" || activeFilter === "Solo Artist") return ["profiles"];
+  if (activeFilter === "Group" || activeFilter === "Music Group") return ["groups_with_stats"];
   if (activeFilter === "Studio" || activeFilter === "Venue") return ["studios_with_stats"];
   if (activeFilter === "Gig") return ["gigs_with_stats"];
   if (activeFilter === "Production Team") return ["production_teams"];

@@ -18,6 +18,7 @@ import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client
 import * as Linking from "expo-linking";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getShareDestination, PENDING_SHARE_STORAGE_KEY } from "../src/utils/shareLinks";
+import { getPasswordRecoveryRoute } from "../src/utils/passwordRecovery";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -764,7 +765,7 @@ function RootContent() {
 
   // Resume shared content after sign-in or the required identity check.
   useEffect(() => {
-    if (loading || !session || segments.some((segment) => String(segment) === "shared")) return;
+    if (loading || !session || segments.some((segment) => ["shared", "password_recovery", "forget_password"].includes(String(segment)))) return;
     if (session && (!roleResolved || !identityChecked || identityRequired)) return;
     let active = true;
     void AsyncStorage.getItem(PENDING_SHARE_STORAGE_KEY).then((stored) => {
@@ -783,6 +784,7 @@ function RootContent() {
     if (session && !identityChecked) return;
 
     const segmentStrings = segments.map((segment) => String(segment));
+    if (segmentStrings.some(screen => ["password_recovery", "forget_password"].includes(screen))) return;
     const currentScreen =
       segmentStrings.length > 0
         ? segmentStrings[segmentStrings.length - 1]
@@ -824,6 +826,7 @@ function RootContent() {
     if (loading || !session || !roleResolved || !isFanUserRole(userRole)) return;
 
     const segmentStrings = segments.map((segment) => String(segment));
+    if (segmentStrings.some(screen => ["password_recovery", "forget_password"].includes(screen))) return;
     const currentScreen =
       segmentStrings.length > 0
         ? segmentStrings[segmentStrings.length - 1]
@@ -884,6 +887,11 @@ function RootContent() {
   const handleDeepLink = (url: string) => {
 
     try {
+      const recoveryRoute = getPasswordRecoveryRoute(url);
+      if (recoveryRoute) {
+        router.replace(recoveryRoute as any);
+        return;
+      }
       const { hostname, path, queryParams } = Linking.parse(url);
       const linkPath = String(path || hostname || "").replace(/^\/+/, "");
 
@@ -914,7 +922,7 @@ function RootContent() {
       }
 
       // Create a unique key for this deep link to prevent double processing
-      const linkKey = `${path}-${queryParams?.booking_id}-${queryParams?.status}-${queryParams?.type}-${queryParams?.verified}-${queryParams?.check_verification}`;
+      const linkKey = `${path}-${queryParams?.booking_id}-${queryParams?.status}-${queryParams?.type}-${queryParams?.verified}-${queryParams?.check_verification}-${queryParams?.session_id}`;
       if (processedDeepLinksRef.current.has(linkKey)) {
         return;
       }
@@ -924,19 +932,6 @@ function RootContent() {
       setTimeout(() => {
         processedDeepLinksRef.current.delete(linkKey);
       }, 5000);
-
-      // Handle password recovery deep links (from Supabase email)
-      if (queryParams?.type === "recovery" || path === "change_password") {
-        router.replace({
-          pathname: "/change_password",
-          params: {
-            type: "recovery",
-            access_token: queryParams?.access_token as string,
-            refresh_token: queryParams?.refresh_token as string,
-          },
-        });
-        return;
-      }
 
       // Handle email and identity verification return links.
       if (queryParams?.verified === "true") {

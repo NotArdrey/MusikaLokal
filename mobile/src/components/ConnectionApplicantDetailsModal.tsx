@@ -2,13 +2,13 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import {
   Modal,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import ProfileAvatar from "./ProfileAvatar";
 import InAppMediaViewer from "./InAppMediaViewer";
 import { typography } from "../theme/tokens";
@@ -151,7 +151,8 @@ export default function ConnectionApplicantDetailsModal({
   return (
     <>
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+      <SafeAreaProvider style={[styles.safeArea, { backgroundColor: colors.background }]}>
+      <SafeAreaView edges={["top", "right", "bottom", "left"]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
         <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
           <TouchableOpacity accessibilityLabel="Close applicant details" onPress={onClose} style={[styles.closeButton, { borderColor: colors.border }]}>
             <Ionicons name="arrow-back" size={22} color={colors.text} />
@@ -359,6 +360,7 @@ export default function ConnectionApplicantDetailsModal({
           </View>
         ) : null}
       </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
     <InAppMediaViewer
       visible={Boolean(portraitViewer)}

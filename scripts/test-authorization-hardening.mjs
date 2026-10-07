@@ -136,6 +136,6 @@ test("signup remains mobile-only and uses the guarded signup function", async ()
   assert.doesNotMatch(source, /SUPABASE_SERVICE_ROLE_KEY|auth\.admin\.createUser/);
   assert.match(signupFunction, /enforceRegistrationRateLimit/);
   assert.match(signupFunction, /allowedSignupRoles\.has/);
-  assert.match(signupFunction, /Didit verification is not approved yet/);
+    assert.match(signupFunction, /Didit verification is not approved(?: or pending review)? yet/);
   assert.match(signupFunction, /auth\.admin\.createUser/);
 });

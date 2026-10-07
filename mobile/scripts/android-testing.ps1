@@ -7,6 +7,10 @@ $repositoryRoot = Split-Path $mobileRoot -Parent
 $androidRoot = Join-Path $mobileRoot "android"
 $outputRoot = Join-Path $mobileRoot "build/testing"
 $signingRoot = Join-Path $mobileRoot ".testing-signing"
+$appConfig = (Get-Content -LiteralPath (Join-Path $mobileRoot "app.json") -Raw | ConvertFrom-Json).expo
+$packageId = $appConfig.android.package
+$versionName = $appConfig.version
+$versionCode = $appConfig.android.versionCode
 
 function Assert-Success([string]$Action) {
   if ($LASTEXITCODE -ne 0) { throw "$Action failed (exit $LASTEXITCODE)." }
@@ -119,7 +123,8 @@ try {
   $badging = & (Join-Path $sdk "build-tools/36.0.0/aapt.exe") dump badging $apk
   Assert-Success "APK metadata inspection"
   $packageLine = $badging | Where-Object { $_ -match '^package:' } | Select-Object -First 1
-  if ($packageLine -notmatch "name='com.anonymous.musikalokal' versionCode='1' versionName='1.0.0'") {
+  $expectedPackage = "name='$packageId' versionCode='$versionCode' versionName='$versionName'"
+  if ($packageLine -notmatch [regex]::Escape($expectedPackage)) {
     throw "Unexpected package ID or testing version."
   }
   $sdkLine = $badging | Where-Object { $_ -match '^sdkVersion:' } | Select-Object -First 1
@@ -129,7 +134,7 @@ try {
   $sha256 = (Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash.ToLowerInvariant()
   Set-Content -LiteralPath "$apk.sha256" -Value "$sha256  musikalokal-testing.apk" -Encoding ASCII
   $metadata = [ordered]@{
-    packageId = "com.anonymous.musikalokal"; versionName = "1.0.0"; versionCode = 1
+    packageId = $packageId; versionName = $versionName; versionCode = $versionCode
     sizeBytes = (Get-Item -LiteralPath $apk).Length; sha256 = $sha256; minSdk = $minSdk
     builtAt = [DateTime]::UtcNow.ToString("o"); certificateSha256 = $fingerprint; testing = $true
   }

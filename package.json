@@ -26,7 +26,14 @@
     "e2e:crud-full": "playwright test -c e2e/playwright.config.ts",
     "test:android-release": "node --test scripts/test-android-release.mjs",
     "test:apk-website": "node --test scripts/test-apk-website.mjs",
-    "test:share-links": "node --test scripts/test-share-links.mjs"
+    "test:share-links": "node --test scripts/test-share-links.mjs scripts/test-share-page.mjs",
+    "test:didit-attempts": "node --test scripts/test-didit-attempts.mjs scripts/test-didit-review-state.mjs",
+    "test:applicant-safe-areas": "node --test scripts/test-applicant-safe-areas.mjs",
+    "share:prepare": "node scripts/prepare-share-page.mjs",
+    "test:bug-fixes": "node --test scripts/test-search-bookmarks.mjs scripts/test-post-attachments.mjs scripts/test-listing-reviews.mjs scripts/test-gig-timeline.mjs scripts/test-profile-group-gigs.mjs scripts/test-activity-order.mjs scripts/test-report-notifications.mjs scripts/test-studio-payment-eligibility.mjs scripts/test-gig-feature-preferences.mjs scripts/test-station-queue.mjs scripts/test-wallet-payment-history.mjs",
+    "test:wallet-payments": "node --test scripts/test-wallet-payment-history.mjs",
+    "test:password-recovery": "node --test scripts/test-password-recovery.mjs scripts/test-password-recovery-page.mjs",
+    "recovery:prepare": "node scripts/prepare-recovery-page.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",

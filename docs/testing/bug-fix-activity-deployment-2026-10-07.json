@@ -1,0 +1,83 @@
+{
+  "verifiedAt": "2026-10-07T04:24:25.186Z",
+  "projectRef": "aefldxegsvzecshlayza",
+  "deployment": {
+    "function": "manage-bookings",
+    "previousVersion": 106,
+    "version": 107,
+    "status": "ACTIVE",
+    "verifyJwt": false,
+    "sourceMatches": true,
+    "sharedRuntimeMatches": true,
+    "unrelatedFunctionVersionsUnchanged": true
+  },
+  "migration": {
+    "version": "20261007140000",
+    "name": "persist_business_activity_order",
+    "businessRowsUnchanged": true,
+    "rlsAndPoliciesUnchanged": true,
+    "existingTriggersPreserved": true,
+    "activityTablesPublished": true
+  },
+  "reviewMigration": {
+    "version": "20261007143000",
+    "name": "record_each_review_activity",
+    "allReviewsStampParent": true,
+    "existingBusinessAndActivityDataUnchanged": true
+  },
+  "database": [
+    {
+      "entity": "studio_bookings",
+      "rows": 14,
+      "stamped": 14
+    },
+    {
+      "entity": "gig_applications",
+      "rows": 5,
+      "stamped": 5
+    },
+    {
+      "entity": "booking_requests",
+      "rows": 14,
+      "stamped": 14
+    }
+  ],
+  "liveTriggerChecks": {
+    "paymentAction": true,
+    "aiMetadataIgnored": true,
+    "suppliedTimesIgnored": true,
+    "retriesIgnored": true,
+    "subsequentReviewsAdvanceActivity": true,
+    "transactionRolledBack": true
+  },
+  "http": [
+    {
+      "name": "missing authorization",
+      "status": 401
+    },
+    {
+      "name": "invalid token",
+      "status": 401
+    },
+    {
+      "name": "anonymous token",
+      "status": 401
+    },
+    {
+      "name": "private timeline missing authorization",
+      "status": 401
+    }
+  ],
+  "localAcceptance": {
+    "newActivityTests": 15,
+    "existingRegressionTests": 67,
+    "mobileTypecheck": true,
+    "webTypecheck": true,
+    "targetedLint": true
+  },
+  "limitations": [
+    "Client changes require a later release.",
+    "Missing historical action timestamps cannot be reconstructed from generic updated_at.",
+    "Realtime resume and reconnect were tested with controlled client events; no physical Android device was connected."
+  ]
+}

@@ -46,6 +46,7 @@ const tableScopes: Record<string, InvalidateScope[]> = {
   production_team_roster: ["bookings", "details", "home", "search"],
   booking_holds: ["details"],
   studio_bookings: ["bookings", "details", "wallet"],
+  studio_payment_events: ["wallet"],
   studio_booking_slots: ["bookings", "details"],
   studio_date_overrides: ["details", "home", "search"],
   studio_operating_hours: ["details", "home", "search"],
@@ -113,13 +114,19 @@ export const useGlobalRealtimeInvalidation = (
 
   useEffect(() => {
     const appStateSub = AppState.addEventListener("change", (nextState) => {
+      const resumed = appStateRef.current !== "active" && nextState === "active";
       appStateRef.current = nextState;
+      if (resumed && userId) {
+        invalidateScope(queryClient, "bookings", userId);
+        invalidateScope(queryClient, "notifications", userId);
+        invalidateScope(queryClient, "wallet", userId);
+      }
     });
 
     return () => {
       appStateSub.remove();
     };
-  }, []);
+  }, [queryClient, userId]);
 
   useEffect(() => {
     if (!userId) {
@@ -180,7 +187,14 @@ export const useGlobalRealtimeInvalidation = (
         );
       });
 
-      channel.subscribe();
+      channel.subscribe((status) => {
+        // A rejoined channel cannot replay actions saved while disconnected.
+        if (!disposed && status === "SUBSCRIBED") {
+          invalidateScope(queryClient, "bookings", userId);
+          invalidateScope(queryClient, "notifications", userId);
+          invalidateScope(queryClient, "wallet", userId);
+        }
+      });
     };
 
     void connect();

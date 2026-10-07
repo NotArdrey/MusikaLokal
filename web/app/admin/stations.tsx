@@ -1,6 +1,6 @@
 import useAdminLayout from '../../src/hooks/useAdminLayout';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../../src/components/admin/AdminPageHeader';
 import LoadingState from '../../src/components/LoadingState';
@@ -11,6 +11,9 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { getEdgeFunctionErrorMessage } from '../../src/utils/edgeFunctionErrors';
+import {createStationSelection, moveQueueItem, moveStationPlaylist, shuffleStationQueue, toggleStationPlaylist, type StationQueueSelection} from '../../src/utils/stationQueueEditor';
+import {getStationQueueEntries} from '../../src/utils/stationQueue';
+import {getStationLiveTimelineState} from '../../src/utils/radioTimeline';
 
 type StationFilter = 'all' | 'live' | 'offline';
 type StationRowAction = 'delete';
@@ -87,6 +90,11 @@ const getStationQueuePlaylists = (station: any, playlistOptions: any[]) => {
 };
 
 const getStationQueuePreview = (station: any, playlistOptions: any[]) => {
+  if (Array.isArray(station?.playback_queue)) {
+    const entries = getStationQueueEntries(station);
+    const currentIndex = getStationLiveTimelineState(station).queueIndex;
+    return {current: entries[currentIndex]?.item || null, next: entries[(currentIndex + 1) % entries.length]?.item || null, loops: currentIndex + 1 >= entries.length};
+  }
   const queuePlaylists = getStationQueuePlaylists(station, playlistOptions);
 
   if (queuePlaylists.length === 0) {
@@ -141,8 +149,10 @@ export default function AdminStationsPage() {
   const [stationDescription, setStationDescription] = useState('');
   const [stationGenre, setStationGenre] = useState('');
   const [stationIsLive, setStationIsLive] = useState(true);
-  const [selectedPlaylistIds, setSelectedPlaylistIds] = useState<string[]>([]);
+  const [queueSelection, setQueueSelection] = useState<StationQueueSelection>({playlistIds: [], trackIds: []});
+  const {playlistIds: selectedPlaylistIds, trackIds: selectedTrackIds} = queueSelection;
   const [playlistSearch, setPlaylistSearch] = useState('');
+  const savingRef = useRef(false);
   const [deleteTargetStation, setDeleteTargetStation] = useState<{ id: string; name: string } | null>(null);
 
   const invokePlaylistAction = useCallback(async (body: Record<string, unknown>) => {
@@ -294,7 +304,7 @@ export default function AdminStationsPage() {
 
   const hasStations = stations.length > 0;
   const hasEligibleStationSources = manualStationSources.length > 0;
-  const isStationEditorReady = selectedPlaylistIds.length > 0;
+  const isStationEditorReady = selectedPlaylistIds.length > 0 && selectedTrackIds.length > 0;
   const addStationDisabled = loadingData;
   const autoCreateDisabled = loadingData || !!dataError || busyKey === 'auto-create';
 
@@ -307,9 +317,9 @@ export default function AdminStationsPage() {
     setStationDescription(source?.station?.description || '');
     setStationGenre(source?.station?.genre || source?.genre || '');
     setStationIsLive(source?.station?.is_active !== false);
-    setSelectedPlaylistIds(getDefaultSelectedPlaylistIds(source));
+    setQueueSelection(createStationSelection(getDefaultSelectedPlaylistIds(source), stationPlaylistOptions, source?.station?.queue_item_ids));
     setPlaylistSearch('');
-  }, []);
+  }, [stationPlaylistOptions]);
 
   const openAddStation = useCallback(() => {
     if (loadingData) {
@@ -333,26 +343,44 @@ export default function AdminStationsPage() {
 
   const closeEditor = useCallback(() => {
     setEditingSource(null);
-    setSelectedPlaylistIds([]);
+    setQueueSelection({playlistIds: [], trackIds: []});
     setPlaylistSearch('');
   }, []);
 
   const togglePlaylist = useCallback((playlistId: string) => {
-    setSelectedPlaylistIds((current) => (
-      current.includes(playlistId)
-        ? current.filter((id) => id !== playlistId)
-        : [...current, playlistId]
-    ));
+    const playlist = stationPlaylistOptions.find((option: any) => option.id === playlistId);
+    if (playlist) setQueueSelection(current => toggleStationPlaylist(current, playlist));
+  }, [stationPlaylistOptions]);
+
+  const toggleTrack = useCallback((trackId: string) => {
+    setQueueSelection(current => ({...current, trackIds: current.trackIds.includes(trackId)
+      ? current.trackIds.filter(id => id !== trackId) : [...current.trackIds, trackId]}));
   }, []);
 
+  const movePlaylist = useCallback((playlistId: string, direction: number) => {
+    setQueueSelection(current => moveStationPlaylist(current, stationPlaylistOptions, playlistId, direction));
+  }, [stationPlaylistOptions]);
+
+  const moveTrack = useCallback((trackId: string, direction: number) => {
+    setQueueSelection(current => ({...current, trackIds: moveQueueItem(current.trackIds, trackId, direction)}));
+  }, []);
+
+  const shuffleQueue = useCallback(() => {
+    setQueueSelection(current => ({...current, trackIds: shuffleStationQueue(current.trackIds)}));
+  }, []);
+
+  const editorTracksById = useMemo(() => new Map<string, any>(stationPlaylistOptions.flatMap((playlist: any) =>
+    (playlist.items || []).map((item: any) => [item.id, {...item, playlistTitle: playlist.title}]))), [stationPlaylistOptions]);
+
   const saveStation = useCallback(async () => {
-    if (!editingSource?.id) return;
-    if (selectedPlaylistIds.length === 0) {
-      Alert.alert('Select playlists', 'Choose at least one playlist for this station.');
+    if (!editingSource?.id || savingRef.current) return;
+    if (selectedPlaylistIds.length === 0 || selectedTrackIds.length === 0) {
+      Alert.alert('Select tracks', 'Choose at least one playable track for this station.');
       return;
     }
 
     const sourceKey = editingSource.key || `${editingSource.kind}:${editingSource.id}`;
+    savingRef.current = true;
     setBusyKey(sourceKey);
     try {
       await invokePlaylistAction({
@@ -365,6 +393,7 @@ export default function AdminStationsPage() {
         cover_image_url: editingSource.cover_image_url || null,
         rotation_interval_minutes: 15,
         playlist_ids: selectedPlaylistIds,
+        selected_track_ids: selectedTrackIds,
         is_active: stationIsLive,
       });
 
@@ -374,6 +403,7 @@ export default function AdminStationsPage() {
       console.error('Admin station save failed:', error);
       Alert.alert('Unable to save station', error instanceof Error ? error.message : 'Please try again.');
     } finally {
+      savingRef.current = false;
       setBusyKey(null);
     }
   }, [
@@ -382,6 +412,7 @@ export default function AdminStationsPage() {
     fetchData,
     invokePlaylistAction,
     selectedPlaylistIds,
+    selectedTrackIds,
     stationDescription,
     stationGenre,
     stationIsLive,
@@ -1000,24 +1031,32 @@ export default function AdminStationsPage() {
                 filteredEditorPlaylistOptions.map((playlist: any) => {
                   const selected = selectedPlaylistIds.includes(playlist.id);
                   return (
-                    <TouchableOpacity
-                      testID={`admin-station-playlist-${playlist.id}`}
-                      accessibilityLabel={`admin-station-playlist-${playlist.id}`}
-                      key={playlist.id}
-                      activeOpacity={1}
-                      onPress={() => togglePlaylist(playlist.id)}
-                      style={[styles.playlistOption, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '14' : 'transparent' }]}
-                    >
-                      <Ionicons name={selected ? 'checkbox' : 'square-outline'} size={20} color={selected ? colors.primary : colors.textSecondary} />
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={{ color: colors.text, fontSize: 13, fontFamily: 'Poppins_700Bold' }} numberOfLines={1}>
-                          {playlist.title || 'Untitled playlist'}
-                        </Text>
-                        <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
-                          {playlist.source_name || 'Unknown source'} - {playlist.track_count || 0} track{playlist.track_count === 1 ? '' : 's'}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
+                    <View key={playlist.id}>
+                      <TouchableOpacity
+                        testID={'admin-station-playlist-' + playlist.id}
+                        accessibilityLabel={'admin-station-playlist-' + playlist.id}
+                        accessibilityRole="checkbox" accessibilityState={{checked: selected}}
+                        activeOpacity={1} onPress={() => togglePlaylist(playlist.id)}
+                        style={[styles.playlistOption, {borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '14' : 'transparent'}]}
+                      >
+                        <Ionicons name={selected ? 'checkbox' : 'square-outline'} size={20} color={selected ? colors.primary : colors.textSecondary} />
+                        <View style={{flex: 1, minWidth: 0}}>
+                          <Text style={{color: colors.text, fontSize: 13, fontFamily: 'Poppins_700Bold'}}>{playlist.title || 'Untitled playlist'}</Text>
+                          <Text style={{color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular'}}>
+                            {playlist.source_name || 'Unknown source'} - {(playlist.items || []).length} playable tracks
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                      {selected && (playlist.items || []).map((item: any) => (
+                        <TouchableOpacity key={item.id} testID={'admin-station-track-' + item.id}
+                          accessibilityLabel={'Include ' + item.title} accessibilityRole="checkbox"
+                          accessibilityState={{checked: selectedTrackIds.includes(item.id)}}
+                          onPress={() => toggleTrack(item.id)} style={[styles.playlistOption, {marginLeft: 16, borderColor: colors.border}]}>
+                          <Ionicons name={selectedTrackIds.includes(item.id) ? 'checkbox' : 'square-outline'} size={18} color={colors.primary} />
+                          <Text style={{flex: 1, minWidth: 0, color: colors.text}}>{item.title}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
                   );
                 })
               ) : (
@@ -1039,6 +1078,46 @@ export default function AdminStationsPage() {
               )}
             </ScrollView>
 
+            <Text style={[styles.fieldLabel, {color: colors.text, marginTop: 14}]}>Playlist order</Text>
+            {selectedPlaylistIds.map((id, index) => (
+              <View key={id} style={[styles.playlistOption, {borderColor: colors.border}]}>
+                <Text style={{flex: 1, minWidth: 0, color: colors.text}}>{index + 1}. {stationPlaylistOptions.find((playlist: any) => playlist.id === id)?.title || 'Playlist'}</Text>
+                {[-1, 1].map(direction => (
+                  <TouchableOpacity key={direction} testID={'admin-station-playlist-' + id + '-' + (direction < 0 ? 'up' : 'down')}
+                    accessibilityLabel={'Move playlist ' + (direction < 0 ? 'up' : 'down')}
+                    disabled={editorBusy || index + direction < 0 || index + direction >= selectedPlaylistIds.length}
+                    onPress={() => movePlaylist(id, direction)} style={{padding: 10, opacity: index + direction < 0 || index + direction >= selectedPlaylistIds.length ? 0.3 : 1}}>
+                    <Ionicons name={direction < 0 ? 'arrow-up' : 'arrow-down'} size={18} color={colors.primary} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ))}
+            <View style={[styles.headerActions, {justifyContent: 'space-between', marginTop: 14, alignItems: 'center'}]}>
+              <Text style={[styles.fieldLabel, {color: colors.text}]}>Track queue ({selectedTrackIds.length})</Text>
+              <TouchableOpacity testID="admin-station-shuffle-queue" accessibilityLabel="Shuffle queue"
+                disabled={editorBusy || selectedTrackIds.length < 2} onPress={shuffleQueue}
+                style={[styles.secondaryBtn, {borderColor: colors.border}]}>
+                <Ionicons name="shuffle" size={18} color={colors.primary} />
+                <Text style={{color: colors.primary}}>Shuffle queue</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={{color: colors.textSecondary, fontSize: 12, marginBottom: 8}}>Save to start this order for every listener.</Text>
+            {selectedTrackIds.map((id, index) => (
+              <View key={id} testID={'admin-station-queue-' + id} style={[styles.playlistOption, {borderColor: colors.border}]}>
+                <View style={{flex: 1, minWidth: 0}}>
+                  <Text style={{color: colors.text}}>{index + 1}. {editorTracksById.get(id)?.title || 'Track'}</Text>
+                  <Text style={{color: colors.textSecondary, fontSize: 11}}>{editorTracksById.get(id)?.playlistTitle}</Text>
+                </View>
+                {[-1, 1].map(direction => (
+                  <TouchableOpacity key={direction} testID={'admin-station-track-' + id + '-' + (direction < 0 ? 'up' : 'down')}
+                    accessibilityLabel={'Move track ' + (direction < 0 ? 'up' : 'down')}
+                    disabled={editorBusy || index + direction < 0 || index + direction >= selectedTrackIds.length}
+                    onPress={() => moveTrack(id, direction)} style={{padding: 10, opacity: index + direction < 0 || index + direction >= selectedTrackIds.length ? 0.3 : 1}}>
+                    <Ionicons name={direction < 0 ? 'arrow-up' : 'arrow-down'} size={18} color={colors.primary} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ))}
             </ScrollView>
             <View style={styles.modalActions}>
               <TouchableOpacity

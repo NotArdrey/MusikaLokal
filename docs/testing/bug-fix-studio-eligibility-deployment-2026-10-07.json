@@ -1,0 +1,32 @@
+{
+  "projectRef": "aefldxegsvzecshlayza",
+  "verifiedAt": "2026-10-07T04:47:59.255Z",
+  "function": {
+    "slug": "manage-bookings",
+    "version": 108,
+    "verifyJwt": false
+  },
+  "migrations": [
+    {
+      "version": "20261007153000",
+      "name": "enforce_studio_payment_eligibility"
+    },
+    {
+      "version": "20261007153500",
+      "name": "avoid_studio_eligibility_fk_deadlocks"
+    }
+  ],
+  "sourceMatches": true,
+  "existingSharedRuntimeUnchanged": true,
+  "unrelatedFunctionsUnchanged": true,
+  "multiDayBatchAtomic": true,
+  "downpaymentBlocksOtherStudios": true,
+  "settlementRestoresEligibility": true,
+  "cancellationRestoresEligibility": true,
+  "clientCannotSupplyServerPricedRows": true,
+  "concurrentRpcBlockedAfterLockWaitMs": 489,
+  "concurrentDirectInsertBlockedAfterLockWaitMs": 429,
+  "onlyOneConcurrentReservationSaved": true,
+  "slotFailureRollsBackBatch": true,
+  "isolatedFixturesRemoved": true
+}

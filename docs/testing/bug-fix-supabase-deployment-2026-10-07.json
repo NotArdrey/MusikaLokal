@@ -1,0 +1,159 @@
+{
+  "verifiedAt": "2026-10-07T04:01:05.633Z",
+  "projectRef": "aefldxegsvzecshlayza",
+  "functions": [
+    {
+      "slug": "home-feed",
+      "previousVersion": 109,
+      "version": 111,
+      "status": "ACTIVE",
+      "verifyJwt": false
+    },
+    {
+      "slug": "manage-details",
+      "previousVersion": 97,
+      "version": 99,
+      "status": "ACTIVE",
+      "verifyJwt": false
+    },
+    {
+      "slug": "search-content",
+      "previousVersion": 92,
+      "version": 94,
+      "status": "ACTIVE",
+      "verifyJwt": false
+    },
+    {
+      "slug": "manage-bookings",
+      "previousVersion": 104,
+      "version": 106,
+      "status": "ACTIVE",
+      "verifyJwt": false
+    }
+  ],
+  "searchChecks": [
+    {
+      "filter": "Musician",
+      "status": 200,
+      "count": 10,
+      "types": [
+        "Artist"
+      ]
+    },
+    {
+      "filter": "Group",
+      "status": 200,
+      "count": 15,
+      "types": [
+        "Group"
+      ]
+    },
+    {
+      "filter": "All",
+      "status": 200,
+      "count": 20,
+      "types": [
+        "Group",
+        "Artist"
+      ]
+    }
+  ],
+  "home": {
+    "status": 200,
+    "featuredCount": 10,
+    "discoverCount": 0
+  },
+  "privateTimelineRejectsUnauthenticated": [
+    {
+      "suppliedAnonymousKey": false,
+      "status": 401
+    },
+    {
+      "suppliedAnonymousKey": true,
+      "status": 401
+    }
+  ],
+  "details": [
+    {
+      "includeReviews": true,
+      "status": 200,
+      "reviewsCount": 0
+    },
+    {
+      "includeReviews": false,
+      "status": 200,
+      "reviewsCount": 0
+    }
+  ],
+  "migration": [
+    {
+      "version": "20261007120000",
+      "name": "preserve_completed_gig_timeline_consent"
+    }
+  ],
+  "sourceVerification": {
+    "entrypoints": [
+      {
+        "slug": "home-feed",
+        "matchesLocalSource": true,
+        "sha256": "f9d6464a627d00e6dbe8988ea0fec5b1f6afe42bb57a7a743f784a35d9884c1a"
+      },
+      {
+        "slug": "manage-details",
+        "matchesLocalSource": true,
+        "sha256": "e1ba6b0b40ae3d210137b7e3151dad621e23d94c0561a979b5e85daf0f22d101"
+      },
+      {
+        "slug": "search-content",
+        "matchesLocalSource": true,
+        "sha256": "765e04aef5f92d4ff00f3c058ce8d33f40825525cbcecca3e5718a544f375a97"
+      },
+      {
+        "slug": "manage-bookings",
+        "matchesLocalSource": true,
+        "sha256": "ece3057663450c04bd303f42b8191cb83a81d5639466cc7c03b56f33cae01d43"
+      }
+    ],
+    "dependencies": [
+      {
+        "name": "coreActionEmail.ts",
+        "matchesRuntime": true,
+        "matchesTypeScriptSource": true
+      },
+      {
+        "name": "gigApplicationAudience.ts",
+        "matchesRuntime": true,
+        "matchesTypeScriptSource": false
+      },
+      {
+        "name": "gmailEmail.ts",
+        "matchesRuntime": true,
+        "matchesTypeScriptSource": true
+      },
+      {
+        "name": "notificationRoutes.ts",
+        "matchesRuntime": true,
+        "matchesTypeScriptSource": true
+      }
+    ],
+    "allPreparedDeploymentFilesMatch": true,
+    "changedFunctions": [
+      "home-feed",
+      "search-content",
+      "manage-details",
+      "manage-bookings"
+    ]
+  },
+  "databaseVerification": {
+    "version": "20261007120000",
+    "name": "preserve_completed_gig_timeline_consent",
+    "rlsEnabled": true,
+    "migrationCopiesMatch": true,
+    "migrationSha256": "2a91777b0bd72a967bdda5b5296218eea5d00c73aa97d20ab61f4912b89a9fbc"
+  },
+  "limitations": {
+    "clientBundleBuilt": false,
+    "authenticatedParticipantLiveCheck": false,
+    "androidDeviceChecksPending": true
+  }
+}

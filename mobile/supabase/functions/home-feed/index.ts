@@ -970,7 +970,7 @@ const fetchCandidates = async (supabaseClient: any, includePosts = false): Promi
             id: item.id,
             type: "Post",
             name: author?.full_name || "Post",
-            image: imageValues[0] || author?.avatar_url || null,
+            image: imageValues[0] || null,
             images: imageValues,
             rating: 0,
             review_count: 0,

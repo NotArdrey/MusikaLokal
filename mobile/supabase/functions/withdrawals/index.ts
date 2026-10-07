@@ -3,6 +3,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+import { mergeWalletPaymentHistory } from '../_shared/studioPaymentHistory.ts';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -157,6 +159,7 @@ serve(async (req: Request) => {
 
       const [
         transactionsResult,
+        paymentEventsResult,
         unpaidBookingsResult,
         payoutMethodsResult,
         withdrawalsResult,
@@ -169,6 +172,7 @@ serve(async (req: Request) => {
               .order('created_at', { ascending: false })
               .limit(80)
           : Promise.resolve({ data: [], error: null }),
+        supabaseAdmin.rpc('get_online_studio_payment_events', { p_user_id: user.id }),
         supabaseAdmin
           .from('studio_bookings')
           .select('*, studio:studios(id, name, address, hourly_rate, rate)')
@@ -191,6 +195,7 @@ serve(async (req: Request) => {
       ]);
 
       if (transactionsResult.error) throw transactionsResult.error;
+      if (paymentEventsResult.error) throw paymentEventsResult.error;
       if (unpaidBookingsResult.error) throw unpaidBookingsResult.error;
       if (payoutMethodsResult.error) throw payoutMethodsResult.error;
       if (withdrawalsResult.error) throw withdrawalsResult.error;
@@ -204,7 +209,7 @@ serve(async (req: Request) => {
         role: profile?.role || null,
         wallet,
         balance: wallet?.balance || 0,
-        transactions: walletActivityTransactions,
+        transactions: mergeWalletPaymentHistory(walletActivityTransactions, paymentEventsResult.data || []),
         unpaidBookings,
         payoutMethods: payoutMethodsResult.data || [],
         withdrawals: withdrawalsResult.data || [],

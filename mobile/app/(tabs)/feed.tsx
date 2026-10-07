@@ -26,6 +26,7 @@ import * as ImagePicker from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase, supabaseAnonKey, supabaseUrl } from "../../lib/supabase";
 import CachedImage from "../../src/components/CachedImage";
+import ProfileAvatar from "../../src/components/ProfileAvatar";
 import BottomModal from "../../src/components/BottomModal";
 import { FeaturedGigPerformers } from "../../src/components/FeaturedGigPerformers";
 import { FeedList } from "../../src/components/feed/FeedList";
@@ -60,6 +61,7 @@ import { emitToast } from "../../src/events/toastBus";
 import { useFeedQuery } from "../../src/data/hooks";
 import { useGigApplicantCounts } from "../../src/hooks/useGigApplicantCounts";
 import { useGigFeaturedPerformers } from "../../src/hooks/useGigFeaturedPerformers";
+import { useComposerProfile } from "../../src/hooks/useComposerProfile";
 import { useTheme } from "../../src/context/ThemeContext";
 import { resolveRadioMediaUrl } from "../../src/audio/radioTrackPlayer";
 import { buildPostShareMessage } from "../../src/utils/postShare";
@@ -86,6 +88,7 @@ import { cleanupRemovedStorageObjects } from "../../src/utils/storageCleanup";
 import { generateNativeVideoFrame } from "../../src/utils/videoFrames";
 import { runAfterUIIdle } from "../../src/utils/idleTask";
 import { getGigSlotCardBadges } from "../../src/utils/gigSlotRequirements";
+import { normalizePostMedia } from "../../src/utils/postMedia";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
@@ -484,6 +487,7 @@ const getDistinctFeedCardImages = (
 };
 
 const ensureFeedCardImage = <T extends { id?: string | null; type?: string; image?: string | null; images?: string[] }>(item: T): T => {
+  if (String(item.type || "").toLowerCase() === "post") return normalizeFeedPost(item);
   const type = item.type || "Group";
   const validImages = Array.isArray(item.images)
     ? item.images.filter((image) => typeof image === "string" && image.trim().length > 0)
@@ -1061,16 +1065,14 @@ const normalizeExistingPostMediaForComposer = (post: any): PostComposerMedia[] =
 const normalizeFeedPost = (post: any) => {
   const author = post?.author || {};
   const visibility = post?.visibility === "followers_only" ? "followers" : post?.visibility;
-  const media = Array.isArray(post?.media)
-    ? post.media.map((item: any) => ({
-        ...item,
-        url: resolveFeedMediaUrl(item?.url || item?.storage_path || item?.public_url),
-        thumbnail_url: resolveFeedMediaUrl(item?.thumbnail_url || item?.thumbnail_path || item?.url || item?.storage_path || item?.public_url),
-      }))
-    : [];
+  const media = normalizePostMedia(post, resolveFeedMediaUrl);
+  const images = media.map((item) => item.thumbnail_url || item.url);
 
   return {
     ...post,
+    type: "Post",
+    image: images[0] || null,
+    images,
     body: post?.body ?? post?.content ?? "",
     author_name: post?.author_name ?? author?.full_name ?? "User",
     author_avatar: post?.author_avatar ?? author?.avatar_url ?? "",
@@ -1768,6 +1770,7 @@ const getFeedMediaUrls = (item: any) => {
         .filter((value: string) => value.length > 0)
     : [];
   if (mediaUrls.length > 0) return mediaUrls;
+  if (String(item?.type || "").toLowerCase() === "post" || item?.post_type != null) return [];
 
   const imageUrls = Array.isArray(item?.images)
     ? item.images
@@ -3549,6 +3552,7 @@ export default function FeedScreen() {
   const { session, userId, isGuest, loading: authLoading, roleResolved, userRole } = useAuth();
   const resolvedUserId = session?.user?.id ?? userId ?? null;
   const canUseSocialActions = Boolean(session?.access_token && resolvedUserId && !isGuest);
+  const composerProfile = useComposerProfile(canUseSocialActions ? resolvedUserId : null);
   const params = useLocalSearchParams<{
     reopenListingId?: string; returnToProfileId?: string;
     postId?: string; listingId?: string; listingType?: string;
@@ -5931,13 +5935,17 @@ export default function FeedScreen() {
     }, 320);
   }, [clearComposerFocusTimer]);
 
-  const handleComposerClose = useCallback(() => {
-    if (creating || mediaBusy) return;
+  const dismissComposer = useCallback(() => {
     clearComposerFocusTimer();
     Keyboard.dismiss();
     setShowCreate(false);
     resetComposer();
-  }, [clearComposerFocusTimer, creating, mediaBusy, resetComposer]);
+  }, [clearComposerFocusTimer, resetComposer]);
+
+  const handleComposerClose = useCallback(() => {
+    if (creating || mediaBusy) return;
+    dismissComposer();
+  }, [creating, dismissComposer, mediaBusy]);
 
   useEffect(() => clearComposerFocusTimer, [clearComposerFocusTimer]);
 
@@ -6232,7 +6240,7 @@ export default function FeedScreen() {
           title: editingPost ? "Post updated" : "Posted!",
           message: editingPost ? "Your changes are live." : "Your post is live.",
         });
-        handleComposerClose();
+        dismissComposer();
         void ensureFeedFresh({ force: true, reason: "post-created" });
       } else if (data?.blocked || data?.pending_review || data?.status === "blocked" || data?.status === "pending_review") {
         setAlert({
@@ -7261,9 +7269,7 @@ export default function FeedScreen() {
             testID="mobile-feed-create-post-button"
             style={[styles.createPostPrompt, { backgroundColor: cardBg }]}
           >
-            <View style={[styles.composerAvatar, { backgroundColor: colors.primary + "30" }]}>
-              <Ionicons name="person" size={16} color={colors.primary} />
-            </View>
+            <ProfileAvatar uri={composerProfile?.avatar_url} size={32} backgroundColor={colors.primary + "30"} iconColor={colors.primary} />
             <View style={[styles.createPostInput, { backgroundColor: isDark ? "#374151" : "#F3F4F6" }]}>
               <Text style={[styles.createPostInputText, { color: colors.textSecondary }]} numberOfLines={1}>
                 {"Share something with the scene..."}
@@ -7830,9 +7836,7 @@ export default function FeedScreen() {
           </View>
 
           <View style={styles.composerAuthorRow}>
-            <View style={[styles.composerAvatar, { backgroundColor: colors.primary + "30" }]}>
-              <Ionicons name="person" size={16} color={colors.primary} />
-            </View>
+            <ProfileAvatar uri={composerProfile?.avatar_url} size={32} backgroundColor={colors.primary + "30"} iconColor={colors.primary} />
             <View style={styles.composerAuthorText}>
               <Text style={[styles.composerAuthorName, { color: colors.text }]} numberOfLines={1}>
                 You

@@ -17,9 +17,9 @@ import { PH_MUSIC_GROUP_TYPES } from "../constants/groupTypes";
 import { useAuth } from "../context/AuthContext";
 import { emitToast } from "../events/toastBus";
 import { useTheme } from "../context/ThemeContext";
-import { supabase } from "../../lib/supabase";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
-import { addFavoriteChangedListener, emitFavoriteChanged } from "../utils/favoriteEvents";
+import { getFavoriteTargetType } from "../utils/favoriteEvents";
+import { useListingFavorite } from "../hooks/useListingFavorite";
 import { isFanUserRole } from "../utils/roleRouting";
 import { buildListingShareUrl } from "../utils/shareLinks";
 import { getSpecificSlotRequirementLines } from "../utils/gigSlotRequirements";
@@ -28,17 +28,6 @@ import PagerView from "./PagerView";
 import { palette, radius, typography } from "../theme/tokens";
 
 const debugLog = (..._args: unknown[]) => { };
-
-const getFavoriteTargetType = (
-  listingType?: string,
-): "group" | "studio" | "gig" | "profile" | null => {
-  const normalized = (listingType || "").toLowerCase();
-  if (normalized === "group") return "group";
-  if (normalized === "artist" || normalized === "musician") return "profile";
-  if (normalized === "studio" || normalized === "venue") return "studio";
-  if (normalized === "gig") return "gig";
-  return null;
-};
 
 interface ListingCardProps {
   item: any;
@@ -265,8 +254,6 @@ const ListingCard: React.FC<ListingCardProps> = ({
   const { colors, isDark } = useTheme();
   const { userRole, userId } = useAuth(); // To avoid showing warning to owners
   const isFan = isFanUserRole(userRole);
-  const [isBookmarked, setIsBookmarked] = useState(false);
-  const [bookmarkBusy, setBookmarkBusy] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
   const isFeedVariant = variant === "feed";
   const normalizedListingType = String(item?.type || "").trim().toLowerCase();
@@ -287,32 +274,10 @@ const ListingCard: React.FC<ListingCardProps> = ({
     [item.type, userRole],
   );
 
-  const favoriteTargetType = useMemo(
-    () => getFavoriteTargetType(item?.type),
-    [item?.type],
-  );
+  const favoriteTargetType = getFavoriteTargetType(item?.type);
 
-  useEffect(() => {
-    if (typeof item?.is_favorited === "boolean") {
-      setIsBookmarked(item.is_favorited);
-    }
-  }, [item?.id, item?.is_favorited]);
-
-  useEffect(() => {
-    if (!favoriteTargetType || !item?.id) return;
-
-    const subscription = addFavoriteChangedListener((payload) => {
-      if (payload.targetType !== favoriteTargetType || payload.id !== item.id) {
-        return;
-      }
-
-      setIsBookmarked(payload.isFavorited);
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, [favoriteTargetType, item?.id]);
+  const { isFavorited: isBookmarked, busy: bookmarkBusy, toggle: toggleBookmark } =
+    useListingFavorite(favoriteTargetType, item?.id, userId);
 
   // Group Warning Logic
   const showGroupWarning = useMemo(
@@ -582,42 +547,6 @@ const ListingCard: React.FC<ListingCardProps> = ({
     }
   };
 
-  useEffect(() => {
-    let isMounted = true;
-
-    const syncBookmarkState = async () => {
-      if (!favoriteTargetType || !item?.id || !userId) {
-        if (isMounted) {
-          setIsBookmarked(false);
-        }
-        return;
-      }
-
-      try {
-        const { count, error } = await supabase
-          .from("favorites")
-          .select("id", { count: "exact", head: true })
-          .eq(`${favoriteTargetType}_id`, item.id)
-          .eq("user_id", userId);
-
-        if (error) throw error;
-        if (isMounted) {
-          setIsBookmarked((count || 0) > 0);
-        }
-      } catch {
-        if (isMounted) {
-          setIsBookmarked(false);
-        }
-      }
-    };
-
-    void syncBookmarkState();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [favoriteTargetType, item?.id, userId]);
-
   const handleBookmarkAction = useCallback(
     async (e: any) => {
       e?.stopPropagation?.();
@@ -630,7 +559,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
         emitToast({
           type: "info",
           title: "Bookmark unavailable",
-          message: "Bookmarking is currently available for artists, groups, studios, and gigs.",
+          message: "Bookmarking is currently available for artists, groups, studios, gigs, and production teams.",
         });
         return;
       }
@@ -644,53 +573,17 @@ const ListingCard: React.FC<ListingCardProps> = ({
         return;
       }
 
-      const previousState = isBookmarked;
-      const optimisticState = !previousState;
-
-      setBookmarkBusy(true);
-      setIsBookmarked(optimisticState);
-
       try {
-        const { data, error } = await supabase.functions.invoke("manage-details", {
-          body: {
-            action: "toggle_favorite",
-            type: favoriteTargetType,
-            id: item.id,
-            userId,
-          },
-        });
-
-        if (error) throw error;
-
-        const resolvedFavorited =
-          typeof data?.is_favorited === "boolean"
-            ? data.is_favorited
-            : optimisticState;
-
-        setIsBookmarked(resolvedFavorited);
-        emitFavoriteChanged({
-          id: item.id,
-          isFavorited: resolvedFavorited,
-          targetType: favoriteTargetType,
-          favoriteCount: typeof data?.favorites_count === "number" ? data.favorites_count : undefined,
-        });
+        await toggleBookmark();
       } catch (error: any) {
-        setIsBookmarked(previousState);
-        emitFavoriteChanged({
-          id: item.id,
-          isFavorited: previousState,
-          targetType: favoriteTargetType,
-        });
         emitToast({
           type: "error",
           title: "Bookmark failed",
           message: error?.message || "Unable to update bookmark right now.",
         });
-      } finally {
-        setBookmarkBusy(false);
       }
     },
-    [bookmarkBusy, favoriteTargetType, isBookmarked, item?.id, userId],
+    [bookmarkBusy, favoriteTargetType, item?.id, toggleBookmark, userId],
   );
 
   const handleInviteAction = useCallback(

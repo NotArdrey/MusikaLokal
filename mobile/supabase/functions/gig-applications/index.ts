@@ -1567,7 +1567,12 @@ async function notifyGigFeatureConsentRequest(supabaseClient: any, applicationId
     const application = await getFeatureConsentApplication(supabaseClient, applicationId)
     if (!application) return
 
-    const actorIds = await getFeatureConsentActorIds(supabaseClient, application)
+    const { audience } = await resolveGigApplicationAudience(supabaseClient, application)
+    const actorIds = uniqueStrings([
+        ...await getFeatureConsentActorIds(supabaseClient, application),
+        ...audience.filter(member => ['applicant', 'group_member', 'selected_performer'].includes(member.viewer_access))
+            .map(member => member.user_id),
+    ])
     const gigName = application?.gig?.name || 'the gig'
     for (const userId of actorIds) {
         await insertCoreNotification(supabaseClient, {
@@ -2805,102 +2810,36 @@ Deno.serve(async (req: Request) => {
             })
         }
 
-        if (action === 'fetch_feature_consent') {
-            const { applicationId } = params
-            if (!applicationId) {
-                return new Response(JSON.stringify({ error: 'applicationId is required' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 400,
+        if (action === 'fetch_feature_consent' || action === 'respond_feature_consent') {
+            const { applicationId, scope, showOnGigPage, showOnProfile } = params
+            const isWrite = action === 'respond_feature_consent'
+            if (!applicationId || (isWrite && (typeof showOnProfile !== 'boolean' ||
+                (showOnGigPage !== undefined && typeof showOnGigPage !== 'boolean') ||
+                (scope !== undefined && !['self', 'group'].includes(scope))))) {
+                return new Response(JSON.stringify({ error: 'A valid application reference, scope and boolean choices are required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400,
                 })
             }
-
             const application = await getFeatureConsentApplication(supabaseClient, applicationId)
             if (!application) {
                 return new Response(JSON.stringify({ error: 'Application not found' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 404,
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404,
                 })
             }
-
-            const actorIds = await getFeatureConsentActorIds(supabaseClient, application)
-            if (!actorIds.includes(effectiveUserId)) {
-                return new Response(
-                    JSON.stringify({
-                        error: 'Only the selected performer or authorized group leader can manage featuring permission',
-                    }),
-                    {
-                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                        status: 403,
-                    }
-                )
-            }
-
-            return new Response(JSON.stringify(application), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 200,
+            const { data: choices, error: consentError } = await supabaseClient.rpc('manage_gig_feature_consent', {
+                p_application_id: applicationId, p_user_id: effectiveUserId,
+                p_scope: scope || null, p_show_on_profile: showOnProfile === true,
+                p_show_on_gig_page: showOnGigPage === true, p_write: isWrite,
             })
-        }
-
-        if (action === 'respond_feature_consent') {
-            const { applicationId, showOnGigPage, showOnProfile } = params
-            if (!applicationId) {
-                return new Response(JSON.stringify({ error: 'applicationId is required' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 400,
+            if (consentError) {
+                const status = consentError.code === '42501' ? 403 : consentError.code === 'P0002' ? 404
+                    : consentError.code === 'P0001' ? 409 : 400
+                return new Response(JSON.stringify({ error: consentError.message }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status,
                 })
             }
-
-            const application = await getFeatureConsentApplication(supabaseClient, applicationId)
-            if (!application) {
-                return new Response(JSON.stringify({ error: 'Application not found' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 404,
-                })
-            }
-
-            const actorIds = await getFeatureConsentActorIds(supabaseClient, application)
-            if (!actorIds.includes(effectiveUserId)) {
-                return new Response(
-                    JSON.stringify({
-                        error: 'Only the selected performer or authorized group leader can manage featuring permission',
-                    }),
-                    {
-                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                        status: 403,
-                    }
-                )
-            }
-
-            if (!['accepted', 'approved'].includes(String(application.status || '').toLowerCase())) {
-                return new Response(
-                    JSON.stringify({
-                        error: 'Featuring permission is available only for accepted applications',
-                    }),
-                    {
-                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                        status: 409,
-                    }
-                )
-            }
-
-            const allowGigPage = showOnGigPage === true
-            const allowProfile = showOnProfile === true
-            const consentStatus = allowGigPage || allowProfile ? 'accepted' : 'declined'
-            const { data: updated, error: updateError } = await supabaseClient
-                .from('gig_applications')
-                .update({
-                    feature_consent_status: consentStatus,
-                    show_on_gig_page: allowGigPage,
-                    show_on_profile: allowProfile,
-                    feature_consent_responded_at: new Date().toISOString(),
-                })
-                .eq('id', applicationId)
-                .select(FEATURE_CONSENT_SELECT)
-                .single()
-
-            if (updateError) throw updateError
-
-            if (application?.gig?.organizer_id && application.gig.organizer_id !== effectiveUserId) {
+            const consentStatus = choices.feature_consent_status
+            if (isWrite && choices.changed && !(choices.is_group_performance && scope === 'self') && application?.gig?.organizer_id && application.gig.organizer_id !== effectiveUserId) {
                 await insertCoreNotification(supabaseClient, {
                     user_id: application.gig.organizer_id,
                     type: consentStatus === 'accepted' ? 'success' : 'info',
@@ -2929,9 +2868,8 @@ Deno.serve(async (req: Request) => {
                 })
             }
 
-            return new Response(JSON.stringify(updated), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 200,
+            return new Response(JSON.stringify({ ...application, ...choices }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
             })
         }
 

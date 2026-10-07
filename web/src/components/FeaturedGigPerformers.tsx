@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { memo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import React, { memo, useState } from "react";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { GigFeaturedPerformer } from "../hooks/useGigFeaturedPerformers";
 import CachedImage from "./CachedImage";
 
@@ -21,10 +21,12 @@ export const FeaturedGigPerformers = memo(function FeaturedGigPerformers({
   borderColor,
   isDark,
 }: FeaturedGigPerformersProps) {
+  const [expandedPerformerIds, setExpandedPerformerIds] = useState<string | null>(null);
+  const performerIds = performers.map((performer) => performer.application_id).join(",");
+  const expanded = expandedPerformerIds === performerIds;
   if (performers.length === 0) return null;
 
-  const visiblePerformers = performers.slice(0, 3);
-  const remainingCount = Math.max(0, performers.length - visiblePerformers.length);
+  const visiblePerformers = expanded ? performers : performers.slice(0, 2);
 
   return (
     <View
@@ -49,8 +51,21 @@ export const FeaturedGigPerformers = memo(function FeaturedGigPerformers({
             <Text style={[styles.name, { color: textColor }]} numberOfLines={1}>{performer.display_name}</Text>
           </View>
         ))}
-        {remainingCount > 0 ? <Text style={[styles.more, { color: primaryColor }]}>+{remainingCount} more</Text> : null}
       </View>
+      {performers.length > 2 ? (
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          aria-expanded={expanded}
+          onPress={(event) => {
+            event.stopPropagation();
+            setExpandedPerformerIds(expanded ? null : performerIds);
+          }}
+          style={styles.expandButton}
+        >
+          <Text style={[styles.more, { color: primaryColor }]}>{expanded ? "Show less" : "Show more"}</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 });
@@ -66,4 +81,5 @@ const styles = StyleSheet.create({
   avatarFallback: { alignItems: "center", justifyContent: "center" },
   name: { flexShrink: 1, fontFamily: "Poppins_500Medium", fontSize: 10 },
   more: { fontFamily: "Poppins_600SemiBold", fontSize: 10 },
+  expandButton: { minHeight: 44, alignItems: "center", justifyContent: "center" },
 });

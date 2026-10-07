@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -11,15 +11,13 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { supabase } from "../lib/supabase";
+import { useGigFeatureConsent } from "../src/hooks/useGigFeatureConsent";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
 import { LoadingButtonContent } from "../src/components/LoadingState";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { typography } from "../src/theme/tokens";
-
-const acceptedStatuses = new Set(["accepted", "approved"]);
 
 export default function GigFeatureConsentScreen() {
   const { colors, isDark } = useTheme();
@@ -37,85 +35,26 @@ export default function GigFeatureConsentScreen() {
 
     router.replace({ pathname: "/bookings", params: { tab: "History" } });
   };
-  const [application, setApplication] = useState<any>(null);
-  const [showOnGigPage, setShowOnGigPage] = useState(false);
-  const [showOnProfile, setShowOnProfile] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-
-  const invokeConsentAction = useCallback(async (body: Record<string, unknown>) => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error("Please sign in to manage featuring permission.");
-
-    const { data, error } = await supabase.functions.invoke("gig-applications", {
-      body,
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
-    if (error) throw new Error(error.message || "The featuring request could not be completed.");
-    if (data?.error) throw new Error(data.error);
-    return data;
-  }, []);
-
-  const loadApplication = useCallback(async () => {
-    if (!applicationId) {
-      setErrorMessage("This featuring request is missing its application reference.");
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setErrorMessage("");
-    try {
-      const data = await invokeConsentAction({ action: "fetch_feature_consent", applicationId });
-      setApplication(data);
-      setShowOnGigPage(data?.show_on_gig_page === true);
-      setShowOnProfile(data?.show_on_profile === true);
-    } catch (error: any) {
-      setErrorMessage(error?.message || "Unable to load the featuring request.");
-    } finally {
-      setLoading(false);
-    }
-  }, [applicationId, invokeConsentAction]);
-
-  useEffect(() => {
-    loadApplication();
-  }, [loadApplication]);
-
-  const saveConsent = async (nextGigPage = showOnGigPage, nextProfile = showOnProfile) => {
-    if (!applicationId || saving) return;
-    setSaving(true);
-    setErrorMessage("");
-    setSuccessMessage("");
-    try {
-      const data = await invokeConsentAction({
-        action: "respond_feature_consent",
-        applicationId,
-        showOnGigPage: nextGigPage,
-        showOnProfile: nextProfile,
-      });
-      setApplication(data);
-      setShowOnGigPage(data?.show_on_gig_page === true);
-      setShowOnProfile(data?.show_on_profile === true);
-      setSuccessMessage(
-        nextGigPage || nextProfile
-          ? "Your featuring choices were saved."
-          : "Your application will remain private.",
-      );
-    } catch (error: any) {
-      setErrorMessage(error?.message || "Unable to save your featuring choices.");
-    } finally {
-      setSaving(false);
-    }
+  const { application, loading, saving, errorMessage, successMessage, loadApplication, saveConsent } = useGigFeatureConsent(applicationId);
+  const [draft, setDraft] = useState<{
+    application: any; showOnGigPage: boolean; showOnProfile: boolean; selfShowOnProfile: boolean;
+  } | null>(null);
+  const choices = draft && draft.application === application ? draft : {
+    application, showOnGigPage: application?.show_on_gig_page === true,
+    showOnProfile: application?.show_on_profile === true,
+    selfShowOnProfile: application?.self_show_on_profile === true,
   };
-
+  const { showOnGigPage, showOnProfile, selfShowOnProfile } = choices;
+  const setShowOnGigPage = (value: boolean) => setDraft({ ...choices, showOnGigPage: value });
+  const setShowOnProfile = (value: boolean) => setDraft({ ...choices, showOnProfile: value });
+  const setSelfShowOnProfile = (value: boolean) => setDraft({ ...choices, selfShowOnProfile: value });
+  const isGroup = application?.is_group_performance === true;
+  const canRespond = application?.can_edit_self === true;
+  const canManageBand = application?.can_edit_group === true;
   const performer = application?.group || application?.production_roster?.roster_group || application?.applicant || application?.production_roster?.roster_profile;
   const performerSnapshot = application?.performer_snapshot || {};
   const performerName = performer?.name || performer?.full_name || performerSnapshot?.display_name || "Accepted performer";
   const performerAvatar = performer?.images?.[0] || performer?.avatar_url || performerSnapshot?.avatar_url;
-  const status = String(application?.status || "").toLowerCase();
-  const canRespond = acceptedStatuses.has(status);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -170,58 +109,73 @@ export default function GigFeatureConsentScreen() {
 
             <View style={[styles.optionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <View style={styles.optionCopy}>
-                <Text style={[styles.optionTitle, { color: colors.text }]}>Feature me on the gig and Feed pages</Text>
-                <Text style={[styles.optionDescription, { color: colors.textSecondary }]}>Show your approved performer name and avatar on the gig page and its cards in the Feed.</Text>
+                <Text style={[styles.optionTitle, { color: colors.text }]}>Show this gig on my public profile</Text>
+                <Text style={[styles.optionDescription, { color: colors.textSecondary }]}>Your choice applies only to your profile. You will still see the gig in your own activity when this is off.</Text>
               </View>
-              <Switch
-                testID="feature-on-gig-page-toggle"
-                value={showOnGigPage}
-                onValueChange={setShowOnGigPage}
-                disabled={!canRespond || saving}
+              <Switch testID="feature-on-profile-toggle" value={selfShowOnProfile} onValueChange={setSelfShowOnProfile}
+                disabled={!canRespond || Boolean(saving)}
                 trackColor={{ false: isDark ? "#374151" : "#CBD5E1", true: colors.primary + "90" }}
-                thumbColor={showOnGigPage ? colors.primary : "#F8FAFC"}
-              />
+                thumbColor={selfShowOnProfile ? colors.primary : "#F8FAFC"} />
             </View>
-
-            <View style={[styles.optionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={styles.optionCopy}>
-                <Text style={[styles.optionTitle, { color: colors.text }]}>Show this accepted gig on my profile</Text>
-                <Text style={[styles.optionDescription, { color: colors.textSecondary }]}>Add this accepted gig to your public profile activity.</Text>
+            {!isGroup ? (
+              <View style={[styles.optionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <View style={styles.optionCopy}>
+                  <Text style={[styles.optionTitle, { color: colors.text }]}>Feature me on the gig and Feed pages</Text>
+                  <Text style={[styles.optionDescription, { color: colors.textSecondary }]}>Show your performer name and avatar in the lineup.</Text>
+                </View>
+                <Switch testID="feature-on-gig-page-toggle" value={showOnGigPage} onValueChange={setShowOnGigPage}
+                  disabled={!canRespond || Boolean(saving)}
+                  trackColor={{ false: isDark ? "#374151" : "#CBD5E1", true: colors.primary + "90" }}
+                  thumbColor={showOnGigPage ? colors.primary : "#F8FAFC"} />
               </View>
-              <Switch
-                testID="feature-on-profile-toggle"
-                value={showOnProfile}
-                onValueChange={setShowOnProfile}
-                disabled={!canRespond || saving}
-                trackColor={{ false: isDark ? "#374151" : "#CBD5E1", true: colors.primary + "90" }}
-                thumbColor={showOnProfile ? colors.primary : "#F8FAFC"}
-              />
-            </View>
+            ) : null}
+            <TouchableOpacity testID="save-feature-consent" disabled={!canRespond || Boolean(saving)}
+              onPress={() => saveConsent("self", selfShowOnProfile, isGroup ? false : showOnGigPage)}
+              style={[styles.primaryButton, { backgroundColor: colors.primary, opacity: !canRespond || saving ? 0.55 : 1 }]}>
+              {saving === "self" ? <LoadingButtonContent message="Saving choice..." /> : <Text style={styles.primaryButtonText}>Save My Choice</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity testID="keep-feature-private" disabled={!canRespond || Boolean(saving)}
+              onPress={() => saveConsent("self", false, isGroup ? false : showOnGigPage)}
+              style={[styles.secondaryButton, { borderColor: colors.border }]}>
+              <Text style={[styles.secondaryButtonText, { color: colors.text }]}>Hide From My Public Profile</Text>
+            </TouchableOpacity>
+            {isGroup && canManageBand ? (
+              <>
+                <View style={[styles.optionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <View style={styles.optionCopy}>
+                    <Text style={[styles.optionTitle, { color: colors.text }]}>Feature the band on the gig and Feed pages</Text>
+                    <Text style={[styles.optionDescription, { color: colors.textSecondary }]}>The band appears once in the lineup. Each member controls their own profile.</Text>
+                  </View>
+                  <Switch testID="feature-band-on-gig-toggle" value={showOnGigPage} onValueChange={setShowOnGigPage}
+                    disabled={Boolean(saving)} trackColor={{ false: isDark ? "#374151" : "#CBD5E1", true: colors.primary + "90" }}
+                    thumbColor={showOnGigPage ? colors.primary : "#F8FAFC"} />
+                </View>
+                <View style={[styles.optionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <View style={styles.optionCopy}>
+                    <Text style={[styles.optionTitle, { color: colors.text }]}>Show this gig on the band’s public page</Text>
+                    <Text style={[styles.optionDescription, { color: colors.textSecondary }]}>Add the performance to the band’s timeline.</Text>
+                  </View>
+                  <Switch testID="feature-band-on-profile-toggle" value={showOnProfile} onValueChange={setShowOnProfile}
+                    disabled={Boolean(saving)} trackColor={{ false: isDark ? "#374151" : "#CBD5E1", true: colors.primary + "90" }}
+                    thumbColor={showOnProfile ? colors.primary : "#F8FAFC"} />
+                </View>
+                <TouchableOpacity testID="save-band-feature-consent" disabled={Boolean(saving)}
+                  onPress={() => saveConsent("group", showOnProfile, showOnGigPage)}
+                  style={[styles.primaryButton, { backgroundColor: colors.primary, opacity: saving ? 0.55 : 1 }]}>
+                  {saving === "group" ? <LoadingButtonContent message="Saving band choices..." /> : <Text style={styles.primaryButtonText}>Save Band Choices</Text>}
+                </TouchableOpacity>
+              </>
+            ) : null}
 
             <View style={[styles.privacyNote, { backgroundColor: colors.inputBackground }]}>
               <Ionicons name="shield-checkmark-outline" size={20} color={colors.primary} />
-              <Text style={[styles.privacyText, { color: colors.textSecondary }]}>Private by default. You can return here from your accepted gig in Bookings and change these choices later.</Text>
+              <Text style={[styles.privacyText, { color: colors.textSecondary }]}>Private by default. Each member controls their own profile. The band leader controls the band feature. Return here from Bookings to change your choices.</Text>
             </View>
 
             {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
             {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
 
-            <TouchableOpacity
-              testID="save-feature-consent"
-              disabled={!canRespond || saving}
-              onPress={() => saveConsent()}
-              style={[styles.primaryButton, { backgroundColor: colors.primary, opacity: !canRespond || saving ? 0.55 : 1 }]}
-            >
-              {saving ? <LoadingButtonContent message="Saving choices..." /> : <Text style={styles.primaryButtonText}>Save Featuring Choices</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity
-              testID="keep-feature-private"
-              disabled={!canRespond || saving}
-              onPress={() => saveConsent(false, false)}
-              style={[styles.secondaryButton, { borderColor: colors.border }]}
-            >
-              <Text style={[styles.secondaryButtonText, { color: colors.text }]}>Keep My Application Private</Text>
-            </TouchableOpacity>
+
           </>
         )}
       </ScrollView>

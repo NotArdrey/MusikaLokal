@@ -1,0 +1,20 @@
+{
+  "walletBaselineErrors": 2,
+  "walletCurrentErrors": 2,
+  "walletRules": [
+    "react-hooks/set-state-in-effect",
+    "react-hooks/set-state-in-effect"
+  ],
+  "utilsAndRealtime": [
+    {
+      "file": "walletHistory.ts",
+      "errors": 0,
+      "warnings": 0
+    },
+    {
+      "file": "realtime.ts",
+      "errors": 0,
+      "warnings": 0
+    }
+  ]
+}

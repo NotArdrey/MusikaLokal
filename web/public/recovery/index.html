@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Reset Password | MusikaLokal</title>
+  <link rel="stylesheet" href="/recovery/styles.css">
+  <script type="module" src="/recovery/page.js"></script>
+</head>
+<body>
+  <main>
+    <a class="brand" href="/">MusikaLokal</a>
+    <h1>Reset your password</h1>
+    <p id="status" role="status" aria-live="polite">Continue to check your secure reset link.</p>
+    <section id="entry">
+      <button id="continue" type="button">Continue in browser</button>
+      <a class="secondary" id="open-app" hidden>Open in app</a>
+    </section>
+    <form id="password-form" hidden>
+      <label for="password">New password</label>
+      <input id="password" name="password" type="password" minlength="6" autocomplete="new-password" required>
+      <label for="confirmation">Confirm new password</label>
+      <input id="confirmation" name="confirmation" type="password" minlength="6" autocomplete="new-password" required>
+      <button id="save" type="submit">Reset password</button>
+    </form>
+    <form id="request-form" hidden>
+      <label for="email">Email address</label>
+      <input id="email" name="email" type="email" autocomplete="email" required>
+      <button id="request" type="submit">Request a new link</button>
+    </form>
+    <a class="secondary" id="login" href="musikalokal://" hidden>Back to login in app</a>
+    <p class="help">Need the Android app? <a href="/">Download MusikaLokal</a></p>
+  </main>
+</body>
+</html>

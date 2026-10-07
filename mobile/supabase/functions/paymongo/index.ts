@@ -4,11 +4,10 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // @ts-ignore
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
-import {
-  withNotificationRouteMeta,
-  withNotificationSeverityType,
-} from "../_shared/notificationRoutes.ts";
+import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
 import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
+
+import { getConfirmedProviderPayment } from '../_shared/studioPaymentHistory.ts';
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -28,18 +27,18 @@ async function verifyWebhookSignature(
 ): Promise<boolean> {
   if (!PAYMONGO_WEBHOOK_SECRET || !signatureHeader) {
     console.warn(
-      "⚠️ Webhook signature verification skipped - no secret or signature",
+      "Webhook signature or server secret is missing",
     );
-    return true; // Skip verification if no secret configured
+    return false;
   }
 
   try {
     // PayMongo signature format: t=timestamp,te=test_signature,li=live_signature
-    const parts = signatureHeader.split(",");
+    const parts = signatureHeader.split(",").map(part => part.trim());
     const timestampPart = parts.find((p) => p.startsWith("t="));
     const signaturePart =
-      parts.find((p) => p.startsWith("li=")) ||
-      parts.find((p) => p.startsWith("te="));
+      parts.find((p) => /^li=[a-f0-9]{64}$/i.test(p)) ||
+      parts.find((p) => /^te=[a-f0-9]{64}$/i.test(p));
 
     if (!timestampPart || !signaturePart) {
       console.error("❌ Invalid signature header format");
@@ -311,18 +310,18 @@ function allocateInitialPaymentRows(
 
   if (paymentType === "downpayment") {
     let amountLeft =
-      amount > 0 ? Math.round(amount) : Math.round(totalFinalPrice / 2);
+      amount > 0 ? Math.round(amount * 100) / 100 : Math.round(totalFinalPrice * 50) / 100;
 
     bookings.forEach((booking, index) => {
       const finalPrice = finalPrices[index] || 0;
       const isLast = index === bookings.length - 1;
       const proportionalAmount =
         totalFinalPrice > 0
-          ? Math.round((amount > 0 ? amount : totalFinalPrice / 2) * (finalPrice / totalFinalPrice))
+          ? Math.round((amount > 0 ? amount : totalFinalPrice / 2) * (finalPrice / totalFinalPrice) * 100) / 100
           : 0;
       const rawPaymentAmount = isLast ? amountLeft : proportionalAmount;
       const paymentAmount = Math.max(0, Math.min(finalPrice, rawPaymentAmount));
-      amountLeft = Math.max(0, amountLeft - paymentAmount);
+      amountLeft = Math.max(0, Math.round((amountLeft - paymentAmount) * 100) / 100);
 
       allocation.set(booking.id, {
         paymentAmount,
@@ -361,156 +360,90 @@ async function insertNotification(
     meta: withNotificationRouteMeta(payload.meta),
     read: payload.read ?? false,
   };
-  const safeNotificationPayload = withNotificationSeverityType(notificationPayload);
 
-  const { error } = await supabaseAdmin.from("notifications").insert(safeNotificationPayload);
+  const { error } = await supabaseAdmin.from("notifications").insert(notificationPayload);
   if (error) {
     console.error("paymongo_notification_failed", { message: error.message });
     return;
   }
-  scheduleCoreActionEmailForNotification(supabaseAdmin, safeNotificationPayload, { source: "paymongo" });
+  scheduleCoreActionEmailForNotification(supabaseAdmin, notificationPayload, { source: "paymongo" });
 }
 
-// Helper to credit owner's wallet when a booking payment is received
-// Idempotent: safe to call multiple times for the same booking (e.g. both
-// the client-side forfeit path and the webhook path may trigger this).
-async function creditOwnerWallet(
-  supabaseAdmin: any,
-  bookingId: string,
-  paymentAmount: number,
-  options: {
-    paymentStage?: "full" | "downpayment" | "balance";
-    balanceAmount?: number;
-  } = {},
-) {
-  try {
+async function applyProviderBookingPayment(supabaseAdmin: any, payment: any, metadata: any,
+  checkoutSessionId?: string | null, fallbackBookingId?: string | null, paymentIntentId?: string | null) {
+  const confirmed = getConfirmedProviderPayment(payment);
+  const targetBookingIds = await resolvePaymentTargetBookingIds(supabaseAdmin, {
+    metadata, fallbackBookingId, checkoutSessionId,
+    paymentIntentId: paymentIntentId || payment.attributes?.payment_intent_id,
+  });
+  if (targetBookingIds.length === 0) return { booking_ids: [], already_recorded: true };
+  const { data: booking, error: bookingError } = await supabaseAdmin.from('studio_bookings')
+    .select('payment_type, paid_at, remaining_balance').eq('id', targetBookingIds[0]).single();
+  if (bookingError) throw bookingError;
+  const { data: previous, error: previousError } = await supabaseAdmin.from('studio_payment_events')
+    .select('stage').eq('provider_reference', confirmed.id).limit(1);
+  if (previousError) throw previousError;
+  const stage = previous?.[0]?.stage || inferBookingPaymentType(metadata, booking);
+  const { data, error } = await supabaseAdmin.rpc('confirm_online_studio_payment', {
+    p_payment_id: confirmed.id, p_booking_ids: targetBookingIds, p_stage: stage,
+    p_amount: confirmed.amount, p_payment_method: confirmed.method, p_paid_at: confirmed.paidAt,
+    p_checkout_session_id: checkoutSessionId || null,
+    p_payment_intent_id: paymentIntentId || payment.attributes?.payment_intent_id || null,
+  });
+  if (error) throw error;
+  await notifyConfirmedBookings(supabaseAdmin, data.booking_ids, stage);
+  return { ...data, stage, payment_method: confirmed.method };
+}
 
-    const paymentStage = options.paymentStage || "full";
-    const referenceType =
-      paymentStage === "balance"
-        ? "booking_balance"
-        : paymentStage === "downpayment"
-          ? "booking_downpayment"
-          : "booking_payment";
-
-    // IDEMPOTENCY: skip the same payment stage only. Legacy transactions have
-    // null reference_type, so they still protect old full/downpayment credits.
-    const { data: existingTxs } = await supabaseAdmin
-      .from("wallet_transactions")
-      .select("id, reference_type")
-      .eq("reference_id", bookingId)
-      .eq("type", "earning");
-
-    const alreadyCredited = (existingTxs || []).some((tx: any) =>
-      tx?.reference_type === referenceType ||
-      (!tx?.reference_type && paymentStage !== "balance")
-    );
-
-    if (alreadyCredited) {
-      return;
-    }
-
-    // Get booking details with studio owner
-    const { data: booking, error: bookingError } = await supabaseAdmin
-      .from("studio_bookings")
-      .select(
-        "id, final_price, payment_amount, remaining_balance, studio:studios(id, name, owner_id)",
-      )
-      .eq("id", bookingId)
-      .single();
-
-    if (bookingError || !booking) {
-      console.error(
-        "❌ Error fetching booking for wallet credit:",
-        bookingError,
-      );
-      return;
-    }
-
-    const ownerId = booking.studio?.owner_id;
-    if (!ownerId) {
-      console.error("❌ No owner_id found for studio");
-      return;
-    }
-
-    // Prefer the booking's actual payment_amount from DB over the PayMongo-charged amount.
-    // In TEST MODE PayMongo always charges PHP 1 (100 centavos), but the booking records the
-    // real agreed price — that is what the studio owner should receive in their wallet.
-    const finalPrice = getNumericAmount(booking.final_price);
-    const storedPaymentAmount = getNumericAmount(booking.payment_amount);
-    const storedRemainingBalance = getNumericAmount(booking.remaining_balance);
-    const creditAmount =
-      paymentStage === "balance"
-        ? (
-          getNumericAmount(options.balanceAmount) ||
-          storedRemainingBalance ||
-          Math.max(0, finalPrice - storedPaymentAmount) ||
-          paymentAmount
-        )
-        : paymentStage === "downpayment"
-          ? (storedPaymentAmount || paymentAmount)
-          : (finalPrice || paymentAmount);
-    if (!creditAmount || creditAmount <= 0) {
-      console.error("❌ Invalid credit amount:", creditAmount);
-      return;
-    }
-
-    // Find or create owner's wallet
-    let { data: wallet, error: walletError } = await supabaseAdmin
-      .from("wallets")
-      .select("id, balance")
-      .eq("user_id", ownerId)
-      .single();
-
-    if (walletError || !wallet) {
-      // Create wallet if it doesn't exist
-      const { data: newWallet, error: createError } = await supabaseAdmin
-        .from("wallets")
-        .insert([{ user_id: ownerId, balance: 0 }])
-        .select()
-        .single();
-
-      if (createError) {
-        console.error("❌ Error creating wallet:", createError);
-        return;
-      }
-      wallet = newWallet;
-    }
-
-    // Update wallet balance
-    const newBalance = (wallet.balance || 0) + creditAmount;
-    const { error: updateError } = await supabaseAdmin
-      .from("wallets")
-      .update({ balance: newBalance, updated_at: new Date().toISOString() })
-      .eq("id", wallet.id);
-
-    if (updateError) {
-      console.error("❌ Error updating wallet balance:", updateError);
-      return;
-    }
-
-    // Create wallet transaction record
-    const { error: txError } = await supabaseAdmin
-      .from("wallet_transactions")
-      .insert({
-        wallet_id: wallet.id,
-        amount: creditAmount,
-        type: "earning",
-        description: `Payment received for booking at ${booking.studio?.name}`,
-        reference_id: bookingId,
-        reference_type: referenceType,
-        is_credit: true,
-        status: "completed",
-      });
-
-    if (txError) {
-      console.error("❌ Error creating wallet transaction:", txError);
-      return;
-    }
-
-  } catch (e) {
-    console.error("❌ Error in creditOwnerWallet:", e);
+async function notifyConfirmedBookings(supabaseAdmin: any, bookingIds: string[], stage: string) {
+  if (!bookingIds?.length) return;
+  const { data, error } = await supabaseAdmin.from('studio_bookings')
+    .select('id, user_id, studio_id, booking_date, status, payment_status, remaining_balance, studio:studios(id, name, owner_id, address, hourly_rate, rate)')
+    .in('id', bookingIds);
+  if (error) { console.error('payment_notification_booking_read_failed', error.message); return; }
+  const bookings = await hydrateStudioBookingLegacy(supabaseAdmin, data || []);
+  for (const booking of bookings) {
+    if (booking.status === 'cancelled') continue;
+    const partial = booking.payment_status === 'partial';
+    const meta = { booking_id: booking.id, studio_id: booking.studio_id,
+      status: booking.payment_status, payment_status: booking.payment_status,
+      event_type: partial ? 'studio_booking_downpayment' : 'studio_booking_paid' };
+    await insertNotification(supabaseAdmin, { user_id: booking.user_id, type: 'success',
+      title: partial ? 'Downpayment Received!' : 'Payment Confirmed!',
+      message: partial ? `Your downpayment for ${booking.studio?.name} has been received. Remaining balance: PHP ${Number(booking.remaining_balance).toLocaleString()}`
+        : `Your booking at ${booking.studio?.name} is now confirmed.`,
+      image: booking.studio?.images?.[0] || null, meta });
+    if (booking.studio?.owner_id) await insertNotification(supabaseAdmin, {
+      user_id: booking.studio.owner_id, type: 'info', title: 'Booking Payment Received',
+      message: `Payment received for booking at ${booking.studio?.name} on ${booking.booking_date}.`, meta });
   }
+}
+
+async function applyProviderRefund(supabaseAdmin: any, refund: any, bookingIds?: string[]) {
+  const attr = refund?.attributes;
+  if (!refund?.id || attr?.status !== 'succeeded' || attr?.currency && attr.currency !== 'PHP') return null;
+  let ids = bookingIds || getMetadataBookingIds(attr.metadata);
+  if (!ids.length && attr.payment_id) {
+    const { data, error } = await supabaseAdmin.from('studio_payment_events')
+      .select('booking_id').eq('payment_id', attr.payment_id).neq('stage', 'refund');
+    if (error) throw error;
+    ids = normalizeBookingIds((data || []).map((event: any) => event.booking_id));
+    if (!ids.length) {
+      const { data: legacy, error: legacyError } = await supabaseAdmin.from('studio_bookings')
+        .select('id').eq('refund_id', refund.id);
+      if (legacyError) throw legacyError;
+      ids = normalizeBookingIds((legacy || []).map((row: any) => row.id));
+    }
+  }
+  if (!ids.length) return null;
+  const { data, error } = await supabaseAdmin.rpc('record_online_studio_refund', {
+    p_refund_id: refund.id, p_payment_id: attr.payment_id || null,
+    p_booking_ids: ids, p_amount: Number(attr.amount) / 100,
+    p_refunded_at: Number(attr.updated_at || attr.created_at) > 0
+      ? new Date(Number(attr.updated_at || attr.created_at) * 1000).toISOString() : null,
+  });
+  if (error) throw error;
+  return data;
 }
 
 async function creditWalletDeposit(
@@ -689,7 +622,7 @@ serve(async (req: Request) => {
       rawBody = await req.text();
       if (rawBody) {
         const body = JSON.parse(rawBody);
-        action = body.action;
+        action = body.action || (body.data?.type === "event" ? "webhook" : null);
         const { action: _, ...restParams } = body;
         params = restParams;
       }
@@ -748,7 +681,7 @@ serve(async (req: Request) => {
         booking_date,
         success_url,
         cancel_url,
-        payment_type,
+        payment_type: requestedPaymentType,
         total_amount,
         remaining_balance,
         redirect_url,
@@ -782,7 +715,7 @@ serve(async (req: Request) => {
       const { data: fetchedBookings, error: bookingError } = await supabaseClient
         .from("studio_bookings")
         .select(
-          "id, user_id, final_price, status, payment_status, studio:studios(name)",
+          "id, user_id, final_price, payment_amount, remaining_balance, paid_at, status, payment_status, studio:studios(name)",
         )
         .in("id", targetBookingIds);
 
@@ -824,7 +757,15 @@ serve(async (req: Request) => {
         .eq("id", user_id)
         .single();
 
-      const checkoutAmount = getNumericAmount(amount);
+      const payment_type = requestedPaymentType || 'full';
+      if (!['full', 'downpayment', 'balance'].includes(payment_type)
+        || bookingRows.some((row: any) => row.paid_at && payment_type !== 'balance')
+        || payment_type === 'balance' && bookingRows.some((row: any) => !row.paid_at || Number(row.remaining_balance) <= 0)) {
+        throw new Error('Invalid payment stage for this booking');
+      }
+      const checkoutAmount = Math.round(bookingRows.reduce((sum: number, row: any) => sum +
+        (payment_type === 'balance' ? Number(row.remaining_balance) : payment_type === 'downpayment'
+          ? Math.round(Number(row.final_price) * 50) / 100 : Number(row.final_price)), 0) * 100) / 100;
       if (checkoutAmount <= 0) {
         return new Response(JSON.stringify({ error: "Invalid checkout amount" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -847,7 +788,7 @@ serve(async (req: Request) => {
 
       // Base URL for redirects
       const baseUrl =
-        Deno.env.get("APP_URL") || Deno.env.get("SUPABASE_URL") || "";
+        Deno.env.get("APP_URL") || "https://aefldxegsvzecshlayza.supabase.co";
 
       // Create PayMongo Checkout Session
       const checkoutData = await paymongoRequest("/checkout_sessions", "POST", {
@@ -891,8 +832,8 @@ serve(async (req: Request) => {
               user_id: user_id,
               studio_name: studioName,
               payment_type: payment_type || "full",
-              total_amount: total_amount || amount,
-              remaining_balance: remaining_balance || 0,
+              total_amount: bookingRows.reduce((sum: number, row: any) => sum + Number(row.final_price), 0),
+              remaining_balance: payment_type === 'downpayment' ? bookingRows.reduce((sum: number, row: any) => sum + Number(row.final_price), 0) - checkoutAmount : 0,
             },
           },
         },
@@ -904,6 +845,7 @@ serve(async (req: Request) => {
       const isBalancePayment = payment_type === "balance";
       const updateData: any = {
         checkout_session_id: checkoutData.data.id,
+        payment_intent_id: checkoutData.data.attributes.payment_intent?.id || null,
         payment_status: "pending",
       };
 
@@ -922,7 +864,7 @@ serve(async (req: Request) => {
         // Initial payment (full or downpayment)
         const paymentAllocations = allocateInitialPaymentRows(
           bookingRows,
-          getNumericAmount(amount),
+          checkoutAmount,
           payment_type || "full",
         );
 
@@ -1044,199 +986,28 @@ serve(async (req: Request) => {
       const payments = sessionData.data.attributes.payments || [];
 
 
-      // If payment is successful, update booking
-      if (paymentStatus === "succeeded" || payments.length > 0) {
-        const payment = payments[0];
-        const paymentMethod = payment?.attributes?.source?.type || "unknown";
-        const paymentIntentId = sessionData.data.attributes.payment_intent?.id;
-        const paymentAmount = payment?.attributes?.amount
-          ? payment.attributes.amount / 100
-          : 0; // Convert from centavos
+      const payment = payments.find((item: any) => item.attributes?.status === 'paid');
+      if (payment) {
         const metadata = sessionData.data.attributes.metadata || {};
-
-        // ========================================
-        // DEDUPLICATION: Check current status before updating to prevent race conditions
-        // The webhook might have already processed this payment
-        // ========================================
-        const { data: currentBookings } = await supabaseAdmin
-          .from("studio_bookings")
-          .select("id, payment_status, payment_type, remaining_balance, paid_at")
-          .eq("checkout_session_id", sessionId);
-
-        const firstCurrentBooking = (currentBookings || [])[0] || null;
-        const paymentType = inferBookingPaymentType(metadata, firstCurrentBooking);
-        const remainingBalance = Number(
-          metadata?.remaining_balance ?? firstCurrentBooking?.remaining_balance ?? 0,
-        );
-        const isDownpayment = paymentType === "downpayment" && remainingBalance > 0;
-
-        const targetBookingIds = await resolvePaymentTargetBookingIds(
-          supabaseAdmin,
-          {
-            metadata,
-            fallbackBookingId: resolvedBookingId,
-            checkoutSessionId: sessionId,
-            paymentIntentId,
-          },
-        );
-        const currentBooking = firstCurrentBooking;
-
-        resolvedBookingId = resolvedBookingId || targetBookingIds[0] || currentBooking?.id || null;
-
-        const { data: targetCurrentBookings } = await supabaseAdmin
-          .from("studio_bookings")
-          .select("id, payment_status, remaining_balance")
-          .in("id", targetBookingIds);
-
-        const currentStatusById = new Map<string, string>(
-          (targetCurrentBookings || []).map((booking: any) => [
-            String(booking.id),
-            String(booking.payment_status || ""),
-          ]),
-        );
-        const unsettledBookingIds = targetBookingIds.filter((id) => {
-          const paymentStatus = currentStatusById.get(String(id));
-          return !(
-            paymentStatus === "paid" ||
-            (isDownpayment && paymentStatus === "partial")
-          );
+        // The caller must own every payment target, even when only a session ID is supplied.
+        const ids = await resolvePaymentTargetBookingIds(supabaseAdmin, {
+          metadata, fallbackBookingId: resolvedBookingId, checkoutSessionId: sessionId,
+          paymentIntentId: sessionData.data.attributes.payment_intent?.id,
         });
-        const remainingBalanceById = new Map<string, number>(
-          (targetCurrentBookings || []).map((booking: any) => [
-            String(booking.id),
-            getNumericAmount(booking.remaining_balance),
-          ]),
-        );
-        const alreadySettled =
-          targetBookingIds.length > 0 &&
-          unsettledBookingIds.length === 0 &&
-          targetBookingIds.every((id) => {
-            const paymentStatus = currentStatusById.get(String(id));
-            return (
-              paymentStatus === "paid" ||
-              (isDownpayment && paymentStatus === "partial")
-            );
-          });
-
-        if (alreadySettled) {
-          return new Response(
-            JSON.stringify({
-              success: true,
-              payment_status: isDownpayment ? "partial" : "paid",
-              payment_method: paymentMethod,
-              message: "Payment already completed",
-            }),
-            {
-              headers: { ...corsHeaders, "Content-Type": "application/json" },
-              status: 200,
-            },
-          );
+        const { data: owned, error } = await supabaseAdmin.from('studio_bookings')
+          .select('id, user_id').in('id', ids);
+        if (error) throw error;
+        if (!ids.length || owned?.length !== ids.length || owned.some((row: any) => row.user_id !== authenticatedUserId)) {
+          return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 403,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
-
-        const bookingIdsToSettle =
-          unsettledBookingIds.length > 0 ? unsettledBookingIds : targetBookingIds;
-
-        if (bookingIdsToSettle.length === 0) {
-          return new Response(
-            JSON.stringify({
-              success: true,
-              payment_status: paymentStatus || "pending",
-              checkout_status: sessionData.data.attributes.status,
-            }),
-            {
-              headers: { ...corsHeaders, "Content-Type": "application/json" },
-              status: 200,
-            },
-          );
-        }
-
-        // Update booking to confirmed and paid
-        const updateData: any = {
-          payment_status: isDownpayment ? "partial" : "paid",
-          payment_intent_id: paymentIntentId,
-          payment_method: paymentMethod,
-          paid_at: new Date().toISOString(),
-          status: "confirmed",
-        };
-
-        if (!isDownpayment) {
-          updateData.remaining_balance = 0;
-        }
-
-        const { error: updateError } = await supabaseAdmin
-          .from("studio_bookings")
-          .update(updateData)
-          .in("id", bookingIdsToSettle);
-
-        if (updateError) {
-          console.error("Error updating booking:", updateError);
-        }
-
-        for (const targetBookingId of bookingIdsToSettle) {
-          await creditOwnerWallet(supabaseAdmin, targetBookingId, paymentAmount, {
-            paymentStage: isDownpayment
-              ? "downpayment"
-              : paymentType === "balance"
-                ? "balance"
-                : "full",
-            balanceAmount: remainingBalanceById.get(String(targetBookingId)) || remainingBalance,
-          });
-        }
-
-        // Get full booking details for notifications
-        const { data: fullBookings } = await supabaseAdmin
-          .from("studio_bookings")
-          .select(
-            "id, user_id, studio_id, booking_date, studio:studios(id, name, owner_id, address, hourly_rate, rate), profile:user_id(avatar_url)",
-          )
-          .in("id", bookingIdsToSettle);
-
-        const hydratedFullBookings = await hydrateStudioBookingLegacy(supabaseAdmin, fullBookings || []);
-
-        for (const fullBooking of hydratedFullBookings) {
-          const studioImage = fullBooking.studio?.images?.[0];
-          const userAvatar = fullBooking.profile?.avatar_url;
-
-          // Notify musician: downpayment leaves a balance due, full payment is fully settled.
-          await insertNotification(supabaseAdmin, {
-            user_id: fullBooking.user_id,
-            type: "success",
-            title: "Payment Successful!",
-            message: isDownpayment
-              ? `Downpayment received for ${fullBooking.studio?.name}. The booking is scheduled with a remaining balance due.`
-              : `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`,
-            image: studioImage,
-            meta: { booking_id: fullBooking.id },
-          });
-
-          // Notify studio owner
-          if (fullBooking.studio?.owner_id) {
-            await insertNotification(supabaseAdmin, {
-              user_id: fullBooking.studio.owner_id,
-              type: "info",
-              title: "Booking Payment Received",
-              message: `Payment received for booking at ${fullBooking.studio?.name} on ${fullBooking.booking_date}.`,
-              image: userAvatar,
-              meta: {
-                booking_id: fullBooking.id,
-                studio_id: fullBooking.studio_id,
-              },
-            });
-          }
-        }
-
-        return new Response(
-          JSON.stringify({
-            success: true,
-            payment_status: isDownpayment ? "partial" : "paid",
-            payment_method: paymentMethod,
-            message: "Payment completed successfully",
-          }),
-          {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 200,
-          },
-        );
+        const result = await applyProviderBookingPayment(supabaseAdmin, payment, metadata,
+          sessionId, resolvedBookingId, sessionData.data.attributes.payment_intent?.id);
+        const { data: settled } = await supabaseAdmin.from('studio_bookings')
+          .select('payment_status').eq('id', ids[0]).single();
+        return new Response(JSON.stringify({ success: true, payment_status: settled?.payment_status,
+          payment_method: result.payment_method, already_recorded: result.already_recorded }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
       }
 
       return new Response(
@@ -1282,159 +1053,10 @@ serve(async (req: Request) => {
             );
             const payments = sessionData.data.attributes.payments || [];
 
-            if (payments.length > 0) {
-              const payment = payments[0];
-              const paymentMethod =
-                payment?.attributes?.source?.type || "unknown";
-              const paymentIntentId =
-                sessionData.data.attributes.payment_intent?.id;
-              const paymentAmount = payment?.attributes?.amount
-                ? payment.attributes.amount / 100
-                : 0; // Convert from centavos
-
-              // Get payment type from checkout session metadata
-              const metadata = sessionData.data.attributes.metadata || {};
-              const paymentType = inferBookingPaymentType(metadata, booking);
-              const remainingBalance = parseFloat(
-                String(metadata?.remaining_balance ?? booking?.remaining_balance ?? 0),
-              );
-              const isDownpayment = paymentType === "downpayment";
-              const targetBookingIds = await resolvePaymentTargetBookingIds(
-                supabaseAdmin,
-                {
-                  metadata,
-                  fallbackBookingId: bookingId,
-                  checkoutSessionId: booking.checkout_session_id,
-                  paymentIntentId,
-                },
-              );
-
-              // ========================================
-              // DEDUPLICATION: Double-check status before updating (race condition protection)
-              // ========================================
-              const { data: recheckBookings } = await supabaseAdmin
-                .from("studio_bookings")
-                .select("id, payment_status, remaining_balance")
-                .in("id", targetBookingIds);
-
-              const alreadySettled =
-                targetBookingIds.length > 0 &&
-                targetBookingIds.every((targetBookingId) => {
-                  const booking = (recheckBookings || []).find(
-                    (item: any) => item.id === targetBookingId,
-                  );
-                  return (
-                    booking?.payment_status === "paid" ||
-                    (isDownpayment && booking?.payment_status === "partial")
-                  );
-                });
-              const unsettledBookingIds = targetBookingIds.filter((targetBookingId) => {
-                const booking = (recheckBookings || []).find(
-                  (item: any) => item.id === targetBookingId,
-                );
-                return !(
-                  booking?.payment_status === "paid" ||
-                  (isDownpayment && booking?.payment_status === "partial")
-                );
-              });
-
-              if (alreadySettled) {
-              } else {
-                const bookingIdsToSettle =
-                  unsettledBookingIds.length > 0 ? unsettledBookingIds : targetBookingIds;
-                const remainingBalanceById = new Map<string, number>(
-                  (recheckBookings || []).map((booking: any) => [
-                    String(booking.id),
-                    getNumericAmount(booking.remaining_balance),
-                  ]),
-                );
-
-
-                // Update booking - handle downpayment vs full payment
-                const updateData: any = {
-                  payment_intent_id: paymentIntentId,
-                  payment_method: paymentMethod,
-                  paid_at: new Date().toISOString(),
-                  status: "confirmed",
-                };
-
-                if (isDownpayment && remainingBalance > 0) {
-                  // Downpayment - set to partial, keep remaining balance
-                  updateData.payment_status = "partial";
-                } else {
-                  // Full payment or balance payment
-                  updateData.payment_status = "paid";
-                  updateData.remaining_balance = 0;
-                }
-
-                await supabaseAdmin
-                  .from("studio_bookings")
-                  .update(updateData)
-                  .in("id", bookingIdsToSettle);
-
-                // Credit the owner's wallet
-                for (const targetBookingId of bookingIdsToSettle) {
-                  await creditOwnerWallet(supabaseAdmin, targetBookingId, paymentAmount, {
-                    paymentStage: isDownpayment
-                      ? "downpayment"
-                      : paymentType === "balance"
-                        ? "balance"
-                        : "full",
-                    balanceAmount: remainingBalanceById.get(String(targetBookingId)) || remainingBalance,
-                  });
-                }
-
-                // Get full booking details for notifications
-                const { data: fullBookings } = await supabaseAdmin
-                  .from("studio_bookings")
-                  .select(
-                    "id, user_id, studio_id, booking_date, remaining_balance, studio:studios(id, name, owner_id, address, hourly_rate, rate), profile:user_id(avatar_url)",
-                  )
-                  .in("id", bookingIdsToSettle);
-
-                const hydratedFullBookings = await hydrateStudioBookingLegacy(supabaseAdmin, fullBookings || []);
-
-                for (const fullBooking of hydratedFullBookings) {
-                  const studioImage = fullBooking.studio?.images?.[0];
-                  const userAvatar = fullBooking.profile?.avatar_url;
-                  const bookingRemainingBalance = getNumericAmount(
-                    fullBooking.remaining_balance ?? remainingBalance,
-                  );
-
-                  // Notify musician with appropriate message
-                  const musicianTitle = isDownpayment ? "Downpayment Received!" : "Payment Successful!";
-                  const musicianMessage = isDownpayment
-                    ? `Your downpayment for ${fullBooking.studio?.name} has been received. Remaining balance: PHP ${bookingRemainingBalance.toLocaleString()}`
-                    : `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`;
-
-                  await insertNotification(supabaseAdmin, {
-                    user_id: fullBooking.user_id,
-                    type: "success",
-                    title: musicianTitle,
-                    message: musicianMessage,
-                    image: studioImage,
-                    meta: { booking_id: fullBooking.id },
-                  });
-
-                  // Notify studio owner
-                  if (fullBooking.studio?.owner_id) {
-                    const ownerTitle = isDownpayment ? "Downpayment Received" : "Booking Payment Received";
-                    const ownerMessage = isDownpayment
-                      ? `Downpayment received for booking at ${fullBooking.studio?.name} on ${fullBooking.booking_date}. Remaining balance: PHP ${bookingRemainingBalance.toLocaleString()}`
-                      : `Payment received for booking at ${fullBooking.studio?.name} on ${fullBooking.booking_date}.`;
-
-                    await insertNotification(supabaseAdmin, {
-                      user_id: fullBooking.studio.owner_id,
-                      type: "info",
-                      title: ownerTitle,
-                      message: ownerMessage,
-                      image: userAvatar,
-                      meta: { booking_id: fullBooking.id },
-                    });
-                  }
-                }
-              }
-            }
+            const payment = payments.find((item: any) => item.attributes?.status === 'paid');
+            if (payment) await applyProviderBookingPayment(supabaseAdmin, payment,
+              sessionData.data.attributes.metadata || {}, booking.checkout_session_id, bookingId,
+              sessionData.data.attributes.payment_intent?.id);
           } catch (e) {
             console.error("Error verifying payment:", e);
           }
@@ -1480,9 +1102,9 @@ serve(async (req: Request) => {
           .from("studio_bookings")
           .update({
             payment_status: "unpaid",
-            checkout_session_id: null, // Clear the old session so a new one can be created
           })
-          .in("id", targetBookingIds);
+          .in("id", targetBookingIds)
+          .in('payment_status', ['unpaid', 'pending', 'failed']).is('paid_at', null);
       }
 
       // Use client-provided redirect URL if available, otherwise fallback to hardcoded scheme
@@ -1508,234 +1130,22 @@ serve(async (req: Request) => {
       const event = params.data ? params.data.attributes : params;
 
 
-      // Helper function to process successful payment
-      async function processSuccessfulPayment(
-        bookingId?: string | null,
-        paymentMethod?: string,
-        paymentAmount?: number,
-        metadata?: any,
-        checkoutSessionId?: string | null,
-        paymentIntentId?: string | null,
-      ) {
-        const targetBookingIds = await resolvePaymentTargetBookingIds(
-          supabaseAdmin,
-          {
-            metadata,
-            fallbackBookingId: bookingId,
-            checkoutSessionId,
-            paymentIntentId,
-          },
-        );
-        if (targetBookingIds.length === 0) return;
-
-        // ========================================
-        // DEDUPLICATION CHECK: Prevent duplicate notifications
-        // Check if booking is already paid before processing
-        // ========================================
-        const { data: existingBookings } = await supabaseAdmin
-          .from("studio_bookings")
-          .select("id, payment_status, payment_type, remaining_balance, paid_at, status")
-          .in("id", targetBookingIds);
-
-        const existingById = new Map<string, any>(
-          (existingBookings || []).map((booking: any) => [booking.id, booking]),
-        );
-
-        // Determine the payment type from metadata or existing booking
-        const firstExistingBooking = (existingBookings || [])[0];
-        const paymentType = inferBookingPaymentType(metadata, firstExistingBooking);
-        const remainingBalance = parseFloat(String(metadata?.remaining_balance || 0));
-        const isDownpayment = paymentType === "downpayment";
-        const processedBookingIds: string[] = [];
-
-        for (const targetBookingId of targetBookingIds) {
-          const targetExistingBooking = existingById.get(targetBookingId);
-          if (!targetExistingBooking) continue;
-
-          if (
-            targetExistingBooking?.payment_status === "paid" ||
-            (isDownpayment && targetExistingBooking?.payment_status === "partial")
-          ) {
-            continue;
-          }
-
-          const updateData: any = {
-            paid_at: new Date().toISOString(),
-          };
-
-          const wasCancelled = targetExistingBooking.status === "cancelled";
-          if (!wasCancelled) {
-            updateData.status = "confirmed";
-          }
-
-          const rowRemainingBalance = getNumericAmount(
-            targetExistingBooking.remaining_balance,
-          );
-
-          if (isDownpayment && (remainingBalance > 0 || rowRemainingBalance > 0)) {
-            updateData.payment_status = "partial";
-          } else {
-            updateData.payment_status = "paid";
-            updateData.remaining_balance = 0;
-          }
-
-          if (paymentMethod) {
-            updateData.payment_method = paymentMethod;
-          }
-
-          if (paymentIntentId) {
-            updateData.payment_intent_id = paymentIntentId;
-          }
-
-          const { error } = await supabaseAdmin
-            .from("studio_bookings")
-            .update(updateData)
-            .eq("id", targetBookingId);
-
-          if (error) {
-            console.error("Webhook: Error updating booking:", error);
-            continue;
-          }
-
-          if (!wasCancelled) {
-            processedBookingIds.push(targetBookingId);
-          }
-          await creditOwnerWallet(supabaseAdmin, targetBookingId, paymentAmount || 0, {
-            paymentStage: isDownpayment
-              ? "downpayment"
-              : paymentType === "balance"
-                ? "balance"
-                : "full",
-            balanceAmount: rowRemainingBalance || remainingBalance,
-          });
+      if (['checkout_session.payment.paid', 'link.payment.paid'].includes(event.type)) {
+        const resource = event.data;
+        const payment = resource?.attributes?.payments?.find((item: any) => item.attributes?.status === 'paid');
+        if (payment && resource.attributes.metadata?.type !== 'wallet_deposit') {
+          await applyProviderBookingPayment(supabaseAdmin, payment, resource.attributes.metadata || {},
+            event.type === 'checkout_session.payment.paid' ? resource.id : null,
+            resource.attributes.metadata?.booking_id || resource.attributes.reference_number,
+            resource.attributes.payment_intent?.id);
         }
-
-        if (processedBookingIds.length > 0) {
-          const { data: paidBookings } = await supabaseAdmin
-            .from("studio_bookings")
-            .select(
-              "id, user_id, studio_id, booking_date, remaining_balance, studio:studios(id, name, owner_id, address, hourly_rate, rate)",
-            )
-            .in("id", processedBookingIds);
-
-          const hydratedPaidBookings = await hydrateStudioBookingLegacy(supabaseAdmin, paidBookings || []);
-
-          for (const booking of hydratedPaidBookings) {
-            const studioImage = booking.studio?.images?.[0] || null;
-            const bookingRemainingBalance = getNumericAmount(
-              booking.remaining_balance ?? remainingBalance,
-            );
-            const notificationTitle = isDownpayment ? "Downpayment Received!" : "Payment Confirmed!";
-            const notificationMessage = isDownpayment
-              ? `Your downpayment for ${booking.studio?.name} has been received. Remaining balance: PHP ${bookingRemainingBalance.toLocaleString()}`
-              : `Your booking at ${booking.studio?.name} is now confirmed.`;
-
-            await insertNotification(supabaseAdmin, {
-              user_id: booking.user_id,
-              type: "success",
-              title: notificationTitle,
-              message: notificationMessage,
-              image: studioImage,
-              meta: { booking_id: booking.id },
-            });
-
-            if (booking.studio?.owner_id) {
-              const ownerMessage = isDownpayment
-                ? `Downpayment received for ${booking.studio?.name} on ${booking.booking_date}. Remaining balance: PHP ${bookingRemainingBalance.toLocaleString()}`
-                : `Payment received for ${booking.studio?.name} on ${booking.booking_date}.`;
-              await insertNotification(supabaseAdmin, {
-                user_id: booking.studio.owner_id,
-                type: "info",
-                title: isDownpayment ? "Downpayment Received" : "New Paid Booking",
-                message: ownerMessage,
-                image: studioImage,
-                meta: { booking_id: booking.id },
-              });
-            }
-          }
-        }
-
       }
-
-      // Handle: checkout_session.payment.paid
-      if (event.type === "checkout_session.payment.paid") {
-        const sessionId = event.data?.id;
-        const metadata = event.data?.attributes?.metadata || {};
-        const bookingId = metadata?.booking_id;
-        const paymentMethod =
-          event.data?.attributes?.payments?.[0]?.attributes?.source?.type;
-        const paymentAmountCentavos =
-          event.data?.attributes?.payments?.[0]?.attributes?.amount;
-        const paymentAmount = paymentAmountCentavos
-          ? paymentAmountCentavos / 100
-          : 0;
-        const paymentIntentId =
-          event.data?.attributes?.payment_intent?.id || null;
-        await processSuccessfulPayment(
-          bookingId,
-          paymentMethod,
-          paymentAmount,
-          metadata,
-          sessionId,
-          paymentIntentId,
-        );
-      }
-
-      // Handle: link.payment.paid
-      if (event.type === "link.payment.paid") {
-        const linkId = event.data?.id;
-        const metadata = event.data?.attributes?.metadata || {};
-        const bookingId =
-          metadata?.booking_id ||
-          event.data?.attributes?.reference_number;
-        const paymentMethod =
-          event.data?.attributes?.payments?.[0]?.attributes?.source?.type;
-        const paymentAmountCentavos = event.data?.attributes?.payments?.[0]?.attributes?.amount;
-        const paymentAmount = paymentAmountCentavos ? paymentAmountCentavos / 100 : 0;
-
-        await processSuccessfulPayment(bookingId, paymentMethod, paymentAmount, metadata);
-      }
-
-      // Handle: payment.paid
-      if (event.type === "payment.paid") {
-        const paymentId = event.data?.id;
-        const metadata = event.data?.attributes?.metadata || {};
-        const bookingId = metadata?.booking_id;
-        const paymentMethod = event.data?.attributes?.source?.type;
-        const paymentIntentId =
-          event.data?.attributes?.payment_intent_id ||
-          event.data?.attributes?.payment_intent?.id ||
-          null;
-        const checkoutSessionId =
-          event.data?.attributes?.checkout_session_id ||
-          event.data?.attributes?.checkout_session?.id ||
-          null;
-
-
-        // For payment.paid, we might need to look up by payment_intent_id
-        if (bookingId || checkoutSessionId || paymentIntentId) {
-          await processSuccessfulPayment(
-            bookingId,
-            paymentMethod,
-            undefined,
-            metadata,
-            checkoutSessionId,
-            paymentIntentId,
-          );
-        } else {
-          // Try to find booking by checkout_session payment_intent
-          if (paymentIntentId) {
-            const { data: booking } = await supabaseAdmin
-              .from("studio_bookings")
-              .select("id")
-              .eq("payment_intent_id", paymentIntentId)
-              .single();
-
-            if (booking) {
-              await processSuccessfulPayment(booking.id, paymentMethod);
-            }
-          }
-        }
+      if (event.type === 'payment.paid') {
+        const payment = event.data;
+        const attr = payment?.attributes || {};
+        await applyProviderBookingPayment(supabaseAdmin, payment, attr.metadata || {},
+          attr.checkout_session_id || attr.checkout_session?.id || null,
+          attr.metadata?.booking_id, attr.payment_intent_id || attr.payment_intent?.id);
       }
 
       // Handle: payment.failed
@@ -1769,7 +1179,9 @@ serve(async (req: Request) => {
           await supabaseAdmin
             .from("studio_bookings")
             .update({ payment_status: "failed" })
-            .in("id", targetBookingIds);
+            .in("id", targetBookingIds)
+            .in('payment_status', ['unpaid', 'pending', 'failed'])
+            .is('paid_at', null);
 
           // Notify user about failed payment
           const { data: bookings } = await supabaseAdmin
@@ -1786,53 +1198,21 @@ serve(async (req: Request) => {
               title: "Payment Failed",
               message: `Your payment for ${booking.studio?.name} failed. Please try again.`,
               image: booking.studio?.images?.[0] || null,
-              meta: { booking_id: booking.id },
+              meta: {
+                booking_id: booking.id,
+                status: "failed",
+                payment_status: "failed",
+                event_type: "studio_booking_payment_failed",
+              },
             });
           }
         }
       }
 
-      // Handle: payment.refunded
-      if (event.type === "payment.refunded") {
-        const refundData = event.data?.attributes;
-        const bookingId = refundData?.metadata?.booking_id;
-        const refundAmount = refundData?.amount ? refundData.amount / 100 : 0; // Convert from centavos
-
-
-        if (bookingId) {
-          // Update booking status to refunded
-          await supabaseAdmin
-            .from("studio_bookings")
-            .update({
-              payment_status: "refunded",
-              refund_amount: refundAmount,
-              refunded_at: new Date().toISOString(),
-              status: "cancelled",
-            })
-            .eq("id", bookingId);
-
-          // Notify user
-          const { data: booking } = await supabaseAdmin
-            .from("studio_bookings")
-            .select("user_id, studio_id, studio:studios(id, name, address, hourly_rate, rate)")
-            .eq("id", bookingId)
-            .single();
-
-          const [bookingWithLegacy] = booking
-            ? await hydrateStudioBookingLegacy(supabaseAdmin, [booking])
-            : [];
-
-          if (bookingWithLegacy) {
-            await insertNotification(supabaseAdmin, {
-              user_id: bookingWithLegacy.user_id,
-              type: "success",
-              title: "Refund Completed",
-              message: `Your refund of PHP ${refundAmount.toLocaleString()} for ${bookingWithLegacy.studio?.name} has been processed.`,
-              image: bookingWithLegacy.studio?.images?.[0] || null,
-              meta: { booking_id: bookingId },
-            });
-          }
-        }
+      if (event.type === 'payment.refunded' || event.type === 'payment.refund.updated') {
+        const resource = event.data;
+        const refunds = resource?.type === 'payment' ? resource.attributes?.refunds || [] : [resource];
+        for (const refund of refunds) await applyProviderRefund(supabaseAdmin, refund);
       }
 
       // Handle: payment.refund.updated
@@ -1963,7 +1343,7 @@ serve(async (req: Request) => {
         .select(
           `
                     id, user_id, status, payment_status, payment_amount, checkout_session_id,
-                    booking_date, checked_in, created_at,
+                    booking_date, check_in_time, created_at,
                     studio:studios(name, owner_id)
                 `,
         )
@@ -2008,7 +1388,7 @@ serve(async (req: Request) => {
       }
 
       // Check if booking was checked in (no refund if already used)
-      if (booking.checked_in) {
+      if (booking.check_in_time) {
         return new Response(
           JSON.stringify({
             error: "Cannot refund a booking that was already checked in",
@@ -2111,8 +1491,14 @@ serve(async (req: Request) => {
             user_id: booking.studio.owner_id,
             type: "warning",
             title: "Manual Refund Required",
-            message: `A booking at ${booking.studio?.name} requires a manual refund of PHP ${refundAmount.toLocaleString()}.`,
-            meta: { booking_id: booking.id, refund_amount: refundAmount },
+            message: `A booking at ${booking.studio?.name} requires a manual refund of ₱${refundAmount.toLocaleString()}.`,
+            meta: {
+              booking_id: booking.id,
+              refund_amount: refundAmount,
+              status: "cancelled",
+              payment_status: "refund_pending",
+              event_type: "studio_booking_refund_pending",
+            },
           });
         }
 
@@ -2122,7 +1508,7 @@ serve(async (req: Request) => {
             refund_percentage: refundPercentage,
             refund_amount: refundAmount,
             status: "pending",
-            message: `Refund of PHP ${refundAmount.toLocaleString()} (${refundPercentage}%) is being processed manually.`,
+            message: `Refund of ₱${refundAmount.toLocaleString()} (${refundPercentage}%) is being processed manually.`,
           }),
           {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -2132,6 +1518,7 @@ serve(async (req: Request) => {
       }
 
       // Process refund via PayMongo
+      let providerRefundId: string | null = null;
       try {
         const refundData = await paymongoRequest("/refunds", "POST", {
           data: {
@@ -2149,26 +1536,32 @@ serve(async (req: Request) => {
         });
 
 
-        // Update booking
-        await supabaseAdmin
-          .from("studio_bookings")
-          .update({
-            status: "cancelled",
-            payment_status: "refunded",
-            cancellation_reason: reason || refundReason,
-            refund_amount: refundAmount,
-            refund_id: refundData.data.id,
-            refunded_at: new Date().toISOString(),
-          })
-          .eq("id", booking_id);
+        providerRefundId = refundData.data.id;
+        const confirmedRefund = await applyProviderRefund(supabaseAdmin, refundData.data, [booking_id]);
+        if (!confirmedRefund) {
+          const { error } = await supabaseAdmin.from('studio_bookings').update({
+            status: 'cancelled', payment_status: 'refund_pending', refund_amount: refundAmount,
+            refund_id: refundData.data.id, cancellation_reason: reason || refundReason,
+          }).eq('id', booking_id);
+          if (error) throw error;
+          return new Response(JSON.stringify({ success: true, status: 'pending', refund_id: refundData.data.id,
+            refund_amount: refundAmount, message: 'Your refund is being processed.' }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
 
         // Notify user
         await insertNotification(supabaseAdmin, {
           user_id: booking.user_id,
           type: "success",
           title: "Refund Processed",
-          message: `Your refund of PHP ${refundAmount.toLocaleString()} (${refundPercentage}%) for ${booking.studio?.name} has been processed.`,
-          meta: { booking_id: booking.id, refund_amount: refundAmount },
+          message: `Your refund of ₱${refundAmount.toLocaleString()} (${refundPercentage}%) for ${booking.studio?.name} has been processed.`,
+          meta: {
+            booking_id: booking.id,
+            refund_amount: refundAmount,
+            status: "cancelled",
+            payment_status: "refunded",
+            event_type: "studio_booking_refunded",
+          },
         });
 
         // Notify studio owner
@@ -2177,8 +1570,14 @@ serve(async (req: Request) => {
             user_id: booking.studio.owner_id,
             type: "info",
             title: "Booking Cancelled & Refunded",
-            message: `A booking at ${booking.studio?.name} was cancelled. Refund of PHP ${refundAmount.toLocaleString()} processed.`,
-            meta: { booking_id: booking.id, refund_amount: refundAmount },
+            message: `A booking at ${booking.studio?.name} was cancelled. Refund of ₱${refundAmount.toLocaleString()} processed.`,
+            meta: {
+              booking_id: booking.id,
+              refund_amount: refundAmount,
+              status: "cancelled",
+              payment_status: "refunded",
+              event_type: "studio_booking_refunded",
+            },
           });
         }
 
@@ -2188,7 +1587,7 @@ serve(async (req: Request) => {
             refund_id: refundData.data.id,
             refund_percentage: refundPercentage,
             refund_amount: refundAmount,
-            message: `Refund of PHP ${refundAmount.toLocaleString()} (${refundPercentage}%) processed successfully!`,
+            message: `Refund of ₱${refundAmount.toLocaleString()} (${refundPercentage}%) processed successfully!`,
           }),
           {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -2197,6 +1596,8 @@ serve(async (req: Request) => {
         );
       } catch (refundError: any) {
         console.error("PayMongo refund error:", refundError);
+
+        if (providerRefundId) throw refundError;
 
         // Mark as pending manual refund
         await supabaseAdmin
@@ -2215,7 +1616,7 @@ serve(async (req: Request) => {
             refund_percentage: refundPercentage,
             refund_amount: refundAmount,
             status: "pending",
-            message: `Booking cancelled. Refund of PHP ${refundAmount.toLocaleString()} is being processed.`,
+            message: `Booking cancelled. Refund of ₱${refundAmount.toLocaleString()} is being processed.`,
           }),
           {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -2445,7 +1846,7 @@ serve(async (req: Request) => {
         user_id,
         type: "success",
         title: "Wallet Topped Up!",
-        message: `PHP ${depositAmount.toLocaleString()} has been added to your wallet.`,
+        message: `₱${depositAmount.toLocaleString()} has been added to your wallet.`,
         meta: { type: "wallet_deposit", amount: depositAmount },
       }).catch(() => {});
 

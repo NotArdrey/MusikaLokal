@@ -2,7 +2,7 @@
   "expo": {
     "name": "musika-lokal",
     "slug": "musika-lokal",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/musika-lokal-logo-modern-wordmark.png",
     "scheme": "musikalokal",
@@ -70,6 +70,7 @@
       "@react-native-community/datetimepicker"
     ],
     "android": {
+      "versionCode": 2,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#0F172A",
@@ -102,17 +103,49 @@
         {
           "action": "VIEW",
           "autoVerify": true,
-          "category": ["BROWSABLE", "DEFAULT"],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
           "data": [
-            { "scheme": "http" },
-            { "scheme": "https" },
-            { "host": "musikalokal.app", "path": "/feed" },
-            { "host": "musikalokal.app", "path": "/home" },
-            { "host": "musikalokal.app", "path": "/group_details" },
-            { "host": "musikalokal.app", "path": "/profile" },
-            { "host": "musikalokal.app", "path": "/production_team" },
-            { "host": "musikalokal.app", "path": "/product_details" },
-            { "host": "musikalokal.app", "path": "/playlist_details" }
+            {
+              "scheme": "http"
+            },
+            {
+              "scheme": "https"
+            },
+            {
+              "host": "musika-lokal.vercel.app",
+              "path": "/feed"
+            },
+            {
+              "host": "musika-lokal.vercel.app",
+              "path": "/home"
+            },
+            {
+              "host": "musika-lokal.vercel.app",
+              "path": "/group_details"
+            },
+            {
+              "host": "musika-lokal.vercel.app",
+              "path": "/profile"
+            },
+            {
+              "host": "musika-lokal.vercel.app",
+              "path": "/production_team"
+            },
+            {
+              "host": "musika-lokal.vercel.app",
+              "path": "/product_details"
+            },
+            {
+              "host": "musika-lokal.vercel.app",
+              "path": "/playlist_details"
+            },
+            {
+              "host": "musika-lokal.vercel.app",
+              "path": "/recovery"
+            }
           ]
         }
       ]

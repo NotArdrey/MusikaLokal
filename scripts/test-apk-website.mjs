@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 
 const dist = fileURLToPath(new URL('../web/dist/', import.meta.url)).replace(/[\\/]$/, '');
+const publicFiles = fileURLToPath(new URL('../web/public/', import.meta.url)).replace(/[\\/]$/, '');
 const output = fileURLToPath(new URL('../output/android-testing/', import.meta.url));
 const contentTypes = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.ttf': 'font/ttf' };
 
@@ -24,8 +25,11 @@ test('exported website supports public downloads, themes and protected admin rou
         response.writeHead(redirect.permanent ? 308 : 307, { Location: redirect.destination }).end();
         return;
       }
-      let file = resolve(dist, `.${pathname}`);
-      if (!file.startsWith(`${dist}${sep}`) && file !== dist) { response.writeHead(403).end(); return; }
+      const gateway = hosting.rewrites.find((entry) => entry.source === pathname && entry.destination === '/share/index.html');
+      const servesShare = Boolean(gateway) || pathname.startsWith('/share/');
+      const directory = servesShare ? publicFiles : dist;
+      let file = resolve(directory, `.${gateway?.destination || pathname}`);
+      if (!file.startsWith(`${directory}${sep}`) && file !== directory) { response.writeHead(403).end(); return; }
       try { if (!(await stat(file)).isFile()) file = resolve(dist, 'index.html'); }
       catch { file = resolve(dist, 'index.html'); }
       response.setHeader('Content-Type', contentTypes[extname(file)] || 'application/octet-stream');
@@ -55,9 +59,11 @@ test('exported website supports public downloads, themes and protected admin rou
       '/product_details?product_id=123', '/playlist_details?playlist_id=123',
     ]) {
       await page.goto(baseUrl + path);
-      await page.getByRole('heading', { name: /Find your sound/ }).waitFor();
-      await page.waitForURL((url) => url.pathname === '/');
+      await page.getByRole('heading', { name: 'Music connects us.' }).waitFor();
+      assert.equal(new URL(page.url()).pathname, path.split('?')[0]);
     }
+    await page.goto(baseUrl);
+    await page.getByRole('heading', { name: /Find your sound/ }).waitFor();
     const associationResponse = await page.request.get(baseUrl + '/.well-known/assetlinks.json');
     assert.equal(associationResponse.status(), 200);
     assert.match(associationResponse.headers()['content-type'], /application\/json/);

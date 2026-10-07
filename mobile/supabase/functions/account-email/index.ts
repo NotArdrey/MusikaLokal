@@ -196,7 +196,7 @@ async function handlePasswordReset(supabaseAdmin: any, body: any) {
   const email = String(body?.email || "").trim().toLowerCase();
   if (!email) return jsonResponse({ error: "Email is required" }, 400);
 
-  const redirectTo = getRedirect(body?.redirectTo, "PASSWORD_RESET_REDIRECT_TO", "musikalokal://change_password");
+  const redirectTo = "https://musika-lokal.vercel.app/recovery";
   const authUser = await findAuthUserByEmail(supabaseAdmin, email);
 
   if (!authUser) {
@@ -218,10 +218,13 @@ async function handlePasswordReset(supabaseAdmin: any, body: any) {
     return jsonResponse({ error: "Unable to prepare password reset link" }, 500);
   }
 
-  const actionLink = getActionLink(data);
-  if (!actionLink) {
+  const tokenHash = String(data?.properties?.hashed_token || "").trim();
+  if (!tokenHash) {
     return jsonResponse({ error: "Generated password reset link was empty" }, 500);
   }
+  // Keep the credential in the fragment so it is not sent in page requests or
+  // referrers. The callback verifies it as recovery before allowing an update.
+  const actionLink = `${redirectTo}#${new URLSearchParams({ token_hash: tokenHash, type: "recovery" })}`;
 
   const recipientName = displayNameForUser(authUser, email);
   const safeName = escapeHtml(recipientName || "there");

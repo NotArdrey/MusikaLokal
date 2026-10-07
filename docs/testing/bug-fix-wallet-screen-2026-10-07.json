@@ -1,0 +1,12 @@
+{
+  "realWalletScreenRendered": true,
+  "allActivityCount": 6,
+  "paymentsCount": 4,
+  "paymentsExcludeOwnerEarnings": true,
+  "refundFilter": true,
+  "bothThemes": true,
+  "externalFundingLabels": true,
+  "historicalTotalAndMissingDateLabels": true,
+  "focusRefreshPreservesHistory": true,
+  "changedUserAndSignOutClearPrivateHistory": true
+}

@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { supabase } from "../../../lib/supabase";
+import { buildGigTimeline, getGigTimelineLabel } from "../../utils/gigTimeline";
 
 interface GroupTimelineTabProps {
   group: any;
@@ -22,6 +23,7 @@ const GroupTimelineTab = ({
   const [gigs, setGigs] = useState<any[]>([]);
 
   useEffect(() => {
+    let cancelled = false;
     const fetchGroupGigs = async () => {
       if (!group?.id) {
         setLoading(false);
@@ -32,20 +34,11 @@ const GroupTimelineTab = ({
       setLoading(true);
       try {
         const isArtistProfile = String(group?.type || "").toLowerCase() === "artist";
-        let query = supabase
-          .from("gig_applications")
-          .select("created_at, gigs(id,name,location,event_date,status)")
-          .eq("status", "accepted")
-          .order("created_at", { ascending: false });
+        const { data, error } = await supabase.rpc('get_public_performer_gig_timeline', {
+          p_target_id: group.id, p_target_type: isArtistProfile ? 'artist' : 'group',
+        });
 
-        if (isArtistProfile) {
-          query = query.eq("applicant_id", group.id);
-        } else {
-          query = query.eq("group_id", group.id);
-        }
-
-        const { data, error } = await query;
-
+        if (cancelled) return;
         if (error) throw error;
 
         const gigMap = new Map<string, any>();
@@ -53,73 +46,32 @@ const GroupTimelineTab = ({
           const gig = application?.gigs;
           if (!gig?.id) return;
           if (!gigMap.has(gig.id)) {
-            gigMap.set(gig.id, gig);
+            gigMap.set(gig.id, { ...gig, application_status: application.status });
           }
         });
 
         setGigs(Array.from(gigMap.values()));
-      } catch (e) {
-        console.log("Error fetching group timeline gigs:", e);
+      } catch {
+        if (cancelled) return;
         setGigs([]);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
-    fetchGroupGigs();
-  }, [group?.id]);
+    void fetchGroupGigs();
+    return () => { cancelled = true; };
+  }, [group?.id, group?.type]);
 
-  const classifyGig = (gig: any): "active" | "upcoming" | "done" => {
-    const eventDate = gig?.event_date ? new Date(gig.event_date) : null;
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    if (gig?.status === "closed" || gig?.status === "cancelled") {
-      return "done";
-    }
-
-    if (!eventDate || isNaN(eventDate.getTime())) {
-      return "upcoming";
-    }
-
-    if (eventDate < todayStart) {
-      return "done";
-    }
-
-    if (eventDate.toDateString() === now.toDateString()) {
-      return "active";
-    }
-
-    return "upcoming";
-  };
-
-  const groupedGigs = useMemo(() => {
-    const buckets = {
-      active: [] as any[],
-      upcoming: [] as any[],
-      done: [] as any[],
-    };
-
-    gigs.forEach((gig) => {
-      buckets[classifyGig(gig)].push(gig);
-    });
-
-    const byDateDesc = (a: any, b: any) => {
-      const aTime = a?.event_date ? new Date(a.event_date).getTime() : 0;
-      const bTime = b?.event_date ? new Date(b.event_date).getTime() : 0;
-      return bTime - aTime;
-    };
-
-    buckets.active.sort(byDateDesc);
-    buckets.upcoming.sort(byDateDesc);
-    buckets.done.sort(byDateDesc);
-
-    return buckets;
-  }, [gigs]);
+  const groupedGigs = useMemo(
+    () => buildGigTimeline(gigs.map((gig) => ({ gigs: gig, status: gig.application_status }))),
+    [gigs],
+  );
 
   const renderGigCard = (gig: any, accent: string) => {
     const eventDate = gig?.event_date
       ? new Date(gig.event_date).toLocaleDateString("en-US", {
+        timeZone: "Asia/Manila",
         month: "short",
         day: "numeric",
         year: "numeric",
@@ -151,7 +103,7 @@ const GroupTimelineTab = ({
             }}
           >
             <Text style={{ color: accent, fontFamily: "Poppins_600SemiBold", fontSize: 11 }}>
-              {String(gig.status || "open").toUpperCase()}
+              {getGigTimelineLabel(gig).toUpperCase()}
             </Text>
           </View>
         </View>

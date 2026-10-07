@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { Text, View } from "react-native";
+import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
 import CachedImage from "../CachedImage";
 import { formatDashedNumericDate } from "../../utils/friendlyDateTime";
 
@@ -10,6 +10,9 @@ interface ReviewsTabProps {
   colors: any;
   styles: any;
   reviews: any[];
+  loading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
   relatedListings?: any[];
 }
 
@@ -36,6 +39,9 @@ const ReviewsTab = ({
   colors,
   styles,
   reviews,
+  loading = false,
+  error,
+  onRetry,
 }: ReviewsTabProps) => (
   <View style={[styles.tabContent, { paddingHorizontal: 0 }]}>
     <View style={[styles.reviewHeader, { paddingHorizontal: 24 }]}>
@@ -59,6 +65,14 @@ const ReviewsTab = ({
       </View>
     </View>
 
+    {error ? (
+      <View accessibilityRole="alert" style={{ paddingHorizontal: 24, marginBottom: 12 }}>
+        <Text style={{ color: colors.textSecondary }}>{error}</Text>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Retry loading reviews" onPress={onRetry}>
+          <Text style={{ color: colors.primary, marginTop: 8 }}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    ) : null}
     <View style={[styles.reviewsScroll, { paddingHorizontal: 24 }]}>
       {reviews.length > 0 ? (
         reviews.map((review) => (
@@ -87,7 +101,9 @@ const ReviewsTab = ({
             <Text style={[styles.reviewBody, { color: colors.text }]}>{getReviewContent(review)}</Text>
           </View>
         ))
-      ) : (
+      ) : loading ? (
+        <ActivityIndicator color={colors.primary} accessibilityLabel="Loading reviews" />
+      ) : error ? null : (
         <Text style={{ color: colors.textSecondary, fontStyle: "italic" }}>No reviews yet.</Text>
       )}
     </View>

@@ -1736,16 +1736,19 @@ export default function GroupDetailsScreen() {
                         <View
                           style={{
                             flexDirection: "row",
+                            flexWrap: "wrap",
+                            alignItems: "flex-start",
+                            gap: 8,
                             justifyContent: "space-between",
                             marginBottom: 8,
                           }}
                         >
                           <Text
-                            style={[styles.setupTitle, { color: colors.text }]}
+                            style={[styles.setupTitle, { color: colors.text, flex: 1, minWidth: 120 }]}
                           >
                             {app.gig?.name || "Unknown Gig"}
                           </Text>
-                          <View style={[styles.applicationStatusBadge, { backgroundColor: `${statusColor}18` }]}>
+                          <View style={[styles.applicationStatusBadge, { backgroundColor: `${statusColor}18`, maxWidth: "100%", flexShrink: 1 }]}>
                             <Text style={[styles.applicationStatusText, { color: statusColor }]}>
                               {normalizedStatus.replace(/_/g, " ")}
                             </Text>

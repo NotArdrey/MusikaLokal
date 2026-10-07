@@ -27,10 +27,11 @@ import { emitToast } from "../src/events/toastBus";
 import { useTheme } from "../src/context/ThemeContext";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import { getStationLiveTimelineState } from "../src/utils/radioTimeline";
+import {getStationQueueEntries, mergeStationSnapshot} from '../src/utils/stationQueue';
+import {useStationQueueRefresh} from '../src/hooks/useStationQueueRefresh';
 import { typography } from "../src/theme/tokens";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const LIVE_STATION_REFRESH_MS = 30_000;
 const moderateScale = (size: number, factor = 0.3) => {
   const scaled = Math.max((SCREEN_WIDTH / 375) * size, size * 0.85);
   return size + (scaled - size) * factor;
@@ -165,7 +166,7 @@ export default function StationDetailsScreen() {
         body: { action: "get_station_details", station_id },
       });
       if (data?.data) {
-        setStation(data.data);
+        setStation((previous: any) => previous?.id === data.data.id ? mergeStationSnapshot(previous, data.data) : data.data);
         syncStationData(data.data);
       }
     } catch (e: any) {
@@ -177,9 +178,17 @@ export default function StationDetailsScreen() {
 
   useEffect(() => {
     fetchStation();
-    const intervalId = setInterval(fetchStation, LIVE_STATION_REFRESH_MS);
-    return () => clearInterval(intervalId);
   }, [fetchStation]);
+
+  useStationQueueRefresh(typeof station_id === 'string' ? station_id : null, snapshot => {
+    if (snapshot.__queueUnavailable) {
+      setStation(null);
+      syncStationData(snapshot);
+      return;
+    }
+    setStation((previous: any) => previous?.id === snapshot.id ? mergeStationSnapshot(previous, snapshot) : snapshot);
+    syncStationData(snapshot);
+  });
 
   useEffect(() => {
     const liveClockTimer = setInterval(() => {
@@ -365,6 +374,8 @@ export default function StationDetailsScreen() {
     ? station.live_slots
     : slots;
   const liveTimelineState = getStationLiveTimelineState(station, liveNowMs);
+  const queueEntries = getStationQueueEntries(station);
+  const upNext = queueEntries.slice(liveTimelineState.queueIndex + 1).concat(queueEntries.slice(0, liveTimelineState.queueIndex + 1));
   const liveCurrentSlot = liveTimelineState.slot || getLiveCurrentSlot(station, liveSlots);
   const liveCurrentItem = liveTimelineState.item || getLiveCurrentItem(station, liveSlots);
   const playerSlotIndex = liveTimelineState.synchronized
@@ -378,7 +389,7 @@ export default function StationDetailsScreen() {
     ? liveCurrentItem?.title || currentTrack?.title || liveSlots[playerSlotIndex]?.playlist?.title || liveSlots[playerSlotIndex]?.label || `Track ${playerSlotIndex + 1}`
     : liveCurrentItem?.title || liveCurrentSlot?.playlist?.title || liveCurrentSlot?.label || `Slot ${playerSlotIndex + 1}`;
   const stationArtworkUrl = getStationArtworkUrl(station);
-  const stationStatus = station?.is_active && liveSlots.length > 0 ? "live" : "offline";
+  const stationStatus = station?.is_active && queueEntries.length > 0 ? "live" : "offline";
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -432,7 +443,7 @@ export default function StationDetailsScreen() {
           </View>
           {slots.length > 0 && (
             <Text style={[styles.rotationSummary, { color: colors.textSecondary }]}>
-              Shared playlist radio. The app plays every station playlist in order and keeps listeners on the same full-queue timeline.
+              Shared radio. Everyone hears the saved track queue in the same order.
             </Text>
           )}
         </View>
@@ -463,6 +474,22 @@ export default function StationDetailsScreen() {
           </View>
         )}
 
+        {queueEntries.length > 0 && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, {color: colors.text}]}>Up Next</Text>
+            {upNext.map((entry, index) => (
+              <View key={entry.item.id + ':' + index} style={[styles.slotCard, {backgroundColor: colors.surface, borderColor: colors.border}]}>
+                <Text style={{color: colors.textSecondary, marginRight: 12}}>{index + 1}</Text>
+                <View style={{flex: 1, minWidth: 0}}>
+                  <Text style={[styles.slotPlaylist, {color: colors.text}]}>{entry.item.title}</Text>
+                  <Text style={[styles.slotTime, {color: colors.textSecondary}]}>{entry.playlist?.title}</Text>
+                </View>
+              </View>
+            ))}
+            <Text style={[styles.sectionSubtitle, {color: colors.textSecondary}]}>The queue loops after the final track.</Text>
+          </View>
+        )}
+
         {/* Schedule / Slots */}
         <View style={styles.section}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -472,7 +499,7 @@ export default function StationDetailsScreen() {
               </Text>
               {slots.length > 0 && (
                 <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}> 
-                  {liveSlots.length} queued for shared playback. The queue loops after the final track.
+                  {queueEntries.length} tracks selected for shared playback.
                 </Text>
               )}
             </View>
