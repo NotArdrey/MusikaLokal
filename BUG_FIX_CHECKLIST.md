@@ -149,11 +149,11 @@ For each part:
 
 Use Node/PGlite for database behavior, permissions, concurrency, and idempotency; browser checks for admin/callback pages; Android device checks for layouts, links, camera/upload, and playback.
 
-Deploy additive migrations before dependent functions and clients. Keep equivalent backend fixes aligned across both workspaces while preserving legitimate differences. The current request excludes a client bundle/APK build. During the later client release, deliver a newly versioned APK for native-link changes, verify the actual downloadable build, and retain the previous release for rollback.
+Deploy additive migrations before dependent functions and clients. Keep equivalent backend fixes aligned across both workspaces while preserving legitimate differences. The initial implementation phase excluded a client bundle/APK build. The subsequently requested client release is recorded below; retain the previous release for rollback.
 
 All 23 implementation items pass the available checks. Release acceptance remains open until the following checks are completed:
 
-- [ ] Build and publish a newly versioned native client when requested; validate the downloadable APK's manifest and certificate.
+- [x] Build and publish a newly versioned native client when requested; validate the downloadable APK's manifest and certificate. Version 1.0.1 (build 2) is published and its browser-downloaded bytes, manifest, and preserved signing certificate are verified. See the [client release report](docs/testing/client-release-2026-10-07.json).
 - [ ] Verify BUG-04/09/17/18 on physical Android with a notch, narrow viewport, larger fonts, and both themes.
 - [ ] Verify automatic HTTPS links in Chrome and Messenger, cold/warm launches, logged-out login/identity handoff, and app absence using the new client.
 - [ ] Verify Didit camera scan/upload, repeated decline/cancel followed by approval, and device restarts with isolated provider identities.

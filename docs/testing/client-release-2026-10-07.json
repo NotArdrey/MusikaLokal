@@ -1,0 +1,123 @@
+{
+  "releasedAt": "2026-10-07T08:12:09.382Z",
+  "sourceCommit": "08541c17dc1a46866b20de4ace6515715dcaca85",
+  "branch": "fix/android-testing-apk",
+  "release": {
+    "packageId": "com.anonymous.musikalokal",
+    "versionName": "1.0.1",
+    "versionCode": 2,
+    "sizeBytes": 102318427,
+    "sha256": "cbfa82e2779e705eb0efb03222d70ee172ee64b92eb7a227e4af1747c1519cf1",
+    "minSdk": 24,
+    "builtAt": "2026-10-07T08:09:08.8208462Z",
+    "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+    "testing": true,
+    "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/cbfa82e2779e705eb0efb03222d70ee172ee64b92eb7a227e4af1747c1519cf1/musikalokal-testing.apk?download=1"
+  },
+  "website": {
+    "url": "https://musika-lokal.vercel.app",
+    "deploymentId": "dpl_EgTJwuy87t5jEebyt1Fy28ZHzUBW",
+    "deploymentUrl": "https://musika-lokal-4nadxde4e-notardreys-projects.vercel.app",
+    "state": "READY",
+    "method": "Verified local Expo web export deployed using Vercel Build Output API",
+    "rollbackDeploymentId": "dpl_Bv85CKmf7YzUEE6JE2GbXABJWZAL",
+    "rollbackDeploymentUrl": "https://musika-lokal-gvflirpxg-notardreys-projects.vercel.app",
+    "previousReleaseManifest": "web/releases/5030328bd1a398ae14a3dd3abf4aa6587ca5aaa5f57aeca4ec190aa1bfe40b48.json",
+    "previousArtifactsRetained": true
+  },
+  "apkChecks": {
+    "assembleRelease": "passed",
+    "architectures": [
+      "arm64-v8a",
+      "x86_64"
+    ],
+    "standaloneJavaScriptBundle": "present",
+    "privateCredentialScan": "passed",
+    "debuggable": false,
+    "minSdk": 24,
+    "targetSdk": 36,
+    "downloadedManifest": "version 1.0.1, version code 2",
+    "downloadedSignature": "APK Signature Scheme v2 verified; certificate matches previous release",
+    "httpsAutoVerify": true,
+    "linkPaths": [
+      "/feed",
+      "/home",
+      "/group_details",
+      "/profile",
+      "/production_team",
+      "/product_details",
+      "/playlist_details",
+      "/recovery"
+    ]
+  },
+  "verification": {
+    "mobileTypecheck": "passed",
+    "webTypecheck": "passed",
+    "bugFixTests": {
+      "passed": 179,
+      "failed": 0
+    },
+    "releaseTests": {
+      "passed": 60,
+      "failed": 0
+    },
+    "freshWebExportBrowserTest": "passed",
+    "webBundlePrivateCredentialScan": "passed",
+    "browser": {
+      "website": "https://musika-lokal.vercel.app",
+      "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/cbfa82e2779e705eb0efb03222d70ee172ee64b92eb7a227e4af1747c1519cf1/musikalokal-testing.apk?download=1",
+      "sha256": "cbfa82e2779e705eb0efb03222d70ee172ee64b92eb7a227e4af1747c1519cf1",
+      "sizeBytes": 102318427,
+      "browserTransport": "browser default",
+      "downloadVerifiedAt": "https://musika-lokal.vercel.app",
+      "downloadTransport": "browser default",
+      "browserChecks": "passed"
+    },
+    "publicFiles": {
+      "website": "https://musika-lokal.vercel.app",
+      "versionName": "1.0.1",
+      "versionCode": 2,
+      "sha256": "cbfa82e2779e705eb0efb03222d70ee172ee64b92eb7a227e4af1747c1519cf1",
+      "verifiedRoutes": [
+        "feed",
+        "home",
+        "group_details",
+        "profile",
+        "production_team",
+        "product_details",
+        "playlist_details",
+        "share",
+        "share/flow.js",
+        "share/page.js",
+        "share/style.css",
+        "recovery",
+        "recovery/flow.js",
+        "recovery/page.js",
+        "recovery/config.js",
+        "recovery/styles.css",
+        ".well-known/assetlinks.json"
+      ],
+      "manifestAndAssociation": "passed",
+      "securityHeaders": "passed"
+    },
+    "screenshots": "docs/testing/client-release-2026-10-07/",
+    "broadSweep": {
+      "passed": 500,
+      "failed": 16,
+      "baselineSourceFailures": {
+        "count": 13,
+        "reproducedAtCommit": "0c093442a5cb693e6b09352794bb63160fe3c632"
+      },
+      "unavailableLiveChecks": [
+        "test-gemini-evidence-live.mjs: GEMINI_API_KEY unavailable in test environment",
+        "test-gemini-video-live.mjs: GEMINI_API_KEY unavailable in test environment",
+        "test-picture-storage-api.mjs: credential lookup returned HTTP 403; no test files created"
+      ]
+    }
+  },
+  "remainingAcceptanceChecks": [
+    "Physical Android installation and update, layout/accessibility, cold/warm HTTPS links and Messenger handoff",
+    "Didit camera/upload/retry/restart flows with isolated provider identities",
+    "Physical audio playback, recovery, wallet, and provider test-mode payment roundtrip"
+  ]
+}
