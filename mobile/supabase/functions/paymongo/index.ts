@@ -7,7 +7,7 @@ import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
 import { withNotificationRouteMeta } from "../_shared/notificationRoutes.ts";
 import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
 
-import { getConfirmedProviderPayment } from '../_shared/studioPaymentHistory.ts';
+import { getConfirmedProviderPayment, getStudioBalanceAfterPayment } from '../_shared/studioPaymentHistory.ts';
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -760,11 +760,11 @@ serve(async (req: Request) => {
       const payment_type = requestedPaymentType || 'full';
       if (!['full', 'downpayment', 'balance'].includes(payment_type)
         || bookingRows.some((row: any) => row.paid_at && payment_type !== 'balance')
-        || payment_type === 'balance' && bookingRows.some((row: any) => !row.paid_at || Number(row.remaining_balance) <= 0)) {
+        || payment_type === 'balance' && bookingRows.some((row: any) => !row.paid_at || getStudioBalanceAfterPayment(row) <= 0)) {
         throw new Error('Invalid payment stage for this booking');
       }
       const checkoutAmount = Math.round(bookingRows.reduce((sum: number, row: any) => sum +
-        (payment_type === 'balance' ? Number(row.remaining_balance) : payment_type === 'downpayment'
+        (payment_type === 'balance' ? getStudioBalanceAfterPayment(row) : payment_type === 'downpayment'
           ? Math.round(Number(row.final_price) * 50) / 100 : Number(row.final_price)), 0) * 100) / 100;
       if (checkoutAmount <= 0) {
         return new Response(JSON.stringify({ error: "Invalid checkout amount" }), {

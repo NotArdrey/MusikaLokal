@@ -28,6 +28,7 @@ import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidatio
 import { clearListingDetailsCache } from '../../src/utils/listingDetailsCache';
 import { createRealtimeChannelTopic } from '../../src/utils/realtimeChannel';
 import { palette, typography } from '../../src/theme/tokens';
+import { shareListing } from '../../src/utils/shareListing';
 
 const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
@@ -774,6 +775,18 @@ export default function MyStudioScreen({ historyOnly = false, embedded = false }
                                                             style={[styles.manageBtn, { borderColor: colors.primary }]}
                                                         >
                                                             <Text style={[styles.manageBtnText, { color: colors.primary }]}>{canManageBookings ? 'Manage' : 'View'}</Text>
+                                                        </TouchableOpacity>
+
+                                                        <TouchableOpacity
+                                                            activeOpacity={1}
+                                                            testID={`mobile-studio-share-${studio.id}`}
+                                                            accessibilityRole="button"
+                                                            accessibilityLabel={`Share ${studio.name || 'studio'}`}
+                                                            onPress={() => shareListing(studio.id, studio.name, 'Studio')}
+                                                            style={[styles.manageBtn, { borderColor: colors.border }]}
+                                                        >
+                                                            <Ionicons name="share-outline" size={16} color={colors.text} />
+                                                            <Text style={[styles.manageBtnText, { color: colors.text }]}>Share</Text>
                                                         </TouchableOpacity>
 
                                                         {canEditListing ? (

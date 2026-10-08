@@ -2,7 +2,7 @@
   "expo": {
     "name": "musika-lokal",
     "slug": "musika-lokal",
-    "version": "1.0.1",
+    "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/images/musika-lokal-logo-modern-wordmark.png",
     "scheme": "musikalokal",
@@ -31,7 +31,12 @@
       "expo-asset",
       "expo-image",
       "expo-video",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "musika-lokal-alerts-v2"
+        }
+      ],
       [
         "expo-audio",
         {
@@ -70,7 +75,7 @@
       "@react-native-community/datetimepicker"
     ],
     "android": {
-      "versionCode": 2,
+      "versionCode": 6,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#0F172A",
@@ -145,6 +150,10 @@
             {
               "host": "musika-lokal.vercel.app",
               "path": "/recovery"
+            },
+            {
+              "host": "musika-lokal.vercel.app",
+              "path": "/action"
             }
           ]
         }

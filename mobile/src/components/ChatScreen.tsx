@@ -97,7 +97,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const { isGuest } = useAuth();
     const insets = useSafeAreaInsets();
     useBottomOverlayVisibility(true, 'ChatConversationDetail');
-    const { messages, loading, sendMessage, retryMessage, markAsRead, addReaction, removeReaction } = useChat(conversationId, currentUserId);
+    const { messages, loading, hasOlderMessages, loadingOlder, olderError, loadOlderMessages,
+        sendMessage, retryMessage, markAsRead, addReaction, removeReaction } = useChat(conversationId, currentUserId);
     const { participants } = useGroupParticipants(isGroupChat ? conversationId : null);
     const [text, setText] = useState('');
     const flatListRef = useRef<FlatList>(null);
@@ -824,6 +825,18 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     data={reversedMessages}
                     keyExtractor={(item) => item.id}
                     renderItem={renderMessage}
+                    onEndReached={() => { if (!olderError) void loadOlderMessages(); }}
+                    onEndReachedThreshold={0.3}
+                    maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+                    ListFooterComponent={loadingOlder ? (
+                        <LoadingState message="Loading earlier messages..." />
+                    ) : hasOlderMessages ? (
+                        <TouchableOpacity onPress={() => void loadOlderMessages()} style={{ padding: 16 }}>
+                            <Text style={{ color: colors.primary, textAlign: 'center', fontFamily: typography.medium }}>
+                                {olderError ? 'Retry loading earlier messages' : 'Load earlier messages'}
+                            </Text>
+                        </TouchableOpacity>
+                    ) : null}
                     contentContainerStyle={styles.messagesList}
                     initialNumToRender={18}
                     maxToRenderPerBatch={24}

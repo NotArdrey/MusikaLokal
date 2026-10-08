@@ -1,0 +1,105 @@
+{
+  "checkedAt": "2026-10-08T04:45:42.959Z",
+  "projectRef": "aefldxegsvzecshlayza",
+  "bucket": {
+    "id": "android-releases",
+    "public": true,
+    "file_size_limit": 134217728,
+    "allowed_mime_types": [
+      "application/vnd.android.package-archive"
+    ]
+  },
+  "globalFileSizeLimitBytes": 134217728,
+  "existingBucketUploadLimitsPreserved": true,
+  "migration": "20261008043647_add_android_release_storage",
+  "migrationHistoryRecorded": true,
+  "releases": [
+    {
+      "version": "1.0.3",
+      "sha256": "e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245",
+      "bytes": 102458983,
+      "downloadUrl": "https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/android-releases/android/testing/e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245/musikalokal-testing.apk?download=MusikaLokal.apk",
+      "checksumVerified": true
+    },
+    {
+      "version": "1.0.2",
+      "sha256": "8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272",
+      "bytes": 102451471,
+      "oldDownloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272/musikalokal-testing.apk?download=1",
+      "downloadUrl": "https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/android-releases/android/testing/8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272/musikalokal-testing.apk?download=MusikaLokal.apk",
+      "checksumVerified": true
+    }
+  ],
+  "storage": {
+    "apkBytes": 204910454,
+    "projectBytes": 2138704248,
+    "sourceBlobBytesRetainedForRollback": 204910454,
+    "sourceBlobCount": 2,
+    "checkedAt": "2026-10-08T04:49:39.973Z"
+  },
+  "access": {
+    "policy": {
+      "check": "(bucket_id <> 'android-releases'::text)",
+      "roles": [
+        "anon",
+        "authenticated"
+      ],
+      "using": "(bucket_id <> 'android-releases'::text)",
+      "command": "ALL",
+      "permissive": "RESTRICTIVE"
+    },
+    "anonymousUploadBlocked": {
+      "status": "403",
+      "message": "new row violates row-level security policy"
+    },
+    "authenticatedRoleCanListReleaseObjects": false
+  },
+  "advisors": {
+    "totalNotices": 263,
+    "names": [
+      "rls_enabled_no_policy",
+      "security_definer_view",
+      "function_search_path_mutable",
+      "extension_in_public",
+      "anon_security_definer_function_executable",
+      "authenticated_security_definer_function_executable",
+      "auth_leaked_password_protection"
+    ],
+    "releaseBucketNotices": []
+  },
+  "verification": {
+    "manifestTests": "4 passed",
+    "webTypecheck": "passed",
+    "webBuild": "passed",
+    "browserRegression": "passed: Supabase URL, download progress, truncated range retry, checksum refusal, cancel, themes, layouts, admin access",
+    "rangeAndCors": "passed: 206, 262144 bytes, public CORS",
+    "deployment": "passed",
+    "stagedBrowser": {
+      "website": "https://musika-lokal-hherriu2j-notardreys-projects.vercel.app",
+      "downloadUrl": "https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/android-releases/android/testing/e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245/musikalokal-testing.apk?download=MusikaLokal.apk",
+      "sha256": "e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245",
+      "sizeBytes": 102458983,
+      "browserTransport": "browser default",
+      "downloadVerifiedAt": "https://musika-lokal-hherriu2j-notardreys-projects.vercel.app",
+      "downloadTransport": "browser default",
+      "browserChecks": "passed"
+    },
+    "productionBrowser": {
+      "website": "https://musika-lokal.vercel.app",
+      "downloadUrl": "https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/android-releases/android/testing/e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245/musikalokal-testing.apk?download=MusikaLokal.apk",
+      "sha256": "e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245",
+      "sizeBytes": 102458983,
+      "browserTransport": "browser default",
+      "downloadVerifiedAt": "https://musika-lokal-hherriu2j-notardreys-projects.vercel.app",
+      "downloadTransport": "browser default",
+      "browserChecks": "passed"
+    }
+  },
+  "deployment": {
+    "id": "dpl_9qPgRjCbtMFQLpsdSMnQQP12Woo4",
+    "url": "https://musika-lokal-hherriu2j-notardreys-projects.vercel.app",
+    "productionUrl": "https://musika-lokal.vercel.app",
+    "promoted": true
+  },
+  "completedAt": "2026-10-08T04:49:39.973Z"
+}

@@ -1,0 +1,374 @@
+{
+  "date": "2026-10-08",
+  "projectRef": "aefldxegsvzecshlayza",
+  "website": {
+    "deploymentId": "dpl_432gcy315eHwEFWYmKqgZoCjPdbX",
+    "url": "https://musika-lokal.vercel.app",
+    "gateway": {
+      "host": "https://musika-lokal.vercel.app",
+      "checks": [
+        {
+          "path": "/email-change/page.js",
+          "status": 200,
+          "sourceMatches": true
+        },
+        {
+          "path": "/email-change/flow.js",
+          "status": 200,
+          "sourceMatches": true
+        },
+        {
+          "path": "/share/actionLinks.js",
+          "status": 200,
+          "sourceMatches": true
+        },
+        {
+          "destination": "/bookings?tab=History",
+          "appHandoffValid": true
+        },
+        {
+          "destination": "/group_application_cv?applicationId=00000000-0000-4000-8000-000000000001",
+          "appHandoffValid": true
+        },
+        {
+          "destination": "/bookings?tab=Active+Musicians",
+          "appHandoffValid": true
+        },
+        {
+          "destination": "/feed",
+          "appHandoffValid": true
+        },
+        {
+          "destination": "/account_details",
+          "appHandoffValid": true
+        }
+      ],
+      "emailChangeEntryWaitsForClick": true,
+      "emailChangeConfirmationStubbed": true,
+      "credentialsRemovedFromHistory": true,
+      "credentialsNotStored": true,
+      "bothThemesAt320px": true,
+      "pageErrors": []
+    },
+    "emailGatewayDeploymentId": "dpl_5jodFmYL6PcfE9g21VqKndMvVV8A",
+    "gatewayFilesStillMatch": [
+      "/email-change/page.js",
+      "/share/actionLinks.js"
+    ]
+  },
+  "authConfig": {
+    "emailChangeTemplateUpdated": true,
+    "emailChangeCallbackAllowed": true,
+    "signupTemplateUnchanged": true,
+    "siteUrlUnchanged": true,
+    "signupTemplateSha256": "c8fbeebcc316a27fe4905954ff4679921a2519a5e42e469d5822d7e4b35fe903"
+  },
+  "liveEmailChange": {
+    "sentEmails": 0,
+    "fixtureCreated": true,
+    "fixtureDeleted": true,
+    "steps": [
+      {
+        "action": "generate_email_change_current",
+        "hashReturned": true,
+        "responseHashMatchesActionLink": true
+      },
+      {
+        "action": "generate_email_change_new",
+        "hashReturned": true,
+        "responseHashMatchesActionLink": false
+      },
+      {
+        "action": "confirm_current",
+        "status": 200,
+        "returnedSession": false
+      },
+      {
+        "action": "confirm_new",
+        "status": 200,
+        "returnedSession": true
+      }
+    ],
+    "emailChangeCompleted": true,
+    "reusedHashRejected": true
+  },
+  "authorization": {
+    "unauthenticatedChecks": [
+      {
+        "function": "account-email",
+        "action": "send_email_change",
+        "status": 401
+      },
+      {
+        "function": "manage-bookings",
+        "action": "withdraw",
+        "status": 401
+      },
+      {
+        "function": "gig-applications",
+        "action": "fetch_group_application_cv_status",
+        "status": 401
+      }
+    ],
+    "cleanupQueryStatus": 201,
+    "cleanup": [
+      {
+        "remaining_auth_fixtures": 0,
+        "remaining_profile_fixtures": 0
+      }
+    ]
+  },
+  "functions": [
+    {
+      "slug": "didit-webhook",
+      "beforeVersion": 165,
+      "afterVersion": 166,
+      "verify_jwt": false
+    },
+    {
+      "slug": "paymongo",
+      "beforeVersion": 126,
+      "afterVersion": 127,
+      "verify_jwt": false
+    },
+    {
+      "slug": "gig-applications",
+      "beforeVersion": 123,
+      "afterVersion": 124,
+      "verify_jwt": false
+    },
+    {
+      "slug": "group-members",
+      "beforeVersion": 67,
+      "afterVersion": 68,
+      "verify_jwt": false
+    },
+    {
+      "slug": "listings-crud",
+      "beforeVersion": 65,
+      "afterVersion": 66,
+      "verify_jwt": false
+    },
+    {
+      "slug": "manage-bookings",
+      "beforeVersion": 110,
+      "afterVersion": 111,
+      "verify_jwt": false
+    },
+    {
+      "slug": "manage-listings",
+      "beforeVersion": 60,
+      "afterVersion": 61,
+      "verify_jwt": false
+    },
+    {
+      "slug": "permit-management",
+      "beforeVersion": 67,
+      "afterVersion": 68,
+      "verify_jwt": false
+    },
+    {
+      "slug": "admin-reports-management",
+      "beforeVersion": 68,
+      "afterVersion": 69,
+      "verify_jwt": false
+    },
+    {
+      "slug": "manage-marketplace",
+      "beforeVersion": 57,
+      "afterVersion": 58,
+      "verify_jwt": false
+    },
+    {
+      "slug": "manage-production",
+      "beforeVersion": 74,
+      "afterVersion": 75,
+      "verify_jwt": false
+    },
+    {
+      "slug": "account-email",
+      "beforeVersion": 38,
+      "afterVersion": 39,
+      "verify_jwt": false
+    },
+    {
+      "slug": "admin-listings-management",
+      "beforeVersion": 40,
+      "afterVersion": 41,
+      "verify_jwt": true
+    }
+  ],
+  "deployedSourceVerification": [
+    {
+      "slug": "paymongo",
+      "fileCount": 6,
+      "allRuntimeMatches": true,
+      "entrySha256": "fafc1da0fe4d7e0709f1aaf624615844c745315d6b448b1c05606bf8c93d65ba"
+    },
+    {
+      "slug": "didit-webhook",
+      "fileCount": 5,
+      "allRuntimeMatches": true,
+      "entrySha256": "c0464b1dbd80aec9aa62af6a47079ad8764d029065cdf78c07e859b2538a0be2"
+    },
+    {
+      "slug": "gig-applications",
+      "fileCount": 12,
+      "allRuntimeMatches": true,
+      "entrySha256": "c315acce75a6d839aa86eb0bd69ced75a0d7e6f3a16ed0b52bdc68d4d1a1bb35"
+    },
+    {
+      "slug": "listings-crud",
+      "fileCount": 6,
+      "allRuntimeMatches": true,
+      "entrySha256": "034ae4351f17a1786e63a76172f0354b236ef424e39b0a86a3a9b7dba69f5174"
+    },
+    {
+      "slug": "manage-bookings",
+      "fileCount": 7,
+      "allRuntimeMatches": true,
+      "entrySha256": "f772625f36b43135f09982ded576a557ab96ffcd517df75ad445fe6760456000"
+    },
+    {
+      "slug": "group-members",
+      "fileCount": 12,
+      "allRuntimeMatches": true,
+      "entrySha256": "80f3462393d4e837e7b45a80aacfda12a906c433d4e9578725a25c6fa6fbb53c"
+    },
+    {
+      "slug": "manage-listings",
+      "fileCount": 6,
+      "allRuntimeMatches": true,
+      "entrySha256": "8ed9e54db251a20669d56987fed7bb80fdfa0f61f68643b02bd786aee8ccbb17"
+    },
+    {
+      "slug": "permit-management",
+      "fileCount": 6,
+      "allRuntimeMatches": true,
+      "entrySha256": "32ec2ca21493a6fc86293ba172b6b325019a17c2caab140c791b00380a05a4c5"
+    },
+    {
+      "slug": "manage-marketplace",
+      "fileCount": 5,
+      "allRuntimeMatches": true,
+      "entrySha256": "d03d2e5012de3e022144583716d278e147b810d22e1880327683316a96e688e2"
+    },
+    {
+      "slug": "admin-reports-management",
+      "fileCount": 7,
+      "allRuntimeMatches": true,
+      "entrySha256": "f073d46b7bf7c4b2d2267a5be8bdf0983fa6945c2e6e58d355406f3f4e73a56a"
+    },
+    {
+      "slug": "account-email",
+      "fileCount": 3,
+      "allRuntimeMatches": true,
+      "entrySha256": "ecb9b9cad594c686255e18a9226f4deca5155639f03d12556ee198359997ccdd"
+    },
+    {
+      "slug": "admin-listings-management",
+      "fileCount": 5,
+      "allRuntimeMatches": true,
+      "entrySha256": "bdcc9b6db72556db76fa12f4ea919c697fd5da6fbebd3d5f29bee40da4c88919"
+    },
+    {
+      "slug": "manage-production",
+      "fileCount": 12,
+      "allRuntimeMatches": true,
+      "entrySha256": "0f0f85e66c4cefa58fc511788babd3244b5cf65b5e5107c8ea58cf45a8d22de2"
+    }
+  ],
+  "lint": {
+    "feedDiagnosticsUnchanged": true,
+    "feedExistingErrors": 12,
+    "feedExistingWarnings": 4,
+    "radioContextErrors": 0,
+    "radioContextWarnings": 0
+  },
+  "tests": {
+    "emailLinks": 48,
+    "radio": 71,
+    "mobileTypecheck": "passed",
+    "webTypecheck": "passed",
+    "emailDenoCheck": "passed",
+    "groupApplicationRegressions": 97,
+    "androidReleaseMetadata": 4,
+    "exportedWebsite": "passed"
+  },
+  "androidApkBuilt": true,
+  "physicalAndroidGmailAcceptance": false,
+  "realMailboxEmailsSent": 0,
+  "apk": {
+    "metadata": {
+      "packageId": "com.anonymous.musikalokal",
+      "versionName": "1.0.4",
+      "versionCode": 5,
+      "sizeBytes": 102456843,
+      "sha256": "5485f0131bf7b9ee9bb5b0bf8d119705a61f272d012a5f7533f4395b514b1157",
+      "minSdk": 24,
+      "builtAt": "2026-10-08T05:42:06.6336692Z",
+      "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+      "testing": true
+    },
+    "signingCertificateMatchesPrevious": true,
+    "embeddedBundleMatchesVerifiedSources": true,
+    "architectures": [
+      "arm64-v8a",
+      "x86_64"
+    ],
+    "apkBuildSucceeded": true,
+    "configuredPrivateCredentialScan": "passed",
+    "release": {
+      "packageId": "com.anonymous.musikalokal",
+      "versionName": "1.0.4",
+      "versionCode": 5,
+      "sizeBytes": 102456843,
+      "sha256": "5485f0131bf7b9ee9bb5b0bf8d119705a61f272d012a5f7533f4395b514b1157",
+      "minSdk": 24,
+      "builtAt": "2026-10-08T05:42:06.6336692Z",
+      "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+      "testing": true,
+      "downloadUrl": "https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/android-releases/android/testing/5485f0131bf7b9ee9bb5b0bf8d119705a61f272d012a5f7533f4395b514b1157/musikalokal-testing.apk?download=MusikaLokal.apk"
+    },
+    "previewBrowserDownload": {
+      "website": "https://musika-lokal-drwjxnkz7-notardreys-projects.vercel.app",
+      "downloadUrl": "https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/android-releases/android/testing/5485f0131bf7b9ee9bb5b0bf8d119705a61f272d012a5f7533f4395b514b1157/musikalokal-testing.apk?download=MusikaLokal.apk",
+      "sha256": "5485f0131bf7b9ee9bb5b0bf8d119705a61f272d012a5f7533f4395b514b1157",
+      "sizeBytes": 102456843,
+      "browserTransport": "browser default",
+      "downloadVerifiedAt": "https://musika-lokal-drwjxnkz7-notardreys-projects.vercel.app",
+      "downloadTransport": "browser default",
+      "browserChecks": "passed"
+    },
+    "productionBrowserChecks": {
+      "website": "https://musika-lokal.vercel.app",
+      "downloadUrl": "https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/android-releases/android/testing/5485f0131bf7b9ee9bb5b0bf8d119705a61f272d012a5f7533f4395b514b1157/musikalokal-testing.apk?download=MusikaLokal.apk",
+      "sha256": "5485f0131bf7b9ee9bb5b0bf8d119705a61f272d012a5f7533f4395b514b1157",
+      "sizeBytes": 102456843,
+      "browserTransport": "browser default",
+      "downloadVerifiedAt": "https://musika-lokal-drwjxnkz7-notardreys-projects.vercel.app",
+      "downloadTransport": "browser default",
+      "browserChecks": "passed"
+    },
+    "embeddedSourceVerification": {
+      "sourceMapFilesMatch": [
+        "src/context/RadioPlayerContext.tsx",
+        "app/(tabs)/feed.tsx",
+        "src/utils/actionLinks.ts",
+        "src/components/ApplicantDetailsModal.tsx"
+      ],
+      "compiledBundleSha256": "03cb35d3975c9ec9df1ffdbe026697e1dd38da6f8c1c519a392fa6304b3b0441",
+      "compiledBundleSize": 9213140,
+      "applicantDetailsModal": {
+        "exactCurrentSourceMatch": true,
+        "sourceSha256": "05812276ef0978fa11cce0d1bce559f0e2b890393c8552095458d5fef7a369d5",
+        "versionName": "1.0.4",
+        "versionCode": 5
+      }
+    },
+    "previousVersionRetained": "1.0.3 (4)",
+    "previousApkPubliclyAvailable": true
+  },
+  "androidApkPublished": true,
+  "physicalAndroidDeviceConnected": false
+}

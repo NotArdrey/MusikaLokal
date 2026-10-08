@@ -1,0 +1,2365 @@
+// @ts-ignore
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// @ts-ignore
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+    buildNotificationRouteMeta,
+    withNotificationRouteMeta,
+} from "../_shared/notificationRoutes.ts";
+import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
+
+const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
+}
+
+const parseGigEventStartTime = (value: unknown) => {
+    const trimmed = String(value || '').trim()
+    const match = trimmed.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)
+    if (!match) return null
+
+    const hours = Number(match[1])
+    const minutes = Number(match[2])
+    const period = match[3].toUpperCase()
+
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null
+    if (hours < 1 || hours > 12 || minutes < 0 || minutes > 59) return null
+
+    let hour24 = hours
+    if (period === 'PM' && hours !== 12) hour24 += 12
+    if (period === 'AM' && hours === 12) hour24 = 0
+
+    return { hour24, minutes }
+}
+
+const getGigEventStartDate = (eventDate: unknown, eventStartTime: unknown) => {
+    if (!eventDate) return null
+
+    const parsedDate = new Date(String(eventDate))
+    if (!Number.isFinite(parsedDate.getTime())) return null
+
+    const parsedTime = parseGigEventStartTime(eventStartTime)
+    if (parsedTime) {
+        parsedDate.setHours(parsedTime.hour24, parsedTime.minutes, 0, 0)
+    }
+
+    return parsedDate
+}
+
+async function insertCoreNotifications(supabaseClient: any, payload: Record<string, unknown> | Record<string, unknown>[]) {
+    const payloads = Array.isArray(payload) ? payload : [payload]
+    const { data, error } = await supabaseClient
+        .from('notifications')
+        .insert(payload)
+        .select()
+
+    if (error) throw error
+
+    for (const item of payloads) {
+        scheduleCoreActionEmailForNotification(supabaseClient, item, { source: 'manage-listings' })
+    }
+
+    return data
+}
+
+function uniqueStrings(values: unknown[]) {
+    return Array.from(
+        new Set(
+            values.filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+        ),
+    )
+}
+
+async function loadProfileLegacyById(client: any, profileIds: string[]) {
+    const ids = uniqueStrings(profileIds)
+    const legacyById = new Map<string, any>()
+    if (ids.length === 0) return legacyById
+
+    const { data, error } = await client
+        .from('profiles_legacy_projection')
+        .select('id, skills, genres, portfolio_urls')
+        .in('id', ids)
+
+    if (error) throw error
+
+    ;(data || []).forEach((row: any) => legacyById.set(row.id, row))
+    return legacyById
+}
+
+async function loadGroupLegacyById(client: any, groupIds: string[]) {
+    const ids = uniqueStrings(groupIds)
+    const legacyById = new Map<string, any>()
+    if (ids.length === 0) return legacyById
+
+    const { data, error } = await client
+        .from('groups_legacy_projection')
+        .select('id, images, members')
+        .in('id', ids)
+
+    if (error) throw error
+
+    ;(data || []).forEach((row: any) => legacyById.set(row.id, row))
+    return legacyById
+}
+
+async function loadStudioLegacyById(client: any, studioIds: string[]) {
+    const ids = uniqueStrings(studioIds)
+    const legacyById = new Map<string, any>()
+    if (ids.length === 0) return legacyById
+
+    const { data, error } = await client
+        .from('studios_with_stats')
+        .select('id, images, location, hourly_rate, rate')
+        .in('id', ids)
+
+    if (error) throw error
+
+    ;(data || []).forEach((row: any) => legacyById.set(row.id, row))
+    return legacyById
+}
+
+function mergeProfileLegacy(profile: any, legacyById: Map<string, any>) {
+    if (!profile?.id) return profile || null
+    const legacy = legacyById.get(profile.id)
+
+    return {
+        ...profile,
+        skills: Array.isArray(legacy?.skills) ? legacy.skills : [],
+        genres: Array.isArray(legacy?.genres) ? legacy.genres : [],
+        portfolio_urls: Array.isArray(legacy?.portfolio_urls) ? legacy.portfolio_urls : [],
+    }
+}
+
+function mergeGroupLegacy(group: any, legacyById: Map<string, any>) {
+    if (!group?.id) return group || null
+    const legacy = legacyById.get(group.id)
+
+    return {
+        ...group,
+        images: Array.isArray(legacy?.images) ? legacy.images : [],
+        members: Array.isArray(legacy?.members) ? legacy.members : [],
+    }
+}
+
+function mergeStudioLegacy(studio: any, studioId: string | null, legacyById: Map<string, any>) {
+    const id = studio?.id || studioId
+    if (!studio && !id) return studio || null
+    const legacy = id ? legacyById.get(id) : null
+
+    return {
+        ...studio,
+        id,
+        images: Array.isArray(legacy?.images) ? legacy.images : [],
+        location: legacy?.location || studio?.location || studio?.address || null,
+        rate_per_hour: studio?.rate_per_hour ?? legacy?.hourly_rate ?? studio?.hourly_rate ?? legacy?.rate ?? studio?.rate ?? null,
+    }
+}
+
+async function hydrateGigApplicationLegacy(client: any, rows: any[]) {
+    const [profileLegacyById, groupLegacyById] = await Promise.all([
+        loadProfileLegacyById(client, rows.map((row: any) => row?.applicant?.id || row?.applicant_id)),
+        loadGroupLegacyById(client, rows.map((row: any) => row?.group?.id || row?.group_id)),
+    ])
+
+    return rows.map((row: any) => ({
+        ...row,
+        applicant: mergeProfileLegacy(row?.applicant, profileLegacyById),
+        group: mergeGroupLegacy(row?.group, groupLegacyById),
+    }))
+}
+
+async function hydrateGroupMemberProfileLegacy(client: any, rows: any[]) {
+    const legacyById = await loadProfileLegacyById(
+        client,
+        rows.map((row: any) => row?.user?.id || row?.user_id),
+    )
+
+    return rows.map((row: any) => ({
+        ...row,
+        user: mergeProfileLegacy(row?.user, legacyById),
+    }))
+}
+
+async function hydrateStudioBookingLegacy(client: any, rows: any[]) {
+    const legacyById = await loadStudioLegacyById(
+        client,
+        rows.map((row: any) => row?.studio?.id || row?.studio_id),
+    )
+
+    return rows.map((row: any) => ({
+        ...row,
+        studio: mergeStudioLegacy(row?.studio, row?.studio_id || null, legacyById),
+    }))
+}
+
+const syncStudio3NF = async (client: any, studioId: string) => {
+    const { error } = await client.rpc('sync_studio_3nf', { p_studio_id: studioId })
+    if (error) throw error
+}
+
+const syncGig3NF = async (client: any, gigId: string) => {
+    const { error } = await client.rpc('sync_gig_3nf', { p_gig_id: gigId })
+    if (error) throw error
+}
+
+const normalizeScheduleSessionType = (value: any): string => {
+    const normalized = String(value || '').trim().toLowerCase()
+    return ['rehearsal', 'recording', 'both'].includes(normalized) ? normalized : 'both'
+}
+
+const buildWeeklyScheduleReason = (source: any): string =>
+    `Weekly schedule [session_type:${normalizeScheduleSessionType(source?.session_type ?? source?.sessionType)}]`
+
+const buildDateOverrideReason = (source: any): string =>
+    `Custom schedule [session_type:${normalizeScheduleSessionType(source?.session_type ?? source?.sessionType)}]`
+
+const replaceGigRequirements = async (client: any, gigId: string, requirements: any) => {
+    const { error: deleteError } = await client.from('gig_requirements').delete().eq('gig_id', gigId)
+    if (deleteError) throw deleteError
+
+    const safeRequirements = requirements && typeof requirements === 'object' ? requirements : {}
+    const payload = Object.entries(safeRequirements)
+        .filter(([key]) => (key ?? '').trim().length > 0)
+        .map(([key, value]) => ({ gig_id: gigId, requirement_key: key, requirement_value: value }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('gig_requirements').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
+const replaceGigMedia = async (client: any, gigId: string, mediaType: 'image' | 'document', urls: string[]) => {
+    const { error: deleteError } = await client
+        .from('gig_media')
+        .delete()
+        .eq('gig_id', gigId)
+        .eq('media_type', mediaType)
+    if (deleteError) throw deleteError
+
+    const payload = (urls || [])
+        .map((url) => (url ?? '').trim())
+        .filter((url) => url.length > 0)
+        .map((url, index) => ({
+            gig_id: gigId,
+            media_type: mediaType,
+            media_url: url,
+            sort_order: index,
+        }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('gig_media').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
+const replaceStudioAmenities = async (client: any, studioId: string, amenities: string[]) => {
+    const { error: deleteError } = await client.from('studio_amenities').delete().eq('studio_id', studioId)
+    if (deleteError) throw deleteError
+
+    const payload = (amenities || [])
+        .map((amenity) => (amenity ?? '').trim())
+        .filter((amenity) => amenity.length > 0)
+        .map((amenity) => ({ studio_id: studioId, amenity }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('studio_amenities').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
+const replaceStudioTypes = async (client: any, studioId: string, types: string[]) => {
+    const { error: deleteError } = await client.from('studio_types').delete().eq('studio_id', studioId)
+    if (deleteError) throw deleteError
+
+    const payload = (types || [])
+        .map((studioType) => (studioType ?? '').trim())
+        .filter((studioType) => studioType.length > 0)
+        .map((studioType) => ({ studio_id: studioId, studio_type: studioType }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('studio_types').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
+const replaceStudioMedia = async (client: any, studioId: string, mediaUrls: string[]) => {
+    const { error: deleteError } = await client
+        .from('studio_media')
+        .delete()
+        .eq('studio_id', studioId)
+        .eq('media_type', 'image')
+    if (deleteError) throw deleteError
+
+    const payload = (mediaUrls || [])
+        .map((mediaUrl) => (mediaUrl ?? '').trim())
+        .filter((mediaUrl) => mediaUrl.length > 0)
+        .map((mediaUrl, index) => ({
+            studio_id: studioId,
+            media_type: 'image',
+            media_url: mediaUrl,
+            sort_order: index,
+        }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('studio_media').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
+const replaceStudioInstruments = async (client: any, studioId: string, instruments: any[]) => {
+    const { error: deleteError } = await client.from('studio_instruments').delete().eq('studio_id', studioId)
+    if (deleteError) throw deleteError
+
+    const payload = (instruments || [])
+        .map((item) => {
+            if (item && typeof item === 'object') {
+                const quantity = Number(item.quantity)
+                return {
+                    instrument_name: String(item.name ?? item.instrument ?? '').trim(),
+                    image_url: item.image ?? item.image_url ?? null,
+                    quantity: Number.isFinite(quantity) && quantity > 0 ? Math.trunc(quantity) : null,
+                    description: typeof item.description === 'string' && item.description.trim().length > 0
+                        ? item.description.trim()
+                        : null,
+                }
+            }
+            return {
+                instrument_name: String(item ?? '').trim(),
+                image_url: null,
+                quantity: null,
+                description: null,
+            }
+        })
+        .filter((item) => item.instrument_name.length > 0)
+        .map((item) => ({
+            studio_id: studioId,
+            instrument_name: item.instrument_name,
+            image_url: item.image_url,
+            quantity: item.quantity,
+            description: item.description,
+        }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('studio_instruments').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
+function extractBearerToken(authHeader: string | null): string | null {
+    const trimmed = String(authHeader || '').trim()
+    if (!trimmed) return null
+
+    const token = trimmed.replace(/^Bearer\s+/i, '').trim()
+    return token || null
+}
+
+function isMissingTableError(error: any, tableName: string) {
+    const code = String(error?.code || '').toUpperCase()
+    const message = String(error?.message || '').toLowerCase()
+    return (code === '42P01' || code === 'PGRST205') && message.includes(tableName.toLowerCase())
+}
+
+async function getProfileRole(client: any, userId: string): Promise<string | null> {
+    const { data, error } = await client
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .maybeSingle()
+
+    if (error) throw error
+    return typeof data?.role === 'string' ? data.role : null
+}
+
+async function getStaffAccessLevel(
+    client: any,
+    userId: string,
+    entityType: 'studio' | 'venue',
+    targetId: string,
+): Promise<number | null> {
+    if (!userId || !targetId) return null
+    const { data: isActiveStaff, error: activeStaffError } = await client.rpc('is_active_staff', {
+        p_user_id: userId,
+    })
+    if (activeStaffError) throw activeStaffError
+    if (!isActiveStaff) return null
+
+    let query = client
+        .from('staff_listing_access')
+        .select('access_level')
+        .eq('staff_user_id', userId)
+        .eq('entity_type', entityType)
+        .is('revoked_at', null)
+        .order('access_level', { ascending: true })
+        .limit(1)
+
+    query = entityType === 'studio'
+        ? query.eq('studio_id', targetId)
+        : query.eq('gig_id', targetId)
+
+    const { data, error } = await query.maybeSingle()
+    if (error) {
+        if (isMissingTableError(error, 'staff_listing_access')) return null
+        throw error
+    }
+
+    const level = Number(data?.access_level)
+    return [1, 2, 3].includes(level) ? level : null
+}
+
+async function authorizeStudioAccess(client: any, userId: string, studioId: string, canManage = false) {
+    const { data: studio, error } = await client
+        .from('studios')
+        .select('owner_id')
+        .eq('id', studioId)
+        .maybeSingle()
+    if (error) throw error
+    if (!studio) return { allowed: false, owner: false, staffLevel: null }
+
+    const role = await getProfileRole(client, userId)
+    const owner = studio.owner_id === userId && role === 'studio-owner'
+    const staffLevel = owner ? null : await getStaffAccessLevel(client, userId, 'studio', studioId)
+    const staffAllowed = staffLevel !== null && (!canManage || staffLevel <= 2)
+    return { allowed: owner || staffAllowed, owner, staffLevel }
+}
+
+async function authorizeGigAccess(client: any, userId: string, gigId: string, canManage = false) {
+    const { data: gig, error } = await client
+        .from('gigs')
+        .select('organizer_id')
+        .eq('id', gigId)
+        .maybeSingle()
+    if (error) throw error
+    if (!gig) return { allowed: false, owner: false, staffLevel: null }
+
+    const role = await getProfileRole(client, userId)
+    const owner = gig.organizer_id === userId && role === 'venue-owner'
+    const staffLevel = owner ? null : await getStaffAccessLevel(client, userId, 'venue', gigId)
+    const staffAllowed = staffLevel !== null && (!canManage || staffLevel <= 2)
+    return { allowed: owner || staffAllowed, owner, staffLevel }
+}
+
+async function authorizeGroupAccess(client: any, userId: string, groupId: string, ownerOnly = false) {
+    if ((await getProfileRole(client, userId)) !== 'musician') return false
+    const { data: group, error: groupError } = await client
+        .from('groups')
+        .select('owner_id')
+        .eq('id', groupId)
+        .maybeSingle()
+    if (groupError) throw groupError
+    if (!group) return false
+
+    if (group.owner_id === userId) {
+        return true
+    }
+
+    if (ownerOnly) return false
+
+    const { data: membership, error: membershipError } = await client
+        .from('group_members')
+        .select('id')
+        .eq('group_id', groupId)
+        .eq('user_id', userId)
+        .limit(1)
+        .maybeSingle()
+    if (membershipError) throw membershipError
+    return Boolean(membership)
+}
+
+function jsonError(message: string, status: number) {
+    return new Response(JSON.stringify({ error: message }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status,
+    })
+}
+
+serve(async (req: Request) => {
+    if (req.method === 'OPTIONS') {
+        return new Response('ok', { headers: corsHeaders })
+    }
+
+    try {
+        const authHeader = req.headers.get('Authorization')
+        const accessToken = extractBearerToken(authHeader)
+
+        if (!accessToken) {
+            return jsonError('Missing authorization header', 401)
+        }
+
+        const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+        const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+        const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+
+        // Keep the service-role client for narrowly scoped server-side writes, but
+        // always verify the bearer token through an auth-bound client first.
+        const supabaseClient = createClient(supabaseUrl, serviceRoleKey)
+        const supabaseAuthClient = createClient(supabaseUrl, supabaseAnonKey, {
+            global: { headers: { Authorization: `Bearer ${accessToken}` } },
+        })
+        const { data: authData, error: authError } = await supabaseAuthClient.auth.getUser(accessToken)
+
+        if (authError || !authData?.user?.id) {
+            return jsonError('Invalid token', 401)
+        }
+
+        const authenticatedUserId = authData.user.id
+        const { action, ...params } = await req.json()
+        const { userId: requestedUserId } = params
+
+        if (requestedUserId && requestedUserId !== authenticatedUserId) {
+            return jsonError('Forbidden: userId mismatch', 403)
+        }
+
+        // Do not let a body field become the caller identity. Existing handlers
+        // use userId, so bind that local alias to the verified auth user.
+        const userId = authenticatedUserId
+        const effectiveUserId = authenticatedUserId
+        const retiredManagementActions = new Set([
+            'update_booking_status',
+            'partial_slot_approval',
+            'update_application_status',
+        ])
+        if (retiredManagementActions.has(action)) {
+            return jsonError('This legacy action is retired. Use manage-bookings or gig-applications.', 410)
+        }
+
+        // CREATE SINGLE NOTIFICATION (server-side)
+        if (action === 'create_notification') {
+            const { targetUserId, title, message, type, image, meta } = params
+
+            if (!targetUserId || !title || !message) {
+                return new Response(JSON.stringify({ error: 'Missing required fields' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            // This legacy endpoint writes through the service-role client. It
+            // may only create a notification for the verified caller; cross-
+            // user notification fan-out belongs in the dedicated functions.
+            if (targetUserId !== userId) return jsonError('Forbidden', 403)
+
+            const payload = {
+                user_id: targetUserId,
+                type: type || 'info',
+                title,
+                message,
+                image: image || null,
+                meta: withNotificationRouteMeta(meta),
+                read: false
+            }
+
+            const [data] = await insertCoreNotifications(supabaseClient, payload)
+
+            return new Response(JSON.stringify(data), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
+        // CREATE MULTIPLE NOTIFICATIONS (server-side)
+        if (action === 'create_notifications') {
+            const { notifications } = params
+
+            if (!Array.isArray(notifications) || notifications.length === 0) {
+                return new Response(JSON.stringify({ error: 'No notifications provided' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            if (notifications.some((notification: any) => notification?.user_id !== userId)) {
+                return jsonError('Forbidden', 403)
+            }
+
+            const payload = notifications
+                .filter((n: any) => n && n.user_id && n.title && n.message)
+                .map((n: any) => ({
+                    user_id: n.user_id,
+                    type: n.type || 'info',
+                    title: n.title,
+                    message: n.message,
+                    image: n.image || null,
+                    meta: withNotificationRouteMeta(n.meta),
+                    read: false
+                }))
+
+            if (payload.length === 0) {
+                return new Response(JSON.stringify({ error: 'Invalid notification payload' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const data = await insertCoreNotifications(supabaseClient, payload)
+
+            return new Response(JSON.stringify(data), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
+        // --- FETCH LISTS (MY GIGS, GROUPS, STUDIOS) ---
+
+        // FETCH MY GIGS (using view with computed stats)
+        if (action === 'fetch_my_gigs') {
+            const { data, error } = await supabaseClient
+                .from('gigs_with_stats')
+                .select('*')
+                .eq('organizer_id', userId)
+                .order('created_at', { ascending: false })
+
+            if (error) throw error
+
+            // View columns already named 'rating' and 'review_count'
+            const mapped = (data || []).map((item: any) => ({
+                ...item,
+                rating: item.rating || 0,
+                review_count: item.review_count || 0
+            }))
+
+            return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // FETCH MY GROUPS (using view with computed stats)
+        if (action === 'fetch_my_groups') {
+            const { data, error } = await supabaseClient
+                .from('groups_with_stats')
+                .select('*')
+                .eq('owner_id', userId)
+                .order('created_at', { ascending: false })
+
+            if (error) throw error
+
+            // View columns already named 'rating' and 'review_count'
+            const mapped = (data || []).map((item: any) => ({
+                ...item,
+                rating: item.rating || 0,
+                review_count: item.review_count || 0
+            }))
+
+            return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // FETCH MY STUDIOS (using view with computed stats)
+        if (action === 'fetch_my_studios') {
+            const { data, error } = await supabaseClient
+                .from('studios_with_stats')
+                .select('*')
+                .eq('owner_id', userId)
+                .order('created_at', { ascending: false })
+
+            if (error) throw error
+
+            let settingsByStudioId = new Map<string, any>()
+            const studioIds = (data || []).map((item: any) => item.id).filter(Boolean)
+            if (studioIds.length > 0) {
+                const { data: settingsData, error: settingsError } = await supabaseClient
+                    .from('studio_settings')
+                    .select('studio_id, lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates')
+                    .in('studio_id', studioIds)
+
+                if (!settingsError && settingsData) {
+                    settingsByStudioId = new Map(settingsData.map((row: any) => [row.studio_id, row]))
+                }
+            }
+
+            // View columns already named 'rating' and 'review_count'
+            const mapped = (data || []).map((item: any) => ({
+                ...item,
+                rating: item.rating || 0,
+                review_count: item.review_count || 0,
+                ...(settingsByStudioId.get(item.id)
+                    ? {
+                        lead_time_hours: settingsByStudioId.get(item.id).lead_time_hours,
+                        weekend_multiplier: settingsByStudioId.get(item.id).weekend_multiplier,
+                        peak_season_multiplier: settingsByStudioId.get(item.id).peak_season_multiplier,
+                        peak_season_dates: settingsByStudioId.get(item.id).peak_season_dates,
+                        off_peak_multiplier: settingsByStudioId.get(item.id).off_peak_multiplier,
+                        off_peak_dates: settingsByStudioId.get(item.id).off_peak_dates,
+                        booking_settings: {
+                            lead_time_hours: settingsByStudioId.get(item.id).lead_time_hours,
+                            weekend_multiplier: settingsByStudioId.get(item.id).weekend_multiplier,
+                            peak_season_multiplier: settingsByStudioId.get(item.id).peak_season_multiplier,
+                            peak_season_dates: settingsByStudioId.get(item.id).peak_season_dates,
+                            off_peak_multiplier: settingsByStudioId.get(item.id).off_peak_multiplier,
+                            off_peak_dates: settingsByStudioId.get(item.id).off_peak_dates,
+                        }
+                    }
+                    : {
+                        booking_settings: null
+                    })
+            }))
+
+            return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // FETCH SINGLE ENTITY (SECURE) - using view with computed stats
+        if (action === 'fetch_one') {
+            const { type, id } = params
+            const viewName = type + 's_with_stats'
+            const ownerField = type === 'gig' ? 'organizer_id' : 'owner_id'
+
+
+            const { data, error } = await supabaseClient
+                .from(viewName)
+                .select('*')
+                .eq('id', id)
+                .eq(ownerField, userId)
+                .maybeSingle()
+
+            if (error) {
+                console.error('❌ Fetch error:', JSON.stringify(error, null, 2));
+                throw error;
+            }
+
+            if (type === 'gig' && data) {
+            }
+
+            // Return null if not found (user doesn't own this entity or doesn't exist)
+            if (!data) {
+                return new Response(JSON.stringify(null), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+            }
+
+            // If studio, also fetch operating hours and convert to availability format
+            if (type === 'studio') {
+                const { data: operatingHours, error: hoursError } = await supabaseClient
+                    .from('studio_operating_hours')
+                    .select('*')
+                    .eq('studio_id', id)
+                    .order('slot_order', { ascending: true });
+
+                if (!hoursError && operatingHours) {
+                    // Convert operating hours to availability format
+                    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                    const availability = dayNames.map((dayName, index) => {
+                        const dayHours = operatingHours.filter((h: any) => h.day_of_week === index && h.is_open);
+                        return {
+                            day: dayName,
+                            slots: dayHours.map((h: any) => ({
+                                start: h.open_time,
+                                end: h.close_time
+                            }))
+                        };
+                    });
+                    data.availability = availability;
+                }
+
+                const { data: studioSettings, error: settingsError } = await supabaseClient
+                    .from('studio_settings')
+                    .select('lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates')
+                    .eq('studio_id', id)
+                    .maybeSingle();
+
+                if (!settingsError && studioSettings) {
+                    data.lead_time_hours = studioSettings.lead_time_hours;
+                    data.weekend_multiplier = studioSettings.weekend_multiplier;
+                    data.peak_season_multiplier = studioSettings.peak_season_multiplier;
+                    data.peak_season_dates = studioSettings.peak_season_dates;
+                    data.off_peak_multiplier = studioSettings.off_peak_multiplier;
+                    data.off_peak_dates = studioSettings.off_peak_dates;
+                    data.booking_settings = {
+                        lead_time_hours: studioSettings.lead_time_hours,
+                        weekend_multiplier: studioSettings.weekend_multiplier,
+                        peak_season_multiplier: studioSettings.peak_season_multiplier,
+                        peak_season_dates: studioSettings.peak_season_dates,
+                        off_peak_multiplier: studioSettings.off_peak_multiplier,
+                        off_peak_dates: studioSettings.off_peak_dates
+                    };
+                }
+            }
+
+            // View columns already named 'rating' and 'review_count'
+            const mapped = {
+                ...data,
+                rating: data.rating || 0,
+                review_count: data.review_count || 0
+            }
+
+            return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // CREATE ENTITY (uses base table for inserts)
+        if (action === 'create') {
+            const { type, payload } = params
+            const table = type + 's'
+            const ownerField = type === 'gig'
+                ? 'organizer_id'
+                : type === 'gig_application'
+                    ? 'applicant_id'
+                    : 'owner_id'
+
+            const requiredRoleByType: Record<string, string> = {
+                studio: 'studio-owner',
+                gig: 'venue-owner',
+                group: 'musician',
+                gig_application: 'musician',
+            }
+            const requiredRole = requiredRoleByType[type]
+            if (!requiredRole) {
+                return jsonError('Unsupported listing type', 400)
+            }
+
+            const callerRole = await getProfileRole(supabaseClient, authenticatedUserId)
+            if (callerRole !== requiredRole) {
+                return jsonError(`Only ${requiredRole} accounts can create ${type} records`, 403)
+            }
+
+            // Extract availability only if type is studio, to prevent it from being sent to studios table insert
+            let studioAvailability = null;
+            let calendarAvailability = null;
+            let bookingSettings = null;
+            let insertPayload = { ...payload };
+
+            if (type === 'gig_application') {
+                // Never honor identity fields supplied by the caller. The
+                // verified bearer user is the applicant and submitter.
+                delete insertPayload.owner_id
+                delete insertPayload.user_id
+                delete insertPayload.applicant_id
+                delete insertPayload.submitted_by_user_id
+                insertPayload = {
+                    ...insertPayload,
+                    applicant_id: authenticatedUserId,
+                    submitted_by_user_id: authenticatedUserId,
+                }
+            }
+
+            // For studios, only allow valid columns to prevent PGRST204 errors
+            // This filters out any extra fields that don't exist in the studios table
+            if (type === 'studio') {
+                const validStudioColumns = [
+                    'name', 'address', 'hourly_rate', 'description',
+                    'latitude', 'longitude', 'rate', 'contract_url',
+                    'availability', 'rehearsal_rate',
+                    'recording_rate', 'pax', 'business_permit_url'
+                ];
+                const filteredPayload: any = {};
+                for (const key of validStudioColumns) {
+                    if (insertPayload[key] !== undefined) {
+                        filteredPayload[key] = insertPayload[key];
+                    }
+                }
+                // Preserve special fields for later processing
+                if (insertPayload.calendar_availability) filteredPayload.calendar_availability = insertPayload.calendar_availability;
+                if (insertPayload.booking_settings) filteredPayload.booking_settings = insertPayload.booking_settings;
+                insertPayload = filteredPayload;
+            }
+
+            // SPAM PREVENTION & SLOT CHECKING: Check for blocking rules for Gig Applications
+            if (type === 'gig_application') {
+                const { gig_id, slot_type } = insertPayload;
+
+                // 1. Fetch gig settings for cooldown and slot tracking
+                const { data: gigData, error: gigError } = await supabaseClient
+                    .from('gigs')
+                    .select('reapplication_cooldown_days, total_slots_filled, status, event_date')
+                    .eq('id', gig_id)
+                    .single();
+
+                const { data: gigLegacyProjection, error: gigLegacyProjectionError } = await supabaseClient
+                    .from('gigs_legacy_projection')
+                    .select('requirements')
+                    .eq('id', gig_id)
+                    .single();
+
+                if (gigError) throw gigError;
+                if (gigLegacyProjectionError) throw gigLegacyProjectionError;
+
+                const gigRequirements = gigLegacyProjection?.requirements || {};
+
+                // 2. Check if gig is still open
+                if (gigData.status !== 'open') {
+                    throw new Error('This gig is no longer accepting applications.');
+                }
+
+                const eventStartsAt = getGigEventStartDate(gigData.event_date, gigRequirements?.event_start_time);
+                if (eventStartsAt && eventStartsAt.getTime() <= Date.now()) {
+                    throw new Error('This gig has already started and is no longer accepting applications.');
+                }
+
+                // 3. Check slot availability
+                const totalSlotsNeeded = gigRequirements?.total_slots_needed || 999;
+                const totalSlotsFilled = gigData.total_slots_filled || 0;
+                
+                if (totalSlotsFilled >= totalSlotsNeeded) {
+                    throw new Error('All performer slots for this gig have been filled.');
+                }
+
+                // Check specific slot type availability if provided
+                if (slot_type && gigRequirements?.slots?.[slot_type]) {
+                    const slotNeeded = gigRequirements.slots[slot_type]?.needed || 0;
+                    let slotFilled = 0;
+
+                    if (slotNeeded > 0) {
+                        const { data: slotSummary, error: slotSummaryError } = await supabaseClient
+                            .from('gig_slot_fill_summary')
+                            .select('accepted_count')
+                            .eq('gig_id', gig_id)
+                            .eq('slot_type', slot_type)
+                            .maybeSingle();
+
+                        if (slotSummaryError) throw slotSummaryError;
+                        slotFilled = slotSummary?.accepted_count || 0;
+                    }
+                    
+                    if (slotNeeded > 0 && slotFilled >= slotNeeded) {
+                        throw new Error(`All ${slot_type} slots have been filled. Try applying for a different slot type.`);
+                    }
+                }
+
+                // 4. Check if user already has a pending or accepted application for this gig
+                const { data: existingApp, error: existingError } = await supabaseClient
+                    .from('gig_applications')
+                    .select('id, status')
+                    .eq('applicant_id', userId)
+                    .eq('gig_id', gig_id)
+                    .in('status', ['pending', 'accepted'])
+                    .maybeSingle();
+
+                if (existingError) throw existingError;
+
+                if (existingApp) {
+                    if (existingApp.status === 'accepted') {
+                        throw new Error('You have already been accepted for this gig.');
+                    }
+                    throw new Error('You already have a pending application for this gig.');
+                }
+
+                // 5. Check cooldown for rejected applications
+                const cooldownDays = Number(gigData.reapplication_cooldown_days ?? 30);
+                
+                if (cooldownDays > 0) {
+                    const { data: rejectedApp, error: rejectedError } = await supabaseClient
+                        .from('gig_applications')
+                        .select('id, rejected_at, created_at')
+                        .eq('applicant_id', userId)
+                        .eq('gig_id', gig_id)
+                        .eq('status', 'rejected')
+                        .order('rejected_at', { ascending: false, nullsFirst: false })
+                        .limit(1)
+                        .maybeSingle();
+
+                    if (rejectedError) throw rejectedError;
+
+                    if (rejectedApp) {
+                        const rejectionDate = rejectedApp.rejected_at || rejectedApp.created_at;
+                        const cooldownEnds = new Date(
+                            new Date(rejectionDate).getTime() + cooldownDays * 24 * 60 * 60 * 1000
+                        );
+                        
+                        const nowTime = Date.now();
+                        if (nowTime < cooldownEnds.getTime()) {
+                            if (eventStartsAt && eventStartsAt.getTime() <= cooldownEnds.getTime()) {
+                                throw new Error(`Your application was declined. Your cooldown ends on ${cooldownEnds.toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' })}, after this gig starts, so you cannot reapply.`);
+                            }
+
+                            throw new Error(`You cannot reapply to this gig until ${cooldownEnds.toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' })}.`);
+                        }
+                    }
+                }
+
+            }
+
+
+            if (type === 'studio' && insertPayload.availability) {
+                studioAvailability = insertPayload.availability;
+                delete insertPayload.availability; // Remove from payload so it doesn't fail insert
+            }
+
+            // Extract calendar_availability (specific date overrides)
+            if (type === 'studio' && insertPayload.calendar_availability) {
+                calendarAvailability = insertPayload.calendar_availability;
+                delete insertPayload.calendar_availability; // Remove from payload so it doesn't fail insert
+            }
+
+            // Extract booking_settings for studio
+            if (type === 'studio' && insertPayload.booking_settings) {
+                bookingSettings = insertPayload.booking_settings;
+                delete insertPayload.booking_settings; // Remove from payload so it doesn't fail insert
+            }
+
+            // Log gig requirements if creating a gig
+            if (type === 'gig') {
+                
+                // For gigs, only allow valid columns to prevent PGRST204 errors
+                const validGigColumns = [
+                    'name', 'location', 'budget', 'description', 'event_date',
+                    'status', 'latitude',
+                    'longitude', 'contract_url', 'business_permit_url',
+                    'reapplication_cooldown_days'
+                ];
+                const filteredPayload: any = {};
+                for (const key of validGigColumns) {
+                    if (insertPayload[key] !== undefined) {
+                        filteredPayload[key] = insertPayload[key];
+                    }
+                }
+                insertPayload = filteredPayload;
+            }
+
+
+            const { data, error } = await supabaseClient
+                .from(table)
+                .insert({ ...insertPayload, [ownerField]: userId })
+                .select()
+                .single()
+
+            if (error) {
+                console.error('❌ Insert error:', JSON.stringify(error, null, 2));
+                throw error;
+            }
+
+
+            // If creating a studio, create operating hours and settings
+            if (type === 'studio') {
+                const studioId = data.id
+
+                // Create studio settings with user provided values or defaults
+                const settingsPayload: any = {
+                    studio_id: studioId,
+                    buffer_minutes: 30,
+                    bulk_discount_threshold_hours: 10,
+                    bulk_discount_percentage: 0
+                };
+
+                if (bookingSettings) {
+                    if (bookingSettings.lead_time_hours) settingsPayload.lead_time_hours = parseInt(bookingSettings.lead_time_hours) || 24;
+                    if (bookingSettings.weekend_multiplier) settingsPayload.weekend_multiplier = parseFloat(bookingSettings.weekend_multiplier) || 1.0;
+                    if (bookingSettings.peak_season_multiplier) settingsPayload.peak_season_multiplier = parseFloat(bookingSettings.peak_season_multiplier) || 1.0;
+                    if (bookingSettings.peak_season_dates) settingsPayload.peak_season_dates = bookingSettings.peak_season_dates;
+                    if (bookingSettings.off_peak_multiplier) settingsPayload.off_peak_multiplier = parseFloat(bookingSettings.off_peak_multiplier) || 1.0;
+                    if (bookingSettings.off_peak_dates) settingsPayload.off_peak_dates = bookingSettings.off_peak_dates;
+                }
+
+                await supabaseClient.from('studio_settings').insert(settingsPayload)
+
+                // Create operating hours
+                let operatingHours = []
+
+                if (studioAvailability && Array.isArray(studioAvailability) && studioAvailability.length > 0) {
+                    // Map user provided availability
+                    // Frontend format: { day: 'Monday', slots: [{start, end}] }
+                    // DB format: day_of_week (0-6), open_time, close_time
+                    // Support multiple slots per day
+
+                    const dayMap: { [key: string]: number } = {
+                        'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
+                    };
+
+                    for (const daySchedule of studioAvailability) {
+                        const dayIndex = dayMap[daySchedule.day];
+                        if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
+                            // Insert ALL slots for this day (not just first and last)
+                            daySchedule.slots.forEach((slot: any, slotIndex: number) => {
+                                operatingHours.push({
+                                    studio_id: studioId,
+                                    day_of_week: dayIndex,
+                                    is_open: true,
+                                    open_time: slot.start,
+                                    close_time: slot.end,
+                                    slot_order: slotIndex,
+                                    reason: buildWeeklyScheduleReason(daySchedule)
+                                });
+                            });
+                        }
+                    }
+                }
+
+                // If no availability provided or parsed, use defaults
+                if (operatingHours.length === 0) {
+                    for (let day = 0; day <= 6; day++) {
+                        operatingHours.push({
+                            studio_id: studioId,
+                            day_of_week: day,
+                            is_open: true,
+                            open_time: '09:00',
+                            close_time: '22:00',
+                            reason: 'Weekly schedule [session_type:both]'
+                        })
+                    }
+                }
+
+                await supabaseClient.from('studio_operating_hours').insert(operatingHours)
+
+                // Insert calendar-based date overrides (specific dates)
+                if (calendarAvailability && Array.isArray(calendarAvailability) && calendarAvailability.length > 0) {
+                    const dateOverrides: any[] = [];
+
+                    for (const dateEntry of calendarAvailability) {
+                        if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
+                            // For each slot in the date, create an override entry
+                            // The table supports one slot per date, so we'll use the first slot's times
+                            dateEntry.slots.forEach((slot: any, slotIndex: number) => dateOverrides.push({
+                                studio_id: studioId,
+                                override_date: dateEntry.date,
+                                is_open: true,
+                                open_time: slot.start,
+                                close_time: slot.end,
+                                slot_order: slotIndex,
+                                reason: buildDateOverrideReason(dateEntry)
+                            }));
+                        }
+                    }
+
+                    if (dateOverrides.length > 0) {
+                        await supabaseClient.from('studio_date_overrides').insert(dateOverrides);
+                    }
+                }
+            }
+
+            // If creating a group, add owner to group_members table
+            if (type === 'group') {
+                const groupId = data.id;
+
+                // Insert owner as a member with 'owner' role
+                const { error: memberError } = await supabaseClient
+                    .from('group_members')
+                    .insert({
+                        group_id: groupId,
+                        user_id: userId,
+                        role: 'owner'
+                    });
+
+                if (memberError) {
+                    console.error('⚠️ Failed to add owner to group_members:', memberError);
+                } else {
+                }
+
+                // Also add any other members that have user_id in the members JSONB array
+                const membersArray = insertPayload.members || [];
+                if (Array.isArray(membersArray)) {
+                    const additionalMembers = membersArray
+                        .filter((m: any) => m.user_id && m.user_id !== userId) // Exclude owner (already added)
+                        .map((m: any) => ({
+                            group_id: groupId,
+                            user_id: m.user_id,
+                            role: 'member'
+                        }));
+
+                    if (additionalMembers.length > 0) {
+                        const { error: additionalError } = await supabaseClient
+                            .from('group_members')
+                            .insert(additionalMembers);
+
+                        if (additionalError) {
+                            console.error('⚠️ Failed to add additional members:', additionalError);
+                        } else {
+                        }
+                    }
+                }
+            }
+
+            if (type === 'studio') {
+                const sourceAmenities = Array.isArray(payload?.amenities) ? payload.amenities : [];
+                const sourceImages = Array.isArray(payload?.images) ? payload.images : [];
+                const sourceTypes = Array.isArray(payload?.types)
+                    ? payload.types
+                    : (payload?.type ? [payload.type] : []);
+                const sourceInstruments = Array.isArray(payload?.instruments) ? payload.instruments : [];
+
+                await syncStudio3NF(supabaseClient, data.id)
+                await replaceStudioAmenities(supabaseClient, data.id, sourceAmenities)
+                await replaceStudioMedia(supabaseClient, data.id, sourceImages)
+                await replaceStudioTypes(supabaseClient, data.id, sourceTypes)
+                await replaceStudioInstruments(supabaseClient, data.id, sourceInstruments)
+            }
+
+            if (type === 'gig') {
+                const sourceRequirements = payload?.requirements
+                const sourceImages = Array.isArray(payload?.images) ? payload.images : []
+                const sourceDocuments = Array.isArray(payload?.documents) ? payload.documents : []
+
+                await syncGig3NF(supabaseClient, data.id)
+                await replaceGigRequirements(supabaseClient, data.id, sourceRequirements)
+                await replaceGigMedia(supabaseClient, data.id, 'image', sourceImages)
+                await replaceGigMedia(supabaseClient, data.id, 'document', sourceDocuments)
+            }
+
+            // Return with default stats for new entity
+            return new Response(JSON.stringify({ ...data, rating: 0, review_count: 0 }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // UPDATE ENTITY (uses base table for updates)
+        if (action === 'update') {
+            const { type, id, payload } = params
+            const table = type + 's'
+            const ownerField = type === 'gig' ? 'organizer_id' : 'owner_id'
+
+            // Handle availability for studios - store in operating_hours table
+            let studioAvailability = null;
+            let calendarAvailability = null;
+            let bookingSettings = null;
+            let updatePayload = { ...payload };
+
+            // For studios, only allow valid columns to prevent PGRST204 errors
+            // This filters out any extra fields that don't exist in the studios table
+            if (type === 'studio') {
+                const validStudioColumns = [
+                    'name', 'address', 'hourly_rate', 'description',
+                    'latitude', 'longitude', 'rate', 'contract_url',
+                    'availability', 'rehearsal_rate',
+                    'recording_rate', 'pax', 'business_permit_url'
+                ];
+                const filteredPayload: any = {};
+                for (const key of validStudioColumns) {
+                    if (updatePayload[key] !== undefined) {
+                        filteredPayload[key] = updatePayload[key];
+                    }
+                }
+                // Preserve special fields for later processing
+                if (updatePayload.calendar_availability) filteredPayload.calendar_availability = updatePayload.calendar_availability;
+                if (updatePayload.booking_settings) filteredPayload.booking_settings = updatePayload.booking_settings;
+                updatePayload = filteredPayload;
+            }
+
+            if (type === 'studio' && updatePayload.availability) {
+                studioAvailability = updatePayload.availability;
+                delete updatePayload.availability;
+            }
+
+            // Extract calendar_availability (specific date overrides)
+            if (type === 'studio' && updatePayload.calendar_availability) {
+                calendarAvailability = updatePayload.calendar_availability;
+                delete updatePayload.calendar_availability; // Remove from payload so it doesn't fail update
+            }
+
+            // Extract booking_settings for studio
+            if (type === 'studio' && updatePayload.booking_settings) {
+                bookingSettings = updatePayload.booking_settings;
+                delete updatePayload.booking_settings; // Remove from payload so it doesn't fail update
+            }
+
+            // Log gig requirements if updating a gig
+            if (type === 'gig') {
+
+                const validGigColumns = [
+                    'name', 'location', 'budget', 'description', 'event_date',
+                    'status', 'latitude',
+                    'longitude', 'contract_url', 'business_permit_url',
+                    'reapplication_cooldown_days'
+                ];
+                const filteredPayload: any = {};
+                for (const key of validGigColumns) {
+                    if (updatePayload[key] !== undefined) {
+                        filteredPayload[key] = updatePayload[key];
+                    }
+                }
+                const reapplicationCooldownDays =
+                    filteredPayload.reapplication_cooldown_days === undefined
+                        ? null
+                        : Number(filteredPayload.reapplication_cooldown_days);
+                delete filteredPayload.reapplication_cooldown_days;
+
+                // The RPC enforces the same owner/Level-1 staff rule using
+                // auth.uid(). Check it before any follow-up service-role write.
+                const gigAccess = await authorizeGigAccess(supabaseClient, userId, id, true)
+                if (!gigAccess.allowed || (!gigAccess.owner && gigAccess.staffLevel !== 1)) {
+                    return jsonError('Forbidden', 403)
+                }
+
+                const { data: rpcData, error: rpcError } = await supabaseAuthClient.rpc('update_gig_safely', {
+                    p_gig_id: id,
+                    p_payload: filteredPayload,
+                    p_reason: 'Updated via manage-listings edge function',
+                });
+
+                if (rpcError) {
+                    console.error('❌ Gig update RPC error:', JSON.stringify(rpcError, null, 2));
+                    throw rpcError;
+                }
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                if (reapplicationCooldownDays !== null) {
+                    const { error: cooldownError } = await supabaseClient
+                        .from('gigs')
+                        .update({ reapplication_cooldown_days: reapplicationCooldownDays })
+                        .eq('id', id);
+                    if (cooldownError) throw cooldownError;
+                }
+
+                const sourceRequirements = payload?.requirements
+                const sourceImages = Array.isArray(payload?.images) ? payload.images : []
+                const sourceDocuments = Array.isArray(payload?.documents) ? payload.documents : []
+
+                await syncGig3NF(supabaseClient, id)
+                if (sourceRequirements !== undefined) {
+                    await replaceGigRequirements(supabaseClient, id, sourceRequirements)
+                }
+                if (payload?.images !== undefined) {
+                    await replaceGigMedia(supabaseClient, id, 'image', sourceImages)
+                }
+                if (payload?.documents !== undefined) {
+                    await replaceGigMedia(supabaseClient, id, 'document', sourceDocuments)
+                }
+
+                return new Response(JSON.stringify({
+                    ...rpcResult.gig,
+                    ...(reapplicationCooldownDays === null
+                        ? {}
+                        : { reapplication_cooldown_days: reapplicationCooldownDays }),
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+
+            const { data, error } = await supabaseClient
+                .from(table)
+                .update(updatePayload)
+                .eq('id', id)
+                .eq(ownerField, userId)
+                .select()
+                .single()
+
+            if (error) {
+                console.error('❌ Update error:', JSON.stringify(error, null, 2));
+                throw error;
+            }
+
+            if (type === 'gig') {
+            }
+
+            // Update studio operating hours if availability was provided
+            if (type === 'studio' && studioAvailability && Array.isArray(studioAvailability)) {
+                const studioId = id;
+
+                // Delete existing operating hours for this studio
+                await supabaseClient
+                    .from('studio_operating_hours')
+                    .delete()
+                    .eq('studio_id', studioId);
+
+                // Create new operating hours
+                const dayMap: { [key: string]: number } = {
+                    'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
+                };
+
+                let operatingHours: any[] = [];
+                for (const daySchedule of studioAvailability) {
+                    const dayIndex = dayMap[daySchedule.day];
+                    if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
+                        // Insert ALL slots for this day (not just first and last)
+                        daySchedule.slots.forEach((slot: any, slotIndex: number) => {
+                            operatingHours.push({
+                                studio_id: studioId,
+                                day_of_week: dayIndex,
+                                is_open: true,
+                                open_time: slot.start,
+                                close_time: slot.end,
+                                slot_order: slotIndex,
+                                reason: buildWeeklyScheduleReason(daySchedule)
+                            });
+                        });
+                    }
+                }
+
+                if (operatingHours.length > 0) {
+                    await supabaseClient.from('studio_operating_hours').insert(operatingHours);
+                }
+            }
+
+            // Update studio date overrides if calendar_availability was provided
+            if (type === 'studio' && calendarAvailability && Array.isArray(calendarAvailability)) {
+                const studioId = id;
+
+                // Delete existing date overrides for this studio
+                await supabaseClient
+                    .from('studio_date_overrides')
+                    .delete()
+                    .eq('studio_id', studioId);
+
+                // Insert new date overrides
+                const dateOverrides: any[] = [];
+
+                for (const dateEntry of calendarAvailability) {
+                    if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
+                        dateEntry.slots.forEach((slot: any, slotIndex: number) => dateOverrides.push({
+                            studio_id: studioId,
+                            override_date: dateEntry.date,
+                            is_open: true,
+                            open_time: slot.start,
+                            close_time: slot.end,
+                            slot_order: slotIndex,
+                            reason: buildDateOverrideReason(dateEntry)
+                        }));
+                    }
+                }
+
+                if (dateOverrides.length > 0) {
+                    await supabaseClient.from('studio_date_overrides').insert(dateOverrides);
+                }
+            }
+
+            // Update studio settings if booking_settings was provided
+            if (type === 'studio' && bookingSettings) {
+                const studioId = id;
+
+                const settingsUpdate: any = {};
+                if (bookingSettings.lead_time_hours !== undefined) settingsUpdate.lead_time_hours = parseInt(bookingSettings.lead_time_hours) || 24;
+                if (bookingSettings.weekend_multiplier !== undefined) settingsUpdate.weekend_multiplier = parseFloat(bookingSettings.weekend_multiplier) || 1.0;
+                if (bookingSettings.peak_season_multiplier !== undefined) settingsUpdate.peak_season_multiplier = parseFloat(bookingSettings.peak_season_multiplier) || 1.0;
+                if (bookingSettings.peak_season_dates !== undefined) settingsUpdate.peak_season_dates = bookingSettings.peak_season_dates;
+                if (bookingSettings.off_peak_multiplier !== undefined) settingsUpdate.off_peak_multiplier = parseFloat(bookingSettings.off_peak_multiplier) || 1.0;
+                if (bookingSettings.off_peak_dates !== undefined) settingsUpdate.off_peak_dates = bookingSettings.off_peak_dates;
+
+                settingsUpdate.updated_at = new Date().toISOString();
+
+                const { error: settingsError } = await supabaseClient
+                    .from('studio_settings')
+                    .update(settingsUpdate)
+                    .eq('studio_id', studioId);
+
+                if (settingsError) {
+                    console.error('⚠️ Failed to update studio settings:', settingsError);
+                } else {
+                }
+            }
+
+            // Sync group_members when updating a group with members that have user_id
+            if (type === 'group' && updatePayload.members) {
+                const groupId = id;
+                const membersArray = updatePayload.members || [];
+
+                if (Array.isArray(membersArray)) {
+                    // Get members with user_id (registered users)
+                    const registeredMembers = membersArray.filter((m: any) => m.user_id);
+
+                    // Get current group_members entries
+                    const { data: currentMembers } = await supabaseClient
+                        .from('group_members')
+                        .select('user_id, role')
+                        .eq('group_id', groupId);
+
+                    const currentUserIds = new Set((currentMembers || []).map((m: any) => m.user_id));
+                    const newUserIds = new Set(registeredMembers.map((m: any) => m.user_id));
+
+                    // Find members to add (in new list but not in current)
+                    const toAdd = registeredMembers
+                        .filter((m: any) => !currentUserIds.has(m.user_id))
+                        .map((m: any) => ({
+                            group_id: groupId,
+                            user_id: m.user_id,
+                            role: m.user_id === data?.owner_id ? 'owner' : 'member'
+                        }));
+
+                    const toRemove = (currentMembers || [])
+                        .filter((m: any) => !newUserIds.has(m.user_id) && m.user_id !== data?.owner_id)
+                        .map((m: any) => m.user_id);
+
+                    // Add new members
+                    if (toAdd.length > 0) {
+                        const { error: addError } = await supabaseClient
+                            .from('group_members')
+                            .insert(toAdd);
+
+                        if (addError) {
+                            console.error('⚠️ Failed to add group members:', addError);
+                        } else {
+                        }
+                    }
+
+                    // Remove members that are no longer in the list
+                    if (toRemove.length > 0) {
+                        const { error: removeError } = await supabaseClient
+                            .from('group_members')
+                            .delete()
+                            .eq('group_id', groupId)
+                            .in('user_id', toRemove);
+
+                        if (removeError) {
+                            console.error('⚠️ Failed to remove group members:', removeError);
+                        } else {
+                        }
+                    }
+                }
+            }
+
+            if (type === 'studio') {
+                const sourceAmenities = payload?.amenities
+                const sourceTypes = payload?.types !== undefined
+                    ? payload?.types
+                    : (payload?.type !== undefined ? [payload?.type] : undefined)
+                const sourceInstruments = payload?.instruments
+
+                await syncStudio3NF(supabaseClient, id)
+                if (sourceAmenities !== undefined) {
+                    await replaceStudioAmenities(supabaseClient, id, sourceAmenities)
+                }
+                if (payload?.images !== undefined) {
+                    await replaceStudioMedia(supabaseClient, id, payload.images)
+                }
+                if (sourceTypes !== undefined) {
+                    await replaceStudioTypes(supabaseClient, id, sourceTypes)
+                }
+                if (sourceInstruments !== undefined) {
+                    await replaceStudioInstruments(supabaseClient, id, sourceInstruments)
+                }
+            }
+
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // DELETE ENTITY (uses base table for deletes)
+        if (action === 'delete') {
+            const { type, id } = params // type: 'gig', 'group', 'studio'
+            const rpcClient = createClient(
+                // @ts-ignore
+                Deno.env.get('SUPABASE_URL') ?? '',
+                // @ts-ignore
+                Deno.env.get('SUPABASE_ANON_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+                {
+                    global: {
+                        headers: {
+                            Authorization: authHeader,
+                        },
+                    },
+                },
+            )
+
+            if (type === 'gig') {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_gig_safely', {
+                    p_gig_id: id,
+                    p_reason: 'Deleted via manage-listings edge function',
+                });
+
+                if (rpcError) throw rpcError;
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                return new Response(JSON.stringify({ success: true, ...rpcResult }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            if (type === 'group') {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_group_safely', {
+                    p_group_id: id,
+                    p_reason: 'Deleted via manage-listings edge function',
+                });
+
+                if (rpcError) throw rpcError;
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                return new Response(JSON.stringify({ success: true, ...rpcResult }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            if (type === 'studio') {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_studio_safely', {
+                    p_studio_id: id,
+                    p_reason: 'Deleted via manage-listings edge function',
+                });
+
+                if (rpcError) throw rpcError;
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                return new Response(JSON.stringify({ success: true, ...rpcResult }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            const table = type + 's'
+
+            const { error } = await supabaseClient
+                .from(table)
+                .delete()
+                .eq('id', id)
+                .eq(type === 'gig' ? 'organizer_id' : 'owner_id', userId) // Security check
+
+            if (error) throw error
+            return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // --- MANAGE DASHBOARD ACTIONS ---
+
+        // FETCH STUDIO BOOKINGS
+        if (action === 'fetch_studio_bookings') {
+            const { studioId } = params;
+            if (!studioId) return jsonError('Missing studioId', 400)
+
+            const studioAccess = await authorizeStudioAccess(supabaseClient, userId, studioId)
+            if (!studioAccess.allowed) return jsonError('Forbidden', 403)
+
+            // Join with profiles to get user info
+            const { data, error } = await supabaseClient
+                .from('studio_bookings')
+                .select(`
+                    *,
+                    user:profiles!user_id(full_name, avatar_url, email)
+                `)
+                .eq('studio_id', studioId)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            // A studio owner/staff member must not review their own booking.
+            const conflictFreeData = (data || []).filter((booking: any) => booking.user_id !== userId)
+            return new Response(JSON.stringify(conflictFreeData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // FETCH GIG APPLICATIONS
+        if (action === 'fetch_gig_applications') {
+            const { gigId } = params;
+            if (!gigId) return jsonError('Missing gigId', 400)
+
+            const gigAccess = await authorizeGigAccess(supabaseClient, userId, gigId)
+            if (!gigAccess.allowed) return jsonError('Forbidden', 403)
+
+            const { data, error } = await supabaseClient
+                .from('gig_applications')
+                .select(`
+                    *,
+                    applicant:profiles!applicant_id(id, full_name, avatar_url, role, bio, location),
+                    group:groups!group_id(id, name, genre, description, location, rate, group_type)
+                `)
+                .eq('gig_id', gigId)
+                .or('leader_approval_status.is.null,leader_approval_status.eq.approved')
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            // Do not expose an application to its own applicant/submitter when
+            // that account also owns or staffs the gig.
+            const conflictFreeData = (data || []).filter((application: any) =>
+                application.applicant_id !== userId && application.submitted_by_user_id !== userId,
+            )
+            const hydratedData = await hydrateGigApplicationLegacy(supabaseClient, conflictFreeData);
+            return new Response(JSON.stringify(hydratedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // FETCH GROUP APPLICATIONS (My applications as a group/musician)
+        if (action === 'fetch_group_applications') {
+            const { groupId } = params;
+            if (groupId && !(await authorizeGroupAccess(supabaseClient, userId, groupId, true))) {
+                return jsonError('Forbidden', 403)
+            }
+            // Fetch applications where group_id matches OR applicant_id matches the user (if personal)
+            // Prioritize group_id if provided
+            let query = supabaseClient.from('gig_applications').select(`
+                *,
+                gig:gigs!gig_id(name, location, budget, event_date, status, images)
+             `);
+
+            if (groupId) {
+                query = query.eq('group_id', groupId);
+            } else {
+                query = query.eq('applicant_id', userId);
+            }
+
+            const { data, error } = await query.order('created_at', { ascending: false });
+
+            if (error) throw error;
+            return new Response(JSON.stringify(data || []), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // UPDATE BOOKING STATUS (Studio Bookings)
+        if (action === 'update_booking_status') {
+            const { bookingId, status, cancellation_reason } = params;
+
+            // First get the booking details to send notification
+            const { data: bookingDetails, error: bookingError } = await supabaseClient
+                .from('studio_bookings')
+                .select(`
+                    *,
+                    studio:studio_id(name, owner_id),
+                    user:user_id(full_name, email)
+                `)
+                .eq('id', bookingId)
+                .single();
+
+            if (bookingError) throw bookingError;
+
+            const studioAccess = await authorizeStudioAccess(supabaseClient, userId, bookingDetails.studio_id, true)
+            if (!studioAccess.allowed || bookingDetails.user_id === userId) {
+                return jsonError('Forbidden', 403)
+            }
+
+            // Update the booking status (and cancellation reason if provided)
+            const updateData: any = { status };
+            if (cancellation_reason) {
+                updateData.cancellation_reason = cancellation_reason;
+            }
+
+            const { data, error } = await supabaseClient
+                .from('studio_bookings')
+                .update(updateData)
+                .eq('id', bookingId)
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            // Send notification to the user who made the booking
+            const studioName = bookingDetails.studio?.name || 'the studio';
+            const bookingDate = bookingDetails.booking_date || 'your requested date';
+
+            let notificationType = 'info';
+            let notificationTitle = '';
+            let notificationMessage = '';
+
+            if (status === 'cancelled') {
+                notificationType = 'warning';
+                notificationTitle = 'Booking Declined';
+                notificationMessage = `Your booking request for "${studioName}" on ${bookingDate} has been declined.${cancellation_reason ? ` Reason: ${cancellation_reason}` : ''}`;
+            } else if (status === 'confirmed') {
+                notificationType = 'success';
+                notificationTitle = 'Booking Confirmed! 🎉';
+                notificationMessage = `Great news! Your booking for "${studioName}" on ${bookingDate} has been confirmed.`;
+            }
+
+            // Insert notification for the user
+            if (notificationTitle) {
+                await insertCoreNotifications(supabaseClient, {
+                        user_id: bookingDetails.user_id,
+                        type: notificationType,
+                        title: notificationTitle,
+                        message: notificationMessage,
+                        meta: {
+                            studio_id: bookingDetails.studio_id,
+                            booking_id: bookingId,
+                            status: status,
+                            booking_date: bookingDate,
+                            cancellation_reason: cancellation_reason || null
+                        }
+                });
+            }
+
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // PARTIAL SLOT APPROVAL (For multi-slot bookings)
+        if (action === 'partial_slot_approval') {
+            const { bookingId, acceptedSlots, declinedSlots, cancellation_reason } = params;
+
+            // First get the booking details
+            const { data: bookingDetails, error: bookingError } = await supabaseClient
+                .from('studio_bookings')
+                .select(`
+                    *,
+                    studio:studio_id(name, owner_id, hourly_rate),
+                    user:user_id(full_name, email)
+                `)
+                .eq('id', bookingId)
+                .single();
+
+            if (bookingError) throw bookingError;
+
+            const studioAccess = await authorizeStudioAccess(supabaseClient, userId, bookingDetails.studio_id, true)
+            if (!studioAccess.allowed || bookingDetails.user_id === userId) {
+                return jsonError('Forbidden', 403)
+            }
+
+            const studioName = bookingDetails.studio?.name || 'the studio';
+            const bookingDate = bookingDetails.booking_date;
+            const hourlyRate = bookingDetails.studio?.hourly_rate || 0;
+
+            // If there are accepted slots, update the original booking with only accepted slots
+            if (acceptedSlots && acceptedSlots.length > 0) {
+                // Calculate new pricing for accepted slots
+                let totalHours = 0;
+                for (const slot of acceptedSlots) {
+                    const [startH, startM] = slot.start.split(':').map(Number);
+                    const [endH, endM] = slot.end.split(':').map(Number);
+                    const hours = (endH + endM / 60) - (startH + startM / 60);
+                    totalHours += hours;
+                }
+                const newPrice = totalHours * hourlyRate;
+
+                // Get overall start and end for backwards compatibility
+                const allStartTimes = acceptedSlots.map((s: any) => s.start).sort();
+                const allEndTimes = acceptedSlots.map((s: any) => s.end).sort();
+                const overallStart = allStartTimes[0];
+                const overallEnd = allEndTimes[allEndTimes.length - 1];
+
+                // Update the booking with only accepted slots
+                const { error: updateError } = await supabaseClient
+                    .from('studio_bookings')
+                    .update({
+                        status: 'confirmed',
+                        time_slots: acceptedSlots,
+                        start_time: overallStart,
+                        end_time: overallEnd,
+                        hours: totalHours,
+                        final_price: newPrice,
+                        subtotal: newPrice
+                    })
+                    .eq('id', bookingId);
+
+                if (updateError) throw updateError;
+
+                // Send notification about partial approval
+                const formatSlot = (s: any) => {
+                    const formatTime = (t: string) => {
+                        const [h, m] = t.split(':');
+                        const hr = parseInt(h);
+                        const period = hr >= 12 ? 'PM' : 'AM';
+                        const h12 = hr % 12 || 12;
+                        return `${h12}:${m} ${period}`;
+                    };
+                    return `${formatTime(s.start)} - ${formatTime(s.end)}`;
+                };
+
+                const acceptedSlotsText = acceptedSlots.map(formatSlot).join(', ');
+                const declinedSlotsText = declinedSlots && declinedSlots.length > 0
+                    ? declinedSlots.map(formatSlot).join(', ')
+                    : '';
+
+                let notificationMessage = `Your booking for "${studioName}" on ${bookingDate} has been partially approved.\n\n✅ Approved: ${acceptedSlotsText}`;
+                if (declinedSlotsText) {
+                    notificationMessage += `\n❌ Declined: ${declinedSlotsText}`;
+                }
+                if (cancellation_reason) {
+                    notificationMessage += `\n\nNote: ${cancellation_reason}`;
+                }
+
+                await insertCoreNotifications(supabaseClient, {
+                        user_id: bookingDetails.user_id,
+                        type: 'info',
+                        title: 'Booking Partially Approved',
+                        message: notificationMessage,
+                        meta: {
+                            studio_id: bookingDetails.studio_id,
+                            booking_id: bookingId,
+                            status: 'partial',
+                            booking_date: bookingDate,
+                            accepted_slots: acceptedSlots,
+                            declined_slots: declinedSlots
+                        }
+                });
+
+                return new Response(JSON.stringify({
+                    success: true,
+                    message: 'Booking partially approved',
+                    acceptedSlots,
+                    declinedSlots
+                }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            } else {
+                // All slots declined - just cancel the booking
+                const { error: updateError } = await supabaseClient
+                    .from('studio_bookings')
+                    .update({
+                        status: 'cancelled',
+                        cancellation_reason: cancellation_reason || 'All time slots were declined by the studio owner.'
+                    })
+                    .eq('id', bookingId);
+
+                if (updateError) throw updateError;
+
+                await insertCoreNotifications(supabaseClient, {
+                        user_id: bookingDetails.user_id,
+                        type: 'warning',
+                        title: 'Booking Declined',
+                        message: `Your booking request for "${studioName}" on ${bookingDate} has been declined. ${cancellation_reason || ''}`,
+                        meta: {
+                            studio_id: bookingDetails.studio_id,
+                            booking_id: bookingId,
+                            status: 'cancelled',
+                            booking_date: bookingDate
+                        }
+                });
+
+                return new Response(JSON.stringify({
+                    success: true,
+                    message: 'Booking declined'
+                }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            }
+        }
+
+        // UPDATE APPLICATION STATUS
+        if (action === 'update_application_status') {
+            const { applicationId, status } = params;
+
+            // First get the application details to send notification
+            const { data: appDetails, error: appError } = await supabaseClient
+                .from('gig_applications')
+                .select(`
+                    *,
+                    gig:gig_id(name, organizer_id),
+                    applicant:applicant_id(full_name),
+                    group:group_id(name)
+                `)
+                .eq('id', applicationId)
+                .single();
+
+            if (appError) throw appError;
+
+            const gigAccess = await authorizeGigAccess(supabaseClient, userId, appDetails.gig_id, true)
+            if (!gigAccess.allowed || appDetails.applicant_id === userId || appDetails.submitted_by_user_id === userId) {
+                return jsonError('Forbidden', 403)
+            }
+
+            // Update the application status
+            const { data, error } = await supabaseClient
+                .from('gig_applications')
+                .update({ status })
+                .eq('id', applicationId)
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            // Send notification to the applicant
+            const applicantName = appDetails.group?.name || appDetails.applicant?.full_name || 'Applicant';
+            const gigName = appDetails.gig?.name || 'the gig';
+
+            let notificationType = 'info';
+            let notificationTitle = '';
+            let notificationMessage = '';
+
+            if (status === 'rejected') {
+                notificationType = 'warning';
+                notificationTitle = 'Application Declined';
+                notificationMessage = `Your application for "${gigName}" has been declined.`;
+            } else if (status === 'accepted') {
+                notificationType = 'success';
+                notificationTitle = 'Application Accepted! 🎉';
+                notificationMessage = `Congratulations! Your application for "${gigName}" has been accepted.`;
+            }
+
+            // Insert notification for the applicant
+            if (notificationTitle) {
+                await insertCoreNotifications(supabaseClient, {
+                        user_id: appDetails.applicant_id,
+                        type: notificationType,
+                        title: notificationTitle,
+                        message: notificationMessage,
+                        meta: {
+                            gig_id: appDetails.gig_id,
+                            application_id: applicationId,
+                            status: status
+                        }
+                });
+            }
+
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // FETCH REVIEWS
+        if (action === 'fetch_reviews') {
+            const { type, id } = params; // type: 'studio', 'gig', 'group'
+            const field = type + '_id'; // e.g., studio_id
+
+            const { data, error } = await supabaseClient
+                .from('reviews')
+                .select(`
+                    *,
+                    author:profiles!author_id(full_name, avatar_url)
+                `)
+                .eq(field, id)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // FETCH MY BOOKINGS (Studio Bookings made by the user)
+        if (action === 'fetch_my_bookings') {
+            // Join with studio to get studio details
+            const { data, error } = await supabaseClient
+                .from('studio_bookings')
+                .select(`
+                    *,
+                    studio:studios!studio_id(id, name, address, hourly_rate, rate)
+                `)
+                .eq('user_id', userId)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            const hydratedData = await hydrateStudioBookingLegacy(supabaseClient, data || []);
+            return new Response(JSON.stringify(hydratedData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // CHECK ELIGIBILITY (Spam Block Check)
+        if (action === 'check_eligibility') {
+            const { gigId } = params; // Changed from organizerId to gigId
+
+            if (!gigId) {
+                return new Response(JSON.stringify({ blocked: false }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            }
+
+            // Count cancellations for THIS gig in last 30 days
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+            const { count, error: countError } = await supabaseClient
+                .from('gig_applications')
+                .select('id', { count: 'exact', head: true })
+                .eq('status', 'cancelled')
+                .eq('applicant_id', userId)
+                .eq('gig_id', gigId) // Scoped to gig
+                .gte('updated_at', thirtyDaysAgo.toISOString());
+
+            if (countError) throw countError;
+
+            const blocked = (count || 0) >= 3;
+            return new Response(JSON.stringify({
+                blocked,
+                reason: blocked ? 'Maximum attempts reached for this gig.' : null
+            }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // CANCEL APPLICATION
+        if (action === 'cancel_application') {
+            const { applicationId } = params;
+
+            // Verify ownership securely
+            const { data: existingApp, error: fetchError } = await supabaseClient
+                .from('gig_applications')
+                .select('applicant_id, group_id, group:groups!group_id(owner_id)')
+                .eq('id', applicationId)
+                .single();
+
+            if (fetchError) throw fetchError;
+            if (!existingApp) throw new Error('Application not found');
+
+            // Check if consumer is the applicant (individual) OR the owner of the group
+            const isApplicant = existingApp.applicant_id === userId;
+            const isGroupOwner = existingApp.group?.owner_id === userId;
+
+            if (!isApplicant && !isGroupOwner) {
+                return new Response(JSON.stringify({ error: 'Unauthorized to cancel this application' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                });
+            }
+
+            // Soft delete: Update status to 'cancelled'
+            const { error: updateError } = await supabaseClient
+                .from('gig_applications')
+                .update({ status: 'cancelled' })
+                .eq('id', applicationId);
+
+            if (updateError) throw updateError;
+
+            // SPAM PREVENTION: Get count to show to user
+            let cancellationCount = 0;
+            try {
+                // Get gig details from existingApp (need to ensure gig_id was fetched)
+                // We initially only fetched select('applicant_id, group_id...').
+                // Let's refetch or improve initial fetch.
+                // Improvement: Update initial fetch to include gig_id
+            } catch (e) {
+                // Ignore count error, just return success
+            }
+
+            // To do this cleanly, let's just fetch the gig_id via the existingApp logic if we update the SELECT above.
+            // But since I can't easily jump back and forth with one replace, I'll do a fresh small query or assume existingApp has it (I will update the SELECT in the next chunk).
+
+            // Re-fetch gig info for counting
+            const { data: appData } = await supabaseClient
+                .from('gig_applications')
+                .select('gig_id') // We know this app exists
+                .eq('id', applicationId)
+                .single();
+
+            if (appData?.gig_id) {
+                const { data: gigData } = await supabaseClient
+                    .from('gigs')
+                    .select('organizer_id')
+                    .eq('id', appData.gig_id)
+                    .single();
+
+                if (gigData) {
+                    const thirtyDaysAgo = new Date();
+                    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+                    const { count } = await supabaseClient
+                        .from('gig_applications')
+                        .select('id, gig:gigs!inner(organizer_id)', { count: 'exact', head: true })
+                        .eq('status', 'cancelled')
+                        .eq('applicant_id', userId)
+                        .eq('gig.organizer_id', gigData.organizer_id)
+                        .gte('updated_at', thirtyDaysAgo.toISOString());
+
+                    cancellationCount = count || 0;
+                }
+            }
+
+            return new Response(JSON.stringify({ success: true, cancellation_count: cancellationCount }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // --- GROUP MEMBER MANAGEMENT ---
+
+        // FETCH GROUP MEMBERS (from group_members table with profile info)
+        if (action === 'fetch_group_members') {
+            const { groupId } = params;
+
+            if (!groupId) {
+                return new Response(JSON.stringify({ error: 'Missing groupId' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+
+            if (!(await authorizeGroupAccess(supabaseClient, userId, groupId))) {
+                return jsonError('Forbidden', 403)
+            }
+
+            const { data, error } = await supabaseClient
+                .from('group_members')
+                .select(`
+                    id,
+                    user_id,
+                    role,
+                    joined_at,
+                    user:profiles!user_id(id, full_name, avatar_url, email)
+                `)
+                .eq('group_id', groupId)
+                .order('joined_at', { ascending: true });
+
+            if (error) throw error;
+            const hydratedData = await hydrateGroupMemberProfileLegacy(supabaseClient, data || []);
+
+            return new Response(JSON.stringify(hydratedData), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
+        // ADD MEMBER TO GROUP (by user_id)
+        if (action === 'add_group_member') {
+            const { groupId, targetUserId, memberRole } = params;
+
+            if (!groupId || !targetUserId) {
+                return new Response(JSON.stringify({ error: 'Missing groupId or targetUserId' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+
+            // Verify the requester is the owner of the group
+            const { data: group, error: groupError } = await supabaseClient
+                .from('groups')
+                .select('owner_id, name')
+                .eq('id', groupId)
+                .single();
+
+            if (groupError || !group) {
+                return new Response(JSON.stringify({ error: 'Group not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                });
+            }
+
+            if (group.owner_id !== effectiveUserId) {
+                return new Response(JSON.stringify({ error: 'Only the group owner can add members' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                });
+            }
+
+            // Check if user is already a member
+            const { data: existingMember } = await supabaseClient
+                .from('group_members')
+                .select('id')
+                .eq('group_id', groupId)
+                .eq('user_id', targetUserId)
+                .maybeSingle();
+
+            if (existingMember) {
+                return new Response(JSON.stringify({ error: 'User is already a member of this group' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+
+            // Add the member
+            const { data, error } = await supabaseClient
+                .from('group_members')
+                .insert({
+                    group_id: groupId,
+                    user_id: targetUserId,
+                    role: memberRole || 'member'
+                })
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            // Notify the new member
+            await insertCoreNotifications(supabaseClient, {
+                user_id: targetUserId,
+                type: 'success',
+                title: 'Added to Group',
+                message: `You have been added to the group "${group.name}"`,
+                meta: buildNotificationRouteMeta('/group_details', { id: groupId }, {
+                    type: 'group_member_added',
+                    group_id: groupId,
+                })
+            });
+
+            return new Response(JSON.stringify(data), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
+        // REMOVE MEMBER FROM GROUP
+        if (action === 'remove_group_member') {
+            const { groupId, targetUserId } = params;
+
+            if (!groupId || !targetUserId) {
+                return new Response(JSON.stringify({ error: 'Missing groupId or targetUserId' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+
+            // Verify the requester is the owner of the group
+            const { data: group, error: groupError } = await supabaseClient
+                .from('groups')
+                .select('owner_id, name')
+                .eq('id', groupId)
+                .single();
+
+            if (groupError || !group) {
+                return new Response(JSON.stringify({ error: 'Group not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                });
+            }
+
+            // Allow owner to remove members, or member to leave the group (self-removal)
+            if (group.owner_id !== effectiveUserId && targetUserId !== effectiveUserId) {
+                return new Response(JSON.stringify({ error: 'Only the group owner can remove members, or members can leave themselves' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                });
+            }
+
+            // Prevent owner from removing themselves (they must transfer leadership first)
+            if (targetUserId === group.owner_id) {
+                return new Response(JSON.stringify({ error: 'The group owner cannot be removed. Transfer leadership first.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+
+            // Remove the member
+            const { error } = await supabaseClient
+                .from('group_members')
+                .delete()
+                .eq('group_id', groupId)
+                .eq('user_id', targetUserId);
+
+            if (error) throw error;
+
+            // Notify the removed member (if removed by owner)
+            if (targetUserId !== effectiveUserId) {
+                await insertCoreNotifications(supabaseClient, {
+                    user_id: targetUserId,
+                    type: 'warning',
+                    title: 'Removed from Group',
+                    message: `You have been removed from the group "${group.name}"`,
+                    meta: buildNotificationRouteMeta('/group_details', { id: groupId }, {
+                        type: 'group_member_removed',
+                        group_id: groupId,
+                    })
+                });
+            }
+
+            return new Response(JSON.stringify({ success: true }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
+        // UPDATE MEMBER ROLE IN GROUP
+        if (action === 'update_group_member_role') {
+            const { groupId, targetUserId, newRole } = params;
+
+            if (!groupId || !targetUserId || !newRole) {
+                return new Response(JSON.stringify({ error: 'Missing required fields' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+
+            // Verify the requester is the owner
+            const { data: group, error: groupError } = await supabaseClient
+                .from('groups')
+                .select('owner_id')
+                .eq('id', groupId)
+                .single();
+
+            if (groupError || !group || group.owner_id !== effectiveUserId) {
+                return new Response(JSON.stringify({ error: 'Only the group owner can update member roles' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                });
+            }
+
+            // Cannot change owner's role via this action (use leadership transfer)
+            if (targetUserId === group.owner_id) {
+                return new Response(JSON.stringify({ error: 'Cannot change owner role. Use leadership transfer instead.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+
+            const { data, error } = await supabaseClient
+                .from('group_members')
+                .update({ role: newRole })
+                .eq('group_id', groupId)
+                .eq('user_id', targetUserId)
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            return new Response(JSON.stringify(data), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
+
+        throw new Error('Invalid action')
+
+    } catch (error: any) {
+        console.error('❌ Edge Function Error:', error);
+        console.error('❌ Error message:', error.message);
+        console.error('❌ Error stack:', error.stack);
+        console.error('❌ Error details:', JSON.stringify(error, null, 2));
+
+        return new Response(JSON.stringify({
+            error: error.message,
+            details: error.toString(),
+            hint: error.hint || null,
+            code: error.code || null
+        }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 400,
+        })
+    }
+})

@@ -19,6 +19,11 @@ type TrackPlayerModuleLike = {
   seekTo?: (...args: any[]) => any;
   getProgress?: (...args: any[]) => any;
   getPlaybackState?: (...args: any[]) => any;
+  getQueue?: (...args: any[]) => any;
+  getActiveTrackIndex?: (...args: any[]) => any;
+  getActiveTrack?: (...args: any[]) => any;
+  getPlayWhenReady?: (...args: any[]) => any;
+  updateNowPlayingMetadata?: (...args: any[]) => any;
   addEventListener?: (...args: any[]) => any;
   skipToNext?: (...args: any[]) => any;
   skipToPrevious?: (...args: any[]) => any;
@@ -30,6 +35,7 @@ const FALLBACK_EVENT = {
   PlaybackError: "playback-error",
   PlaybackPlayWhenReadyChanged: "playback-play-when-ready-changed",
   PlaybackActiveTrackChanged: "playback-active-track-changed",
+  PlaybackProgressUpdated: "playback-progress-updated",
   RemotePlay: "remote-play",
   RemotePause: "remote-pause",
   RemoteStop: "remote-stop",
@@ -64,6 +70,7 @@ const FALLBACK_IOS_CATEGORY = {
 } as const;
 
 const FALLBACK_APP_KILLED_BEHAVIOR = {
+  ContinuePlayback: "continue-playback",
   StopPlaybackAndRemoveNotification: "stop-playback-and-remove-notification",
 } as const;
 
@@ -118,6 +125,11 @@ const TrackPlayer = {
   seekTo: (...args: any[]) => nativeTrackPlayer?.seekTo?.(...args) ?? Promise.resolve(),
   getProgress: (...args: any[]) => nativeTrackPlayer?.getProgress?.(...args) ?? Promise.resolve({ position: 0, duration: 0, buffered: 0 }),
   getPlaybackState: (...args: any[]) => nativeTrackPlayer?.getPlaybackState?.(...args) ?? Promise.resolve({ state: State.None }),
+  getQueue: (...args: any[]) => nativeTrackPlayer?.getQueue?.(...args) ?? Promise.resolve([]),
+  getActiveTrackIndex: (...args: any[]) => nativeTrackPlayer?.getActiveTrackIndex?.(...args) ?? Promise.resolve(undefined),
+  getActiveTrack: (...args: any[]) => nativeTrackPlayer?.getActiveTrack?.(...args) ?? Promise.resolve(undefined),
+  getPlayWhenReady: (...args: any[]) => nativeTrackPlayer?.getPlayWhenReady?.(...args) ?? Promise.resolve(false),
+  updateNowPlayingMetadata: (...args: any[]) => nativeTrackPlayer?.updateNowPlayingMetadata?.(...args) ?? Promise.resolve(),
   addEventListener: (...args: any[]) => nativeTrackPlayer?.addEventListener?.(...args) ?? noOpSubscription,
   skipToNext: (...args: any[]) => nativeTrackPlayer?.skipToNext?.(...args) ?? Promise.resolve(),
   skipToPrevious: (...args: any[]) => nativeTrackPlayer?.skipToPrevious?.(...args) ?? Promise.resolve(),

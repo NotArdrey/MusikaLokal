@@ -1,0 +1,2206 @@
+import { createUploadModerationCase, findUploadModerationCase, moderationCaseDecision, type VisualDecision } from "../_shared/uploadModeration.ts";
+// @ts-ignore
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// @ts-ignore
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// Deno environment
+declare const Deno: {
+  env: {
+    get(key: string): string | undefined;
+  };
+};
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform",
+};
+
+// ─── Configuration ────────────────────────────────────────────────────────────
+
+const GROQ_API_KEYS = Array.from(new Set([
+  Deno.env.get("GROQ_API_KEY")?.trim(),
+  Deno.env.get("GROQ_FALLBACK_API_KEY")?.trim(),
+].filter((key): key is string => Boolean(key))));
+const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY")?.trim() || "";
+
+const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+const OPENAI_CHAT_API_URL = "https://api.openai.com/v1/chat/completions";
+const OPENAI_MODERATION_API_URL = "https://api.openai.com/v1/moderations";
+const ACRCLOUD_HOST = Deno.env.get("ACRCLOUD_HOST")?.trim() || "";
+const ACRCLOUD_ACCESS_KEY = Deno.env.get("ACRCLOUD_ACCESS_KEY")?.trim() || "";
+const ACRCLOUD_ACCESS_SECRET = Deno.env.get("ACRCLOUD_ACCESS_SECRET")?.trim() || "";
+const ACRCLOUD_MIN_SCORE = Number(Deno.env.get("ACRCLOUD_MIN_SCORE") || "80");
+const ACRCLOUD_CUSTOM_HOST = Deno.env.get("ACRCLOUD_CUSTOM_HOST")?.trim() || "";
+const ACRCLOUD_CUSTOM_ACCESS_KEY = Deno.env.get("ACRCLOUD_CUSTOM_ACCESS_KEY")?.trim() || "";
+const ACRCLOUD_CUSTOM_ACCESS_SECRET = Deno.env.get("ACRCLOUD_CUSTOM_ACCESS_SECRET")?.trim() || "";
+
+const MAX_FILES_PER_REQUEST = 10;
+const MAX_GIG_VIDEO_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+const MAX_GIG_VIDEO_DURATION_MS = 5 * 60 * 1000;
+const DEFAULT_GROQ_VISION_MODEL = "qwen/qwen3.8-27b";
+const GROQ_VISION_MODELS = Array.from(
+  new Set([
+    Deno.env.get("GROQ_VISION_MODEL")?.trim(),
+    Deno.env.get("GROQ_VISION_FALLBACK_MODEL")?.trim(),
+    DEFAULT_GROQ_VISION_MODEL,
+  ].filter((model): model is string => Boolean(model))),
+);
+// The response is a tiny JSON object. A large reservation needlessly consumes
+// Groq's output-token allowance and makes multi-frame videos hit 429s.
+const GROQ_VISION_MAX_COMPLETION_TOKENS = 160;
+const MAX_GROQ_RATE_LIMIT_RETRY_MS = 15_000;
+const GROQ_RATE_LIMIT_RETRY_BUFFER_MS = 500;
+const GROQ_SAFETY_TEXT_MODEL = "openai/gpt-oss-safeguard-20b";
+const MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_ACRCLOUD_AUDIO_SAMPLE_BYTES = 4 * 1024 * 1024;
+
+// ─── Blocked extensions / MIME types ─────────────────────────────────────────
+// (rule-based pre-screen before AI)
+
+const BLOCKED_EXTENSIONS = new Set([
+  // Executables
+  "exe", "bat", "cmd", "com", "vbs", "vbe", "js", "jse", "wsf", "wsh",
+  "scr", "pif", "reg", "msi", "msp",
+  // Scripts
+  "sh", "bash", "zsh", "fish", "ps1", "psm1", "psd1",
+  // Web threats
+  "php", "php3", "php4", "php5", "phtml", "asp", "aspx", "cgi", "pl", "py",
+  "rb", "htaccess", "htpasswd",
+  // Archives that may auto-exec
+  "jar", "jnlp",
+]);
+
+const BLOCKED_MIME_PREFIXES = [
+  "application/x-msdownload",
+  "application/x-executable",
+  "application/x-shellscript",
+  "application/x-sh",
+  "application/x-bat",
+  "application/x-msdos-program",
+];
+
+// Known-safe MIME categories for photos, documents, and video uploads.
+const SAFE_PHOTO_MIMES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+  "image/avif",
+]);
+
+const SAFE_DOCUMENT_MIMES = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/csv",
+  "application/csv",
+  "text/plain",
+  "application/rtf",
+  "text/rtf",
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+]);
+
+const SAFE_VIDEO_MIMES = new Set([
+  "video/mp4",
+  "video/mpeg",
+  "video/quicktime",
+  "video/webm",
+  "video/x-m4v",
+  "video/x-msvideo",
+]);
+
+const SAFE_VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "avi", "mpeg", "mpg"]);
+const SAFE_DOCUMENT_EXTENSIONS = new Set([
+  "pdf",
+  "doc",
+  "docx",
+  "ppt",
+  "pptx",
+  "xls",
+  "xlsx",
+  "csv",
+  "txt",
+  "rtf",
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+]);
+const SAFE_AUDIO_MIMES = new Set([
+  "audio/mpeg",
+  "audio/mp3",
+]);
+const SAFE_AUDIO_EXTENSIONS = new Set(["mp3"]);
+const COPYRIGHT_MEDIA_MIMES = new Set([
+  ...SAFE_AUDIO_MIMES,
+  ...SAFE_VIDEO_MIMES,
+  "audio/mp4",
+  "audio/x-m4a",
+]);
+const COPYRIGHT_OWNERSHIP_REVIEW_SOURCE = "COPYRIGHT_OWNERSHIP";
+const COPYRIGHT_OWNERSHIP_REVIEW_REASON = "COPYRIGHT_OWNERSHIP_REVIEW";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface FileCandidate {
+  relatedType?: string;
+  relatedId?: string;
+  id?: string;
+  fingerprint?: string;
+  fileName?: string;
+  mimeType?: string | null;
+  fileSize?: number;
+  durationMs?: number;
+  kind?: "photo" | "document" | "video" | "audio";
+  contentDataUrl?: string | null;
+}
+
+type ScreeningResult = {
+  moderationCaseId?: string;
+  moderationStatus?: string;
+  id: string;
+  allowed: boolean;
+  reason?: string;
+  retryable?: boolean;
+  requiresAdminReview?: boolean;
+  publiclyAvailable?: boolean;
+  copyrightStatus?: "not_required" | "pending_review" | "approved" | "declined";
+  copyrightReviewId?: string | null;
+  copyrightTrackKey?: string | null;
+  copyrightMetadata?: Record<string, unknown>;
+};
+
+type CopyrightScreeningContext = {
+  supabaseAdmin?: any | null;
+  user?: {
+    id?: string | null;
+    email?: string | null;
+  } | null;
+  context?: string;
+};
+
+export function buildPendingCopyrightReviewDecision(
+  ownershipReview: { reviewId?: string | null; trackKey?: string | null; metadata?: Record<string, unknown> },
+  reason: string,
+): Omit<ScreeningResult, "id"> {
+  return {
+    allowed: true,
+    reason,
+    requiresAdminReview: true,
+    publiclyAvailable: false,
+    copyrightStatus: "pending_review",
+    copyrightReviewId: ownershipReview.reviewId || null,
+    copyrightTrackKey: ownershipReview.trackKey || null,
+    copyrightMetadata: ownershipReview.metadata || {},
+  };
+}
+
+// ─── Rule-based pre-screen ────────────────────────────────────────────────────
+
+function extractExtension(fileName: string): string {
+  const cleaned = (fileName || "").trim().toLowerCase().split("?")[0];
+  const dotIndex = cleaned.lastIndexOf(".");
+  if (dotIndex < 0) return "";
+  return cleaned.slice(dotIndex + 1);
+}
+
+function ruleBasedScreen(file: FileCandidate, context = ""): VisualDecision {
+  const ext = extractExtension(file.fileName || "");
+
+  if (ext && BLOCKED_EXTENSIONS.has(ext)) {
+    return {
+      allowed: false,
+      reason: `Files of type .${ext} are not allowed for upload.`,
+    };
+  }
+
+  const mime = (file.mimeType || "").toLowerCase();
+  for (const prefix of BLOCKED_MIME_PREFIXES) {
+    if (mime.startsWith(prefix)) {
+      return {
+        allowed: false,
+        reason: `Files with MIME type "${file.mimeType}" are not allowed for upload.`,
+      };
+    }
+  }
+
+  // Kind-specific MIME validation (only block if a conflicting MIME is explicitly set)
+  if (file.kind === "photo" && mime && !mime.startsWith("image/")) {
+    return {
+      allowed: false,
+      reason: "Photos must be valid image files (JPEG, PNG, WebP, etc.).",
+    };
+  }
+
+  if (file.kind === "document") {
+    if (ext && !SAFE_DOCUMENT_EXTENSIONS.has(ext)) {
+      return {
+        allowed: false,
+        reason: `Documents of type .${ext} are not accepted. Please upload a PDF, Office document, CSV, TXT, RTF, or image.`,
+      };
+    }
+
+    if (mime && !SAFE_DOCUMENT_MIMES.has(mime) && !mime.startsWith("image/")) {
+      return {
+        allowed: false,
+        reason: `Documents of type "${file.mimeType}" are not accepted. Please upload a PDF, Office document, CSV, TXT, RTF, or image.`,
+      };
+    }
+  }
+
+  if (file.kind === "video") {
+    if (context === "gig_video_content" || context === "gig_application_performance_video") {
+      const fileSize = Number(file.fileSize || 0);
+      if (Number.isFinite(fileSize) && fileSize > MAX_GIG_VIDEO_FILE_SIZE_BYTES) {
+        return {
+          allowed: false,
+          reason: "Performance videos must be 50MB or smaller.",
+        };
+      }
+
+      const durationMs = Number(file.durationMs || 0);
+      if (Number.isFinite(durationMs) && durationMs > MAX_GIG_VIDEO_DURATION_MS) {
+        return {
+          allowed: false,
+          reason: "Performance videos must be 5 minutes or shorter.",
+        };
+      }
+    }
+
+    if (ext && !SAFE_VIDEO_EXTENSIONS.has(ext)) {
+      return {
+        allowed: false,
+        reason: `Videos of type .${ext} are not accepted. Please upload MP4, MOV, or WebM video.`,
+      };
+    }
+
+    if (mime && !SAFE_VIDEO_MIMES.has(mime)) {
+      return {
+        allowed: false,
+        reason: `Videos of type "${file.mimeType}" are not accepted. Please upload MP4, MOV, or WebM video.`,
+      };
+    }
+  }
+
+  if (file.kind === "audio") {
+    if (ext && !SAFE_AUDIO_EXTENSIONS.has(ext)) {
+      return {
+        allowed: false,
+        reason: `Audio files of type .${ext} are not accepted. Please upload an MP3 audio file.`,
+      };
+    }
+
+    if (mime && !SAFE_AUDIO_MIMES.has(mime)) {
+      return {
+        allowed: false,
+        reason: `Audio files of type "${file.mimeType}" are not accepted. Please upload an MP3 audio file.`,
+      };
+    }
+  }
+
+  return { allowed: true };
+}
+
+function estimateBase64Bytes(base64Value: string): number {
+  const normalized = base64Value.replace(/\s/g, "");
+  let padding = 0;
+  if (normalized.endsWith("==")) padding = 2;
+  else if (normalized.endsWith("=")) padding = 1;
+  return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
+}
+
+function normalizePhotoMimeType(value?: string | null): string {
+  const mimeType = (value || "").trim().toLowerCase();
+  if (mimeType === "image/jpg") return "image/jpeg";
+  return mimeType;
+}
+
+function resolvePhotoMimeTypeFromExtension(fileName?: string): string {
+  switch (extractExtension(fileName || "")) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "webp":
+      return "image/webp";
+    case "gif":
+      return "image/gif";
+    case "heic":
+      return "image/heic";
+    case "heif":
+      return "image/heif";
+    case "avif":
+      return "image/avif";
+    default:
+      return "";
+  }
+}
+
+function resolveScreeningImageMimeType(file: FileCandidate, declaredMimeType: string): string {
+  const candidates = [
+    declaredMimeType,
+    file.mimeType || "",
+    resolvePhotoMimeTypeFromExtension(file.fileName || ""),
+  ];
+
+  for (const candidate of candidates) {
+    const mimeType = normalizePhotoMimeType(candidate);
+    if (SAFE_PHOTO_MIMES.has(mimeType)) {
+      return mimeType;
+    }
+  }
+
+  return "";
+}
+
+function parseImageDataUrl(
+  file: FileCandidate,
+): { dataUrl: string; mimeType: string; base64: string } | null {
+  const raw = typeof file.contentDataUrl === "string" ? file.contentDataUrl.trim() : "";
+  if (!raw) return null;
+
+  const match = raw.match(/^data:([^;,]*);base64,([a-z0-9+/=\s]+)$/i);
+  if (!match) {
+    throw new Error("Image content must be sent as a base64 data URL.");
+  }
+
+  const mimeType = resolveScreeningImageMimeType(file, match[1]);
+  const base64 = match[2].replace(/\s/g, "");
+  if (!mimeType) {
+    throw new Error("Photos must be valid image files (JPEG, PNG, WebP, etc.).");
+  }
+
+  if (estimateBase64Bytes(base64) > MAX_INLINE_IMAGE_BYTES) {
+    throw new Error("Image is too large for safety screening. Please upload an image under 4 MB.");
+  }
+
+  return {
+    dataUrl: `data:${mimeType};base64,${base64}`,
+    mimeType,
+    base64,
+  };
+}
+
+function base64ToUint8Array(base64Value: string): Uint8Array {
+  const binary = atob(base64Value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}
+
+function parseCopyrightMediaDataUrl(
+  file: FileCandidate,
+): { bytes: Uint8Array; mimeType: string; originalBytes: number; wasTruncated: boolean } | null {
+  const raw = typeof file.contentDataUrl === "string" ? file.contentDataUrl.trim() : "";
+  if (!raw) return null;
+
+  const match = raw.match(/^data:((?:audio|video)\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i);
+  if (!match) {
+    throw new Error("Copyright media must be sent as an audio or video base64 data URL.");
+  }
+
+  const mimeType = match[1].toLowerCase();
+  if (!COPYRIGHT_MEDIA_MIMES.has(mimeType)) {
+    throw new Error("Copyright screening supports MP3, MP4, MOV, M4V, WebM, AVI, and MPEG media.");
+  }
+
+  const base64 = match[2].replace(/\s/g, "");
+  const bytes = base64ToUint8Array(base64);
+  if (bytes.byteLength === 0) {
+    throw new Error("Copyright media is empty. Please upload a valid audio or video file.");
+  }
+
+  const wasTruncated = bytes.byteLength > MAX_ACRCLOUD_AUDIO_SAMPLE_BYTES;
+
+  return {
+    bytes: wasTruncated ? bytes.slice(0, MAX_ACRCLOUD_AUDIO_SAMPLE_BYTES) : bytes,
+    mimeType,
+    originalBytes: bytes.byteLength,
+    wasTruncated,
+  };
+}
+
+async function createAcrCloudSignature(
+  accessSecret: string,
+  stringToSign: string,
+): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(accessSecret),
+    { name: "HMAC", hash: "SHA-1" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(stringToSign),
+  );
+  return bytesToBase64(new Uint8Array(signature));
+}
+
+function buildGenreEvidenceReceiptPayload(userId: string, metadata: Record<string, unknown>): string {
+  const genres = Array.isArray(metadata.recognized_audio_genres)
+    ? metadata.recognized_audio_genres.map((genre) => String(genre).trim().toLowerCase()).filter(Boolean).sort()
+    : [];
+  const rawScore = Number(metadata.copyright_score);
+  return JSON.stringify({
+    version: 1,
+    user_id: userId,
+    track_key: String(metadata.copyright_track_key || ""),
+    score: Number.isFinite(rawScore) ? rawScore : null,
+    genres,
+  });
+}
+
+async function attachGenreEvidenceReceipt(
+  metadata: Record<string, unknown>,
+  userId: string,
+): Promise<Record<string, unknown>> {
+  const secret = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")?.trim() || "";
+  if (!secret || !userId || !Array.isArray(metadata.recognized_audio_genres) || metadata.recognized_audio_genres.length === 0) {
+    return metadata;
+  }
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(buildGenreEvidenceReceiptPayload(userId, metadata)),
+  );
+  const receipt = Array.from(new Uint8Array(signature))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return {
+    ...metadata,
+    genre_evidence_receipt_version: 1,
+    genre_evidence_user_id: userId,
+    genre_evidence_receipt: receipt,
+  };
+}
+
+function getAcrCloudIdentifyUrl(host: string): string {
+  const trimmedHost = host.replace(/\/+$/, "");
+  if (/^https?:\/\//i.test(trimmedHost)) {
+    return `${trimmedHost}/v1/identify`;
+  }
+  return `https://${trimmedHost}/v1/identify`;
+}
+
+function maskSecretPreview(value: string): string {
+  if (!value) return "missing";
+  if (value.length <= 8) return "***";
+  return `${value.slice(0, 4)}...${value.slice(-4)}`;
+}
+
+function hashText(value: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function normalizeTrackKeyText(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function getAcrArtistNames(match: any): string[] {
+  return Array.isArray(match?.artists)
+    ? match.artists.map((artist: any) => artist?.name).filter(Boolean)
+    : [];
+}
+
+function collectAcrGenreNames(value: unknown, result: string[]): void {
+  if (typeof value === "string") {
+    const genre = value.trim();
+    if (genre) result.push(genre);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectAcrGenreNames(item, result));
+    return;
+  }
+
+  if (!value || typeof value !== "object") return;
+  const genre = value as Record<string, unknown>;
+  if (typeof genre.name === "string") collectAcrGenreNames(genre.name, result);
+  else if (typeof genre.title === "string") collectAcrGenreNames(genre.title, result);
+}
+
+export function getAcrGenreNames(match: any): string[] {
+  const genres: string[] = [];
+  collectAcrGenreNames(match?.genres, genres);
+  collectAcrGenreNames(match?.genre, genres);
+  collectAcrGenreNames(match?.external_metadata?.spotify?.track?.genres, genres);
+  collectAcrGenreNames(match?.external_metadata?.deezer?.track?.genres, genres);
+
+  return Array.from(new Set(genres.map((genre) => genre.trim()).filter(Boolean)));
+}
+
+function getAcrRightsOwner(match: any): string {
+  return Array.isArray(match?.rights_claim)
+    ? match.rights_claim
+        .flatMap((claim: any) => Array.isArray(claim?.rights_owners) ? claim.rights_owners : [])
+        .map((owner: any) => owner?.name)
+        .filter(Boolean)[0] || ""
+    : "";
+}
+
+function buildCopyrightTrackKey(match: any): string {
+  const isrc = String(match?.external_ids?.isrc || "").trim().toUpperCase();
+  if (isrc) return `isrc:${isrc}`;
+
+  const acrid = String(match?.acrid || "").trim();
+  if (acrid) return `acrid:${acrid}`;
+
+  const title = normalizeTrackKeyText(match?.title || "unknown-track");
+  const artists = getAcrArtistNames(match).map(normalizeTrackKeyText).filter(Boolean).join("-");
+  return `track:${hashText(`${title}|${artists}`)}`;
+}
+
+export function buildCopyrightMatchMetadata(match: any) {
+  const artistNames = getAcrArtistNames(match);
+  const recognizedAudioGenres = getAcrGenreNames(match);
+  const title = typeof match?.title === "string" && match.title.trim()
+    ? match.title.trim()
+    : "Released recording";
+  const score = Number(match?.score || 0);
+  const isrc = String(match?.external_ids?.isrc || "").trim();
+  const upc = String(match?.external_ids?.upc || "").trim();
+  const acrid = String(match?.acrid || "").trim();
+  const rightsOwner = getAcrRightsOwner(match);
+
+  return {
+    copyright_track_key: buildCopyrightTrackKey(match),
+    copyright_title: title,
+    copyright_artists: artistNames,
+    copyright_artist_label: artistNames.join(", "),
+    copyright_score: Number.isFinite(score) ? score : null,
+    copyright_isrc: isrc || null,
+    copyright_upc: upc || null,
+    copyright_acrid: acrid || null,
+    copyright_label: String(match?.label || "").trim() || null,
+    copyright_album: String(match?.album?.name || match?.album || "").trim() || null,
+    copyright_release_date: String(match?.release_date || "").trim() || null,
+    copyright_rights_owner: rightsOwner || null,
+    copyright_match_type: String(match?._musikalokal_match_type || "audio_fingerprint"),
+    recognized_audio_genres: recognizedAudioGenres,
+    recognized_audio_genre_source: recognizedAudioGenres.length > 0 ? "acrcloud_catalog_metadata" : null,
+    recognized_audio_genre_confidence: Number.isFinite(score)
+      ? Math.max(0, Math.min(1, score / 100))
+      : null,
+  };
+}
+
+function buildCopyrightMatchDetails(match: any): string {
+  const metadata = buildCopyrightMatchMetadata(match);
+  const details = [
+    metadata.copyright_artist_label
+      ? `${metadata.copyright_title} by ${metadata.copyright_artist_label}`
+      : metadata.copyright_title,
+    Number.isFinite(metadata.copyright_score) && Number(metadata.copyright_score) > 0
+      ? `match score ${metadata.copyright_score}`
+      : "",
+    metadata.copyright_rights_owner ? `rights owner: ${metadata.copyright_rights_owner}` : "",
+    metadata.copyright_isrc ? `ISRC: ${metadata.copyright_isrc}` : "",
+  ].filter(Boolean).join("; ");
+
+  return details || "a released recording";
+}
+
+async function findCopyrightOwnershipReview(
+  supabaseAdmin: any,
+  userId: string,
+  trackKey: string,
+  statuses: string[],
+) {
+  const { data, error } = await supabaseAdmin
+    .from("manual_identity_reviews")
+    .select("id, status, metadata")
+    .eq("user_id", userId)
+    .eq("source", COPYRIGHT_OWNERSHIP_REVIEW_SOURCE)
+    .in("status", statuses)
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (error) {
+    console.error("[upload-safety-screen] copyright_ownership_review_lookup_failed", {
+      userId,
+      trackKey,
+      message: error.message,
+    });
+    return null;
+  }
+
+  return (data || []).find((review: any) => (
+    String(review?.metadata?.copyright_track_key || "").trim() === trackKey
+  )) || null;
+}
+
+async function queueCopyrightOwnershipReview(
+  supabaseAdmin: any,
+  user: { id?: string | null; email?: string | null } | null,
+  file: FileCandidate,
+  match: any,
+  context?: string,
+  supportingMetadata: Record<string, unknown> = {},
+) {
+  const isGigPerformanceVideo = context === "gig_application_performance_video";
+  const userId = String(user?.id || "").trim();
+  if (!supabaseAdmin || !userId) {
+    const metadata = { ...buildCopyrightMatchMetadata(match), ...supportingMetadata };
+    return {
+      approved: false,
+      queued: false,
+      reviewId: null,
+      reviewStatus: null,
+      trackKey: metadata.copyright_track_key,
+      metadata,
+    };
+  }
+
+  const matchMetadata = { ...buildCopyrightMatchMetadata(match), ...supportingMetadata };
+  const trackKey = matchMetadata.copyright_track_key;
+  const existingReview = await findCopyrightOwnershipReview(
+    supabaseAdmin,
+    userId,
+    trackKey,
+    ["APPROVED", "PENDING_REVIEW"],
+  );
+
+  if (existingReview?.status === "APPROVED") {
+    return {
+      approved: true,
+      queued: false,
+      reviewId: existingReview.id,
+      reviewStatus: "APPROVED",
+      trackKey,
+      metadata: matchMetadata,
+    };
+  }
+
+  if (existingReview?.status === "PENDING_REVIEW") {
+    return {
+      approved: false,
+      queued: false,
+      reviewId: existingReview.id,
+      reviewStatus: "PENDING_REVIEW",
+      trackKey,
+      metadata: matchMetadata,
+    };
+  }
+
+  const { data: profile } = await supabaseAdmin
+    .from("profiles")
+    .select("email, role, full_name")
+    .eq("id", userId)
+    .maybeSingle();
+
+  const submittedEmail = String(user?.email || profile?.email || "unknown@musikalokal.local").trim().toLowerCase();
+  const submittedRole = String(profile?.role || "musician").trim().toLowerCase() || "musician";
+  const nowIso = new Date().toISOString();
+  const metadata = {
+    ...matchMetadata,
+    review_reason: COPYRIGHT_OWNERSHIP_REVIEW_REASON,
+    requested_from: "upload-safety-screen",
+    requested_context: context || "playlist_audio_upload",
+    upload_kind: isGigPerformanceVideo ? "gig_performance_video" : "playlist_audio",
+    uploaded_file_name: file.fileName || null,
+    uploaded_mime_type: file.mimeType || null,
+    uploaded_file_size: typeof file.fileSize === "number" ? file.fileSize : null,
+    requested_at: nowIso,
+  };
+
+  const { data: insertedReview, error: insertError } = await supabaseAdmin
+    .from("manual_identity_reviews")
+    .insert({
+      user_id: userId,
+      submitted_by_email: submittedEmail,
+      submitted_role: submittedRole,
+      document_type: isGigPerformanceVideo ? "Performance video recording ownership" : "Released track ownership",
+      document_type_key: "COPYRIGHT_OWNERSHIP",
+      document_country: "PHL",
+      source: COPYRIGHT_OWNERSHIP_REVIEW_SOURCE,
+      status: "PENDING_REVIEW",
+      review_reason: COPYRIGHT_OWNERSHIP_REVIEW_REASON,
+      matched_on: "COPYRIGHT_TRACK",
+      review_notes: isGigPerformanceVideo
+        ? "A gig performance video matched a released recording and requires admin ownership or permission review."
+        : "Matched released recording requires admin ownership approval before upload.",
+      metadata,
+      expected_decision_by: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (insertError) {
+    console.error("[upload-safety-screen] copyright_ownership_review_queue_failed", {
+      userId,
+      trackKey,
+      message: insertError.message,
+    });
+    return {
+      approved: false,
+      queued: false,
+      reviewId: null,
+      reviewStatus: null,
+      trackKey,
+      metadata: matchMetadata,
+    };
+  }
+
+  await supabaseAdmin.from("notifications").insert({
+    user_id: userId,
+    type: "warning",
+    title: isGigPerformanceVideo ? "Performance Video Review Required" : "Track Ownership Review Required",
+    message: isGigPerformanceVideo
+      ? "Your performance video matched a released recording. Your gig application can continue, but an admin will review your ownership or permission claim."
+      : "Your upload matched a released recording. Identity Review admin approval is required before you can upload this track.",
+    meta: {
+      manual_identity_review_id: insertedReview?.id || null,
+      source: COPYRIGHT_OWNERSHIP_REVIEW_SOURCE,
+      copyright_track_key: trackKey,
+      copyright_title: matchMetadata.copyright_title,
+      copyright_artists: matchMetadata.copyright_artists,
+    },
+  });
+
+  console.log("[upload-safety-screen] copyright_ownership_review_queued", {
+    userId,
+    reviewId: insertedReview?.id || null,
+    trackKey,
+  });
+
+  return {
+    approved: false,
+    queued: true,
+    reviewId: insertedReview?.id || null,
+    reviewStatus: "PENDING_REVIEW",
+    trackKey,
+    metadata: matchMetadata,
+  };
+}
+
+function getBestAcrMusicMatch(response: any, includeMelodyMatches = false): any | null {
+  const musicMatches = Array.isArray(response?.metadata?.music)
+    ? response.metadata.music.map((match: any) => ({ ...match, _musikalokal_match_type: "audio_fingerprint" }))
+    : [];
+  const melodyMatches = includeMelodyMatches && Array.isArray(response?.metadata?.humming)
+    ? response.metadata.humming.map((match: any) => {
+        const rawScore = Number(match?.score || 0);
+        return {
+          ...match,
+          score: rawScore > 0 && rawScore <= 1 ? rawScore * 100 : rawScore,
+          _musikalokal_match_type: "melody_humming",
+        };
+      })
+    : [];
+  const matches = [...musicMatches, ...melodyMatches];
+  if (matches.length === 0) {
+    return null;
+  }
+
+  return matches.reduce((best: any, current: any) => {
+    const bestScore = Number(best?.score || 0);
+    const currentScore = Number(current?.score || 0);
+    return currentScore > bestScore ? current : best;
+  }, matches[0]);
+}
+
+function summarizeAcrMusicMatch(match: any): string {
+  return `This audio appears to match ${buildCopyrightMatchDetails(match)}. If this is your song, an ownership request has been sent to Identity Review for admin approval.`;
+}
+
+function getAcrCloudFailureReason(statusCode: number): string {
+  switch (statusCode) {
+    case 2004:
+      return "ACRCloud could not decode the audio sample (code 2004). Please try another MP4/MOV video or re-export this file.";
+    case 3001:
+      return "ACRCloud credentials were rejected (code 3001). Please contact support.";
+    case 3003:
+      return "ACRCloud's monthly request limit has been reached (code 3003). Please contact support.";
+    case 3014:
+      return "ACRCloud rejected the request signature (code 3014). Please contact support.";
+    case 3015:
+      return "ACRCloud is receiving too many requests (code 3015). Please wait a few seconds and try again.";
+    case 3000:
+    case 3010:
+      return `ACRCloud's recognition service is temporarily unavailable (code ${statusCode}). Please try again shortly.`;
+    case 3002:
+    case 3006:
+      return `ACRCloud rejected the screening request (code ${statusCode}). Please contact support.`;
+    default:
+      return `ACRCloud could not verify this video (code ${Number.isFinite(statusCode) ? statusCode : "unknown"}). Please try again.`;
+  }
+}
+
+type InternalPlaylistMatch = {
+  customMatch: any;
+  playlistItem: any;
+  fingerprint: any;
+  approvedReview: any | null;
+  evidence: Record<string, unknown>;
+};
+
+async function findInternalPlaylistMatch(
+  file: FileCandidate,
+  parsedAudio: { bytes: Uint8Array; mimeType: string },
+  screeningContext: CopyrightScreeningContext,
+): Promise<InternalPlaylistMatch | null> {
+  const userId = String(screeningContext.user?.id || "").trim();
+  if (
+    screeningContext.context !== "gig_application_performance_video" ||
+    !screeningContext.supabaseAdmin ||
+    !userId ||
+    !ACRCLOUD_CUSTOM_HOST ||
+    !ACRCLOUD_CUSTOM_ACCESS_KEY ||
+    !ACRCLOUD_CUSTOM_ACCESS_SECRET
+  ) {
+    return null;
+  }
+
+  try {
+    const httpMethod = "POST";
+    const httpUri = "/v1/identify";
+    const dataType = "audio";
+    const signatureVersion = "1";
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const signature = await createAcrCloudSignature(
+      ACRCLOUD_CUSTOM_ACCESS_SECRET,
+      [httpMethod, httpUri, ACRCLOUD_CUSTOM_ACCESS_KEY, dataType, signatureVersion, timestamp].join("\n"),
+    );
+    const sampleBytes = parsedAudio.bytes.buffer.slice(
+      parsedAudio.bytes.byteOffset,
+      parsedAudio.bytes.byteOffset + parsedAudio.bytes.byteLength,
+    ) as ArrayBuffer;
+    const formData = new FormData();
+    formData.append("sample", new Blob([sampleBytes], { type: parsedAudio.mimeType }), file.fileName || "gig-audio.m4a");
+    formData.append("access_key", ACRCLOUD_CUSTOM_ACCESS_KEY);
+    formData.append("sample_bytes", String(parsedAudio.bytes.byteLength));
+    formData.append("timestamp", timestamp);
+    formData.append("signature", signature);
+    formData.append("data_type", dataType);
+    formData.append("signature_version", signatureVersion);
+
+    const response = await fetch(getAcrCloudIdentifyUrl(ACRCLOUD_CUSTOM_HOST), {
+      method: httpMethod,
+      body: formData,
+    });
+    if (!response.ok) {
+      console.warn("[upload-safety-screen] internal_audio_match_unavailable", {
+        status: response.status,
+        reason: "custom_identify_http_error",
+      });
+      return null;
+    }
+
+    const payload = await response.json();
+    if (Number(payload?.status?.code) !== 0) {
+      console.log("[upload-safety-screen] internal_audio_match_none", {
+        statusCode: payload?.status?.code ?? null,
+      });
+      return null;
+    }
+
+    const customMatches = Array.isArray(payload?.metadata?.custom_files)
+      ? payload.metadata.custom_files
+      : [];
+    for (const customMatch of customMatches) {
+      const providerAcrid = String(customMatch?.acrid || customMatch?.arcid || "").trim();
+      if (!providerAcrid) continue;
+
+      const { data: fingerprint, error: fingerprintError } = await screeningContext.supabaseAdmin
+        .from("playlist_audio_fingerprints")
+        .select("id, playlist_item_id, owner_user_id, provider, provider_file_id, provider_acrid, status, metadata")
+        .eq("provider", "acrcloud_custom")
+        .eq("provider_acrid", providerAcrid)
+        .eq("owner_user_id", userId)
+        .maybeSingle();
+      if (fingerprintError) {
+        console.error("[upload-safety-screen] internal_audio_fingerprint_lookup_failed", {
+          providerAcrid,
+          message: fingerprintError.message,
+        });
+        continue;
+      }
+      if (!fingerprint) continue;
+
+      const { data: playlistItem, error: itemError } = await screeningContext.supabaseAdmin
+        .from("playlist_items")
+        .select("id, playlist_id, title, artist_name, copyright_status, copyright_review_id, copyright_metadata, playlist:playlists!playlist_id(genre)")
+        .eq("id", fingerprint.playlist_item_id)
+        .maybeSingle();
+      if (itemError || !playlistItem) {
+        if (itemError) {
+          console.error("[upload-safety-screen] internal_audio_playlist_item_lookup_failed", {
+            playlistItemId: fingerprint.playlist_item_id,
+            message: itemError.message,
+          });
+        }
+        continue;
+      }
+
+      let approvedReview: any | null = null;
+      if (playlistItem.copyright_status === "approved" && playlistItem.copyright_review_id) {
+        const { data: review } = await screeningContext.supabaseAdmin
+          .from("manual_identity_reviews")
+          .select("id, user_id, source, status, metadata")
+          .eq("id", playlistItem.copyright_review_id)
+          .eq("user_id", userId)
+          .eq("source", COPYRIGHT_OWNERSHIP_REVIEW_SOURCE)
+          .eq("status", "APPROVED")
+          .maybeSingle();
+        approvedReview = review || null;
+      }
+
+      const rawScore = Number(customMatch?.score);
+      const hasProviderScore = Number.isFinite(rawScore) && rawScore > 0;
+      const normalizedScore = hasProviderScore && rawScore <= 1 ? rawScore * 100 : rawScore;
+      const evidence = {
+        internal_match_type: "same_recording_fingerprint",
+        internal_match_strength: "strong",
+        internal_match_similarity_score: hasProviderScore ? normalizedScore : 100,
+        internal_match_score_basis: hasProviderScore
+          ? "acrcloud_custom_score"
+          : "normalized_binary_fingerprint_match",
+        internal_match_playlist_item_id: playlistItem.id,
+        internal_match_playlist_id: playlistItem.playlist_id,
+        internal_match_playlist_title: playlistItem.title,
+        internal_match_playlist_artist: playlistItem.artist_name || null,
+        internal_match_provider: "acrcloud_custom",
+        internal_match_provider_acrid: providerAcrid,
+        internal_match_provider_file_id: fingerprint.provider_file_id || null,
+        internal_match_detected_at: new Date().toISOString(),
+        ownership_verification: approvedReview ? "previously_verified" : "requires_admin_review",
+      };
+
+      await screeningContext.supabaseAdmin
+        .from("playlist_audio_fingerprints")
+        .update({ status: "ready", error_message: null, updated_at: new Date().toISOString() })
+        .eq("id", fingerprint.id);
+
+      console.log("[upload-safety-screen] internal_audio_match_found", {
+        userId,
+        playlistItemId: playlistItem.id,
+        providerAcrid,
+        approvedOwnershipReview: Boolean(approvedReview),
+      });
+      return { customMatch, playlistItem, fingerprint, approvedReview, evidence };
+    }
+  } catch (error) {
+    console.warn("[upload-safety-screen] internal_audio_match_unavailable", {
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return null;
+}
+
+async function resolveInternalPlaylistMatch(
+  file: FileCandidate,
+  internalMatch: InternalPlaylistMatch,
+  screeningContext: CopyrightScreeningContext,
+): Promise<Omit<ScreeningResult, "id">> {
+  const syntheticMatch = {
+    title: internalMatch.playlistItem.title || "Playlist recording",
+    artists: internalMatch.playlistItem.artist_name
+      ? [{ name: internalMatch.playlistItem.artist_name }]
+      : [],
+    score: internalMatch.evidence.internal_match_similarity_score,
+    acrid: `internal:${internalMatch.fingerprint.provider_acrid}`,
+    genres: internalMatch.playlistItem?.playlist?.genre
+      ? [internalMatch.playlistItem.playlist.genre]
+      : [],
+    _musikalokal_match_type: "custom_audio_fingerprint",
+  };
+  if (screeningContext.context === "gig_application_performance_video") {
+    const userId = String(screeningContext.user?.id || "").trim();
+    const metadata = await attachGenreEvidenceReceipt(
+      { ...buildCopyrightMatchMetadata(syntheticMatch), ...internalMatch.evidence },
+      userId,
+    );
+    return {
+      allowed: true,
+      reason: "The recording was recognized and may be used as advisory genre evidence.",
+      publiclyAvailable: true,
+      copyrightStatus: "not_required",
+      copyrightTrackKey: String(metadata.copyright_track_key || "") || null,
+      copyrightMetadata: metadata,
+    };
+  }
+
+  if (internalMatch.approvedReview) {
+    const reviewMetadata = internalMatch.approvedReview.metadata &&
+        typeof internalMatch.approvedReview.metadata === "object"
+      ? internalMatch.approvedReview.metadata
+      : {};
+    return {
+      allowed: true,
+      publiclyAvailable: true,
+      copyrightStatus: "approved",
+      copyrightReviewId: internalMatch.approvedReview.id,
+      copyrightTrackKey: String(reviewMetadata.copyright_track_key || "") || null,
+      copyrightMetadata: { ...reviewMetadata, ...internalMatch.evidence },
+    };
+  }
+
+  const ownershipReview = await queueCopyrightOwnershipReview(
+    screeningContext.supabaseAdmin,
+    screeningContext.user || null,
+    file,
+    syntheticMatch,
+    screeningContext.context,
+    internalMatch.evidence,
+  );
+  if (!ownershipReview.reviewId && !ownershipReview.queued) {
+    return {
+      allowed: false,
+      reason: "This video matches one of your playlist recordings, but the ownership review could not be sent. Please try again.",
+    };
+  }
+
+  return buildPendingCopyrightReviewDecision(
+    ownershipReview,
+    "This performance video matches a recording in your playlist. Your application can continue while an admin reviews the ownership evidence.",
+  );
+}
+
+async function screenAudioCopyright(
+  file: FileCandidate,
+  screeningContext: CopyrightScreeningContext = {},
+): Promise<Omit<ScreeningResult, "id">> {
+  console.log("[upload-safety-screen] acrcloud_copyright_check_start", {
+    fileName: file.fileName || "(unknown)",
+    mimeType: file.mimeType || null,
+    declaredFileSize: typeof file.fileSize === "number" ? file.fileSize : null,
+    hasInlineAudio: typeof file.contentDataUrl === "string" && file.contentDataUrl.trim().length > 0,
+  });
+
+  const parsedAudio = parseCopyrightMediaDataUrl(file);
+  if (!parsedAudio) {
+    console.log("[upload-safety-screen] acrcloud_copyright_check_skipped", {
+      fileName: file.fileName || "(unknown)",
+      reason: "no_inline_audio_content",
+    });
+    return { allowed: true, publiclyAvailable: true, copyrightStatus: "not_required" };
+  }
+
+  const internalMatch = await findInternalPlaylistMatch(file, parsedAudio, screeningContext);
+  if (internalMatch?.approvedReview) {
+    console.log("[upload-safety-screen] internal_audio_match_allowed", {
+      playlistItemId: internalMatch.playlistItem.id,
+      reviewId: internalMatch.approvedReview.id,
+      reason: "ownership_previously_verified",
+    });
+    return resolveInternalPlaylistMatch(file, internalMatch, screeningContext);
+  }
+
+  if (!ACRCLOUD_HOST || !ACRCLOUD_ACCESS_KEY || !ACRCLOUD_ACCESS_SECRET) {
+    if (internalMatch) {
+      return resolveInternalPlaylistMatch(file, internalMatch, screeningContext);
+    }
+    console.error("[upload-safety-screen] acrcloud_config_missing", {
+      hasHost: Boolean(ACRCLOUD_HOST),
+      hasAccessKey: Boolean(ACRCLOUD_ACCESS_KEY),
+      hasAccessSecret: Boolean(ACRCLOUD_ACCESS_SECRET),
+    });
+    return {
+      allowed: false,
+      reason: "Audio copyright checking is not configured. Upload blocked until ACRCloud credentials are available.",
+    };
+  }
+
+  console.log("[upload-safety-screen] acrcloud_config_ready", {
+    host: ACRCLOUD_HOST,
+    accessKey: maskSecretPreview(ACRCLOUD_ACCESS_KEY),
+    minScore: Number.isFinite(ACRCLOUD_MIN_SCORE) ? ACRCLOUD_MIN_SCORE : 80,
+    sampleBytes: parsedAudio.bytes.byteLength,
+    originalBytes: parsedAudio.originalBytes,
+    truncatedForAcrCloud: parsedAudio.wasTruncated,
+    sampleMimeType: parsedAudio.mimeType,
+  });
+
+  const httpMethod = "POST";
+  const httpUri = "/v1/identify";
+  const dataType = "audio";
+  const signatureVersion = "1";
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const stringToSign = [
+    httpMethod,
+    httpUri,
+    ACRCLOUD_ACCESS_KEY,
+    dataType,
+    signatureVersion,
+    timestamp,
+  ].join("\n");
+  const signature = await createAcrCloudSignature(ACRCLOUD_ACCESS_SECRET, stringToSign);
+
+  const formData = new FormData();
+  const sampleBytes = parsedAudio.bytes.buffer.slice(
+    parsedAudio.bytes.byteOffset,
+    parsedAudio.bytes.byteOffset + parsedAudio.bytes.byteLength,
+  ) as ArrayBuffer;
+  formData.append("sample", new Blob([sampleBytes], { type: parsedAudio.mimeType }), file.fileName || "track.mp3");
+  formData.append("access_key", ACRCLOUD_ACCESS_KEY);
+  formData.append("sample_bytes", String(parsedAudio.bytes.byteLength));
+  formData.append("timestamp", timestamp);
+  formData.append("signature", signature);
+  formData.append("data_type", dataType);
+  formData.append("signature_version", signatureVersion);
+
+  const response = await fetch(getAcrCloudIdentifyUrl(ACRCLOUD_HOST), {
+    method: httpMethod,
+    body: formData,
+  });
+
+  console.log("[upload-safety-screen] acrcloud_identify_response", {
+    status: response.status,
+    statusText: response.statusText,
+    ok: response.ok,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    console.error("[upload-safety-screen] acrcloud_identify_failed", {
+      status: response.status,
+      statusText: response.statusText,
+      body: errorBody.slice(0, 1000),
+    });
+    if (internalMatch) {
+      return resolveInternalPlaylistMatch(file, internalMatch, screeningContext);
+    }
+    return {
+      allowed: false,
+      reason: `ACRCloud could not be reached (HTTP ${response.status}). Please try again in a moment.`,
+    };
+  }
+
+  const acrResult = await response.json();
+  const statusCode = Number(acrResult?.status?.code);
+  console.log("[upload-safety-screen] acrcloud_identify_payload_status", {
+    code: acrResult?.status?.code,
+    message: acrResult?.status?.msg,
+    version: acrResult?.status?.version,
+    hasMusicMetadata: Array.isArray(acrResult?.metadata?.music),
+    matchCount: Array.isArray(acrResult?.metadata?.music) ? acrResult.metadata.music.length : 0,
+  });
+
+  if (statusCode === 1001) {
+    console.log("[upload-safety-screen] acrcloud_copyright_check_allowed", {
+      fileName: file.fileName || "(unknown)",
+      reason: "no_match",
+      statusCode,
+    });
+    return internalMatch
+      ? resolveInternalPlaylistMatch(file, internalMatch, screeningContext)
+      : { allowed: true, publiclyAvailable: true, copyrightStatus: "not_required" };
+  }
+
+  if (statusCode !== 0) {
+    console.error("[upload-safety-screen] acrcloud_identify_status", {
+      code: acrResult?.status?.code,
+      message: acrResult?.status?.msg,
+    });
+    if (internalMatch) {
+      return resolveInternalPlaylistMatch(file, internalMatch, screeningContext);
+    }
+    return {
+      allowed: false,
+      reason: getAcrCloudFailureReason(statusCode),
+    };
+  }
+
+  const bestMatch = getBestAcrMusicMatch(
+    acrResult,
+    screeningContext.context === "gig_application_performance_video",
+  );
+  const minScore = Number.isFinite(ACRCLOUD_MIN_SCORE) ? ACRCLOUD_MIN_SCORE : 80;
+  console.log("[upload-safety-screen] acrcloud_best_match", {
+    found: Boolean(bestMatch),
+    title: bestMatch?.title || null,
+    artists: Array.isArray(bestMatch?.artists)
+      ? bestMatch.artists.map((artist: any) => artist?.name).filter(Boolean)
+      : [],
+    score: bestMatch?.score || null,
+    acrid: bestMatch?.acrid || null,
+    isrc: bestMatch?.external_ids?.isrc || null,
+    upc: bestMatch?.external_ids?.upc || null,
+    label: bestMatch?.label || null,
+    matchType: bestMatch?._musikalokal_match_type || null,
+    minScore,
+  });
+
+  if (bestMatch && Number(bestMatch?.score || 0) >= minScore) {
+    if (screeningContext.context === "gig_application_performance_video") {
+      const userId = String(screeningContext.user?.id || "").trim();
+      const metadata = await attachGenreEvidenceReceipt(
+        { ...buildCopyrightMatchMetadata(bestMatch), ...(internalMatch?.evidence || {}) },
+        userId,
+      );
+      console.log("[upload-safety-screen] acrcloud_gig_recording_allowed", {
+        fileName: file.fileName || "(unknown)",
+        title: bestMatch?.title || null,
+        score: bestMatch?.score || null,
+        genres: metadata.recognized_audio_genres || [],
+      });
+      return {
+        allowed: true,
+        reason: "The recording was recognized and may be used as advisory genre evidence.",
+        publiclyAvailable: true,
+        copyrightStatus: "not_required",
+        copyrightTrackKey: String(metadata.copyright_track_key || "") || null,
+        copyrightMetadata: metadata,
+      };
+    }
+
+    const ownershipReview = await queueCopyrightOwnershipReview(
+      screeningContext.supabaseAdmin,
+      screeningContext.user || null,
+      file,
+      bestMatch,
+      screeningContext.context,
+      internalMatch?.evidence || {},
+    );
+
+    if (ownershipReview.approved) {
+      console.log("[upload-safety-screen] acrcloud_copyright_check_allowed", {
+        fileName: file.fileName || "(unknown)",
+        reason: "approved_ownership_review",
+        reviewId: ownershipReview.reviewId,
+        trackKey: ownershipReview.trackKey,
+      });
+      return {
+        allowed: true,
+        publiclyAvailable: true,
+        copyrightStatus: "approved",
+        copyrightReviewId: ownershipReview.reviewId,
+        copyrightTrackKey: ownershipReview.trackKey,
+        copyrightMetadata: ownershipReview.metadata,
+      };
+    }
+
+    console.warn("[upload-safety-screen] acrcloud_copyright_match_requires_review", {
+      fileName: file.fileName || "(unknown)",
+      title: bestMatch?.title || null,
+      score: bestMatch?.score || null,
+      minScore,
+      acrid: bestMatch?.acrid || null,
+      ownershipReviewId: ownershipReview.reviewId,
+      ownershipReviewQueued: ownershipReview.queued,
+    });
+
+    if (!ownershipReview.reviewId && !ownershipReview.queued) {
+      return {
+        allowed: false,
+        reason: "This track appears to match a released recording, but the ownership review could not be sent. Please try again.",
+      };
+    }
+
+    return buildPendingCopyrightReviewDecision(
+      ownershipReview,
+      summarizeAcrMusicMatch(bestMatch),
+    );
+  }
+
+  console.log("[upload-safety-screen] acrcloud_copyright_check_allowed", {
+    fileName: file.fileName || "(unknown)",
+    reason: bestMatch ? "below_score_threshold" : "no_music_match",
+    score: bestMatch?.score || null,
+    minScore,
+  });
+
+  return internalMatch
+    ? resolveInternalPlaylistMatch(file, internalMatch, screeningContext)
+    : { allowed: true, publiclyAvailable: true, copyrightStatus: "not_required" };
+}
+
+function getFileId(file: FileCandidate, index: number): string {
+  return (
+    (typeof file.id === "string" ? file.id : null) ||
+    (typeof file.fingerprint === "string" ? file.fingerprint : null) ||
+    String(index)
+  );
+}
+
+const BLOCKED_CATEGORY_LABELS: Record<string, string> = {
+  sexual: "sexual or nude content",
+  "sexual/minors": "sexual content involving minors",
+  violence: "violent content",
+  "violence/graphic": "graphic violence or gore",
+  hate: "hate or extremist content",
+  "hate/threatening": "threatening hate content",
+  illicit: "illegal content",
+  "illicit/violent": "violent illegal content",
+};
+
+const VISUAL_BLOCK_REASONS: Record<string, string> = {
+  sexual: "sexual content",
+  nudity: "nudity",
+  violence: "violence",
+  gore: "graphic violence or gore",
+  hate_symbols: "hate symbols or extremist imagery",
+  illegal: "illegal content",
+};
+
+const BLOCKED_REASON_PATTERN =
+  /\b(adult|blood|bloody|criminal|explicit|extremis(?:t|m)|gore|gory|hate(?:ful)?|illegal|illicit|injur(?:y|ies)|nazi|nude|nudity|offensive|porn(?:ographic)?|sexual|swastika|violence|violent|weapon)\b/i;
+
+function hasBlockedCategory(
+  categories: Record<string, unknown>,
+  labels: Record<string, string>,
+): string | null {
+  for (const category of Object.keys(labels)) {
+    if (parseLooseBoolean(categories?.[category]) === true) {
+      return labels[category];
+    }
+  }
+
+  return null;
+}
+
+function isBlockedPolicyReason(reason: unknown): reason is string {
+  return typeof reason === "string" && BLOCKED_REASON_PATTERN.test(reason);
+}
+
+function resolveBlockedModerationReason(result: any): string | null {
+  const categories = result?.categories || {};
+  const blockedCategory = hasBlockedCategory(categories, BLOCKED_CATEGORY_LABELS);
+  if (blockedCategory) {
+    return `Blocked for ${blockedCategory}.`;
+  }
+
+  if (result?.flagged === true && isBlockedPolicyReason(result?.reason)) {
+    return "Blocked by image safety moderation.";
+  }
+
+  return null;
+}
+
+function buildVisualReviewPrompt(context: string, file: FileCandidate): string {
+  const mediaDescription = file.kind === "video"
+    ? "a representative frame from an uploaded video"
+    : "an uploaded image";
+
+  return `You are reviewing ${mediaDescription} for Musika Lokal before the media can be saved or displayed.
+
+Context: ${context}
+File name: ${file.fileName || "(unknown)"}
+File type: ${file.mimeType || "(unknown)"}
+
+Block the image ONLY if it contains one of these categories:
+- pornographic or sexual content
+- nudity
+- violence, weapons used threateningly, blood, gore, or serious injury
+- hate symbols, extremist symbols, or offensive hateful content
+- illegal content
+
+Allow everything else, including ordinary selfies, profile photos, gig photos, posters, landscapes, food, screenshots, documents, and non-music images.
+Do not block an image because it lacks music, instruments, performances, artists, stages, or other musical content.
+
+Include confidence as an estimate from 0 to 1, or null when unavailable.
+Return ONLY valid JSON:
+{"allowed": true, "categories": {"sexual": false, "nudity": false, "violence": false, "gore": false, "hate_symbols": false, "illegal": false}, "confidence": null, "reason": ""}`;
+}
+
+function parseLooseBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (["true", "yes", "allow", "allowed", "safe", "pass"].includes(normalized)) return true;
+  if (["false", "no", "block", "blocked", "unsafe", "fail"].includes(normalized)) return false;
+  return null;
+}
+
+function parseVisualReviewDecision(raw: string | null): VisualDecision | null {
+  if (!raw) return null;
+
+  try {
+    const jsonStart = raw.indexOf("{");
+    const jsonEnd = raw.lastIndexOf("}");
+    if (jsonStart < 0 || jsonEnd < 0) return null;
+
+    const parsed = JSON.parse(raw.slice(jsonStart, jsonEnd + 1));
+    const categories = parsed?.categories && typeof parsed.categories === "object"
+      ? parsed.categories
+      : {};
+
+    const evidence = {
+      categories: Object.keys(categories).filter(key => parseLooseBoolean(categories[key]) === true),
+      confidence: typeof parsed.confidence === 'number' && parsed.confidence >= 0 && parsed.confidence <= 1 ? parsed.confidence : null,
+    };
+    const blockedCategory = hasBlockedCategory(categories, VISUAL_BLOCK_REASONS);
+    if (blockedCategory) {
+      return {
+        allowed: false,
+        reason: parsed?.reason || `Blocked for ${blockedCategory}.`,
+        ...evidence,
+      };
+    }
+
+    const allowed = parseLooseBoolean(parsed?.allowed);
+    if (allowed === false) {
+      return {
+        allowed: false,
+        reason: typeof parsed?.reason === "string" ? parsed.reason : undefined,
+        ...evidence,
+      };
+    }
+
+    return allowed === true ? { allowed: true } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function callOpenAiImageModeration(
+  context: string,
+  file: FileCandidate,
+  dataUrl: string,
+): Promise<VisualDecision> {
+  const response = await fetch(OPENAI_MODERATION_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "omni-moderation-latest",
+      input: [
+        {
+          type: "text",
+          text: `Musika Lokal upload safety check. Context: ${context}. File: ${file.fileName || "unknown"}.`,
+        },
+        {
+          type: "image_url",
+          image_url: { url: dataUrl },
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenAI moderation error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const result = data?.results?.[0] || null;
+  const blockedReason = resolveBlockedModerationReason(result);
+  if (blockedReason) {
+    const categories = Object.keys(result?.categories || {}).filter(key => result.categories[key] === true);
+    const scores = categories.map(key => result?.category_scores?.[key]).filter(value => typeof value === 'number' && value >= 0 && value <= 1);
+    return { allowed: false, reason: blockedReason, categories, confidence: scores.length ? Math.max(...scores) : null, provider: 'openai-moderation' };
+  }
+
+  return { allowed: true };
+}
+
+async function callOpenAiVisualReview(
+  prompt: string,
+  dataUrl: string,
+): Promise<VisualDecision | null> {
+  const response = await fetch(OPENAI_CHAT_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: dataUrl, detail: "low" } },
+          ],
+        },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0,
+      max_tokens: 300,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenAI visual review error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return parseVisualReviewDecision(data?.choices?.[0]?.message?.content || null);
+}
+
+async function callGroqVisualReview(
+  prompt: string,
+  dataUrl: string,
+  model: string,
+  apiKey: string,
+): Promise<VisualDecision | null> {
+  console.log("[upload-safety-screen] groq_visual_review_start", {
+    model,
+    imageBytesApprox: estimateBase64Bytes(dataUrl.split(",")[1] || ""),
+  });
+
+  const requestBody = {
+    model,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: dataUrl } },
+        ],
+      },
+    ],
+    response_format: { type: "json_object" },
+    reasoning_effort: "none",
+    reasoning_format: "hidden",
+    temperature: 0.2,
+    max_completion_tokens: GROQ_VISION_MAX_COMPLETION_TOKENS,
+    stream: false,
+  };
+  let response = await fetch(GROQ_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    let errorBody = await response.text().catch(() => "");
+    if (response.status === 400 && /json_validate_failed/i.test(errorBody)) {
+      console.warn("[upload-safety-screen] groq_json_mode_retry", {
+        model,
+      });
+      const plainJsonRequestBody: Record<string, unknown> = { ...requestBody };
+      delete plainJsonRequestBody.response_format;
+      response = await fetch(GROQ_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(plainJsonRequestBody),
+      });
+      if (response.ok) {
+        errorBody = "";
+      } else {
+        errorBody = await response.text().catch(() => "");
+      }
+    }
+    if (!response.ok) {
+      console.error("[upload-safety-screen] groq_visual_review_failed", {
+        model,
+        status: response.status,
+        statusText: response.statusText,
+        body: errorBody.slice(0, 1000),
+      });
+      const failure = new Error(`Groq visual review error: ${response.status}${errorBody ? ` ${errorBody}` : ""}`) as Error & {
+        retryAfterMs?: number;
+      };
+      if (response.status === 429) {
+        const retryAfterHeader = response.headers.get("retry-after");
+        if (retryAfterHeader !== null) {
+          const retryAfterSeconds = Number(retryAfterHeader);
+          if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
+            failure.retryAfterMs = Math.ceil(retryAfterSeconds * 1000);
+          }
+        }
+      }
+      throw failure;
+    }
+  }
+
+  const data = await response.json();
+  const rawContent = data?.choices?.[0]?.message?.content || "";
+  const decision = parseVisualReviewDecision(rawContent);
+  console.log("[upload-safety-screen] groq_visual_review_done", {
+    model,
+    hasDecision: Boolean(decision),
+    allowed: decision?.allowed,
+    reason: decision?.reason,
+    rawPreview: decision ? undefined : String(rawContent).slice(0, 500),
+  });
+  return decision;
+}
+
+async function screenVisualContent(
+  context: string,
+  file: FileCandidate,
+): Promise<VisualDecision> {
+  const parsedImage = parseImageDataUrl(file);
+  if (!parsedImage) {
+    throw new Error("Media bytes could not be screened. Please select the file again.");
+  }
+
+  const prompt = buildVisualReviewPrompt(context, file);
+  let reviewed = false;
+  const providerFailures: string[] = [];
+  const rateLimitRetries: Array<{
+    model: string;
+    apiKey: string;
+    keyIndex: number;
+    retryAfterMs: number;
+  }> = [];
+
+  if (OPENAI_API_KEY) {
+    try {
+      const moderationDecision = await callOpenAiImageModeration(
+        context,
+        file,
+        parsedImage.dataUrl,
+      );
+      reviewed = true;
+      if (!moderationDecision.allowed) {
+        return moderationDecision;
+      }
+
+      const visualDecision = await callOpenAiVisualReview(prompt, parsedImage.dataUrl);
+      if (visualDecision) {
+        reviewed = true;
+        if (!visualDecision.allowed) {
+          return { ...visualDecision, provider: 'openai-vision' };
+        }
+      }
+    } catch (error) {
+      providerFailures.push(`OpenAI: ${error instanceof Error ? error.message : String(error)}`);
+      console.error("[upload-safety-screen] openai_visual_review_exception_fallback", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      // Try another image-capable provider before blocking.
+    }
+  }
+
+  if (GROQ_API_KEYS.length > 0) {
+    for (const model of GROQ_VISION_MODELS) {
+      for (const [keyIndex, apiKey] of GROQ_API_KEYS.entries()) {
+        try {
+        const visualDecision = await callGroqVisualReview(prompt, parsedImage.dataUrl, model, apiKey);
+        if (visualDecision) {
+          reviewed = true;
+          if (!visualDecision.allowed) {
+            return { ...visualDecision, provider: 'groq-vision' };
+          }
+          return { allowed: true };
+        } else {
+          providerFailures.push(`Groq (${model}): no valid JSON decision returned`);
+        }
+        } catch (error) {
+        providerFailures.push(`Groq (${model}): ${error instanceof Error ? error.message : String(error)}`);
+        const retryAfterMs = Number((error as Error & { retryAfterMs?: number })?.retryAfterMs);
+        if (
+          Number.isFinite(retryAfterMs) &&
+          retryAfterMs >= 0 &&
+          retryAfterMs <= MAX_GROQ_RATE_LIMIT_RETRY_MS
+        ) {
+          rateLimitRetries.push({ model, apiKey, keyIndex, retryAfterMs });
+        }
+        console.error("[upload-safety-screen] groq_visual_review_exception_fallback", {
+          model,
+          keySlot: keyIndex + 1,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        // Try the next Groq account or vision model before blocking the upload.
+        }
+      }
+    }
+  }
+
+  if (!reviewed && rateLimitRetries.length > 0) {
+    const retry = rateLimitRetries.sort((a, b) => a.retryAfterMs - b.retryAfterMs)[0];
+    const waitMs = retry.retryAfterMs + GROQ_RATE_LIMIT_RETRY_BUFFER_MS;
+    console.warn("[upload-safety-screen] groq_rate_limit_wait", {
+      model: retry.model,
+      keySlot: retry.keyIndex + 1,
+      waitMs,
+    });
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    try {
+      const visualDecision = await callGroqVisualReview(
+        prompt,
+        parsedImage.dataUrl,
+        retry.model,
+        retry.apiKey,
+      );
+      if (visualDecision) {
+        if (!visualDecision.allowed) {
+          return { ...visualDecision, provider: "groq-vision" };
+        }
+        return { allowed: true };
+      }
+      providerFailures.push(`Groq (${retry.model}): retry returned no valid JSON decision`);
+    } catch (error) {
+      providerFailures.push(`Groq (${retry.model}) retry: ${error instanceof Error ? error.message : String(error)}`);
+      console.error("[upload-safety-screen] groq_rate_limit_retry_failed", {
+        model: retry.model,
+        keySlot: retry.keyIndex + 1,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (reviewed) {
+    return { allowed: true };
+  }
+
+  console.warn("[upload-safety-screen] visual_review_unavailable", {
+    fileName: file.fileName || "(unknown)",
+    kind: file.kind || "photo",
+    providerFailures,
+    hasOpenAi: Boolean(OPENAI_API_KEY),
+    hasGroq: GROQ_API_KEYS.length > 0,
+  });
+
+  throw new Error("Visual safety screening is temporarily unavailable. Please try again.");
+}
+
+// ─── AI screening ─────────────────────────────────────────────────────────────
+
+function buildAiPrompt(context: string, files: FileCandidate[]): string {
+  const fileDescriptions = files
+    .map((f, i) => {
+      const parts = [
+        `File ${i + 1}:`,
+        `  name: ${f.fileName || "(unknown)"}`,
+        `  type: ${f.mimeType || "(unknown)"}`,
+        `  size: ${typeof f.fileSize === "number" ? `${f.fileSize} bytes` : "(unknown)"}`,
+        `  kind: ${f.kind || "photo"}`,
+      ];
+      return parts.join("\n");
+    })
+    .join("\n\n");
+
+  return `You are a content safety reviewer for Musika Lokal. Your job is to review file metadata ONLY (no actual file content is provided) and block only clearly prohibited content.
+
+Upload context: ${context}
+
+Files to review:
+${fileDescriptions}
+
+Review guidelines:
+- ALLOW all ordinary uploads, even when they are not related to music
+- ALLOW profile photos, gig photos, studio photos, event photos, ID documents, PDF contracts, PDF permits, document images, performance videos, audition videos, rehearsal videos, and gig walkthrough videos
+- BLOCK only files with names clearly suggesting pornographic/sexual content, nudity, violence, gore, hate symbols, offensive hateful content, or illegal material
+- Do not block because the file lacks music, instruments, performances, artists, stages, or other musical content
+
+Return ONLY valid JSON. No markdown, no explanation.
+Format: {"results": [{"index": 0, "allowed": true}, {"index": 1, "allowed": false, "reason": "..."}]}`;
+}
+
+async function callGroq(prompt: string, apiKey: string): Promise<string> {
+  console.log("[upload-safety-screen] groq_text_safety_start", {
+    model: GROQ_SAFETY_TEXT_MODEL,
+  });
+
+  const response = await fetch(GROQ_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: GROQ_SAFETY_TEXT_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.1,
+      max_completion_tokens: 512,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    console.error("[upload-safety-screen] groq_text_safety_failed", {
+      status: response.status,
+      statusText: response.statusText,
+      body: errorBody.slice(0, 1000),
+    });
+    throw new Error(`Groq API error: ${response.status}${errorBody ? ` ${errorBody}` : ""}`);
+  }
+
+  const data = await response.json();
+  console.log("[upload-safety-screen] groq_text_safety_done");
+  return data?.choices?.[0]?.message?.content || "";
+}
+
+async function callOpenAi(prompt: string): Promise<string> {
+  const response = await fetch(OPENAI_CHAT_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.1,
+      max_tokens: 512,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenAI API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data?.choices?.[0]?.message?.content || "";
+}
+
+async function callAi(prompt: string): Promise<string | null> {
+  for (const apiKey of GROQ_API_KEYS) {
+    try {
+      return await callGroq(prompt, apiKey);
+    } catch {
+      // Try the next Groq account before another provider.
+    }
+  }
+
+  if (OPENAI_API_KEY) {
+    try {
+      return await callOpenAi(prompt);
+    } catch {
+      // fall through
+    }
+  }
+
+  return null;
+}
+
+function parseAiResults(
+  raw: string | null,
+  files: FileCandidate[],
+): Array<{ index: number; allowed: boolean; reason?: string }> | null {
+  if (!raw) return null;
+
+  try {
+    const jsonStart = raw.indexOf("{");
+    const jsonEnd = raw.lastIndexOf("}");
+    if (jsonStart < 0 || jsonEnd < 0) return null;
+
+    const parsed = JSON.parse(raw.slice(jsonStart, jsonEnd + 1));
+    if (!Array.isArray(parsed?.results)) return null;
+
+    return parsed.results
+      .filter(
+        (r: unknown) => r && typeof r === "object" && typeof (r as any).index === "number",
+      )
+      .map((result: any) => {
+        const reason = typeof result?.reason === "string" ? result.reason : undefined;
+        const categories = result?.categories && typeof result.categories === "object"
+          ? result.categories
+          : {};
+        const blockedCategory = hasBlockedCategory(categories, VISUAL_BLOCK_REASONS);
+        const allowed = parseLooseBoolean(result?.allowed);
+        const shouldBlock = Boolean(blockedCategory) || (allowed === false && isBlockedPolicyReason(reason));
+
+        return {
+          index: result.index,
+          allowed: !shouldBlock,
+          reason: shouldBlock ? reason || `Blocked for ${blockedCategory}.` : undefined,
+        };
+      });
+  } catch {
+    return null;
+  }
+}
+
+// ─── Main handler ─────────────────────────────────────────────────────────────
+
+serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+    const supabaseAdmin = supabaseServiceRoleKey
+      ? createClient(supabaseUrl, supabaseServiceRoleKey)
+      : null;
+
+    // Authenticate the user
+    const authHeader = req.headers.get("Authorization");
+    const token = authHeader?.replace("Bearer ", "").trim() || "";
+
+    if (!token) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 401,
+      });
+    }
+
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
+
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 401,
+      });
+    }
+
+    // Parse request body
+    let body: Record<string, unknown> = {};
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid request body." }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400,
+      });
+    }
+
+    const context = typeof body.context === "string" ? body.context.slice(0, 160) : "add_edit_upload";
+    if (!supabaseAdmin) throw new Error('Moderation storage is unavailable.');
+
+    if (body.action === 'attach_moderation_evidence') {
+      const caseId = String(body.caseId || '');
+      const path = String(body.path || '');
+      const { data: entry, error } = await supabaseAdmin.from('upload_moderation_cases').select('id,user_id,media_path,status').eq('id', caseId).single();
+      if (error || !entry || entry.user_id !== user.id || entry.status !== 'pending_review') {
+        return new Response(JSON.stringify({ error: 'Moderation case unavailable.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      const folder = `${user.id}/${caseId}`;
+      const filename = path.slice(folder.length + 1);
+      if (!path.startsWith(folder + '/') || !/^original\.[a-z0-9]+$/.test(filename)) throw new Error('Invalid evidence path');
+      const { data: objects, error: storageError } = await supabaseAdmin.storage.from('moderation-quarantine').list(folder, { search: filename });
+      if (storageError || !objects?.some((object: any) => object.name === filename)) throw new Error('Evidence upload not found');
+      const { error: attachError } = await supabaseAdmin.from('upload_moderation_cases').update({ media_path: path }).eq('id', caseId).is('media_path', null);
+      if (attachError) throw attachError;
+      return new Response(JSON.stringify({ attached: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    const { data: restriction, error: restrictionError } = await supabaseAdmin.from('upload_moderation_restrictions').select('restricted_until').eq('user_id', user.id).gt('restricted_until', new Date().toISOString()).maybeSingle();
+    if (restrictionError) throw restrictionError;
+    if (restriction) {
+      return new Response(JSON.stringify({ error: `Media uploads are restricted until ${restriction.restricted_until}.` }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    if (body.action === "link_copyright_review_media") {
+      const reviewId = typeof body.reviewId === "string" ? body.reviewId.trim() : "";
+      const mediaUrl = typeof body.mediaUrl === "string" ? body.mediaUrl.trim() : "";
+      if (!supabaseAdmin || !reviewId || !mediaUrl) {
+        return new Response(JSON.stringify({ error: "reviewId and mediaUrl are required." }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      let parsedMediaUrl: URL;
+      try {
+        parsedMediaUrl = new URL(mediaUrl);
+        const storageOrigin = new URL(supabaseUrl).origin;
+        if (parsedMediaUrl.origin !== storageOrigin || !parsedMediaUrl.pathname.startsWith("/storage/v1/object/")) {
+          throw new Error("invalid_storage_url");
+        }
+      } catch {
+        return new Response(JSON.stringify({ error: "mediaUrl must be a URL in this project's Supabase Storage." }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      const { data: review, error: reviewError } = await supabaseAdmin
+        .from("manual_identity_reviews")
+        .select("id, user_id, source, metadata")
+        .eq("id", reviewId)
+        .maybeSingle();
+      if (reviewError) throw reviewError;
+      if (!review || review.user_id !== user.id || String(review.source || "").toUpperCase() !== COPYRIGHT_OWNERSHIP_REVIEW_SOURCE) {
+        return new Response(JSON.stringify({ error: "Copyright review not found." }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 404,
+        });
+      }
+
+      const { error: linkError } = await supabaseAdmin
+        .from("manual_identity_reviews")
+        .update({
+          metadata: {
+            ...(review.metadata || {}),
+            uploaded_video_url: parsedMediaUrl.toString(),
+            media_linked_at: new Date().toISOString(),
+          },
+        })
+        .eq("id", reviewId)
+        .eq("user_id", user.id);
+      if (linkError) throw linkError;
+
+      return new Response(JSON.stringify({ linked: true, reviewId }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    const rawFiles = Array.isArray(body.files) ? (body.files as FileCandidate[]) : [];
+    console.log("[upload-safety-screen] request_received", {
+      context,
+      fileCount: rawFiles.length,
+      hasInlineContent: rawFiles.some(
+        (file) => typeof file.contentDataUrl === "string" && file.contentDataUrl.trim().length > 0,
+      ),
+      kinds: rawFiles.map((file) => file.kind || "photo"),
+    });
+
+    if (rawFiles.length === 0) {
+      return new Response(JSON.stringify({ results: [] }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    const files = rawFiles.slice(0, MAX_FILES_PER_REQUEST);
+
+    // Step 1: Rule-based pre-screen
+    const ruleResults = files.map((file) => ruleBasedScreen(file, context));
+    // Step 2: Content screening when the client provides actual media bytes.
+    const hasInlineMediaContent = files.some(
+      (file) => typeof file.contentDataUrl === "string" && file.contentDataUrl.trim().length > 0,
+    );
+
+    if (hasInlineMediaContent) {
+      const results: ScreeningResult[] = [];
+
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i];
+        const fileId = getFileId(file, i);
+        const hasContentDataUrl =
+          typeof file.contentDataUrl === "string" && file.contentDataUrl.trim().length > 0;
+
+        if (!ruleResults[i].allowed) {
+          results.push({ id: fileId, ...ruleResults[i] });
+          continue;
+        }
+        if (!hasContentDataUrl) {
+          results.push({ id: fileId, allowed: file.kind === 'document', reason: file.kind === 'document' ? undefined : 'Media bytes are required for safety screening. Please select the file again.' });
+          continue;
+        }
+
+        try {
+          const isCopyright = file.kind === 'audio' || (file.kind === 'video' && context === 'gig_application_performance_video');
+          const review = !isCopyright ? await findUploadModerationCase(supabaseAdmin, user.id, context, file) : { existing: null, hash: null };
+          if (review.existing) {
+            results.push({ id: fileId, ...moderationCaseDecision(review.existing) });
+            continue;
+          }
+          const decision = file.kind === "audio" ||
+              (file.kind === "video" && context === "gig_application_performance_video")
+            ? await screenAudioCopyright(file, {
+                supabaseAdmin,
+                user: { id: user.id, email: user.email || null },
+                context,
+              })
+            : await screenVisualContent(context, file);
+          if (!decision.allowed && !isCopyright) {
+            const moderation = await createUploadModerationCase(supabaseAdmin, user.id, context, file, decision, review.hash);
+            results.push({ id: fileId, ...moderation });
+            continue;
+          }
+          results.push({
+            id: fileId,
+            ...decision,
+            reason: decision.reason,
+          });
+        } catch (mediaError) {
+          results.push({
+            id: fileId,
+            allowed: false,
+            retryable: true,
+            reason:
+              mediaError instanceof Error
+                ? mediaError.message
+                : "Media safety screening failed. Upload blocked.",
+          });
+        }
+      }
+
+      return new Response(JSON.stringify({ results }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    // Step 3: AI metadata screening for files that passed rule-based check
+    const aiPrompt = buildAiPrompt(context, files);
+    const metadataOnlySupported = files.some(file => file.kind === "document" || file.kind === "audio");
+    const aiRaw = metadataOnlySupported ? await callAi(aiPrompt) : null;
+    const aiDecisions = parseAiResults(aiRaw, files);
+
+    const results: ScreeningResult[] = await Promise.all(files.map(async (file, i) => {
+      const fileId = getFileId(file, i);
+
+      if (!ruleResults[i].allowed) return { id: fileId, ...ruleResults[i] };
+      if (file.kind !== 'document' && file.kind !== 'audio') {
+        return { id: fileId, allowed: false, reason: 'Media bytes are required for safety screening. Please select the file again.' };
+      }
+      if (!aiDecisions) {
+        // AI unavailable — allow files that passed rule-based check
+        return { id: fileId, allowed: true };
+      }
+
+      const aiDecision = aiDecisions.find((d) => d.index === i);
+      if (!aiDecision) {
+        // AI gave no decision for this file — allow it
+        return { id: fileId, allowed: true };
+      }
+
+      if (!aiDecision.allowed && file.kind !== 'audio') {
+        const moderation = await createUploadModerationCase(supabaseAdmin, user.id, context, file, aiDecision, null);
+        return { id: fileId, ...moderation };
+      }
+      return {
+        id: fileId,
+        allowed: aiDecision.allowed !== false,
+        reason: aiDecision.allowed === false ? aiDecision.reason : undefined,
+      };
+    }));
+
+    return new Response(JSON.stringify({ results }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 200,
+    });
+  } catch (err) {
+    console.error("upload-safety-screen error:", err);
+    return new Response(
+      JSON.stringify({ error: "Internal server error while screening uploads." }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500,
+      },
+    );
+  }
+});

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
 
@@ -20,4 +20,9 @@ writeFileSync('web/public/recovery/flow.js', ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
 }).outputText);
 writeFileSync('web/public/recovery/config.js', `export const config = ${JSON.stringify({ url, anonKey })};\n`);
+mkdirSync('web/public/email-change', { recursive: true });
+writeFileSync('web/public/email-change/flow.js', ts.transpileModule(
+  readFileSync('mobile/supabase/functions/_shared/emailChangeLinks.ts', 'utf8'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
+  }).outputText);
 console.log('Prepared standalone recovery files using only the public Supabase configuration. No app bundle built.');

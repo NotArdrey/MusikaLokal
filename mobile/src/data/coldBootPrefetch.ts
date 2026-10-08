@@ -1,6 +1,7 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { invokeEdgeFunction } from "./api";
 import { queryKeys } from "./queryKeys";
+import { BoundedCache } from "../utils/BoundedCache";
 
 const FEED_PAGE_SIZE = 12;
 const MARKETPLACE_PAGE_SIZE = 20;
@@ -21,7 +22,7 @@ type NavbarColdBootPrefetchParams = {
   userId?: string | null;
 };
 
-const startedAtByKey = new Map<string, number>();
+const startedAtByKey = new BoundedCache<string, number>(80, FEED_PREFETCH_STALE_MS);
 
 const keyId = (queryKey: QueryKey) => JSON.stringify(queryKey);
 
@@ -102,6 +103,7 @@ const prefetchFeed = (queryClient: QueryClient, userId: string | null) => {
     getNextPageParam: (lastPage: PaginatedResponse) =>
       lastPage.nextCursor || undefined,
     initialPageParam: null as string | null,
+    pages: 1,
     queryFn: ({ pageParam }) =>
       invokeEdgeFunction<PaginatedResponse>("manage-social-feed", {
         body: {

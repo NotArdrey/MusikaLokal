@@ -1,0 +1,619 @@
+[
+  {
+    "slug": "paymongo",
+    "files": [
+      {
+        "path": "supabase/functions/paymongo/index.ts",
+        "sha256": "fafc1da0fe4d7e0709f1aaf624615844c745315d6b448b1c05606bf8c93d65ba",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/actionLinks.ts",
+        "sha256": "8fc8ea8e1fd331a94265d22817ed7259ba1fac3086907e65645832a31968ddc0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/coreActionEmail.ts",
+        "sha256": "7614d928ca4723957ce2bb9d7cd804dc74455af52265c9675b00987d0a39dace",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gmailEmail.ts",
+        "sha256": "a536d0ff35ff8bf6d1b36c67322674fa172a15a7e8faecae6bebfdc1e11e810e",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/notificationRoutes.ts",
+        "sha256": "b53a437a2f77fc51d12e599deb5382e90fbf398b8bf39e4fe9d18e3348efd61a",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/studioPaymentHistory.ts",
+        "sha256": "4658685ca0274591140dd16ec8ca32eacbd36158ddcb833eed6603c296a679e9",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      }
+    ]
+  },
+  {
+    "slug": "didit-webhook",
+    "files": [
+      {
+        "path": "supabase/functions/didit-webhook/index.ts",
+        "sha256": "c0464b1dbd80aec9aa62af6a47079ad8764d029065cdf78c07e859b2538a0be2",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/actionLinks.ts",
+        "sha256": "8fc8ea8e1fd331a94265d22817ed7259ba1fac3086907e65645832a31968ddc0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/diditAttempt.ts",
+        "sha256": "0a61599f883be3a4088967f9c1cf593325c6fbb59833c412a139dd28c0cbf9f7",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gmailEmail.ts",
+        "sha256": "a536d0ff35ff8bf6d1b36c67322674fa172a15a7e8faecae6bebfdc1e11e810e",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/identityDuplicate.ts",
+        "sha256": "70774a4031682a158ede77baad7fdaecb5975eb72c12bd051e541ec6905573fb",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      }
+    ]
+  },
+  {
+    "slug": "gig-applications",
+    "files": [
+      {
+        "path": "supabase/functions/gig-applications/index.ts",
+        "sha256": "c315acce75a6d839aa86eb0bd69ced75a0d7e6f3a16ed0b52bdc68d4d1a1bb35",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/actionLinks.ts",
+        "sha256": "8fc8ea8e1fd331a94265d22817ed7259ba1fac3086907e65645832a31968ddc0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/coreActionEmail.ts",
+        "sha256": "7614d928ca4723957ce2bb9d7cd804dc74455af52265c9675b00987d0a39dace",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigApplicationAudience.ts",
+        "sha256": "77448decb916656f9e863c7069f4cfa4a2cc12025c0e0a9ef68560b1faf1ef59",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigMemberRequirementMatching.ts",
+        "sha256": "5d20f8b00bec31ee23a16728755e4f4c460de39d413236d3f6d41fb14af654de",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigMemberVerification.ts",
+        "sha256": "9299958472f285c963a97e2d4eeb0c16ee47619641081f56e895cad6409ef02d",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigMemberVerificationService.ts",
+        "sha256": "544504b81bfb10dc3492c637b92c88d4cbc37b80b89855c69c57e8b3358e3be0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigPortfolioReview.ts",
+        "sha256": "68e4d8248b43357677e1c51375105ccd69d8137b146322e3cb95dea1a5b5c910",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigReviewWorkerDispatch.ts",
+        "sha256": "e91ba33c0b5c0d586331bf5bb7f4a3d20bd481f8a193fc86a271739d3a2cef83",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gmailEmail.ts",
+        "sha256": "a536d0ff35ff8bf6d1b36c67322674fa172a15a7e8faecae6bebfdc1e11e810e",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/notificationRoutes.ts",
+        "sha256": "b53a437a2f77fc51d12e599deb5382e90fbf398b8bf39e4fe9d18e3348efd61a",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/submittedGenreFit.ts",
+        "sha256": "bedf5d45b3972d1829eb408a95c78cd722da42dff6a1bc37502ff94a6da53af8",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      }
+    ]
+  },
+  {
+    "slug": "listings-crud",
+    "files": [
+      {
+        "path": "supabase/functions/listings-crud/deno.json",
+        "sha256": "2b45f56839bf90afc9438e3ae7e806e6a7c9a44446a83b118617f031c1fa35f3",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/listings-crud/index.ts",
+        "sha256": "034ae4351f17a1786e63a76172f0354b236ef424e39b0a86a3a9b7dba69f5174",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/actionLinks.ts",
+        "sha256": "8fc8ea8e1fd331a94265d22817ed7259ba1fac3086907e65645832a31968ddc0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/coreActionEmail.ts",
+        "sha256": "7614d928ca4723957ce2bb9d7cd804dc74455af52265c9675b00987d0a39dace",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gmailEmail.ts",
+        "sha256": "a536d0ff35ff8bf6d1b36c67322674fa172a15a7e8faecae6bebfdc1e11e810e",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/notificationRoutes.ts",
+        "sha256": "b53a437a2f77fc51d12e599deb5382e90fbf398b8bf39e4fe9d18e3348efd61a",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      }
+    ]
+  },
+  {
+    "slug": "manage-bookings",
+    "files": [
+      {
+        "path": "supabase/functions/manage-bookings/index.ts",
+        "sha256": "f772625f36b43135f09982ded576a557ab96ffcd517df75ad445fe6760456000",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/actionLinks.ts",
+        "sha256": "8fc8ea8e1fd331a94265d22817ed7259ba1fac3086907e65645832a31968ddc0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/activityOrder.ts",
+        "sha256": "c136533e24ff9a3d73f28205c88eab0cdca091cb370f6e342d93efb4d4400265",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/coreActionEmail.ts",
+        "sha256": "7614d928ca4723957ce2bb9d7cd804dc74455af52265c9675b00987d0a39dace",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigApplicationAudience.ts",
+        "sha256": "77448decb916656f9e863c7069f4cfa4a2cc12025c0e0a9ef68560b1faf1ef59",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gmailEmail.ts",
+        "sha256": "a536d0ff35ff8bf6d1b36c67322674fa172a15a7e8faecae6bebfdc1e11e810e",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/notificationRoutes.ts",
+        "sha256": "b53a437a2f77fc51d12e599deb5382e90fbf398b8bf39e4fe9d18e3348efd61a",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      }
+    ]
+  },
+  {
+    "slug": "group-members",
+    "files": [
+      {
+        "path": "supabase/functions/group-members/index.ts",
+        "sha256": "80f3462393d4e837e7b45a80aacfda12a906c433d4e9578725a25c6fa6fbb53c",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/actionLinks.ts",
+        "sha256": "8fc8ea8e1fd331a94265d22817ed7259ba1fac3086907e65645832a31968ddc0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/connectionApplicantRecommendations.ts",
+        "sha256": "8ce73d7986cdaf7b7778522f6b1ff1e87fb69f8c5667f8eb35fbfc1a134cbb66",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/connectionGenreReview.ts",
+        "sha256": "3d9c7bbbec1a7c2c275b7a4b2ebcb554370b5dc156cb7ef6614195e7d00b5188",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/coreActionEmail.ts",
+        "sha256": "7614d928ca4723957ce2bb9d7cd804dc74455af52265c9675b00987d0a39dace",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigMemberVerification.ts",
+        "sha256": "9299958472f285c963a97e2d4eeb0c16ee47619641081f56e895cad6409ef02d",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigMemberVerificationService.ts",
+        "sha256": "544504b81bfb10dc3492c637b92c88d4cbc37b80b89855c69c57e8b3358e3be0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigPortfolioReview.ts",
+        "sha256": "68e4d8248b43357677e1c51375105ccd69d8137b146322e3cb95dea1a5b5c910",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigReviewWorkerDispatch.ts",
+        "sha256": "e91ba33c0b5c0d586331bf5bb7f4a3d20bd481f8a193fc86a271739d3a2cef83",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gmailEmail.ts",
+        "sha256": "a536d0ff35ff8bf6d1b36c67322674fa172a15a7e8faecae6bebfdc1e11e810e",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/notificationRoutes.ts",
+        "sha256": "b53a437a2f77fc51d12e599deb5382e90fbf398b8bf39e4fe9d18e3348efd61a",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/submittedGenreFit.ts",
+        "sha256": "bedf5d45b3972d1829eb408a95c78cd722da42dff6a1bc37502ff94a6da53af8",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      }
+    ]
+  },
+  {
+    "slug": "manage-listings",
+    "files": [
+      {
+        "path": "supabase/functions/manage-listings/deno.json",
+        "sha256": "2b45f56839bf90afc9438e3ae7e806e6a7c9a44446a83b118617f031c1fa35f3",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/manage-listings/index.ts",
+        "sha256": "8ed9e54db251a20669d56987fed7bb80fdfa0f61f68643b02bd786aee8ccbb17",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/actionLinks.ts",
+        "sha256": "8fc8ea8e1fd331a94265d22817ed7259ba1fac3086907e65645832a31968ddc0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/coreActionEmail.ts",
+        "sha256": "7614d928ca4723957ce2bb9d7cd804dc74455af52265c9675b00987d0a39dace",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gmailEmail.ts",
+        "sha256": "a536d0ff35ff8bf6d1b36c67322674fa172a15a7e8faecae6bebfdc1e11e810e",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/notificationRoutes.ts",
+        "sha256": "b53a437a2f77fc51d12e599deb5382e90fbf398b8bf39e4fe9d18e3348efd61a",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      }
+    ]
+  },
+  {
+    "slug": "permit-management",
+    "files": [
+      {
+        "path": "supabase/functions/permit-management/deno.json",
+        "sha256": "8cef4d7d49766700f8f992d46060591ea337b72e53836101400baf335f0f78bf",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/permit-management/index.ts",
+        "sha256": "32ec2ca21493a6fc86293ba172b6b325019a17c2caab140c791b00380a05a4c5",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/actionLinks.ts",
+        "sha256": "8fc8ea8e1fd331a94265d22817ed7259ba1fac3086907e65645832a31968ddc0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/coreActionEmail.ts",
+        "sha256": "7614d928ca4723957ce2bb9d7cd804dc74455af52265c9675b00987d0a39dace",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gmailEmail.ts",
+        "sha256": "8f777bb117999636f7ecb379e74d877ef3d35c03d9fcffeae7cc03b3a8774740",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/notificationRoutes.ts",
+        "sha256": "b53a437a2f77fc51d12e599deb5382e90fbf398b8bf39e4fe9d18e3348efd61a",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      }
+    ]
+  },
+  {
+    "slug": "manage-marketplace",
+    "files": [
+      {
+        "path": "supabase/functions/manage-marketplace/index.ts",
+        "sha256": "d03d2e5012de3e022144583716d278e147b810d22e1880327683316a96e688e2",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/actionLinks.ts",
+        "sha256": "8fc8ea8e1fd331a94265d22817ed7259ba1fac3086907e65645832a31968ddc0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/coreActionEmail.ts",
+        "sha256": "7614d928ca4723957ce2bb9d7cd804dc74455af52265c9675b00987d0a39dace",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gmailEmail.ts",
+        "sha256": "a536d0ff35ff8bf6d1b36c67322674fa172a15a7e8faecae6bebfdc1e11e810e",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/notificationRoutes.ts",
+        "sha256": "b53a437a2f77fc51d12e599deb5382e90fbf398b8bf39e4fe9d18e3348efd61a",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      }
+    ]
+  },
+  {
+    "slug": "admin-reports-management",
+    "files": [
+      {
+        "path": "supabase/functions/admin-reports-management/deno.json",
+        "sha256": "8cef4d7d49766700f8f992d46060591ea337b72e53836101400baf335f0f78bf",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/admin-reports-management/index.ts",
+        "sha256": "f073d46b7bf7c4b2d2267a5be8bdf0983fa6945c2e6e58d355406f3f4e73a56a",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/actionLinks.ts",
+        "sha256": "8fc8ea8e1fd331a94265d22817ed7259ba1fac3086907e65645832a31968ddc0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/coreActionEmail.ts",
+        "sha256": "7614d928ca4723957ce2bb9d7cd804dc74455af52265c9675b00987d0a39dace",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gmailEmail.ts",
+        "sha256": "a536d0ff35ff8bf6d1b36c67322674fa172a15a7e8faecae6bebfdc1e11e810e",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/notificationRoutes.ts",
+        "sha256": "b53a437a2f77fc51d12e599deb5382e90fbf398b8bf39e4fe9d18e3348efd61a",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/uploadModeration.ts",
+        "sha256": "9fe410e14c54c0f75b920f7df80f0ac9314f8b16e005e845bebfdd2f2115f0a1",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      }
+    ]
+  },
+  {
+    "slug": "account-email",
+    "files": [
+      {
+        "path": "supabase/functions/account-email/index.ts",
+        "sha256": "ecb9b9cad594c686255e18a9226f4deca5155639f03d12556ee198359997ccdd",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/emailChangeLinks.ts",
+        "sha256": "9c6e87768fc155596c24dc3cbaebfe7eed056d1bb53e6e9aac7e8d4fd8fd9e1b",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gmailEmail.ts",
+        "sha256": "466222f67ec4c15a5c350d40bb55bb3292dc877589b2a43f90b54390c2644489",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      }
+    ]
+  },
+  {
+    "slug": "admin-listings-management",
+    "files": [
+      {
+        "path": "supabase/functions/admin-listings-management/index.ts",
+        "sha256": "bdcc9b6db72556db76fa12f4ea919c697fd5da6fbebd3d5f29bee40da4c88919",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/actionLinks.ts",
+        "sha256": "8fc8ea8e1fd331a94265d22817ed7259ba1fac3086907e65645832a31968ddc0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/coreActionEmail.ts",
+        "sha256": "7614d928ca4723957ce2bb9d7cd804dc74455af52265c9675b00987d0a39dace",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gmailEmail.ts",
+        "sha256": "8f777bb117999636f7ecb379e74d877ef3d35c03d9fcffeae7cc03b3a8774740",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/notificationRoutes.ts",
+        "sha256": "b53a437a2f77fc51d12e599deb5382e90fbf398b8bf39e4fe9d18e3348efd61a",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      }
+    ]
+  },
+  {
+    "slug": "manage-production",
+    "files": [
+      {
+        "path": "supabase/functions/manage-production/index.ts",
+        "sha256": "0f0f85e66c4cefa58fc511788babd3244b5cf65b5e5107c8ea58cf45a8d22de2",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/actionLinks.ts",
+        "sha256": "8fc8ea8e1fd331a94265d22817ed7259ba1fac3086907e65645832a31968ddc0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/connectionApplicantRecommendations.ts",
+        "sha256": "8ce73d7986cdaf7b7778522f6b1ff1e87fb69f8c5667f8eb35fbfc1a134cbb66",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/connectionGenreReview.ts",
+        "sha256": "3d9c7bbbec1a7c2c275b7a4b2ebcb554370b5dc156cb7ef6614195e7d00b5188",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/coreActionEmail.ts",
+        "sha256": "7614d928ca4723957ce2bb9d7cd804dc74455af52265c9675b00987d0a39dace",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigMemberVerification.ts",
+        "sha256": "9299958472f285c963a97e2d4eeb0c16ee47619641081f56e895cad6409ef02d",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigMemberVerificationService.ts",
+        "sha256": "544504b81bfb10dc3492c637b92c88d4cbc37b80b89855c69c57e8b3358e3be0",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigPortfolioReview.ts",
+        "sha256": "68e4d8248b43357677e1c51375105ccd69d8137b146322e3cb95dea1a5b5c910",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gigReviewWorkerDispatch.ts",
+        "sha256": "e91ba33c0b5c0d586331bf5bb7f4a3d20bd481f8a193fc86a271739d3a2cef83",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/gmailEmail.ts",
+        "sha256": "a536d0ff35ff8bf6d1b36c67322674fa172a15a7e8faecae6bebfdc1e11e810e",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/notificationRoutes.ts",
+        "sha256": "b53a437a2f77fc51d12e599deb5382e90fbf398b8bf39e4fe9d18e3348efd61a",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      },
+      {
+        "path": "supabase/functions/_shared/submittedGenreFit.ts",
+        "sha256": "bedf5d45b3972d1829eb408a95c78cd722da42dff6a1bc37502ff94a6da53af8",
+        "exactSourceMatch": true,
+        "runtimeMatch": true
+      }
+    ]
+  }
+]

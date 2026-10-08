@@ -17,9 +17,10 @@ interface DocumentUploaderProps {
     onFileSelect: (file: any) => void;
     label?: string;
     existingUrl?: string;
+    disabled?: boolean;
 }
 
-const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label = 'Upload Document', existingUrl }) => {
+const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label = 'Upload Document', existingUrl, disabled = false }) => {
     const { colors, isDark } = useTheme();
     const [fileName, setFileName] = useState<string | null>(existingUrl ? 'Current document' : null);
     const [checking, setChecking] = useState(false);
@@ -98,7 +99,7 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
                     accessibilityLabel="e2e-document-upload-button"
                     style={[styles.uploadBtn, { borderColor: colors.border, backgroundColor: isDark ? '#374151' : '#F9FAFB' }]}
                     onPress={pickDocument}
-                    disabled={checking}
+                    disabled={checking || disabled}
                 >
                     <Ionicons name="cloud-upload-outline" size={24} color={colors.primary} />
                     <Text style={[styles.uploadText, { color: colors.text }]}>
@@ -111,7 +112,7 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
                         <Ionicons name="document-text" size={24} color={colors.primary} />
                         <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>{fileName}</Text>
                     </View>
-                    <TouchableOpacity activeOpacity={1} onPress={clearDocument} style={styles.removeBtn}>
+                    <TouchableOpacity activeOpacity={1} disabled={disabled} onPress={clearDocument} style={styles.removeBtn}>
                         <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
                     </TouchableOpacity>
                 </View>
@@ -142,7 +143,8 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderStyle: 'dashed',
         borderRadius: 12,
-        height: 60,
+        minHeight: 60,
+        padding: 12,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
@@ -151,6 +153,8 @@ const styles = StyleSheet.create({
     uploadText: {
         fontFamily: typography.medium,
         fontSize: 14,
+        flexShrink: 1,
+        textAlign: 'center',
     },
     fileContainer: {
         flexDirection: 'row',

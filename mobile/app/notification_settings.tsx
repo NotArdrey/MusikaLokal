@@ -31,7 +31,7 @@ const PREFERENCE_OPTIONS: PreferenceOption[] = [
   {
     key: 'push_enabled',
     label: 'Push Notifications',
-    description: 'Send system notifications to your device when the app is backgrounded or closed.',
+    description: 'Receive pop-up alerts while using another app, when allowed by your device notification settings.',
   },
   {
     key: 'booking_confirmed',

@@ -10,7 +10,7 @@ import { PersistQueryClientProviderProps } from "@tanstack/react-query-persist-c
 import { AppState, AppStateStatus } from "react-native";
 import { publicPersistQueryPrefixes } from "./queryKeys";
 
-const QUERY_CACHE_BUSTER = "musika-mobile-query-v1";
+const QUERY_CACHE_BUSTER = "musika-mobile-query-v3";
 const ONE_MINUTE_MS = 60 * 1000;
 const ONE_HOUR_MS = 60 * ONE_MINUTE_MS;
 
@@ -35,7 +35,7 @@ const isTransientQueryError = (error: unknown) => {
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      gcTime: 30 * ONE_MINUTE_MS,
+      gcTime: 5 * ONE_MINUTE_MS,
       refetchOnMount: false,
       refetchOnReconnect: true,
       refetchOnWindowFocus: false,
@@ -52,6 +52,26 @@ export const asyncStoragePersister = createAsyncStoragePersister({
   key: "musika-mobile-public-query-cache",
   storage: AsyncStorage,
   throttleTime: 2000,
+  serialize: (client) => {
+    const queries = [...client.clientState.queries]
+      .sort((left, right) => right.state.dataUpdatedAt - left.state.dataUpdatedAt)
+      .slice(0, 40)
+      .map(query => {
+        const data = query.state.data as { pages?: unknown[]; pageParams?: unknown[] } | null;
+        if (!data || !Array.isArray(data.pages) || !Array.isArray(data.pageParams)) return query;
+        return { ...query, state: { ...query.state, data: {
+          ...data, pages: data.pages.slice(0, 3), pageParams: data.pageParams.slice(0, 3),
+        } } };
+      });
+    let size = 0;
+    const boundedQueries = queries.filter(query => {
+      const length = JSON.stringify(query).length;
+      if (size + length > 1_000_000) return false;
+      size += length;
+      return true;
+    });
+    return JSON.stringify({ ...client, clientState: { ...client.clientState, queries: boundedQueries } });
+  },
 });
 
 const getQueryPrefix = (queryKey: QueryKey) => {

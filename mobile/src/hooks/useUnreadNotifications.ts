@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { prepareRealtimeAuth, supabase } from '../../lib/supabase';
 import { createRealtimeChannelTopic } from '../utils/realtimeChannel';
@@ -21,7 +22,8 @@ export function useUnreadNotifications(userId: string | null | undefined, enable
     }
   }, [enabled, userId]);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
+    if (!userId || !enabled) return;
     let disposed = false;
     const requests = requestRef;
     let channel: ReturnType<typeof supabase.channel> | null = null;
@@ -44,7 +46,7 @@ export function useUnreadNotifications(userId: string | null | undefined, enable
       appState.remove();
       if (channel) void supabase.removeChannel(channel);
     };
-  }, [enabled, refresh, userId]);
+  }, [enabled, refresh, userId]));
 
   return { hasUnread: enabled && unread.userId === userId && unread.count > 0, refresh };
 }

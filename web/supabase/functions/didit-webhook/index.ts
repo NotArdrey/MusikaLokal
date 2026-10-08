@@ -3,6 +3,7 @@ import { isInvalidatedDiditAttempt } from "../_shared/diditAttempt.ts";
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { sendEmailWithGmail } from '../_shared/gmailEmail.ts';
+import { buildActionEmailUrl } from '../_shared/actionLinks.ts';
 import {
     buildIdentityDocumentFingerprint,
     DUPLICATE_REVIEW_SOURCE,
@@ -1012,7 +1013,7 @@ async function sendVerificationEmail(
     </ul>
     
     <div style="text-align: center; margin: 30px 0;">
-        <a href="musikalokal://login?verified=true" style="display: inline-block; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600;">Open MusikaLokal App</a>
+        <a href="${buildActionEmailUrl({ route: '/feed' })}" style="display: inline-block; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600;">Open MusikaLokal App</a>
     </div>
     
     <p style="color: #64748b; font-size: 14px;">If the button doesn't work, open the MusikaLokal app on your device and sign in with your credentials.</p>

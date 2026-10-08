@@ -1,0 +1,1461 @@
+import { handleUploadModerationAdmin } from "../_shared/uploadModeration.ts";
+// @ts-ignore
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// @ts-ignore
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  scheduleCoreActionEmailForNotification,
+  sendCoreActionEmailForNotification,
+} from "../_shared/coreActionEmail.ts";
+
+declare const Deno: {
+  env: {
+    get: (key: string) => string | undefined;
+  };
+};
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform",
+};
+
+type ReportStatus = "pending" | "resolved" | "dismissed";
+type ReportModerationAction =
+  | "none"
+  | "warn_reporter"
+  | "warn_target_owner"
+  | "warn_both"
+  | "manual_review";
+
+type ReportEscalationStatus = "none" | "manual_review";
+type ReportTargetAccountAction =
+  | "none"
+  | "mark_unverified"
+  | "ban_1_day"
+  | "ban_7_days"
+  | "ban_30_days"
+  | "ban_permanent"
+  | "lift_ban";
+
+type ReportTargetAccountActionConfig = {
+  label: string;
+  banDuration?: string | "none";
+  expiresAfterDays?: number;
+  notificationType: "success" | "info" | "warning" | "error";
+  notificationTitle: string;
+  notificationMessage: string;
+};
+
+const reportModerationActions = new Set<ReportModerationAction>([
+  "none",
+  "warn_reporter",
+  "warn_target_owner",
+  "warn_both",
+  "manual_review",
+]);
+
+const reportEscalationStatuses = new Set<ReportEscalationStatus>([
+  "none",
+  "manual_review",
+]);
+
+const reportTargetAccountActionConfigs: Record<ReportTargetAccountAction, ReportTargetAccountActionConfig> = {
+  none: {
+    label: "None",
+    notificationType: "info",
+    notificationTitle: "Report Moderation Update",
+    notificationMessage: "A report related to your account was reviewed by an administrator.",
+  },
+  mark_unverified: {
+    label: "Mark Unverified",
+    notificationType: "warning",
+    notificationTitle: "Account Verification Required",
+    notificationMessage:
+      "An administrator marked your account as needing verification review. Please complete verification before continuing.",
+  },
+  ban_1_day: {
+    label: "Ban 1 Day",
+    banDuration: "24h",
+    expiresAfterDays: 1,
+    notificationType: "error",
+    notificationTitle: "Account Temporarily Banned",
+    notificationMessage: "Your MusikaLokal account has been banned for 1 day after report moderation.",
+  },
+  ban_7_days: {
+    label: "Ban 7 Days",
+    banDuration: "168h",
+    expiresAfterDays: 7,
+    notificationType: "error",
+    notificationTitle: "Account Temporarily Banned",
+    notificationMessage: "Your MusikaLokal account has been banned for 7 days after report moderation.",
+  },
+  ban_30_days: {
+    label: "Ban 30 Days",
+    banDuration: "720h",
+    expiresAfterDays: 30,
+    notificationType: "error",
+    notificationTitle: "Account Temporarily Banned",
+    notificationMessage: "Your MusikaLokal account has been banned for 30 days after report moderation.",
+  },
+  ban_permanent: {
+    label: "Permanent Ban",
+    // Supabase Auth models bans as durations; 100 years is the documented permanent-ban equivalent.
+    banDuration: "876000h",
+    notificationType: "error",
+    notificationTitle: "Account Permanently Banned",
+    notificationMessage: "Your MusikaLokal account has been permanently banned after report moderation.",
+  },
+  lift_ban: {
+    label: "Lift Ban",
+    banDuration: "none",
+    notificationType: "success",
+    notificationTitle: "Account Ban Lifted",
+    notificationMessage: "An administrator lifted the ban on your MusikaLokal account.",
+  },
+};
+
+function jsonResponse(payload: unknown, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+async function getAuthenticatedUserId(
+  authHeader: string,
+  supabaseUrl: string,
+  anonKey: string,
+) {
+  const token = authHeader.replace(/^Bearer\s+/i, "");
+  if (!token) return null;
+
+  const authClient = createClient(supabaseUrl, anonKey, {
+    global: {
+      headers: {
+        Authorization: authHeader,
+      },
+    },
+  });
+
+  const {
+    data: { user },
+    error,
+  } = await authClient.auth.getUser(token);
+
+  if (error || !user?.id) return null;
+  return user.id;
+}
+
+function parseReportStatus(rawValue: unknown): ReportStatus | null {
+  const value = String(rawValue || "").trim().toLowerCase();
+  if (value === "pending" || value === "resolved" || value === "dismissed") {
+    return value;
+  }
+  return null;
+}
+
+function parseReportModerationAction(rawValue: unknown): ReportModerationAction | null {
+  const value = String(rawValue || "").trim().toLowerCase() as ReportModerationAction;
+  if (reportModerationActions.has(value)) return value;
+  return null;
+}
+
+function parseReportEscalationStatus(rawValue: unknown): ReportEscalationStatus | null {
+  const value = String(rawValue || "").trim().toLowerCase() as ReportEscalationStatus;
+  if (reportEscalationStatuses.has(value)) return value;
+  return null;
+}
+
+function parseReportTargetAccountAction(rawValue: unknown): ReportTargetAccountAction | null {
+  const value = String(rawValue || "none").trim().toLowerCase() as ReportTargetAccountAction;
+  if (Object.prototype.hasOwnProperty.call(reportTargetAccountActionConfigs, value)) return value;
+  return null;
+}
+
+function getTargetAccountActionExpiresAt(action: ReportTargetAccountAction, now: Date) {
+  const config = reportTargetAccountActionConfigs[action];
+  if (!config.expiresAfterDays) return null;
+  return new Date(now.getTime() + config.expiresAfterDays * 24 * 60 * 60 * 1000).toISOString();
+}
+
+async function updateProfileBanState(
+  client: any,
+  userId: string,
+  action: ReportTargetAccountAction,
+  input: {
+    adminUserId: string;
+    nowIso: string;
+    banExpiresAt: string | null;
+  },
+) {
+  if (action === "none" || action === "mark_unverified") {
+    return { error: null as string | null };
+  }
+
+  const config = reportTargetAccountActionConfigs[action];
+  const profileUpdate =
+    action === "lift_ban"
+      ? {
+          is_banned: false,
+          banned_until: null,
+          ban_reason: null,
+          ban_action: "lift_ban",
+          ban_lifted_at: input.nowIso,
+          ban_lifted_by: input.adminUserId,
+        }
+      : {
+          is_banned: true,
+          banned_until: input.banExpiresAt,
+          ban_reason: config?.label || "Account ban",
+          ban_action: action,
+          banned_at: input.nowIso,
+          banned_by: input.adminUserId,
+          ban_lifted_at: null,
+          ban_lifted_by: null,
+        };
+
+  const { error } = await client
+    .from("profiles")
+    .update(profileUpdate)
+    .eq("id", userId);
+
+  if (!error) return { error: null };
+
+  if (isMissingColumnError(error)) {
+    return { error: "Account ban profile fields are missing. Apply the latest profile ban migration first." };
+  }
+
+  return { error: error.message || "Unable to update account ban state." };
+}
+
+function normalizeText(rawValue: unknown, maxLength: number): string | null {
+  if (typeof rawValue !== "string") return null;
+  const value = rawValue.trim();
+  if (!value) return null;
+  return value.slice(0, maxLength);
+}
+
+function isMissingColumnError(error: any) {
+  const code = String(error?.code || "").toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  const details = String(error?.details || "").toLowerCase();
+  const hint = String(error?.hint || "").toLowerCase();
+  const text = `${message} ${details} ${hint}`;
+
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    code === "PGRST204" ||
+    text.includes("does not exist") ||
+    text.includes("relation") ||
+    text.includes("schema cache") ||
+    text.includes("unknown column")
+  );
+}
+
+function isMissingTableError(error: any, tableName: string) {
+  const code = String(error?.code || "").toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    code === "42P01" ||
+    message.includes(`relation "${tableName}" does not exist`) ||
+    message.includes(`table "${tableName}" does not exist`)
+  );
+}
+
+async function ensureProfileBanFieldsAvailable(client: any, userId: string) {
+  const { error } = await client
+    .from("profiles")
+    .select("is_banned")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!error) return { error: null as string | null };
+
+  if (isMissingColumnError(error)) {
+    return { error: "Account ban profile fields are missing. Apply the latest profile ban migration first." };
+  }
+
+  return { error: error.message || "Unable to verify account ban fields." };
+}
+
+async function fetchProfileById(client: any, profileId: string) {
+  const normalizedProfileId = String(profileId || "").trim();
+  if (!normalizedProfileId) return null;
+
+  const { data, error } = await client
+    .from("profiles")
+    .select("*")
+    .eq("id", normalizedProfileId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data || null;
+}
+
+function selectPreferredLinkedUserId<T extends Record<string, unknown>>(
+  rows: T[],
+  userIdKey: keyof T,
+  roleKey: keyof T,
+) {
+  const rankedRows = [...rows].sort((left, right) => {
+    const leftRole = String(left?.[roleKey] || "").trim().toLowerCase();
+    const rightRole = String(right?.[roleKey] || "").trim().toLowerCase();
+    const leftRank = leftRole === "owner" ? 0 : leftRole === "leader" ? 1 : 2;
+    const rightRank = rightRole === "owner" ? 0 : rightRole === "leader" ? 1 : 2;
+    return leftRank - rightRank;
+  });
+
+  for (const row of rankedRows) {
+    const userId = String(row?.[userIdKey] || "").trim();
+    if (userId) return userId;
+  }
+
+  return "";
+}
+
+async function resolveGroupOwnerId(client: any, groupId: string, directOwnerId?: unknown) {
+  const normalizedGroupId = String(groupId || "").trim();
+  const normalizedDirectOwnerId = String(directOwnerId || "").trim();
+
+  if (!normalizedGroupId) return "";
+  if (normalizedDirectOwnerId) return normalizedDirectOwnerId;
+
+  try {
+    const { data, error } = await client
+      .from("group_members")
+      .select("user_id, role")
+      .eq("group_id", normalizedGroupId);
+
+    if (error) {
+      if (!isMissingColumnError(error)) throw error;
+    } else if (Array.isArray(data) && data.length > 0) {
+      const linkedUserId = selectPreferredLinkedUserId(data, "user_id", "role");
+      if (linkedUserId) return linkedUserId;
+    }
+  } catch (error) {
+    if (!isMissingColumnError(error)) throw error;
+  }
+
+  try {
+    const { data, error } = await client
+      .from("group_roster_members")
+      .select("user_id, member_role")
+      .eq("group_id", normalizedGroupId)
+      .not("user_id", "is", null);
+
+    if (error) {
+      if (!isMissingColumnError(error)) throw error;
+    } else if (Array.isArray(data) && data.length > 0) {
+      const linkedUserId = selectPreferredLinkedUserId(data, "user_id", "member_role");
+      if (linkedUserId) return linkedUserId;
+    }
+  } catch (error) {
+    if (!isMissingColumnError(error)) throw error;
+  }
+
+  return "";
+}
+
+async function assertAdmin(client: any, userId: string) {
+  const { data, error } = await client
+    .from("profiles")
+    .select("id, role")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error || !data || data.role !== "admin") {
+    return false;
+  }
+
+  return true;
+}
+
+const reportTargetTableMap: Record<string, string> = {
+  group: "groups",
+  studio: "studios",
+  venue: "studios",
+  gig: "gigs",
+  user: "profiles",
+  profile: "profiles",
+  product: "products",
+  playlist: "playlists",
+  feed_post: "feed_posts",
+  booking: "studio_bookings",
+};
+
+async function scheduleSavedReportEmails(client: any, reportId: string, revision: unknown) {
+  if (!revision) return;
+  const { data, error } = await client.from("notifications").select("*")
+    .contains("meta", { event_type: "report_moderation_saved", report_id: reportId, report_revision: revision });
+  if (error) { console.error("report_notification_email_read_failed", { message: error.message }); return; }
+  for (const notification of data || []) {
+    scheduleCoreActionEmailForNotification(client, notification, { source: "admin-reports-management" });
+  }
+}
+
+async function fetchProfilesMap(client: any, profileIds: string[]) {
+  if (profileIds.length === 0) {
+    return {} as Record<string, { full_name: string; email: string }>;
+  }
+
+  const { data: profileRows, error: profileError } = await client
+    .from("profiles")
+    .select("id, full_name, email")
+    .in("id", profileIds);
+
+  if (profileError) throw profileError;
+
+  return (profileRows || []).reduce(
+    (
+      acc: Record<string, { full_name: string; email: string }>,
+      row: { id: string; full_name?: string | null; email?: string | null },
+    ) => {
+      acc[row.id] = {
+        full_name: row.full_name || "Unknown",
+        email: row.email || "",
+      };
+      return acc;
+    },
+    {},
+  );
+}
+
+async function fetchReportTargetDetails(client: any, rawTargetType: unknown, rawTargetId: unknown) {
+  const targetType = String(rawTargetType || "").trim().toLowerCase();
+  const targetId = String(rawTargetId || "").trim();
+  const table = reportTargetTableMap[targetType] || null;
+
+  if (!targetId) {
+    return {
+      type: targetType,
+      id: targetId,
+      table,
+      record: null,
+      owner_profile: null,
+    };
+  }
+
+  if (!table) {
+    return {
+      type: targetType,
+      id: targetId,
+      table: null,
+      record: null,
+      owner_profile: null,
+    };
+  }
+
+  const { data: record, error: recordError } = await client
+    .from(table)
+    .select("*")
+    .eq("id", targetId)
+    .maybeSingle();
+
+  if (recordError) throw recordError;
+
+  if (targetType === "booking") {
+    const { data: studio, error: studioError } = record?.studio_id
+      ? await client
+        .from("studios")
+        .select("id, name, owner_id")
+        .eq("id", record.studio_id)
+        .maybeSingle()
+      : { data: null, error: null };
+
+    if (studioError) throw studioError;
+
+    const ownerProfile = studio?.owner_id
+      ? await fetchProfileById(client, String(studio.owner_id))
+      : null;
+
+    return {
+      type: targetType,
+      id: targetId,
+      table,
+      record: record
+        ? {
+          ...record,
+          studio_name: studio?.name || null,
+          studio_owner_id: studio?.owner_id || null,
+        }
+        : null,
+      owner_profile: ownerProfile,
+    };
+  }
+
+  if (targetType === "profile" || targetType === "user") {
+    return {
+      type: targetType,
+      id: targetId,
+      table,
+      record: record || null,
+      owner_profile: record || null,
+    };
+  }
+
+  let ownerId = String(
+    record?.owner_id ||
+    record?.organizer_id ||
+    record?.seller_id ||
+    record?.creator_id ||
+    record?.author_id ||
+    record?.user_id ||
+    "",
+  ).trim();
+
+  if (!ownerId && targetType === "group") {
+    ownerId = await resolveGroupOwnerId(client, targetId, record?.owner_id);
+  }
+
+  let ownerProfile = null;
+  if (ownerId) {
+    ownerProfile = await fetchProfileById(client, ownerId);
+  }
+
+  return {
+    type: targetType,
+    id: targetId,
+    table,
+    record: record || null,
+    owner_profile: ownerProfile,
+  };
+}
+
+async function resolveReportTargetOwnerId(client: any, report: any) {
+  const normalizedTargetType = String(report?.target_type || "").trim().toLowerCase();
+  const targetId = String(report?.target_id || "").trim();
+
+  if (!targetId) return "";
+  if (normalizedTargetType === "profile" || normalizedTargetType === "user") return targetId;
+
+  try {
+    const targetDetails = await fetchReportTargetDetails(client, report?.target_type, report?.target_id);
+    return String(targetDetails?.owner_profile?.id || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+async function markTargetAccountUnverified(client: any, userId: string) {
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId) {
+    return { error: "Reported account is unavailable." };
+  }
+
+  const { data: existingAuth, error: existingAuthError } = await client.auth.admin.getUserById(normalizedUserId);
+  if (existingAuthError || !existingAuth?.user) {
+    return { error: "Reported auth account was not found." };
+  }
+
+  const existingMetadata = (existingAuth.user.user_metadata || {}) as Record<string, unknown>;
+  const nextMetadata = {
+    ...existingMetadata,
+    is_verified: false,
+    verification_status: "PENDING_REVIEW",
+  };
+
+  const { error: authUpdateError } = await client.auth.admin.updateUserById(normalizedUserId, {
+    user_metadata: nextMetadata,
+  });
+
+  if (authUpdateError) {
+    return { error: authUpdateError.message };
+  }
+
+  const { error: profileUpdateError } = await client
+    .from("profiles")
+    .update({
+      is_verified: false,
+      verification_status: "PENDING_REVIEW",
+      id_verified_at: null,
+    })
+    .eq("id", normalizedUserId);
+
+  if (profileUpdateError) {
+    return { error: profileUpdateError.message };
+  }
+
+  return { error: null };
+}
+
+async function applyTargetAccountAction(
+  client: any,
+  userId: string,
+  action: ReportTargetAccountAction,
+  input: {
+    reportId: string;
+    adminUserId: string;
+    nowIso: string;
+    banExpiresAt: string | null;
+  },
+) {
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId) {
+    return { error: "Reported account is unavailable." };
+  }
+
+  if (action === "none") {
+    return { error: null };
+  }
+
+  if (action === "mark_unverified") {
+    return await markTargetAccountUnverified(client, normalizedUserId);
+  }
+
+  const config = reportTargetAccountActionConfigs[action];
+  if (!config?.banDuration) {
+    return { error: "Unsupported account action." };
+  }
+
+  const { data: existingAuth, error: existingAuthError } = await client.auth.admin.getUserById(normalizedUserId);
+  if (existingAuthError || !existingAuth?.user) {
+    return { error: "Reported auth account was not found." };
+  }
+
+  const profileBanFieldsResult = await ensureProfileBanFieldsAvailable(client, normalizedUserId);
+  if (profileBanFieldsResult.error) {
+    return { error: profileBanFieldsResult.error };
+  }
+
+  const existingMetadata = (existingAuth.user.user_metadata || {}) as Record<string, unknown>;
+  const existingModeration = existingMetadata.moderation || {};
+  const nextModeration =
+    action === "lift_ban"
+      ? {
+          ...(typeof existingModeration === "object" && existingModeration !== null ? existingModeration : {}),
+          banned: false,
+          last_lifted_at: input.nowIso,
+          last_lifted_by: input.adminUserId,
+          last_lifted_report_id: input.reportId,
+        }
+      : {
+          ...(typeof existingModeration === "object" && existingModeration !== null ? existingModeration : {}),
+          banned: true,
+          ban_action: action,
+          banned_at: input.nowIso,
+          banned_by: input.adminUserId,
+          ban_report_id: input.reportId,
+          ban_duration: config.banDuration,
+          ban_expires_at: input.banExpiresAt,
+          ban_permanent: action === "ban_permanent",
+        };
+
+  const { error: authUpdateError } = await client.auth.admin.updateUserById(normalizedUserId, {
+    ban_duration: config.banDuration,
+    user_metadata: {
+      ...existingMetadata,
+      moderation: nextModeration,
+    },
+  });
+
+  if (authUpdateError) {
+    return { error: authUpdateError.message };
+  }
+
+  const profileBanResult = await updateProfileBanState(client, normalizedUserId, action, {
+    adminUserId: input.adminUserId,
+    nowIso: input.nowIso,
+    banExpiresAt: input.banExpiresAt,
+  });
+  if (profileBanResult.error) {
+    return { error: profileBanResult.error };
+  }
+
+  return { error: null };
+}
+
+serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  try {
+    const authHeader = req.headers.get("Authorization") || "";
+    if (!authHeader) {
+      return jsonResponse({ error: "Missing authorization header" }, 401);
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+    if (!supabaseUrl || !serviceRoleKey || !anonKey) {
+      return jsonResponse({ error: "Server misconfiguration" }, 500);
+    }
+
+    const userId = await getAuthenticatedUserId(authHeader, supabaseUrl, anonKey);
+    if (!userId) {
+      return jsonResponse({ error: "Invalid JWT" }, 401);
+    }
+
+    const client = createClient(supabaseUrl, serviceRoleKey);
+
+    const isAdmin = await assertAdmin(client, userId);
+    if (!isAdmin) {
+      return jsonResponse({ error: "Forbidden: admin role required" }, 403);
+    }
+
+    const { action, ...params } = await req.json();
+
+    if (['fetch_upload_moderation_cases', 'fetch_upload_moderation_details', 'review_upload_moderation_case'].includes(action)) {
+      try {
+        const result: any = await handleUploadModerationAdmin(client, userId, action, params);
+
+        if (action === 'review_upload_moderation_case' && result?.case?.user_id) {
+          const { data: notification, error: notificationError } = await client
+            .from('notifications')
+            .select('user_id,type,title,message,image,meta')
+            .eq('user_id', result.case.user_id)
+            .contains('meta', {
+              moderation_case_id: params.caseId,
+              action: params.decision,
+            })
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (notificationError) {
+            console.error('upload_moderation_notification_lookup_failed', {
+              caseId: params.caseId,
+              message: notificationError.message,
+            });
+          }
+
+          if (notification) {
+            try {
+              const emailDelivery = await sendCoreActionEmailForNotification(
+                client,
+                notification,
+                {
+                  source: 'admin-upload-moderation',
+                  templateType: `upload_moderation_${String(params.decision || 'review')}`,
+                },
+              );
+              return jsonResponse({ ...result, emailDelivery });
+            } catch (emailError) {
+              console.error('upload_moderation_email_failed', {
+                caseId: params.caseId,
+                message: emailError instanceof Error ? emailError.message : String(emailError),
+              });
+            }
+          }
+        }
+
+        return jsonResponse(result);
+      } catch (error) {
+        return jsonResponse({ error: error instanceof Error ? error.message : (error as any)?.message || 'Moderation request failed.' }, 400);
+      }
+    }
+    if (action === "fetch_reports") {
+      const statusFilter = String(params.statusFilter || "all").trim().toLowerCase();
+      const escalationFilterRaw = String(params.escalationFilter || "all").trim().toLowerCase();
+      const escalationFilter =
+        escalationFilterRaw === "all" ? "all" : parseReportEscalationStatus(escalationFilterRaw);
+      const pageSize = Math.max(1, Math.min(100, Number(params.limit || 50)));
+      const fetchLimit = Math.min(200, pageSize + 1);
+
+      if (escalationFilterRaw !== "all" && !escalationFilter) {
+        return jsonResponse({ error: "Invalid escalation filter" }, 400);
+      }
+
+      const buildQuery = (columns: string, includeEscalationFilter: boolean) => {
+        let query = client
+          .from("reports")
+          .select(columns)
+          .order("created_at", { ascending: false })
+          .limit(fetchLimit);
+
+        if (["pending", "resolved", "dismissed"].includes(statusFilter)) {
+          query = query.eq("status", statusFilter);
+        }
+
+        if (
+          includeEscalationFilter &&
+          escalationFilter &&
+          (escalationFilter === "none" || escalationFilter === "manual_review")
+        ) {
+          query = query.eq("escalation_status", escalationFilter);
+        }
+
+        return query;
+      };
+
+      const selectWithTargetAccountAction = [
+        "id",
+        "reporter_id",
+        "target_type",
+        "target_id",
+        "reason",
+        "details",
+        "status",
+        "created_at",
+        "reviewed_by",
+        "reviewed_at",
+        "moderation_action",
+        "moderation_notes",
+        "target_account_action",
+        "target_account_action_expires_at",
+        "escalation_status",
+        "escalated_at",
+        "escalation_reason",
+      ].join(", ");
+
+      const selectWithModeration = [
+        "id",
+        "reporter_id",
+        "target_type",
+        "target_id",
+        "reason",
+        "details",
+        "status",
+        "created_at",
+        "reviewed_by",
+        "reviewed_at",
+        "moderation_action",
+        "moderation_notes",
+        "escalation_status",
+        "escalated_at",
+        "escalation_reason",
+      ].join(", ");
+
+      const selectLegacy = "id, reporter_id, target_type, target_id, reason, details, status, created_at";
+
+      let reports: any[] = [];
+      let usedLegacy = false;
+      let usedTargetAccountActionLegacy = false;
+
+      {
+        const { data, error } = await buildQuery(selectWithTargetAccountAction, true);
+        if (!error) {
+          reports = Array.isArray(data) ? data : [];
+        } else if (isMissingColumnError(error)) {
+          usedTargetAccountActionLegacy = true;
+
+          const moderation = await buildQuery(selectWithModeration, true);
+          if (!moderation.error) {
+            reports = Array.isArray(moderation.data) ? moderation.data : [];
+          } else if (isMissingColumnError(moderation.error)) {
+            usedLegacy = true;
+
+            if (escalationFilter === "manual_review") {
+              return jsonResponse({
+                items: [],
+                hasMore: false,
+                usedLegacy: true,
+                usedTargetAccountActionLegacy,
+              });
+            }
+
+            const legacy = await buildQuery(selectLegacy, false);
+            if (legacy.error) throw legacy.error;
+            reports = Array.isArray(legacy.data) ? legacy.data : [];
+          } else {
+            throw moderation.error;
+          }
+        } else {
+          throw error;
+        }
+      }
+
+      const hasMore = reports.length > pageSize;
+      const pageRows = hasMore ? reports.slice(0, pageSize) : reports;
+
+      const profileIds = Array.from(
+        new Set(
+          pageRows
+            .flatMap((entry: any) => [entry.reporter_id, entry.reviewed_by])
+            .filter(Boolean),
+        ),
+      );
+
+      const profileMap = await fetchProfilesMap(client, profileIds);
+
+      return jsonResponse({
+        items: pageRows.map((entry: any) => ({
+          ...entry,
+          reporter_name: profileMap[entry.reporter_id]?.full_name || "Unknown",
+          reporter_email: profileMap[entry.reporter_id]?.email || "",
+          reviewer_name: profileMap[entry.reviewed_by]?.full_name || "",
+          moderation_action: entry.moderation_action || "none",
+          moderation_notes: entry.moderation_notes || null,
+          target_account_action: entry.target_account_action || "none",
+          target_account_action_expires_at: entry.target_account_action_expires_at || null,
+          escalation_status: entry.escalation_status || "none",
+          escalated_at: entry.escalated_at || null,
+          escalation_reason: entry.escalation_reason || null,
+          reviewed_by: entry.reviewed_by || null,
+          reviewed_at: entry.reviewed_at || null,
+        })),
+        hasMore,
+        usedLegacy,
+        usedTargetAccountActionLegacy,
+      });
+    }
+
+    if (action === "fetch_report_details") {
+      const reportId = String(params.reportId || "").trim();
+
+      if (!reportId) {
+        return jsonResponse({ error: "Missing reportId" }, 400);
+      }
+
+      const { data: report, error: reportError } = await client
+        .from("reports")
+        .select("*")
+        .eq("id", reportId)
+        .maybeSingle();
+
+      if (reportError) throw reportError;
+      if (!report) {
+        return jsonResponse({ error: "Report not found" }, 404);
+      }
+
+      let reporterProfile = null;
+      if (report.reporter_id) {
+        const { data: reporterRow, error: reporterError } = await client
+          .from("profiles")
+          .select("*")
+          .eq("id", report.reporter_id)
+          .maybeSingle();
+
+        if (reporterError) throw reporterError;
+        reporterProfile = reporterRow || null;
+      }
+
+      let reviewerProfile = null;
+      if (report.reviewed_by) {
+        const { data: reviewerRow, error: reviewerError } = await client
+          .from("profiles")
+          .select("*")
+          .eq("id", report.reviewed_by)
+          .maybeSingle();
+
+        if (reviewerError) throw reviewerError;
+        reviewerProfile = reviewerRow || null;
+      }
+
+      const targetDetails = await fetchReportTargetDetails(client, report.target_type, report.target_id);
+
+      return jsonResponse({
+        report: {
+          ...report,
+          reporter_name: reporterProfile?.full_name || "Unknown",
+          reporter_email: reporterProfile?.email || "",
+          reviewer_name: reviewerProfile?.full_name || "",
+        },
+        reporter_profile: reporterProfile,
+        reviewer_profile: reviewerProfile,
+        target: targetDetails,
+      });
+    }
+
+    if (action === "lift_report_target_ban") {
+      const reportId = String(params.reportId || "").trim();
+
+      if (!reportId) {
+        return jsonResponse({ error: "Missing reportId" }, 400);
+      }
+
+      let supportsTargetAccountActionColumns = true;
+      let existingReport: any = null;
+
+      {
+        const { data, error } = await client
+          .from("reports")
+          .select("id, status, reporter_id, target_type, target_id, moderation_revision, target_account_action, target_account_action_expires_at")
+          .eq("id", reportId)
+          .maybeSingle();
+
+        if (!error) {
+          existingReport = data;
+        } else if (isMissingColumnError(error)) {
+          supportsTargetAccountActionColumns = false;
+
+          const fallback = await client
+            .from("reports")
+            .select("id, status, reporter_id, target_type, target_id")
+            .eq("id", reportId)
+            .maybeSingle();
+
+          if (fallback.error) throw fallback.error;
+          existingReport = fallback.data;
+        } else {
+          throw error;
+        }
+      }
+
+      if (!existingReport) {
+        return jsonResponse({ error: "Report not found" }, 404);
+      }
+
+      const targetOwnerId = await resolveReportTargetOwnerId(client, existingReport);
+      if (!targetOwnerId) {
+        return jsonResponse({ error: "Reported account is unavailable." }, 400);
+      }
+
+      const nowIso = new Date().toISOString();
+      const accountActionResult = await applyTargetAccountAction(client, targetOwnerId, "lift_ban", {
+        reportId,
+        adminUserId: userId,
+        nowIso,
+        banExpiresAt: null,
+      });
+
+      if (accountActionResult.error) {
+        return jsonResponse({ error: accountActionResult.error }, 400);
+      }
+
+      let updatedReport: any = {
+        ...existingReport,
+        reviewed_by: userId,
+        reviewed_at: nowIso,
+        target_account_action: "lift_ban",
+        target_account_action_expires_at: null,
+      };
+
+      if (supportsTargetAccountActionColumns) {
+        const { data, error } = await client
+          .from("reports")
+          .update({
+            reviewed_by: userId,
+            reviewed_at: nowIso,
+            target_account_action: "lift_ban",
+            target_account_action_expires_at: null,
+          })
+          .eq("id", reportId)
+          .select("id, status, target_type, target_id, moderation_revision, reviewed_by, reviewed_at, target_account_action, target_account_action_expires_at")
+          .maybeSingle();
+
+        if (error) {
+          if (isMissingColumnError(error)) {
+            supportsTargetAccountActionColumns = false;
+          } else {
+            throw error;
+          }
+        } else if (data) {
+          updatedReport = data;
+        }
+      }
+
+      if (updatedReport.moderation_revision > existingReport.moderation_revision) {
+        await scheduleSavedReportEmails(client, reportId, updatedReport.moderation_revision);
+      }
+
+      return jsonResponse({
+        item: {
+          ...updatedReport,
+          target_account_action: "lift_ban",
+          target_account_action_expires_at: null,
+        },
+        usedTargetAccountActionLegacy: !supportsTargetAccountActionColumns,
+        success: true,
+      });
+    }
+
+    if (action === "refund_booking_report") {
+      const reportId = String(params.reportId || "").trim();
+      const notes = normalizeText(params.notes, 2000);
+
+      if (!reportId) {
+        return jsonResponse({ error: "reportId is required" }, 400);
+      }
+
+      const { data: refundResult, error: refundError } = await client.rpc(
+        "admin_refund_reported_booking",
+        {
+          p_report_id: reportId,
+          p_admin_user_id: userId,
+          p_notes: notes,
+        },
+      );
+
+      if (refundError) {
+        if (refundError.code === "42883" || refundError.code === "PGRST202") {
+          return jsonResponse(
+            { error: "Booking refunds require the latest database migration." },
+            503,
+          );
+        }
+        return jsonResponse({ error: refundError.message }, 400);
+      }
+
+      const { data: updatedReport, error: updatedReportError } = await client
+        .from("reports")
+        .select("id, status, target_type, target_id, moderation_revision, reviewed_by, reviewed_at, moderation_action, moderation_notes, escalation_status, escalated_at, escalation_reason")
+        .eq("id", reportId)
+        .maybeSingle();
+
+      if (updatedReportError) throw updatedReportError;
+
+      return jsonResponse({
+        success: true,
+        refund: refundResult,
+        item: updatedReport,
+      });
+    }
+
+    if (action === "update_report_status") {
+      const reportId = String(params.reportId || "").trim();
+      const nextStatus = parseReportStatus(params.nextStatus);
+      const hasModerationActionParam =
+        params.moderationAction !== undefined &&
+        params.moderationAction !== null &&
+        String(params.moderationAction).trim().length > 0;
+      const moderationAction = hasModerationActionParam
+        ? parseReportModerationAction(params.moderationAction)
+        : ("none" as ReportModerationAction);
+      const targetAccountAction = parseReportTargetAccountAction(params.targetAccountAction);
+      const moderationNotes = normalizeText(params.moderationNotes, 2000);
+      const escalationReason = normalizeText(params.escalationReason, 500);
+
+      if (!reportId || !nextStatus || !moderationAction || !targetAccountAction) {
+        return jsonResponse({ error: "Missing required fields" }, 400);
+      }
+
+      if (moderationAction === "manual_review" && nextStatus !== "pending") {
+        return jsonResponse(
+          { error: "Manual review escalation requires pending status." },
+          400,
+        );
+      }
+
+      const { data: existingReport, error: existingReportError } = await client
+        .from("reports")
+        .select("id, status, reporter_id, target_type, target_id, escalation_status, moderation_revision")
+        .eq("id", reportId)
+        .maybeSingle();
+
+      if (existingReportError) throw existingReportError;
+      if (!existingReport) {
+        return jsonResponse({ error: "Report not found" }, 404);
+      }
+
+      const targetOwnerId = await resolveReportTargetOwnerId(client, existingReport);
+
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const targetAccountActionExpiresAt = getTargetAccountActionExpiresAt(targetAccountAction, now);
+      let supportsTargetAccountActionColumns = false;
+
+      if (targetAccountAction !== "none") {
+        if (!targetOwnerId) {
+          return jsonResponse({ error: "Reported account is unavailable." }, 400);
+        }
+
+        const columnCheck = await client
+          .from("reports")
+          .select("target_account_action, target_account_action_expires_at")
+          .limit(1);
+
+        if (columnCheck.error) {
+          if (isMissingColumnError(columnCheck.error)) {
+            supportsTargetAccountActionColumns = false;
+          } else {
+            throw columnCheck.error;
+          }
+        } else {
+          supportsTargetAccountActionColumns = true;
+        }
+
+        const accountActionResult = await applyTargetAccountAction(client, targetOwnerId, targetAccountAction, {
+          reportId,
+          adminUserId: userId,
+          nowIso,
+          banExpiresAt: targetAccountActionExpiresAt,
+        });
+        if (accountActionResult.error) {
+          return jsonResponse({ error: accountActionResult.error }, 400);
+        }
+      }
+
+      const updatePayload: Record<string, unknown> = {
+        status: nextStatus,
+        reviewed_by: userId,
+        reviewed_at: nowIso,
+        moderation_action: moderationAction,
+        moderation_notes: moderationNotes,
+      };
+
+      if (targetAccountAction !== "none" && supportsTargetAccountActionColumns) {
+        updatePayload.target_account_action = targetAccountAction;
+        updatePayload.target_account_action_expires_at = targetAccountActionExpiresAt;
+      }
+
+      if (moderationAction === "manual_review") {
+        updatePayload.escalation_status = "manual_review";
+        updatePayload.escalated_at = nowIso;
+        updatePayload.escalation_reason =
+          escalationReason || moderationNotes || "Escalated by admin for manual review.";
+      } else {
+        updatePayload.escalation_status = "none";
+
+        if (nextStatus === "pending" || existingReport.escalation_status === "manual_review") {
+          updatePayload.escalated_at = null;
+          updatePayload.escalation_reason = null;
+        } else {
+          updatePayload.escalation_reason = escalationReason;
+        }
+      }
+
+      let updatedReport: Record<string, unknown> | null = null;
+      let usedLegacy = false;
+      let usedTargetAccountActionLegacy = targetAccountAction !== "none" && !supportsTargetAccountActionColumns;
+
+      {
+        const updateSelect = targetAccountAction !== "none" && supportsTargetAccountActionColumns
+          ? "id, status, target_type, target_id, moderation_revision, reviewed_by, reviewed_at, moderation_action, moderation_notes, target_account_action, target_account_action_expires_at, escalation_status, escalated_at, escalation_reason"
+          : "id, status, target_type, target_id, moderation_revision, reviewed_by, reviewed_at, moderation_action, moderation_notes, escalation_status, escalated_at, escalation_reason";
+
+        const { data, error } = await client
+          .from("reports")
+          .update(updatePayload)
+          .eq("id", reportId)
+          .select(updateSelect)
+          .maybeSingle();
+
+        if (!error) {
+          updatedReport = data;
+        } else if (isMissingColumnError(error)) {
+          const needsModerationColumns =
+            moderationAction !== "none" ||
+            moderationNotes !== null ||
+            escalationReason !== null ||
+            nextStatus === "pending";
+
+          if (needsModerationColumns) {
+            return jsonResponse(
+              {
+                error:
+                  "Report moderation workflow requires the latest database migration. Apply the new reports moderation migration first.",
+              },
+              503,
+            );
+          }
+
+          usedLegacy = true;
+
+          const fallback = await client
+            .from("reports")
+            .update({ status: nextStatus })
+            .eq("id", reportId)
+            .select("id, status, target_type, target_id")
+            .maybeSingle();
+
+          if (fallback.error) throw fallback.error;
+          updatedReport = fallback.data;
+        } else {
+          throw error;
+        }
+      }
+
+      if (!updatedReport) {
+        return jsonResponse({ error: "Report not found" }, 404);
+      }
+
+      // The report trigger commits inbox notifications with this saved revision.
+      if (Number(updatedReport.moderation_revision) > Number(existingReport.moderation_revision)) {
+        await scheduleSavedReportEmails(client, reportId, updatedReport.moderation_revision);
+      }
+
+      return jsonResponse({
+        item: {
+          ...updatedReport,
+          moderation_action: updatedReport.moderation_action || moderationAction,
+          moderation_notes:
+            updatedReport.moderation_notes !== undefined
+              ? updatedReport.moderation_notes
+              : moderationNotes,
+          escalation_status:
+            updatedReport.escalation_status !== undefined
+              ? updatedReport.escalation_status
+              : (moderationAction === "manual_review" ? "manual_review" : "none"),
+          target_account_action:
+            updatedReport.target_account_action !== undefined
+              ? updatedReport.target_account_action
+              : targetAccountAction,
+          target_account_action_expires_at:
+            updatedReport.target_account_action_expires_at !== undefined
+              ? updatedReport.target_account_action_expires_at
+              : targetAccountActionExpiresAt,
+        },
+        usedLegacy,
+        usedTargetAccountActionLegacy,
+      });
+    }
+
+    // ADMIN: FETCH BOOKING INCIDENTS
+    if (action === "admin_fetch_booking_incidents") {
+      const statusFilter = String(params.statusFilter || "all").trim().toLowerCase();
+      const limit = Math.min(Math.max(Number(params.limit || 100), 1), 200);
+
+      let incidentQuery = client
+        .from("booking_incidents")
+        .select(
+          "id, booking_id, reporter_user_id, counterparty_user_id, issue_type, status, reporter_notes, counterparty_notes, response_deadline_at, responded_at, resolved_at, resolved_by_user_id, resolution, created_at",
+        )
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+      if (statusFilter !== "all") {
+        incidentQuery = incidentQuery.eq("status", statusFilter);
+      }
+
+      const { data: incidents, error: incidentError } = await incidentQuery;
+
+      if (incidentError) {
+        if (isMissingTableError(incidentError, "booking_incidents")) {
+          return jsonResponse(
+            { error: "Booking incidents are not available yet. Apply the latest booking incident migration first." },
+            503,
+          );
+        }
+        throw incidentError;
+      }
+
+      const bookingIds = [...new Set((incidents || []).map((item: any) => item.booking_id).filter(Boolean))];
+      const profileIds = [
+        ...new Set(
+          (incidents || [])
+            .flatMap((item: any) => [item.reporter_user_id, item.counterparty_user_id, item.resolved_by_user_id])
+            .filter(Boolean),
+        ),
+      ];
+
+      const bookingMap = new Map<string, any>();
+      if (bookingIds.length > 0) {
+        const { data: bookings, error: bookingsError } = await client
+          .from("studio_bookings")
+          .select("id, booking_date, start_time, end_time, studio_id, studio:studios(name)")
+          .in("id", bookingIds);
+        if (bookingsError) throw bookingsError;
+        (bookings || []).forEach((b: any) => bookingMap.set(b.id, b));
+      }
+
+      const profileMap = new Map<string, any>();
+      if (profileIds.length > 0) {
+        const { data: profiles, error: profilesError } = await client
+          .from("profiles")
+          .select("id, full_name, email")
+          .in("id", profileIds);
+        if (profilesError) throw profilesError;
+        (profiles || []).forEach((p: any) => profileMap.set(p.id, p));
+      }
+
+      const items = (incidents || []).map((incident: any) => {
+        const booking = bookingMap.get(incident.booking_id);
+        const reporter = profileMap.get(incident.reporter_user_id);
+        const counterparty = profileMap.get(incident.counterparty_user_id);
+        return {
+          ...incident,
+          studio_name: booking?.studio?.name || null,
+          booking_date: booking?.booking_date || null,
+          booking_start_time: booking?.start_time || null,
+          booking_end_time: booking?.end_time || null,
+          reporter_name: reporter?.full_name || "Unknown",
+          reporter_email: reporter?.email || "",
+          counterparty_name: counterparty?.full_name || "Unknown",
+          counterparty_email: counterparty?.email || "",
+        };
+      });
+
+      return jsonResponse({ items });
+    }
+
+    // ADMIN: RESOLVE BOOKING INCIDENT
+    if (action === "admin_resolve_booking_incident") {
+      const { incident_id, resolution, admin_notes } = params;
+      const allowedResolutions = ["resolved_refund", "resolved_no_refund", "dismissed"];
+
+      if (!incident_id || !allowedResolutions.includes(String(resolution || ""))) {
+        return jsonResponse(
+          { error: "incident_id and valid resolution are required (resolved_refund | resolved_no_refund | dismissed)." },
+          400,
+        );
+      }
+
+      const { data: incident, error: fetchError } = await client
+        .from("booking_incidents")
+        .select("id, booking_id, status, reporter_user_id, counterparty_user_id")
+        .eq("id", incident_id)
+        .maybeSingle();
+
+      if (fetchError) {
+        if (isMissingTableError(fetchError, "booking_incidents")) {
+          return jsonResponse(
+            { error: "Booking incidents are not available yet. Apply the latest booking incident migration first." },
+            503,
+          );
+        }
+        throw fetchError;
+      }
+
+      if (!incident) {
+        return jsonResponse({ error: "Incident not found." }, 404);
+      }
+
+      if (!["open", "responded", "manual_review"].includes(incident.status)) {
+        return jsonResponse({ error: "This incident is already resolved." }, 409);
+      }
+
+      const fallbackNote =
+        resolution === "resolved_refund"
+          ? "Admin resolved incident with refund outcome."
+          : resolution === "resolved_no_refund"
+            ? "Admin resolved incident with no-refund outcome."
+            : "Admin dismissed incident.";
+
+      const resolverNotes =
+        typeof admin_notes === "string" && admin_notes.trim() ? admin_notes.trim() : fallbackNote;
+
+      const { data: updatedIncident, error: updateError } = await client
+        .from("booking_incidents")
+        .update({
+          status: resolution,
+          resolved_at: new Date().toISOString(),
+          resolved_by_user_id: userId,
+          resolution: resolverNotes,
+        })
+        .eq("id", incident_id)
+        .select("*")
+        .single();
+
+      if (updateError) throw updateError;
+
+      if (resolution !== "resolved_refund" && incident.booking_id) {
+        const { error: payoutError } = await client.rpc("release_booking_payout", {
+          p_booking_id: incident.booking_id,
+          p_reason: `Admin resolved incident ${incident_id}: ${resolution}`,
+        });
+        if (payoutError && payoutError.code !== "42883" && payoutError.code !== "PGRST202") {
+          console.error("Failed to release booking payout:", payoutError);
+        }
+      }
+
+      const notifyTargets = [incident.reporter_user_id, incident.counterparty_user_id].filter(Boolean) as string[];
+      for (const targetUserId of [...new Set(notifyTargets)]) {
+        const notificationPayload = {
+          user_id: targetUserId,
+          type: "info",
+          title: "Booking Incident Resolved",
+          message: `An admin resolved your booking incident as ${String(resolution).replace(/_/g, " ")}.`,
+          read: false,
+          meta: { incident_id, booking_id: incident.booking_id, resolution, event_type: "booking_incident_resolved_by_admin" },
+        };
+
+        await client.from("notifications").insert(notificationPayload).then(({ error }: any) => {
+          if (!error) {
+            scheduleCoreActionEmailForNotification(client, notificationPayload, { source: "admin-reports-management" });
+          }
+        });
+      }
+
+      return jsonResponse({ success: true, incident: updatedIncident });
+    }
+
+    return jsonResponse({ error: `Unsupported action: ${action}` }, 400);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unexpected error";
+    return jsonResponse({ error: message }, 500);
+  }
+});

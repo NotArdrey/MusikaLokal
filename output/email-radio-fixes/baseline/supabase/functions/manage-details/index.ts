@@ -1,0 +1,570 @@
+// @ts-ignore
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+// @ts-ignore
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+
+const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
+}
+
+type NormalizedReportTargetType = 'group' | 'studio' | 'gig' | 'profile' | 'product' | 'playlist' | 'feed_post' | 'booking'
+type FavoriteTargetType = 'group' | 'studio' | 'gig' | 'profile' | 'production_team'
+
+const reportTargetTableMap: Record<NormalizedReportTargetType, string> = {
+    group: 'groups',
+    studio: 'studios',
+    gig: 'gigs',
+    profile: 'profiles',
+    product: 'products',
+    playlist: 'playlists',
+    feed_post: 'feed_posts',
+    booking: 'studio_bookings',
+}
+
+const favoriteTargetColumnMap: Record<FavoriteTargetType, string> = {
+    group: 'group_id',
+    studio: 'studio_id',
+    gig: 'gig_id',
+    profile: 'profile_id',
+    production_team: 'production_team_id',
+}
+
+const uuidPattern =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+const isUuid = (value: string): boolean => uuidPattern.test(value)
+
+const normalizeReportTargetType = (rawType: unknown): NormalizedReportTargetType | null => {
+    const value = String(rawType || '').trim().toLowerCase()
+
+    if (value === 'venue') return 'studio'
+    if (value === 'artist' || value === 'user') return 'profile'
+    if (value === 'music') return 'playlist'
+    if (value === 'post') return 'feed_post'
+    if (
+        value === 'group' ||
+        value === 'studio' ||
+        value === 'gig' ||
+        value === 'profile' ||
+        value === 'product' ||
+        value === 'playlist' ||
+        value === 'feed_post'
+    ) {
+        return value
+    }
+
+    return null
+}
+
+const normalizeFavoriteTargetType = (rawType: unknown): FavoriteTargetType | null => {
+    const value = String(rawType || '').trim().toLowerCase()
+
+    if (value === 'venue') return 'studio'
+    if (value === 'artist' || value === 'user') return 'profile'
+    if (value === 'production' || value === 'production-team') return 'production_team'
+    if (
+        value === 'group' ||
+        value === 'studio' ||
+        value === 'gig' ||
+        value === 'profile' ||
+        value === 'production_team'
+    ) {
+        return value
+    }
+
+    return null
+}
+
+const getDetailsViewName = (rawType: unknown): string | null => {
+    const value = String(rawType || '').trim().toLowerCase()
+
+    if (value === 'venue') return 'studios_with_stats'
+    if (value === 'artist' || value === 'musician' || value === 'profile') return 'profiles_with_stats'
+    if (value === 'group') return 'groups_with_stats'
+    if (value === 'studio') return 'studios_with_stats'
+    if (value === 'gig') return 'gigs_with_stats'
+
+    return null
+}
+
+const getRelatedListingViewName = (rawType: unknown): string => {
+    const value = String(rawType || '').trim().toLowerCase()
+    if (value === 'studio' || value === 'venue') return 'studios_with_stats'
+    if (value === 'gig') return 'gigs_with_stats'
+    if (value === 'artist' || value === 'musician' || value === 'profile') return 'profiles_with_stats'
+    return 'groups_with_stats'
+}
+
+const getFavoriteTargetColumn = (type: FavoriteTargetType): string => favoriteTargetColumnMap[type]
+
+const getReviewTargetColumn = (type: FavoriteTargetType): string =>
+    type === 'profile' ? 'user_id' : getFavoriteTargetColumn(type)
+
+const getReviewContent = (row: any): string | null => {
+    const candidates = [row?.content, row?.comment, row?.feedback, row?.body, row?.review_text]
+
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim().length > 0) {
+            return candidate.trim()
+        }
+    }
+
+    return null
+}
+
+const mapReviewRow = (row: any) => ({
+    ...row,
+    author: row?.author ?? row?.profiles ?? null,
+    content: getReviewContent(row),
+    likes_count: Number(row?.likes_count ?? row?.computed_likes_count ?? 0),
+})
+
+const getNumericValue = (...candidates: unknown[]): number => {
+    for (const candidate of candidates) {
+        if (candidate === null || candidate === undefined || candidate === '') continue
+
+        const parsed = Number(candidate)
+        if (Number.isFinite(parsed)) return parsed
+    }
+
+    return 0
+}
+
+const normalizeRequiredText = (rawValue: unknown, maxLength: number): string => {
+    const value = typeof rawValue === 'string' ? rawValue.trim() : ''
+    if (!value) return ''
+    return value.slice(0, maxLength)
+}
+
+const normalizeOptionalText = (rawValue: unknown, maxLength: number): string | null => {
+    if (typeof rawValue !== 'string') return null
+    const value = rawValue.trim()
+    if (!value) return null
+    return value.slice(0, maxLength)
+}
+
+const getFavoritesCount = async (
+    client: any,
+    type: FavoriteTargetType,
+    id: string,
+): Promise<number> => {
+    const { count, error } = await client
+        .from('favorites')
+        .select('id', { count: 'exact', head: true })
+        .eq(getFavoriteTargetColumn(type), id)
+
+    if (error) throw error
+    return count || 0
+}
+
+const assertReportTargetExists = async (
+    client: any,
+    targetType: NormalizedReportTargetType,
+    targetId: string,
+) => {
+    const tableName = reportTargetTableMap[targetType]
+
+    const { data, error } = await client
+        .from(tableName)
+        .select('id')
+        .eq('id', targetId)
+        .maybeSingle()
+
+    if (error) throw error
+    if (!data) {
+        throw new Error(`Cannot report missing ${targetType}.`)
+    }
+}
+
+serve(async (req: Request) => {
+    if (req.method === 'OPTIONS') {
+        return new Response('ok', { headers: corsHeaders })
+    }
+
+    try {
+        const supabaseClient = createClient(
+            // @ts-ignore
+            Deno.env.get('SUPABASE_URL') ?? '',
+            // @ts-ignore
+            Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+            { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
+        )
+
+        const { action, ...params } = await req.json()
+        const { userId, type, id } = params // type: 'group' | 'studio' | 'gig'
+
+        // 1. FETCH DETAILS (using views with computed stats)
+        if (action === 'fetch') {
+            const viewName = getDetailsViewName(type)
+            const normalizedFavoriteType = normalizeFavoriteTargetType(type)
+            if (!viewName || !normalizedFavoriteType) {
+                throw new Error('Invalid details target type.')
+            }
+
+            // Fetch Main Entity from view with computed stats
+            const { data: entity, error: entityError } = await supabaseClient
+                .from(viewName)
+                .select('*')
+                .eq('id', id)
+                .single()
+
+            if (entityError) throw entityError
+
+            if (type === 'group') {
+                const { data: mediaRows, error: mediaError } = await supabaseClient
+                    .from('group_media')
+                    .select('media_url, sort_order, created_at')
+                    .eq('group_id', id)
+                    .eq('media_type', 'image')
+                    .order('sort_order', { ascending: true })
+                    .order('created_at', { ascending: true })
+
+                if (!mediaError) {
+                    const mediaImages = (mediaRows || [])
+                        .map((row: any) => row.media_url)
+                        .filter((url: any) => typeof url === 'string' && url.trim().length > 0)
+
+                    if (mediaImages.length > 0) {
+                        entity.images = mediaImages
+                    } else if (!Array.isArray(entity.images)) {
+                        entity.images = []
+                    }
+                } else if (!Array.isArray(entity.images)) {
+                    entity.images = []
+                }
+            }
+
+            const ownerId =
+                normalizedFavoriteType === 'gig'
+                    ? entity.organizer_id
+                    : normalizedFavoriteType === 'profile'
+                      ? entity.id
+                      : entity.owner_id
+            const { data: ownerProfile } = ownerId
+                ? await supabaseClient
+                    .from('profiles')
+                    .select('id, full_name, avatar_url, role')
+                    .eq('id', ownerId)
+                    .maybeSingle()
+                : { data: null }
+
+            // Check Ownership
+            let isOwner = false
+            if (normalizedFavoriteType === 'gig') {
+                isOwner = entity.organizer_id === userId
+            } else if (normalizedFavoriteType === 'profile') {
+                isOwner = entity.id === userId
+            } else {
+                isOwner = entity.owner_id === userId
+            }
+
+            // Check if Favorited for current viewer
+            let isFavorited = false
+            if (userId) {
+                const { count, error: favoriteCheckError } = await supabaseClient
+                    .from('favorites')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('user_id', userId)
+                    .eq(getFavoriteTargetColumn(normalizedFavoriteType), id)
+
+                if (favoriteCheckError) throw favoriteCheckError
+                isFavorited = (count || 0) > 0
+            }
+
+            const favoritesCount = await getFavoritesCount(supabaseClient, normalizedFavoriteType, id)
+
+            let mappedReviews: any[] = []
+            if (params.includeReviews !== false) {
+                const { data: reviews, error: reviewsError } = await supabaseClient
+                    .from('reviews')
+                    .select('*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url, created_at)')
+                    .eq(getReviewTargetColumn(normalizedFavoriteType), id)
+                    .order('created_at', { ascending: false })
+                    .limit(5)
+                if (reviewsError) console.warn('Could not fetch listing reviews:', reviewsError)
+                mappedReviews = (reviews || []).map(mapReviewRow)
+            }
+
+            let auxiliary: Record<string, any> = {}
+
+            if (normalizedFavoriteType === 'group') {
+                const [settingsResult, membersResult] = await Promise.all([
+                    supabaseClient
+                        .from('groups')
+                        .select('open_group_applications')
+                        .eq('id', id)
+                        .maybeSingle(),
+                    supabaseClient
+                        .from('group_members')
+                        .select('user_id, role, profiles:user_id(full_name, avatar_url)')
+                        .eq('group_id', id),
+                ])
+
+                auxiliary = {
+                    ...auxiliary,
+                    group_settings: settingsResult.data || null,
+                    group_members: membersResult.data || [],
+                }
+            }
+
+            if (normalizedFavoriteType === 'studio') {
+                const [
+                    operatingHoursResult,
+                    dateOverridesResult,
+                    studioSettingsResult,
+                    studioTypesResult,
+                    studioPromotionsResult,
+                ] = await Promise.all([
+                    supabaseClient
+                        .from('studio_operating_hours')
+                        .select('*')
+                        .eq('studio_id', id)
+                        .order('slot_order', { ascending: true }),
+                    supabaseClient
+                        .from('studio_date_overrides')
+                        .select('*')
+                        .eq('studio_id', id)
+                        .order('override_date', { ascending: true })
+                        .order('slot_order', { ascending: true }),
+                    supabaseClient
+                        .from('studio_settings')
+                        .select('*')
+                        .eq('studio_id', id)
+                        .maybeSingle(),
+                    supabaseClient
+                        .from('studio_types')
+                        .select('studio_type')
+                        .eq('studio_id', id),
+                    supabaseClient
+                        .from('studio_promotions')
+                        .select('*')
+                        .eq('studio_id', id)
+                        .eq('is_active', true),
+                ])
+
+                auxiliary = {
+                    ...auxiliary,
+                    operating_hours: operatingHoursResult.data || [],
+                    date_overrides: dateOverridesResult.data || [],
+                    studio_settings: studioSettingsResult.data || null,
+                    studio_types: studioTypesResult.data || [],
+                    promotions: studioPromotionsResult.data || [],
+                }
+            }
+
+            let relatedListings: any[] = []
+            if (entity.embedding) {
+                const { data: relatedMatches } = await supabaseClient.rpc('match_listings', {
+                    query_embedding: entity.embedding,
+                    match_threshold: 0.5,
+                    match_count: 5,
+                    listing_type: type,
+                })
+
+                const relatedIds = (relatedMatches || [])
+                    .map((row: any) => row?.id)
+                    .filter((relatedId: any) => typeof relatedId === 'string' && relatedId !== id)
+
+                if (relatedIds.length > 0) {
+                    const { data: fullRelated } = await supabaseClient
+                        .from(getRelatedListingViewName(type))
+                        .select('*')
+                        .in('id', relatedIds)
+
+                    relatedListings = fullRelated || []
+                }
+            }
+
+            return new Response(JSON.stringify({
+                ...entity,
+                rating: getNumericValue(entity.rating, entity.computed_rating),
+                review_count: getNumericValue(entity.review_count, entity.computed_review_count),
+                is_owner: isOwner,
+                is_favorited: isFavorited,
+                favorites_count: favoritesCount,
+                reviews: mappedReviews,
+                owner_profile: ownerProfile || null,
+                related_listings: relatedListings,
+                auxiliary,
+            }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
+        // 2. TOGGLE FAVORITE
+        if (action === 'toggle_favorite') {
+            const normalizedType = normalizeFavoriteTargetType(type)
+            if (!normalizedType) {
+                throw new Error('Invalid favorite target type.')
+            }
+
+            const favoriteColumn = getFavoriteTargetColumn(normalizedType)
+
+            // Read all matches so existing duplicate favorites can still be removed.
+            const { data: existingRows, error: existingError } = await supabaseClient
+                .from('favorites')
+                .select('id')
+                .eq('user_id', userId)
+                .eq(favoriteColumn, id)
+
+            if (existingError) throw existingError
+
+            if (existingRows?.length) {
+                // Remove every matching row so older duplicate data cannot keep the item bookmarked.
+                const { error: deleteError } = await supabaseClient
+                    .from('favorites')
+                    .delete()
+                    .eq('user_id', userId)
+                    .eq(favoriteColumn, id)
+                if (deleteError) throw deleteError
+
+                const favoritesCount = await getFavoritesCount(supabaseClient, normalizedType, id)
+                return new Response(
+                    JSON.stringify({ is_favorited: false, favorites_count: favoritesCount }),
+                    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+                )
+            } else {
+                // Add
+                const payload: any = { user_id: userId }
+                payload[favoriteColumn] = id
+
+                const { error: insertError } = await supabaseClient.from('favorites').insert(payload)
+                if (insertError) {
+                    if (insertError.code !== '23505') throw insertError
+
+                    // A concurrent request may have inserted this favorite after the read above.
+                    const { data: concurrentRows, error: concurrentReadError } = await supabaseClient
+                        .from('favorites')
+                        .select('id')
+                        .eq('user_id', userId)
+                        .eq(favoriteColumn, id)
+                        .limit(1)
+                    if (concurrentReadError) throw concurrentReadError
+                    if (!concurrentRows?.length) throw insertError
+                }
+
+                const favoritesCount = await getFavoritesCount(supabaseClient, normalizedType, id)
+                return new Response(
+                    JSON.stringify({ is_favorited: true, favorites_count: favoritesCount }),
+                    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+                )
+            }
+        }
+
+        // 3. SUBMIT REVIEW
+        if (action === 'review') {
+            return new Response(
+                JSON.stringify({ error: 'Listing reviews are retired. Submit a review from a completed booking.' }),
+                { status: 410, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+            )
+        }
+
+        // 4. REPORT
+        if (action === 'report') {
+            const normalizedUserId = String(userId || '').trim()
+            const normalizedTargetType = normalizeReportTargetType(type)
+            const normalizedTargetId = String(id || '').trim()
+            const normalizedReason = normalizeRequiredText(params.reason, 180)
+            const normalizedDetails = normalizeOptionalText(params.details, 1000)
+
+            if (!normalizedUserId || !isUuid(normalizedUserId)) {
+                throw new Error('A valid userId is required to submit a report.')
+            }
+
+            if (!normalizedTargetType) {
+                throw new Error('Invalid report target type.')
+            }
+
+            if (!normalizedTargetId || !isUuid(normalizedTargetId)) {
+                throw new Error('Invalid report target id.')
+            }
+
+            if (!normalizedReason) {
+                throw new Error('Report reason is required.')
+            }
+
+            if (normalizedTargetType === 'profile' && normalizedTargetId === normalizedUserId) {
+                throw new Error('You cannot report your own profile.')
+            }
+
+            await assertReportTargetExists(
+                supabaseClient,
+                normalizedTargetType,
+                normalizedTargetId,
+            )
+
+            if (normalizedTargetType === 'booking') {
+                const { data: booking, error: bookingError } = await supabaseClient
+                    .from('studio_bookings')
+                    .select('user_id')
+                    .eq('id', normalizedTargetId)
+                    .maybeSingle()
+
+                if (bookingError) throw bookingError
+                if (!booking || booking.user_id !== normalizedUserId) {
+                    throw new Error('You can only report your own booking.')
+                }
+            }
+
+            const { data: existingPendingReport, error: existingPendingReportError } = await supabaseClient
+                .from('reports')
+                .select('id')
+                .eq('reporter_id', normalizedUserId)
+                .eq('target_type', normalizedTargetType)
+                .eq('target_id', normalizedTargetId)
+                .eq('reason', normalizedReason)
+                .eq('status', 'pending')
+                .limit(1)
+                .maybeSingle()
+
+            if (existingPendingReportError) throw existingPendingReportError
+
+            if (existingPendingReport?.id) {
+                return new Response(
+                    JSON.stringify({
+                        id: existingPendingReport.id,
+                        already_reported: true,
+                    }),
+                    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+                )
+            }
+
+            const { data, error } = await supabaseClient
+                .from('reports')
+                .insert({
+                    reporter_id: normalizedUserId,
+                    target_type: normalizedTargetType,
+                    target_id: normalizedTargetId,
+                    reason: normalizedReason,
+                    details: normalizedDetails,
+                })
+                .select()
+
+            if (error) {
+                const errorCode = String(error?.code || '').toUpperCase()
+
+                if (errorCode === '23505') {
+                    throw new Error('You already have a pending report for this target and reason.')
+                }
+
+                if (errorCode === '23503') {
+                    throw new Error('This target no longer exists. Please refresh and try again.')
+                }
+
+                throw error
+            }
+
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+        }
+
+        throw new Error('Invalid action')
+
+    } catch (error: any) {
+        return new Response(JSON.stringify({ error: error.message }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 400,
+        })
+    }
+})

@@ -1,0 +1,220 @@
+{
+  "comparison": "Current working tree against HEAD; HEAD does not include earlier uncommitted bug fixes.",
+  "files": [
+    {
+      "file": "mobile/app/(tabs)/bookings.tsx",
+      "currentErrors": 4,
+      "headErrors": 4,
+      "currentWarnings": 14,
+      "headWarnings": 13,
+      "currentErrorLocations": [
+        {
+          "line": 2111,
+          "rule": "react-hooks/set-state-in-effect"
+        },
+        {
+          "line": 2151,
+          "rule": "react-hooks/set-state-in-effect"
+        },
+        {
+          "line": 6024,
+          "rule": "react-hooks/set-state-in-effect"
+        },
+        {
+          "line": 6235,
+          "rule": "react-hooks/set-state-in-effect"
+        }
+      ]
+    },
+    {
+      "file": "mobile/app/(tabs)/feed.tsx",
+      "currentErrors": 12,
+      "headErrors": 12,
+      "currentWarnings": 4,
+      "headWarnings": 4,
+      "currentErrorLocations": [
+        {
+          "line": 2627,
+          "rule": "react-hooks/set-state-in-effect"
+        },
+        {
+          "line": 2693,
+          "rule": "react-hooks/set-state-in-effect"
+        },
+        {
+          "line": 3073,
+          "rule": "react-hooks/preserve-manual-memoization"
+        },
+        {
+          "line": 3147,
+          "rule": "react-hooks/preserve-manual-memoization"
+        },
+        {
+          "line": 3153,
+          "rule": "react-hooks/preserve-manual-memoization"
+        },
+        {
+          "line": 3719,
+          "rule": "react-hooks/refs"
+        },
+        {
+          "line": 4149,
+          "rule": "react-hooks/set-state-in-effect"
+        },
+        {
+          "line": 5709,
+          "rule": "react-hooks/set-state-in-effect"
+        },
+        {
+          "line": 5757,
+          "rule": "react-hooks/set-state-in-effect"
+        },
+        {
+          "line": 7330,
+          "rule": "react-hooks/refs"
+        },
+        {
+          "line": 7331,
+          "rule": "react-hooks/refs"
+        },
+        {
+          "line": 7356,
+          "rule": "react-hooks/refs"
+        }
+      ]
+    },
+    {
+      "file": "mobile/app/(tabs)/marketplace.tsx",
+      "currentErrors": 0,
+      "headErrors": 0,
+      "currentWarnings": 1,
+      "headWarnings": 1,
+      "currentErrorLocations": []
+    },
+    {
+      "file": "mobile/src/components/header.tsx",
+      "currentErrors": 0,
+      "headErrors": 1,
+      "currentWarnings": 0,
+      "headWarnings": 0,
+      "currentErrorLocations": []
+    },
+    {
+      "file": "mobile/src/components/CachedImage.tsx",
+      "currentErrors": 1,
+      "headErrors": 1,
+      "currentWarnings": 0,
+      "headWarnings": 0,
+      "currentErrorLocations": [
+        {
+          "line": 108,
+          "rule": "react-hooks/set-state-in-effect"
+        }
+      ]
+    },
+    {
+      "file": "mobile/src/components/ChatScreen.tsx",
+      "currentErrors": 7,
+      "headErrors": 7,
+      "currentWarnings": 0,
+      "headWarnings": 0,
+      "currentErrorLocations": [
+        {
+          "line": 133,
+          "rule": "react-hooks/refs"
+        },
+        {
+          "line": 133,
+          "rule": "react-hooks/refs"
+        },
+        {
+          "line": 133,
+          "rule": "react-hooks/refs"
+        },
+        {
+          "line": 133,
+          "rule": "react-hooks/refs"
+        },
+        {
+          "line": 133,
+          "rule": "react-hooks/refs"
+        },
+        {
+          "line": 143,
+          "rule": "react-hooks/set-state-in-effect"
+        },
+        {
+          "line": 773,
+          "rule": "react-hooks/purity"
+        }
+      ]
+    },
+    {
+      "file": "mobile/src/components/PostDetailsModal.tsx",
+      "currentErrors": 1,
+      "headErrors": 1,
+      "currentWarnings": 0,
+      "headWarnings": 0,
+      "currentErrorLocations": [
+        {
+          "line": 462,
+          "rule": "react-hooks/set-state-in-effect"
+        }
+      ]
+    },
+    {
+      "file": "mobile/src/components/BookingDetailsSheet.tsx",
+      "currentErrors": 0,
+      "headErrors": 0,
+      "currentWarnings": 1,
+      "headWarnings": 1,
+      "currentErrorLocations": []
+    },
+    {
+      "file": "mobile/src/components/ProductionTeamDetailsSheet.tsx",
+      "currentErrors": 0,
+      "headErrors": 0,
+      "currentWarnings": 2,
+      "headWarnings": 2,
+      "currentErrorLocations": []
+    },
+    {
+      "file": "mobile/src/hooks/useChat.ts",
+      "currentErrors": 2,
+      "headErrors": 3,
+      "currentWarnings": 0,
+      "headWarnings": 0,
+      "currentErrorLocations": [
+        {
+          "line": 727,
+          "rule": "react-hooks/set-state-in-effect"
+        },
+        {
+          "line": 1498,
+          "rule": "react-hooks/set-state-in-effect"
+        }
+      ]
+    },
+    {
+      "file": "web/src/components/CachedImage.tsx",
+      "currentErrors": 1,
+      "headErrors": 1,
+      "currentWarnings": 0,
+      "headWarnings": 0,
+      "currentErrorLocations": [
+        {
+          "line": 92,
+          "rule": "react-hooks/set-state-in-effect"
+        }
+      ]
+    },
+    {
+      "file": "web/src/admin/cache.ts",
+      "currentErrors": 0,
+      "headErrors": 0,
+      "currentWarnings": 0,
+      "headWarnings": 0,
+      "currentErrorLocations": []
+    }
+  ]
+}

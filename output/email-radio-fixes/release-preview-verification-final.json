@@ -1,0 +1,10 @@
+{
+  "website": "https://musika-lokal-drwjxnkz7-notardreys-projects.vercel.app",
+  "downloadUrl": "https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/android-releases/android/testing/5485f0131bf7b9ee9bb5b0bf8d119705a61f272d012a5f7533f4395b514b1157/musikalokal-testing.apk?download=MusikaLokal.apk",
+  "sha256": "5485f0131bf7b9ee9bb5b0bf8d119705a61f272d012a5f7533f4395b514b1157",
+  "sizeBytes": 102456843,
+  "browserTransport": "browser default",
+  "downloadVerifiedAt": "https://musika-lokal-drwjxnkz7-notardreys-projects.vercel.app",
+  "downloadTransport": "browser default",
+  "browserChecks": "passed"
+}

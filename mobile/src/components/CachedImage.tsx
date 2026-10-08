@@ -98,11 +98,15 @@ const CachedImage = ({
     });
   }, [backupSourceUri, cacheVersion, format, quality, resize, targetHeight, targetWidth, transform]);
 
-  const [resolvedUri, setResolvedUri] = useState<string | null>(transformedPrimaryUri || transformedBackupUri);
+  const imageSources = useMemo(() => Array.from(new Set([
+    transformedPrimaryUri, primarySourceUri, transformedBackupUri, backupSourceUri,
+  ])).filter((source): source is string => Boolean(source)),
+  [transformedPrimaryUri, primarySourceUri, transformedBackupUri, backupSourceUri]);
+  const [resolvedUri, setResolvedUri] = useState<string | null>(imageSources[0] || null);
 
   useEffect(() => {
-    setResolvedUri(transformedPrimaryUri || transformedBackupUri);
-  }, [transformedBackupUri, transformedPrimaryUri]);
+    setResolvedUri(imageSources[0] || null);
+  }, [imageSources]);
 
   if (!resolvedUri) return null;
 
@@ -118,22 +122,9 @@ const CachedImage = ({
       enforceEarlyResizing
       recyclingKey={disableRecyclingKey ? undefined : resolvedUri}
       onError={() => {
-        if (primarySourceUri && resolvedUri !== primarySourceUri) {
-          setResolvedUri(primarySourceUri);
-          return;
-        }
-
-        if (transformedBackupUri && resolvedUri !== transformedBackupUri) {
-          setResolvedUri(transformedBackupUri);
-          return;
-        }
-
-        if (backupSourceUri && resolvedUri !== backupSourceUri) {
-          setResolvedUri(backupSourceUri);
-          return;
-        }
-
-        setResolvedUri(null);
+        setResolvedUri((current) => current === resolvedUri
+          ? imageSources[imageSources.indexOf(current) + 1] || null
+          : current);
       }}
     />
   );

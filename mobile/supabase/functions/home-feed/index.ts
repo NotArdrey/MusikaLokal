@@ -111,6 +111,13 @@ interface RecommendationItem {
     organizer_id: string | null;
     description?: string | null;
     avatar_url?: string | null;
+    uploader_id?: string | null;
+    uploader_name?: string | null;
+    uploader_avatar?: string | null;
+    owner_name?: string | null;
+    owner_avatar?: string | null;
+    organizer_name?: string | null;
+    organizer_avatar?: string | null;
     logo_url?: string | null;
     group_type?: string | null;
     studio_type?: string | null;
@@ -1227,7 +1234,27 @@ const fetchCandidates = async (supabaseClient: any, includePosts = false): Promi
         extractedGenres: [],
     }));
 
-    return [...postItems, ...groupItems, ...studioItems, ...gigItems, ...artistItems, ...productionItems];
+    const listingItems = [...groupItems, ...studioItems, ...gigItems, ...productionItems];
+    const uploaderIds = uniqueStrings(listingItems.map((item) => item.owner_id || item.organizer_id));
+    const uploaderById = new Map<string, any>();
+    if (uploaderIds.length > 0) {
+        const { data, error } = await supabaseClient.from("profiles")
+            .select("id, full_name, avatar_url").in("id", uploaderIds);
+        if (error) console.error("home-feed uploader lookup error:", error);
+        for (const profile of data || []) uploaderById.set(profile.id, profile);
+    }
+    const withUploader = listingItems.map((item) => {
+        const uploaderId = item.owner_id || item.organizer_id;
+        const uploader = uploaderId ? uploaderById.get(uploaderId) : null;
+        const name = uploader?.full_name || null;
+        const avatar = uploader?.avatar_url || null;
+        return {
+            ...item, uploader_id: uploaderId, uploader_name: name, uploader_avatar: avatar,
+            owner_name: item.owner_id ? name : null, owner_avatar: item.owner_id ? avatar : null,
+            organizer_name: item.organizer_id ? name : null, organizer_avatar: item.organizer_id ? avatar : null,
+        };
+    });
+    return [...postItems, ...withUploader, ...artistItems];
 };
 
 const getRecommendations = async (

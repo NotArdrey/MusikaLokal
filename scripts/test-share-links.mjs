@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import * as shareLinks from '../mobile/src/utils/shareLinks.ts';
+import * as actionLinks from '../mobile/src/utils/actionLinks.ts';
 import * as passwordRecovery from '../mobile/src/utils/passwordRecovery.ts';
 const { buildListingShareUrl, buildPostShareUrl, getShareDestination } = shareLinks;
 
@@ -69,6 +70,7 @@ test('cold and warm native links save the destination before routing through the
     exports,
     require(name) {
       if (name === '../src/utils/shareLinks') return shareLinks;
+      if (name === '../src/utils/appLinks') return { ...shareLinks, getAppLinkDestination: raw => actionLinks.getActionDestination(raw) || shareLinks.getShareDestination(raw) || actionLinks.normalizeActionDestination(raw) };
       if (name === '../src/utils/passwordRecovery') return passwordRecovery;
       if (name === '@react-native-async-storage/async-storage') return { default: {
         async setItem(key, value) {

@@ -1,3 +1,5 @@
+import { BoundedCache } from './BoundedCache';
+
 export type ListingDetailsCacheEntry = {
   data: any;
   existingBookings: any[];
@@ -6,14 +8,19 @@ export type ListingDetailsCacheEntry = {
 
 export const LISTING_DETAILS_CACHE_TTL_MS = 60_000;
 
-const listingDetailsCache = new Map<string, ListingDetailsCacheEntry>();
+const listingDetailsCache = new BoundedCache<string, ListingDetailsCacheEntry>(40, LISTING_DETAILS_CACHE_TTL_MS);
 const listingDetailsInFlight = new Set<string>();
 
 export const getListingDetailsCacheEntry = (
   listingId: string | null | undefined,
 ) => {
   if (!listingId) return null;
-  return listingDetailsCache.get(listingId) || null;
+  const cached = listingDetailsCache.get(listingId);
+  if (cached && Date.now() - cached.fetchedAt >= LISTING_DETAILS_CACHE_TTL_MS) {
+    listingDetailsCache.delete(listingId);
+    return null;
+  }
+  return cached || null;
 };
 
 export const setListingDetailsCacheEntry = (

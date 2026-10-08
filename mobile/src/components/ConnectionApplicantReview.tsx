@@ -35,7 +35,7 @@ export default function ConnectionApplicantReview({
   const allMemberIdsFound = Number(verification?.expected_member_count || 0) > 0 &&
     Number(verification?.verified_member_count || 0) === Number(verification?.expected_member_count || 0);
   const hasProfileMismatch = usesDualReference && verificationMembers.some((member: any) =>
-    member?.profile_status === "mismatch" || ["matches_another_member", "different_video_person", "not_found_in_video"].includes(String(member?.profile_issue_code || "")),
+    member?.profile_status === "mismatch" || ["matches_another_member", "different_video_person"].includes(String(member?.profile_issue_code || "")),
   );
   const hasProfileReviewIssue = usesDualReference && verificationMembers.some((member: any) => member?.profile_status !== "verified");
   const verificationRequested = application?.member_verification_consent === true;

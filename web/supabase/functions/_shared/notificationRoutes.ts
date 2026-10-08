@@ -1,4 +1,4 @@
-﻿type NotificationMeta = Record<string, unknown> | null | undefined;
+type NotificationMeta = Record<string, unknown> | null | undefined;
 
 type NotificationRouteOptions = {
   pathname?: string | null;
@@ -197,6 +197,13 @@ const inferNotificationRoute = (
   const senderEntityType = readString(meta.sender_entity_type, meta.senderEntityType)?.toLowerCase();
   const receiverEntityType = readString(meta.receiver_entity_type, meta.receiverEntityType)?.toLowerCase();
   const requestKind = readString(meta.request_kind, meta.requestKind)?.toLowerCase();
+
+  if (eventType === "group_application_member_cv_required" || eventType === "group_application_ready_for_leader") {
+    const applicationId = readString(meta.application_id, meta.applicationId);
+    return applicationId
+      ? { pathname: "/group_application_cv", routeParams: { applicationId } }
+      : { pathname: "/bookings", routeParams: { tab: "Pending" } };
+  }
 
   if (
     eventType === "listing_connection_request" &&

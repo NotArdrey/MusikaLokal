@@ -1,0 +1,4447 @@
+// @ts-ignore
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// @ts-ignore
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { sendEmailWithGmail } from "../_shared/gmailEmail.ts";
+import {
+  claimApprovedIdentityDocument,
+  getDuplicateIdentityReviewReason,
+  prepareIdentityNameBirthDateDuplicateInput,
+  recordIdentityDocumentClaim,
+  queueIdentityReview,
+} from "../_shared/identityDuplicate.ts";
+import {
+  MUSICIAN_VIDEO_BUCKET,
+  MUSICIAN_VIDEO_REVIEW_SOURCE,
+  publishMusicianVideoToProfilePortfolio,
+} from "../_shared/musicianVideoProof.ts";
+
+declare const Deno: {
+  env: {
+    get: (key: string) => string | undefined;
+  };
+};
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform",
+};
+
+const allowedRoles = new Set([
+  "fan",
+  "musician",
+  "studio-owner",
+  "venue-owner",
+  "producer",
+  "admin",
+  "staff",
+]);
+const verificationRequiredRoles = new Set(["studio-owner", "venue-owner", "producer", "admin", "staff"]);
+
+const roleAliases: Record<string, string> = {
+  manager: "musician",
+  "musician-member": "musician",
+};
+
+const COPYRIGHT_OWNERSHIP_REVIEW_SOURCE = "COPYRIGHT_OWNERSHIP";
+const KNOWN_PLAYLIST_AUDIO_BUCKETS = new Set(["documents", "playlist-assets"]);
+const userListProfileSelect =
+  "id, full_name, email, role, is_verified, verification_status, created_at, contact_number, address, location, bio, is_banned, banned_until, ban_reason, ban_action, banned_at, banned_by, ban_lifted_at, ban_lifted_by";
+const userListProfileSelectLegacy =
+  "id, full_name, email, role, is_verified, verification_status, created_at, contact_number, address, location, bio";
+
+function jsonResponse(payload: unknown, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+async function getAuthenticatedUserId(
+  authHeader: string,
+  supabaseUrl: string,
+  anonKey: string,
+) {
+  const token = authHeader.replace(/^Bearer\s+/i, "");
+  if (!token) return null;
+
+  const authClient = createClient(supabaseUrl, anonKey, {
+    global: {
+      headers: {
+        Authorization: authHeader,
+      },
+    },
+  });
+
+  const {
+    data: { user },
+    error,
+  } = await authClient.auth.getUser(token);
+
+  if (error || !user?.id) return null;
+  return user.id;
+}
+
+async function assertAdmin(client: any, userId: string) {
+  const [{ data: profile, error: profileError }, { data: membership, error: membershipError }] = await Promise.all([
+    client.from("profiles").select("id, role").eq("id", userId).maybeSingle(),
+    client
+      .from("profile_roles")
+      .select("profile_id")
+      .eq("profile_id", userId)
+      .eq("role", "admin")
+      .eq("status", "ACTIVE")
+      .maybeSingle(),
+  ]);
+
+  return !profileError && !membershipError && profile?.role === "admin" && !!membership;
+}
+
+function parseRole(rawRole: unknown) {
+  const role = String(rawRole || "").trim().toLowerCase();
+  const normalizedRole = roleAliases[role] || role;
+  if (!allowedRoles.has(normalizedRole)) return null;
+  return normalizedRole;
+}
+
+function parseBoolean(raw: unknown): boolean | null {
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "string") {
+    const value = raw.trim().toLowerCase();
+    if (value === "true") return true;
+    if (value === "false") return false;
+  }
+  return null;
+}
+
+function isMissingColumnError(error: any) {
+  const code = String(error?.code || "").toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+
+  return (
+    code === "42703" ||
+    code === "PGRST204" ||
+    message.includes("column") ||
+    message.includes("schema cache")
+  );
+}
+
+async function ensureProfileBanFieldsAvailable(client: any, userId: string) {
+  const { error } = await client
+    .from("profiles")
+    .select("is_banned")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!error) return { error: null as string | null };
+
+  if (isMissingColumnError(error)) {
+    return { error: "Account ban profile fields are missing. Apply the latest profile ban migration first.", status: 503 };
+  }
+
+  return { error: error.message || "Unable to verify account ban fields.", status: 400 };
+}
+
+function normalizeTextField(raw: unknown): string | null {
+  const value = String(raw ?? "").trim();
+  return value.length > 0 ? value : null;
+}
+
+function normalizeDateOnly(raw: unknown): string | null {
+  const value = String(raw ?? "").trim();
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
+function getApprovalClaimReviewReason(approvalClaim: any, role: string) {
+  return String(approvalClaim?.review_reason || approvalClaim?.reason || "").trim() || getDuplicateIdentityReviewReason(role);
+}
+
+function getApprovalClaimMatchedOn(approvalClaim: any, fallback = "DOCUMENT_FINGERPRINT") {
+  return String(approvalClaim?.matched_on || approvalClaim?.match_type || fallback).trim().toUpperCase();
+}
+
+function normalizeApprovalClaimResult(rawClaim: any): any {
+  if (Array.isArray(rawClaim)) {
+    return normalizeApprovalClaimResult(rawClaim[0]);
+  }
+
+  if (typeof rawClaim === "string") {
+    try {
+      return normalizeApprovalClaimResult(JSON.parse(rawClaim));
+    } catch {
+      return { decision: rawClaim };
+    }
+  }
+
+  return rawClaim;
+}
+
+function getIdentityMatchLabel(matchType: unknown) {
+  const normalized = String(matchType || "").trim().toUpperCase();
+  if (normalized === "NAME_BIRTHDATE") return "Same name + birthdate";
+  if (normalized === "DOCUMENT_FINGERPRINT") return "Same verified ID";
+  return "Possible identity match";
+}
+
+function normalizeIdentityMatchType(matchType: unknown, fallback = "DOCUMENT_FINGERPRINT") {
+  const normalized = String(matchType || fallback || "").trim().toUpperCase();
+  return normalized || "DOCUMENT_FINGERPRINT";
+}
+
+function getReviewMetadataObject(review: any) {
+  return review?.metadata && typeof review.metadata === "object" ? review.metadata : {};
+}
+
+function decodeStoragePath(value: string) {
+  return value
+    .split("/")
+    .map((part) => {
+      try {
+        return decodeURIComponent(part);
+      } catch {
+        return part;
+      }
+    })
+    .join("/");
+}
+
+function parsePlaylistAudioStorageRef(value: unknown): { bucket: string; path: string } | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed) return null;
+
+  const storageUrlMatch = trimmed.match(
+    /(?:^|\/)storage\/v1\/object\/(?:public|sign|authenticated)\/([^/?#]+)\/([^?#]+)/i,
+  );
+
+  if (storageUrlMatch) {
+    const bucket = decodeURIComponent(storageUrlMatch[1]);
+    if (!KNOWN_PLAYLIST_AUDIO_BUCKETS.has(bucket)) return null;
+
+    return {
+      bucket,
+      path: decodeStoragePath(storageUrlMatch[2]),
+    };
+  }
+
+  const normalized = trimmed.replace(/^\/+/, "").split(/[?#]/)[0];
+  const parts = normalized.split("/");
+  const bucket = parts[0];
+
+  if (parts.length > 1 && KNOWN_PLAYLIST_AUDIO_BUCKETS.has(bucket)) {
+    return {
+      bucket,
+      path: parts.slice(1).join("/"),
+    };
+  }
+
+  return null;
+}
+
+function uniquePlaylistAudioStorageRefs(items: any[]) {
+  const seen = new Set<string>();
+  const refs: Array<{ bucket: string; path: string }> = [];
+
+  for (const item of items || []) {
+    const ref = parsePlaylistAudioStorageRef(item?.audio_url);
+    if (!ref?.bucket || !ref.path) continue;
+
+    const key = `${ref.bucket}/${ref.path}`;
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    refs.push(ref);
+  }
+
+  return refs;
+}
+
+async function removePlaylistAudioStorageRefs(client: any, refs: Array<{ bucket: string; path: string }>) {
+  const refsByBucket = new Map<string, string[]>();
+  for (const ref of refs) {
+    const current = refsByBucket.get(ref.bucket) || [];
+    current.push(ref.path);
+    refsByBucket.set(ref.bucket, current);
+  }
+
+  const removed: Array<{ bucket: string; path: string }> = [];
+  for (const [bucket, paths] of refsByBucket.entries()) {
+    const uniquePaths = Array.from(new Set(paths.filter(Boolean)));
+    for (let index = 0; index < uniquePaths.length; index += 100) {
+      const chunk = uniquePaths.slice(index, index + 100);
+      const { error } = await client.storage.from(bucket).remove(chunk);
+      if (error) {
+        throw new Error(error.message || `Unable to delete MP3 from ${bucket}`);
+      }
+
+      removed.push(...chunk.map((path) => ({ bucket, path })));
+    }
+  }
+
+  return removed;
+}
+
+function isCopyrightOwnershipReview(review: any) {
+  return String(review?.source || "").trim().toUpperCase() === COPYRIGHT_OWNERSHIP_REVIEW_SOURCE;
+}
+
+function hasDiditSession(review: any) {
+  return Boolean(String(review?.didit_session_id || "").trim());
+}
+
+function getCopyrightOwnershipTrackLabel(review: any) {
+  const metadata = getReviewMetadataObject(review);
+  const title = String(metadata.copyright_title || "released recording").trim();
+  const artistLabel = String(metadata.copyright_artist_label || "").trim();
+  return artistLabel ? `${title} by ${artistLabel}` : title;
+}
+
+function metadataMatchSources(metadata: any) {
+  return [
+    metadata?.duplicate_matches,
+    metadata?.matches,
+    metadata?.approval_claim_result?.matches,
+    metadata?.claim_result?.matches,
+  ].filter(Array.isArray);
+}
+
+function mapMetadataIdentityMatch(rawMatch: any, fallbackMatchedOn: unknown) {
+  if (!rawMatch || typeof rawMatch !== "object") return null;
+  const matchedOn = normalizeIdentityMatchType(rawMatch.matched_on || rawMatch.match_type || fallbackMatchedOn);
+  const userId = String(rawMatch.user_id || rawMatch.original_user_id || rawMatch.matched_existing_user_id || "").trim();
+  const originalUserId = String(rawMatch.original_user_id || "").trim();
+  const email = String(rawMatch.email || rawMatch.normalized_email || rawMatch.profiles?.email || "").trim().toLowerCase();
+  if (!userId && !email) return null;
+
+  return {
+    claim_id: String(rawMatch.claim_id || rawMatch.identity_document_claim_id || rawMatch.id || "").trim() || null,
+    didit_session_id: String(rawMatch.didit_session_id || rawMatch.diditSessionId || rawMatch.session_id || "").trim() || null,
+    manual_review_id: String(rawMatch.manual_review_id || rawMatch.manualReviewId || "").trim() || null,
+    user_id: userId || null,
+    original_user_id: originalUserId || null,
+    email: email || null,
+    full_name: rawMatch.full_name || rawMatch.verified_full_legal_name || rawMatch.profiles?.full_name || null,
+    role: rawMatch.role || null,
+    source: rawMatch.source || null,
+    claim_status: rawMatch.claim_status || rawMatch.status || null,
+    verified_at: rawMatch.verified_at || rawMatch.created_at || null,
+    birth_date: normalizeDateOnly(rawMatch.birth_date),
+    matched_on: matchedOn,
+    match_type: matchedOn,
+    match_label: getIdentityMatchLabel(matchedOn),
+    front_image_url: rawMatch.front_image_url || null,
+    back_image_url: rawMatch.back_image_url || null,
+    selfie_image_url: rawMatch.selfie_image_url || null,
+  };
+}
+
+function getReviewMetadataIdentityMatches(review: any, fallbackMatchedOn: unknown) {
+  const metadata = getReviewMetadataObject(review);
+  const matches: any[] = [];
+
+  for (const source of metadataMatchSources(metadata)) {
+    for (const rawMatch of source) {
+      const match = mapMetadataIdentityMatch(rawMatch, fallbackMatchedOn);
+      if (match) matches.push(match);
+    }
+  }
+
+  const matchedExistingUserId =
+    metadata?.matched_existing_user_id ||
+    metadata?.approval_claim_result?.matched_existing_user_id ||
+    metadata?.claim_result?.matched_existing_user_id;
+  if (matchedExistingUserId) {
+    const matchedOn = normalizeIdentityMatchType(metadata?.matched_on || metadata?.approval_claim_result?.matched_on || fallbackMatchedOn);
+    matches.push({
+      user_id: String(matchedExistingUserId),
+      email: null,
+      full_name: null,
+      role: null,
+      source: metadata?.source || null,
+      verified_at: null,
+      birth_date: null,
+      matched_on: matchedOn,
+      match_type: matchedOn,
+      match_label: getIdentityMatchLabel(matchedOn),
+    });
+  }
+
+  return matches.filter((match, index, all) => (
+    index === all.findIndex((other) => (
+      String(other.user_id || other.email || "") === String(match.user_id || match.email || "") &&
+      String(other.matched_on || "") === String(match.matched_on || "")
+    ))
+  ));
+}
+
+function getEmbeddedProfile(rawProfile: any) {
+  if (Array.isArray(rawProfile)) return rawProfile[0] || null;
+  return rawProfile && typeof rawProfile === "object" ? rawProfile : null;
+}
+
+function getClaimProfile(claim: any, profilesById?: Map<string, any>) {
+  const embeddedProfile = getEmbeddedProfile(claim?.profiles);
+  if (embeddedProfile?.id || embeddedProfile?.email) return embeddedProfile;
+
+  const userId = String(claim?.user_id || "").trim();
+  return userId && profilesById ? profilesById.get(userId) || null : null;
+}
+
+function claimHasCurrentProfile(claim: any, profilesById?: Map<string, any>) {
+  const userId = String(claim?.user_id || "").trim();
+  const profile = getClaimProfile(claim, profilesById);
+  return Boolean(userId && profile);
+}
+
+async function hydrateProfilesById(client: any, profilesById: Map<string, any>, ids: unknown[]) {
+  const missingIds = Array.from(new Set(
+    ids
+      .map((id) => String(id || "").trim())
+      .filter((id) => id && !profilesById.has(id)),
+  ));
+
+  if (missingIds.length === 0) return;
+
+  const { data: profiles } = await client
+    .from("profiles")
+    .select("id, full_name, email, role, verification_status, id_document_expiry")
+    .in("id", missingIds);
+
+  for (const profile of profiles || []) {
+    profilesById.set(String(profile.id), profile);
+  }
+}
+
+async function hydrateProfilesByEmail(client: any, profilesById: Map<string, any>, emails: unknown[]) {
+  const knownEmails = new Set(
+    Array.from(profilesById.values())
+      .map((profile: any) => String(profile?.email || "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const missingEmails = Array.from(new Set(
+    emails
+      .map((email) => String(email || "").trim().toLowerCase())
+      .filter((email) => email && !knownEmails.has(email)),
+  ));
+
+  if (missingEmails.length === 0) return;
+
+  const { data: profiles } = await client
+    .from("profiles")
+    .select("id, full_name, email, role, verification_status, id_document_expiry")
+    .in("email", missingEmails);
+
+  for (const profile of profiles || []) {
+    profilesById.set(String(profile.id), profile);
+  }
+}
+
+function getProfileByEmail(profilesById: Map<string, any>, email: unknown) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) return null;
+
+  return Array.from(profilesById.values()).find((profile: any) => (
+    String(profile?.email || "").trim().toLowerCase() === normalizedEmail
+  )) || null;
+}
+
+function normalizeStringList(raw: unknown): string[] {
+  const source = Array.isArray(raw) ? raw : String(raw ?? "").split(/[,;\n]/);
+  const seen = new Set<string>();
+  const items: string[] = [];
+
+  for (const item of source) {
+    const value = String(item ?? "").trim();
+    if (!value || seen.has(value.toLowerCase())) continue;
+    seen.add(value.toLowerCase());
+    items.push(value);
+  }
+
+  return items;
+}
+
+async function loadTargetNames(
+  client: any,
+  table: string,
+  ids: string[],
+) {
+  const uniqueIds = Array.from(new Set(ids.map((id) => String(id || "").trim()).filter(Boolean)));
+  const names = new Map<string, string>();
+  if (uniqueIds.length === 0) return names;
+
+  const { data, error } = await client
+    .from(table)
+    .select("id, name")
+    .in("id", uniqueIds);
+
+  if (error) throw error;
+
+  for (const row of data || []) {
+    if (row?.id) names.set(String(row.id), String(row.name || ""));
+  }
+
+  return names;
+}
+
+async function attachStaffAssignments(client: any, profiles: any[]) {
+  const items = Array.isArray(profiles) ? profiles : [];
+  const staffIds = items
+    .filter((profile) => String(profile?.role || "").trim().toLowerCase() === "staff")
+    .map((profile) => String(profile?.id || "").trim())
+    .filter(Boolean);
+
+  if (staffIds.length === 0) return items;
+
+  const { data, error } = await client
+    .from("staff_listing_access")
+    .select("id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level, can_edit_listing, can_add_listing, can_delete_listing, can_manage_marketplace, created_at, updated_at")
+    .in("staff_user_id", staffIds)
+    .is("revoked_at", null);
+
+  if (error) {
+    if (isMissingTableError(error, "staff_listing_access")) return items;
+    throw error;
+  }
+
+  const assignments = data || [];
+  const studioNames = await loadTargetNames(client, "studios", assignments.map((item: any) => item?.studio_id));
+  const gigNames = await loadTargetNames(client, "gigs", assignments.map((item: any) => item?.gig_id));
+  const productionNames = await loadTargetNames(client, "production_teams", assignments.map((item: any) => item?.production_team_id));
+
+  const assignmentsByUser = new Map<string, any[]>();
+  for (const assignment of assignments) {
+    const staffUserId = String(assignment?.staff_user_id || "");
+    const entityType = normalizeStaffEntityType(assignment?.entity_type);
+    const targetId = getStaffAssignmentTargetId(assignment);
+    const targetName =
+      entityType === "studio"
+        ? studioNames.get(String(targetId || ""))
+        : entityType === "venue"
+          ? gigNames.get(String(targetId || ""))
+          : entityType === "production"
+            ? productionNames.get(String(targetId || ""))
+            : null;
+
+    const hydratedAssignment = {
+      ...assignment,
+      target_id: targetId,
+      target_name: targetName || null,
+    };
+
+    if (!assignmentsByUser.has(staffUserId)) assignmentsByUser.set(staffUserId, []);
+    assignmentsByUser.get(staffUserId)?.push(hydratedAssignment);
+  }
+
+  return items.map((profile) => {
+    const staffAssignments = assignmentsByUser.get(String(profile?.id || "")) || [];
+    const assignment = staffAssignments[0] || null;
+    return {
+      ...profile,
+      staff_assignments: staffAssignments,
+      staff_assignment: assignment,
+      staff_assignment_label: staffAssignments.map(getStaffAssignmentLabel).filter(Boolean).join("; ") || null,
+    };
+  });
+}
+
+async function attachProfileLists(client: any, profiles: any[]) {
+  const items = Array.isArray(profiles) ? profiles : [];
+  const profileIds = items
+    .map((profile) => String(profile?.id || "").trim())
+    .filter((id) => id.length > 0);
+
+  if (profileIds.length === 0) return items;
+
+  const [{ data: skillRows, error: skillsError }, { data: genreRows, error: genresError }] = await Promise.all([
+    client.from("profile_skills").select("profile_id, skill").in("profile_id", profileIds),
+    client.from("profile_genres").select("profile_id, genre").in("profile_id", profileIds),
+  ]);
+
+  if (skillsError) throw skillsError;
+  if (genresError) throw genresError;
+
+  const skillsByProfile = new Map<string, string[]>();
+  const genresByProfile = new Map<string, string[]>();
+
+  for (const row of skillRows || []) {
+    const profileId = String(row?.profile_id || "");
+    if (!skillsByProfile.has(profileId)) skillsByProfile.set(profileId, []);
+    const skill = String(row?.skill || "").trim();
+    if (skill) skillsByProfile.get(profileId)?.push(skill);
+  }
+
+  for (const row of genreRows || []) {
+    const profileId = String(row?.profile_id || "");
+    if (!genresByProfile.has(profileId)) genresByProfile.set(profileId, []);
+    const genre = String(row?.genre || "").trim();
+    if (genre) genresByProfile.get(profileId)?.push(genre);
+  }
+
+  const hydratedProfiles = items.map((profile) => ({
+    ...profile,
+    skills: skillsByProfile.get(String(profile?.id || "")) || [],
+    genres: genresByProfile.get(String(profile?.id || "")) || [],
+  }));
+
+  return attachStaffAssignments(client, hydratedProfiles);
+}
+
+async function replaceProfileList(
+  client: any,
+  table: string,
+  valueColumn: string,
+  userId: string,
+  values: string[],
+) {
+  const { error: deleteError } = await client.from(table).delete().eq("profile_id", userId);
+  if (deleteError) throw deleteError;
+
+  if (values.length === 0) return;
+
+  const payload = values.map((value) => ({
+    profile_id: userId,
+    [valueColumn]: value,
+  }));
+
+  const { error: insertError } = await client.from(table).insert(payload);
+  if (insertError) throw insertError;
+}
+
+function isMissingTableError(error: any, tableName: string) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "").toLowerCase();
+  const normalizedTable = tableName.toLowerCase();
+
+  return (
+    (code === "42P01" && message.includes(normalizedTable)) ||
+    (code === "PGRST205" && message.includes(normalizedTable))
+  );
+}
+
+type StaffEntityType = "studio" | "venue" | "production";
+type StaffAccessLevel = 1 | 2 | 3;
+
+const managedRoleTargets: Record<string, { table: string; ownerColumn: string; entityType: StaffEntityType }> = {
+  "studio-owner": { table: "studios", ownerColumn: "owner_id", entityType: "studio" },
+  "venue-owner": { table: "gigs", ownerColumn: "organizer_id", entityType: "venue" },
+  producer: { table: "production_teams", ownerColumn: "owner_id", entityType: "production" },
+};
+
+function getListingAssignmentTargetId(raw: any): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const targetId = String(raw.target_id || raw.targetId || "").trim();
+  return targetId || null;
+}
+
+async function assignManagedListingOwner(client: any, role: string, targetId: string, userId: string) {
+  const target = managedRoleTargets[role];
+  if (!target) return null;
+
+  const { data: existing, error: existingError } = await client
+    .from(target.table)
+    .select(`id, name, ${target.ownerColumn}`)
+    .eq("id", targetId)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+  if (!existing?.id) throw new Error(`The selected ${target.entityType} no longer exists.`);
+
+  const previousOwnerId = String(existing[target.ownerColumn] || "").trim() || null;
+  const { data, error } = await client
+    .from(target.table)
+    .update({ [target.ownerColumn]: userId })
+    .eq("id", targetId)
+    .select("id, name")
+    .maybeSingle();
+
+  if (error) throw error;
+
+  if (target.entityType === "production") {
+    const { error: membershipError } = await client.from("production_team_members").upsert({
+      team_id: targetId,
+      user_id: userId,
+      role: "owner",
+    }, { onConflict: "team_id,user_id" });
+    if (membershipError) throw membershipError;
+
+    if (previousOwnerId && previousOwnerId !== userId) {
+      const { error: previousOwnerError } = await client
+        .from("production_team_members")
+        .update({ role: "manager" })
+        .eq("team_id", targetId)
+        .eq("user_id", previousOwnerId)
+        .eq("role", "owner");
+      if (previousOwnerError) throw previousOwnerError;
+    }
+  }
+
+  return data;
+}
+
+type NormalizedStaffAssignment = {
+  entity_type: StaffEntityType;
+  access_level: StaffAccessLevel;
+  studio_id: string | null;
+  gig_id: string | null;
+  production_team_id: string | null;
+  can_edit_listing: boolean;
+  can_add_listing: boolean;
+  can_delete_listing: boolean;
+  can_manage_marketplace: boolean;
+};
+
+class StaffAssignmentConflictError extends Error {
+  code: string;
+  reason: string;
+  resolution: string;
+  entityType: StaffEntityType;
+  targetName: string;
+
+  constructor(options: {
+    code: string;
+    entityType: StaffEntityType;
+    targetName: string;
+    reason: string;
+    resolution: string;
+  }) {
+    super(`Cannot assign staff access to "${options.targetName}".`);
+    this.name = "StaffAssignmentConflictError";
+    this.code = options.code;
+    this.reason = options.reason;
+    this.resolution = options.resolution;
+    this.entityType = options.entityType;
+    this.targetName = options.targetName;
+  }
+}
+
+function staffAssignmentErrorResponse(error: unknown) {
+  if (error instanceof StaffAssignmentConflictError) {
+    return jsonResponse({
+      error: "Staff assignment conflict",
+      code: error.code,
+      message: error.message,
+      reason: error.reason,
+      resolution: error.resolution,
+      entity_type: error.entityType,
+      target_name: error.targetName,
+    }, 409);
+  }
+
+  const message = error instanceof Error ? error.message : "Unable to validate the staff assignment.";
+  return jsonResponse({ error: message }, 400);
+}
+
+const staffEntityTypes = new Set(["studio", "venue", "production"]);
+
+function normalizeStaffEntityType(raw: unknown): StaffEntityType | null {
+  const entityType = String(raw || "").trim().toLowerCase();
+  return staffEntityTypes.has(entityType) ? entityType as StaffEntityType : null;
+}
+
+function getPhilippineTodayStartIso() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "";
+  return `${value("year")}-${value("month")}-${value("day")}T00:00:00+08:00`;
+}
+
+function normalizeStaffAccessLevel(raw: unknown): StaffAccessLevel | null {
+  const level = Number(raw);
+  return level === 1 || level === 2 || level === 3 ? level as StaffAccessLevel : null;
+}
+
+function normalizeStaffPermission(raw: any, snakeKey: string, camelKey: string, fallback: boolean) {
+  if (typeof raw?.[snakeKey] === "boolean") return raw[snakeKey];
+  if (typeof raw?.[camelKey] === "boolean") return raw[camelKey];
+  return fallback;
+}
+
+function normalizeStaffAssignment(raw: any): NormalizedStaffAssignment | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const entityType = normalizeStaffEntityType(raw.entity_type || raw.entityType);
+  const accessLevel = normalizeStaffAccessLevel(raw.access_level || raw.accessLevel);
+  const targetId = String(raw.target_id || raw.targetId || "").trim();
+
+  if (!entityType || !accessLevel) return null;
+
+  const studioId = String(raw.studio_id || raw.studioId || "").trim();
+  const gigId = String(raw.gig_id || raw.gigId || "").trim();
+  const productionTeamId = String(raw.production_team_id || raw.productionTeamId || "").trim();
+  const canEditListing = normalizeStaffPermission(raw, "can_edit_listing", "canEditListing", accessLevel === 1);
+  const canAddListing = normalizeStaffPermission(raw, "can_add_listing", "canAddListing", accessLevel === 1);
+  const canDeleteListing = normalizeStaffPermission(raw, "can_delete_listing", "canDeleteListing", accessLevel === 1);
+  const canManageMarketplace = raw.can_manage_marketplace === true || raw.canManageMarketplace === true;
+
+  const permissions = {
+    can_edit_listing: canEditListing,
+    can_add_listing: canAddListing,
+    can_delete_listing: canDeleteListing,
+    can_manage_marketplace: canManageMarketplace,
+  };
+
+  if (entityType === "studio") {
+    const id = studioId || targetId;
+    return id ? { entity_type: entityType, access_level: accessLevel, studio_id: id, gig_id: null, production_team_id: null, ...permissions } : null;
+  }
+
+  if (entityType === "venue") {
+    const id = gigId || targetId;
+    return id ? { entity_type: entityType, access_level: accessLevel, studio_id: null, gig_id: id, production_team_id: null, ...permissions } : null;
+  }
+
+  const id = productionTeamId || targetId;
+  return id ? { entity_type: entityType, access_level: accessLevel, studio_id: null, gig_id: null, production_team_id: id, ...permissions } : null;
+}
+
+function getStaffAssignmentTargetId(assignment: any): string | null {
+  const entityType = normalizeStaffEntityType(assignment?.entity_type);
+  if (entityType === "studio") return assignment?.studio_id || null;
+  if (entityType === "venue") return assignment?.gig_id || null;
+  if (entityType === "production") return assignment?.production_team_id || null;
+  return null;
+}
+
+function getStaffAssignmentLabel(assignment: any) {
+  const entityType = normalizeStaffEntityType(assignment?.entity_type);
+  const targetName = String(assignment?.target_name || "").trim();
+  const targetId = getStaffAssignmentTargetId(assignment);
+  const level = normalizeStaffAccessLevel(assignment?.access_level);
+
+  if (!entityType || !targetId || !level) return null;
+
+  const entityLabel = entityType === "venue" ? "Gig" : entityType === "production" ? "Production" : "Studio";
+  const permissions = ["View"];
+  if (level <= 2) permissions.push("manage bookings");
+  if (assignment?.can_edit_listing === true) permissions.push("edit");
+  if (assignment?.can_add_listing === true) permissions.push("add");
+  if (assignment?.can_delete_listing === true) permissions.push("delete");
+  return `${entityLabel}: ${targetName || targetId} (${permissions.join(", ")})`;
+}
+
+function normalizeStaffAssignments(raw: any): NormalizedStaffAssignment[] {
+  if (!Array.isArray(raw)) return [];
+
+  const seen = new Set<string>();
+  return raw.flatMap((item) => {
+    const assignment = normalizeStaffAssignment(item);
+    if (!assignment) return [];
+    const targetId = getStaffAssignmentTargetId(assignment);
+    const key = `${assignment.entity_type}:${targetId}`;
+    if (!targetId || seen.has(key)) return [];
+    seen.add(key);
+    return [assignment];
+  });
+}
+
+async function assertStaffAccessTableReady(client: any) {
+  const { error } = await client
+    .from("staff_listing_access")
+    .select("id")
+    .limit(1);
+
+  if (!error) return;
+  if (isMissingTableError(error, "staff_listing_access")) {
+    throw new Error("Staff access migration is not applied yet.");
+  }
+  throw error;
+}
+
+async function validateStaffAssignmentTarget(
+  client: any,
+  assignment: NormalizedStaffAssignment,
+) {
+  const target =
+    assignment.entity_type === "studio"
+      ? { table: "studios", id: assignment.studio_id, label: "studio" }
+      : assignment.entity_type === "venue"
+        ? { table: "gigs", id: assignment.gig_id, label: "gig" }
+        : { table: "production_teams", id: assignment.production_team_id, label: "production team" };
+
+  if (!target.id) {
+    throw new Error(`Select a ${target.label} for this staff user.`);
+  }
+
+  const targetSelect = assignment.entity_type === "studio"
+    ? "id, name, permit_status, owner_id"
+    : assignment.entity_type === "venue"
+      ? "id, name, status, permit_status, event_date, organizer_id"
+      : "id, name, owner_id";
+  const { data, error } = await client
+    .from(target.table)
+    .select(targetSelect)
+    .eq("id", target.id)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data?.id) {
+    throw new Error(`The selected ${target.label} no longer exists.`);
+  }
+
+  if (
+    assignment.entity_type === "studio" &&
+    String(data.permit_status || "").trim().toLowerCase() !== "approved"
+  ) {
+    throw new Error("The selected studio is not active and approved.");
+  }
+
+  if (assignment.entity_type === "venue") {
+    const status = String(data.status || "").trim().toLowerCase();
+    const permitStatus = String(data.permit_status || "").trim().toLowerCase();
+    const eventTime = data.event_date ? new Date(data.event_date).getTime() : null;
+    const todayStart = new Date(getPhilippineTodayStartIso()).getTime();
+    const eventIsPast = eventTime !== null && (!Number.isFinite(eventTime) || eventTime < todayStart);
+
+    if (status !== "open" || permitStatus !== "approved" || eventIsPast) {
+      throw new Error("The selected gig is not active or its event date has passed.");
+    }
+  }
+
+  return data;
+}
+
+async function assertNoStaffAssignmentConflict(
+  client: any,
+  staffUserId: string,
+  assignment: NormalizedStaffAssignment,
+  target: any,
+) {
+  const targetName = String(target?.name || "the selected listing").trim() || "the selected listing";
+
+  if (assignment.entity_type === "studio" && assignment.studio_id) {
+    const [{ data: bookings, error: bookingsError }, { data: requests, error: requestsError }] = await Promise.all([
+      client
+        .from("studio_bookings")
+        .select("id")
+        .eq("studio_id", assignment.studio_id)
+        .eq("user_id", staffUserId)
+        .not("status", "in", '("completed","cancelled","declined","rejected")')
+        .limit(1),
+      client
+        .from("booking_requests")
+        .select("id")
+        .eq("studio_id", assignment.studio_id)
+        .eq("sender_id", staffUserId)
+        .not("status", "in", '("completed","cancelled","declined","rejected")')
+        .limit(1),
+    ]);
+    if (bookingsError) throw bookingsError;
+    if (requestsError) throw requestsError;
+    if (bookings?.length || requests?.length) {
+      throw new StaffAssignmentConflictError({
+        code: "STAFF_STUDIO_ACTIVE_BOOKING",
+        entityType: "studio",
+        targetName,
+        reason: "This user has an active booking or booking request at this studio.",
+        resolution: "Complete, cancel, decline, or reject that booking first, then save again - or choose a different studio.",
+      });
+    }
+    return;
+  }
+
+  if (assignment.entity_type === "venue" && assignment.gig_id) {
+    const { data: directApplications, error: directError } = await client
+      .from("gig_applications")
+      .select("id")
+      .eq("gig_id", assignment.gig_id)
+      .or(`applicant_id.eq.${staffUserId},submitted_by_user_id.eq.${staffUserId}`)
+      .in("status", ["pending", "accepted", "approved"])
+      .limit(1);
+    if (directError) throw directError;
+    if (directApplications?.length) {
+      throw new StaffAssignmentConflictError({
+        code: "STAFF_GIG_ACTIVE_APPLICATION",
+        entityType: "venue",
+        targetName,
+        reason: "This user has an active application for this gig.",
+        resolution: "Resolve or withdraw the application first, then save again - or choose a different gig.",
+      });
+    }
+
+    const [{ data: ownedGroups, error: ownedGroupsError }, { data: memberships, error: membershipsError }] = await Promise.all([
+      client.from("groups").select("id").eq("owner_id", staffUserId),
+      client.from("group_members").select("group_id").eq("user_id", staffUserId),
+    ]);
+    if (ownedGroupsError) throw ownedGroupsError;
+    if (membershipsError) throw membershipsError;
+    const groupIds = Array.from(new Set([
+      ...(ownedGroups || []).map((row: any) => row.id),
+      ...(memberships || []).map((row: any) => row.group_id),
+    ].filter(Boolean)));
+    if (groupIds.length > 0) {
+      const { data: groupApplications, error: groupApplicationsError } = await client
+        .from("gig_applications")
+        .select("id")
+        .eq("gig_id", assignment.gig_id)
+        .in("group_id", groupIds)
+        .in("status", ["pending", "accepted", "approved"])
+        .limit(1);
+      if (groupApplicationsError) throw groupApplicationsError;
+      if (groupApplications?.length) {
+        throw new StaffAssignmentConflictError({
+          code: "STAFF_GIG_GROUP_APPLICATION",
+          entityType: "venue",
+          targetName,
+          reason: "A group this user owns or belongs to has an active application for this gig.",
+          resolution: "Resolve or withdraw the group application first, then save again - or choose a different gig.",
+        });
+      }
+    }
+    return;
+  }
+
+  if (assignment.entity_type === "production" && assignment.production_team_id) {
+    const [
+      { data: membership, error: membershipError },
+      { data: ownedTeam, error: ownedTeamError },
+      { data: directRoster, error: directRosterError },
+      { data: ownedGroups, error: ownedGroupsError },
+      { data: memberships, error: membershipsError },
+    ] = await Promise.all([
+      client
+        .from("production_team_members")
+        .select("id")
+        .eq("team_id", assignment.production_team_id)
+        .eq("user_id", staffUserId)
+        .limit(1),
+      client
+        .from("production_teams")
+        .select("id")
+        .eq("id", assignment.production_team_id)
+        .eq("owner_id", staffUserId)
+        .limit(1),
+      client
+        .from("production_team_roster")
+        .select("id")
+        .eq("team_id", assignment.production_team_id)
+        .eq("profile_id", staffUserId)
+        .limit(1),
+      client.from("groups").select("id").eq("owner_id", staffUserId),
+      client.from("group_members").select("group_id").eq("user_id", staffUserId),
+    ]);
+    if (membershipError) throw membershipError;
+    if (ownedTeamError) throw ownedTeamError;
+    if (directRosterError) throw directRosterError;
+    if (ownedGroupsError) throw ownedGroupsError;
+    if (membershipsError) throw membershipsError;
+
+    const groupIds = Array.from(new Set([
+      ...(ownedGroups || []).map((row: any) => row.id),
+      ...(memberships || []).map((row: any) => row.group_id),
+    ].filter(Boolean)));
+    let hasGroupRosterConflict = false;
+    if (groupIds.length > 0) {
+      const { data: groupRoster, error: groupRosterError } = await client
+        .from("production_team_roster")
+        .select("id")
+        .eq("team_id", assignment.production_team_id)
+        .in("group_id", groupIds)
+        .limit(1);
+      if (groupRosterError) throw groupRosterError;
+      hasGroupRosterConflict = Boolean(groupRoster?.length);
+    }
+
+    const reasons: string[] = [];
+    const requiredActions: string[] = [];
+    if (membership?.length || ownedTeam?.length) {
+      reasons.push("the user is an owner or member of this production team");
+      requiredActions.push("team ownership or membership");
+    }
+    if (directRoster?.length) {
+      reasons.push("the user is listed as talent on this production roster");
+      requiredActions.push("their roster entry");
+    }
+    if (hasGroupRosterConflict) {
+      reasons.push("a group they own or belong to is listed on this production roster");
+      requiredActions.push("the group's roster entry");
+    }
+
+    if (reasons.length > 0) {
+      throw new StaffAssignmentConflictError({
+        code: "STAFF_PRODUCTION_PARTICIPATION",
+        entityType: "production",
+        targetName,
+        reason: `This assignment conflicts because ${reasons.join(" and ")}.`,
+        resolution: `Remove ${requiredActions.join(" and ")} first, then save again - or choose a different production team.`,
+      });
+    }
+  }
+}
+
+async function validateStaffAssignments(
+  client: any,
+  staffUserId: string,
+  assignments: NormalizedStaffAssignment[],
+) {
+  await assertStaffAccessTableReady(client);
+  const targets = await Promise.all(assignments.map((assignment) => validateStaffAssignmentTarget(client, assignment)));
+  await Promise.all(assignments.map((assignment, index) => (
+    assertNoStaffAssignmentConflict(client, staffUserId, assignment, targets[index])
+  )));
+
+  const marketplaceOwnerIds = new Set(assignments.flatMap((assignment, index) => {
+    if (!assignment.can_manage_marketplace) return [];
+    const ownerId = assignment.entity_type === "venue"
+      ? targets[index]?.organizer_id
+      : targets[index]?.owner_id;
+    return ownerId ? [String(ownerId)] : [];
+  }));
+  if (marketplaceOwnerIds.size > 1) {
+    throw new Error("Marketplace access requires all selected listings to belong to the same owner. Disable Manage marketplace or select listings from one owner only.");
+  }
+
+  return targets;
+}
+
+async function getProductionTargetConflicts(client: any, staffUserId: string, items: any[]) {
+  const teamIds = items.map((item) => String(item?.id || "")).filter(Boolean);
+  if (!staffUserId || teamIds.length === 0) return new Map<string, any>();
+
+  const [
+    { data: memberRows, error: memberError },
+    { data: directRosterRows, error: directRosterError },
+    { data: ownedGroups, error: ownedGroupsError },
+    { data: groupMemberships, error: groupMembershipsError },
+  ] = await Promise.all([
+    client
+      .from("production_team_members")
+      .select("team_id, role")
+      .eq("user_id", staffUserId)
+      .in("team_id", teamIds),
+    client
+      .from("production_team_roster")
+      .select("id, team_id")
+      .eq("profile_id", staffUserId)
+      .in("team_id", teamIds),
+    client.from("groups").select("id").eq("owner_id", staffUserId),
+    client.from("group_members").select("group_id").eq("user_id", staffUserId),
+  ]);
+  if (memberError) throw memberError;
+  if (directRosterError) throw directRosterError;
+  if (ownedGroupsError) throw ownedGroupsError;
+  if (groupMembershipsError) throw groupMembershipsError;
+
+  const groupIds = Array.from(new Set([
+    ...(ownedGroups || []).map((row: any) => row.id),
+    ...(groupMemberships || []).map((row: any) => row.group_id),
+  ].filter(Boolean)));
+  const { data: groupRosterRows, error: groupRosterError } = groupIds.length > 0
+    ? await client
+      .from("production_team_roster")
+      .select("team_id")
+      .in("team_id", teamIds)
+      .in("group_id", groupIds)
+    : { data: [], error: null };
+  if (groupRosterError) throw groupRosterError;
+
+  const directRosterIds = (directRosterRows || []).map((row: any) => row.id).filter(Boolean);
+  const { data: linkedApplications, error: linkedApplicationsError } = directRosterIds.length > 0
+    ? await client
+      .from("gig_applications")
+      .select("production_roster_id")
+      .in("production_roster_id", directRosterIds)
+    : { data: [], error: null };
+  if (linkedApplicationsError) throw linkedApplicationsError;
+
+  const memberRoleByTeam = new Map((memberRows || []).map((row: any) => [String(row.team_id), String(row.role || "member")]));
+  const directRosterIdsByTeam = new Map<string, string[]>();
+  for (const row of directRosterRows || []) {
+    const teamId = String(row.team_id || "");
+    if (!directRosterIdsByTeam.has(teamId)) directRosterIdsByTeam.set(teamId, []);
+    directRosterIdsByTeam.get(teamId)?.push(String(row.id));
+  }
+  const linkedRosterIds = new Set((linkedApplications || []).map((row: any) => String(row.production_roster_id || "")));
+  const groupRosterTeamIds = new Set((groupRosterRows || []).map((row: any) => String(row.team_id || "")));
+  const conflicts = new Map<string, any>();
+
+  for (const item of items) {
+    const teamId = String(item?.id || "");
+    const memberRole = memberRoleByTeam.get(teamId) || null;
+    const rosterIds = directRosterIdsByTeam.get(teamId) || [];
+    const hasDirectRoster = rosterIds.length > 0;
+    const hasLinkedApplication = rosterIds.some((id) => linkedRosterIds.has(id));
+    const hasGroupRoster = groupRosterTeamIds.has(teamId);
+    if (!memberRole && !hasDirectRoster && !hasGroupRoster) continue;
+
+    const reasons: string[] = [];
+    if (memberRole) reasons.push(`team ${memberRole}`);
+    if (hasDirectRoster) reasons.push("direct roster talent");
+    if (hasGroupRoster) reasons.push("represented through a group roster entry");
+
+    const canAutoResolve = memberRole !== "owner" && !hasGroupRoster && !hasLinkedApplication;
+    conflicts.set(teamId, {
+      id: teamId,
+      name: String(item?.name || "Untitled"),
+      entity_type: "production",
+      reason: `This user already participates as ${reasons.join(" and ")}.`,
+      resolution: canAutoResolve
+        ? "Remove the user's direct team membership and roster entry, then keep this staff assignment selected."
+        : hasLinkedApplication
+          ? "Resolve the linked gig application from the production team before removing the roster entry."
+          : "Resolve the ownership or group roster participation from the production team.",
+      can_auto_resolve: canAutoResolve,
+    });
+  }
+
+  return conflicts;
+}
+
+async function revokeStaffAssignments(client: any, staffUserId: string) {
+  await assertStaffAccessTableReady(client);
+
+  const { error } = await client
+    .from("staff_listing_access")
+    .update({ revoked_at: new Date().toISOString() })
+    .eq("staff_user_id", staffUserId)
+    .is("revoked_at", null);
+
+  if (error) throw error;
+}
+
+async function replaceStaffAssignments(
+  client: any,
+  staffUserId: string,
+  assignments: NormalizedStaffAssignment[],
+  actorId: string,
+  validatedTargets?: any[],
+) {
+  const targets = validatedTargets || await validateStaffAssignments(client, staffUserId, assignments);
+  await revokeStaffAssignments(client, staffUserId);
+
+  if (assignments.length === 0) return [];
+
+  const { data, error } = await client
+    .from("staff_listing_access")
+    .insert(assignments.map((assignment) => ({
+      staff_user_id: staffUserId,
+      entity_type: assignment.entity_type,
+      studio_id: assignment.studio_id,
+      gig_id: assignment.gig_id,
+      production_team_id: assignment.production_team_id,
+      access_level: assignment.access_level,
+      can_edit_listing: assignment.can_edit_listing,
+      can_add_listing: assignment.can_add_listing,
+      can_delete_listing: assignment.can_delete_listing,
+      can_manage_marketplace: assignment.can_manage_marketplace,
+      created_by: actorId,
+    })))
+    .select("id, staff_user_id, entity_type, studio_id, gig_id, production_team_id, access_level, can_edit_listing, can_add_listing, can_delete_listing, can_manage_marketplace, created_at, updated_at");
+
+  if (error) throw error;
+
+  return (data || []).map((item: any, index: number) => ({
+    ...item,
+    target_id: getStaffAssignmentTargetId(item),
+    target_name: targets[index]?.name || null,
+  }));
+}
+
+async function deleteRowsByIds(client: any, table: string, column: string, ids: string[]) {
+  const uniqueIds = Array.from(new Set(ids.map((id) => String(id || "").trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) return;
+
+  const { error } = await client.from(table).delete().in(column, uniqueIds);
+  if (error) throw error;
+}
+
+async function nullProfileReference(client: any, table: string, column: string, userId: string) {
+  const { error } = await client.from(table).update({ [column]: null }).eq(column, userId);
+  if (error) throw error;
+}
+
+function isAuthUserNotFoundError(error: any) {
+  if (!error) return false;
+  const status = Number(error?.status || error?.code || 0);
+  const message = String(error?.message || error?.error_description || error || "").toLowerCase();
+  return message.includes("user not found") || (status === 404 && message.includes("not found"));
+}
+
+async function deleteIdentityClaimsForRemovedUser(client: any, userId: string) {
+  const { error: userIdError } = await client
+    .from("identity_document_claims")
+    .delete()
+    .eq("user_id", userId);
+
+  if (userIdError) throw userIdError;
+
+  const { error: originalUserIdError } = await client
+    .from("identity_document_claims")
+    .delete()
+    .eq("original_user_id", userId);
+
+  if (originalUserIdError) throw originalUserIdError;
+}
+
+async function cleanupProfileDeleteBlockers(client: any, userId: string) {
+  const [
+    { data: ownedGroups, error: ownedGroupsError },
+    { data: ownedStudios, error: ownedStudiosError },
+  ] = await Promise.all([
+    client.from("groups").select("id").eq("owner_id", userId),
+    client.from("studios").select("id").eq("owner_id", userId),
+  ]);
+
+  if (ownedGroupsError) throw ownedGroupsError;
+  if (ownedStudiosError) throw ownedStudiosError;
+
+  const ownedGroupIds = (ownedGroups || []).map((item: any) => String(item?.id || "")).filter(Boolean);
+  const ownedStudioIds = (ownedStudios || []).map((item: any) => String(item?.id || "")).filter(Boolean);
+
+  await Promise.all([
+    deleteRowsByIds(client, "booking_requests", "group_id", ownedGroupIds),
+    deleteRowsByIds(client, "booking_requests", "studio_id", ownedStudioIds),
+  ]);
+
+  const bookingRequestDeletes = [
+    client.from("booking_requests").delete().eq("sender_id", userId),
+    client.from("booking_requests").delete().eq("receiver_id", userId),
+  ];
+
+  const cleanupUpdates = [
+    nullProfileReference(client, "gigs", "permit_reviewed_by", userId),
+    nullProfileReference(client, "studios", "permit_reviewed_by", userId),
+    nullProfileReference(client, "withdrawal_requests", "processed_by", userId),
+  ];
+
+  const results = await Promise.all([
+    ...bookingRequestDeletes,
+    ...cleanupUpdates,
+  ]);
+  for (const result of results.slice(0, bookingRequestDeletes.length)) {
+    if (result?.error) throw result.error;
+  }
+}
+
+async function deleteReviewedIdentityAccount(client: any, userId: string) {
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId) {
+    throw new Error("Missing userId for account deletion");
+  }
+
+  const { data: existingAuth, error: existingAuthError } = await client.auth.admin.getUserById(normalizedUserId);
+  const { data: existingProfile, error: existingProfileError } = await client
+    .from("profiles")
+    .select("id")
+    .eq("id", normalizedUserId)
+    .maybeSingle();
+
+  if (existingAuthError && !isAuthUserNotFoundError(existingAuthError)) {
+    throw existingAuthError;
+  }
+
+  if (existingProfileError) throw existingProfileError;
+
+  if ((existingAuthError || !existingAuth?.user) && !existingProfile) {
+    return {
+      deleted: false,
+      auth_deleted: false,
+      profile_deleted: false,
+      already_removed: true,
+    };
+  }
+
+  await deleteIdentityClaimsForRemovedUser(client, normalizedUserId);
+
+  let profileDeleted = false;
+  if (existingProfile) {
+    await cleanupProfileDeleteBlockers(client, normalizedUserId);
+
+    const { error: profileDeleteError } = await client
+      .from("profiles")
+      .delete()
+      .eq("id", normalizedUserId);
+
+    if (profileDeleteError) throw profileDeleteError;
+    profileDeleted = true;
+  }
+
+  let authDeleted = false;
+  if (existingAuth?.user) {
+    const { error: authDeleteError } = await client.auth.admin.deleteUser(normalizedUserId);
+    if (authDeleteError && !isAuthUserNotFoundError(authDeleteError)) throw authDeleteError;
+    authDeleted = true;
+  }
+
+  return {
+    deleted: profileDeleted || authDeleted,
+    auth_deleted: authDeleted,
+    profile_deleted: profileDeleted,
+    already_removed: false,
+  };
+}
+
+function maskEmailForLog(email: string) {
+  const [name, domain] = String(email || "").split("@");
+  if (!name || !domain) return "missing";
+  return `${name.slice(0, 1)}***@${domain}`;
+}
+
+function escapeHtml(raw: unknown) {
+  return String(raw || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function buildMusikaLokalEmail({
+  title,
+  subtitle,
+  bodyHtml,
+  eyebrow = "Identity Verification",
+}: {
+  title: string;
+  subtitle: string;
+  bodyHtml: string;
+  eyebrow?: string;
+}) {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(title)} - MusikaLokal</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="text-align: center; margin-bottom: 30px;">
+    <h1 style="color: #6366f1; margin: 0; font-size: 30px; font-weight: 800;">MusikaLokal</h1>
+  </div>
+
+  <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: #ffffff; padding: 30px; border-radius: 16px; text-align: center; margin-bottom: 30px;">
+    <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.85; margin-bottom: 10px;">${escapeHtml(eyebrow)}</div>
+    <h2 style="margin: 0 0 10px 0; font-size: 24px; line-height: 1.3;">${escapeHtml(title)}</h2>
+    <p style="margin: 0; opacity: 0.9;">${escapeHtml(subtitle)}</p>
+  </div>
+
+  ${bodyHtml}
+
+  <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+
+  <p style="color: #64748b; font-size: 12px; text-align: center; margin: 0;">
+    This email was sent by MusikaLokal. If you did not create an account, please ignore this email.<br>
+    &copy; ${new Date().getFullYear()} MusikaLokal. All rights reserved.
+  </p>
+</body>
+</html>`;
+}
+
+function getManualApprovalConfirmationRedirect() {
+  const supabaseUrl = String(Deno.env.get("SUPABASE_URL") || "").replace(/\/+$/, "");
+  const redirectPageUrl = supabaseUrl ? `${supabaseUrl}/functions/v1/login-redirect` : "musikalokal://?verified=true";
+  return Deno.env.get("EMAIL_CONFIRM_REDIRECT_TO") || redirectPageUrl;
+}
+
+async function generateManualApprovalConfirmationLink(client: any, userEmail: string) {
+  if (!userEmail) return { link: null as string | null, error: "Missing recipient email" };
+
+  const redirectTo = getManualApprovalConfirmationRedirect();
+  const { data, error } = await client.auth.admin.generateLink({
+    type: "magiclink",
+    email: userEmail,
+    options: {
+      redirectTo,
+      data: {
+        is_verified: false,
+        verification_status: "APPROVED",
+      },
+    },
+  });
+
+  if (error) {
+    console.error("manual_identity_review_confirmation_link_failed", {
+      recipient: maskEmailForLog(userEmail),
+      message: error.message,
+    });
+    return { link: null, error: error.message };
+  }
+
+  const link = String(data?.properties?.action_link || "").trim();
+  if (!link) {
+    return { link: null, error: "Generated confirmation link was empty" };
+  }
+
+  return { link, error: null };
+}
+
+async function sendDecisionEmail(
+  client: any,
+  userEmail: string,
+  decision: "APPROVED" | "DECLINED",
+  reviewNotes: string | null,
+  confirmationLink: string | null = null,
+  confirmationLinkError: string | null = null,
+) {
+  if (!userEmail) return { sent: false, queued: false, provider: "none", error: "Missing recipient email" };
+
+  let fallbackReason = "";
+  const normalizedDecision = decision === "APPROVED" ? "approved" : "declined";
+  const hasConfirmationStep = decision === "APPROVED" && Boolean(confirmationLink || confirmationLinkError);
+  const subject = decision === "APPROVED"
+    ? hasConfirmationStep
+      ? "Identity Verified - Confirm Your Email - MusikaLokal"
+      : "Identity Verified - MusikaLokal"
+    : "Identity Verification Declined - MusikaLokal";
+
+  const notesHtml = reviewNotes
+    ? `<div style="background: #f8fafc; padding: 16px 18px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 20px 0;"><p style="margin: 0; color: #334155;"><strong>Admin notes:</strong> ${escapeHtml(reviewNotes)}</p></div>`
+    : "";
+  const confirmHtml = confirmationLink
+    ? `<div style="text-align: center; margin: 30px 0;"><a href="${escapeHtml(confirmationLink)}" style="display: inline-block; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 700;">Confirm Email and Continue</a></div>`
+    : hasConfirmationStep
+      ? `<p style="margin: 0 0 12px;">If you do not see a confirmation link, open MusikaLokal and use the resend confirmation option on the signup/login screen.</p>`
+      : `<p style="margin: 0 0 12px;">Your email is already confirmed, so you can open MusikaLokal and sign in.</p>`;
+  const confirmErrorHtml = confirmationLinkError
+    ? `<p style="margin: 0 0 12px; color: #6B7280; font-size: 13px;">Confirmation link status: ${escapeHtml(confirmationLinkError)}</p>`
+    : "";
+
+  const html = buildMusikaLokalEmail({
+    title: decision === "APPROVED" ? "Identity Verification Approved!" : "Identity Verification Declined",
+    subtitle: decision === "APPROVED"
+      ? hasConfirmationStep
+        ? "Your account is now ready for the final email confirmation step"
+        : "Your account is ready to use"
+      : "This unverified account will be removed so you can start fresh",
+    bodyHtml: decision === "APPROVED"
+      ? `
+  <p style="margin: 0 0 12px;">Good news: your manual identity review has been <strong>${normalizedDecision}</strong>, and your MusikaLokal identity is now verified.</p>
+  <p style="margin: 0 0 12px;">${hasConfirmationStep ? "One step remains before you can sign in: please confirm your email address." : "You can now sign in and use your verified account."}</p>
+  ${confirmHtml}
+  ${confirmErrorHtml}
+  <ul style="background: #f8fafc; padding: 20px 20px 20px 40px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 24px 0;">
+    <li>Book musicians and studios</li>
+    <li>List your services and earn</li>
+    <li>Manage gigs and bookings</li>
+    <li>Connect with the music community</li>
+  </ul>
+  ${notesHtml}
+  <p style="margin: 16px 0 0;">Thank you,<br>MusikaLokal Team</p>`
+      : `
+  <p style="margin: 0 0 12px;">We reviewed your manual identity submission, but we could not approve it yet.</p>
+  <p style="margin: 0 0 12px;">Because this account could not pass identity verification, the unverified MusikaLokal account tied to this submission will be removed.</p>
+  <ul style="background: #f8fafc; padding: 20px 20px 20px 40px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 24px 0;">
+    <li>Use a clear photo of a valid government ID</li>
+    <li>Make sure the name and document details are readable</li>
+    <li>Create a new account only when you are ready to submit valid verification details</li>
+  </ul>
+  ${notesHtml}
+  <p style="margin: 16px 0 0;">Thank you,<br>MusikaLokal Team</p>`,
+  });
+
+  const gmailDelivery = await sendEmailWithGmail({
+    to: userEmail,
+    subject,
+    html,
+    recipientName: "User",
+    source: "admin-users-management",
+  });
+  if (gmailDelivery.sent) {
+    console.log("manual_identity_review_decision_email_sent", {
+      decision,
+      provider: gmailDelivery.provider,
+      recipient: maskEmailForLog(userEmail),
+    });
+    return { sent: true, queued: false, provider: gmailDelivery.provider };
+  }
+
+  fallbackReason = gmailDelivery.error || "Gmail sender is not configured";
+  console.error("manual_identity_review_decision_email_gmail_failed", {
+    provider: gmailDelivery.provider,
+    message: fallbackReason,
+  });
+
+  const { error } = await client.from("email_notifications").insert({
+    recipient_email: userEmail,
+    recipient_name: "User",
+    subject,
+    html_content: html,
+    template_type: "manual_identity_review_decision",
+    status: "pending",
+    created_at: new Date().toISOString(),
+  });
+
+  if (error) {
+    console.error("manual_identity_review_decision_email_queue_failed", { message: error.message });
+    return {
+      sent: false,
+      queued: false,
+      provider: "email_notifications",
+      error: fallbackReason ? `${fallbackReason}; ${error.message}` : error.message,
+    };
+  }
+
+  console.log("manual_identity_review_decision_email_queued", {
+    decision,
+    provider: "email_notifications",
+    recipient: maskEmailForLog(userEmail),
+    reason: fallbackReason || "gmail sender unavailable",
+  });
+
+  return {
+    sent: false,
+    queued: true,
+    provider: "email_notifications",
+    error: fallbackReason ? `${fallbackReason}; queued in email_notifications` : null,
+  };
+}
+
+async function sendCopyrightOwnershipDeclinedEmail(
+  client: any,
+  {
+    userEmail,
+    recipientName,
+    trackLabel,
+    reviewNotes,
+    isPerformanceVideo = false,
+  }: {
+    userEmail: string;
+    recipientName?: string | null;
+    trackLabel: string;
+    reviewNotes?: string | null;
+    isPerformanceVideo?: boolean;
+  },
+) {
+  const normalizedEmail = String(userEmail || "").trim().toLowerCase();
+  if (!normalizedEmail) {
+    return { sent: false, queued: false, provider: "none", error: "Missing recipient email" };
+  }
+
+  const safeTrackLabel = trackLabel || (isPerformanceVideo ? "your performance video" : "your uploaded track");
+  const subject = isPerformanceVideo
+    ? "Performance Video Rights Declined - MusikaLokal"
+    : "Track Ownership Declined - MusikaLokal";
+  const notesHtml = reviewNotes
+    ? `<div style="background: #fef2f2; padding: 16px 18px; border-radius: 8px; border-left: 4px solid #dc2626; margin: 20px 0;"><p style="margin: 0; color: #7f1d1d;"><strong>Admin notes:</strong> ${escapeHtml(reviewNotes)}</p></div>`
+    : "";
+  const html = buildMusikaLokalEmail({
+    eyebrow: "Music Review",
+    title: isPerformanceVideo ? "Performance Video Rights Declined" : "Track Ownership Declined",
+    subtitle: isPerformanceVideo ? "The application was flagged for organizer review" : "The MP3 was removed from your playlist",
+    bodyHtml: isPerformanceVideo ? `
+  <p style="margin: 0 0 12px;">We reviewed your ownership, license, or permission claim for <strong>${escapeHtml(safeTrackLabel)}</strong>, but we could not approve it.</p>
+  <p style="margin: 0 0 12px;">The video remains private in the gig application and is marked with a declined rights-review status for the organizer.</p>
+  <ul style="background: #f8fafc; padding: 20px 20px 20px 40px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 24px 0;">
+    <li>Submit only performances or recordings you own or have permission to use</li>
+    <li>Provide clear license or permission details when requested</li>
+    <li>Contact support if you believe the fingerprint match was incorrect</li>
+  </ul>
+  ${notesHtml}
+  <p style="margin: 16px 0 0;">Thank you,<br>MusikaLokal Team</p>` : `
+  <p style="margin: 0 0 12px;">We reviewed your ownership request for <strong>${escapeHtml(safeTrackLabel)}</strong>, but we could not approve it.</p>
+  <p style="margin: 0 0 12px;">The uploaded MP3 has been removed from your playlist and cannot be played on MusikaLokal.</p>
+  <ul style="background: #f8fafc; padding: 20px 20px 20px 40px; border-radius: 8px; border-left: 4px solid #6366f1; margin: 24px 0;">
+    <li>Upload only music you own or have permission to share</li>
+    <li>Use a different MP3 if this was the wrong file</li>
+    <li>Add clear ownership details when submitting copyrighted music for review</li>
+  </ul>
+  ${notesHtml}
+  <p style="margin: 16px 0 0;">Thank you,<br>MusikaLokal Team</p>`,
+  });
+
+  const gmailDelivery = await sendEmailWithGmail({
+    to: normalizedEmail,
+    subject,
+    html,
+    recipientName: recipientName || "User",
+    source: "admin-users-management",
+  });
+
+  if (gmailDelivery.sent) {
+    console.log("copyright_ownership_declined_email_sent", {
+      provider: gmailDelivery.provider,
+      recipient: maskEmailForLog(normalizedEmail),
+    });
+    return { sent: true, queued: false, provider: gmailDelivery.provider, error: null };
+  }
+
+  const fallbackReason = gmailDelivery.error || "Gmail sender is not configured";
+  console.error("copyright_ownership_declined_email_gmail_failed", {
+    provider: gmailDelivery.provider,
+    message: fallbackReason,
+  });
+
+  const { error } = await client.from("email_notifications").insert({
+    recipient_email: normalizedEmail,
+    recipient_name: recipientName || "User",
+    subject,
+    html_content: html,
+    template_type: "copyright_ownership_declined",
+    status: "pending",
+    error_message: fallbackReason,
+    created_at: new Date().toISOString(),
+  });
+
+  if (error) {
+    console.error("copyright_ownership_declined_email_queue_failed", { message: error.message });
+    return {
+      sent: false,
+      queued: false,
+      provider: "email_notifications",
+      error: `${fallbackReason}; ${error.message}`,
+    };
+  }
+
+  console.log("copyright_ownership_declined_email_queued", {
+    provider: "email_notifications",
+    recipient: maskEmailForLog(normalizedEmail),
+    reason: fallbackReason,
+  });
+
+  return {
+    sent: false,
+    queued: true,
+    provider: "email_notifications",
+    error: `${fallbackReason}; queued in email_notifications`,
+  };
+}
+
+function normalizeDiditReviewStatus(rawStatus: unknown) {
+  const value = String(rawStatus || "").trim();
+  const upperValue = value.replace(/[\s-]+/g, "_").toUpperCase();
+
+  if (upperValue === "PENDING_REVIEW" || upperValue === "IN_REVIEW") return "In Review";
+  if (upperValue === "APPROVED") return "Approved";
+  if (upperValue === "DECLINED") return "Declined";
+  if (upperValue === "RESUBMITTED") return "Resubmitted";
+  if (upperValue === "IN_PROGRESS") return "In Progress";
+  if (upperValue === "NOT_STARTED") return "Not Started";
+  if (upperValue === "ABANDONED") return "Abandoned";
+  if (upperValue === "EXPIRED") return "Expired";
+  if (upperValue === "KYC_EXPIRED") return "Kyc Expired";
+
+  return value || null;
+}
+
+function isDiditBackedReview(review: any) {
+  const source = String(review?.source || "").trim().toUpperCase();
+  return hasDiditSession(review) && source !== COPYRIGHT_OWNERSHIP_REVIEW_SOURCE;
+}
+
+function isDiditPendingReview(review: any) {
+  return String(review?.source || "").trim().toUpperCase() === "DIDIT_PENDING";
+}
+
+function getDiditSourceReviewStatus(review: any) {
+  const metadata = review?.metadata && typeof review.metadata === "object" ? review.metadata : {};
+  return normalizeDiditReviewStatus(metadata.didit_status || metadata.source_session_status || null);
+}
+
+function shouldSyncDiditManualReviewStatus(review: any) {
+  if (!isDiditPendingReview(review)) return false;
+
+  const sourceStatus = getDiditSourceReviewStatus(review);
+  if (!sourceStatus) return true;
+
+  return sourceStatus === "In Review" || sourceStatus === "Resubmitted";
+}
+
+function getDiditReviewInfo(review: any) {
+  if (!isDiditBackedReview(review)) return null;
+
+  const metadata = review?.metadata && typeof review.metadata === "object" ? review.metadata : {};
+  const rawStatus = metadata.didit_status || metadata.source_session_status || review.status || "PENDING_REVIEW";
+
+  return {
+    status: normalizeDiditReviewStatus(rawStatus) || "In Review",
+    session_id: review.didit_session_id || null,
+    action_available: shouldSyncDiditManualReviewStatus(review) && Boolean(review.didit_session_id),
+    last_synced_at: metadata.didit_status_synced_at || null,
+  };
+}
+
+function firstNonEmptyString(...values: unknown[]) {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (normalized) return normalized;
+  }
+
+  return null;
+}
+
+function firstArrayItem(value: unknown) {
+  return Array.isArray(value) && value.length > 0 ? value[0] : null;
+}
+
+function firstObject(...values: unknown[]) {
+  for (const value of values) {
+    if (Array.isArray(value) && value.length > 0 && value[0] && typeof value[0] === "object") {
+      return value[0];
+    }
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function normalizeDocumentTypeKey(value: unknown) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/['']/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  if (!normalized) return "";
+  if (normalized === "passport") return "passport";
+  if (["driver_license", "drivers_license", "driving_license", "driver_s_license"].includes(normalized)) return "drivers_license";
+  if (["id_card", "identity_card", "national_id", "national_id_card", "government_id"].includes(normalized)) return "national_id";
+
+  return normalized;
+}
+
+function formatDocumentTypeLabel(rawType: unknown, fallbackType: unknown) {
+  const raw = String(rawType || "").trim();
+  const key = normalizeDocumentTypeKey(raw || fallbackType);
+
+  if (key === "passport") return "Passport";
+  if (key === "drivers_license") return "Driver's license";
+  if (key === "national_id") return "National ID card";
+
+  const label = raw || String(fallbackType || "").trim();
+  if (!label) return "";
+
+  return label
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getDiditDocumentInfoFromVerificationData(verificationData: any) {
+  if (!verificationData || typeof verificationData !== "object") return null;
+
+  const decision = findDiditDecisionPayload(verificationData);
+  const idVerification = firstObject(
+    decision?.id_verifications,
+    decision?.id_verification,
+    decision?.idVerification,
+    verificationData?.raw_data,
+    verificationData,
+  );
+  const rawDocumentType = firstNonEmptyString(
+    verificationData?.document_type,
+    verificationData?.documentType,
+    verificationData?.didit_document_type,
+    idVerification?.document_type,
+    idVerification?.documentType,
+    idVerification?.type,
+    idVerification?.document?.type,
+    idVerification?.document_details?.type,
+  );
+  const documentTypeKey = normalizeDocumentTypeKey(rawDocumentType);
+  const documentType = formatDocumentTypeLabel(rawDocumentType, documentTypeKey);
+
+  if (!rawDocumentType || !documentTypeKey || !documentType) return null;
+
+  return {
+    document_type: documentType,
+    document_type_key: documentTypeKey,
+    didit_document_type: rawDocumentType,
+  };
+}
+
+function findDiditDecisionPayload(source: any) {
+  const candidates = [
+    source?.decision,
+    source?.verification_data?.decision,
+    source?.details?.decision,
+    source,
+  ];
+
+  return candidates.find((candidate) => (
+    candidate &&
+    typeof candidate === "object" &&
+    (
+      Array.isArray(candidate.id_verifications) ||
+      Array.isArray(candidate.face_matches) ||
+      candidate.id_verification ||
+      candidate.face_match ||
+      candidate.liveness_check
+    )
+  )) || source;
+}
+
+function extractDiditReviewAssetUrls(sessionDecision: any) {
+  const decision = findDiditDecisionPayload(sessionDecision);
+  const idVerification = firstObject(
+    decision?.id_verifications,
+    decision?.id_verification,
+    decision?.idVerification,
+  );
+  const livenessCheck = firstObject(
+    decision?.liveness_checks,
+    decision?.liveness_check,
+    decision?.liveness,
+  );
+  const faceMatch = firstObject(
+    decision?.face_matches,
+    decision?.face_match,
+    decision?.faceMatch,
+  );
+  const nfcVerification = firstObject(
+    decision?.nfc_verifications,
+    decision?.nfc_verification,
+    decision?.nfcVerification,
+  );
+
+  const frontImageUrl = firstNonEmptyString(
+    decision?.full_front_image,
+    decision?.full_front_image_url,
+    decision?.front_image,
+    decision?.front_image_url,
+    decision?.front_image_camera_front,
+    decision?.front_image_camera_front_url,
+    decision?.document_front_image,
+    decision?.document_front_image_url,
+    decision?.raw_data?.full_front_image,
+    decision?.raw_data?.full_front_image_url,
+    decision?.raw_data?.front_image,
+    decision?.raw_data?.front_image_url,
+    decision?.raw_data?.front_image_camera_front,
+    decision?.raw_data?.front_image_camera_front_url,
+    decision?.verification_data?.raw_data?.full_front_image,
+    decision?.verification_data?.raw_data?.full_front_image_url,
+    decision?.verification_data?.raw_data?.front_image,
+    decision?.verification_data?.raw_data?.front_image_url,
+    decision?.verification_data?.raw_data?.front_image_camera_front,
+    decision?.verification_data?.raw_data?.front_image_camera_front_url,
+    idVerification?.full_front_image,
+    idVerification?.full_front_image_url,
+    idVerification?.front_image,
+    idVerification?.front_image_url,
+    idVerification?.front_image_camera_front,
+    idVerification?.front_image_camera_front_url,
+    idVerification?.document_front_image,
+    idVerification?.document_front_image_url,
+    idVerification?.images?.front,
+    idVerification?.images?.front_image,
+    idVerification?.document?.front_image,
+  );
+  const backImageUrl = firstNonEmptyString(
+    decision?.full_back_image,
+    decision?.full_back_image_url,
+    decision?.back_image,
+    decision?.back_image_url,
+    decision?.back_image_camera_front,
+    decision?.back_image_camera_front_url,
+    decision?.document_back_image,
+    decision?.document_back_image_url,
+    decision?.raw_data?.full_back_image,
+    decision?.raw_data?.full_back_image_url,
+    decision?.raw_data?.back_image,
+    decision?.raw_data?.back_image_url,
+    decision?.raw_data?.back_image_camera_front,
+    decision?.raw_data?.back_image_camera_front_url,
+    decision?.verification_data?.raw_data?.full_back_image,
+    decision?.verification_data?.raw_data?.full_back_image_url,
+    decision?.verification_data?.raw_data?.back_image,
+    decision?.verification_data?.raw_data?.back_image_url,
+    decision?.verification_data?.raw_data?.back_image_camera_front,
+    decision?.verification_data?.raw_data?.back_image_camera_front_url,
+    idVerification?.full_back_image,
+    idVerification?.full_back_image_url,
+    idVerification?.back_image,
+    idVerification?.back_image_url,
+    idVerification?.back_image_camera_front,
+    idVerification?.back_image_camera_front_url,
+    idVerification?.document_back_image,
+    idVerification?.document_back_image_url,
+    idVerification?.images?.back,
+    idVerification?.images?.back_image,
+    idVerification?.document?.back_image,
+  );
+  const selfieImageUrl = firstNonEmptyString(
+    decision?.portrait_image,
+    decision?.portrait_image_url,
+    decision?.selfie_image,
+    decision?.selfie_image_url,
+    decision?.reference_image,
+    decision?.reference_image_url,
+    decision?.raw_data?.portrait_image,
+    decision?.raw_data?.portrait_image_url,
+    decision?.raw_data?.selfie_image,
+    decision?.raw_data?.selfie_image_url,
+    decision?.raw_data?.reference_image,
+    decision?.raw_data?.reference_image_url,
+    decision?.verification_data?.raw_data?.portrait_image,
+    decision?.verification_data?.raw_data?.portrait_image_url,
+    decision?.verification_data?.raw_data?.selfie_image,
+    decision?.verification_data?.raw_data?.selfie_image_url,
+    decision?.verification_data?.raw_data?.reference_image,
+    decision?.verification_data?.raw_data?.reference_image_url,
+    livenessCheck?.reference_image,
+    livenessCheck?.reference_image_url,
+    livenessCheck?.image,
+    livenessCheck?.image_url,
+    livenessCheck?.selfie_image,
+    livenessCheck?.selfie_image_url,
+    faceMatch?.source_image,
+    faceMatch?.source_image_url,
+    faceMatch?.target_image,
+    faceMatch?.target_image_url,
+    faceMatch?.selfie_image,
+    faceMatch?.selfie_image_url,
+    nfcVerification?.portrait_image,
+    nfcVerification?.portrait_image_url,
+    idVerification?.portrait_image,
+    idVerification?.portrait_image_url,
+  );
+
+  return {
+    front_image_url: frontImageUrl,
+    back_image_url: backImageUrl,
+    selfie_image_url: selfieImageUrl,
+    source_status: decision?.status || decision?.source_session_status || sessionDecision?.status || null,
+    available: Boolean(frontImageUrl || backImageUrl || selfieImageUrl),
+  };
+}
+
+async function fetchDiditReviewAssetUrls(sessionId: string) {
+  const diditApiKey = Deno.env.get("DIDIT_API_KEY") || "";
+  if (!diditApiKey) {
+    return {
+      front_image_url: null,
+      back_image_url: null,
+      selfie_image_url: null,
+      source_status: null,
+      available: false,
+      error: "DIDIT_API_KEY is not configured.",
+    };
+  }
+
+  const endpoint = `https://verification.didit.me/v3/session/${encodeURIComponent(sessionId)}/decision/`;
+  const diditResponse = await fetch(endpoint, {
+    method: "GET",
+    headers: {
+      "x-api-key": diditApiKey,
+    },
+  });
+
+  const responseText = await diditResponse.text();
+  let responsePayload: any = null;
+  if (responseText) {
+    try {
+      responsePayload = JSON.parse(responseText);
+    } catch {
+      responsePayload = { raw: responseText.slice(0, 500) };
+    }
+  }
+
+  if (!diditResponse.ok) {
+    const diditMessage = String(
+      responsePayload?.message ||
+        responsePayload?.detail ||
+        responsePayload?.error ||
+        responsePayload?.raw ||
+        "",
+    ).trim();
+
+    console.error("didit_manual_review_assets_fetch_failed", {
+      sessionId,
+      status: diditResponse.status,
+      endpoint,
+      message: diditMessage || null,
+    });
+
+    return {
+      front_image_url: null,
+      back_image_url: null,
+      selfie_image_url: null,
+      source_status: null,
+      available: false,
+      error: diditMessage || `Didit asset fetch failed with HTTP ${diditResponse.status}.`,
+    };
+  }
+
+  return { ...extractDiditReviewAssetUrls(responsePayload), error: null };
+}
+
+function mergeDiditReviewAssets(primary: any, fallback: any) {
+  return {
+    front_image_url: primary?.front_image_url || fallback?.front_image_url || null,
+    back_image_url: primary?.back_image_url || fallback?.back_image_url || null,
+    selfie_image_url: primary?.selfie_image_url || fallback?.selfie_image_url || null,
+    source_status: primary?.source_status || fallback?.source_status || null,
+    available: Boolean(
+      primary?.front_image_url ||
+        primary?.back_image_url ||
+        primary?.selfie_image_url ||
+        fallback?.front_image_url ||
+        fallback?.back_image_url ||
+        fallback?.selfie_image_url
+    ),
+    error: primary?.error || fallback?.error || null,
+  };
+}
+
+async function fetchDiditSessionAssetBundle(client: any, sessionId: string) {
+  const diditSessionId = String(sessionId || "").trim();
+
+  if (!diditSessionId) {
+    return {
+      session_id: null,
+      front_image_url: null,
+      back_image_url: null,
+      selfie_image_url: null,
+      didit_review: {
+        session_id: null,
+        status: null,
+        assets_available: false,
+        assets_error: "Missing Didit session ID.",
+      },
+    };
+  }
+
+  const { data: storedSession } = await client
+    .from("verification_sessions")
+    .select("status, verification_data")
+    .eq("session_ref", diditSessionId)
+    .maybeSingle();
+
+  const storedAssets = extractDiditReviewAssetUrls(storedSession?.verification_data || {});
+  const liveAssets = await fetchDiditReviewAssetUrls(diditSessionId);
+  const diditAssets = mergeDiditReviewAssets(liveAssets, storedAssets);
+
+  return {
+    session_id: diditSessionId,
+    front_image_url: diditAssets.front_image_url || null,
+    back_image_url: diditAssets.back_image_url || null,
+    selfie_image_url: diditAssets.selfie_image_url || null,
+    didit_review: {
+      session_id: diditSessionId,
+      status: normalizeDiditReviewStatus(diditAssets.source_status || storedSession?.status) || "In Review",
+      assets_available: Boolean(diditAssets.available),
+      assets_error: diditAssets.error || null,
+    },
+  };
+}
+
+function isPendingDiditStatus(rawStatus: unknown) {
+  const value = String(rawStatus || "").trim().replace(/[\s-]+/g, "_").toUpperCase();
+  return value === "PENDING_REVIEW" || value === "IN_REVIEW";
+}
+
+async function queueMissingDiditPendingReviews(client: any) {
+  const { data: pendingProfiles, error: profilesError } = await client
+    .from("profiles")
+    .select("id, email, role, verification_status, didit_session_id, created_at")
+    .eq("verification_status", "PENDING_REVIEW")
+    .not("didit_session_id", "is", null)
+    .limit(300);
+
+  if (profilesError) {
+    throw new Error(`Unable to load pending Didit profiles: ${profilesError.message}`);
+  }
+
+  const profiles = (pendingProfiles || []).filter((profile: any) => {
+    return String(profile?.id || "").trim() && String(profile?.didit_session_id || "").trim();
+  });
+
+  if (profiles.length === 0) {
+    return { created: 0, checked: 0 };
+  }
+
+  const profileIds = profiles.map((profile: any) => String(profile.id));
+  const sessionIds = Array.from(new Set(profiles.map((profile: any) => String(profile.didit_session_id || "").trim()).filter(Boolean)));
+
+  const [{ data: existingReviews, error: reviewsError }, { data: sessions, error: sessionsError }] = await Promise.all([
+    client
+      .from("manual_identity_reviews")
+      .select("id, user_id, didit_session_id, source, status")
+      .in("user_id", profileIds)
+      .eq("status", "PENDING_REVIEW"),
+    client
+      .from("verification_sessions")
+      .select("session_ref, status, verification_data, created_at")
+      .in("session_ref", sessionIds),
+  ]);
+
+  if (reviewsError) {
+    throw new Error(`Unable to load pending Didit identity reviews: ${reviewsError.message}`);
+  }
+
+  if (sessionsError) {
+    throw new Error(`Unable to load pending Didit verification sessions: ${sessionsError.message}`);
+  }
+
+  const existingByUser = new Set((existingReviews || []).map((review: any) => String(review.user_id || "")));
+  const sessionByRef = new Map<string, any>(
+    (sessions || []).map((session: any) => [String(session.session_ref || ""), session]),
+  );
+  let created = 0;
+
+  for (const profile of profiles) {
+    const userId = String(profile.id || "");
+    const diditSessionId = String(profile.didit_session_id || "").trim();
+    if (!userId || !diditSessionId || existingByUser.has(userId)) continue;
+
+    const session = sessionByRef.get(diditSessionId);
+    if (session && !isPendingDiditStatus(session.status)) continue;
+
+    const verificationData = session?.verification_data && typeof session.verification_data === "object"
+      ? session.verification_data
+      : {};
+    const identityNameBirthDate = prepareIdentityNameBirthDateDuplicateInput(verificationData.raw_data || verificationData, {
+      fullLegalName: verificationData.verified_full_legal_name || verificationData.full_legal_name || verificationData.full_name,
+      normalizedFullLegalName: verificationData.normalized_full_legal_name,
+      birthDate: verificationData.birth_date || verificationData.date_of_birth,
+    });
+
+    const queued = await queueIdentityReview(client, {
+      userId,
+      email: profile.email || verificationData.email || "",
+      role: profile.role || verificationData.role || "musician",
+      documentType: verificationData.document_type || verificationData.documentType || "Government ID",
+      documentTypeKey: verificationData.document_type_key || verificationData.documentTypeKey || null,
+      documentCountry: verificationData.document_country || verificationData.issuing_country || verificationData.country || "PHL",
+      source: "DIDIT_PENDING",
+      diditSessionId,
+      documentFingerprint: verificationData.document_fingerprint || null,
+      verifiedFullLegalName: identityNameBirthDate.fullLegalName,
+      normalizedFullLegalName: identityNameBirthDate.normalizedFullLegalName,
+      birthDate: identityNameBirthDate.birthDate,
+      reviewReason: verificationData.review_reason || null,
+      matchedOn: verificationData.matched_on || null,
+      metadata: {
+        didit_status: normalizeDiditReviewStatus(session?.status || profile.verification_status || "PENDING_REVIEW"),
+        source_session_status: session?.status || profile.verification_status || "PENDING_REVIEW",
+        verification_session_user_ref: verificationData.user_ref || null,
+        review_started_at: verificationData.review_started_at || session?.created_at || profile.created_at || null,
+        hydrated_from_pending_profile: true,
+      },
+    });
+
+    if (queued?.id) {
+      created += 1;
+      existingByUser.add(userId);
+    }
+  }
+
+  return { created, checked: profiles.length };
+}
+
+function mapDiditManualDecision(decision: string) {
+  return decision === "APPROVED" ? "Approved" : "Declined";
+}
+
+async function updateDiditManualReviewStatus(
+  sessionId: string,
+  decision: "APPROVED" | "DECLINED",
+  reviewNotes: string | null,
+) {
+  const diditApiKey = Deno.env.get("DIDIT_API_KEY") || "";
+  if (!diditApiKey) {
+    throw new Error("DIDIT_API_KEY is not configured, so this Didit review cannot be updated from MusikaLokal.");
+  }
+
+  const nextStatus = mapDiditManualDecision(decision);
+  const diditResponse = await fetch(
+    `https://verification.didit.me/v3/session/${encodeURIComponent(sessionId)}/update-status/`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": diditApiKey,
+      },
+      body: JSON.stringify({
+        new_status: nextStatus,
+        comment: reviewNotes || `MusikaLokal admin marked this identity review as ${nextStatus}.`,
+        send_email: false,
+      }),
+    },
+  );
+
+  const responseText = await diditResponse.text();
+  let responsePayload: any = null;
+  if (responseText) {
+    try {
+      responsePayload = JSON.parse(responseText);
+    } catch {
+      responsePayload = { raw: responseText.slice(0, 500) };
+    }
+  }
+
+  if (!diditResponse.ok) {
+    const diditMessage = String(
+      responsePayload?.message ||
+        responsePayload?.detail ||
+        responsePayload?.error ||
+        responsePayload?.raw ||
+        "",
+    ).trim();
+
+    console.error("didit_manual_review_status_update_failed", {
+      sessionId,
+      status: diditResponse.status,
+      message: diditMessage || null,
+    });
+
+    throw new Error(
+      diditMessage
+        ? `Didit status update failed: ${diditMessage}`
+        : `Didit status update failed with HTTP ${diditResponse.status}.`,
+    );
+  }
+
+  return {
+    synced: true,
+    session_id: responsePayload?.session_id || sessionId,
+    session_kind: responsePayload?.session_kind || null,
+    status: nextStatus,
+    synced_at: new Date().toISOString(),
+  };
+}
+
+serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  try {
+    const authHeader = req.headers.get("Authorization") || "";
+    if (!authHeader) {
+      return jsonResponse({ error: "Missing authorization header" }, 401);
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+
+    if (!supabaseUrl || !serviceRoleKey || !anonKey) {
+      return jsonResponse({ error: "Server misconfiguration" }, 500);
+    }
+
+    const actorId = await getAuthenticatedUserId(authHeader, supabaseUrl, anonKey);
+    if (!actorId) {
+      return jsonResponse({ error: "Invalid JWT" }, 401);
+    }
+
+    const client = createClient(supabaseUrl, serviceRoleKey);
+
+    const isAdmin = await assertAdmin(client, actorId);
+    if (!isAdmin) {
+      return jsonResponse({ error: "Forbidden: admin role required" }, 403);
+    }
+
+    const body = await req.json();
+    const action = String(body?.action || "").trim();
+
+    if (action === "fetch_users") {
+      const limit = Math.max(1, Math.min(300, Number(body?.limit || 200)));
+
+      let fetchResult = await client
+        .from("profiles")
+        .select(userListProfileSelect)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+      if (fetchResult.error && isMissingColumnError(fetchResult.error)) {
+        fetchResult = await client
+          .from("profiles")
+          .select(userListProfileSelectLegacy)
+          .order("created_at", { ascending: false })
+          .limit(limit);
+      }
+
+      const { data, error } = fetchResult;
+      if (error) throw error;
+
+      const items = await attachProfileLists(client, data || []);
+
+      return jsonResponse({ items });
+    }
+
+    if (action === "fetch_manual_identity_reviews") {
+      const limit = Math.max(1, Math.min(300, Number(body?.limit || 100)));
+      const requestedStatus = String(body?.status || "PENDING_REVIEW").trim().toUpperCase();
+      let diditQueueHydration = { created: 0, checked: 0 };
+
+      if (!requestedStatus || requestedStatus === "ALL" || requestedStatus === "PENDING_REVIEW") {
+        diditQueueHydration = await queueMissingDiditPendingReviews(client);
+      }
+
+      let reviewQuery = client
+        .from("manual_identity_reviews")
+        .select(
+          "id, user_id, submitted_by_email, submitted_role, document_type, document_type_key, document_country, source, status, didit_session_id, document_fingerprint, verified_full_legal_name, normalized_full_legal_name, birth_date, review_reason, matched_on, duplicate_reason, duplicate_match_count, metadata, front_image_path, back_image_path, selfie_image_path, music_video_path, music_video_original_name, music_video_mime_type, music_video_size_bytes, music_video_uploaded_at, review_notes, reviewed_by, reviewed_at, expected_decision_by, created_at, updated_at",
+        )
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+      if (requestedStatus && requestedStatus !== "ALL") {
+        reviewQuery = reviewQuery.eq("status", requestedStatus);
+      }
+
+      const { data: reviews, error: reviewsError } = await reviewQuery;
+      if (reviewsError) {
+        return jsonResponse({ error: reviewsError.message }, 400);
+      }
+
+      const userIds = Array.from(new Set((reviews || []).map((item: any) => String(item.user_id || "")).filter(Boolean)));
+      const diditSessionIds = Array.from(new Set((reviews || []).map((item: any) => String(item.didit_session_id || "").trim()).filter(Boolean)));
+      let profilesById = new Map<string, any>();
+      let verificationSessionsByRef = new Map<string, any>();
+      let playlistItemsByReviewId = new Map<string, any[]>();
+      let gigApplicationsByReviewId = new Map<string, any[]>();
+
+      if (userIds.length > 0) {
+        const { data: linkedProfiles, error: linkedProfilesError } = await client
+          .from("profiles")
+          .select("id, full_name, email, role, verification_status, id_document_expiry")
+          .in("id", userIds);
+
+        if (!linkedProfilesError && linkedProfiles) {
+          profilesById = new Map<string, any>(linkedProfiles.map((item: any) => [String(item.id), item]));
+        }
+      }
+
+      if (diditSessionIds.length > 0) {
+        const { data: linkedSessions, error: linkedSessionsError } = await client
+          .from("verification_sessions")
+          .select("session_ref, verification_data")
+          .in("session_ref", diditSessionIds);
+
+        if (!linkedSessionsError && linkedSessions) {
+          verificationSessionsByRef = new Map<string, any>(linkedSessions.map((item: any) => [String(item.session_ref), item]));
+        }
+      }
+
+      const copyrightReviewIds = Array.from(new Set(
+        (reviews || [])
+          .filter((item: any) => isCopyrightOwnershipReview(item))
+          .map((item: any) => String(item.id || "").trim())
+          .filter(Boolean),
+      ));
+
+      if (copyrightReviewIds.length > 0) {
+        const { data: linkedPlaylistItems, error: linkedPlaylistItemsError } = await client
+          .from("playlist_items")
+          .select("id, playlist_id, title, artist_name, audio_url, cover_image_url, duration_seconds, copyright_status, copyright_review_id, created_at")
+          .in("copyright_review_id", copyrightReviewIds)
+          .order("created_at", { ascending: false });
+
+        if (linkedPlaylistItemsError) {
+          console.warn("[admin-users-management] copyright_playlist_items_lookup_failed", {
+            message: linkedPlaylistItemsError.message,
+          });
+        } else {
+          const linkedPlaylistIds = Array.from(new Set(
+            (linkedPlaylistItems || [])
+              .map((item: any) => String(item?.playlist_id || "").trim())
+              .filter(Boolean),
+          ));
+          let playlistsById = new Map<string, any>();
+
+          if (linkedPlaylistIds.length > 0) {
+            const { data: linkedPlaylists, error: linkedPlaylistsError } = await client
+              .from("playlists")
+              .select("id, title")
+              .in("id", linkedPlaylistIds);
+
+            if (linkedPlaylistsError) {
+              console.warn("[admin-users-management] copyright_playlists_lookup_failed", {
+                message: linkedPlaylistsError.message,
+              });
+            } else {
+              playlistsById = new Map<string, any>(
+                (linkedPlaylists || []).map((playlist: any) => [String(playlist.id), playlist]),
+              );
+            }
+          }
+
+          playlistItemsByReviewId = new Map<string, any[]>();
+          for (const playlistItem of linkedPlaylistItems || []) {
+            const reviewId = String(playlistItem?.copyright_review_id || "").trim();
+            if (!reviewId) continue;
+
+            const existing = playlistItemsByReviewId.get(reviewId) || [];
+            existing.push({
+              ...playlistItem,
+              playlist: playlistsById.get(String(playlistItem?.playlist_id || "")) || null,
+            });
+            playlistItemsByReviewId.set(reviewId, existing);
+          }
+        }
+
+        const { data: linkedGigApplications, error: linkedGigApplicationsError } = await client
+          .from("gig_applications")
+          .select("id, gig_id, video_url, video_copyright_status, video_copyright_review_id, video_copyright_metadata, created_at, gig:gig_id(id, name)")
+          .in("video_copyright_review_id", copyrightReviewIds)
+          .order("created_at", { ascending: false });
+
+        if (linkedGigApplicationsError) {
+          console.warn("[admin-users-management] copyright_gig_applications_lookup_failed", {
+            message: linkedGigApplicationsError.message,
+          });
+        } else {
+          gigApplicationsByReviewId = new Map<string, any[]>();
+          for (const application of linkedGigApplications || []) {
+            const reviewId = String(application?.video_copyright_review_id || "").trim();
+            if (!reviewId) continue;
+            const existing = gigApplicationsByReviewId.get(reviewId) || [];
+            existing.push(application);
+            gigApplicationsByReviewId.set(reviewId, existing);
+          }
+        }
+      }
+
+      const metadataMatchUserIds = Array.from(new Set<string>(
+        (reviews || [])
+          .flatMap((review: any) => getReviewMetadataIdentityMatches(review, review?.matched_on || "DOCUMENT_FINGERPRINT"))
+          .map((match: any) => String(match.user_id || "").trim())
+          .filter(Boolean),
+      ));
+      const metadataMatchEmails = Array.from(new Set<string>(
+        (reviews || [])
+          .flatMap((review: any) => getReviewMetadataIdentityMatches(review, review?.matched_on || "DOCUMENT_FINGERPRINT"))
+          .map((match: any) => String(match.email || "").trim().toLowerCase())
+          .filter(Boolean),
+      ));
+      const missingMetadataProfileIds = metadataMatchUserIds.filter((id) => !profilesById.has(id));
+
+      await hydrateProfilesById(client, profilesById, missingMetadataProfileIds);
+      await hydrateProfilesByEmail(client, profilesById, metadataMatchEmails);
+
+      const reviewFingerprints = Array.from(new Set(
+        (reviews || [])
+          .map((item: any) => String(item.document_fingerprint || "").trim())
+          .filter(Boolean),
+      ));
+      const reviewRoles = Array.from(new Set(
+        (reviews || [])
+          .map((item: any) => {
+            const profile = profilesById.get(String(item.user_id));
+            return String(item.submitted_role || profile?.role || "").trim().toLowerCase();
+          })
+          .filter(Boolean),
+      ));
+      let approvedClaimsByFingerprintRole = new Map<string, any[]>();
+
+      if (reviewFingerprints.length > 0 && reviewRoles.length > 0) {
+        const { data: approvedClaims, error: approvedClaimsError } = await client
+          .from("identity_document_claims")
+          .select("id, user_id, original_user_id, normalized_email, role, source, status, created_at, document_fingerprint, verified_full_legal_name, normalized_full_legal_name, birth_date, didit_session_id, manual_review_id, profiles:user_id(id, full_name, email, role)")
+          .in("document_fingerprint", reviewFingerprints)
+          .in("role", reviewRoles)
+          .in("status", ["APPROVED", "PENDING_REVIEW"]);
+
+        if (approvedClaimsError) {
+          return jsonResponse({ error: approvedClaimsError.message }, 400);
+        }
+
+        await hydrateProfilesById(client, profilesById, (approvedClaims || []).map((claim: any) => claim.user_id));
+
+        approvedClaimsByFingerprintRole = new Map<string, any[]>();
+        for (const claim of approvedClaims || []) {
+          const key = `${String(claim.document_fingerprint || "")}:${String(claim.role || "").trim().toLowerCase()}`;
+          const existing = approvedClaimsByFingerprintRole.get(key) || [];
+          existing.push(claim);
+          approvedClaimsByFingerprintRole.set(key, existing);
+        }
+      }
+
+      const reviewNameBirthInputs = (reviews || [])
+        .map((review: any) => {
+          const profile = profilesById.get(String(review.user_id));
+          const role = String(review.submitted_role || profile?.role || "").trim().toLowerCase();
+          const input = prepareIdentityNameBirthDateDuplicateInput(null, {
+            fullLegalName: review.verified_full_legal_name,
+            normalizedFullLegalName: review.normalized_full_legal_name,
+            birthDate: review.birth_date,
+          });
+          return {
+            role,
+            normalizedFullLegalName: input.normalizedFullLegalName,
+            birthDate: input.birthDate,
+          };
+        })
+        .filter((item: any) => item.role && item.normalizedFullLegalName && item.birthDate);
+      const reviewNormalizedNames = Array.from(new Set(reviewNameBirthInputs.map((item: any) => item.normalizedFullLegalName)));
+      const reviewBirthDates = Array.from(new Set(reviewNameBirthInputs.map((item: any) => item.birthDate)));
+      let approvedClaimsByNameBirthRole = new Map<string, any[]>();
+
+      if (reviewRoles.length > 0 && reviewNormalizedNames.length > 0 && reviewBirthDates.length > 0) {
+        const { data: approvedNameBirthClaims, error: approvedNameBirthClaimsError } = await client
+          .from("identity_document_claims")
+          .select("id, user_id, original_user_id, normalized_email, role, source, status, created_at, verified_full_legal_name, normalized_full_legal_name, birth_date, didit_session_id, manual_review_id, profiles:user_id(id, full_name, email, role)")
+          .in("role", reviewRoles)
+          .in("normalized_full_legal_name", reviewNormalizedNames)
+          .in("birth_date", reviewBirthDates)
+          .eq("status", "APPROVED");
+
+        if (approvedNameBirthClaimsError) {
+          return jsonResponse({ error: approvedNameBirthClaimsError.message }, 400);
+        }
+
+        await hydrateProfilesById(client, profilesById, (approvedNameBirthClaims || []).map((claim: any) => claim.user_id));
+
+        approvedClaimsByNameBirthRole = new Map<string, any[]>();
+        for (const claim of approvedNameBirthClaims || []) {
+          const key = [
+            String(claim.role || "").trim().toLowerCase(),
+            String(claim.normalized_full_legal_name || "").trim(),
+            normalizeDateOnly(claim.birth_date) || "",
+          ].join(":");
+          const existing = approvedClaimsByNameBirthRole.get(key) || [];
+          existing.push(claim);
+          approvedClaimsByNameBirthRole.set(key, existing);
+        }
+      }
+
+      const items = await Promise.all((reviews || []).map(async (review: any) => {
+        const profile = profilesById.get(String(review.user_id)) || null;
+        const reviewEmail = String(profile?.email || review.submitted_by_email || "").trim().toLowerCase();
+        const reviewRole = String(review.submitted_role || profile?.role || "").trim().toLowerCase();
+        const duplicateWarningKey = `${String(review.document_fingerprint || "").trim()}:${reviewRole}`;
+        const duplicateMatches = (approvedClaimsByFingerprintRole.get(duplicateWarningKey) || [])
+          .filter((claim: any) => {
+            const linkedProfile = getClaimProfile(claim, profilesById);
+            const matchUserId = String(claim.user_id || "").trim();
+            const matchEmail = String(linkedProfile?.email || "").trim().toLowerCase();
+            return matchUserId &&
+              linkedProfile &&
+              matchUserId !== String(review.user_id) &&
+              (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+          })
+          .map((claim: any) => ({
+            claim_id: claim.id || null,
+            didit_session_id: claim.didit_session_id || null,
+            manual_review_id: claim.manual_review_id || null,
+            user_id: claim.user_id || null,
+            original_user_id: claim.original_user_id || null,
+            email: getClaimProfile(claim, profilesById)?.email || null,
+            full_name: getClaimProfile(claim, profilesById)?.full_name || null,
+            role: getClaimProfile(claim, profilesById)?.role || claim.role,
+            source: claim.source,
+            claim_status: claim.status,
+            verified_at: claim.created_at,
+            birth_date: normalizeDateOnly(claim.birth_date),
+            matched_on: "DOCUMENT_FINGERPRINT",
+            match_type: "DOCUMENT_FINGERPRINT",
+            match_label: getIdentityMatchLabel("DOCUMENT_FINGERPRINT"),
+          }));
+        const reviewNameBirth = prepareIdentityNameBirthDateDuplicateInput(null, {
+          fullLegalName: review.verified_full_legal_name,
+          normalizedFullLegalName: review.normalized_full_legal_name,
+          birthDate: review.birth_date,
+        });
+        const nameBirthWarningKey = [
+          reviewRole,
+          String(reviewNameBirth.normalizedFullLegalName || "").trim(),
+          String(reviewNameBirth.birthDate || "").trim(),
+        ].join(":");
+        const nameBirthMatches = reviewNameBirth.hasNameBirthDate
+          ? (approvedClaimsByNameBirthRole.get(nameBirthWarningKey) || [])
+            .filter((claim: any) => {
+              const linkedProfile = getClaimProfile(claim, profilesById);
+              const matchUserId = String(claim.user_id || "").trim();
+              const matchEmail = String(linkedProfile?.email || "").trim().toLowerCase();
+              return matchUserId &&
+                linkedProfile &&
+                matchUserId !== String(review.user_id) &&
+                (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+            })
+            .map((claim: any) => ({
+              claim_id: claim.id || null,
+              didit_session_id: claim.didit_session_id || null,
+              manual_review_id: claim.manual_review_id || null,
+              user_id: claim.user_id || null,
+              original_user_id: claim.original_user_id || null,
+              email: getClaimProfile(claim, profilesById)?.email || null,
+              full_name: getClaimProfile(claim, profilesById)?.full_name || null,
+              role: getClaimProfile(claim, profilesById)?.role || claim.role,
+              source: claim.source,
+              claim_status: claim.status,
+              verified_at: claim.created_at,
+              birth_date: normalizeDateOnly(claim.birth_date),
+              matched_on: "NAME_BIRTHDATE",
+              match_type: "NAME_BIRTHDATE",
+              match_label: getIdentityMatchLabel("NAME_BIRTHDATE"),
+            }))
+          : [];
+        const reviewMetadata = getReviewMetadataObject(review);
+        const fallbackMatchedOn = review.matched_on || reviewMetadata?.matched_on || reviewMetadata?.approval_claim_result?.matched_on || "DOCUMENT_FINGERPRINT";
+        const rawMetadataMatches = getReviewMetadataIdentityMatches(review, fallbackMatchedOn);
+        const metadataMatches = rawMetadataMatches
+          .map((match: any) => {
+            const matchUserId = String(match.user_id || "").trim();
+            const linkedProfile = matchUserId ? profilesById.get(matchUserId) : getProfileByEmail(profilesById, match.email);
+            return linkedProfile
+              ? {
+                  ...match,
+                  user_id: linkedProfile.id,
+                  email: linkedProfile.email || null,
+                  full_name: linkedProfile.full_name || null,
+                  role: linkedProfile.role || match.role || null,
+                }
+              : null;
+          })
+          .filter((match: any) => {
+            if (!match) return false;
+            const matchUserId = String(match.user_id || "").trim();
+            const matchEmail = String(match.email || "").trim().toLowerCase();
+            return matchUserId &&
+              matchUserId !== String(review.user_id) &&
+              (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+          });
+        const allIdentityMatches = [
+          ...duplicateMatches,
+          ...nameBirthMatches.filter((nameMatch: any) => !duplicateMatches.some((docMatch: any) => (
+            String(docMatch.user_id || "") === String(nameMatch.user_id || "")
+          ))),
+          ...metadataMatches.filter((metadataMatch: any) => ![...duplicateMatches, ...nameBirthMatches].some((match: any) => (
+            String(match.user_id || match.email || "") === String(metadataMatch.user_id || metadataMatch.email || "") &&
+            String(match.matched_on || match.match_type || "") === String(metadataMatch.matched_on || metadataMatch.match_type || "")
+          ))),
+        ];
+        const matchTypes = Array.from(new Set(allIdentityMatches.map((match: any) => String(match.matched_on || match.match_type || "").trim()).filter(Boolean)));
+        const identityMatchWarning = allIdentityMatches.length > 0
+          ? {
+              same_role: true,
+              match_count: allIdentityMatches.length,
+              match_types: matchTypes.length > 0 ? matchTypes : [normalizeIdentityMatchType(fallbackMatchedOn)],
+              has_document_match: duplicateMatches.length > 0,
+              has_name_birthdate_match: nameBirthMatches.length > 0,
+              review_reason: review.review_reason || reviewMetadata?.review_reason || review.duplicate_reason || null,
+              matched_on: review.matched_on || reviewMetadata?.matched_on || matchTypes[0] || normalizeIdentityMatchType(fallbackMatchedOn),
+              matched_accounts: allIdentityMatches.slice(0, 5),
+              stale_matched_accounts: [],
+            }
+          : null;
+
+        const diditSession = verificationSessionsByRef.get(String(review.didit_session_id || ""));
+        const diditDocumentInfo = getDiditDocumentInfoFromVerificationData(diditSession?.verification_data);
+        const displayReview = diditDocumentInfo
+          ? {
+              ...review,
+              document_type: diditDocumentInfo.document_type,
+              document_type_key: diditDocumentInfo.document_type_key || review.document_type_key,
+              metadata: {
+                ...reviewMetadata,
+                selected_document_type: reviewMetadata.selected_document_type || review.document_type || null,
+                selected_document_type_key: reviewMetadata.selected_document_type_key || review.document_type_key || null,
+                didit_document_type: reviewMetadata.didit_document_type || diditDocumentInfo.didit_document_type,
+                didit_document_type_key: reviewMetadata.didit_document_type_key || diditDocumentInfo.document_type_key,
+              },
+            }
+          : review;
+        const copyrightPlaylistItems = (playlistItemsByReviewId.get(String(displayReview.id || "")) || [])
+          .map((playlistItem: any) => {
+            const playlist = Array.isArray(playlistItem?.playlist)
+              ? playlistItem.playlist[0] || null
+              : playlistItem?.playlist || null;
+
+            return {
+              id: playlistItem.id || null,
+              playlist_id: playlistItem.playlist_id || null,
+              playlist_title: playlist?.title || null,
+              title: playlistItem.title || null,
+              artist_name: playlistItem.artist_name || null,
+              audio_url: playlistItem.audio_url || null,
+              cover_image_url: playlistItem.cover_image_url || null,
+              duration_seconds: playlistItem.duration_seconds || null,
+              copyright_status: playlistItem.copyright_status || null,
+              created_at: playlistItem.created_at || null,
+            };
+          });
+        const copyrightGigApplications = (gigApplicationsByReviewId.get(String(displayReview.id || "")) || [])
+          .map((application: any) => ({
+            id: application.id || null,
+            gig_id: application.gig_id || null,
+            gig_name: (Array.isArray(application.gig) ? application.gig[0] : application.gig)?.name || null,
+            video_url: application.video_url || null,
+            copyright_status: application.video_copyright_status || null,
+            created_at: application.created_at || null,
+          }));
+
+        const item = {
+          ...displayReview,
+          profile,
+          didit_review: getDiditReviewInfo(displayReview),
+          copyright_playlist_item: copyrightPlaylistItems[0] || null,
+          copyright_playlist_items: copyrightPlaylistItems,
+          copyright_gig_application: copyrightGigApplications[0] || null,
+          copyright_gig_applications: copyrightGigApplications,
+          duplicate_verified_identity_warning: duplicateMatches.length > 0
+            ? {
+                same_verified_id_fingerprint: true,
+                same_role: true,
+                different_email_or_account: true,
+                match_count: duplicateMatches.length,
+                matched_accounts: duplicateMatches.slice(0, 5),
+              }
+            : null,
+          identity_match_warning: identityMatchWarning,
+          front_image_url: null,
+          back_image_url: null,
+          selfie_image_url: null,
+          music_video_url: null,
+        } as Record<string, any>;
+
+        if (review.front_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.front_image_path), 60 * 30);
+          item.front_image_url = signed?.signedUrl || null;
+        }
+
+        if (review.back_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.back_image_path), 60 * 30);
+          item.back_image_url = signed?.signedUrl || null;
+        }
+
+        if (review.selfie_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.selfie_image_path), 60 * 30);
+          item.selfie_image_url = signed?.signedUrl || null;
+        }
+
+        if (review.music_video_path) {
+          const { data: signed } = await client.storage
+            .from(MUSICIAN_VIDEO_BUCKET)
+            .createSignedUrl(String(review.music_video_path), 60 * 30);
+          item.music_video_url = signed?.signedUrl || null;
+        }
+
+        return item;
+      }));
+
+      return jsonResponse({ items, didit_queue_hydration: diditQueueHydration });
+    }
+
+    if (action === "fetch_manual_identity_review_assets") {
+      const reviewId = String(body?.reviewId || "").trim();
+
+      if (!reviewId) {
+        return jsonResponse({ error: "Missing reviewId" }, 400);
+      }
+
+      const { data: review, error: reviewError } = await client
+        .from("manual_identity_reviews")
+        .select("id, source, status, didit_session_id, metadata, front_image_path, back_image_path, selfie_image_path, music_video_path")
+        .eq("id", reviewId)
+        .maybeSingle();
+
+      if (reviewError) {
+        return jsonResponse({ error: reviewError.message }, 400);
+      }
+
+      if (!review) {
+        return jsonResponse({ error: "Identity review not found." }, 404);
+      }
+
+      const item = {
+        id: review.id,
+        didit_review: getDiditReviewInfo(review),
+        front_image_url: null,
+        back_image_url: null,
+        selfie_image_url: null,
+        music_video_url: null,
+      } as Record<string, any>;
+
+      if (isDiditBackedReview(review)) {
+        const diditSessionId = String(review.didit_session_id || "").trim();
+        const diditAssets = await fetchDiditSessionAssetBundle(client, diditSessionId);
+        item.didit_review = {
+          ...(item.didit_review || {}),
+          ...(diditAssets.didit_review || {}),
+          status: diditAssets.didit_review?.status || item.didit_review?.status || "In Review",
+        };
+        item.front_image_url = diditAssets.front_image_url || null;
+        item.back_image_url = diditAssets.back_image_url || null;
+        item.selfie_image_url = diditAssets.selfie_image_url || null;
+      } else {
+        if (review.front_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.front_image_path), 60 * 30);
+          item.front_image_url = signed?.signedUrl || null;
+        }
+
+        if (review.back_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.back_image_path), 60 * 30);
+          item.back_image_url = signed?.signedUrl || null;
+        }
+
+        if (review.selfie_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.selfie_image_path), 60 * 30);
+          item.selfie_image_url = signed?.signedUrl || null;
+        }
+      }
+
+      if (review.music_video_path) {
+        const { data: signed } = await client.storage
+          .from(MUSICIAN_VIDEO_BUCKET)
+          .createSignedUrl(String(review.music_video_path), 60 * 30);
+        item.music_video_url = signed?.signedUrl || null;
+      }
+
+      return jsonResponse({ item });
+    }
+
+    if (action === "fetch_identity_match_assets") {
+      const claimId = String(body?.claimId || body?.claim_id || "").trim();
+      let diditSessionId = String(body?.diditSessionId || body?.didit_session_id || "").trim();
+      let manualReviewId = String(body?.manualReviewId || body?.manual_review_id || "").trim();
+      let claim: any = null;
+
+      if (claimId) {
+        const { data: claimData, error: claimError } = await client
+          .from("identity_document_claims")
+          .select("id, didit_session_id, manual_review_id, source, status")
+          .eq("id", claimId)
+          .maybeSingle();
+
+        if (claimError) {
+          return jsonResponse({ error: claimError.message }, 400);
+        }
+
+        claim = claimData || null;
+        diditSessionId = diditSessionId || String(claim?.didit_session_id || "").trim();
+        manualReviewId = manualReviewId || String(claim?.manual_review_id || "").trim();
+      }
+
+      if (claimId && !claim && !diditSessionId && !manualReviewId) {
+        return jsonResponse({ error: "Identity claim not found." }, 404);
+      }
+
+      const item = {
+        claim_id: claim?.id || claimId || null,
+        didit_session_id: diditSessionId || null,
+        manual_review_id: manualReviewId || null,
+        front_image_url: null,
+        back_image_url: null,
+        selfie_image_url: null,
+        music_video_url: null,
+        didit_review: null,
+      } as Record<string, any>;
+
+      if (diditSessionId) {
+        const diditAssets = await fetchDiditSessionAssetBundle(client, diditSessionId);
+        return jsonResponse({
+          item: {
+            ...item,
+            didit_session_id: diditAssets.session_id || diditSessionId,
+            front_image_url: diditAssets.front_image_url || null,
+            back_image_url: diditAssets.back_image_url || null,
+            selfie_image_url: diditAssets.selfie_image_url || null,
+            didit_review: diditAssets.didit_review || null,
+          },
+        });
+      }
+
+      if (manualReviewId) {
+        const { data: review, error: reviewError } = await client
+          .from("manual_identity_reviews")
+          .select("id, source, status, didit_session_id, metadata, front_image_path, back_image_path, selfie_image_path, music_video_path")
+          .eq("id", manualReviewId)
+          .maybeSingle();
+
+        if (reviewError) {
+          return jsonResponse({ error: reviewError.message }, 400);
+        }
+
+        if (!review) {
+          return jsonResponse({ error: "Linked identity review not found." }, 404);
+        }
+
+        item.manual_review_id = review.id;
+        item.didit_session_id = review.didit_session_id || null;
+
+        if (isDiditBackedReview(review)) {
+          const diditAssets = await fetchDiditSessionAssetBundle(client, String(review.didit_session_id || "").trim());
+          return jsonResponse({
+            item: {
+              ...item,
+              didit_session_id: diditAssets.session_id || review.didit_session_id || null,
+              front_image_url: diditAssets.front_image_url || null,
+              back_image_url: diditAssets.back_image_url || null,
+              selfie_image_url: diditAssets.selfie_image_url || null,
+              didit_review: diditAssets.didit_review || null,
+            },
+          });
+        }
+
+        if (review.front_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.front_image_path), 60 * 30);
+          item.front_image_url = signed?.signedUrl || null;
+        }
+
+        if (review.back_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.back_image_path), 60 * 30);
+          item.back_image_url = signed?.signedUrl || null;
+        }
+
+        if (review.selfie_image_path) {
+          const { data: signed } = await client.storage
+            .from("identity-manual")
+            .createSignedUrl(String(review.selfie_image_path), 60 * 30);
+          item.selfie_image_url = signed?.signedUrl || null;
+        }
+
+        if (review.music_video_path) {
+          const { data: signed } = await client.storage
+            .from(MUSICIAN_VIDEO_BUCKET)
+            .createSignedUrl(String(review.music_video_path), 60 * 30);
+          item.music_video_url = signed?.signedUrl || null;
+        }
+
+        return jsonResponse({ item });
+      }
+
+      return jsonResponse({ error: "No Didit session or linked review was found for this matched account." }, 404);
+    }
+
+    if (action === "review_manual_identity") {
+      const reviewId = String(body?.reviewId || "").trim();
+      const decision = String(body?.decision || "").trim().toUpperCase();
+      const reviewNotesRaw = String(body?.reviewNotes || "").trim();
+      const reviewNotes = reviewNotesRaw ? reviewNotesRaw : null;
+
+      if (!reviewId) {
+        return jsonResponse({ error: "Missing reviewId" }, 400);
+      }
+
+      if (decision !== "APPROVED" && decision !== "DECLINED") {
+        return jsonResponse({ error: "Invalid decision. Use APPROVED or DECLINED." }, 400);
+      }
+
+      const { data: review, error: reviewError } = await client
+        .from("manual_identity_reviews")
+        .select("*")
+        .eq("id", reviewId)
+        .maybeSingle();
+
+      if (reviewError) {
+        return jsonResponse({ error: reviewError.message }, 400);
+      }
+
+      if (!review) {
+        return jsonResponse({ error: "Manual identity review not found" }, 404);
+      }
+
+      if (String(review.user_id || "") === actorId) {
+        return jsonResponse({ error: "Administrators cannot review their own identity submission" }, 403);
+      }
+
+      if (String(review.status || "").toUpperCase() !== "PENDING_REVIEW") {
+        return jsonResponse({ error: "This review is already finalized" }, 400);
+      }
+
+      if (isCopyrightOwnershipReview(review)) {
+        const nowIso = new Date().toISOString();
+        const existingReviewMetadata = getReviewMetadataObject(review);
+        const trackLabel = getCopyrightOwnershipTrackLabel(review);
+        const { data: linkedPlaylistItems, error: linkedPlaylistItemsError } = await client
+          .from("playlist_items")
+          .select("id, playlist_id, title, artist_name, audio_url, duration_seconds, copyright_status, copyright_review_id, created_at")
+          .eq("copyright_review_id", reviewId);
+
+        if (linkedPlaylistItemsError) {
+          return jsonResponse({ error: linkedPlaylistItemsError.message }, 400);
+        }
+
+        const linkedItems = linkedPlaylistItems || [];
+        const { data: linkedGigApplications, error: linkedGigApplicationsError } = await client
+          .from("gig_applications")
+          .select("id, video_url")
+          .eq("video_copyright_review_id", reviewId);
+        if (linkedGigApplicationsError && String(linkedGigApplicationsError.code || "") !== "42703") {
+          return jsonResponse({ error: linkedGigApplicationsError.message }, 400);
+        }
+        const linkedGigItems = linkedGigApplications || [];
+        const isPerformanceVideoReview = existingReviewMetadata.upload_kind === "gig_performance_video" || linkedGigItems.length > 0;
+        let deletedAudioRefs: Array<{ bucket: string; path: string }> = [];
+
+        if (decision === "DECLINED") {
+          const audioRefs = uniquePlaylistAudioStorageRefs(linkedItems);
+          try {
+            deletedAudioRefs = await removePlaylistAudioStorageRefs(client, audioRefs);
+          } catch (deleteError: any) {
+            return jsonResponse({
+              error: deleteError?.message || "Unable to delete the declined MP3. The review was not finalized.",
+            }, 500);
+          }
+        }
+
+        const nextReviewMetadata = {
+          ...existingReviewMetadata,
+          copyright_ownership_decision: decision,
+          copyright_ownership_reviewed_by: actorId,
+          copyright_ownership_reviewed_at: nowIso,
+          ...(decision === "DECLINED"
+            ? {
+                declined_mp3_deleted_at: nowIso,
+                declined_mp3_storage_deleted: deletedAudioRefs.length > 0,
+                declined_mp3_storage_ref_count: deletedAudioRefs.length,
+                declined_playlist_item_count: linkedItems.length,
+              }
+            : {}),
+        };
+
+        const { data: updatedReview, error: updateReviewError } = await client
+          .from("manual_identity_reviews")
+          .update({
+            status: decision,
+            review_notes: reviewNotes,
+            reviewed_by: actorId,
+            reviewed_at: nowIso,
+            metadata: nextReviewMetadata,
+            updated_at: nowIso,
+          })
+          .eq("id", reviewId)
+          .select("*")
+          .maybeSingle();
+
+        if (updateReviewError) {
+          return jsonResponse({ error: updateReviewError.message }, 400);
+        }
+
+        const nextPlaylistItemCopyrightStatus = decision === "APPROVED" ? "approved" : "declined";
+        const playlistItemPatch: Record<string, unknown> = {
+          copyright_status: nextPlaylistItemCopyrightStatus,
+        };
+
+        if (decision === "DECLINED") {
+          playlistItemPatch.audio_url = null;
+          playlistItemPatch.duration_seconds = null;
+        }
+
+        const { error: updatePlaylistItemsError } = await client
+          .from("playlist_items")
+          .update(playlistItemPatch)
+          .eq("copyright_review_id", reviewId);
+
+        if (updatePlaylistItemsError) {
+          return jsonResponse({ error: updatePlaylistItemsError.message }, 400);
+        }
+
+        const decisionTitle = isPerformanceVideoReview
+          ? decision === "APPROVED" ? "Performance Video Rights Approved" : "Performance Video Rights Declined"
+          : decision === "APPROVED" ? "Track Ownership Approved" : "Track Ownership Declined";
+        const decisionMessage = isPerformanceVideoReview
+          ? decision === "APPROVED"
+            ? `Your ownership or permission review for ${trackLabel} was approved. The gig application now shows the approved review status.`
+            : `Your ownership or permission review for ${trackLabel} was declined. The performance video remains private in the application and is marked for the organizer's attention.`
+          : decision === "APPROVED"
+            ? `Your ownership review for ${trackLabel} was approved. The track is now available in your playlist.`
+            : `Your ownership review for ${trackLabel} was declined. The uploaded MP3 was removed from your playlist.`;
+        const notificationPayload = {
+          user_id: review.user_id,
+          type: decision === "APPROVED" ? "success" : "warning",
+          title: decisionTitle,
+          message: decisionMessage,
+          meta: {
+            manual_identity_review_id: reviewId,
+            source: COPYRIGHT_OWNERSHIP_REVIEW_SOURCE,
+            decision,
+            review_notes: reviewNotes,
+            copyright_track_key: existingReviewMetadata.copyright_track_key || null,
+            declined_mp3_deleted: decision === "DECLINED" && linkedItems.length > 0,
+            declined_mp3_storage_deleted: deletedAudioRefs.length > 0,
+            linked_gig_application_count: linkedGigItems.length,
+          },
+        };
+
+        const { error: notificationError } = await client.from("notifications").insert(notificationPayload);
+        if (notificationError) {
+          console.error("copyright_ownership_decision_notification_failed", {
+            reviewId,
+            decision,
+            message: notificationError.message,
+          });
+        }
+
+        const { data: notificationProfile } = await client
+          .from("profiles")
+          .select("email, full_name")
+          .eq("id", review.user_id)
+          .maybeSingle();
+
+        let decisionEmail = {
+          sent: false,
+          queued: false,
+          provider: "none",
+          error: null as string | null,
+        };
+
+        if (decision === "DECLINED") {
+          decisionEmail = await sendCopyrightOwnershipDeclinedEmail(client, {
+            userEmail: String(notificationProfile?.email || review.submitted_by_email || "").trim().toLowerCase(),
+            recipientName: String(notificationProfile?.full_name || "").trim() || null,
+            trackLabel,
+            reviewNotes,
+            isPerformanceVideo: isPerformanceVideoReview,
+          });
+
+          if (decisionEmail.sent) {
+            await client
+              .from("manual_identity_reviews")
+              .update({ decision_email_sent_at: nowIso, updated_at: nowIso })
+              .eq("id", reviewId);
+          }
+        }
+
+        return jsonResponse({
+          item: {
+            ...(updatedReview || review),
+            copyright_ownership_review: true,
+            decision_email_sent: decisionEmail.sent,
+            decision_email_queued: decisionEmail.queued,
+            decision_email_provider: decisionEmail.provider,
+            decision_email_error: decisionEmail.error || null,
+            declined_account_delete_attempted: false,
+            declined_account_deleted: false,
+            playlist_item_copyright_status: nextPlaylistItemCopyrightStatus,
+            declined_mp3_deleted: decision === "DECLINED" && linkedItems.length > 0,
+            declined_mp3_storage_deleted: deletedAudioRefs.length > 0,
+            declined_mp3_storage_ref_count: deletedAudioRefs.length,
+            declined_playlist_item_count: linkedItems.length,
+            notification_created: !notificationError,
+          },
+        });
+      }
+
+      const { data: preDecisionProfile } = await client
+        .from("profiles")
+        .select("role, email, is_verified, verification_status")
+        .eq("id", review.user_id)
+        .maybeSingle();
+
+      const reviewRoleForClaim = String(review.submitted_role || preDecisionProfile?.role || "musician").trim().toLowerCase();
+      const { data: otherActiveRoles, error: otherActiveRolesError } = await client
+        .from("profile_roles").select("role").eq("profile_id", review.user_id)
+        .eq("status", "ACTIVE").neq("role", reviewRoleForClaim);
+      if (otherActiveRolesError) return jsonResponse({ error: otherActiveRolesError.message }, 400);
+      const isAdditionalRoleReview = Boolean(otherActiveRoles?.length);
+      let duplicateMatchesForApproval: any[] = [];
+      const documentFingerprintForDecision = String(review.document_fingerprint || "").trim() || null;
+      const reviewSourceForDecision = String(review.source || "").trim().toUpperCase();
+      const isMusicianVideoOnlyReview = reviewSourceForDecision === MUSICIAN_VIDEO_REVIEW_SOURCE;
+      const isMusicianSignupReview = reviewRoleForClaim === "musician" || Boolean(review.music_video_path) || isMusicianVideoOnlyReview;
+
+      if (decision === "APPROVED") {
+        if (isMusicianSignupReview && !review.music_video_path) {
+          return jsonResponse({
+            error: "Musician signup cannot be approved without a music video proof upload.",
+          }, 400);
+        }
+
+        if (isMusicianVideoOnlyReview) {
+          const { data: approvedIdentityClaim, error: approvedIdentityClaimError } = await client
+            .from("identity_document_claims")
+            .select("id")
+            .eq("user_id", review.user_id)
+            .eq("role", reviewRoleForClaim)
+            .eq("status", "APPROVED")
+            .limit(1)
+            .maybeSingle();
+
+          if (approvedIdentityClaimError) {
+            return jsonResponse({ error: approvedIdentityClaimError.message }, 400);
+          }
+
+          if (!approvedIdentityClaim?.id) {
+            return jsonResponse({
+              error: "Identity must be approved before approving this musician video proof.",
+            }, 400);
+          }
+        }
+
+        const reviewEmail = String(preDecisionProfile?.email || review.submitted_by_email || "").trim().toLowerCase();
+        const approvalProfilesById = new Map<string, any>();
+        if (!isMusicianVideoOnlyReview && documentFingerprintForDecision) {
+          const { data: duplicateClaims, error: duplicateClaimsError } = await client
+            .from("identity_document_claims")
+            .select("id, user_id, normalized_email, profiles:user_id(id, email, role)")
+            .eq("document_fingerprint", documentFingerprintForDecision)
+            .eq("role", reviewRoleForClaim)
+            .eq("status", "APPROVED");
+
+          if (duplicateClaimsError) {
+            return jsonResponse({ error: duplicateClaimsError.message }, 400);
+          }
+
+          await hydrateProfilesById(client, approvalProfilesById, (duplicateClaims || []).map((claim: any) => claim.user_id));
+
+          duplicateMatchesForApproval.push(
+            ...(duplicateClaims || [])
+              .filter((claim: any) => {
+                const linkedProfile = getClaimProfile(claim, approvalProfilesById);
+                const matchUserId = String(claim.user_id || "").trim();
+                const matchEmail = String(linkedProfile?.email || "").trim().toLowerCase();
+                return matchUserId &&
+                  linkedProfile &&
+                  matchUserId !== String(review.user_id) &&
+                  (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+              })
+              .map((claim: any) => ({ ...claim, matched_on: "DOCUMENT_FINGERPRINT" })),
+          );
+        }
+
+        const reviewNameBirth = prepareIdentityNameBirthDateDuplicateInput(null, {
+          fullLegalName: review.verified_full_legal_name,
+          normalizedFullLegalName: review.normalized_full_legal_name,
+          birthDate: review.birth_date,
+        });
+        if (!isMusicianVideoOnlyReview && reviewNameBirth.hasNameBirthDate) {
+          const { data: nameBirthClaims, error: nameBirthClaimsError } = await client
+            .from("identity_document_claims")
+            .select("id, user_id, normalized_email, profiles:user_id(id, email, role)")
+            .eq("normalized_full_legal_name", reviewNameBirth.normalizedFullLegalName)
+            .eq("birth_date", reviewNameBirth.birthDate)
+            .eq("role", reviewRoleForClaim)
+            .eq("status", "APPROVED");
+
+          if (nameBirthClaimsError) {
+            return jsonResponse({ error: nameBirthClaimsError.message }, 400);
+          }
+
+          await hydrateProfilesById(client, approvalProfilesById, (nameBirthClaims || []).map((claim: any) => claim.user_id));
+
+          duplicateMatchesForApproval.push(
+            ...(nameBirthClaims || [])
+              .filter((claim: any) => {
+                const linkedProfile = getClaimProfile(claim, approvalProfilesById);
+                const matchUserId = String(claim.user_id || "").trim();
+                const matchEmail = String(linkedProfile?.email || "").trim().toLowerCase();
+                return matchUserId &&
+                  linkedProfile &&
+                  matchUserId !== String(review.user_id) &&
+                  (!reviewEmail || !matchEmail || matchEmail !== reviewEmail);
+              })
+              .map((claim: any) => ({ ...claim, matched_on: "NAME_BIRTHDATE" })),
+          );
+        }
+
+        duplicateMatchesForApproval = duplicateMatchesForApproval.filter((claim: any, index: number, all: any[]) => (
+          index === all.findIndex((other: any) => (
+            String(other.user_id || "") === String(claim.user_id || "") &&
+            String(other.matched_on || "") === String(claim.matched_on || "")
+          ))
+        ));
+
+        if (duplicateMatchesForApproval.length > 0) {
+          return jsonResponse({
+            error: "This identity already belongs to another approved same-role account and cannot be approved. Decline this review instead.",
+          }, 409);
+        }
+
+        if (!isMusicianVideoOnlyReview && !documentFingerprintForDecision && !reviewNameBirth.hasNameBirthDate) {
+          return jsonResponse({
+            error: "This review is missing both document fingerprint and name/birthdate data, so duplicate identity checks cannot run. Require the user to repeat identity verification instead.",
+          }, 400);
+        }
+      }
+
+      const profileVerificationStatus = decision === "APPROVED" ? "APPROVED" : "DECLINED";
+      const nowIso = new Date().toISOString();
+      let diditStatusSync: Record<string, any> | null = null;
+      let diditStatusSyncSkipped: Record<string, any> | null = null;
+      let musicianVideoPortfolio: Record<string, any> | null = null;
+
+      if (shouldSyncDiditManualReviewStatus(review)) {
+        const diditSessionId = String(review.didit_session_id || "").trim();
+        if (!diditSessionId) {
+          return jsonResponse({
+            error: "This Didit review is missing a Didit session ID, so MusikaLokal cannot update Didit.",
+          }, 400);
+        }
+
+        try {
+          diditStatusSync = await updateDiditManualReviewStatus(
+            diditSessionId,
+            decision as "APPROVED" | "DECLINED",
+            reviewNotes,
+          );
+        } catch (diditError: any) {
+          return jsonResponse({
+            error: diditError?.message || "Unable to update the Didit review status.",
+          }, 502);
+        }
+      } else if (isDiditPendingReview(review) && String(review.didit_session_id || "").trim()) {
+        const sourceStatus = getDiditSourceReviewStatus(review);
+        diditStatusSyncSkipped = {
+          status: sourceStatus || null,
+          skipped_at: nowIso,
+          reason: sourceStatus
+            ? `Didit source session is already ${sourceStatus}; MusikaLokal review decision is local only.`
+            : "Didit source session is not in an actionable manual-review status.",
+        };
+      }
+
+      if (decision === "APPROVED" && isMusicianSignupReview && review.music_video_path) {
+        musicianVideoPortfolio = await publishMusicianVideoToProfilePortfolio(client, {
+          userId: review.user_id,
+          reviewId,
+          objectPath: review.music_video_path,
+          mimeType: review.music_video_mime_type || "video/mp4",
+          originalName: review.music_video_original_name || "music-video",
+        });
+      }
+
+      const existingReviewMetadata = review.metadata && typeof review.metadata === "object" ? review.metadata : {};
+      const nextReviewMetadata = {
+        ...existingReviewMetadata,
+        ...(diditStatusSync
+          ? {
+              didit_status: diditStatusSync.status,
+              didit_status_synced_at: diditStatusSync.synced_at,
+              didit_status_sync_session_kind: diditStatusSync.session_kind || null,
+            }
+          : {}),
+        ...(diditStatusSyncSkipped
+          ? {
+              didit_status_sync_skipped: true,
+              didit_status_sync_skipped_at: diditStatusSyncSkipped.skipped_at,
+              didit_status_sync_skipped_reason: diditStatusSyncSkipped.reason,
+              didit_status: diditStatusSyncSkipped.status || existingReviewMetadata.didit_status || existingReviewMetadata.source_session_status || null,
+            }
+          : {}),
+        ...(musicianVideoPortfolio
+          ? {
+              musician_video_portfolio_bucket: musicianVideoPortfolio.bucketName,
+              musician_video_portfolio_path: musicianVideoPortfolio.path,
+              musician_video_portfolio_url: musicianVideoPortfolio.publicUrl,
+              musician_video_published_to_gallery_at: nowIso,
+            }
+          : {}),
+      };
+
+      const reviewUpdatePayload: Record<string, unknown> = {
+        status: profileVerificationStatus,
+        review_notes: reviewNotes,
+        reviewed_by: actorId,
+        reviewed_at: nowIso,
+        metadata: nextReviewMetadata,
+        updated_at: nowIso,
+      };
+
+      const { data: updatedReview, error: updateReviewError } = await client
+        .from("manual_identity_reviews")
+        .update(reviewUpdatePayload)
+        .eq("id", reviewId)
+        .select("*")
+        .maybeSingle();
+
+      if (updateReviewError) {
+        return jsonResponse({ error: updateReviewError.message }, 400);
+      }
+
+      const { data: authUserData, error: authUserError } = await client.auth.admin.getUserById(String(review.user_id));
+      if (authUserError || !authUserData?.user) {
+        return jsonResponse({ error: "User not found for review" }, 404);
+      }
+
+      const { data: reviewProfile } = await client
+        .from("profiles")
+        .select("role, email")
+        .eq("id", review.user_id)
+        .maybeSingle();
+
+      const emailAlreadyConfirmed = Boolean(authUserData.user.email_confirmed_at);
+      const isVerified = decision === "APPROVED" && emailAlreadyConfirmed;
+
+      const existingMetadata = (authUserData.user.user_metadata || {}) as Record<string, unknown>;
+      if (isAdditionalRoleReview) {
+        if (decision === "APPROVED") {
+          const { error } = await client.from("profiles").update({ role: reviewRoleForClaim }).eq("id", review.user_id);
+          if (error) return jsonResponse({ error: error.message }, 400);
+          const { error: authError } = await client.auth.admin.updateUserById(String(review.user_id), {
+            user_metadata: { ...existingMetadata, role: reviewRoleForClaim },
+          });
+          if (authError) return jsonResponse({ error: authError.message }, 400);
+        }
+      } else {
+        const { error: profileUpdateError } = await client.from("profiles").update({
+          is_verified: isVerified, verification_status: profileVerificationStatus,
+          id_verified_at: isVerified ? nowIso : null,
+        }).eq("id", review.user_id);
+        if (profileUpdateError) return jsonResponse({ error: profileUpdateError.message }, 400);
+        const { error: authUpdateError } = await client.auth.admin.updateUserById(String(review.user_id), {
+          user_metadata: { ...existingMetadata, is_verified: decision === "APPROVED", verification_status: profileVerificationStatus },
+        });
+        if (authUpdateError) return jsonResponse({ error: authUpdateError.message }, 400);
+      }
+
+      const reviewNameBirthForClaim = prepareIdentityNameBirthDateDuplicateInput(null, {
+        fullLegalName: review.verified_full_legal_name,
+        normalizedFullLegalName: review.normalized_full_legal_name,
+        birthDate: review.birth_date,
+      });
+
+      if (!isMusicianVideoOnlyReview && documentFingerprintForDecision) {
+        if (decision === "APPROVED") {
+          const approvalClaim = normalizeApprovalClaimResult(await claimApprovedIdentityDocument(client, {
+            userId: review.user_id,
+            role: reviewRoleForClaim,
+            documentFingerprint: documentFingerprintForDecision,
+            documentType: review.document_type,
+            documentTypeKey: review.document_type_key,
+            documentCountry: review.document_country || "PHL",
+            source: review.source || "MANUAL_UPLOAD",
+            status: "APPROVED",
+            diditSessionId: review.didit_session_id || null,
+            manualReviewId: reviewId,
+            email: reviewProfile?.email || review.submitted_by_email || null,
+            duplicateOverride: false,
+            verifiedFullLegalName: reviewNameBirthForClaim.fullLegalName,
+            normalizedFullLegalName: reviewNameBirthForClaim.normalizedFullLegalName,
+            birthDate: reviewNameBirthForClaim.birthDate,
+            metadata: {
+              approved_by: actorId,
+              review_notes: reviewNotes,
+              separate_account_identity_policy: true,
+            },
+          }));
+
+          if (approvalClaim?.decision !== "APPROVED") {
+            return jsonResponse({
+              error: "This identity could not be approved because an approved same-role claim already exists.",
+              claim: approvalClaim,
+            }, 409);
+          }
+        } else {
+          await recordIdentityDocumentClaim(client, {
+            userId: review.user_id,
+            role: reviewRoleForClaim,
+            documentFingerprint: documentFingerprintForDecision,
+            documentType: review.document_type,
+            documentTypeKey: review.document_type_key,
+            documentCountry: review.document_country || "PHL",
+            source: review.source || "MANUAL_UPLOAD",
+            status: "DECLINED",
+            diditSessionId: review.didit_session_id || null,
+            manualReviewId: reviewId,
+            email: reviewProfile?.email || review.submitted_by_email || null,
+            verifiedFullLegalName: reviewNameBirthForClaim.fullLegalName,
+            normalizedFullLegalName: reviewNameBirthForClaim.normalizedFullLegalName,
+            birthDate: reviewNameBirthForClaim.birthDate,
+          });
+        }
+      }
+
+      const { error: roleMembershipUpdateError } = await client.from("profile_roles").upsert({
+        profile_id: review.user_id,
+        role: reviewRoleForClaim,
+        status: decision === "APPROVED" ? "ACTIVE" : "DECLINED",
+        source: "ADMIN_REVIEW",
+        activated_at: decision === "APPROVED" ? nowIso : null,
+        updated_at: nowIso,
+      }, { onConflict: "profile_id,role" });
+      if (roleMembershipUpdateError) return jsonResponse({ error: roleMembershipUpdateError.message }, 400);
+
+      await client.from("notifications").insert({
+        user_id: review.user_id,
+        type: decision === "APPROVED" ? "success" : "warning",
+        title: isMusicianVideoOnlyReview
+          ? (decision === "APPROVED" ? "Musician Verification Approved" : "Musician Verification Declined")
+          : (decision === "APPROVED" ? "Identity Verification Approved" : "Identity Verification Declined"),
+        message: decision === "APPROVED"
+          ? (isMusicianVideoOnlyReview ? "Your musician video proof was approved." : "Your manual identity verification was approved.")
+          : (isMusicianVideoOnlyReview ? "Your musician video proof was declined." : "Your manual identity verification was declined. Please submit a new valid government ID."),
+        meta: {
+          manual_identity_review_id: reviewId,
+          decision: profileVerificationStatus,
+          review_notes: reviewNotes,
+          didit_status_sync: diditStatusSync,
+        },
+      });
+
+      const fallbackEmail = String(review.submitted_by_email || "").trim();
+      const targetEmail = String(authUserData.user.email || fallbackEmail).trim().toLowerCase();
+      let confirmationLinkResult = { link: null as string | null, error: null as string | null };
+      let decisionEmail;
+      const declinedAccountDeletion: Record<string, any> = {
+        attempted: false,
+        deleted: false,
+        auth_deleted: false,
+        profile_deleted: false,
+        already_removed: false,
+        skipped_reason: null,
+        error: null,
+      };
+
+      if (decision === "APPROVED") {
+        if (!emailAlreadyConfirmed) {
+          confirmationLinkResult = await generateManualApprovalConfirmationLink(client, targetEmail);
+        }
+
+        decisionEmail = await sendDecisionEmail(
+          client,
+          targetEmail,
+          decision as "APPROVED",
+          reviewNotes,
+          confirmationLinkResult.link,
+          confirmationLinkResult.error,
+        );
+      } else {
+        decisionEmail = await sendDecisionEmail(
+          client,
+          targetEmail,
+          decision as "APPROVED" | "DECLINED",
+          reviewNotes,
+          confirmationLinkResult.link,
+          confirmationLinkResult.error,
+        );
+      }
+      console.log("manual_identity_review_decision_email_result", {
+        reviewId,
+        decision,
+        recipient: maskEmailForLog(targetEmail),
+        sent: decisionEmail.sent,
+        queued: decisionEmail.queued,
+        provider: decisionEmail.provider,
+        confirmationLinkGenerated: Boolean(confirmationLinkResult.link),
+        emailAlreadyConfirmed,
+        error: decisionEmail.error || null,
+      });
+
+      if (decisionEmail.sent) {
+        await client
+          .from("manual_identity_reviews")
+          .update({ decision_email_sent_at: nowIso, updated_at: nowIso })
+          .eq("id", reviewId);
+      }
+
+      if (decision === "DECLINED") {
+        if (isAdditionalRoleReview) {
+          declinedAccountDeletion.skipped_reason = "Only the additional role was declined; the existing account remains active.";
+        } else if (String(review.user_id) === actorId) {
+          declinedAccountDeletion.skipped_reason = "Refused to delete the signed-in admin account.";
+          console.error("manual_identity_review_declined_account_delete_skipped", {
+            reviewId,
+            userId: review.user_id,
+            reason: declinedAccountDeletion.skipped_reason,
+          });
+        } else {
+          declinedAccountDeletion.attempted = true;
+
+          try {
+            const deleteResult = await deleteReviewedIdentityAccount(client, String(review.user_id));
+            declinedAccountDeletion.deleted = Boolean(deleteResult.deleted || deleteResult.already_removed);
+            declinedAccountDeletion.auth_deleted = Boolean(deleteResult.auth_deleted);
+            declinedAccountDeletion.profile_deleted = Boolean(deleteResult.profile_deleted);
+            declinedAccountDeletion.already_removed = Boolean(deleteResult.already_removed);
+
+            console.log("manual_identity_review_declined_account_deleted", {
+              reviewId,
+              userId: review.user_id,
+              authDeleted: declinedAccountDeletion.auth_deleted,
+              profileDeleted: declinedAccountDeletion.profile_deleted,
+              alreadyRemoved: declinedAccountDeletion.already_removed,
+              emailSent: decisionEmail.sent,
+              emailQueued: decisionEmail.queued,
+              emailError: decisionEmail.error || null,
+            });
+          } catch (deleteError: any) {
+            declinedAccountDeletion.error = deleteError?.message || "Unable to delete declined account.";
+            console.error("manual_identity_review_declined_account_delete_failed", {
+              reviewId,
+              userId: review.user_id,
+              message: declinedAccountDeletion.error,
+              emailSent: decisionEmail.sent,
+              emailQueued: decisionEmail.queued,
+              emailError: decisionEmail.error || null,
+            });
+          }
+        }
+      }
+
+      return jsonResponse({
+        item: {
+          ...(updatedReview || review),
+          decision_email_sent: decisionEmail.sent,
+          decision_email_queued: decisionEmail.queued,
+          decision_email_provider: decisionEmail.provider,
+          decision_email_error: decisionEmail.error || null,
+          declined_account_delete_attempted: declinedAccountDeletion.attempted,
+          declined_account_deleted: declinedAccountDeletion.deleted,
+          declined_account_auth_deleted: declinedAccountDeletion.auth_deleted,
+          declined_account_profile_deleted: declinedAccountDeletion.profile_deleted,
+          declined_account_already_removed: declinedAccountDeletion.already_removed,
+          declined_account_delete_skipped_reason: declinedAccountDeletion.skipped_reason,
+          declined_account_delete_error: declinedAccountDeletion.error,
+          didit_status_sync: diditStatusSync,
+        },
+      });
+    }
+
+    if (action === "fetch_user_details") {
+      const userId = String(body?.userId || "").trim();
+
+      if (!userId) {
+        return jsonResponse({ error: "Missing userId" }, 400);
+      }
+
+      const { data: profile, error: profileError } = await client
+        .from("profiles")
+        .select("*")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (profileError) throw profileError;
+
+      const { data: authUserData, error: authUserError } = await client.auth.admin.getUserById(userId);
+      if (authUserError && !profile) {
+        return jsonResponse({ error: "User not found" }, 404);
+      }
+
+      const authUser = authUserData?.user || null;
+      const authDetails = authUser
+        ? {
+            email: profile?.email || authUser.email || null,
+            auth_email: authUser.email || null,
+            phone: authUser.phone || null,
+            email_confirmed: Boolean(authUser.email_confirmed_at),
+            email_confirmed_at: authUser.email_confirmed_at || null,
+            last_sign_in_at: authUser.last_sign_in_at || null,
+            auth_created_at: authUser.created_at || null,
+            auth_updated_at: authUser.updated_at || null,
+            banned_until: authUser.banned_until || null,
+          }
+        : {};
+
+      const detailProfile = profile
+        ? { ...profile, ...authDetails }
+        : {
+            id: userId,
+            ...authDetails,
+          };
+
+      const [item] = await attachProfileLists(client, [detailProfile]);
+
+      return jsonResponse({
+        item: item || null,
+      });
+    }
+
+    if (action === "fetch_owned_role_listings") {
+      const userId = String(body?.userId || "").trim();
+      if (!userId) return jsonResponse({ error: "Missing userId" }, 400);
+
+      const { data: ownerProfile, error: ownerProfileError } = await client
+        .from("profiles")
+        .select("id, role")
+        .eq("id", userId)
+        .maybeSingle();
+      if (ownerProfileError) return jsonResponse({ error: ownerProfileError.message }, 400);
+
+      const ownerRole = String(ownerProfile?.role || "").trim().toLowerCase();
+      const target = managedRoleTargets[ownerRole];
+      if (!target) return jsonResponse({ items: [], candidates: [], owner_role: ownerRole });
+
+      const [{ data: ownedItems, error: ownedItemsError }, { data: candidates, error: candidatesError }] = await Promise.all([
+        client
+          .from(target.table)
+          .select(`id, name, created_at, ${target.entityType === "venue" ? "event_date, " : ""}${target.ownerColumn}`)
+          .eq(target.ownerColumn, userId)
+          .order("created_at", { ascending: true }),
+        client
+          .from("profiles")
+          .select("id, full_name, email, role, is_verified, verification_status")
+          .eq("role", ownerRole)
+          .eq("is_verified", true)
+          .eq("verification_status", "APPROVED")
+          .neq("id", userId)
+          .order("full_name", { ascending: true }),
+      ]);
+
+      if (ownedItemsError) return jsonResponse({ error: ownedItemsError.message }, 400);
+      if (candidatesError) return jsonResponse({ error: candidatesError.message }, 400);
+
+      return jsonResponse({
+        owner_role: ownerRole,
+        entity_type: target.entityType,
+        items: (ownedItems || []).map((item: any) => ({
+          id: item.id,
+          name: item.name || "Untitled",
+          created_at: item.created_at || null,
+          event_date: item.event_date || null,
+          entity_type: target.entityType,
+        })),
+        candidates: (candidates || []).map((candidate: any) => ({
+          id: candidate.id,
+          full_name: candidate.full_name || candidate.email || "Unnamed owner",
+          email: candidate.email || null,
+        })),
+      });
+    }
+
+    if (action === "fetch_role_targets") {
+      const requestedRole = parseRole(body?.role);
+      const requestedEntityType = normalizeStaffEntityType(body?.entity_type || body?.entityType);
+      const candidateStaffUserId = String(body?.staff_user_id || body?.staffUserId || "").trim();
+      const target = requestedRole && managedRoleTargets[requestedRole]
+        ? managedRoleTargets[requestedRole]
+        : requestedEntityType === "studio"
+          ? { table: "studios", ownerColumn: "owner_id", entityType: "studio" as StaffEntityType }
+          : requestedEntityType === "venue"
+            ? { table: "gigs", ownerColumn: "organizer_id", entityType: "venue" as StaffEntityType }
+            : requestedEntityType === "production"
+              ? { table: "production_teams", ownerColumn: "owner_id", entityType: "production" as StaffEntityType }
+              : null;
+
+      if (!target) return jsonResponse({ error: "Invalid listing role or entity type" }, 400);
+
+      let targetsQuery = client
+        .from(target.table)
+        .select(`id, name, created_at, ${target.entityType === "venue" ? "event_date, " : ""}${target.ownerColumn}`);
+
+      if (target.entityType === "studio") {
+        targetsQuery = targetsQuery.eq("permit_status", "approved");
+      } else if (target.entityType === "venue") {
+        targetsQuery = targetsQuery
+          .eq("status", "open")
+          .eq("permit_status", "approved")
+          .or(`event_date.is.null,event_date.gte.${getPhilippineTodayStartIso()}`);
+      }
+
+      const { data, error } = await targetsQuery
+        .order(target.entityType === "venue" ? "event_date" : "created_at", {
+          ascending: target.entityType === "venue",
+          nullsFirst: false,
+        })
+        .limit(300);
+      if (error) return jsonResponse({ error: error.message }, 400);
+
+      const allItems = data || [];
+      const ownedTargetIds = new Set(
+        candidateStaffUserId
+          ? allItems
+            .filter((item: any) => String(item?.[target.ownerColumn] || "") === candidateStaffUserId)
+            .map((item: any) => String(item.id))
+          : [],
+      );
+      const productionConflicts = candidateStaffUserId && target.entityType === "production"
+        ? await getProductionTargetConflicts(client, candidateStaffUserId, allItems)
+        : new Map<string, any>();
+      const eligibleItems = allItems.filter((item: any) => (
+        !ownedTargetIds.has(String(item.id)) && !productionConflicts.has(String(item.id))
+      ));
+
+      return jsonResponse({
+        items: eligibleItems.map((item: any) => ({
+          id: item.id,
+          name: item.name || "Untitled",
+          created_at: item.created_at || null,
+          event_date: item.event_date || null,
+          owner_id: item[target.ownerColumn] || null,
+          entity_type: target.entityType,
+        })),
+        conflicts: Array.from(productionConflicts.entries())
+          .filter(([teamId]) => !ownedTargetIds.has(teamId))
+          .map(([, conflict]) => conflict),
+        hidden_owned_count: ownedTargetIds.size,
+        hidden_owned_ids: Array.from(ownedTargetIds),
+      });
+    }
+
+    if (action === "resolve_staff_production_conflict") {
+      const staffUserId = String(body?.staff_user_id || body?.staffUserId || "").trim();
+      const teamId = String(body?.team_id || body?.teamId || "").trim();
+      if (!staffUserId || !teamId) {
+        return jsonResponse({ error: "staff_user_id and team_id are required" }, 400);
+      }
+
+      const { data, error } = await client.rpc("admin_resolve_staff_production_conflict", {
+        p_actor_user_id: actorId,
+        p_staff_user_id: staffUserId,
+        p_team_id: teamId,
+      });
+      if (error) return jsonResponse({ error: error.message }, 409);
+      return jsonResponse({ result: data || null });
+    }
+
+    if (action === "create_user") {
+      const email = String(body?.email || "").trim().toLowerCase();
+      const password = String(body?.password || "");
+      const fullName = String(body?.fullName || "").trim();
+      const role = parseRole(body?.role);
+      const emailConfirmed = parseBoolean(body?.emailConfirmed) ?? false;
+      const isVerified = parseBoolean(body?.isVerified) ?? false;
+      const verificationStatus = isVerified ? "APPROVED" : "PENDING";
+      const verifiedAt = isVerified ? new Date().toISOString() : null;
+      const contactNumber = normalizeTextField(body?.contactNumber);
+      const address = normalizeTextField(body?.address);
+      const bio = normalizeTextField(body?.bio);
+      const skills = normalizeStringList(body?.skills);
+      const genres = normalizeStringList(body?.genres);
+      const staffAssignments = role === "staff"
+        ? (Array.isArray(body?.staffAssignments)
+          ? normalizeStaffAssignments(body.staffAssignments)
+          : [normalizeStaffAssignment(body?.staffAssignment)].filter(Boolean) as NormalizedStaffAssignment[])
+        : [];
+
+      if (!email || !password || !role) {
+        return jsonResponse({ error: "Missing required fields" }, 400);
+      }
+
+      if (verificationRequiredRoles.has(role) && !isVerified) {
+        return jsonResponse({ error: "Verify this user's identity before assigning a privileged role." }, 409);
+      }
+
+      if (role === "staff" && staffAssignments.length === 0) {
+        return jsonResponse({ error: "Select at least one staff target and allowed actions." }, 400);
+      }
+
+      if (!fullName) {
+        return jsonResponse({ error: "Full name is required" }, 400);
+      }
+
+      if (password.length < 6) {
+        return jsonResponse({ error: "Password must be at least 6 characters" }, 400);
+      }
+
+      const { data: createdUser, error: createUserError } = await client.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: emailConfirmed,
+        user_metadata: {
+          role,
+          is_verified: isVerified,
+          verification_status: verificationStatus,
+          full_name: fullName,
+        },
+      });
+
+      if (createUserError) {
+        return jsonResponse({ error: createUserError.message }, 400);
+      }
+
+      const userId = createdUser?.user?.id;
+      if (!userId) {
+        return jsonResponse({ error: "Unable to create user" }, 500);
+      }
+
+      const profilePayload = {
+        id: userId,
+        email,
+        full_name: fullName,
+        role,
+        contact_number: contactNumber,
+        address,
+        location: address,
+        bio,
+        is_verified: isVerified,
+        verification_status: verificationStatus,
+        id_verified_at: verifiedAt,
+      };
+
+      const { data: profile, error: profileError } = await client
+        .from("profiles")
+        .upsert(profilePayload, { onConflict: "id" })
+        .select(userListProfileSelectLegacy)
+        .maybeSingle();
+
+      if (profileError) {
+        await client.auth.admin.deleteUser(userId);
+        return jsonResponse({ error: profileError.message }, 400);
+      }
+
+      try {
+        await Promise.all([
+          replaceProfileList(client, "profile_skills", "skill", userId, skills),
+          replaceProfileList(client, "profile_genres", "genre", userId, genres),
+          client.from("profile_roles").upsert({
+            profile_id: userId,
+            role,
+            status: "ACTIVE",
+            source: "ADMIN_CREATE_USER",
+            activated_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "profile_id,role" }).then(({ error }: any) => {
+            if (error) throw error;
+          }),
+        ]);
+
+        if (staffAssignments.length > 0) {
+          await replaceStaffAssignments(client, userId, staffAssignments, actorId);
+        }
+      } catch (listError) {
+        if (role === "staff") {
+          try {
+            await client.from("staff_listing_access").delete().eq("staff_user_id", userId);
+          } catch {
+            // The profile/auth cleanup below is the important rollback path.
+          }
+        }
+        await client.from("profiles").delete().eq("id", userId);
+        await client.auth.admin.deleteUser(userId);
+        return staffAssignmentErrorResponse(listError);
+      }
+
+      const [item] = await attachProfileLists(client, [profile || profilePayload]);
+
+      return jsonResponse({ item: item || profile || profilePayload }, 200);
+    }
+
+    if (action === "update_user") {
+      const userId = String(body?.userId || "").trim();
+      const maybeRole = body?.role;
+      const maybeFullName = body?.fullName;
+      const maybeEmail = body?.email;
+      const maybeIsVerified = body?.isVerified;
+      const maybeContactNumber = body?.contactNumber;
+      const maybeAddress = body?.address;
+      const maybeBio = body?.bio;
+      const maybeSkills = body?.skills;
+      const maybeGenres = body?.genres;
+      const maybePassword = body?.password;
+      const hasStaffAssignmentUpdate =
+        Object.prototype.hasOwnProperty.call(body || {}, "staffAssignments") ||
+        Object.prototype.hasOwnProperty.call(body || {}, "staffAssignment");
+      const listingAssignmentTargetId = getListingAssignmentTargetId(body?.listingAssignment);
+      const ownershipReassignments = Array.isArray(body?.ownershipReassignments)
+        ? body.ownershipReassignments.map((item: any) => ({
+            entity_type: String(item?.entity_type || item?.entityType || "").trim().toLowerCase(),
+            target_id: String(item?.target_id || item?.targetId || "").trim(),
+            new_owner_id: String(item?.new_owner_id || item?.newOwnerId || "").trim(),
+          })).filter((item: any) => item.entity_type && item.target_id && item.new_owner_id)
+        : [];
+      const normalizedStaffAssignments = hasStaffAssignmentUpdate
+        ? (Array.isArray(body?.staffAssignments)
+          ? normalizeStaffAssignments(body.staffAssignments)
+          : [normalizeStaffAssignment(body?.staffAssignment)].filter(Boolean) as NormalizedStaffAssignment[])
+        : [];
+
+      if (!userId) {
+        return jsonResponse({ error: "Missing userId" }, 400);
+      }
+
+      const nextPassword = String(maybePassword ?? "").trim();
+      const hasPasswordUpdate = maybePassword !== undefined && nextPassword.length > 0;
+
+      if (hasPasswordUpdate && nextPassword.length < 6) {
+        return jsonResponse({ error: "Password must be at least 6 characters" }, 400);
+      }
+
+      let existingProfileForUpdate: Record<string, unknown> | null = null;
+      if (maybeIsVerified !== undefined || maybeRole !== undefined || hasStaffAssignmentUpdate) {
+        const { data: existingProfile, error: existingProfileError } = await client
+          .from("profiles")
+          .select("role, email, full_name, is_verified, verification_status")
+          .eq("id", userId)
+          .maybeSingle();
+
+        if (existingProfileError) {
+          return jsonResponse({ error: existingProfileError.message }, 400);
+        }
+
+        existingProfileForUpdate = existingProfile || null;
+      }
+
+      const profileUpdates: Record<string, unknown> = {};
+
+      if (maybeRole !== undefined) {
+        const parsedRole = parseRole(maybeRole);
+        if (!parsedRole) {
+          return jsonResponse({ error: "Invalid role" }, 400);
+        }
+        if (parsedRole !== String(existingProfileForUpdate?.["role"] || "").trim().toLowerCase()) {
+          profileUpdates.role = parsedRole;
+        }
+      }
+
+      if (maybeFullName !== undefined) {
+        const nextFullName = String(maybeFullName || "").trim();
+        if (!nextFullName) {
+          return jsonResponse({ error: "Full name is required" }, 400);
+        }
+        if (nextFullName !== String(existingProfileForUpdate?.["full_name"] || "").trim()) {
+          profileUpdates.full_name = nextFullName;
+        }
+      }
+
+      if (maybeEmail !== undefined) {
+        const email = String(maybeEmail || "").trim().toLowerCase();
+        if (!email) {
+          return jsonResponse({ error: "Email cannot be empty" }, 400);
+        }
+        if (email !== String(existingProfileForUpdate?.["email"] || "").trim().toLowerCase()) {
+          profileUpdates.email = email;
+        }
+      }
+
+      if (maybeContactNumber !== undefined) {
+        profileUpdates.contact_number = normalizeTextField(maybeContactNumber);
+      }
+
+      if (maybeAddress !== undefined) {
+        const nextAddress = normalizeTextField(maybeAddress);
+        profileUpdates.address = nextAddress;
+        profileUpdates.location = nextAddress;
+      }
+
+      if (maybeBio !== undefined) {
+        profileUpdates.bio = normalizeTextField(maybeBio);
+      }
+
+      if (maybeIsVerified !== undefined) {
+        const parsed = parseBoolean(maybeIsVerified);
+        if (parsed === null) {
+          return jsonResponse({ error: "Invalid isVerified value" }, 400);
+        }
+        const existingVerified = existingProfileForUpdate?.["is_verified"] === true;
+        const existingStatus = String(existingProfileForUpdate?.["verification_status"] || "").trim().toUpperCase();
+        const nextStatus = parsed
+          ? "APPROVED"
+          : (["PENDING_REVIEW", "DECLINED", "ABANDONED"].includes(existingStatus) ? existingStatus : "PENDING");
+        if (parsed !== existingVerified || nextStatus !== existingStatus) {
+          profileUpdates.is_verified = parsed;
+          profileUpdates.verification_status = nextStatus;
+          profileUpdates.id_verified_at = parsed ? new Date().toISOString() : null;
+        }
+      }
+
+      const roleChanged = Boolean(
+        profileUpdates.role !== undefined &&
+        existingProfileForUpdate?.["role"] &&
+        String(existingProfileForUpdate["role"]).trim().toLowerCase() !== String(profileUpdates.role).trim().toLowerCase()
+      );
+
+      const hasListUpdates = maybeSkills !== undefined || maybeGenres !== undefined;
+      const targetRole = String(profileUpdates.role ?? existingProfileForUpdate?.["role"] ?? "").trim().toLowerCase();
+
+      if ((maybeRole !== undefined || maybeIsVerified !== undefined) && verificationRequiredRoles.has(targetRole)) {
+        const willBeVerified = profileUpdates.is_verified !== undefined
+          ? profileUpdates.is_verified === true
+          : existingProfileForUpdate?.["is_verified"] === true;
+        const nextVerificationStatus = String(
+          profileUpdates.verification_status ?? existingProfileForUpdate?.["verification_status"] ?? "",
+        ).trim().toUpperCase();
+        if (!willBeVerified || nextVerificationStatus !== "APPROVED") {
+          return jsonResponse({ error: "Verify this user's identity before assigning a privileged role." }, 409);
+        }
+      }
+
+      if (
+        roleChanged &&
+        verificationRequiredRoles.has(targetRole) &&
+        (existingProfileForUpdate?.["is_verified"] !== true ||
+          String(existingProfileForUpdate?.["verification_status"] || "").trim().toUpperCase() !== "APPROVED")
+      ) {
+        return jsonResponse({ error: "Approve the user's identity before changing them to a privileged role." }, 409);
+      }
+
+      if (targetRole === "staff" && (maybeRole !== undefined || hasStaffAssignmentUpdate) && normalizedStaffAssignments.length === 0) {
+        return jsonResponse({ error: "Select at least one staff target and allowed actions." }, 400);
+      }
+
+      if (Object.keys(profileUpdates).length === 0 && !hasListUpdates && !hasPasswordUpdate && !hasStaffAssignmentUpdate) {
+        return jsonResponse({ error: "No updates provided" }, 400);
+      }
+
+      let validatedStaffTargets: any[] | undefined;
+      if (targetRole === "staff" && hasStaffAssignmentUpdate && normalizedStaffAssignments.length > 0) {
+        try {
+          validatedStaffTargets = await validateStaffAssignments(client, userId, normalizedStaffAssignments);
+        } catch (assignmentError) {
+          return staffAssignmentErrorResponse(assignmentError);
+        }
+      }
+
+      const { data: existingAuth, error: existingAuthError } = await client.auth.admin.getUserById(userId);
+      if (existingAuthError || !existingAuth?.user) {
+        return jsonResponse({ error: "User not found" }, 404);
+      }
+
+      const existingMetadata = (existingAuth.user.user_metadata || {}) as Record<string, unknown>;
+      const nextMetadata = { ...existingMetadata } as Record<string, unknown>;
+      let metadataChanged = false;
+
+      if (profileUpdates.role !== undefined) {
+        nextMetadata.role = profileUpdates.role;
+        metadataChanged = true;
+      }
+      if (profileUpdates.is_verified !== undefined) {
+        nextMetadata.is_verified = profileUpdates.is_verified;
+        metadataChanged = true;
+      }
+      if (profileUpdates.verification_status !== undefined) {
+        nextMetadata.verification_status = profileUpdates.verification_status;
+        metadataChanged = true;
+      }
+      if (profileUpdates.full_name !== undefined) {
+        nextMetadata.full_name = profileUpdates.full_name;
+        metadataChanged = true;
+      }
+
+      const authUpdatePayload: Record<string, unknown> = {};
+      if (metadataChanged) authUpdatePayload.user_metadata = nextMetadata;
+
+      if (profileUpdates.email !== undefined) {
+        authUpdatePayload.email = String(profileUpdates.email);
+      }
+
+      if (hasPasswordUpdate) {
+        authUpdatePayload.password = nextPassword;
+      }
+
+      if (Object.keys(authUpdatePayload).length > 0) {
+        const { error: authUpdateError } = await client.auth.admin.updateUserById(userId, authUpdatePayload);
+        if (authUpdateError) {
+          return jsonResponse({ error: authUpdateError.message }, 400);
+        }
+      }
+
+      let updatedProfile: any = null;
+      const databaseProfileUpdates = { ...profileUpdates };
+      if (roleChanged) delete databaseProfileUpdates.role;
+
+      if (Object.keys(databaseProfileUpdates).length > 0) {
+        const { error: profileUpdateError } = await client
+          .from("profiles")
+          .update(databaseProfileUpdates)
+          .eq("id", userId);
+
+        if (profileUpdateError) {
+          return jsonResponse({ error: profileUpdateError.message }, 400);
+        }
+      }
+
+      if (roleChanged) {
+        const { error: roleTransitionError } = await client.rpc("admin_transition_user_role", {
+          p_actor_user_id: actorId,
+          p_user_id: userId,
+          p_expected_old_role: String(existingProfileForUpdate?.["role"] || ""),
+          p_new_role: targetRole,
+          p_metadata: {
+            staff_assignments_requested: normalizedStaffAssignments.length,
+            listing_assignment_target_id: listingAssignmentTargetId,
+            ownership_reassignments: ownershipReassignments,
+          },
+        });
+        if (roleTransitionError) {
+          await client.rpc("revoke_user_auth_sessions", { p_user_id: userId });
+          return jsonResponse({ error: roleTransitionError.message }, 409);
+        }
+      }
+
+      const { data: refreshedProfile, error: profileFetchError } = await client
+        .from("profiles")
+        .select(userListProfileSelectLegacy)
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (profileFetchError) {
+        return jsonResponse({ error: profileFetchError.message }, 400);
+      }
+      updatedProfile = refreshedProfile;
+
+      if (!updatedProfile) {
+        return jsonResponse({ error: "Profile not found" }, 404);
+      }
+
+      try {
+        await Promise.all([
+          maybeSkills !== undefined
+            ? replaceProfileList(client, "profile_skills", "skill", userId, normalizeStringList(maybeSkills))
+            : Promise.resolve(),
+          maybeGenres !== undefined
+            ? replaceProfileList(client, "profile_genres", "genre", userId, normalizeStringList(maybeGenres))
+            : Promise.resolve(),
+        ]);
+
+        if (targetRole === "staff" && hasStaffAssignmentUpdate && normalizedStaffAssignments.length > 0) {
+          await replaceStaffAssignments(client, userId, normalizedStaffAssignments, actorId, validatedStaffTargets);
+        } else if (targetRole !== "staff" && (hasStaffAssignmentUpdate || profileUpdates.role !== undefined)) {
+          await revokeStaffAssignments(client, userId);
+        }
+
+        if (listingAssignmentTargetId && managedRoleTargets[targetRole]) {
+          await assignManagedListingOwner(client, targetRole, listingAssignmentTargetId, userId);
+        }
+      } catch (listError) {
+        if (roleChanged) {
+          // The profile role has already changed at this point. Even if a
+          // related assignment failed, do not leave the old session active.
+          await client.rpc("revoke_user_auth_sessions", { p_user_id: userId });
+        }
+        return staffAssignmentErrorResponse(listError);
+      }
+
+      const [item] = await attachProfileLists(client, [updatedProfile]);
+
+      // Publish the profile update first so the target app can observe the role
+      // change and clear its local token. Then revoke every server-side session
+      // to prevent refresh or continued use from another device.
+      if (roleChanged) {
+        const { error: revokeSessionsError } = await client.rpc("revoke_user_auth_sessions", {
+          p_user_id: userId,
+        });
+        if (revokeSessionsError) {
+          return jsonResponse({
+            error: `The role was changed, but the user's sessions could not be revoked: ${revokeSessionsError.message}`,
+            role_changed: true,
+          }, 500);
+        }
+      }
+
+      return jsonResponse({ item: item || updatedProfile, role_changed: roleChanged }, 200);
+    }
+
+    if (action === "unban_user") {
+      const userId = String(body?.userId || "").trim();
+
+      if (!userId) {
+        return jsonResponse({ error: "Missing userId" }, 400);
+      }
+
+      const { data: existingAuth, error: existingAuthError } = await client.auth.admin.getUserById(userId);
+      const { data: existingProfile, error: existingProfileError } = await client
+        .from("profiles")
+        .select("id")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (existingProfileError) {
+        return jsonResponse({ error: existingProfileError.message }, 400);
+      }
+
+      if ((existingAuthError || !existingAuth?.user) && !existingProfile) {
+        return jsonResponse({ error: "User not found" }, 404);
+      }
+
+      const banFieldsResult = await ensureProfileBanFieldsAvailable(client, userId);
+      if (banFieldsResult.error) {
+        return jsonResponse({ error: banFieldsResult.error }, banFieldsResult.status || 400);
+      }
+
+      const nowIso = new Date().toISOString();
+
+      if (existingAuth?.user) {
+        const existingMetadata = (existingAuth.user.user_metadata || {}) as Record<string, unknown>;
+        const existingModeration = existingMetadata.moderation;
+        const nextModeration = {
+          ...(existingModeration && typeof existingModeration === "object" ? existingModeration : {}),
+          banned: false,
+          last_lifted_at: nowIso,
+          last_lifted_by: actorId,
+          last_lifted_source: "admin_users_management",
+        };
+
+        const { error: authUpdateError } = await client.auth.admin.updateUserById(userId, {
+          ban_duration: "none",
+          user_metadata: {
+            ...existingMetadata,
+            moderation: nextModeration,
+          },
+        });
+
+        if (authUpdateError) {
+          return jsonResponse({ error: authUpdateError.message }, 400);
+        }
+      }
+
+      const { data: profile, error: profileUpdateError } = await client
+        .from("profiles")
+        .update({
+          is_banned: false,
+          banned_until: null,
+          ban_reason: null,
+          ban_action: "manual_unban",
+          ban_lifted_at: nowIso,
+          ban_lifted_by: actorId,
+        })
+        .eq("id", userId)
+        .select(userListProfileSelect)
+        .maybeSingle();
+
+      if (profileUpdateError) {
+        if (isMissingColumnError(profileUpdateError)) {
+          return jsonResponse({ error: "Account ban profile fields are missing. Apply the latest profile ban migration first." }, 503);
+        }
+        return jsonResponse({ error: profileUpdateError.message }, 400);
+      }
+
+      const [item] = await attachProfileLists(client, profile ? [profile] : []);
+
+      return jsonResponse({ item: item || profile || { id: userId, is_banned: false }, success: true }, 200);
+    }
+
+    if (action === "delete_user") {
+      const userId = String(body?.userId || "").trim();
+
+      if (!userId) {
+        return jsonResponse({ error: "Missing userId" }, 400);
+      }
+
+      if (userId === actorId) {
+        return jsonResponse({ error: "You cannot delete your own account" }, 400);
+      }
+
+      const { data: existingAuth, error: existingAuthError } = await client.auth.admin.getUserById(userId);
+      const { data: existingProfile, error: existingProfileError } = await client
+        .from("profiles")
+        .select("id")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (existingProfileError) {
+        return jsonResponse({ error: existingProfileError.message }, 400);
+      }
+
+      if ((existingAuthError || !existingAuth?.user) && !existingProfile) {
+        return jsonResponse({ error: "User not found" }, 404);
+      }
+
+      try {
+        await deleteIdentityClaimsForRemovedUser(client, userId);
+      } catch (claimDeleteError) {
+        const message = claimDeleteError instanceof Error ? claimDeleteError.message : "Unable to remove identity claims for this user";
+        return jsonResponse({ error: message }, 400);
+      }
+
+      if (existingProfile) {
+        try {
+          await cleanupProfileDeleteBlockers(client, userId);
+        } catch (cleanupError) {
+          const message = cleanupError instanceof Error ? cleanupError.message : "Unable to prepare related records for deletion";
+          return jsonResponse({ error: message }, 400);
+        }
+
+        const { error: profileDeleteError } = await client
+          .from("profiles")
+          .delete()
+          .eq("id", userId);
+
+        if (profileDeleteError) {
+          return jsonResponse({ error: profileDeleteError.message }, 400);
+        }
+      }
+
+      if (existingAuth?.user) {
+        const { error: deleteError } = await client.auth.admin.deleteUser(userId);
+        if (deleteError) {
+          return jsonResponse({ error: deleteError.message }, 400);
+        }
+      }
+
+      return jsonResponse({ success: true }, 200);
+    }
+
+    return jsonResponse({ error: `Unsupported action: ${action}` }, 400);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unexpected error";
+    return jsonResponse({ error: message }, 500);
+  }
+});

@@ -31,7 +31,7 @@ async function database(app) {
     create table profiles(id uuid primary key, role text);
     create table studios(id uuid primary key, owner_id uuid references profiles(id), name text);
     create table studio_bookings(id uuid primary key, user_id uuid references profiles(id), studio_id uuid references studios(id),
-      final_price numeric, payment_amount numeric, remaining_balance numeric default 0, status text default 'pending', payment_status text default 'pending',
+      booking_date date, final_price numeric, payment_amount numeric, remaining_balance numeric default 0, status text default 'pending', payment_status text default 'pending',
       payment_type text default 'full', payment_method text, checkout_session_id text, payment_intent_id text, paid_at timestamptz, refund_id text,
       refund_amount numeric, refunded_at timestamptz, created_at timestamptz default now(), updated_at timestamptz default now());
     create table wallets(id uuid primary key default gen_random_uuid(), user_id uuid unique references profiles(id), balance numeric default 0, updated_at timestamptz default now());
@@ -52,6 +52,9 @@ async function database(app) {
   const before = (await db.query('select jsonb_agg(to_jsonb(b) order by id) as rows from studio_bookings b')).rows[0].rows;
   const balances = (await db.query('select user_id,balance from wallets order by user_id')).rows;
   await db.exec(read(`${app}/supabase/migrations/${migration}`));
+  await db.exec(read(`${app}/supabase/migrations/20261007200100_effective_studio_balance_checkout.sql`));
+  const eligibility = read(`${app}/supabase/migrations/20261007200000_wallet_outstanding_payment_destination.sql`);
+  await db.exec(eligibility.slice(eligibility.indexOf('create or replace function'), eligibility.indexOf('$$;') + 3));
   assert.deepEqual((await db.query('select jsonb_agg(to_jsonb(b) order by id) as rows from studio_bookings b')).rows[0].rows,before);
   assert.deepEqual((await db.query('select user_id,balance from wallets order by user_id')).rows,balances);
   return db;
@@ -112,6 +115,23 @@ for (const app of ['mobile','web']) test(`${app}: online payment database accept
       await db.query("update studio_bookings set checkout_session_id='cs_old_balance',payment_status='pending' where id=$1",[uid(94)]);
       await confirm(db,[94],{stage:'balance',amount:500,session:'cs_old_balance',ref:'pay_old_balance'});
       assert.equal(Number((await db.query('select sum(amount) as amount from studio_payment_events where booking_id=$1',[uid(94)])).rows[0].amount),1000);
+    });
+    await t.test('legacy zero stored balance uses confirmed partial debt for display and settlement without replaying payments',async()=>{
+      await book(db,31,{price:1000,amount:500,remaining:500,stage:'downpayment'});
+      await confirm(db,[31],{stage:'downpayment',amount:500});
+      await db.query("update studio_bookings set remaining_balance=0,payment_status='pending',checkout_session_id='cs_legacy_balance' where id=$1",[uid(31)]);
+      const debts=(await db.query('select outstanding_studio_payments($1) as debts',[payer])).rows[0].debts;
+      assert.equal(debts.find(b=>b.id===uid(31)).remaining_balance,500);
+      assert.equal(history.getStudioBalanceAfterPayment((await db.query('select * from studio_bookings where id=$1',[uid(31)])).rows[0]),500);
+      const saved=await state(db);
+      await assert.rejects(confirm(db,[31],{stage:'balance',amount:1000,session:'cs_legacy_balance',ref:'pay_legacy_balance'}),/PAYMENT_AMOUNT_MISMATCH/);
+      assert.deepEqual(await state(db),saved);
+      await confirm(db,[31],{stage:'balance',amount:500,session:'cs_legacy_balance',ref:'pay_legacy_balance'});
+      assert.equal((await db.query('select payment_status from studio_bookings where id=$1',[uid(31)])).rows[0].payment_status,'paid');
+      const paid=await state(db);
+      await confirm(db,[31],{stage:'balance',amount:500,session:'cs_legacy_balance',ref:'pay_legacy_balance'});
+      assert.deepEqual(await state(db),paid);
+      assert.equal((await db.query('select outstanding_studio_payments($1) as debts',[payer])).rows[0].debts.some(b=>b.id===uid(31)),false);
     });
     await t.test('missing bookings, cross-payer batches, superseded sessions, altered references, and underpayment roll back completely',async()=>{
       await book(db,14); await book(db,15,{session:'cs_14',user:stranger});
@@ -260,6 +280,7 @@ test('real payment and wallet handlers execute against the migrated database',as
       else if(name==='record_online_studio_refund')data=(await db.query('select record_online_studio_refund($1,$2,$3,$4,$5) as result',[
         args.p_refund_id,args.p_payment_id,args.p_booking_ids,args.p_amount,args.p_refunded_at])).rows[0].result;
       else if(name==='get_online_studio_payment_events')data=(await db.query('select get_online_studio_payment_events($1) as result',[args.p_user_id])).rows[0].result;
+      else if(name==='outstanding_studio_payments')data=(await db.query('select outstanding_studio_payments($1) as result',[args.p_user_id])).rows[0].result;
       else throw new Error(name);
       return{data,error:null};
     }catch(error){return{data:null,error:{message:error.message}};}},
@@ -321,6 +342,27 @@ test('real payment and wallet handlers execute against the migrated database',as
       const refunded=await state(db);assert.equal((await webhook('payment.refund.updated',refundResource)).status,200);assert.deepEqual(await state(db),refunded);
       const result=await (await post(walletHandler,{action:'get_wallet_summary'})).json();const records=result.transactions.filter(tx=>tx.reference_id===uid(20));
       assert.equal(records.length,2);assert.equal(records.find(tx=>tx.type==='refund').amount,3000);assert.equal(Number(result.balance),42);
+    });
+    await t.test('wallet summary agrees with eligibility for full unpaid and legacy partial debt, removes cancelled and settled debt, and never rewrites balances',async()=>{
+      await book(db,40,{price:1000,amount:0,remaining:0,paymentStatus:'unpaid'});
+      await book(db,41,{price:800,amount:200,remaining:0,stage:'downpayment',paymentStatus:'partial',status:'completed'});
+      await db.query("update studio_bookings set paid_at='2026-10-07' where id=$1",[uid(41)]);
+      await book(db,42,{price:900,amount:0,remaining:900,paymentStatus:'unpaid',status:'cancelled'});
+      const before=await state(db);
+      const response=await post(walletHandler,{action:'get_wallet_summary'});
+      assert.equal(response.status,200);
+      const result=await response.json();
+      assert.equal(result.unpaidBookings.find(b=>b.id===uid(40)).remaining_balance,1000);
+      assert.equal(result.unpaidBookings.find(b=>b.id===uid(41)).remaining_balance,600);
+      assert.equal(result.unpaidBookings.some(b=>b.id===uid(42)),false);
+      assert.equal(Number(result.balance),42);
+      const expected=(await db.query('select outstanding_studio_payments($1) as debts',[payer])).rows[0].debts;
+      assert.deepEqual(result.unpaidBookings.map(b=>[b.id,b.remaining_balance]).sort(),expected.map(b=>[b.id,b.remaining_balance]).sort());
+      assert.deepEqual(await state(db),before);
+      await db.query("update studio_bookings set payment_status='paid',payment_amount=final_price,remaining_balance=0 where id=$1",[uid(40)]);
+      await db.query("update studio_bookings set status='cancelled' where id=$1",[uid(41)]);
+      const refreshed=await (await post(walletHandler,{action:'get_wallet_summary'})).json();
+      assert.equal(refreshed.unpaidBookings.some(b=>[uid(40),uid(41)].includes(b.id)),false);
     });
   }finally{await db.close();}
 });

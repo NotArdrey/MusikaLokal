@@ -2,6 +2,8 @@ import {
   keepPreviousData,
   useInfiniteQuery,
   useQuery,
+  useQueryClient,
+  type InfiniteData,
 } from "@tanstack/react-query";
 import { invokeEdgeFunction } from "./api";
 import { queryKeys } from "./queryKeys";
@@ -125,10 +127,10 @@ export const useWalletSummaryQuery = <TData = any>(
 
 export const useBookingsSummaryQuery = <TData = any>(
   userId: string | null | undefined,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean; focused?: { current: boolean } },
 ) => {
   return useQuery({
-    enabled: Boolean(userId) && (options?.enabled ?? true),
+    enabled: () => Boolean(userId) && (options?.enabled ?? true) && (options?.focused?.current ?? true),
     placeholderData: keepPreviousData,
     queryFn: () =>
       invokeEdgeFunction<TData>("manage-bookings", {
@@ -164,7 +166,7 @@ export const useListingDetailsQuery = <TData = any>(params: {
   });
 };
 
-export const useFeedQuery = <TItem = any>(params: {
+export const feedQueryOptions = <TItem = any>(params: {
   enabled?: boolean;
   feedTab: string;
   feedType: string;
@@ -185,18 +187,13 @@ export const useFeedQuery = <TItem = any>(params: {
       : Array.isArray(page?.data)
         ? page.data
         : [];
-  const fetchFeedPage = (body: Record<string, unknown>) =>
-    invokeEdgeFunction<PaginatedResponse<TItem>>("manage-social-feed", {
-      body,
-    });
-
-  return useInfiniteQuery({
+  return {
     enabled: (feedType === "public" || Boolean(resolvedUserId)) && (params.enabled ?? true),
     getNextPageParam: (lastPage: PaginatedResponse<TItem>) => lastPage.nextCursor || undefined,
     initialPageParam: null as string | null,
     meta: { persist: feedType === "public" && !personalize },
     placeholderData: keepPreviousData,
-    queryFn: async ({ pageParam }) => {
+    queryFn: async ({ pageParam, signal }: { pageParam: string | null; signal: AbortSignal }) => {
       const feedPayload = {
         action: "get_feed",
         cursor: pageParam,
@@ -206,7 +203,9 @@ export const useFeedQuery = <TItem = any>(params: {
         personalize,
         ...(resolvedUserId ? { userId: resolvedUserId } : {}),
       };
-      const firstPage = await fetchFeedPage(feedPayload);
+      const firstPage = await invokeEdgeFunction<PaginatedResponse<TItem>>("manage-social-feed", {
+        body: feedPayload, signal,
+      });
       const firstPosts = getPageItems(firstPage);
 
       if (params.feedTab === "for_you" && !pageParam && firstPosts.length === 0) {
@@ -214,7 +213,7 @@ export const useFeedQuery = <TItem = any>(params: {
           userId: resolvedUserId,
         });
 
-        const publicFallback = await fetchFeedPage({
+        const publicFallback = await invokeEdgeFunction<PaginatedResponse<TItem>>("manage-social-feed", { body: {
           action: "get_feed",
           cursor: undefined,
           feed_type: "public",
@@ -222,7 +221,7 @@ export const useFeedQuery = <TItem = any>(params: {
           limit: params.limit,
           personalize: false,
           ...(resolvedUserId ? { userId: resolvedUserId } : {}),
-        });
+        }, signal });
         const fallbackPosts = getPageItems(publicFallback);
 
         logLoadTime("Feed", "public-fallback-complete", {
@@ -238,19 +237,39 @@ export const useFeedQuery = <TItem = any>(params: {
     },
     queryKey: queryKeys.feed.list(params.feedTab, resolvedUserId, params.limit, personalize),
     staleTime: FEED_STALE_TIME_MS,
-  });
+  };
+};
+
+export const useFeedQuery = <TItem = any>(params: Parameters<typeof feedQueryOptions<TItem>>[0]) => {
+  const queryClient = useQueryClient();
+  const options = feedQueryOptions<TItem>(params);
+  const query = useInfiniteQuery(options);
+  const refreshFirstPage = async () => {
+    try {
+      // Replace pages only after a successful refresh. Pagination remains available.
+      const data = await queryClient.fetchInfiniteQuery({ ...options, pages: 1, staleTime: 0 });
+      return { data, error: null };
+    } catch (error) {
+      return {
+        data: queryClient.getQueryData<InfiniteData<PaginatedResponse<TItem>, string | null>>(options.queryKey),
+        error,
+      };
+    }
+  };
+  return { ...query, refreshFirstPage };
 };
 
 export const useMarketplaceProductsQuery = <TItem = any>(params: {
   category?: string | null;
   enabled?: boolean;
+  focused?: { current: boolean };
   includeSold?: boolean;
   limit: number;
 }) => {
   const includeSold = params.includeSold ?? true;
 
   return useInfiniteQuery({
-    enabled: params.enabled ?? true,
+    enabled: () => (params.enabled ?? true) && (params.focused?.current ?? true),
     getNextPageParam: (lastPage: PaginatedResponse<TItem>) =>
       lastPage.nextOffset ?? undefined,
     initialPageParam: 0,
@@ -294,10 +313,10 @@ export const useMarketplaceProductsQuery = <TItem = any>(params: {
 
 export const useSellerProductsQuery = <TData = any>(
   userId: string | null | undefined,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean; focused?: { current: boolean } },
 ) => {
   return useQuery({
-    enabled: Boolean(userId) && (options?.enabled ?? true),
+    enabled: () => Boolean(userId) && (options?.enabled ?? true) && (options?.focused?.current ?? true),
     placeholderData: keepPreviousData,
     queryFn: () =>
       invokeEdgeFunction<TData>("manage-marketplace", {

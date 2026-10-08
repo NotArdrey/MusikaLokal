@@ -13,6 +13,14 @@ Installation steps expand independently by touch or keyboard. Android users
 receive a reminder to keep the page open; iPhone/iPad users receive Android-only
 installation guidance. The previous Android app badge has been removed.
 
+Version 1.0.5 is the primary download. A separate **Download version 1.0.2**
+link below its release information offers the retained earlier APK directly
+from Supabase Storage.
+
+The 1.0.5 rebuild uses the existing Vercel Blob store because the available
+Supabase publishing credential returned HTTP 403. The APK checksum and signing
+certificate were verified before updating the release manifest.
+
 ## Build the standalone testing APK
 
 From the repository root on Windows:
@@ -101,22 +109,39 @@ npx vercel login
 npx vercel link --yes --project musika-lokal --scope notardreys-projects
 ```
 
-The connected public Blob store is `musika-lokal-apk`, in Singapore. Upload the
-verified APK using Vercel's authenticated environment:
+APKs are hosted in the public `android-releases` Supabase Storage bucket in the
+existing MusikaLokal project. The website itself remains on Vercel. Upload the
+verified APK from the repository root:
 
 ```powershell
-npx vercel env run -- npm --prefix web run apk:publish
+npm --prefix web run apk:publish
 ```
 
+The script reads the root `.env` without exposing credentials to the client.
+Provide a server-only `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY`, or
+use `SUPABASE_ACCESS_TOKEN` with permission to retrieve the project's service
+key. Explicit process environment credentials take precedence over the file.
+Never give these variables an `EXPO_PUBLIC_` prefix.
+
+The project global upload limit and APK bucket limit are 128 MiB; the existing
+app buckets retain their previous effective upload caps. The APK bucket accepts
+only `application/vnd.android.package-archive`. A restrictive storage policy
+blocks ordinary client roles from listing, uploading, replacing, or deleting
+releases. Public download URLs require no sign-in.
+
 The upload script validates the APK against its build metadata, uploads to a
-checksum-specific immutable path, and updates `web/public/android-release.json`
-only after upload succeeds. The manifest contains the download URL, version,
+checksum-specific immutable path, verifies the complete public file's SHA-256
+and size, and updates `web/public/android-release.json` only after verification
+succeeds. The manifest contains the download URL, version,
 size, checksum, minimum Android API, build time, and certificate fingerprint.
 The website reads this manifest and disables downloading when it is missing or
 invalid. Each uploaded manifest is retained in `web/releases/`; keep these
-records and previous Blob objects for rollback.
-If this exact APK is already uploaded, reuse its existing manifest and proceed
-to deployment; immutable uploads reject replacement of an existing object.
+records and the previous APK for rollback. Versions 1.0.3 and 1.0.2 were copied
+to Supabase on October 8, 2026. Their existing Blob copies remain available for
+older website deployments; six earlier Blob APKs have been removed.
+If this exact APK is already uploaded, the script verifies the existing public
+object and reuses it without overwriting it. Old release objects need explicit
+cleanup as new versions accumulate; publishing does not delete rollback files.
 
 Build and test before deploying:
 
@@ -204,5 +229,6 @@ Screenshots are written to `output/android-testing/`.
 For each deployed release, download the APK from the public website and compare
 its SHA-256 hash with the build metadata. Record any physical-device or
 authenticated workflow checks that remain untested. To roll back, deploy the
-previous website version with its previous manifest; retained immutable Blob
-objects continue serving that APK.
+previous website version with its previous manifest; retained immutable release
+objects continue serving that APK. The parser accepts the project's exact
+Supabase APK bucket and legacy public Vercel Blob URLs.

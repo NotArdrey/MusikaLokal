@@ -18,6 +18,35 @@ import { resolveNotificationNavigationTarget } from '../utils/notificationNaviga
 const PUSH_NOTIFICATION_CHANNEL_ID = 'musika-lokal-alerts-v2';
 
 let notificationHandlerConfigured = false;
+let notificationChannelPromise: Promise<unknown> | null = null;
+
+const ensureAndroidNotificationChannel = () => {
+  if (Platform.OS !== 'android') {
+    return Promise.resolve();
+  }
+
+  const notifications = Notifications;
+  if (!notifications?.setNotificationChannelAsync) {
+    return Promise.reject(new Error('Android notification channels are unavailable.'));
+  }
+
+  if (!notificationChannelPromise) {
+    notificationChannelPromise = notifications.setNotificationChannelAsync(PUSH_NOTIFICATION_CHANNEL_ID, {
+      name: 'MusikaLokal Alerts',
+      importance: NotificationAndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#0F172A',
+      sound: 'default',
+      enableVibrate: true,
+      showBadge: true,
+    }).catch((error) => {
+      notificationChannelPromise = null;
+      throw error;
+    });
+  }
+
+  return notificationChannelPromise;
+};
 
 type ForegroundNotificationHandler = (notification: any) => void;
 
@@ -32,12 +61,14 @@ const ensureNotificationHandler = () => {
   }
 
   notifications.setNotificationHandler({
+    // Foreground pushes use the existing deduplicated in-app toast.
+    // Background pushes are presented by Android/iOS using the server payload.
     handleNotification: async () => ({
       shouldShowBanner: false,
       shouldShowList: false,
       shouldPlaySound: false,
       shouldSetBadge: false,
-      priority: 'max',
+      priority: notifications.AndroidNotificationPriority.MAX,
     }),
   });
 
@@ -79,17 +110,11 @@ export const usePushNotifications = (
 
     ensureNotificationHandler();
 
-    if (Platform.OS === 'android' && notifications.setNotificationChannelAsync) {
-      void notifications.setNotificationChannelAsync(PUSH_NOTIFICATION_CHANNEL_ID, {
-        name: 'MusikaLokal Alerts',
-        importance: NotificationAndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#0F172A',
-        sound: 'default',
-        enableVibrate: true,
-        showBadge: true,
-      });
-    }
+    void ensureAndroidNotificationChannel().catch((error) => {
+      if (__DEV__) {
+        console.warn('[push] Failed to create notification channel', error);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -196,6 +221,13 @@ export const usePushNotifications = (
     let isDisposed = false;
 
     const syncPushRegistration = async () => {
+      // Android 13+ needs the channel before requesting notification permission.
+      // Register only after it exists so incoming pushes can use the alerts channel.
+      await ensureAndroidNotificationChannel();
+      if (isDisposed) {
+        return;
+      }
+
       const installationId = await getOrCreatePushInstallationId();
 
       const existingPermissions = await getPermissionsAsync();
@@ -219,9 +251,10 @@ export const usePushNotifications = (
       }
 
       const projectId = getExpoPushProjectId();
-      const tokenResponse = projectId
-        ? await getExpoPushTokenAsync({ projectId })
-        : await getExpoPushTokenAsync();
+      if (!projectId) {
+        throw new Error('Missing Expo project ID. Configure EXPO_PUBLIC_EAS_PROJECT_ID before registering push devices.');
+      }
+      const tokenResponse = await getExpoPushTokenAsync({ projectId });
 
       if (isDisposed || !tokenResponse.data) {
         return;

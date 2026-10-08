@@ -1,0 +1,61 @@
+{
+  "checkedAt": "2026-10-08T04:28:26.068Z",
+  "storeHostname": "yr5chc4fi5tszotq.public.blob.vercel-storage.com",
+  "before": {
+    "count": 8,
+    "bytes": 821987984
+  },
+  "deleted": [
+    {
+      "pathname": "android/testing/2dfb57671802f6a87e888a30388777ff331091c1d26629e48b8d05b3552285f5/musikalokal-testing.apk",
+      "bytes": 103310613
+    },
+    {
+      "pathname": "android/testing/5030328bd1a398ae14a3dd3abf4aa6587ca5aaa5f57aeca4ec190aa1bfe40b48/musikalokal-testing.apk",
+      "bytes": 102294783
+    },
+    {
+      "pathname": "android/testing/534e8662845257c99e97ee49b2c6d1f3ceb7defeb909e24864b4742ce0fb7ef7/musikalokal-testing.apk",
+      "bytes": 103239289
+    },
+    {
+      "pathname": "android/testing/a26a08c6969ee415263802ca3c07e78b794579b1f2c4eb621f5ccd30da642078/musikalokal-testing.apk",
+      "bytes": 103621815
+    },
+    {
+      "pathname": "android/testing/a9a6e5223d62e6daaa6bd5d44d0801c746ba6701d46f5d23669549cfd352c411/musikalokal-testing.apk",
+      "bytes": 102292603
+    },
+    {
+      "pathname": "android/testing/cbfa82e2779e705eb0efb03222d70ee172ee64b92eb7a227e4af1747c1519cf1/musikalokal-testing.apk",
+      "bytes": 102318427
+    }
+  ],
+  "after": {
+    "count": 2,
+    "bytes": 204910454,
+    "decimalMB": 204.910454,
+    "currentStoredPercentOf1GB": 20.4910454
+  },
+  "freedBytes": 617077530,
+  "kept": [
+    {
+      "sha256": "e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245",
+      "pathname": "android/testing/e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245/musikalokal-testing.apk",
+      "bytes": 102458983,
+      "httpStatus": 200
+    },
+    {
+      "sha256": "8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272",
+      "pathname": "android/testing/8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272/musikalokal-testing.apk",
+      "bytes": 102451471,
+      "httpStatus": 200
+    }
+  ],
+  "publicManifest": {
+    "version": "1.0.3",
+    "sha256": "e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245",
+    "verified": true
+  },
+  "usageNote": "This is live stored size from the Blob inventory. Vercel monthly average storage usage is a separate metric and will not immediately reset."
+}

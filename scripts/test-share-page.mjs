@@ -3,6 +3,7 @@ import {readFileSync, mkdirSync} from 'node:fs';
 import {test} from 'node:test';
 import {chromium} from '@playwright/test';
 import {getShareDestination} from '../mobile/src/utils/shareLinks.ts';
+import {getActionDestination, buildActionEmailUrl} from '../mobile/src/utils/actionLinks.ts';
 
 test('published share gateway preserves all targets, offers the APK and renders in both themes', async () => {
   const browser=await chromium.launch({channel:'msedge',headless:true});
@@ -29,6 +30,22 @@ test('published share gateway preserves all targets, offers the APK and renders 
       await page.locator('#open-app').evaluate(node=>node.addEventListener('click',e=>{e.preventDefault();window.captureOpen(node.href);}));
       await page.locator('#open-app').click();assert.equal(pressed,href);
     }
+    const id='9d28c58a-7f1e-4fcb-8091-b8f1b65f79cc';
+    for (const [route,params] of [
+      ['/group_application_cv',{applicationId:id}], ['/bookings',{tab:'History'}],
+      ['/production_team',{teamId:id,tab:'Applications'}], ['/wallet',{section:'outstanding',bookingId:id}],
+      ['/gig_feature_consent',{applicationId:id}], ['/manage_gig',{id,tab:'Applicants'}],
+      ['/post_details',{post_id:id}],
+    ]) {
+      const link=buildActionEmailUrl({route,route_params:params});
+      await page.goto(link);
+      await page.locator('#open-app').waitFor({state:'visible'});
+      const href=await page.locator('#open-app').getAttribute('href');
+      assert.equal(getActionDestination(href),getActionDestination(link));
+      await page.waitForFunction(()=>document.getElementById('download').href.includes('testing.apk'));
+      await page.locator('#open-app').evaluate(node=>node.addEventListener('click',e=>{e.preventDefault();window.captureOpen(node.href);}));
+      await page.locator('#open-app').click();assert.equal(pressed,href);
+    }
     mkdirSync('docs/testing/remaining-bugs-2026-10-07',{recursive:true});
     for(const colorScheme of ['light','dark'])for(const width of [320,1280])for(const scale of [1,1.6]) {
       await page.emulateMedia({colorScheme});await page.setViewportSize({width,height:900});
@@ -39,6 +56,9 @@ test('published share gateway preserves all targets, offers the APK and renders 
       if(width===320&&scale===1.6)await page.screenshot({path:`docs/testing/remaining-bugs-2026-10-07/share-${colorScheme}.png`,fullPage:true});
     }
     await page.goto('https://musika-lokal.vercel.app/feed?listingId=x&listingType=admin');
+    await page.waitForFunction(()=>document.getElementById('message').textContent.includes('incomplete'));
+    assert.equal(await page.locator('#open-app').isVisible(),false);
+    await page.goto('https://musika-lokal.vercel.app/action?destination=%2Fgroup_application_cv%3FapplicationId%3Dinvalid');
     await page.waitForFunction(()=>document.getElementById('message').textContent.includes('incomplete'));
     assert.equal(await page.locator('#open-app').isVisible(),false);
     releaseAvailable=false;await page.goto('https://musika-lokal.vercel.app/feed?postId=one');

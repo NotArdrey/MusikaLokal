@@ -10,7 +10,9 @@ const customer=uid(1),other=uid(2),studio=uid(10),secondStudio=uid(11);
 const compile=source=>ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
 const databases=[];after(async()=>{for(const db of databases)await db.close();});
 const migration='20261007153000_enforce_studio_payment_eligibility.sql';
+const walletMigration='20261007200000_wallet_outstanding_payment_destination.sql';
 assert.equal(read(`mobile/supabase/migrations/${migration}`),read(`web/supabase/migrations/${migration}`));
+assert.equal(read(`mobile/supabase/migrations/${walletMigration}`),read(`web/supabase/migrations/${walletMigration}`));
 const reservation=(studioId=studio,date='2026-10-22',slots=[{start:'10:00',end:'11:00'}])=>({payload:{
   studio_id:studioId,booking_date:date,start_time:slots[0].start,end_time:slots.at(-1).end,
   session_type:'rehearsal',base_rate:500,hours:slots.length,subtotal:500*slots.length,
@@ -27,12 +29,13 @@ for(const app of ['mobile','web']){
     create table studio_bookings(id uuid primary key default gen_random_uuid(),user_id uuid not null references profiles(id),studio_id uuid not null references studios(id),
       booking_date date,start_time time,end_time time,notes text,status text default 'pending',payment_status text default 'unpaid',
       session_type text,base_rate numeric,hours numeric,subtotal numeric,modifiers_applied jsonb,final_price numeric,
-      payment_amount numeric default 0,remaining_balance numeric default 0,cancellation_policy_id uuid,cancellation_policy_snapshot jsonb,created_at timestamptz default now());
+      payment_amount numeric default 0,remaining_balance numeric default 0,paid_at timestamptz,cancellation_policy_id uuid,cancellation_policy_snapshot jsonb,created_at timestamptz default now());
     create table studio_booking_slots(id uuid default gen_random_uuid(),booking_id uuid references studio_bookings(id) on delete cascade,
       start_time time,end_time time,sort_order integer,check(end_time>start_time));
     insert into profiles values('${customer}'),('${other}');insert into studios values('${studio}','Studio A'),('${secondStudio}','Studio B');`);
   await db.exec(read(`${app}/supabase/migrations/${migration}`));
   await db.exec(read(`${app}/supabase/migrations/20261007153500_avoid_studio_eligibility_fk_deadlocks.sql`));
+  await db.exec(read(`${app}/supabase/migrations/${walletMigration}`));
   assert.match((await db.query("select pg_get_functiondef('enforce_studio_payment_eligibility()'::regprocedure) as body")).rows[0].body,/for no key update/);
   assert.equal((await eligible()).eligible,true);
   const rows=await create([reservation(),reservation(studio,'2026-10-23',[{start:'10:00',end:'11:00'},{start:'14:00',end:'15:00'}])]);
@@ -41,7 +44,7 @@ for(const app of ['mobile','web']){
   assert.deepEqual(slots.map(s=>s.start_time),['10:00:00','14:00:00']);assert.deepEqual(slots.map(s=>s.sort_order),[0,1]);
   await assert.rejects(create([reservation(secondStudio)]),error=>{
     assert.equal(error.message,'OUTSTANDING_STUDIO_PAYMENT');const detail=JSON.parse(error.detail);
-    assert.equal(detail.bookings.length,2);assert.equal(detail.bookings[0].studio_name,'Studio A');assert.equal(detail.pay_now.pathname,'/bookings');return true;
+    assert.equal(detail.bookings.length,2);assert.equal(detail.bookings[0].studio_name,'Studio A');assert.equal(detail.pay_now.pathname,'/wallet');assert.equal(detail.pay_now.params.section,'outstanding');assert.equal(detail.pay_now.params.bookingId,null);return true;
   });
   assert.equal((await db.query('select count(*)::int as n from studio_bookings')).rows[0].n,2);
   const state=await eligible();assert.equal(state.eligible,false);assert.equal(state.code,'OUTSTANDING_STUDIO_PAYMENT');
@@ -78,6 +81,8 @@ for(const app of ['mobile','web']){
   await db.exec(`update studio_bookings set status='cancelled' where user_id='${other}';`);
   await db.exec(`insert into studio_bookings(user_id,studio_id,final_price) values('${other}','${secondStudio}',500);`);
   await db.exec(read(`${app}/supabase/migrations/${migration}`));
+  await db.exec(read(`${app}/supabase/migrations/20261007153500_avoid_studio_eligibility_fk_deadlocks.sql`));
+  await db.exec(read(`${app}/supabase/migrations/${walletMigration}`));
   assert.equal((await eligible(other)).bookings.length,1);
  });
  test(`${app}: public eligibility reads only the signed-in user; clients cannot supply server-priced batches`,async()=>{
@@ -110,7 +115,7 @@ for(const app of ['mobile','web']){
       if(name==='calculate_multi_slot_price')return {data:[{base_rate:500,hours:1,subtotal:500,final_price:500}],error:null};
       if(name==='apply_studio_promotion')return {data:null,error:null};
       if(name==='create_studio_reservation_batch'){
-        calls.push(args);return blocked?{error:{message:'OUTSTANDING_STUDIO_PAYMENT',details:JSON.stringify({code:'OUTSTANDING_STUDIO_PAYMENT',bookings:[{id:uid(80)}],pay_now:{pathname:'/bookings'}})}}
+        calls.push(args);return blocked?{error:{message:'OUTSTANDING_STUDIO_PAYMENT',details:JSON.stringify({code:'OUTSTANDING_STUDIO_PAYMENT',bookings:[{id:uid(80)}],pay_now:{pathname:'/wallet',params:{section:'outstanding',bookingId:uid(80)}}})}}
           :{data:args.p_reservations.map((r,i)=>({...r.payload,id:uid(70+i)})),error:null};
       }return {data:null,error:null};
     },
@@ -128,7 +133,7 @@ for(const app of ['mobile','web']){
   assert.equal(calls[0].p_user_id,customer);
   calls=[];const invalid=await call({action:'create',reservations:[single,{...single,user_id:other}]});assert.equal(invalid.status,403);assert.equal(calls.length,0,'later validation failure creates no earlier reservations');
   blocked=true;const block=await call({action:'create',...single});assert.equal(block.status,409);const payload=await block.json();
-  assert.equal(payload.code,'OUTSTANDING_STUDIO_PAYMENT');assert.equal(payload.bookings[0].id,uid(80));assert.equal(payload.pay_now.pathname,'/bookings');
+  assert.equal(payload.code,'OUTSTANDING_STUDIO_PAYMENT');assert.equal(payload.bookings[0].id,uid(80));assert.equal(payload.pay_now.pathname,'/wallet');
   blocked=false;const legacy=await call({action:'create',...single});assert.equal(legacy.status,201);assert.ok((await legacy.json()).id,'single-session callers keep the legacy response');
   actor=null;assert.equal((await call({action:'create',...single})).status,401);
  });
@@ -147,13 +152,14 @@ for(const app of ['mobile','web']){
       toDateKey:v=>v,toTimeLabel:v=>v,getBookingSessionType:b=>b.session_type,getBookingSongCount:b=>b.songCount,
       invokeManageBookingsCreate:async body=>{requests.push(body);return block?{error:{serverError:{code:'OUTSTANDING_STUDIO_PAYMENT',error:'Outstanding payment'}}}:{data:{bookings:body.reservations.map((b,i)=>({id:uid(50+i)}))}};},
       setLoading(){},paymentEligibility:{refresh:()=>{refreshes++;}},showAlert:(...args)=>alerts.push(args),
+      openOutstandingWallet:rows=>navigations.push({pathname:'/wallet',params:{section:'outstanding'}}),
       sheetRef:{current:{dismiss(){}}},router:{push:target=>navigations.push(target)},
     });return {results,errors};
   };
   assert.equal((await execute()).results.length,2);assert.equal(requests.length,1);assert.equal(requests[0].reservations.length,2);
   assert.equal(requests[0].reservations[1].time_slots.length,2);
   assert.equal((await execute(true)).results.length,0);assert.equal(refreshes,1);assert.equal(alerts[0][1],'Outstanding Studio Payment');
-  alerts[0][3].find(b=>b.text==='Pay Now').onPress();assert.equal(navigations[0].pathname,'/bookings');
+  alerts[0][3].find(b=>b.text==='Pay Now').onPress();assert.equal(navigations[0].pathname,'/wallet');
  });
 
  test(`${app}: eligibility refreshes across studios, reconnect and resume; old users and slower responses cannot overwrite it`,async()=>{

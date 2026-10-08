@@ -100,7 +100,7 @@ test('exported website supports public downloads, themes and protected admin rou
     await screenshot({ path: resolve(output, 'homepage-mobile-light.png'), fullPage: true });
 
     const release = {
-      downloadUrl: 'https://test.public.blob.vercel-storage.com/android/testing/musikalokal-testing.apk?download=1',
+      downloadUrl: `https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/android-releases/android/testing/${'a'.repeat(64)}/musikalokal-testing.apk?download=MusikaLokal.apk`,
       packageId: 'com.anonymous.musikalokal', versionName: '1.0.0', versionCode: 1,
       sizeBytes: 32 * 1024 * 1024, sha256: 'a'.repeat(64), certificateSha256: 'b'.repeat(64),
       minSdk: 24, builtAt: '2026-10-05T00:00:00Z', testing: true,
@@ -134,7 +134,8 @@ test('exported website supports public downloads, themes and protected admin rou
     const apkBytes = Buffer.alloc(2 * 1024 * 1024 + 97);
     for (let i = 0; i < apkBytes.length; i++) apkBytes[i] = i % 251;
     const apkChecksum = createHash('sha256').update(apkBytes).digest('hex');
-    let downloadRelease = { ...release, sizeBytes: apkBytes.length, sha256: apkChecksum };
+    const apkDownloadUrl = release.downloadUrl.replace(release.sha256, apkChecksum);
+    let downloadRelease = { ...release, downloadUrl: apkDownloadUrl, sizeBytes: apkBytes.length, sha256: apkChecksum };
     let requests = 0;
     let truncateOnce = true;
     let delayTransfer = false;
@@ -142,7 +143,7 @@ test('exported website supports public downloads, themes and protected admin rou
     const delayedTransfer = new Promise((resolve) => { releaseDelayedTransfer = resolve; });
     await page.unroute('**/android-release.json');
     await page.route('**/android-release.json', (route) => route.fulfill({ json: downloadRelease }));
-    await page.route(release.downloadUrl, async (route) => {
+    await page.route('https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/android-releases/**', async (route) => {
       requests++;
       const range = /^bytes=(\d+)-(\d+)$/.exec(route.request().headers().range);
       assert.ok(range, 'APK requests must use bounded byte ranges');
@@ -170,13 +171,13 @@ test('exported website supports public downloads, themes and protected admin rou
     assert.equal(requests, 10, 'one incomplete range must be retried');
     await page.getByText('Download ready. Open MusikaLokal.apk from your browser downloads to install.', { exact: true }).waitFor();
 
-    downloadRelease = { ...downloadRelease, sha256: 'a'.repeat(64) };
+    downloadRelease = { ...downloadRelease, downloadUrl: release.downloadUrl, sha256: 'a'.repeat(64) };
     await page.reload();
     await page.getByRole('link', { name: 'Download Android APK' }).click();
     await page.getByText('The download did not finish. Please try again.', { exact: true }).waitFor();
     assert.equal(savedDownloads, 1, 'a checksum mismatch must never save an APK');
 
-    downloadRelease = { ...downloadRelease, sha256: apkChecksum };
+    downloadRelease = { ...downloadRelease, downloadUrl: apkDownloadUrl, sha256: apkChecksum };
     delayTransfer = true;
     await page.reload();
     await page.locator('#installation').scrollIntoViewIfNeeded();

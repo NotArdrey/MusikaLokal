@@ -15,6 +15,7 @@ import {
     View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
+import { BoundedCache } from "../utils/BoundedCache";
 import { useTheme } from "../context/ThemeContext";
 import LoadingState from "./LoadingState";
 import { formatFriendlyDateTime } from "../utils/friendlyDateTime";
@@ -34,10 +35,10 @@ import { typography } from "../theme/tokens";
 const debugLog = (..._args: unknown[]) => { };
 
 const { width, height } = Dimensions.get("window");
-const bookingStudioDetailsCache = new Map<
+const bookingStudioDetailsCache = new BoundedCache<
   string,
   { studioDetails: any; dateOverride: any; cachedAt: number }
->();
+>(40, 5 * 60_000);
 const BOOKING_DETAILS_CACHE_TTL_MS = 60_000;
 
 // Responsive scaling utilities - optimized for iPhone SE and smaller devices

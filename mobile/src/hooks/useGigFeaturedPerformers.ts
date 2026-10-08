@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from "react";
 import { AppState } from "react-native";
 import { supabase } from "../../lib/supabase";
+import { createRefreshScheduler } from '../utils/refreshScheduler';
 
 export type GigFeaturedPerformer = {
   application_id: string;
@@ -32,7 +34,7 @@ export const useGigFeaturedPerformers = (
   const requestKey = gigIds.join(",");
   const enabled = options.enabled !== false;
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     let cancelled = false;
     const requestedGigIds = requestKey ? requestKey.split(",") : [];
 
@@ -49,6 +51,7 @@ export const useGigFeaturedPerformers = (
       });
 
       let performerRows = Array.isArray(data) ? data : [];
+      if (cancelled) return;
       if (error) {
         const fallbackResults = await Promise.all(
           requestedGigIds.map((gigId) =>
@@ -78,25 +81,30 @@ export const useGigFeaturedPerformers = (
       setPerformersByGigId(nextPerformers);
     };
 
-    void loadPerformers();
+    const refresh = createRefreshScheduler(loadPerformers);
+    void refresh.run();
     const channel = supabase
       .channel(`feed-featured-performers-${Date.now()}-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "gig_applications" },
-        () => void loadPerformers(),
+        payload => {
+          const gigId = (payload.new as Record<string, unknown>).gig_id || (payload.old as Record<string, unknown>).gig_id;
+          if (!gigId || requestedGigIds.includes(String(gigId))) refresh.schedule();
+        },
       )
       .subscribe();
     const appStateSubscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void loadPerformers();
+      if (state === "active") refresh.schedule();
     });
 
     return () => {
       cancelled = true;
+      refresh.cancel();
       appStateSubscription.remove();
       void supabase.removeChannel(channel);
     };
-  }, [enabled, requestKey]);
+  }, [enabled, requestKey]));
 
   return performersByGigId;
 };

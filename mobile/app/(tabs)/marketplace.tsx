@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { useQueryScreenFocus } from "../../src/hooks/useQueryScreenFocus";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -36,6 +37,7 @@ import {
   useSellerProductsQuery,
 } from "../../src/data/hooks";
 import { prefetchMarketplaceProductDetails } from "../../src/data/coldBootPrefetch";
+import { queryKeys } from "../../src/data/queryKeys";
 import { createE2EImageFixtureUrls, isE2EFixtureMode } from "../../src/utils/e2eFixtures";
 import { getSmoothTabIndex, setSmoothTab } from "../../src/utils/smoothTabs";
 import { typography } from "../../src/theme/tokens";
@@ -79,6 +81,7 @@ export default function MarketplaceScreen() {
   const { session, isGuest, userId, userRole, roleResolved, loading: authLoading } = useAuth();
   const { clearBottomOverlays } = useBottomOverlayActions();
   const queryClient = useQueryClient();
+  const queryScreenFocus = useQueryScreenFocus();
   const e2eProductSubmitInFlightRef = useRef(false);
   const resolvedUserId = session?.user?.id ?? userId ?? null;
   const normalizedUserRole = (userRole || "").toLowerCase();
@@ -166,12 +169,29 @@ export default function MarketplaceScreen() {
   const productsQuery = useMarketplaceProductsQuery<any>({
     category,
     enabled: !authLoading && Boolean(session || isGuest),
+    focused: queryScreenFocus,
     includeSold: true,
     limit: MARKETPLACE_PAGE_SIZE,
   });
   const sellerProductsQuery = useSellerProductsQuery<any>(resolvedUserId, {
     enabled: !authLoading && canSell,
+    focused: queryScreenFocus,
   });
+  const refetchProducts = productsQuery.refetch;
+  const refetchSellerProducts = sellerProductsQuery.refetch;
+  useFocusEffect(useCallback(() => {
+    const shouldRefresh = (key: readonly unknown[]) => {
+      const state = queryClient.getQueryState(key);
+      return state?.fetchStatus !== 'fetching' &&
+        (!state?.dataUpdatedAt || state.isInvalidated || Date.now() - state.dataUpdatedAt >= 30_000);
+    };
+    if (!authLoading && (session || isGuest) && shouldRefresh(queryKeys.marketplace.products(category, true, MARKETPLACE_PAGE_SIZE))) {
+      void refetchProducts();
+    }
+    if (!authLoading && canSell && shouldRefresh(queryKeys.marketplace.sellerProducts(resolvedUserId))) {
+      void refetchSellerProducts();
+    }
+  }, [authLoading, canSell, category, isGuest, queryClient, refetchProducts, refetchSellerProducts, resolvedUserId, session]));
 
   const products = useMemo(
     () => productsQuery.data?.pages.flatMap((page) => page.items || page.data || []) ?? [],

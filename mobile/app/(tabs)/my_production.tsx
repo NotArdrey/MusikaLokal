@@ -22,6 +22,7 @@ import { getActionErrorMessage, getResultErrorMessage, logActionError } from '..
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
 import { fetchActiveStaffAssignments, getStaffPermissions, StaffEntityType } from '../../src/utils/staffAccess';
 import { palette, typography } from '../../src/theme/tokens';
+import { shareListing } from '../../src/utils/shareListing';
 
 type TeamRecord = {
   id: string;
@@ -389,6 +390,18 @@ export default function MyProductionScreen({ historyOnly = false, embedded = fal
                         >
 
                           <Text style={[styles.manageBtnText, { color: colors.primary }]}>{showManageAsView ? 'View' : 'Manage'}</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          activeOpacity={1}
+                          testID={`mobile-production-share-${team.id}`}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Share ${team.name || 'production team'}`}
+                          onPress={() => shareListing(team.id, team.name, 'Production Team')}
+                          style={[styles.manageBtn, { borderColor: colors.border }]}
+                        >
+                          <Ionicons name="share-outline" size={16} color={colors.text} />
+                          <Text style={[styles.manageBtnText, { color: colors.text }]}>Share</Text>
                         </TouchableOpacity>
 
                         {canOnlyViewAndChat ? (

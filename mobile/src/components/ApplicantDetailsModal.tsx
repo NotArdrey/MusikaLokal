@@ -49,21 +49,24 @@ const titleCase = (value: unknown) =>
 const profileVerificationMeta = (member: any) => {
   const issueCode = String(member?.profile_issue_code || "");
   if (issueCode === "matches_another_member") {
-    return { label: "No match: profile belongs to another member", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
+    return { label: "No match: profile matched another member in the video", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
   }
   if (issueCode === "different_video_person") {
-    return { label: "No match: profile and ID show different people", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
+    return { label: "No match: profile and ID matched different people in the video", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
   }
   if (issueCode === "identity_not_confirmed") {
-    return { label: "Could not check: ID photo was not found in the video", color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
+    return { label: "Needs review: No clear match found for this member in the video.", color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
   }
   if (issueCode === "not_found_in_video") {
-    return { label: "No match: profile does not match the ID photo", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
+    const label = member?.status === "verified"
+      ? "Needs review: No clear match found for the profile photo in the video."
+      : "Needs review: No clear match found for this member in the video.";
+    return { label, color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
   }
-  if (member?.profile_status === "verified") return { label: "Match: same person", color: "#059669", soft: "#ECFDF5", tone: "match" as const };
+  if (member?.profile_status === "verified") return { label: "Confirmed: Match found for this member in the video.", color: "#059669", soft: "#ECFDF5", tone: "match" as const };
   if (member?.profile_status === "no_reference") return { label: "Could not check: no profile photo", color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
   if (member?.profile_status === "reference_unusable") return { label: "Could not check: profile photo is unclear", color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
-  if (member?.profile_status === "mismatch") return { label: "No match: profile does not match the ID photo", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
+  if (member?.profile_status === "mismatch") return { label: "No match: profile and ID matched different people in the video", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
   return { label: "Could not check", color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
 };
 
@@ -179,23 +182,23 @@ const toneMeta = (tone: ReviewTone) => {
 function SummaryMetric({ value, label, tone }: { value: number; label: string; tone: ReviewTone }) {
   const meta = toneMeta(tone);
   return (
-    <View style={[styles.summaryMetric, { backgroundColor: meta.soft }]}>
+    <View style={styles.summaryMetric}>
       <Text style={[styles.summaryMetricValue, { color: meta.color }]}>{value}</Text>
-      <Text numberOfLines={2} style={[styles.summaryMetricLabel, { color: meta.color }]}>{label}</Text>
+      <Text style={[styles.summaryMetricLabel, { color: meta.color }]}>{label}</Text>
     </View>
   );
 }
 
 function ProfileIdFinding({ meta }: { meta: ReturnType<typeof profileVerificationMeta> }) {
   return (
-    <View style={[styles.profileIdFinding, { backgroundColor: meta.soft, borderColor: meta.color }]}>
+    <View style={styles.profileIdFinding}>
       <Ionicons
         name={meta.tone === "match" ? "checkmark-circle" : meta.tone === "mismatch" ? "close-circle" : "warning"}
         size={20}
         color={meta.color}
       />
       <View style={styles.flexOne}>
-        <Text style={[styles.profileIdFindingTitle, { color: meta.color }]}>Profile photo vs ID photo</Text>
+        <Text style={[styles.profileIdFindingTitle, { color: meta.color }]}>Profile photo in video</Text>
         <Text style={[styles.profileIdFindingText, { color: meta.color }]}>{meta.label}</Text>
       </View>
     </View>
@@ -206,21 +209,23 @@ function AttentionItem({
   title,
   detail,
   tone,
+  colors,
   children,
 }: {
   title: string;
   detail: string;
   tone: ReviewTone;
+  colors: Colors;
   children?: React.ReactNode;
 }) {
   const meta = toneMeta(tone);
   return (
-    <View style={[styles.attentionItem, { borderLeftColor: meta.color, backgroundColor: meta.soft }]}>
+    <View style={[styles.attentionItem, { borderLeftColor: meta.color }]}>
       <View style={styles.attentionHeading}>
         <Ionicons name={meta.icon} size={18} color={meta.color} />
         <Text style={[styles.attentionTitle, { color: meta.color }]}>{title}</Text>
       </View>
-      <Text style={styles.attentionDetail}>{detail}</Text>
+      <Text style={[styles.attentionDetail, { color: colors.textSecondary }]}>{detail}</Text>
       {children}
     </View>
   );
@@ -252,7 +257,7 @@ function ConfirmedRequirements({ rows, colors }: { rows: any[]; colors: Colors }
   const [open, setOpen] = useState(false);
   if (rows.length === 0) return null;
   return (
-    <View style={[styles.confirmedGroup, { borderColor: "#A7F3D0", backgroundColor: "#F0FDF4" }]}>
+    <View style={[styles.confirmedGroup, { borderColor: colors.border }]}>
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
@@ -265,7 +270,7 @@ function ConfirmedRequirements({ rows, colors }: { rows: any[]; colors: Colors }
         <Ionicons name={open ? "chevron-up" : "chevron-down"} size={16} color={colors.primary} />
       </TouchableOpacity>
       {open ? (
-        <View style={[styles.confirmedGroupBody, { borderTopColor: "#A7F3D0" }]}>
+        <View style={[styles.confirmedGroupBody, { borderTopColor: colors.border }]}>
           {rows.map((row, index) => (
             <RequirementRow key={`${row.key || row.label}-${index}`} row={row} colors={colors} />
           ))}
@@ -291,14 +296,14 @@ function RequirementRow({ row, colors }: { row: any; colors: Colors }) {
           <Text style={[styles.requirementTitle, { color: colors.text }]}>{row.label}</Text>
           <Text style={[styles.requirementStatus, { color: meta.color }]}>{row.statusLabel}</Text>
           <Text numberOfLines={open ? undefined : 2} style={[styles.requirementDetail, { color: colors.textSecondary }]}>{row.detail}</Text>
-        </View>
-        <View style={styles.evidenceAction}>
-          <Text style={[styles.evidenceActionText, { color: colors.primary }]}>{open ? "Hide" : "View evidence"}</Text>
-          <Ionicons name={open ? "chevron-up" : "chevron-down"} size={15} color={colors.primary} />
+          <View style={styles.evidenceAction}>
+            <Text style={[styles.evidenceActionText, { color: colors.primary }]}>{open ? "Hide" : "View evidence"}</Text>
+            <Ionicons name={open ? "chevron-up" : "chevron-down"} size={15} color={colors.primary} />
+          </View>
         </View>
       </TouchableOpacity>
       {open ? (
-        <View style={[styles.requirementEvidence, { borderTopColor: colors.border, backgroundColor: colors.inputBackground }]}>
+        <View style={[styles.requirementEvidence, { borderTopColor: colors.border }]}>
           <Text style={[styles.evidenceLabel, { color: colors.textSecondary }]}>EVIDENCE SOURCE</Text>
           <Text style={[styles.evidenceValue, { color: colors.text }]}>{row.sourceLabel}</Text>
           {row.evidenceEntries.length > 0 ? row.evidenceEntries.map((entry: any, index: number) => (
@@ -337,7 +342,7 @@ function Section({
         onPress={() => setOpen((current) => !current)}
         style={styles.sectionHeader}
       >
-        <View style={[styles.sectionIcon, { backgroundColor: `${colors.primary}12` }]}>
+        <View style={styles.sectionIcon}>
           <Ionicons name={icon} size={18} color={colors.primary} />
         </View>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
@@ -396,7 +401,7 @@ function EvidenceFinding({ item, colors, sourceContext }: { item: any; colors: C
   );
 
   return (
-    <View style={[styles.findingCard, { borderColor: colors.border, backgroundColor: colors.inputBackground }]}>
+    <View style={[styles.findingCard, { borderColor: colors.border }]}>
       <Text style={[styles.findingTitle, { color: colors.text }]}>{criterionLabel(item?.criterion)}</Text>
       <StatusRow icon={status.icon} label={status.label} color={status.color} />
       <Text style={[styles.body, { color: colors.textSecondary }]}>{reason}</Text>
@@ -502,7 +507,7 @@ function TagList({ values, colors, empty }: { values: unknown[]; colors: Colors;
       {values.map((value, index) => (
         <View
           key={`${String(value)}-${index}`}
-          style={[styles.tag, { backgroundColor: `${colors.primary}10`, borderColor: `${colors.primary}2E` }]}
+          style={[styles.tag, { borderColor: colors.border }]}
         >
           <Text style={[styles.tagText, { color: colors.primary }]}>{String(value)}</Text>
         </View>
@@ -769,7 +774,7 @@ export default function ApplicantDetailsModal({
         : "Performance identity not checked";
   const memberIdentityDetail = memberVerification
     ? usesVerifiedIdPortrait
-      ? `${verifiedMemberCount} of ${expectedMemberCount} member ID photos matched people in the video.${hasProfileMismatch ? " At least one profile photo does not match that member's ID photo." : hasProfileReviewIssue ? " At least one profile photo could not be checked." : usesDualReference ? " Each profile photo matched the same person as that member's ID." : ""} The full ID is hidden; only the ID holder's face is shown.`
+      ? `${verifiedMemberCount} of ${expectedMemberCount} member ID photos matched people in the video.${hasProfileMismatch ? " At least one profile photo matched a different person in the video." : hasProfileReviewIssue ? " At least one profile photo could not be confirmed." : usesDualReference ? " Each profile photo matched the same person as that member's ID." : ""} The full ID is hidden; only the ID holder's face is shown.`
       : `${Number(memberVerification.verified_member_count || 0)} of ${Number(memberVerification.expected_member_count || 0)} registered members were confidently matched in this historical check using registered profile photos. New checks use approved government-ID holder portraits.`
     : "No registered-member verification result is available for this application.";
   const cvIdentityMismatch = cvNameCheckStatus === "mismatch";
@@ -866,7 +871,7 @@ export default function ApplicantDetailsModal({
           </TouchableOpacity>
           <View style={styles.headerCopy}>
             <Text style={[styles.eyebrow, { color: colors.textSecondary }]}>APPLICANT REVIEW</Text>
-            <Text numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.78} style={[styles.modalTitle, { color: colors.text }]}>{name}</Text>
+            <Text numberOfLines={2} style={[styles.modalTitle, { color: colors.text }]}>{name}</Text>
           </View>
         </View>
 
@@ -903,7 +908,7 @@ export default function ApplicantDetailsModal({
                   <Text style={[styles.heroRole, { color: colors.primary }]}>{appliedRole}</Text>
                   <View style={styles.heroLocationRow}>
                     <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
-                    <Text numberOfLines={1} style={[styles.heroLocation, { color: colors.textSecondary }]}>
+                    <Text style={[styles.heroLocation, { color: colors.textSecondary }]}>
                       {shortLocation(fullLocation) || "Location not provided"}
                     </Text>
                   </View>
@@ -911,17 +916,17 @@ export default function ApplicantDetailsModal({
               </View>
 
               <View style={styles.verificationBadges}>
-                <View style={[styles.verificationBadge, { backgroundColor: isVerified ? "#ECFDF5" : colors.inputBackground }]}>
+                <View style={styles.verificationBadge}>
                   <Ionicons name={isVerified ? "shield-checkmark" : "shield-outline"} size={15} color={isVerified ? "#059669" : colors.textSecondary} />
                   <Text style={[styles.verificationBadgeText, { color: isVerified ? "#047857" : colors.textSecondary }]}>{accountVerificationLabel}</Text>
                 </View>
-                <View style={[styles.verificationBadge, { backgroundColor: memberIdentityVerified ? "#ECFDF5" : "#FFFBEB" }]}>
+                <View style={styles.verificationBadge}>
                   <Ionicons name={memberIdentityVerified ? "videocam" : "warning-outline"} size={15} color={memberIdentityVerified ? "#059669" : "#D97706"} />
                   <Text style={[styles.verificationBadgeText, { color: memberIdentityVerified ? "#047857" : "#B45309" }]}>{memberIdentityLabel}</Text>
                 </View>
               </View>
 
-              <View style={[styles.matchPanel, { backgroundColor: `${colors.primary}0D` }]}>
+              <View style={[styles.matchPanel, { borderTopColor: colors.border }]}>
                 <View accessibilityLabel="Match to gig requirements review summary" style={styles.matchPanelHeader}>
                   <View style={styles.matchPanelLabelRow}>
                     <Ionicons name="clipboard-outline" size={17} color={colors.primary} />
@@ -948,7 +953,7 @@ export default function ApplicantDetailsModal({
                 </View>
                 <Text style={[styles.attentionSectionTitle, { color: colors.text }]}>Needs attention</Text>
                 {attentionItems.length > 0 ? attentionItems.map((item) => (
-                  <AttentionItem key={item.key} title={item.title} detail={item.detail} tone={item.tone} />
+                  <AttentionItem key={item.key} title={item.title} detail={item.detail} tone={item.tone} colors={colors} />
                 )) : (
                   <View style={styles.allClearRow}>
                     <Ionicons name="checkmark-circle" size={19} color="#059669" />
@@ -1115,7 +1120,7 @@ export default function ApplicantDetailsModal({
                 <DetailRow icon="person-add-outline" label="Submitted by" value={application.submitter.full_name} colors={colors} />
               ) : null}
               <Text style={[styles.label, { color: colors.text }]}>Application message</Text>
-              <View style={[styles.messageCard, { backgroundColor: colors.inputBackground }]}>
+              <View style={[styles.messageCard, { borderTopColor: colors.border }]}>
                 <Text style={[styles.body, { color: colors.text }]}>
                   {application.pitch_message || "No application message was supplied."}
                 </Text>
@@ -1132,10 +1137,10 @@ export default function ApplicantDetailsModal({
                 )}
                 {cvIdentityMismatch ? (
                   <View accessibilityLabel="Important verification needed">
-                    <AttentionItem title="CV identity mismatch" detail={cvIdentityDetail} tone="failed" />
+                    <AttentionItem title="CV identity mismatch" detail={cvIdentityDetail} tone="failed" colors={colors} />
                   </View>
                 ) : null}
-                {memberVerification && !memberIdentityVerified ? <AttentionItem title="Performance identity" detail={memberIdentityDetail} tone="review" /> : null}
+                {memberVerification && !memberIdentityVerified ? <AttentionItem title="Performance identity" detail={memberIdentityDetail} tone="review" colors={colors} /> : null}
               </ReviewGroup>
 
               <ConfirmedRequirements rows={confirmedRequirementRows} colors={colors} />
@@ -1152,13 +1157,66 @@ export default function ApplicantDetailsModal({
                     />
                     <Text style={[styles.body, { color: colors.textSecondary }]}>{cvIdentityMismatch ? cvIdentityDetail : cvNameCheck?.summary || "Open the submitted CV when you need to verify its contents."}</Text>
                     {application.cv_url ? (
-                      <TouchableOpacity onPress={() => onOpenMedia(application.cv_url, "Applicant CV")} style={[styles.outlineButton, { borderColor: colors.primary }]}>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel="View applicant CV"
+                        onPress={() => onOpenMedia(application.cv_url, "Applicant CV")}
+                        style={[styles.outlineButton, { borderColor: colors.primary }]}
+                      >
                         <Ionicons name="open-outline" size={17} color={colors.primary} />
                         <Text style={[styles.outlineButtonText, { color: colors.primary }]}>View CV</Text>
                       </TouchableOpacity>
                     ) : null}
                   </>
                 )}
+                {memberCvs.length > 0 ? (
+                  <View style={styles.stackMedium}>
+                    <Text style={[styles.body, { color: colors.textSecondary }]}>Each CV belongs to the named group member. The performance video is shared by the whole group.</Text>
+                    {memberCvs.map((member: any) => {
+                      const reviewStatus = String(member.ai_review_status || "not_requested");
+                      const reviewSummary = member.ai_review_result?.classification?.summary
+                        || member.ai_review_result?.reason
+                        || (member.ai_review_consent ? "Automatic review is pending." : "AI review was not authorized by this member.");
+                      return (
+                        <View key={member.id} style={[styles.messageCard, { borderTopColor: colors.border }]}>
+                          <Text style={[styles.label, { color: colors.text }]}>{member.member_name || "Group member"}</Text>
+                          <Text style={[styles.body, { color: colors.textSecondary }]}>
+                            {[member.role, member.instrument].filter(Boolean).join(" · ") || "Group member"}
+                          </Text>
+                          <StatusRow
+                            icon={reviewStatus === "completed" ? "checkmark-circle-outline" : "information-circle-outline"}
+                            label={reviewStatus === "completed" ? "CV reviewed" : reviewStatus === "failed" ? "Manual review needed" : reviewStatus === "skipped" ? "AI review not authorized" : "CV submitted"}
+                            color={reviewStatus === "completed" ? "#10B981" : reviewStatus === "failed" ? "#F59E0B" : colors.primary}
+                          />
+                          <Text style={[styles.body, { color: colors.textSecondary }]}>{reviewSummary}</Text>
+                          {member.cv_url ? (
+                            <TouchableOpacity
+                              accessibilityRole="button"
+                              accessibilityLabel={`View ${member.member_name || "Member"} CV`}
+                              onPress={() => onOpenMedia(member.cv_url, `${member.member_name || "Member"} CV`)}
+                              style={[styles.outlineButton, { borderColor: colors.primary }]}
+                            >
+                              <Ionicons name="open-outline" size={17} color={colors.primary} />
+                              <Text style={[styles.outlineButtonText, { color: colors.primary }]}>View CV</Text>
+                            </TouchableOpacity>
+                          ) : (
+                            <View style={styles.stackSmall}>
+                              <Text style={[styles.body, { color: colors.textSecondary }]}>This CV is temporarily unavailable.</Text>
+                              <TouchableOpacity
+                                accessibilityRole="button"
+                                accessibilityLabel={`Refresh CV for ${member.member_name || "Member"}`}
+                                onPress={() => onRetry()}
+                                style={styles.reviewDetailsButton}
+                              >
+                                <Text style={[styles.reviewDetailsButtonText, { color: colors.primary }]}>Refresh applicant details</Text>
+                              </TouchableOpacity>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
               </ReviewGroup>
 
               <ReviewGroup title="Performance video" icon="videocam-outline" colors={colors}>
@@ -1185,13 +1243,16 @@ export default function ApplicantDetailsModal({
                   color={memberIdentityVerified ? "#059669" : "#D97706"}
                 />
                 <Text style={[styles.body, { color: colors.textSecondary }]}>{memberIdentityDetail}</Text>
+                {memberVerification?.additional_people_detected ? (
+                  <Text style={[styles.advisory, { color: "#B45309" }]}>Additional people may appear in the video. Review the performance manually.</Text>
+                ) : null}
                 {memberVerificationMembers.map((member: any, index: number) => {
                   const verified = member.status === "verified";
                   const similarity = member.best_similarity === null || member.best_similarity === undefined ? Number.NaN : Number(member.best_similarity);
                   const profileMeta = profileVerificationMeta(member);
                   const profileSimilarity = member.profile_best_similarity === null || member.profile_best_similarity === undefined ? Number.NaN : Number(member.profile_best_similarity);
                   return (
-                    <View key={`${member.member_id || "member-summary"}-${index}`} style={[styles.messageCard, { backgroundColor: colors.inputBackground }]}>
+                    <View key={`${member.member_id || "member-summary"}-${index}`} style={[styles.messageCard, { borderTopColor: colors.border }]}>
                       {member.reference_portrait_url ? (
                         <TouchableOpacity
                           accessibilityRole="button"
@@ -1202,7 +1263,7 @@ export default function ApplicantDetailsModal({
                           <ProfileAvatar uri={member.reference_portrait_url} size={56} backgroundColor={colors.surface} iconColor={colors.primary} cachePolicy="none" />
                           <View style={styles.flexOne}>
                             <Text style={[styles.requirementTitle, { color: colors.text }]}>Government ID photo</Text>
-                            <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view the ID holder's face</Text>
+                            <Text style={[styles.advisory, { color: colors.primary }]}>{"Tap to view the ID holder's face"}</Text>
                           </View>
                         </TouchableOpacity>
                       ) : null}
@@ -1221,13 +1282,13 @@ export default function ApplicantDetailsModal({
                         </TouchableOpacity>
                       ) : null}
                       <Text style={[styles.requirementTitle, { color: colors.text }]}>{member.member_name_snapshot || `Member ${index + 1}`}</Text>
-                      <Text style={[styles.advisory, { color: verified ? "#059669" : "#D97706" }]}>ID found in video: {verified ? "Yes" : "No"}</Text>
+                      <Text style={[styles.advisory, { color: verified ? "#059669" : "#D97706" }]}>ID found in video: {verified ? "Yes" : "Not confirmed"}</Text>
                       {Number.isFinite(similarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>ID match: {similarity.toFixed(1)}%</Text> : null}
                       {usesDualReference ? (
                         <>
                           <ProfileIdFinding meta={profileMeta} />
                           {Number.isFinite(profileSimilarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>Profile match: {profileSimilarity.toFixed(1)}%</Text> : null}
-                          {profileMeta.tone !== "match" ? <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>The ID match stays recorded. Review this member.</Text> : null}
+                          {profileMeta.tone !== "match" ? <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>Review the video manually to confirm this member.</Text> : null}
                         </>
                       ) : null}
                       {!verified ? <Text style={[styles.advisory, { color: "#B45309" }]}>Manual review recommended</Text> : null}
@@ -1237,87 +1298,9 @@ export default function ApplicantDetailsModal({
                 <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>Advisory only. This check does not accept or decline an applicant.</Text>
               </ReviewGroup>
 
-              <ReviewDetails colors={colors}>
-              {memberVerification ? (
-                <Subsection title="Registered Member Verification" icon="people-circle-outline" colors={colors}>
-                  <StatusRow
-                    icon={memberVerification.result === "verified" ? "checkmark-circle-outline" : ["queued", "processing"].includes(String(memberVerification.status)) ? "time-outline" : "warning-outline"}
-                    label={
-                      memberVerification.result === "verified"
-                        ? "Performance identity confirmed"
-                        : ["queued", "processing"].includes(String(memberVerification.status))
-                          ? "Performance identity in progress"
-                          : memberVerification.result === "no_video"
-                            ? "No performance video to verify"
-                            : memberVerification.status === "not_requested"
-                              ? "Verification was not authorized"
-                              : "Identity not confirmed"
-                    }
-                    color={memberVerification.result === "verified" ? "#10B981" : ["queued", "processing"].includes(String(memberVerification.status)) ? colors.primary : "#F59E0B"}
-                  />
-                  <Text style={[styles.body, { color: colors.textSecondary }]}>
-                    {memberIdentityDetail} {"This is advisory and does not change the match score or make the organizer's decision."}
-                  </Text>
-                  {memberVerification.additional_people_detected ? (
-                    <Text style={[styles.advisory, { color: "#B45309" }]}>Additional people may appear in the video. Review the performance manually.</Text>
-                  ) : null}
-                  {memberVerificationMembers.map((member: any, index: number) => {
-                    const verified = member.status === "verified";
-                    const similarity = member.best_similarity === null || member.best_similarity === undefined ? Number.NaN : Number(member.best_similarity);
-                    const profileMeta = profileVerificationMeta(member);
-                    const profileSimilarity = member.profile_best_similarity === null || member.profile_best_similarity === undefined ? Number.NaN : Number(member.profile_best_similarity);
-                    return (
-                      <View key={`${member.member_id || "member"}-${index}`} style={[styles.messageCard, { backgroundColor: colors.inputBackground }]}>
-                        {member.reference_portrait_url ? (
-                          <TouchableOpacity
-                            accessibilityRole="button"
-                            accessibilityLabel={`View government ID photo for ${member.member_name_snapshot || `member ${index + 1}`}`}
-                            onPress={() => onOpenMedia(member.reference_portrait_url, `${member.member_name_snapshot || `Member ${index + 1}`} - Government ID Photo`)}
-                            style={styles.portraitPreviewRow}
-                          >
-                            <ProfileAvatar uri={member.reference_portrait_url} size={56} backgroundColor={colors.surface} iconColor={colors.primary} cachePolicy="none" />
-                            <View style={styles.flexOne}>
-                              <Text style={[styles.requirementTitle, { color: colors.text }]}>Government ID photo</Text>
-                              <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view the ID holder's face</Text>
-                            </View>
-                          </TouchableOpacity>
-                        ) : null}
-                        {usesDualReference && member.profile_photo_url ? (
-                          <TouchableOpacity
-                            accessibilityRole="button"
-                            accessibilityLabel={`View registered profile photo for ${member.member_name_snapshot || `member ${index + 1}`}`}
-                            onPress={() => onOpenMedia(member.profile_photo_url, `${member.member_name_snapshot || `Member ${index + 1}`} - Profile Photo`)}
-                            style={styles.portraitPreviewRow}
-                          >
-                            <ProfileAvatar uri={member.profile_photo_url} size={56} backgroundColor={colors.surface} iconColor={colors.primary} />
-                            <View style={styles.flexOne}>
-                              <Text style={[styles.requirementTitle, { color: colors.text }]}>Profile photo</Text>
-                              <Text style={[styles.advisory, { color: colors.primary }]}>Tap to view</Text>
-                            </View>
-                          </TouchableOpacity>
-                        ) : null}
-                        <StatusRow
-                          icon={verified ? "checkmark-circle-outline" : "warning-outline"}
-                          label={`${member.member_name_snapshot || `Member ${index + 1}`}: ID found in video - ${verified ? "Yes" : "No"}`}
-                          color={verified ? "#10B981" : "#F59E0B"}
-                        />
-                        {Number.isFinite(similarity) ? (
-                          <Text style={[styles.advisory, { color: colors.textSecondary }]}>ID match: {similarity.toFixed(1)}%</Text>
-                        ) : null}
-                        {usesDualReference ? (
-                          <>
-                            <ProfileIdFinding meta={profileMeta} />
-                            {Number.isFinite(profileSimilarity) ? <Text style={[styles.advisory, { color: colors.textSecondary }]}>Profile match: {profileSimilarity.toFixed(1)}%</Text> : null}
-                            {profileMeta.tone !== "match" ? <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>The ID match stays recorded. Review this member.</Text> : null}
-                          </>
-                        ) : null}
-                        {!verified ? <Text style={[styles.advisory, { color: "#B45309" }]}>Manual review recommended</Text> : null}
-                      </View>
-                    );
-                  })}
-                </Subsection>
-              ) : null}
+            </Section>
 
+            <Section title="File review details" icon="document-text-outline" colors={colors}>
               {application.cv_url &&
               application.ai_portfolio_review_consent === true &&
               cvDocumentStatus === "cv" &&
@@ -1347,40 +1330,9 @@ export default function ApplicantDetailsModal({
                 </Subsection>
               ) : null}
 
-              {memberCvs.length > 0 ? (
-                <Subsection title="Member CVs" icon="people-outline" colors={colors}>
-                  <Text style={[styles.body, { color: colors.textSecondary }]}>Each CV belongs to the named group member. The performance video is shared by the whole group.</Text>
-                  {memberCvs.map((member: any) => {
-                    const reviewStatus = String(member.ai_review_status || "not_requested");
-                    const reviewSummary = member.ai_review_result?.classification?.summary
-                      || member.ai_review_result?.reason
-                      || (member.ai_review_consent ? "Automatic review is pending." : "AI review was not authorized by this member.");
-                    return (
-                      <View key={member.id} style={[styles.messageCard, { backgroundColor: colors.inputBackground }]}>
-                        <Text style={[styles.label, { color: colors.text }]}>{member.member_name || "Group member"}</Text>
-                        <Text style={[styles.body, { color: colors.textSecondary }]}>
-                          {[member.role, member.instrument].filter(Boolean).join(" · ") || "Group member"}
-                        </Text>
-                        <StatusRow
-                          icon={reviewStatus === "completed" ? "checkmark-circle-outline" : "information-circle-outline"}
-                          label={reviewStatus === "completed" ? "CV reviewed" : reviewStatus === "failed" ? "Manual review needed" : reviewStatus === "skipped" ? "AI review not authorized" : "CV submitted"}
-                          color={reviewStatus === "completed" ? "#10B981" : reviewStatus === "failed" ? "#F59E0B" : colors.primary}
-                        />
-                        <Text style={[styles.body, { color: colors.textSecondary }]}>{reviewSummary}</Text>
-                        {member.cv_url ? (
-                          <TouchableOpacity onPress={() => onOpenMedia(member.cv_url, `${member.member_name || "Member"} CV`)} style={[styles.outlineButton, { borderColor: colors.primary }]}>
-                            <Ionicons name="open-outline" size={17} color={colors.primary} />
-                            <Text style={[styles.outlineButtonText, { color: colors.primary }]}>View {member.member_name || "Member"} CV</Text>
-                          </TouchableOpacity>
-                        ) : null}
-                      </View>
-                    );
-                  })}
-                </Subsection>
-              ) : null}
               <Subsection title="CV Check" icon="document-text-outline" colors={colors}>
               {memberCvs.length > 0 ? (
-                <Text style={[styles.body, { color: colors.textSecondary }]}>Individual findings and documents are listed under Member CVs above.</Text>
+                <Text style={[styles.body, { color: colors.textSecondary }]}>Individual findings and documents are listed in the CV section above.</Text>
               ) : !application.cv_url ? (
                 <EmptyState colors={colors}>No CV was uploaded.</EmptyState>
               ) : (
@@ -1494,14 +1446,13 @@ export default function ApplicantDetailsModal({
                 </ReviewDetails>
               ) : null}
               </Subsection>
-              </ReviewDetails>
             </Section>
 
             <Section title="Application History" icon="time-outline" colors={colors}>
               {hasPriorApplicationCounts ? (
                 <View
                   testID="prior-application-counts"
-                  style={[styles.historySummary, { backgroundColor: colors.inputBackground }]}
+                  style={styles.historySummary}
                 >
                   <Text style={[styles.label, { color: colors.text }]}>
                     Applied {priorApplicationCounts.owner_gigs + 1}{" "}
@@ -1607,138 +1558,138 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1 },
   closeButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   headerCopy: { flex: 1, minWidth: 0, marginLeft: 12 },
-  eyebrow: { fontFamily: typography.semibold, fontSize: 9, lineHeight: 13, letterSpacing: 1.25 },
-  modalTitle: { flexShrink: 1, fontFamily: typography.title, fontSize: 15, lineHeight: 20 },
-  scrollContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32, gap: 12 },
+  eyebrow: { fontFamily: typography.semibold, fontSize: 14, lineHeight: 21, letterSpacing: 1.25 },
+  modalTitle: { flexShrink: 1, fontFamily: typography.title, fontSize: 20, lineHeight: 28 },
+  scrollContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32, gap: 24 },
   centerState: { flex: 1, padding: 32, alignItems: "center", justifyContent: "center", gap: 14 },
-  heroCard: { borderWidth: 1, borderRadius: 18, padding: 16, gap: 14 },
+  heroCard: { borderBottomWidth: 1, paddingVertical: 8, gap: 18 },
   heroProfileRow: { flexDirection: "row", alignItems: "center", gap: 13 },
   heroIdentity: { flex: 1, minWidth: 0 },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  heroName: { flexShrink: 1, fontFamily: typography.title, fontSize: 18, lineHeight: 24 },
-  heroRole: { marginTop: 2, fontFamily: typography.semibold, fontSize: 12, lineHeight: 17 },
+  heroName: { flexShrink: 1, fontFamily: typography.title, fontSize: 24, lineHeight: 32 },
+  heroRole: { marginTop: 2, fontFamily: typography.semibold, fontSize: 16, lineHeight: 24 },
   heroLocationRow: { marginTop: 3, flexDirection: "row", alignItems: "center", gap: 4 },
-  heroLocation: { flex: 1, fontFamily: typography.body, fontSize: 11, lineHeight: 15 },
+  heroLocation: { flex: 1, fontFamily: typography.body, fontSize: 15, lineHeight: 22 },
   verificationBadges: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
-  verificationBadge: { maxWidth: "100%", minHeight: 30, borderRadius: 999, paddingHorizontal: 9, flexDirection: "row", alignItems: "center", gap: 5 },
-  verificationBadgeText: { flexShrink: 1, fontFamily: typography.semibold, fontSize: 9, lineHeight: 13 },
-  matchPanel: { borderRadius: 14, padding: 12, gap: 8 },
+  verificationBadge: { maxWidth: "100%", minHeight: 36, flexDirection: "row", alignItems: "center", gap: 7 },
+  verificationBadgeText: { flexShrink: 1, fontFamily: typography.semibold, fontSize: 14, lineHeight: 21 },
+  matchPanel: { borderTopWidth: 1, paddingTop: 16, gap: 12 },
   matchPanelHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   matchPanelLabelRow: { flexDirection: "row", alignItems: "center", gap: 7, flex: 1 },
-  matchPanelLabel: { fontFamily: typography.semibold, fontSize: 12, lineHeight: 17 },
-  matchPanelScore: { fontFamily: typography.bold, fontSize: 14, lineHeight: 19 },
+  matchPanelLabel: { fontFamily: typography.semibold, fontSize: 16, lineHeight: 24 },
+  matchPanelScore: { fontFamily: typography.bold, fontSize: 20, lineHeight: 28 },
   progressTrack: { height: 7, borderRadius: 999, overflow: "hidden" },
   progressFill: { height: "100%", borderRadius: 999 },
-  summaryMetrics: { flexDirection: "row", gap: 6, marginTop: 3 },
-  summaryMetric: { flex: 1, minHeight: 60, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 8, justifyContent: "center" },
-  summaryMetricValue: { fontFamily: typography.bold, fontSize: 17, lineHeight: 21 },
-  summaryMetricLabel: { marginTop: 1, fontFamily: typography.medium, fontSize: 8, lineHeight: 11 },
-  attentionSectionTitle: { marginTop: 4, fontFamily: typography.title, fontSize: 11, lineHeight: 16 },
-  attentionItem: { borderLeftWidth: 3, borderRadius: 9, paddingHorizontal: 10, paddingVertical: 9, gap: 3 },
+  summaryMetrics: { gap: 4, marginTop: 3 },
+  summaryMetric: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 12 },
+  summaryMetricValue: { minWidth: 32, fontFamily: typography.bold, fontSize: 24, lineHeight: 32 },
+  summaryMetricLabel: { flex: 1, fontFamily: typography.medium, fontSize: 16, lineHeight: 24 },
+  attentionSectionTitle: { marginTop: 4, fontFamily: typography.title, fontSize: 15, lineHeight: 22 },
+  attentionItem: { borderLeftWidth: 3, paddingHorizontal: 12, paddingVertical: 10, gap: 6 },
   attentionHeading: { flexDirection: "row", alignItems: "center", gap: 6 },
-  attentionTitle: { flex: 1, fontFamily: typography.title, fontSize: 10, lineHeight: 15 },
-  attentionDetail: { color: "#4B5563", fontFamily: typography.body, fontSize: 9, lineHeight: 14, paddingLeft: 24 },
-  allClearRow: { minHeight: 38, borderRadius: 9, backgroundColor: "#ECFDF5", paddingHorizontal: 10, flexDirection: "row", alignItems: "center", gap: 7 },
-  allClearText: { flex: 1, color: "#047857", fontFamily: typography.semibold, fontSize: 10, lineHeight: 15 },
-  matchSummary: { fontFamily: typography.body, fontSize: 10, lineHeight: 15 },
-  requiredSummary: { fontFamily: typography.semibold, fontSize: 10, lineHeight: 15 },
+  attentionTitle: { flex: 1, fontFamily: typography.title, fontSize: 16, lineHeight: 24 },
+  attentionDetail: { fontFamily: typography.body, fontSize: 16, lineHeight: 24 },
+  allClearRow: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8 },
+  allClearText: { flex: 1, color: "#047857", fontFamily: typography.semibold, fontSize: 16, lineHeight: 24 },
+  matchSummary: { fontFamily: typography.body, fontSize: 14, lineHeight: 21 },
+  requiredSummary: { fontFamily: typography.semibold, fontSize: 14, lineHeight: 21 },
   majorVerificationBanner: { flexDirection: "row", alignItems: "flex-start", gap: 9, borderWidth: 1, borderColor: "#F59E0B", backgroundColor: "#FFFBEB", borderRadius: 11, padding: 10 },
-  majorVerificationTitle: { color: "#92400E", fontFamily: typography.title, fontSize: 11, lineHeight: 16 },
-  majorVerificationCopy: { color: "#92400E", fontFamily: typography.body, fontSize: 10, lineHeight: 15, marginTop: 2 },
+  majorVerificationTitle: { color: "#92400E", fontFamily: typography.title, fontSize: 15, lineHeight: 22 },
+  majorVerificationCopy: { color: "#92400E", fontFamily: typography.body, fontSize: 14, lineHeight: 21, marginTop: 2 },
   memberCoverage: { borderTopWidth: 1, marginTop: 3, paddingTop: 7, gap: 7 },
-  memberCoverageSummary: { fontFamily: typography.body, fontSize: 10, lineHeight: 15 },
+  memberCoverageSummary: { fontFamily: typography.body, fontSize: 14, lineHeight: 21 },
   memberCoverageRow: { flexDirection: "row", alignItems: "flex-start", gap: 7 },
   memberCoverageCopy: { flex: 1, minWidth: 0 },
-  memberCoverageTitle: { fontFamily: typography.semibold, fontSize: 10, lineHeight: 15 },
-  memberCoverageDetail: { fontFamily: typography.body, fontSize: 9, lineHeight: 14 },
+  memberCoverageTitle: { fontFamily: typography.semibold, fontSize: 14, lineHeight: 21 },
+  memberCoverageDetail: { fontFamily: typography.body, fontSize: 14, lineHeight: 21 },
   quickStats: { borderTopWidth: 1, paddingTop: 13, flexDirection: "row", alignItems: "center" },
   quickStat: { flex: 1, alignItems: "center" },
-  quickStatValue: { fontFamily: typography.bold, fontSize: 16, lineHeight: 21 },
-  quickStatLabel: { marginTop: 1, fontFamily: typography.body, fontSize: 9, lineHeight: 13 },
+  quickStatValue: { fontFamily: typography.bold, fontSize: 22, lineHeight: 30 },
+  quickStatLabel: { marginTop: 1, fontFamily: typography.body, fontSize: 14, lineHeight: 21 },
   quickStatDivider: { width: 1, height: 28 },
-  section: { borderWidth: 1, borderRadius: 16, overflow: "hidden" },
-  sectionHeader: { minHeight: 58, flexDirection: "row", alignItems: "center", paddingHorizontal: 14, gap: 10 },
-  sectionIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  sectionTitle: { flex: 1, fontFamily: typography.heading, fontSize: 13, lineHeight: 18 },
-  sectionBody: { borderTopWidth: 1, padding: 14, gap: 10 },
-  reviewGroup: { borderTopWidth: 1, paddingTop: 10, gap: 8 },
+  section: { borderTopWidth: 1 },
+  sectionHeader: { minHeight: 56, flexDirection: "row", alignItems: "center", paddingVertical: 12, gap: 10 },
+  sectionIcon: { width: 24, alignItems: "center", justifyContent: "center" },
+  sectionTitle: { flex: 1, fontFamily: typography.heading, fontSize: 18, lineHeight: 26 },
+  sectionBody: { borderTopWidth: 1, paddingVertical: 16, gap: 16 },
+  reviewGroup: { borderTopWidth: 1, paddingTop: 16, gap: 12 },
   reviewGroupHeader: { flexDirection: "row", alignItems: "center", gap: 7 },
-  reviewGroupTitle: { flex: 1, fontFamily: typography.title, fontSize: 12, lineHeight: 17 },
-  reviewGroupBody: { gap: 8 },
-  confirmedGroup: { borderWidth: 1, borderRadius: 11, overflow: "hidden" },
-  confirmedGroupHeader: { minHeight: 44, paddingHorizontal: 11, flexDirection: "row", alignItems: "center", gap: 7 },
-  confirmedGroupTitle: { flex: 1, color: "#047857", fontFamily: typography.heading, fontSize: 11, lineHeight: 16 },
-  confirmedGroupAction: { fontFamily: typography.semibold, fontSize: 9, lineHeight: 13 },
-  confirmedGroupBody: { borderTopWidth: 1, padding: 8, gap: 7 },
-  requirementRow: { borderWidth: 1, borderRadius: 10, overflow: "hidden" },
-  requirementRowButton: { minHeight: 66, padding: 10, flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  reviewGroupTitle: { flex: 1, fontFamily: typography.title, fontSize: 16, lineHeight: 24 },
+  reviewGroupBody: { gap: 12 },
+  confirmedGroup: { borderBottomWidth: 1 },
+  confirmedGroupHeader: { minHeight: 48, paddingVertical: 12, flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  confirmedGroupTitle: { flex: 1, color: "#047857", fontFamily: typography.heading, fontSize: 16, lineHeight: 24 },
+  confirmedGroupAction: { fontFamily: typography.semibold, fontSize: 14, lineHeight: 21 },
+  confirmedGroupBody: { borderTopWidth: 1, paddingVertical: 12, gap: 12 },
+  requirementRow: { borderBottomWidth: 1 },
+  requirementRowButton: { minHeight: 66, paddingVertical: 12, flexDirection: "row", alignItems: "flex-start", gap: 8 },
   requirementCopy: { flex: 1, minWidth: 0 },
-  requirementTitle: { fontFamily: typography.heading, fontSize: 11, lineHeight: 16 },
-  requirementStatus: { marginTop: 1, fontFamily: typography.semibold, fontSize: 9, lineHeight: 13 },
-  requirementDetail: { marginTop: 2, fontFamily: typography.body, fontSize: 9, lineHeight: 14 },
-  evidenceAction: { flexDirection: "row", alignItems: "center", gap: 2, paddingTop: 1 },
-  evidenceActionText: { fontFamily: typography.semibold, fontSize: 8, lineHeight: 12 },
-  requirementEvidence: { borderTopWidth: 1, padding: 10, gap: 5 },
-  evidenceLabel: { fontFamily: typography.semibold, fontSize: 8, lineHeight: 12, letterSpacing: 0.5 },
-  evidenceValue: { fontFamily: typography.medium, fontSize: 10, lineHeight: 15 },
+  requirementTitle: { fontFamily: typography.heading, fontSize: 16, lineHeight: 24 },
+  requirementStatus: { marginTop: 1, fontFamily: typography.semibold, fontSize: 14, lineHeight: 21 },
+  requirementDetail: { marginTop: 2, fontFamily: typography.body, fontSize: 14, lineHeight: 21 },
+  evidenceAction: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
+  evidenceActionText: { fontFamily: typography.semibold, fontSize: 14, lineHeight: 21 },
+  requirementEvidence: { borderTopWidth: 1, paddingVertical: 12, gap: 8 },
+  evidenceLabel: { fontFamily: typography.semibold, fontSize: 14, lineHeight: 21, letterSpacing: 0.5 },
+  evidenceValue: { fontFamily: typography.medium, fontSize: 14, lineHeight: 21 },
   evidenceEntry: { gap: 2, marginTop: 3 },
   subsection: { gap: 10 },
   subsectionHeader: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 8 },
-  subsectionTitle: { flex: 1, fontFamily: typography.heading, fontSize: 12, lineHeight: 17 },
+  subsectionTitle: { flex: 1, fontFamily: typography.heading, fontSize: 16, lineHeight: 24 },
   subsectionBody: { gap: 10 },
   reviewDivider: { height: 1, marginVertical: 4 },
   flexOne: { flex: 1 },
-  body: { fontFamily: typography.body, fontSize: 12, lineHeight: 19 },
-  label: { fontFamily: typography.semibold, fontSize: 12, marginTop: 4 },
-  disclaimer: { fontFamily: typography.body, fontSize: 10, lineHeight: 16, marginTop: 5 },
-  advisory: { fontFamily: typography.body, fontSize: 10, lineHeight: 15 },
-  manualPrompt: { fontFamily: typography.semibold, fontSize: 11, lineHeight: 17 },
+  body: { fontFamily: typography.body, fontSize: 16, lineHeight: 24 },
+  label: { fontFamily: typography.semibold, fontSize: 16, lineHeight: 24, marginTop: 4 },
+  disclaimer: { fontFamily: typography.body, fontSize: 14, lineHeight: 21, marginTop: 5 },
+  advisory: { fontFamily: typography.body, fontSize: 14, lineHeight: 21 },
+  manualPrompt: { fontFamily: typography.semibold, fontSize: 15, lineHeight: 22 },
   statusRow: { flexDirection: "row", alignItems: "center", gap: 7 },
-  statusRowText: { flex: 1, fontFamily: typography.semibold, fontSize: 12, lineHeight: 18 },
-  findingCard: { borderWidth: 1, borderRadius: 11, padding: 11, gap: 6 },
-  findingTitle: { fontFamily: typography.heading, fontSize: 12, lineHeight: 17 },
-  evidenceSource: { fontFamily: typography.semibold, fontSize: 10, lineHeight: 15 },
-  reviewDetails: { alignItems: "flex-start" },
-  reviewDetailsButton: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 4 },
-  reviewDetailsButtonText: { fontFamily: typography.semibold, fontSize: 10, lineHeight: 15 },
+  statusRowText: { flex: 1, fontFamily: typography.semibold, fontSize: 16, lineHeight: 24 },
+  findingCard: { borderTopWidth: 1, paddingVertical: 12, gap: 8 },
+  findingTitle: { fontFamily: typography.heading, fontSize: 16, lineHeight: 24 },
+  evidenceSource: { fontFamily: typography.semibold, fontSize: 14, lineHeight: 21 },
+  reviewDetails: { width: "100%", alignItems: "flex-start" },
+  reviewDetailsButton: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 6 },
+  reviewDetailsButtonText: { fontFamily: typography.semibold, fontSize: 14, lineHeight: 21 },
   reviewDetailsBody: { width: "100%", borderLeftWidth: 2, paddingLeft: 10, gap: 7 },
   detailRow: { flexDirection: "row", alignItems: "flex-start", gap: 9 },
-  detailLabel: { fontFamily: typography.body, fontSize: 9, lineHeight: 13 },
-  detailValue: { marginTop: 1, fontFamily: typography.medium, fontSize: 12, lineHeight: 17 },
-  messageCard: { borderRadius: 11, padding: 12, gap: 7 },
-  profileIdFinding: { borderWidth: 1, borderRadius: 10, padding: 9, flexDirection: "row", alignItems: "flex-start", gap: 8 },
-  profileIdFindingTitle: { fontFamily: typography.title, fontSize: 10, lineHeight: 15 },
-  profileIdFindingText: { fontFamily: typography.medium, fontSize: 10, lineHeight: 15 },
-  portraitPreviewRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 2 },
+  detailLabel: { fontFamily: typography.body, fontSize: 14, lineHeight: 21 },
+  detailValue: { marginTop: 1, fontFamily: typography.medium, fontSize: 16, lineHeight: 24 },
+  messageCard: { borderTopWidth: 1, paddingVertical: 16, gap: 12 },
+  profileIdFinding: { paddingVertical: 8, flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  profileIdFindingTitle: { fontFamily: typography.title, fontSize: 16, lineHeight: 24 },
+  profileIdFindingText: { fontFamily: typography.medium, fontSize: 16, lineHeight: 24 },
+  portraitPreviewRow: { minHeight: 56, flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 4 },
   tagList: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
   tag: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
-  tagText: { fontFamily: typography.medium, fontSize: 10, lineHeight: 14 },
+  tagText: { fontFamily: typography.medium, fontSize: 14, lineHeight: 21 },
   stackSmall: { gap: 6 },
   stackMedium: { gap: 7 },
   bulletRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   bulletDot: { width: 5, height: 5, borderRadius: 3, marginTop: 7 },
   bulletText: { flex: 1 },
-  historySummary: { borderRadius: 11, padding: 12, gap: 3, marginBottom: 3 },
-  outlineButton: { minHeight: 44, borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 8 },
-  outlineButtonText: { flex: 1, fontFamily: typography.semibold, fontSize: 12 },
+  historySummary: { gap: 8, marginBottom: 4 },
+  outlineButton: { minHeight: 48, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8 },
+  outlineButtonText: { flex: 1, fontFamily: typography.semibold, fontSize: 16, lineHeight: 24 },
   primaryButton: { minHeight: 44, borderRadius: 11, paddingHorizontal: 22, alignItems: "center", justifyContent: "center" },
   primaryButtonText: { color: "#FFF", fontFamily: typography.semibold },
   actionFooter: { borderTopWidth: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14, flexDirection: "row", gap: 10 },
-  footerSecondaryButton: { flex: 0.8, minHeight: 48, borderRadius: 999, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  footerPrimaryButton: { flex: 1.2, minHeight: 48, borderRadius: 999, flexDirection: "row", gap: 7, alignItems: "center", justifyContent: "center" },
+  footerSecondaryButton: { flex: 0.8, minHeight: 48, paddingVertical: 10, paddingHorizontal: 8, borderRadius: 999, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  footerPrimaryButton: { flex: 1.2, minHeight: 48, paddingVertical: 10, paddingHorizontal: 8, borderRadius: 999, flexDirection: "row", gap: 7, alignItems: "center", justifyContent: "center" },
   footerDangerButton: { flex: 1, minHeight: 48, borderRadius: 999, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  actionButtonText: { fontFamily: typography.semibold, fontSize: 13 },
+  actionButtonText: { flexShrink: 1, textAlign: "center", fontFamily: typography.semibold, fontSize: 16, lineHeight: 24 },
   readOnlyNotice: { flex: 1, minHeight: 46, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  readOnlyText: { fontFamily: typography.medium, fontSize: 12 },
+  readOnlyText: { flexShrink: 1, textAlign: "center", fontFamily: typography.medium, fontSize: 16, lineHeight: 24 },
   confirmationBackdrop: { flex: 1, backgroundColor: "rgba(15, 23, 42, 0.52)", justifyContent: "flex-end" },
   confirmationSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 24, alignItems: "center" },
   confirmationHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: "#D1D5DB", marginBottom: 18 },
   confirmationIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: "#FFFBEB", alignItems: "center", justifyContent: "center", marginBottom: 12 },
-  confirmationTitle: { textAlign: "center", fontFamily: typography.title, fontSize: 18, lineHeight: 25 },
-  confirmationCopy: { marginTop: 6, textAlign: "center", fontFamily: typography.body, fontSize: 12, lineHeight: 19 },
+  confirmationTitle: { textAlign: "center", fontFamily: typography.title, fontSize: 24, lineHeight: 32 },
+  confirmationCopy: { marginTop: 6, textAlign: "center", fontFamily: typography.body, fontSize: 16, lineHeight: 24 },
   confirmationActions: { width: "100%", marginTop: 20, gap: 9 },
   confirmationSecondary: { minHeight: 48, borderWidth: 1, borderRadius: 999, alignItems: "center", justifyContent: "center" },
-  confirmationSecondaryText: { fontFamily: typography.semibold, fontSize: 12 },
+  confirmationSecondaryText: { fontFamily: typography.semibold, fontSize: 16, lineHeight: 24 },
   confirmationPrimary: { minHeight: 48, borderRadius: 999, backgroundColor: "#10B981", alignItems: "center", justifyContent: "center" },
-  confirmationPrimaryText: { color: "#FFFFFF", fontFamily: typography.semibold, fontSize: 12 },
+  confirmationPrimaryText: { color: "#FFFFFF", fontFamily: typography.semibold, fontSize: 16, lineHeight: 24 },
 });

@@ -173,14 +173,7 @@ serve(async (req: Request) => {
               .limit(80)
           : Promise.resolve({ data: [], error: null }),
         supabaseAdmin.rpc('get_online_studio_payment_events', { p_user_id: user.id }),
-        supabaseAdmin
-          .from('studio_bookings')
-          .select('*, studio:studios(id, name, address, hourly_rate, rate)')
-          .eq('user_id', user.id)
-          .gt('remaining_balance', 0)
-          .in('status', ['pending', 'confirmed'])
-          .order('booking_date', { ascending: true })
-          .limit(30),
+        supabaseAdmin.rpc('outstanding_studio_payments', { p_user_id: user.id }),
         supabaseAdmin
           .from('payout_methods')
           .select('*')
@@ -202,7 +195,17 @@ serve(async (req: Request) => {
 
       const walletActivityTransactions = (transactionsResult.data || [])
         .map(normalizeWalletActivityTransaction);
-      const unpaidBookings = await hydrateStudioBookingLegacy(supabaseAdmin, unpaidBookingsResult.data || []);
+      const debts = unpaidBookingsResult.data || [];
+      const debtById = new Map<string, number>(debts.map((booking: any) => [booking.id, Number(booking.remaining_balance)]));
+      const bookingRows = debts.length > 0
+        ? await supabaseAdmin.from('studio_bookings')
+          .select('*, studio:studios(id, name, address, hourly_rate, rate)')
+          .eq('user_id', user.id).in('id', debts.map((booking: any) => booking.id))
+          .order('booking_date', { ascending: true })
+        : { data: [], error: null };
+      if (bookingRows.error) throw bookingRows.error;
+      const unpaidBookings = await hydrateStudioBookingLegacy(supabaseAdmin,
+        (bookingRows.data || []).map((booking: any) => ({ ...booking, remaining_balance: debtById.get(booking.id) })));
 
       return new Response(JSON.stringify({
         success: true,

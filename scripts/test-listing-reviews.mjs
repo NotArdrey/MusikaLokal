@@ -56,7 +56,14 @@ function fixture(workspace, initialType = 'Studio', initialId = 'studio-a') {
       eq(column, id) { record.column = column; record.id = id; return query; },
       order() { return query; }, limit() { return query; },
       abortSignal(signal) { record.signal = signal; return query; },
-      then(resolve) { requests.push({ ...record, resolve }); },
+      then(resolve) {
+        // Match the deployed profiles schema, which has no updated_at column.
+        const fields = record.columns.match(/profiles![^(]+\(([^)]+)\)/)?.[1].split(',').map(field => field.trim()) || [];
+        const missing = fields.find(field => !['id', 'full_name', 'avatar_url', 'created_at'].includes(field));
+        requests.push({ ...record, resolve: response => resolve(missing
+          ? { data: null, error: { code: '42703', message: `column profiles.${missing} does not exist` } }
+          : response) });
+      },
     }; return query;
   } };
   const exports = {};

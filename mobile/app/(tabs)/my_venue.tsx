@@ -24,6 +24,7 @@ import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidatio
 import { StaffAssignment, fetchActiveStaffAssignments, getStaffPermissions } from '../../src/utils/staffAccess';
 import { createRealtimeChannelTopic } from '../../src/utils/realtimeChannel';
 import { palette, typography } from '../../src/theme/tokens';
+import { shareListing } from '../../src/utils/shareListing';
 
 const DEFAULT_GIG_IMAGE = 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop';
 const JOINED_GIG_APPLICATION_STATUSES = ['accepted', 'approved', 'completed'];
@@ -714,6 +715,18 @@ export default function MyVenueScreen({ historyOnly = false, embedded = false }:
                                                             style={[styles.manageBtn, { borderColor: colors.primary }]}
                                                         >
                                                             <Text style={[styles.manageBtnText, { color: colors.primary }]}>{canManageGig ? 'Manage' : 'View'}</Text>
+                                                        </TouchableOpacity>
+
+                                                        <TouchableOpacity
+                                                            activeOpacity={1}
+                                                            testID={`mobile-gig-share-${gig.id}`}
+                                                            accessibilityRole="button"
+                                                            accessibilityLabel={`Share ${gig.name || 'gig'}`}
+                                                            onPress={() => shareListing(gig.id, gig.name, 'Gig')}
+                                                            style={[styles.manageBtn, { borderColor: colors.border }]}
+                                                        >
+                                                            <Ionicons name="share-outline" size={16} color={colors.text} />
+                                                            <Text style={[styles.manageBtnText, { color: colors.text }]}>Share</Text>
                                                         </TouchableOpacity>
 
                                                         {canEditVenue && gig.management_status !== 'done' && isRejected ? (

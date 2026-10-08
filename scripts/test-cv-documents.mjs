@@ -42,7 +42,7 @@ for (const root of ["mobile", "web"]) {
       assert.match(read(path), /documentOnly: true/);
     }
     if (root === "mobile") {
-      assert.match(read("app/group_application_cv.tsx"), /documentOnly: true/);
+      assert.match(read("src/components/GroupApplicationCvForm.tsx"), /documentOnly: true/);
     }
   });
 }

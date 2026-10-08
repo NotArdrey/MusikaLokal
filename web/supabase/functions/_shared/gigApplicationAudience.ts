@@ -1,5 +1,6 @@
 export type GigApplicationViewerAccess =
   | "applicant"
+  | "group_leader"
   | "production_manager"
   | "selected_performer"
   | "group_member"
@@ -21,6 +22,7 @@ type AudienceOptions = {
 
 const APPLICATION_AUDIENCE_SELECT = `
   id,
+  status,
   applicant_id,
   submitted_by_user_id,
   group_id,
@@ -44,6 +46,7 @@ const ACCESS_PRIORITY: Record<GigApplicationViewerAccess, number> = {
   organizer: 50,
   production_manager: 40,
   applicant: 30,
+  group_leader: 25,
   selected_performer: 20,
   group_member: 10,
 };
@@ -199,6 +202,15 @@ export async function resolveGigApplicationAudience(
     addAudienceMember(membersByUserId, {
       user_id: application.applicant_id,
       viewer_access: "applicant",
+      viewer_can_act: true,
+      viewer_read_only_reason: null,
+    });
+  }
+
+  if (includeApplicant && !application.production_team_id && application.group?.owner_id && application.status === "pending") {
+    addAudienceMember(membersByUserId, {
+      user_id: application.group.owner_id,
+      viewer_access: "group_leader",
       viewer_can_act: true,
       viewer_read_only_reason: null,
     });

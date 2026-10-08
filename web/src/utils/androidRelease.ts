@@ -16,7 +16,10 @@ export function parseAndroidRelease(value: unknown): AndroidRelease | null {
   const release = value as Partial<AndroidRelease>;
   let url: URL;
   try { url = new URL(release.downloadUrl || ""); } catch { return null; }
-  if (url.protocol !== "https:" || !url.hostname.endsWith(".public.blob.vercel-storage.com") || url.username || url.password) return null;
+  const isBlob = url.hostname.endsWith(".public.blob.vercel-storage.com");
+  const isSupabase = url.origin === "https://aefldxegsvzecshlayza.supabase.co"
+    && url.pathname === `/storage/v1/object/public/android-releases/android/testing/${release.sha256}/musikalokal-testing.apk`;
+  if (url.protocol !== "https:" || (!isBlob && !isSupabase) || url.username || url.password) return null;
   if (release.packageId !== "com.anonymous.musikalokal" || release.testing !== true) return null;
   if (typeof release.versionName !== "string" || !/^\d+\.\d+\.\d+$/.test(release.versionName)) return null;
   if (!Number.isSafeInteger(release.versionCode) || release.versionCode! < 1) return null;

@@ -36,6 +36,9 @@ export type RadioQueueTrack = {
   slotLabel: string;
   sourceArtistName: string;
   isLiveStream?: boolean;
+  radioAnchorAt?: string;
+  radioQueueLength?: number;
+  radioQueueRevision?: number;
 };
 
 export type LiveStationCursor = {
@@ -221,6 +224,7 @@ const getTrackArtworkUrl = (stationData: any, slot: any, playlist: any, item: an
   const candidates: unknown[] = [
     item?.cover_image_url,
     playlist?.cover_image_url,
+    stationData?.cover_image_url,
   ];
 
   for (const value of candidates) {
@@ -385,17 +389,17 @@ const buildStationQueueEntries = (stationData: any): RadioQueueEntry[] => {
 const buildPlayerOptions = (_canSkipPrevious: boolean, _canSkipNext: boolean) => {
   return {
     android: {
-      appKilledPlaybackBehavior: AppKilledPlaybackBehavior.StopPlaybackAndRemoveNotification,
+      appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
       stopForegroundGracePeriod: 0,
     },
-    capabilities: [Capability.Stop],
-    notificationCapabilities: [Capability.Stop],
-    compactCapabilities: [],
+    capabilities: [Capability.Play, Capability.Pause, Capability.Stop],
+    notificationCapabilities: [Capability.Play, Capability.Pause, Capability.Stop],
+    compactCapabilities: [Capability.Play, Capability.Pause],
     progressUpdateEventInterval: 1,
   };
 };
 
-const getRadioPlayerCapabilitiesKey = (_canSkipPrevious: boolean, _canSkipNext: boolean) => "radio-stop-only";
+const getRadioPlayerCapabilitiesKey = (_canSkipPrevious: boolean, _canSkipNext: boolean) => "radio-play-pause-stop";
 
 export const ensureRadioPlayerSetup = async () => {
   if (!isTrackPlayerAvailable) {
@@ -408,7 +412,7 @@ export const ensureRadioPlayerSetup = async () => {
         await TrackPlayer.setupPlayer({
           iosCategory: IOSCategory.Playback,
           autoHandleInterruptions: true,
-          autoUpdateMetadata: true,
+          autoUpdateMetadata: false,
         });
       } catch (error: any) {
         const code = typeof error?.code === "string" ? error.code : "";
@@ -521,6 +525,10 @@ export const buildStationQueue = async (
         entry.item?.duration_seconds ?? entry.item?.teaser?.duration_seconds,
       ),
       genre: typeof stationData?.genre === "string" ? stationData.genre : undefined,
+      isLiveStream: true,
+      radioAnchorAt: stationData?.queue_anchor_at || stationData?.live_anchor_at || undefined,
+      radioQueueLength: queueEntries.length,
+      radioQueueRevision: Number(stationData?.queue_revision || 0),
     };
 
     return track;

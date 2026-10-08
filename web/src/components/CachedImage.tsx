@@ -82,11 +82,15 @@ const CachedImage = ({
     });
   }, [cacheVersion, format, height, quality, resize, sourceUri, transform, width]);
 
-  const [resolvedUri, setResolvedUri] = useState<string | null>(transformedUri);
+  const imageSources = useMemo(() => Array.from(new Set([
+    transformedUri, primarySourceUri, backupSourceUri,
+  ])).filter((source): source is string => Boolean(source)),
+  [transformedUri, primarySourceUri, backupSourceUri]);
+  const [resolvedUri, setResolvedUri] = useState<string | null>(imageSources[0] || null);
 
   useEffect(() => {
-    setResolvedUri(transformedUri);
-  }, [transformedUri]);
+    setResolvedUri(imageSources[0] || null);
+  }, [imageSources]);
 
   if (!resolvedUri) return null;
 
@@ -99,17 +103,9 @@ const CachedImage = ({
       cachePolicy={cachePolicy}
       recyclingKey={resolvedUri}
       onError={() => {
-        if (primarySourceUri && resolvedUri !== primarySourceUri) {
-          setResolvedUri(primarySourceUri);
-          return;
-        }
-
-        if (backupSourceUri && resolvedUri !== backupSourceUri) {
-          setResolvedUri(backupSourceUri);
-          return;
-        }
-
-        setResolvedUri(null);
+        setResolvedUri((current) => current === resolvedUri
+          ? imageSources[imageSources.indexOf(current) + 1] || null
+          : current);
       }}
     />
   );

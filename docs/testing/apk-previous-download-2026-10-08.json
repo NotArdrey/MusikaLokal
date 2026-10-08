@@ -1,0 +1,56 @@
+{
+  "checkedAt": "2026-10-08T04:56:15.362Z",
+  "website": "https://musika-lokal.vercel.app",
+  "mainVersion": "1.0.3",
+  "mainDownloadUrl": "https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/android-releases/android/testing/e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245/musikalokal-testing.apk?download=MusikaLokal.apk",
+  "previousVersion": "1.0.2",
+  "previousDownloadUrl": "https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/android-releases/android/testing/8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272/musikalokal-testing.apk?download=MusikaLokal.apk",
+  "layouts": [
+    {
+      "theme": "light",
+      "width": 320,
+      "passed": true
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "passed": true
+    },
+    {
+      "theme": "light",
+      "width": 1280,
+      "passed": true
+    },
+    {
+      "theme": "dark",
+      "width": 320,
+      "passed": true
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "passed": true
+    },
+    {
+      "theme": "dark",
+      "width": 1280,
+      "passed": true
+    }
+  ],
+  "download": {
+    "version": "1.0.2",
+    "bytes": 102451471,
+    "sha256": "8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272",
+    "verifiedAt": "https://musika-lokal-eujt6pxvx-notardreys-projects.vercel.app",
+    "browserTransport": "browser default",
+    "suggestedFilename": "MusikaLokal.apk"
+  },
+  "browserChecks": "passed",
+  "deploymentId": "dpl_4hNRNzuMgzqsABvRYAVTX6KDeEZb",
+  "promoted": true,
+  "localChecks": {
+    "typecheck": "passed",
+    "build": "passed",
+    "browserRegression": "passed"
+  }
+}

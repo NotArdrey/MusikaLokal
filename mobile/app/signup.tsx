@@ -2502,6 +2502,13 @@ export default function SignupScreen() {
                     status: authErr?.status ?? authErr?.context?.status ?? 409,
                     platform: Platform.OS,
                 });
+                const reason = `This identity is already used by another ${selectedRole} account. Each verified identity can have only one ${selectedRole} account. Please sign in to your existing account.`;
+                setStep('details');
+                setErrors((previous) => ({ ...previous, role: reason }));
+                const cleanup = resetDiditVerificationReturnState('duplicate_identity_rejected');
+                Alert.alert('Account Exists', reason, [{ text: 'OK' }]);
+                await cleanup;
+                return;
             } else {
                 logDiditEmailFlowError('finishAccountCreation.catch', authErr, {
                     email: maskEmailForLog(email),
@@ -3915,7 +3922,6 @@ const styles = StyleSheet.create({
     },
     manualFlowHint: { flex: 1, fontSize: 12, lineHeight: 18, fontFamily: typography.body },
 });
-
 
 
 

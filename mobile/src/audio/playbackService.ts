@@ -1,4 +1,12 @@
 import TrackPlayer, { Event, State, isTrackPlayerAvailable } from "./safeTrackPlayer";
+import {
+  pauseRadioPlayback,
+  resumeRadioPlayback,
+  stopRadioPlayback,
+  synchronizeRadioPlayback,
+  updateRadioNowPlayingMetadata,
+} from "./radioLivePlayback";
+import type { RadioQueueTrack } from "./radioTrackPlayer";
 
 const playbackService = async () => {
   if (!isTrackPlayerAvailable) {
@@ -7,28 +15,24 @@ const playbackService = async () => {
 
   TrackPlayer.addEventListener(Event.RemotePlay, async () => {
     try {
-      const playbackState = await TrackPlayer.getPlaybackState();
-      if (playbackState.state === State.Ended) {
-        await TrackPlayer.seekTo(0);
-      }
-      await TrackPlayer.play();
-    } catch (_) {
+      await resumeRadioPlayback();
+    } catch {
       // Ignore remote command failures to keep the service resilient.
     }
   });
 
   TrackPlayer.addEventListener(Event.RemotePause, async () => {
     try {
-      await TrackPlayer.play();
-    } catch (_) {
+      await pauseRadioPlayback();
+    } catch {
       // Ignore remote command failures to keep the service resilient.
     }
   });
 
   TrackPlayer.addEventListener(Event.RemoteStop, async () => {
     try {
-      await TrackPlayer.reset();
-    } catch (_) {
+      await stopRadioPlayback();
+    } catch {
       // Ignore remote command failures to keep the service resilient.
     }
   });
@@ -44,6 +48,24 @@ const playbackService = async () => {
   TrackPlayer.addEventListener(Event.RemoteSeek, async (event: { position: number }) => {
     void event;
     // Live radio keeps one shared timeline; remote seek is intentionally ignored.
+  });
+
+  const recoverLivePosition = () => {
+    void synchronizeRadioPlayback().catch(error => console.warn("Radio live recovery failed:", error));
+  };
+  let lastSyncAt = 0;
+  TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, () => {
+    if (Date.now() - lastSyncAt < 5_000) return;
+    lastSyncAt = Date.now();
+    recoverLivePosition();
+  });
+  TrackPlayer.addEventListener(Event.PlaybackState, (event: { state: string }) => {
+    if (event.state === State.Playing) recoverLivePosition();
+  });
+  TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, (event: { track?: RadioQueueTrack }) => {
+    if (!event.track) return;
+    void updateRadioNowPlayingMetadata(event.track).catch(error => console.warn("Radio metadata update failed:", error));
+    recoverLivePosition();
   });
 };
 

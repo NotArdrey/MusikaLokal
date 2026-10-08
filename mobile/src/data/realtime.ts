@@ -6,6 +6,7 @@ import { createRealtimeChannelTopic } from "../utils/realtimeChannel";
 import { queryKeys } from "./queryKeys";
 
 const INVALIDATION_DEBOUNCE_MS = 600;
+const userFilteredTables = new Set(['notifications', 'payout_methods', 'withdrawal_requests', 'studio_payment_events']);
 
 type InvalidateScope =
   | "bookings"
@@ -24,6 +25,7 @@ const tableScopes: Record<string, InvalidateScope[]> = {
   // A withdrawal can free the final slot and reopen a gig, affecting every
   // surface that recommends or searches for open gigs.
   gig_applications: ["bookings", "details", "feed", "home", "search"],
+  gig_application_members: ["bookings"],
   gig_requirements: ["details", "home", "search"],
   gig_media: ["details", "home", "search"],
   gigs: ["bookings", "details", "feed", "home", "search"],
@@ -65,6 +67,7 @@ const invalidateScope = (
   userId: string | null | undefined,
 ) => {
   if (scope === "bookings") {
+    void queryClient.invalidateQueries({ queryKey: ["group-application-cv-tasks", userId] });
     void queryClient.invalidateQueries({ queryKey: queryKeys.bookings.summary(userId) });
     return;
   }
@@ -182,7 +185,9 @@ export const useGlobalRealtimeInvalidation = (
       Object.keys(tableScopes).forEach((table) => {
         channel?.on(
           "postgres_changes",
-          { event: "*", schema: "public", table },
+          { event: "*", schema: "public", table,
+            ...(userFilteredTables.has(table) ? { filter: `user_id=eq.${userId}` } : {}),
+          },
           () => queueInvalidation(table),
         );
       });

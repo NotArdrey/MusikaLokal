@@ -153,7 +153,7 @@ for (const root of ["mobile", "web"]) {
     const portraitPreviewMigration = read(`${root}/supabase/migrations/20261001120000_add_member_verification_portrait_previews.sql`);
     const dualReferenceMigration = read(`${root}/supabase/migrations/20261001150000_add_profile_photo_member_verification.sql`);
     const correlationMigration = read(`${root}/supabase/migrations/20261001170000_correlate_profile_and_id_video_people.sql`);
-    const groupMemberScreen = read(`${root}/app/group_application_cv.tsx`);
+    const groupMemberScreen = read(root === 'mobile' ? 'mobile/src/components/GroupApplicationCvForm.tsx' : `${root}/app/group_application_cv.tsx`);
 
     assert.match(migration, /member_verification_consent/i);
     assert.match(migration, /create table if not exists public\.member_verification_reference_faces/i);

@@ -169,7 +169,8 @@ test('unread badge refreshes on events, reconnect/resume and rejects stale users
       useState(initial){const i=cursor++;state[i]??=initial;return [state[i],v=>{state[i]=v;}];},
       useRef(initial){return requestSlots[cursor++]??={current:initial};},
       useCallback:fn=>fn, useEffect:fn=>effects.push(fn),
-    }:name==='react-native'?{AppState:{addEventListener(_,fn){listener=fn;return {remove(){}};}}}
+    }:name==='expo-router'?{useFocusEffect:fn=>effects.push(fn)}
+      :name==='react-native'?{AppState:{addEventListener(_,fn){listener=fn;return {remove(){}};}}}
       :name.includes('/supabase')?{prepareRealtimeAuth:async()=>true,supabase:{
         functions:{invoke:(_,options)=>new Promise(resolve=>pending.push({resolve,user:options.body.userId}))},
         channel:()=>channel,removeChannel(){removed++;}}}
@@ -192,7 +193,7 @@ test('unread badge refreshes on events, reconnect/resume and rejects stale users
   stale.resolve({data:{count:20}});pending.shift().resolve({data:{count:0}});await flush();
   assert.equal(render('jared').hasUnread,false);
   change(); pending.shift().resolve({error:new Error('offline')});await flush();assert.equal(render('jared').hasUnread,false);
-  assert.equal(render('jared',false,true).hasUnread,false);await flush();cleanup();assert.equal(removed,2);
+  assert.equal(render('jared',false,true).hasUnread,false);await flush();cleanup?.();assert.equal(removed,2);
 });
 
 test('inbox invalidates within five seconds of an event and recovers on reconnect/resume',async()=>{

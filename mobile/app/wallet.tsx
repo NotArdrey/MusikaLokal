@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ExpoLinking from 'expo-linking';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Linking, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import BottomModal from '../src/components/BottomModal';
@@ -61,8 +61,12 @@ function WalletContent() {
   const { colors, isDark } = useTheme();
   const { userId, isGuest } = useAuth();
   const { contentBottomPadding } = useBottomBarClearance(24);
-  const params = useLocalSearchParams<{ refresh?: string }>();
+  const params = useLocalSearchParams<{ refresh?: string; section?: string; bookingId?: string }>();
   const walletRefreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
+  const walletSection = Array.isArray(params.section) ? params.section[0] : params.section;
+  const focusedBookingId = Array.isArray(params.bookingId) ? params.bookingId[0] : params.bookingId;
+  const scrollRef = useRef<ScrollView>(null);
+  const [outstandingSectionY, setOutstandingSectionY] = useState<number | null>(null);
 
   // Withdrawal modal states
   const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
@@ -88,6 +92,7 @@ function WalletContent() {
   const [txFilter, setTxFilter] = useState<string>("all");
   const [unpaidBookings, setUnpaidBookings] = useState<any[]>([]);
   const [payingBookingId, setPayingBookingId] = useState<string | null>(null);
+  const balanceCheckoutRef = useRef<AbortController | null>(null);
 
   const [userRole, setUserRole] = useState<string | null>(null);
 
@@ -349,11 +354,16 @@ function WalletContent() {
 
   // Pay remaining balance
   const handlePayBalance = async (booking: any) => {
+    if (balanceCheckoutRef.current) return;
+    if (!userId) {
+      Alert.alert('Sign In Required', 'Please sign in again to pay this booking.');
+      return;
+    }
+    const controller = new AbortController();
+    balanceCheckoutRef.current = controller;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       setPayingBookingId(booking.id);
-
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
 
       // Generate environment-aware redirect URLs (works with Expo Go and production)
       const redirectUrl = ExpoLinking.createURL('payment-result', {
@@ -363,14 +373,15 @@ function WalletContent() {
         queryParams: { status: 'cancelled', booking_id: booking.id }
       });
 
-      const { data: paymentData, error: paymentError } = await supabase.functions.invoke('paymongo', {
+      const checkoutRequest = supabase.functions.invoke('paymongo', {
+        signal: controller.signal,
         body: {
           action: 'create_checkout',
           booking_id: booking.id,
-          user_id: user.id,
+          user_id: userId,
           amount: booking.remaining_balance,
           total_amount: booking.final_price,
-          payment_type: 'balance',
+          payment_type: booking.paid_at ? 'balance' : 'full',
           remaining_balance: 0,
           studio_name: booking.studio?.name,
           booking_date: booking.booking_date,
@@ -379,23 +390,33 @@ function WalletContent() {
           cancel_redirect_url: cancelRedirectUrl
         }
       });
+      const { data: paymentData, error: paymentError } = await Promise.race([
+        checkoutRequest,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => {
+            controller.abort();
+            reject(new Error('Checkout took too long to open. Please try Pay Now again.'));
+          }, 30000);
+        }),
+      ]);
+      clearTimeout(timeout);
 
       if (paymentError) {
         Alert.alert('Error', 'Failed to create payment session. Please try again.');
         return;
       }
 
-      if (paymentData?.checkout_url) {
-        const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
-        if (canOpen) {
-          await Linking.openURL(paymentData.checkout_url);
-        } else {
-          Alert.alert('Error', 'Unable to open payment page.');
-        }
+      if (paymentData?.error) throw new Error(paymentData.error);
+      if (!paymentData?.checkout_url || new URL(paymentData.checkout_url).protocol !== 'https:') {
+        throw new Error('The payment page is unavailable. Please try again.');
       }
+      await Linking.openURL(paymentData.checkout_url);
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Failed to initiate payment.');
     } finally {
+      if (timeout) clearTimeout(timeout);
+      controller.abort();
+      balanceCheckoutRef.current = null;
       setPayingBookingId(null);
     }
   };
@@ -411,6 +432,11 @@ function WalletContent() {
     if (!userId || !walletRefreshKey) return;
     void refetchWalletSummary();
   }, [refetchWalletSummary, userId, walletRefreshKey]);
+
+  useEffect(() => {
+    if (walletSection !== 'outstanding' || outstandingSectionY === null || loading || walletSummaryQuery.isFetching) return;
+    scrollRef.current?.scrollTo({ y: outstandingSectionY, animated: true });
+  }, [loading, outstandingSectionY, walletRefreshKey, walletSection, walletSummaryQuery.isFetching]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -654,6 +680,7 @@ function WalletContent() {
         <Header title="Wallet" />
 
         <ScrollView
+          ref={scrollRef}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[styles.scrollContent, { paddingBottom: contentBottomPadding }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -709,7 +736,7 @@ function WalletContent() {
 
           {/* Unpaid Balances Section */}
           {unpaidBookings.length > 0 && (
-            <View style={styles.cardWrapper}>
+            <View style={styles.cardWrapper} onLayout={(event) => setOutstandingSectionY(event.nativeEvent.layout.y)}>
               <View style={[styles.unpaidSection, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}>
                 <View style={styles.unpaidHeader}>
                   <View style={styles.unpaidHeaderLeft}>
@@ -723,11 +750,8 @@ function WalletContent() {
                   </View>
                   <Text
                     style={styles.unpaidTotal}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.75}
                   >
-                    PHP {unpaidBookings.reduce((sum, b) => sum + (b.remaining_balance || 0), 0).toLocaleString()}
+                    PHP {unpaidBookings.reduce((sum, b) => sum + Number(b.remaining_balance || 0), 0).toLocaleString()}
                   </Text>
                 </View>
 
@@ -737,6 +761,7 @@ function WalletContent() {
                     key={booking.id}
                     style={[
                       styles.unpaidItem,
+                      booking.id === focusedBookingId && { backgroundColor: '#FEE2E2' },
                       { borderTopWidth: index === 0 ? 1 : 0, borderTopColor: '#FECACA' }
                     ]}
                   >
@@ -754,24 +779,20 @@ function WalletContent() {
                       </Text>
                     </View>
                     <TouchableOpacity activeOpacity={payingBookingId === booking.id ? 1 : 0.78}
+                      accessibilityRole="button"
+                      accessibilityLabel={payingBookingId === booking.id ? 'Opening checkout' : 'Pay Now'}
                       onPress={() => handlePayBalance(booking)}
-                      disabled={payingBookingId === booking.id}
+                      disabled={payingBookingId !== null}
                       style={[styles.payNowBtn, { opacity: payingBookingId === booking.id ? 0.6 : 1 }]}
                     >
-                      {payingBookingId === booking.id ? (
-                        <ActivityIndicator size="small" color="white" />
-                      ) : (
-                        <>
-                          <Ionicons name="card" size={16} color="white" />
-                          <Text style={styles.payNowText}>Pay Now</Text>
-                        </>
-                      )}
+                      {payingBookingId === booking.id ? <ActivityIndicator size="small" color="white" /> : <Ionicons name="card" size={16} color="white" />}
+                      <Text style={styles.payNowText}>{payingBookingId === booking.id ? 'Opening…' : 'Pay Now'}</Text>
                     </TouchableOpacity>
                   </View>
                 ))}
 
                 <Text style={styles.unpaidWarning}>
-                  You can settle outstanding balances from Activity when ready.
+                  Studio payments are separate from your wallet balance. Choose Pay Now to open checkout.
                 </Text>
               </View>
             </View>
@@ -919,7 +940,7 @@ function WalletContent() {
                         </Text>
                       </View>
                     </View>
-                    <Text style={[styles.transactionAmount, { color: tx.is_credit ? '#10B981' : '#EF4444' }]}>
+                    <Text style={[styles.transactionAmount, styles.transactionHistoryAmount, { color: tx.is_credit ? '#10B981' : '#EF4444' }]}>
                       {tx.is_credit ? '+' : '-'}PHP {txAmount.toFixed(2)}
                     </Text>
                   </View>
@@ -1403,6 +1424,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
+    flexWrap: 'wrap',
+    gap: 10,
   },
   transactionLeft: {
     flexDirection: 'row',
@@ -1435,6 +1458,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     flexShrink: 0,
   },
+  transactionHistoryAmount: {
+    width: '100%',
+    textAlign: 'right',
+  },
   navbarContainer: {
     position: 'absolute',
     bottom: 0,
@@ -1448,7 +1475,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   unpaidHeader: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     gap: 12,
@@ -1481,14 +1508,14 @@ const styles = StyleSheet.create({
     fontFamily: typography.bold,
     color: '#DC2626',
     flexShrink: 0,
-    maxWidth: 132,
-    textAlign: 'right',
+    textAlign: 'left',
   },
   unpaidItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
     gap: 12,
+    flexWrap: 'wrap',
   },
   unpaidImage: {
     width: 50,
@@ -1497,7 +1524,7 @@ const styles = StyleSheet.create({
   },
   unpaidInfo: {
     flex: 1,
-    minWidth: 0,
+    minWidth: 140,
   },
   unpaidName: {
     fontSize: 14,
@@ -1522,6 +1549,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 8,
+    width: '100%',
+    minHeight: 44,
+    justifyContent: 'center',
   },
   payNowText: {
     fontSize: 13,

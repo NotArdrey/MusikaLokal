@@ -20,6 +20,7 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { getActionErrorMessage, getResultErrorMessage, logActionError } from '../../src/utils/actionError';
 import { invalidateListingCaches } from '../../src/utils/listingCacheInvalidation';
 import { palette, typography } from '../../src/theme/tokens';
+import { shareListing } from '../../src/utils/shareListing';
 
 const isMissingRelationError = (error: any, relationName: string) => {
     const message = String(error?.message || '').toLowerCase();
@@ -469,6 +470,18 @@ export default function MyGroupScreen({ historyOnly = false, embedded = false }:
                                                 >
 
                                                     <Text style={[styles.manageBtnText, { color: colors.primary }]}>{canManageGroup ? 'Manage' : 'View'}</Text>
+                                                </TouchableOpacity>
+
+                                                <TouchableOpacity
+                                                    activeOpacity={1}
+                                                    testID={`mobile-group-share-${group.id}`}
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel={`Share ${group.name || 'group'}`}
+                                                    onPress={() => shareListing(group.id, group.name, 'Group')}
+                                                    style={[styles.manageBtn, { borderColor: colors.border }]}
+                                                >
+                                                    <Ionicons name="share-outline" size={16} color={colors.text} />
+                                                    <Text style={[styles.manageBtnText, { color: colors.text }]}>Share</Text>
                                                 </TouchableOpacity>
 
                                                 <TouchableOpacity activeOpacity={1}

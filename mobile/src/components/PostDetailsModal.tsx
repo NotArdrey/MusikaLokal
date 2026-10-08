@@ -26,6 +26,7 @@ import LoadingState from "./LoadingState";
 import { emitToast } from "../events/toastBus";
 import { buildPostShareMessage } from "../utils/postShare";
 import { normalizePostMedia } from "../utils/postMedia";
+import { BoundedCache } from "../utils/BoundedCache";
 import BottomModal from "./BottomModal";
 import CachedImage from "./CachedImage";
 import CustomAlert, { AlertType } from "./CustomAlert";
@@ -179,7 +180,7 @@ type CachedPostDetails = {
 };
 
 const POST_DETAILS_CACHE_TTL_MS = 60_000;
-const postDetailsCache = new Map<string, CachedPostDetails>();
+const postDetailsCache = new BoundedCache<string, CachedPostDetails>(40, 5 * 60_000);
 const ANDROID_KEYBOARD_ANIMATION_MS = 220;
 
 const normalizeCommentPayload = (comment: any) => ({

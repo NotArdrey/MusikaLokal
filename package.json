@@ -3,6 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "test:performance": "node scripts/inspect-session-performance.mjs",
+    "test:heads-up-notifications": "node --test scripts/test-heads-up-notifications.mjs",
     "users:reset-passwords": "node scripts/reset-all-user-passwords.mjs",
     "fixtures:videos": "node scripts/local-test-data/generate-test-videos.mjs",
     "seed:local-test": "node scripts/local-test-data/seed.mjs",
@@ -10,6 +12,8 @@
     "test:local-simulation": "node --test scripts/test-local-simulation-fixtures.mjs",
     "test:workflows": "node --test scripts/test-gig-history-upload-moderation.mjs scripts/test-upload-screening.mjs scripts/test-gig-genre-matching.mjs scripts/test-gig-member-requirement-matching.mjs scripts/test-gig-member-verification.mjs scripts/test-connection-member-verification.mjs scripts/test-gig-application-privacy.mjs scripts/test-group-application-member-cvs.mjs scripts/test-gig-split-review-workers.mjs scripts/test-feed-featured-suggestions.mjs scripts/test-auth-typography.mjs scripts/test-authorization-hardening.mjs",
     "test:member-verification": "node --test scripts/test-gig-member-verification.mjs",
+    "test:group-application-actions": "node --test scripts/test-group-application-actions.mjs scripts/test-group-application-member-cvs.mjs scripts/test-group-application-confirmation.mjs scripts/test-gig-timeline.mjs scripts/test-authorization-hardening.mjs scripts/test-cv-documents.mjs scripts/test-native-upload-uri-handling.cjs scripts/test-report-notifications.mjs",
+    "test:new-feed-wallet-signup": "node --test scripts/test-new-feed-signup-fixes.mjs scripts/test-studio-payment-eligibility.mjs scripts/test-wallet-payment-history.mjs scripts/test-post-attachments.mjs scripts/test-didit-attempts.mjs scripts/test-didit-review-state.mjs",
     "test:connection-member-verification": "node --test scripts/test-connection-member-verification.mjs",
     "test:connection-recommendations": "npx -y deno test scripts/test-connection-application-recommendations.ts",
     "test:applicant-review": "node --test scripts/test-submitted-genre-fit.mjs scripts/test-group-application-confirmation.mjs scripts/test-gig-group-visibility.mjs",
@@ -27,12 +31,15 @@
     "test:android-release": "node --test scripts/test-android-release.mjs",
     "test:apk-website": "node --test scripts/test-apk-website.mjs",
     "test:share-links": "node --test scripts/test-share-links.mjs scripts/test-share-page.mjs",
+    "test:reviews-email-links": "node --test scripts/test-listing-reviews.mjs scripts/test-email-action-links.mjs scripts/test-share-links.mjs scripts/test-share-page.mjs scripts/test-password-recovery.mjs scripts/test-password-recovery-page.mjs scripts/test-report-notifications.mjs",
     "test:didit-attempts": "node --test scripts/test-didit-attempts.mjs scripts/test-didit-review-state.mjs",
     "test:applicant-safe-areas": "node --test scripts/test-applicant-safe-areas.mjs",
     "share:prepare": "node scripts/prepare-share-page.mjs",
     "test:bug-fixes": "node --test scripts/test-search-bookmarks.mjs scripts/test-post-attachments.mjs scripts/test-listing-reviews.mjs scripts/test-gig-timeline.mjs scripts/test-profile-group-gigs.mjs scripts/test-activity-order.mjs scripts/test-report-notifications.mjs scripts/test-studio-payment-eligibility.mjs scripts/test-gig-feature-preferences.mjs scripts/test-station-queue.mjs scripts/test-wallet-payment-history.mjs",
     "test:wallet-payments": "node --test scripts/test-wallet-payment-history.mjs",
+    "test:radio": "node --test scripts/test-radio-live-playback.mjs scripts/test-expo-audio.mjs scripts/test-station-queue.mjs",
     "test:password-recovery": "node --test scripts/test-password-recovery.mjs scripts/test-password-recovery-page.mjs",
+    "test:email-links": "node --test scripts/test-email-action-links.mjs scripts/test-email-change.mjs scripts/test-share-links.mjs scripts/test-share-page.mjs scripts/test-password-recovery.mjs scripts/test-password-recovery-page.mjs",
     "recovery:prepare": "node scripts/prepare-recovery-page.mjs"
   },
   "devDependencies": {

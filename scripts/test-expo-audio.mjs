@@ -121,3 +121,23 @@ test("lock-screen controls are enabled in app builds but skipped in Expo Go", as
     await sound.unloadAsync();
   }
 });
+
+test("radio fallback lock-screen metadata hides seeking and shows the station and current song", async () => {
+  const { AudioSound, player } = harness();
+  const { sound } = await AudioSound.createAsync({ uri: "track.mp3" });
+  sound.enableBackgroundPlayback("Local Radio · LIVE", { artist: "Red · Artist", artworkUrl: "cover.jpg" }, true);
+  assert.equal(player.lockScreenCalls[0][1].artist, "Red · Artist");
+  assert.equal(player.lockScreenCalls[0][1].artworkUrl, "cover.jpg");
+  assert.equal(player.lockScreenCalls[0][2].isLiveStream, true);
+  await sound.unloadAsync();
+});
+
+test("external lock-screen pause and play update the fallback playback intent", async () => {
+  const { AudioSound, player } = harness();
+  const { sound } = await AudioSound.createAsync({ uri: "track.mp3" }, { shouldPlay: true });
+  player.pause();
+  assert.equal((await sound.getStatusAsync()).shouldPlay, false);
+  player.play();
+  assert.equal((await sound.getStatusAsync()).shouldPlay, true);
+  await sound.unloadAsync();
+});

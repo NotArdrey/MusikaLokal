@@ -41,21 +41,24 @@ const titleCase = (value: unknown) => String(value || "").replace(/_/g, " ").rep
 const profileVerificationMeta = (member: any) => {
   const issueCode = String(member?.profile_issue_code || "");
   if (issueCode === "matches_another_member") {
-    return { label: "No match: profile belongs to another member", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
+    return { label: "No match: profile matched another member in the video", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
   }
   if (issueCode === "different_video_person") {
-    return { label: "No match: profile and ID show different people", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
+    return { label: "No match: profile and ID matched different people in the video", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
   }
   if (issueCode === "identity_not_confirmed") {
-    return { label: "Could not check: ID photo was not found in the video", color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
+    return { label: "Needs review: No clear match found for this member in the video.", color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
   }
   if (issueCode === "not_found_in_video") {
-    return { label: "No match: profile does not match the ID photo", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
+    const label = member?.status === "verified"
+      ? "Needs review: No clear match found for the profile photo in the video."
+      : "Needs review: No clear match found for this member in the video.";
+    return { label, color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
   }
-  if (member?.profile_status === "verified") return { label: "Match: same person", color: "#059669", soft: "#ECFDF5", tone: "match" as const };
+  if (member?.profile_status === "verified") return { label: "Confirmed: Match found for this member in the video.", color: "#059669", soft: "#ECFDF5", tone: "match" as const };
   if (member?.profile_status === "no_reference") return { label: "Could not check: no profile photo", color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
   if (member?.profile_status === "reference_unusable") return { label: "Could not check: profile photo is unclear", color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
-  if (member?.profile_status === "mismatch") return { label: "No match: profile does not match the ID photo", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
+  if (member?.profile_status === "mismatch") return { label: "No match: profile and ID matched different people in the video", color: "#DC2626", soft: "#FEF2F2", tone: "mismatch" as const };
   return { label: "Could not check", color: "#D97706", soft: "#FFFBEB", tone: "review" as const };
 };
 
@@ -76,7 +79,7 @@ function ProfileIdFinding({ meta }: { meta: ReturnType<typeof profileVerificatio
         color={meta.color}
       />
       <View style={styles.portraitCopy}>
-        <Text style={[styles.profileIdFindingTitle, { color: meta.color }]}>Profile photo vs ID photo</Text>
+        <Text style={[styles.profileIdFindingTitle, { color: meta.color }]}>Profile photo in video</Text>
         <Text style={[styles.profileIdFindingText, { color: meta.color }]}>{meta.label}</Text>
       </View>
     </View>
@@ -223,7 +226,7 @@ export default function ConnectionApplicantDetailsModal({
                   />
                   <View style={styles.requirementCopy}>
                     <Text style={[styles.requirementTitle, { color: verificationColor }]}>{verificationTitle}</Text>
-                    <Text style={[styles.requirementDetail, { color: colors.textSecondary }]}>{usesVerifiedIdPortrait ? `${verifiedMemberCount} of ${expectedMemberCount} member ID photos matched people in the video.${hasProfileMismatch ? " At least one profile does not match that member's ID photo." : hasProfileReviewIssue ? " At least one profile could not be checked." : usesDualReference ? " Each profile matched the same person as that member's ID." : ""} The full ID is hidden; only the ID holder's face is shown.` : "This older result used the profile photo. New checks use the government ID photo."}</Text>
+                    <Text style={[styles.requirementDetail, { color: colors.textSecondary }]}>{usesVerifiedIdPortrait ? `${verifiedMemberCount} of ${expectedMemberCount} member ID photos matched people in the video.${hasProfileMismatch ? " At least one profile photo matched a different person in the video." : hasProfileReviewIssue ? " At least one profile photo could not be confirmed." : usesDualReference ? " Each profile matched the same person as that member's ID." : ""} The full ID is hidden; only the ID holder's face is shown.` : "This older result used the profile photo. New checks use the government ID photo."}</Text>
                   </View>
                 </View>
                 {verificationMembers.map((member, index) => {
@@ -267,13 +270,13 @@ export default function ConnectionApplicantDetailsModal({
                       </TouchableOpacity>
                     ) : null}
                     <Text style={[styles.requirementTitle, { color: colors.text }]}>{member?.member_name_snapshot || `Registered member ${index + 1}`}</Text>
-                    <Text style={[styles.body, { color: member?.status === "verified" ? "#059669" : "#D97706" }]}>ID found in video: {member?.status === "verified" ? "Yes" : "No"}</Text>
+                    <Text style={[styles.body, { color: member?.status === "verified" ? "#059669" : "#D97706" }]}>ID found in video: {member?.status === "verified" ? "Yes" : "Not confirmed"}</Text>
                     <Text style={[styles.body, { color: colors.textSecondary }]}>ID match: {member?.best_similarity === null || member?.best_similarity === undefined ? "Not available" : `${Number(member.best_similarity).toFixed(1)}%`}</Text>
                     {usesDualReference ? (
                       <>
                         <ProfileIdFinding meta={profileMeta} />
                         <Text style={[styles.body, { color: colors.textSecondary }]}>Profile match: {member?.profile_best_similarity === null || member?.profile_best_similarity === undefined ? "Not available" : `${Number(member.profile_best_similarity).toFixed(1)}%`}</Text>
-                        {profileMeta.tone !== "match" ? <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>The ID match stays recorded. Review this member.</Text> : null}
+                        {profileMeta.tone !== "match" ? <Text style={[styles.disclaimer, { color: colors.textSecondary }]}>Review the video manually to confirm this member.</Text> : null}
                       </>
                     ) : null}
                   </View>

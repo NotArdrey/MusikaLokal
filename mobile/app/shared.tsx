@@ -3,7 +3,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useEffect } from "react";
 import LoadingState from "../src/components/LoadingState";
 import { useAuth } from "../src/context/AuthContext";
-import { getShareDestination, PENDING_SHARE_STORAGE_KEY } from "../src/utils/shareLinks";
+import { getAppLinkDestination, PENDING_SHARE_STORAGE_KEY } from "../src/utils/appLinks";
 
 export default function SharedContentEntry() {
   const { destination } = useLocalSearchParams<{ destination?: string }>();
@@ -19,7 +19,7 @@ export default function SharedContentEntry() {
       router.replace("/identity_verification");
       return;
     }
-    const target = getShareDestination(destination || "") || "/feed";
+    const target = getAppLinkDestination(destination || "") || "/notifications";
     let active = true;
     void AsyncStorage.removeItem(PENDING_SHARE_STORAGE_KEY).catch(() => {}).then(() => {
       if (active) router.replace(target as any);
@@ -27,5 +27,5 @@ export default function SharedContentEntry() {
     return () => { active = false; };
   }, [destination, identityChecked, identityRequired, loading, roleResolved, session]);
 
-  return <LoadingState message="Opening shared content..." style={{ flex: 1 }} />;
+  return <LoadingState message="Opening MusikaLokal..." style={{ flex: 1 }} />;
 }

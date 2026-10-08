@@ -1,0 +1,46 @@
+{
+  "host": "https://musika-lokal.vercel.app",
+  "checks": [
+    {
+      "path": "/email-change/page.js",
+      "status": 200,
+      "sourceMatches": true
+    },
+    {
+      "path": "/email-change/flow.js",
+      "status": 200,
+      "sourceMatches": true
+    },
+    {
+      "path": "/share/actionLinks.js",
+      "status": 200,
+      "sourceMatches": true
+    },
+    {
+      "destination": "/bookings?tab=History",
+      "appHandoffValid": true
+    },
+    {
+      "destination": "/group_application_cv?applicationId=00000000-0000-4000-8000-000000000001",
+      "appHandoffValid": true
+    },
+    {
+      "destination": "/bookings?tab=Active+Musicians",
+      "appHandoffValid": true
+    },
+    {
+      "destination": "/feed",
+      "appHandoffValid": true
+    },
+    {
+      "destination": "/account_details",
+      "appHandoffValid": true
+    }
+  ],
+  "emailChangeEntryWaitsForClick": true,
+  "emailChangeConfirmationStubbed": true,
+  "credentialsRemovedFromHistory": true,
+  "credentialsNotStored": true,
+  "bothThemesAt320px": true,
+  "pageErrors": []
+}

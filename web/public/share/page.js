@@ -1,9 +1,11 @@
-import { getShareDestination } from './flow.js';
+import { getAppLinkDestination } from './appLinks.js';
 
-const destination = getShareDestination(window.location.href);
+const destination = getAppLinkDestination(window.location.href);
 const open = document.getElementById('open-app');
 if (destination) {
-  open.href = `musikalokal://${destination.slice(1)}`;
+  open.href = window.location.pathname === '/action'
+    ? `musikalokal://action?${new URLSearchParams({ destination })}`
+    : `musikalokal://${destination.slice(1)}`;
   open.hidden = false;
 } else {
   document.getElementById('message').textContent = 'This shared link is incomplete. Ask the sender to share it again.';

@@ -1,8 +1,25 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import vm from "node:vm";
+import ts from "typescript";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+
+const reviewDeclaration = (path, name, scope = {}) => {
+  const source = ts.createSourceFile(path, read(path), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let declaration;
+  const visit = (node) => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === name) declaration = node;
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  assert.ok(declaration, `${name} must exist in ${path}`);
+  const compiled = ts.transpileModule(`(${declaration.initializer.getText(source)})`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  return vm.runInNewContext(compiled, scope);
+};
 
 for (const root of ["web", "mobile"]) {
   test(`${root}: connection applications use the shared registered-member verifier`, () => {
@@ -52,24 +69,74 @@ test("connection application UIs collect consent and show verification results",
   assert.match(details, /Government ID photo/);
   assert.match(details, /reference_portrait_url/);
   assert.match(details, /profile_photo_url/);
-  assert.match(details, /Profile photo vs ID photo/);
-  assert.match(details, /No match: profile belongs to another member/);
-  assert.match(details, /No match: profile and ID show different people/);
-  assert.match(details, /No match: profile does not match the ID photo/);
+  assert.match(details, /Profile photo in video/);
+  assert.match(details, /No match: profile matched another member in the video/);
+  assert.match(details, /No match: profile and ID matched different people in the video/);
+  assert.match(details, /Needs review: No clear match found for this member in the video/);
 });
 
-test("gig, group, and production reviews show the same simple profile and ID finding", () => {
+test("gig, group, and production reviews describe the video comparisons", () => {
   const gigDetails = read("mobile/src/components/ApplicantDetailsModal.tsx");
   const connectionDetails = read("mobile/src/components/ConnectionApplicantDetailsModal.tsx");
 
   for (const details of [gigDetails, connectionDetails]) {
-    assert.match(details, /Profile photo vs ID photo/);
-    assert.match(details, /Match: same person/);
-    assert.match(details, /No match: profile belongs to another member/);
-    assert.match(details, /No match: profile and ID show different people/);
-    assert.match(details, /No match: profile does not match the ID photo/);
+    assert.match(details, /Profile photo in video/);
+    assert.match(details, /Confirmed: Match found for this member in the video/);
+    assert.match(details, /No match: profile matched another member in the video/);
+    assert.match(details, /No match: profile and ID matched different people in the video/);
+    assert.match(details, /Needs review: No clear match found for this member in the video/);
     assert.match(details, /Government ID photo/);
+    assert.match(details, /Not confirmed/);
+    assert.doesNotMatch(details, /The ID match stays recorded/);
     assert.doesNotMatch(details, /Profile-to-video/);
     assert.doesNotMatch(details, /secondary result never overrides/i);
+  }
+});
+
+for (const component of ["ApplicantDetailsModal", "ConnectionApplicantDetailsModal"]) {
+  const profileMeta = reviewDeclaration(`mobile/src/components/${component}.tsx`, "profileVerificationMeta");
+
+  test(`${component}: a profile not matched in the video needs review regardless of the ID result`, () => {
+    for (const status of ["needs_review", "verified"]) {
+      const finding = profileMeta({ status, profile_status: "needs_review", profile_issue_code: "not_found_in_video" });
+      assert.equal(finding.tone, "review");
+      assert.equal(finding.color, "#D97706");
+      assert.equal(finding.label, status === "verified"
+        ? "Needs review: No clear match found for the profile photo in the video."
+        : "Needs review: No clear match found for this member in the video.");
+    }
+  });
+
+  test(`${component}: a profile match cannot confirm identity when the ID was not matched`, () => {
+    const finding = profileMeta({ status: "needs_review", profile_status: "needs_review", profile_issue_code: "identity_not_confirmed" });
+    assert.equal(finding.tone, "review");
+    assert.equal(finding.label, "Needs review: No clear match found for this member in the video.");
+  });
+
+  test(`${component}: confirmed matches stay green and matches to different video people stay red`, () => {
+    const confirmed = profileMeta({ status: "verified", profile_status: "verified" });
+    assert.equal(confirmed.tone, "match");
+    assert.equal(confirmed.label, "Confirmed: Match found for this member in the video.");
+    for (const profile_issue_code of ["matches_another_member", "different_video_person"]) {
+      const finding = profileMeta({ status: "verified", profile_status: "mismatch", profile_issue_code });
+      assert.equal(finding.tone, "mismatch");
+      assert.equal(finding.color, "#DC2626");
+      assert.match(finding.label, /video/);
+    }
+  });
+}
+
+test("compact connection review distinguishes an unconfirmed profile from a different video person", () => {
+  const path = "mobile/src/components/ConnectionApplicantReview.tsx";
+  for (const [profile_status, profile_issue_code, expected] of [
+    ["needs_review", "not_found_in_video", false],
+    ["needs_review", "identity_not_confirmed", false],
+    ["mismatch", "different_video_person", true],
+    ["mismatch", "matches_another_member", true],
+  ]) {
+    assert.equal(reviewDeclaration(path, "hasProfileMismatch", {
+      usesDualReference: true,
+      verificationMembers: [{ profile_status, profile_issue_code }],
+    }), expected);
   }
 });

@@ -2,7 +2,7 @@ import useAdminLayout from '../../src/hooks/useAdminLayout';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Linking, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, Linking, Modal, ScrollView, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Calendar } from '../../src/components/CenteredCalendar';
 import CustomAlert, { AlertType } from '../../src/components/CustomAlert';
 import { AdminFilterBar } from '../../src/components/admin/filters';
@@ -13,6 +13,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { getEdgeFunctionErrorMessage } from '../../src/utils/edgeFunctionErrors';
+import { buildListingShareUrl } from '../../src/utils/shareLinks';
 
 type ResourceType = 'studio' | 'venue' | 'production';
 type ResourceFilter = 'all' | ResourceType;
@@ -993,6 +994,34 @@ export default function AdminManagePage() {
     }
   }, [fetchResources, invokeAdminManage]);
 
+  const handleShareResource = async (resource: AdminResource) => {
+    const type = typeLabels[resource.resource_type];
+    const shareUrl = buildListingShareUrl(resource.id, type);
+    try {
+      if (typeof navigator.share === 'function') {
+        await Share.share({
+          message: `Check out ${resource.name || 'this listing'} (${type}) on MusikaLokal!\n${shareUrl}`,
+          url: shareUrl,
+        });
+      } else {
+        await navigator.clipboard.writeText(shareUrl);
+        setAlert({
+          type: 'success',
+          title: `${type} Link Copied`,
+          message: 'Paste this link into your social post or message.',
+        });
+      }
+    } catch (error: any) {
+      if (error?.name === 'AbortError') return;
+      setAlert({
+        type: 'error',
+        title: 'Unable to Share',
+        message: `You can copy the listing link below:\n${shareUrl}`,
+        forceModal: true,
+      });
+    }
+  };
+
   const confirmDelete = useCallback((resource: AdminResource) => {
     setAlert({
       type: 'warning',
@@ -1304,6 +1333,18 @@ export default function AdminManagePage() {
                           <Text style={[styles.rowButtonText, { color: colors.primary }]}>View</Text>
                         </>
                       )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={0.82}
+                      testID={`admin-manage-share-${testPart}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Share ${resource.name || typeLabels[resource.resource_type]}`}
+                      style={[styles.rowButton, { borderColor: colors.border }]}
+                      onPress={() => handleShareResource(resource)}
+                      disabled={Boolean(busyKey)}
+                    >
+                      <Ionicons name="share-outline" size={15} color={colors.text} />
+                      <Text style={[styles.rowButtonText, { color: colors.text }]}>Share</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       activeOpacity={0.82}

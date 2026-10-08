@@ -1,0 +1,26 @@
+{
+  "unauthenticatedChecks": [
+    {
+      "function": "account-email",
+      "action": "send_email_change",
+      "status": 401
+    },
+    {
+      "function": "manage-bookings",
+      "action": "withdraw",
+      "status": 401
+    },
+    {
+      "function": "gig-applications",
+      "action": "fetch_group_application_cv_status",
+      "status": 401
+    }
+  ],
+  "cleanupQueryStatus": 201,
+  "cleanup": [
+    {
+      "remaining_auth_fixtures": 0,
+      "remaining_profile_fixtures": 0
+    }
+  ]
+}

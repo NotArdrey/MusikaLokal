@@ -1,0 +1,63 @@
+{
+  "verifiedAt": "2026-10-07T13:14:30.366Z",
+  "projectRef": "aefldxegsvzecshlayza",
+  "originalFailure": {
+    "status": 400,
+    "code": "42703",
+    "message": "column profiles_1.updated_at does not exist"
+  },
+  "profileColumns": [
+    "id",
+    "full_name",
+    "avatar_url",
+    "created_at"
+  ],
+  "publicHookChecks": [
+    {
+      "workspace": "mobile",
+      "listingType": "Studio",
+      "publicReviewCount": 4,
+      "expectedCount": 4,
+      "authorJoinSucceeded": true
+    },
+    {
+      "workspace": "mobile",
+      "listingType": "Group",
+      "publicReviewCount": 1,
+      "expectedCount": 1,
+      "authorJoinSucceeded": true
+    },
+    {
+      "workspace": "mobile",
+      "listingType": "Artist",
+      "publicReviewCount": 2,
+      "expectedCount": 2,
+      "authorJoinSucceeded": true
+    },
+    {
+      "workspace": "web",
+      "listingType": "Studio",
+      "publicReviewCount": 4,
+      "expectedCount": 4,
+      "authorJoinSucceeded": true
+    },
+    {
+      "workspace": "web",
+      "listingType": "Group",
+      "publicReviewCount": 1,
+      "expectedCount": 1,
+      "authorJoinSucceeded": true
+    },
+    {
+      "workspace": "web",
+      "listingType": "Artist",
+      "publicReviewCount": 2,
+      "expectedCount": 2,
+      "authorJoinSucceeded": true
+    }
+  ],
+  "mutationsPerformed": false,
+  "supabaseDeploymentRequiredForReviews": false,
+  "clientBundleBuilt": false,
+  "androidDeviceChecksPending": true
+}

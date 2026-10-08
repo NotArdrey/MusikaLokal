@@ -1,11 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getShareDestination, PENDING_SHARE_STORAGE_KEY } from "../src/utils/shareLinks";
+import { getAppLinkDestination, PENDING_SHARE_STORAGE_KEY } from "../src/utils/appLinks";
 import { getPasswordRecoveryRoute } from "../src/utils/passwordRecovery";
 
 export async function redirectSystemPath({ path }: { path: string; initial: boolean }) {
   const recoveryRoute = getPasswordRecoveryRoute(path);
   if (recoveryRoute) return recoveryRoute;
-  const destination = getShareDestination(path);
+  const destination = getAppLinkDestination(path);
   if (!destination) return path;
   // Keep the destination through sign-in, identity verification and app restarts.
   try {

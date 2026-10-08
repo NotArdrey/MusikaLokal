@@ -1,0 +1,71 @@
+{
+  "date": "2026-10-07",
+  "timezone": "Asia/Manila",
+  "scope": "Offline source execution with mocked Supabase/storage and the installed query core. Native device profiling remains pending.",
+  "productionNetworkRequests": 0,
+  "measurements": {
+    "mobileImageFailureAttempts": 2,
+    "webImageFailureAttempts": 2,
+    "listingCache": {
+      "distinctEntries": 1000,
+      "maximumRetained": 40,
+      "retainedAfterExpiry": 0
+    },
+    "screenCache": {
+      "distinctKeys": 300,
+      "maximumMemoryEntries": 40,
+      "maximumStorageEntries": 80,
+      "retainedAfterExpiry": 0,
+      "unrelatedStoragePreserved": true
+    },
+    "persistedQueries": {
+      "maximumQueries": 40,
+      "maximumPagesPerQuery": 3,
+      "characterBudget": 1000000
+    },
+    "feed": {
+      "previouslyLoadedPages": 50,
+      "refreshRequests": 1,
+      "retainedPagesAfterRefresh": 1,
+      "paginationContinues": true,
+      "failedRefreshPreservesData": true
+    },
+    "inactiveBookingRefreshes": 0,
+    "header": {
+      "messageEvents": 100,
+      "readsForBatch": 2,
+      "activeChannels": 1,
+      "remainingAfterBlur": 0
+    },
+    "chatPagination": {
+      "totalMessages": 150,
+      "initialMessages": 50,
+      "pages": 3,
+      "uniqueMessages": 150
+    },
+    "chatCache": {
+      "loadedMessages": 1000,
+      "messagesPerWrite": 50,
+      "writesFor100Updates": 1
+    },
+    "filteredPersonalTables": 4
+  },
+  "sourceSha256": {
+    "mobile/src/components/CachedImage.tsx": "3844ffd1efdd8f5f7f69364ecf8acd7c5272032e0935332cef0351b5fe134099",
+    "web/src/components/CachedImage.tsx": "56588b9edd19e9721f831e38c10bb87124bfc69891c259fc645066b77ac17d94",
+    "mobile/src/utils/BoundedCache.ts": "6080849d17e59421688e7e92bbae9efe02bd925414289b82129e5e743100bbf2",
+    "mobile/src/utils/listingDetailsCache.ts": "0d7b6a132934358cd8513dfed663bed5fd106900bf4fd2cd7a54e7f14d062e0a",
+    "mobile/src/utils/screenCache.ts": "030d873104f0d02a0bede55ff6e06819c6f1263abfa6659b96661db8dd2a100d",
+    "mobile/src/data/hooks.ts": "b77f242831cebc2bbdc529cc0501b29bedab34f875fcf2e05d6407c3190c5190",
+    "mobile/src/data/queryClient.ts": "a7611a1a357bd458dc4d35f8a2b6e5216eb707ecf63785e58e3a57c18f64e850",
+    "mobile/src/data/chatMessages.ts": "017094f04604b0e5e6a2698764ef2ca3d42a6831530db08ff6c91b68f3ac9f02",
+    "mobile/src/data/realtime.ts": "27710a6a6107f9e680d2f17fdd0c7411a2aad9d242f613c59b69f05445c4f540",
+    "mobile/src/hooks/useChat.ts": "d64d1e8c3774a433d9399709865311ed6511e1a9654da054da83fabb8c8e5c3b",
+    "mobile/src/components/header.tsx": "38081633c41ded1a226ff784c31f77f8b04184c7c3ab650af5cd26d69a60b834",
+    "mobile/src/hooks/useQueryScreenFocus.ts": "620b668780f74c7dac03128b8b9dd78fdcffb431805d06405e3b8876cd0f68e4",
+    "mobile/src/utils/refreshScheduler.ts": "a815e6bd49a99ef25ae8bddfc1428a451f17eb33d1acde15bb15cb5f2a24159e",
+    "mobile/app/(tabs)/marketplace.tsx": "c2a8f1b25f81759279025ee686ed511783c32179f836aa6e3bf6d3eaccb357db",
+    "mobile/app/(tabs)/bookings.tsx": "2fdd4077bd4904489accd20c6670ec9033fd3d9e65bd5b4cd816a11c49057e14",
+    "mobile/app/(tabs)/feed.tsx": "a49741e2df008de30c981ef3ddbefb98718b15f7d0190f959f227ea3988f434f"
+  }
+}

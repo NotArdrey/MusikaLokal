@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname, useSegments } from "expo-router";
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, { interpolateColor, useAnimatedProps, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { supabase } from '../../lib/supabase';
+import { prepareRealtimeAuth, supabase } from '../../lib/supabase';
 import { useUnreadNotifications } from '../hooks/useUnreadNotifications';
 import { useAuth } from '../context/AuthContext';
 import { runAfterUIIdle } from '../utils/idleTask';
@@ -67,8 +67,10 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
     const segments = useSegments();
     const routePathname = useMemo(() => normalizeHeaderPathname(pathname, segments), [pathname, segments]);
     const isTaskFlow = routePathname.startsWith('/add_') || routePathname.startsWith('/edit_');
-    const { hasUnread, refresh: checkUnreadNotifications } = useUnreadNotifications(userId, !isGuest);
-    const [hasUnreadChats, setHasUnreadChats] = useState(false);
+    const { hasUnread } = useUnreadNotifications(userId, !isGuest);
+    const [chatUnreadState, setChatUnreadState] = useState({ userId: '', hasUnread: false });
+    const hasUnreadChats = !isGuest && !isFan && chatUnreadState.userId === userId && chatUnreadState.hasUnread;
+    const unreadChatRequestRef = useRef(0);
     const [guestMenuVisible, setGuestMenuVisible] = useState(false);
     const [staffAccessLevel, setStaffAccessLevel] = useState<1 | 2 | 3 | null>(null);
     const isBrandMainHeader = title.trim().toLowerCase() === 'musikalokal';
@@ -233,9 +235,10 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
     }, [closeGuestMenu, setGuestMode]);
 
     const checkUnreadChats = useCallback(async () => {
+        const requestId = ++unreadChatRequestRef.current;
         try {
             if (!userId || isGuest || isFan) {
-                setHasUnreadChats(false);
+                setChatUnreadState({ userId: userId || '', hasUnread: false });
                 return;
             }
 
@@ -248,7 +251,7 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
 
             const conversationIds = (participations || []).map((item) => item.conversation_id);
             if (conversationIds.length === 0) {
-                setHasUnreadChats(false);
+                if (requestId === unreadChatRequestRef.current) setChatUnreadState({ userId, hasUnread: false });
                 return;
             }
 
@@ -260,7 +263,7 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
                 .is('read_at', null);
 
             if (unreadCountError) return;
-            setHasUnreadChats((count || 0) > 0);
+            if (requestId === unreadChatRequestRef.current) setChatUnreadState({ userId, hasUnread: (count || 0) > 0 });
         } catch {
             // Silently ignore errors
         }
@@ -269,56 +272,53 @@ function Header({ title, overline, compact = false, backgroundColor, showTitle =
     useFocusEffect(
         useCallback(() => {
             let isActive = true;
+            let inFlight = false;
+            let pendingRefresh = false;
+            let timer: ReturnType<typeof setTimeout> | null = null;
+            let messagesChannel: ReturnType<typeof supabase.channel> | null = null;
+            const refreshChats = async () => {
+                if (!isActive || AppState.currentState !== 'active' || isFan || isGuest || !userId) return;
+                if (inFlight) { pendingRefresh = true; return; }
+                inFlight = true;
+                pendingRefresh = false;
+                try { await checkUnreadChats(); }
+                finally {
+                    inFlight = false;
+                    if (pendingRefresh && isActive) scheduleRefresh();
+                }
+            };
+            const scheduleRefresh = () => {
+                if (!isActive || timer) return;
+                timer = setTimeout(() => { timer = null; void refreshChats(); }, 300);
+            };
             const focusTask = runAfterUIIdle(() => {
                 if (!isActive) {
                     return;
                 }
 
-                void checkUnreadNotifications();
-                if (!isFan) {
-                    void checkUnreadChats();
-                }
+                void refreshChats();
             });
+            const appState = AppState.addEventListener('change', state => {
+                if (state === 'active') scheduleRefresh();
+            });
+            const connect = async () => {
+                if (!userId || isGuest || isFan || !(await prepareRealtimeAuth()) || !isActive) return;
+                messagesChannel = supabase.channel(createRealtimeChannelTopic(`header-messages:${userId}`))
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, scheduleRefresh)
+                    .subscribe(status => { if (status === 'SUBSCRIBED') scheduleRefresh(); });
+            };
+            void connect();
 
             return () => {
                 isActive = false;
+                ++unreadChatRequestRef.current;
                 focusTask.cancel();
+                appState.remove();
+                if (timer) clearTimeout(timer);
+                if (messagesChannel) void supabase.removeChannel(messagesChannel);
             };
-        }, [checkUnreadNotifications, checkUnreadChats, isFan])
+        }, [checkUnreadChats, isFan, isGuest, userId])
     );
-
-    useEffect(() => {
-        if (!userId || isGuest) {
-            setHasUnreadChats(false);
-            return;
-        }
-
-        checkUnreadNotifications();
-        if (isFan) {
-            setHasUnreadChats(false);
-        } else {
-            checkUnreadChats();
-        }
-
-        const messagesChannel = isFan
-            ? null
-            : supabase
-                .channel(createRealtimeChannelTopic(`header-messages:${userId}`))
-                .on(
-                    'postgres_changes',
-                    { event: '*', schema: 'public', table: 'messages' },
-                    () => {
-                        checkUnreadChats();
-                    }
-                )
-                .subscribe();
-
-        return () => {
-            if (messagesChannel) {
-                supabase.removeChannel(messagesChannel);
-            }
-        };
-    }, [userId, isGuest, isFan, checkUnreadNotifications, checkUnreadChats]);
 
     const isTransparent = useSharedValue(transparent ? 1 : 0);
 

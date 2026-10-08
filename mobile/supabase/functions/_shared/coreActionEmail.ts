@@ -1,4 +1,6 @@
 import { sendEmailWithGmail } from "./gmailEmail.ts";
+import { buildActionEmailUrl } from "./actionLinks.ts";
+import { withNotificationRouteMeta } from "./notificationRoutes.ts";
 
 type CoreActionNotificationPayload = {
   user_id?: string | null;
@@ -70,7 +72,7 @@ function buildCoreActionEmailHtml(payload: CoreActionNotificationPayload, recipi
   const safeName = escapeHtml(recipientName || "there");
   const safeTitle = escapeHtml(title);
   const safeMessage = escapeHtml(message);
-  const appUrl = Deno.env.get("CORE_ACTION_EMAIL_APP_URL") || "musikalokal://notifications";
+  const appUrl = buildActionEmailUrl(withNotificationRouteMeta(payload.meta), Deno.env.get("CORE_ACTION_EMAIL_APP_URL"));
   const safeAppUrl = escapeHtml(appUrl);
 
   return `
@@ -92,6 +94,7 @@ function buildCoreActionEmailHtml(payload: CoreActionNotificationPayload, recipi
       <div style="text-align:center;margin:28px 0;">
         <a href="${safeAppUrl}" style="display:inline-block;background:#5546ff;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:700;">Open MusikaLokal</a>
       </div>
+      <p style="margin:0 0 20px;font-size:13px;line-height:1.5;word-break:break-all;">If the button does not work, open this link: <a href="${safeAppUrl}">${safeAppUrl}</a></p>
       <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">This email was sent because there was an important update on your MusikaLokal account.</p>
     </div>
   </div>

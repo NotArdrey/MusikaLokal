@@ -201,6 +201,13 @@ const StudioBookTab = ({
   const hasBlockingPaymentBooking = paymentEligibility.hasOutstanding;
   const blockingPaymentTitle = "Outstanding Studio Payment";
   const blockingPaymentMessage = "Complete or cancel your outstanding studio payments before reserving any studio.";
+  const openOutstandingWallet = (blockingBookings = paymentEligibility.bookings) => {
+    (sheetRef as any)?.current?.dismiss();
+    const bookingId = blockingBookings.length === 1 ? blockingBookings[0]?.id : undefined;
+    router.push({ pathname: "/wallet", params: {
+      section: "outstanding", refresh: String(Date.now()), ...(bookingId ? { bookingId } : {}),
+    } } as any);
+  };
   const [recordingSongCountInput, setRecordingSongCountInput] = React.useState("1");
   const [editingBookingDraft, setEditingBookingDraft] = React.useState<{
     booking: any;
@@ -1308,10 +1315,7 @@ const StudioBookTab = ({
               shadowRadius: 3,
               elevation: 3,
             }}
-            onPress={() => {
-              (sheetRef as any)?.current?.dismiss();
-              router.push({ pathname: "/bookings", params: { tab: "Pending" } } as any);
-            }}
+            onPress={() => openOutstandingWallet()}
           >
             <Text
               style={{
@@ -2551,10 +2555,7 @@ const StudioBookTab = ({
                         void paymentEligibility.refresh();
                         showAlert("warning", "Outstanding Studio Payment", detail.error, [
                           { text: "Cancel", style: "cancel" },
-                          { text: "Pay Now", onPress: () => {
-                            (sheetRef as any)?.current?.dismiss();
-                            router.push({ pathname: "/bookings", params: { tab: "Pending" } } as any);
-                          } },
+                          { text: "Pay Now", onPress: () => openOutstandingWallet(detail.bookings) },
                         ]);
                         return;
                       }

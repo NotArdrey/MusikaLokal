@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-07",
+  "automatedTests": {
+    "command": "npm run test:heads-up-notifications",
+    "passed": 10,
+    "failed": 0
+  },
+  "mobileTypeScript": "passed",
+  "targetedEslint": "passed (zero errors; two existing notification-settings warnings)",
+  "androidManifestIntrospection": {
+    "defaultChannel": "musika-lokal-alerts-v2",
+    "passed": true
+  },
+  "androidBundle": {
+    "path": "mobile/build/heads-up-verification",
+    "passed": true,
+    "notificationModules": [
+      {
+        "module": "src/notifications/expoNotifications.ts",
+        "included": true
+      },
+      {
+        "module": "expo-notifications/build/index.js",
+        "included": true
+      },
+      {
+        "module": "expo-notifications/build/setNotificationChannelAsync.android.js",
+        "included": true
+      },
+      {
+        "module": "expo-notifications/build/getExpoPushTokenAsync.js",
+        "included": true
+      }
+    ]
+  },
+  "liveReadOnlyInspection": {
+    "channel": "musika-lokal-alerts-v2",
+    "priority": "high",
+    "sound": "default",
+    "activePushDevices": 0,
+    "activeAndroidPushDevices": 0
+  },
+  "localConfiguration": {
+    "expoProjectIdConfigured": false,
+    "firebaseAndroidFileConfigured": false
+  },
+  "release": {
+    "apkBuilt": false,
+    "backendChangesRequired": false,
+    "deviceHeadsUpAcceptance": "pending"
+  }
+}

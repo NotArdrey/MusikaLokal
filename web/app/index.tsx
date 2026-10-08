@@ -5,6 +5,7 @@ import { useTheme } from "../src/context/ThemeContext";
 import { BRAND_LOGOS } from "../src/constants/Images";
 import { parseAndroidRelease, type AndroidRelease } from "../src/utils/androidRelease";
 import { downloadAndroidApk } from "../src/utils/downloadAndroidApk";
+import previousRelease from "../releases/8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272.json";
 import "../src/theme/download.css";
 
 const installationSteps = [
@@ -93,6 +94,7 @@ export default function DownloadHomepage() {
             </div>
             <p className="release-description" role="status">{release ? `Version ${release.versionName} · ${(release.sizeBytes / 1024 / 1024).toFixed(1)} MB · ${release.minSdk === 24 ? "Android 7.0+" : `Android API ${release.minSdk}+`}` : loading ? "Finding the latest Android download." : "The Android app is not available to download right now. Please check back soon."}</p>
             <p className="standalone-note">Available for 64-bit Android devices.</p>
+            <p className="previous-release">Previous version: <a href={previousRelease.downloadUrl}>Download version {previousRelease.versionName}</a></p>
             {device ? <p className="device-note">{device === "android" ? "Keep this page open until your download is ready." : device === "ios" ? "This app is for Android. Open this page on your Android phone to install." : "Open this page on your Android phone, or download here and transfer the APK."}</p> : null}
             {downloadProgress !== null ? <div className="download-progress"><progress aria-label="APK download progress" value={downloadProgress} max={100} /><span>{downloadProgress === 100 ? "Preparing your file…" : `${downloadProgress}% downloaded`}</span></div> : null}
             <p className="download-notice" aria-live="polite">{downloadProgress !== null ? "Keep this page open. Your file will be saved when the download is complete." : downloadNotice}</p>

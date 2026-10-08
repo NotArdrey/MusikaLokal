@@ -1,0 +1,170 @@
+[
+  {
+    "width": 320,
+    "dark": false,
+    "fontScale": 1,
+    "ready": false,
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": false,
+    "fontScale": 1,
+    "ready": true,
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": false,
+    "fontScale": 1.6,
+    "ready": false,
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": false,
+    "fontScale": 1.6,
+    "ready": true,
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "fontScale": 1,
+    "ready": false,
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "fontScale": 1,
+    "ready": true,
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "fontScale": 1.6,
+    "ready": false,
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "fontScale": 1.6,
+    "ready": true,
+    "passed": true
+  },
+  {
+    "width": 360,
+    "dark": false,
+    "fontScale": 1,
+    "ready": false,
+    "passed": true
+  },
+  {
+    "width": 360,
+    "dark": false,
+    "fontScale": 1,
+    "ready": true,
+    "passed": true
+  },
+  {
+    "width": 360,
+    "dark": false,
+    "fontScale": 1.6,
+    "ready": false,
+    "passed": true
+  },
+  {
+    "width": 360,
+    "dark": false,
+    "fontScale": 1.6,
+    "ready": true,
+    "passed": true
+  },
+  {
+    "width": 360,
+    "dark": true,
+    "fontScale": 1,
+    "ready": false,
+    "passed": true
+  },
+  {
+    "width": 360,
+    "dark": true,
+    "fontScale": 1,
+    "ready": true,
+    "passed": true
+  },
+  {
+    "width": 360,
+    "dark": true,
+    "fontScale": 1.6,
+    "ready": false,
+    "passed": true
+  },
+  {
+    "width": 360,
+    "dark": true,
+    "fontScale": 1.6,
+    "ready": true,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "fontScale": 1,
+    "ready": false,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "fontScale": 1,
+    "ready": true,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "fontScale": 1.6,
+    "ready": false,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "fontScale": 1.6,
+    "ready": true,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "fontScale": 1,
+    "ready": false,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "fontScale": 1,
+    "ready": true,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "fontScale": 1.6,
+    "ready": false,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "fontScale": 1.6,
+    "ready": true,
+    "passed": true
+  }
+]

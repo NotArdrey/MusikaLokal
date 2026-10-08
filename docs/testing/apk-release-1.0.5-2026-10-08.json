@@ -1,0 +1,33 @@
+{
+  "date": "2026-10-08",
+  "website": "https://musika-lokal.vercel.app",
+  "deploymentId": "dpl_5Z6NedeYocPawyb8twXmh5tM71o8",
+  "versionName": "1.0.5",
+  "versionCode": 6,
+  "packageId": "com.anonymous.musikalokal",
+  "sha256": "e70b91eae9eedfa5f358935b25d95521fcb2d271fa98140592762893740620af",
+  "sizeBytes": 102459743,
+  "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+  "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/e70b91eae9eedfa5f358935b25d95521fcb2d271fa98140592762893740620af/musikalokal-testing.apk?download=1",
+  "verification": {
+    "androidBuild": "passed",
+    "signatureAndUpdateCertificate": "passed",
+    "embeddedBundleAndPrivateCredentialScan": "passed",
+    "embeddedSourcesMatch": ["src/context/RadioPlayerContext.tsx", "src/data/queryClient.ts", "src/hooks/usePushNotifications.ts", "src/components/ApplicantDetailsModal.tsx"],
+    "mobileTypecheck": "passed",
+    "webTypecheck": "passed",
+    "focusedRegressionChecksPassed": 91,
+    "websiteBuild": "passed",
+    "websiteDownloadAndAdminRegression": "passed",
+    "stagedBrowserDownloadAndChecksum": "passed",
+    "productionBrowserChecks": "passed",
+    "productionRehashedStagedDownload": true,
+    "adminRoutesIncludedInDeployment": true
+  },
+  "storage": {
+    "provider": "existing Vercel Blob store",
+    "reason": "Available Supabase credentials returned HTTP 403 retrieving publishing credentials; existing .env.local Blob credential worked."
+  },
+  "backendDeploymentRequired": false,
+  "limitations": ["Physical Android installation and live authenticated admin workflows were not tested in this release."]
+}

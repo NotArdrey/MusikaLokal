@@ -14,7 +14,7 @@ for (const app of ["mobile", "web"]) {
       read(`../${app}/src/hooks/useApplicationSubmissionAction.ts`),
       read(`../${app}/src/utils/notificationNavigation.ts`),
       read(`../${app}/src/components/GroupApplicationCvTaskList.tsx`),
-      app === "mobile" ? read(`../${app}/app/group_application_cv.tsx`) : Promise.resolve(""),
+      app === "mobile" ? read(`../${app}/src/components/GroupApplicationCvForm.tsx`) : Promise.resolve(""),
       app === "mobile" ? read(`../${app}/app/(tabs)/bookings.tsx`) : Promise.resolve(""),
       app === "mobile" ? read(`../${app}/src/components/BookingDetailsSheet.tsx`) : Promise.resolve(""),
     ]);
@@ -48,13 +48,13 @@ for (const app of ["mobile", "web"]) {
     assert.match(notificationNavigation, /group_application_member_cv_required/);
     assert.match(taskList, /Group application tasks/);
     if (app === "mobile") {
-      assert.match(screen, /Send Complete Application/);
+      assert.match(screen, /Send Application/);
       assert.match(screen, /aiReviewConsent: true/);
       assert.match(screen, /memberVerificationConsent: true/);
       assert.doesNotMatch(screen, /accessibilityRole="checkbox"/);
       assert.doesNotMatch(screen, /Back to Bookings/);
       assert.doesNotMatch(bookings, /<GroupApplicationCvTaskList/);
-      assert.match(bookings, /"Waiting for members"/);
+      assert.match(bookings, /getGroupApplicationCvStatusLabel/);
       assert.match(bookings, /member CVs submitted/);
       assert.match(bookings, /\bWithdraw\b/);
       assert.doesNotMatch(bookingDetails, /name="arrow-down"/);

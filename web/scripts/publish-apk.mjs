@@ -3,7 +3,7 @@ import { readFile, stat, mkdir, writeFile, rename } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { put } from '@vercel/blob';
+import { uploadAndroidApk } from './android-release-storage.mjs';
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const apkPath = resolve(process.argv[2] || resolve(webRoot, '../mobile/build/testing/musikalokal-testing.apk'));
@@ -19,15 +19,9 @@ try {
       !/^[a-f0-9]{64}$/.test(metadata.certificateSha256) || metadata.minSdk < 24) {
     throw new Error('APK verification metadata is missing or does not match the APK. Rebuild with android:apk:test.');
   }
-  if (!process.env.BLOB_READ_WRITE_TOKEN && !process.env.BLOB_STORE_ID) {
-    throw new Error('Authenticate the connected Blob store with Vercel CLI/environment credentials before uploading.');
-  }
-  const blob = await put(`android/testing/${sha256}/musikalokal-testing.apk`, createReadStream(apkPath), {
-    access: 'public', contentType: 'application/vnd.android.package-archive',
-    multipart: true, addRandomSuffix: false, allowOverwrite: false,
-  });
+  const downloadUrl = await uploadAndroidApk(apkPath, metadata);
   // Only publish the new manifest after the complete APK is available.
-  const release = { ...metadata, downloadUrl: blob.downloadUrl };
+  const release = { ...metadata, downloadUrl };
   const historyRoot = resolve(webRoot, 'releases');
   await mkdir(historyRoot, { recursive: true });
   await writeFile(resolve(historyRoot, `${sha256}.json`), `${JSON.stringify(release, null, 2)}\n`);
@@ -47,7 +41,7 @@ try {
       sha256_cert_fingerprints: [certificate],
     },
   }], null, 2)}\n`);
-  console.log(`Uploaded verified testing APK: ${blob.downloadUrl}`);
+  console.log(`Uploaded verified testing APK: ${downloadUrl}`);
   console.log(`SHA-256: ${sha256}`);
   console.log('Release manifest updated. Rebuild and deploy the website to publish this release.');
 } catch (error) {

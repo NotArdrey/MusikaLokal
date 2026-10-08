@@ -28,6 +28,7 @@ import { useTheme } from "../src/context/ThemeContext";
 import { formatFriendlyDateTime } from "../src/utils/friendlyDateTime";
 import { getStationLiveTimelineState } from "../src/utils/radioTimeline";
 import {getStationQueueEntries, mergeStationSnapshot} from '../src/utils/stationQueue';
+import { getStationArtistName, getStationArtwork, getStationUpcomingEntries } from "../src/utils/stationPresentation";
 import {useStationQueueRefresh} from '../src/hooks/useStationQueueRefresh';
 import { typography } from "../src/theme/tokens";
 
@@ -78,13 +79,7 @@ const resolveStationMediaUrl = (value: unknown) => {
 };
 
 const getStationArtworkUrl = (station: any) => {
-  const candidateImages: unknown[] = [
-    station?.cover_image_url,
-    station?.creator?.avatar_url,
-    ...(Array.isArray(station?.slots)
-      ? station.slots.map((slot: any) => slot?.playlist?.cover_image_url)
-      : []),
-  ];
+  const candidateImages: unknown[] = [getStationArtwork(station)];
 
   for (const value of candidateImages) {
     const resolved = resolveStationMediaUrl(value);
@@ -129,6 +124,8 @@ export default function StationDetailsScreen() {
     activeStation,
     currentTrack,
     currentSlotIndex,
+    isPlaying,
+    loadingStationId,
     isMuted,
     syncStationData,
     toggleMute,
@@ -335,14 +332,16 @@ export default function StationDetailsScreen() {
 
   const handleListenOrMute = useCallback(async () => {
     if (!station) return;
-
-    if (isActiveStation) {
-      await toggleMute();
-      return;
+    try {
+      if (isActiveStation && isPlaying) {
+        await toggleMute();
+        return;
+      }
+      await tuneIn(station, 0);
+    } catch (error: any) {
+      setAlert({ type: "error", title: "Unable to Play Radio", message: error?.message || "Please try again." });
     }
-
-    await tuneIn(station, 0);
-  }, [isActiveStation, station, toggleMute, tuneIn]);
+  }, [isActiveStation, isPlaying, station, toggleMute, tuneIn]);
 
   if (loading) {
     return (
@@ -375,7 +374,8 @@ export default function StationDetailsScreen() {
     : slots;
   const liveTimelineState = getStationLiveTimelineState(station, liveNowMs);
   const queueEntries = getStationQueueEntries(station);
-  const upNext = queueEntries.slice(liveTimelineState.queueIndex + 1).concat(queueEntries.slice(0, liveTimelineState.queueIndex + 1));
+  const displayedQueueIndex = isActiveStation && currentTrack ? currentTrack.queueIndex : liveTimelineState.queueIndex;
+  const upNext = getStationUpcomingEntries(queueEntries, displayedQueueIndex);
   const liveCurrentSlot = liveTimelineState.slot || getLiveCurrentSlot(station, liveSlots);
   const liveCurrentItem = liveTimelineState.item || getLiveCurrentItem(station, liveSlots);
   const playerSlotIndex = liveTimelineState.synchronized
@@ -386,7 +386,7 @@ export default function StationDetailsScreen() {
   const liveSlotIds = new Set(liveSlots.map((slot: any) => slot.id));
   const existingPlaylistIds = new Set(slots.map((s: any) => s.playlist_id));
   const playerTrackTitle = isActiveStation
-    ? liveCurrentItem?.title || currentTrack?.title || liveSlots[playerSlotIndex]?.playlist?.title || liveSlots[playerSlotIndex]?.label || `Track ${playerSlotIndex + 1}`
+    ? currentTrack?.title || liveCurrentItem?.title || liveSlots[playerSlotIndex]?.playlist?.title || liveSlots[playerSlotIndex]?.label || `Track ${playerSlotIndex + 1}`
     : liveCurrentItem?.title || liveCurrentSlot?.playlist?.title || liveCurrentSlot?.label || `Slot ${playerSlotIndex + 1}`;
   const stationArtworkUrl = getStationArtworkUrl(station);
   const stationStatus = station?.is_active && queueEntries.length > 0 ? "live" : "offline";
@@ -416,9 +416,9 @@ export default function StationDetailsScreen() {
         {/* Meta */}
         <View style={styles.metaSection}>
           <Text style={[styles.stationName, { color: colors.text }]}>{station.name}</Text>
-          {station.creator && (
+          {!!getStationArtistName(station) && (
             <Text style={[styles.creatorName, { color: colors.textSecondary }]}>
-              by {station.creator.full_name}
+              by {getStationArtistName(station)}
             </Text>
           )}
           {station.description && (
@@ -451,17 +451,19 @@ export default function StationDetailsScreen() {
         {/* Player Controls */}
         {stationStatus === "live" && liveSlots.length > 0 && (
           <View style={[styles.playerBar, { backgroundColor: isDark ? "#1E293B" : "#F8FAFC", borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
-            <TouchableOpacity activeOpacity={1} onPress={handleListenOrMute} style={styles.playerBtn}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={isActiveStation && isPlaying ? (playerIsMuted ? "Unmute radio" : "Mute radio") : "Listen to radio"} disabled={loadingStationId === station.id} activeOpacity={1} onPress={handleListenOrMute} style={styles.playerBtn}>
+              {loadingStationId === station.id ? <ActivityIndicator color={colors.primary} /> : (
               <Ionicons
-                name={isActiveStation ? (playerIsMuted ? "volume-mute" : "volume-high") : "play"}
+                name={isActiveStation && isPlaying ? (playerIsMuted ? "volume-mute" : "volume-high") : "play"}
                 size={28}
                 color={isActiveStation && playerIsMuted ? "#ef4444" : colors.primary}
               />
+              )}
             </TouchableOpacity>
 
             <View style={{ flex: 1, marginHorizontal: 12 }}>
               <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                {isActiveStation ? "Now Playing" : "Tap to Listen"}
+                {loadingStationId === station.id ? "Connecting" : isActiveStation && isPlaying ? "Now Playing" : "Tap to Listen"}
               </Text>
               <Text style={{ fontSize: moderateScale(13), fontWeight: "600", color: colors.text }} numberOfLines={1}>
                 {playerTrackTitle}
@@ -469,7 +471,7 @@ export default function StationDetailsScreen() {
             </View>
 
             <Text style={[styles.radioModeLabel, { color: colors.textSecondary }]}>
-              {isActiveStation ? (playerIsMuted ? "Muted" : "Live") : "Listen"}
+              {loadingStationId === station.id ? "Loading" : isActiveStation && isPlaying ? (playerIsMuted ? "Muted" : "Live") : "Listen"}
             </Text>
           </View>
         )}
@@ -482,11 +484,15 @@ export default function StationDetailsScreen() {
                 <Text style={{color: colors.textSecondary, marginRight: 12}}>{index + 1}</Text>
                 <View style={{flex: 1, minWidth: 0}}>
                   <Text style={[styles.slotPlaylist, {color: colors.text}]}>{entry.item.title}</Text>
-                  <Text style={[styles.slotTime, {color: colors.textSecondary}]}>{entry.playlist?.title}</Text>
+                  {!!entry.playlist?.title && entry.playlist.title !== entry.item.title && (
+                    <Text style={[styles.slotTime, {color: colors.textSecondary}]}>{entry.playlist.title}</Text>
+                  )}
                 </View>
               </View>
             ))}
-            <Text style={[styles.sectionSubtitle, {color: colors.textSecondary}]}>The queue loops after the final track.</Text>
+            <Text style={[styles.sectionSubtitle, {color: colors.textSecondary}]}>
+              {queueEntries.length === 1 ? "This station has one track. It repeats until more music is added." : "The queue loops after the final track."}
+            </Text>
           </View>
         )}
 

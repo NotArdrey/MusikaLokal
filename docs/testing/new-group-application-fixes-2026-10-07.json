@@ -1,0 +1,93 @@
+{
+  "verifiedAt": "2026-10-07T12:32:50.072Z",
+  "projectRef": "aefldxegsvzecshlayza",
+  "functions": [
+    {
+      "slug": "manage-bookings",
+      "previousVersion": 109,
+      "version": 110,
+      "status": "ACTIVE",
+      "verifyJwt": false
+    },
+    {
+      "slug": "gig-applications",
+      "previousVersion": 122,
+      "version": 123,
+      "status": "ACTIVE",
+      "verifyJwt": false
+    }
+  ],
+  "sourceVerification": [
+    {
+      "file": "manage-bookings/index.ts",
+      "matchesLocalSource": true,
+      "sha256": "f772625f36b43135f09982ded576a557ab96ffcd517df75ad445fe6760456000"
+    },
+    {
+      "file": "gig-applications/index.ts",
+      "matchesLocalSource": true,
+      "sha256": "c315acce75a6d839aa86eb0bd69ced75a0d7e6f3a16ed0b52bdc68d4d1a1bb35"
+    },
+    {
+      "file": "_shared/gigApplicationAudience.ts",
+      "matchesLocalSource": true,
+      "sha256": "385c0905ffab4dce803c215f05602d8cdefd4734ffbfe6604f60e130ee917942"
+    },
+    {
+      "file": "_shared/notificationRoutes.ts",
+      "matchesLocalSource": true,
+      "sha256": "2b4979fe70dc6dc104c2fd057ab14fc00adfe2dd0bd3f551784b79cf266b75f2"
+    }
+  ],
+  "smokeChecks": [
+    {
+      "slug": "manage-bookings",
+      "anonymousKeyAsBearer": false,
+      "status": 401
+    },
+    {
+      "slug": "manage-bookings",
+      "anonymousKeyAsBearer": true,
+      "status": 401
+    },
+    {
+      "slug": "gig-applications",
+      "anonymousKeyAsBearer": false,
+      "status": 401
+    },
+    {
+      "slug": "gig-applications",
+      "anonymousKeyAsBearer": true,
+      "status": 401
+    }
+  ],
+  "migration": {
+    "version": "20261007190000",
+    "name": "serialize_group_member_cv_submissions",
+    "matchesLocalBody": true,
+    "serverAllowed": true,
+    "clientAllowed": false,
+    "anonymousAllowed": false,
+    "sha256": "70c951fe022ec6b690d3844dfd5722d69ae86cd2aab6181af520a85a48797908"
+  },
+  "validation": {
+    "automatedChecksPassed": 94,
+    "mobileTypecheck": "passed",
+    "webTypecheck": "passed",
+    "gitDiffCheck": "passed",
+    "legacyPrivacySuite": {
+      "passed": false,
+      "failureCount": 6,
+      "reasons": [
+        "Removed web application screens",
+        "Scoring source assertions"
+      ]
+    }
+  },
+  "limitations": {
+    "authenticatedParticipantLiveCheck": false,
+    "androidDeviceChecksPending": true,
+    "clientBundleBuilt": false
+  },
+  "rollbackSourceDirectory": "C:/Users/Neila/AppData/Local/Temp/musikalokal-group-cv-rollback-NB4PSn"
+}

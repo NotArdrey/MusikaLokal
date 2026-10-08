@@ -1,27 +1,15 @@
-type ExpoNotificationsModuleLike = {
-  AndroidImportance?: {
-    MAX?: number;
-  };
-  setNotificationHandler?: (...args: any[]) => any;
-  setNotificationChannelAsync?: (...args: any[]) => Promise<any>;
-  getPermissionsAsync?: (...args: any[]) => Promise<any>;
-  requestPermissionsAsync?: (...args: any[]) => Promise<any>;
-  getExpoPushTokenAsync?: (...args: any[]) => Promise<any>;
-  getLastNotificationResponseAsync?: (...args: any[]) => Promise<any>;
-  addNotificationReceivedListener?: (...args: any[]) => { remove: () => void };
-  addNotificationResponseReceivedListener?: (...args: any[]) => { remove: () => void };
-  clearLastNotificationResponseAsync?: (...args: any[]) => Promise<any>;
-};
+type ExpoNotificationsModule = typeof import('expo-notifications');
 
-let nativeNotifications: ExpoNotificationsModuleLike | null = null;
+let nativeNotifications: ExpoNotificationsModule | null = null;
 
 try {
-  const dynamicRequire = eval("require") as (id: string) => any;
-  nativeNotifications = dynamicRequire("expo-notifications");
+  // Metro needs a literal require to include the notification library in native bundles.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  nativeNotifications = require('expo-notifications') as ExpoNotificationsModule;
 } catch {
   if (__DEV__) {
     console.info(
-      "[push] expo-notifications unavailable; native push registration is disabled until dependencies are installed and Metro is restarted.",
+      '[push] expo-notifications unavailable; use a native build with the notification module installed.',
     );
   }
 }
@@ -29,5 +17,5 @@ try {
 export const Notifications = nativeNotifications;
 export const isExpoNotificationsAvailable = !!nativeNotifications;
 export const NotificationAndroidImportance = {
-  MAX: nativeNotifications?.AndroidImportance?.MAX ?? 5,
+  MAX: nativeNotifications?.AndroidImportance.MAX ?? 7,
 } as const;

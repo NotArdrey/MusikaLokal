@@ -1,4 +1,4 @@
-import { createAudioPlayer, type AudioPlayer, type AudioStatus } from "expo-audio";
+import { createAudioPlayer, type AudioMetadata, type AudioPlayer, type AudioStatus } from "expo-audio";
 import Constants from "expo-constants";
 
 export type PlaybackStatus =
@@ -27,9 +27,13 @@ export class AudioSound {
   private disposed = false;
   private shouldPlay = false;
   private finished = false;
+  private wasPlaying = false;
 
   private constructor(private player: AudioPlayer) {
     this.subscription = player.addListener("playbackStatusUpdate", (status) => {
+      if (status.playing) this.shouldPlay = true;
+      else if (this.wasPlaying && !status.isBuffering) this.shouldPlay = false;
+      this.wasPlaying = status.playing;
       if (status.didJustFinish) {
         this.finished = true;
         this.shouldPlay = false;
@@ -102,13 +106,13 @@ export class AudioSound {
     this.callback = callback;
   }
 
-  enableBackgroundPlayback(title: string) {
+  enableBackgroundPlayback(title: string, metadata: AudioMetadata = {}, isLiveStream = false) {
     // Expo Go's native Android manifest does not include this project's
     // AudioControlsService config. Calling this API there makes expo-audio log
     // a red-screen service-binding error; custom development/release builds
     // include the service through the expo-audio config plugin in app.json.
     if (Constants.appOwnership === "expo") return;
-    this.player.setActiveForLockScreen(true, { title });
+    this.player.setActiveForLockScreen(true, { ...metadata, title }, { isLiveStream });
   }
 
   async getStatusAsync(): Promise<PlaybackStatus> {

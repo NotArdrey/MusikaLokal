@@ -1,9 +1,12 @@
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { emitToast } from '../events/toastBus';
 import { getScreenCacheKey, readScreenCache, writeScreenCache } from '../utils/screenCache';
 import { createRealtimeChannelTopic } from '../utils/realtimeChannel';
+import { BoundedCache } from '../utils/BoundedCache';
+import { CHAT_MESSAGE_PAGE_SIZE, fetchChatMessagesPage, type ChatMessageCursor } from '../data/chatMessages';
 
 const createUuidV4 = () =>
     'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
@@ -93,7 +96,7 @@ type SenderProfile = NonNullable<Message['sender']>;
 
 const CONVERSATIONS_CACHE_TTL_MS = 45_000;
 const CHAT_MESSAGES_CACHE_TTL_MS = 60_000;
-const senderProfileCache = new Map<string, SenderProfile>();
+const senderProfileCache = new BoundedCache<string, SenderProfile>(128, 5 * 60_000);
 
 const primeSenderProfileCache = (messages: Message[] | null | undefined) => {
     (messages || []).forEach((message) => {
@@ -200,9 +203,17 @@ export const setConversationMute = async (
     };
 };
 
+const compareMessageOrder = (left: Message, right: Message) => {
+    const milliseconds = toTimestamp(left.created_at) - toTimestamp(right.created_at);
+    if (milliseconds) return milliseconds;
+    // Postgres timestamps can carry finer precision than JavaScript Date.
+    const fraction = (value: string) => Number((value?.match(/\.(\d+)/)?.[1] || '').padEnd(6, '0').slice(3, 6));
+    return fraction(left.created_at) - fraction(right.created_at) || left.id.localeCompare(right.id);
+};
+
 const sortMessagesChronologically = (messages: Message[]) => {
     return [...messages].sort((left, right) => {
-        return toTimestamp(left.created_at) - toTimestamp(right.created_at);
+        return compareMessageOrder(left, right);
     });
 };
 
@@ -210,7 +221,15 @@ const upsertMessage = (messages: Message[], nextMessage: Message) => {
     const existingIndex = messages.findIndex((message) => message.id === nextMessage.id);
 
     if (existingIndex < 0) {
-        return sortMessagesChronologically([...messages, nextMessage]);
+        let start = 0;
+        let end = messages.length;
+        while (start < end) {
+            const middle = (start + end) >>> 1;
+            const comparison = compareMessageOrder(messages[middle], nextMessage);
+            if (comparison <= 0) start = middle + 1;
+            else end = middle;
+        }
+        return [...messages.slice(0, start), nextMessage, ...messages.slice(start)];
     }
 
     const nextMessages = [...messages];
@@ -224,27 +243,16 @@ const upsertMessage = (messages: Message[], nextMessage: Message) => {
         local_error: nextMessage.local_error ?? existingMessage.local_error,
     };
 
-    return sortMessagesChronologically(nextMessages);
-};
-
-const mergeFetchedMessages = (currentMessages: Message[], fetchedMessages: Message[]) => {
-    const fetchedMessageIds = new Set(fetchedMessages.map((message) => message.id));
-    const localUnresolvedMessages = currentMessages.filter((message) => {
-        return (
-            (message.local_status === 'sending' || message.local_status === 'failed') &&
-            !fetchedMessageIds.has(message.id)
-        );
-    });
-
-    return sortMessagesChronologically([...fetchedMessages, ...localUnresolvedMessages]);
+    return existingMessage.created_at === nextMessage.created_at || !nextMessage.created_at
+        ? nextMessages : sortMessagesChronologically(nextMessages);
 };
 
 const buildConversationListCacheKey = (currentUserId: string) => {
     return getScreenCacheKey('chat-conversations', { currentUserId });
 };
 
-const buildConversationMessagesCacheKey = (conversationId: string) => {
-    return getScreenCacheKey('chat-messages', { conversationId });
+const buildConversationMessagesCacheKey = (conversationId: string, currentUserId: string) => {
+    return getScreenCacheKey('chat-messages', { conversationId, currentUserId });
 };
 
 // Hook to get or create a conversation (1-on-1)
@@ -898,57 +906,71 @@ export function useChat(conversationId: string | null, currentUserId: string | n
     const [loading, setLoading] = useState(true);
     const [pendingSendCount, setPendingSendCount] = useState(0);
     const [error, setError] = useState<string | null>(null);
+    const [hasOlderMessages, setHasOlderMessages] = useState(false);
+    const [loadingOlder, setLoadingOlder] = useState(false);
+    const [olderError, setOlderError] = useState<string | null>(null);
+    const generationRef = useRef(0);
+    const loadedKeyRef = useRef<string | null>(null);
+    const oldestRef = useRef<ChatMessageCursor | null>(null);
+    const hasOlderRef = useRef(false);
+    const olderRequestRef = useRef<AbortController | null>(null);
+    const cacheTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const cacheSnapshotRef = useRef<{ key: string; messages: Message[] } | null>(null);
     const sending = pendingSendCount > 0;
-    const messageCacheKey = conversationId
-        ? buildConversationMessagesCacheKey(conversationId)
+    const messageCacheKey = conversationId && currentUserId
+        ? buildConversationMessagesCacheKey(conversationId, currentUserId)
         : null;
+    const currentKeyRef = useRef(messageCacheKey);
+    useEffect(() => {
+        currentKeyRef.current = messageCacheKey;
+        return () => { currentKeyRef.current = null; };
+    }, [messageCacheKey]);
 
     // Fetch initial messages
-    useEffect(() => {
-        if (!conversationId) {
+    useFocusEffect(useCallback(() => {
+        const generation = ++generationRef.current;
+        loadedKeyRef.current = null;
+        oldestRef.current = null;
+        hasOlderRef.current = false;
+        setHasOlderMessages(false);
+        setLoadingOlder(false);
+        setOlderError(null);
+        setError(null);
+        setPendingSendCount(0);
+        setMessages([]);
+        if (!conversationId || !currentUserId || !messageCacheKey) {
             setMessages([]);
             setLoading(false);
             return;
         }
 
         let cancelled = false;
+        const controller = new AbortController();
 
         const fetchMessages = async (options?: { silent?: boolean }) => {
             try {
                 if (!options?.silent) {
                     setLoading(true);
                 }
-                const { data, error: fetchError } = await supabase
-                    .from('messages')
-                    .select(`
-                        *,
-                        sender:profiles!messages_sender_id_fkey(id, full_name, avatar_url),
-                        reactions:message_reactions(
-                            id,
-                            user_id,
-                            emoji,
-                            created_at,
-                            user:profiles!message_reactions_user_id_fkey(id, full_name, avatar_url)
-                        )
-                    `)
-                    .eq('conversation_id', conversationId)
-                    .order('created_at', { ascending: true });
-
-                if (fetchError) throw fetchError;
-                if (cancelled) return;
-
-                const fetchedMessages = sortMessagesChronologically(data || []);
+                const page = await fetchChatMessagesPage<Message>(conversationId, null, controller.signal);
+                if (cancelled || generation !== generationRef.current) return;
+                const fetchedMessages = page.messages;
                 primeSenderProfileCache(fetchedMessages);
+                loadedKeyRef.current = messageCacheKey;
+                oldestRef.current = page.oldest;
+                hasOlderRef.current = page.hasMore;
+                setHasOlderMessages(page.hasMore);
                 setMessages((prev) => {
-                    const nextMessages = mergeFetchedMessages(prev, fetchedMessages);
-
-                    if (messageCacheKey) {
-                        void writeScreenCache(messageCacheKey, nextMessages);
-                    }
-
-                    return nextMessages;
+                    if (currentKeyRef.current !== messageCacheKey) return prev;
+                    const fetchedIds = new Set(fetchedMessages.map(message => message.id));
+                    const newest = fetchedMessages[fetchedMessages.length - 1];
+                    const arrivedDuringFetch = prev.filter(message => !fetchedIds.has(message.id) &&
+                        (message.local_status === 'sending' || message.local_status === 'failed' ||
+                         !newest || toTimestamp(message.created_at) >= toTimestamp(newest.created_at)));
+                    return sortMessagesChronologically([...fetchedMessages, ...arrivedDuringFetch]);
                 });
             } catch (err: any) {
+                if (cancelled || generation !== generationRef.current) return;
                 console.error('Error fetching messages:', err);
                 setError(err.message);
             } finally {
@@ -970,6 +992,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             if (cachedMessages) {
                 const nextMessages = sortMessagesChronologically(cachedMessages);
                 primeSenderProfileCache(nextMessages);
+                loadedKeyRef.current = messageCacheKey;
                 setMessages(nextMessages);
                 setLoading(false);
             }
@@ -979,12 +1002,73 @@ export function useChat(conversationId: string | null, currentUserId: string | n
 
         return () => {
             cancelled = true;
+            ++generationRef.current;
+            controller.abort();
+            olderRequestRef.current?.abort();
+            olderRequestRef.current = null;
         };
-    }, [conversationId, messageCacheKey]);
+    }, [conversationId, currentUserId, messageCacheKey]));
+
+    const loadOlderMessages = useCallback(async () => {
+        if (!conversationId || !currentUserId || !hasOlderRef.current || !oldestRef.current || olderRequestRef.current) return;
+        const generation = generationRef.current;
+        const controller = new AbortController();
+        olderRequestRef.current = controller;
+        setLoadingOlder(true);
+        setOlderError(null);
+        try {
+            const page = await fetchChatMessagesPage<Message>(conversationId, oldestRef.current, controller.signal);
+            if (generation !== generationRef.current || controller.signal.aborted) return;
+            primeSenderProfileCache(page.messages);
+            if (page.oldest) oldestRef.current = page.oldest;
+            hasOlderRef.current = page.hasMore;
+            setHasOlderMessages(page.hasMore);
+            setMessages(prev => {
+                if (currentKeyRef.current !== messageCacheKey) return prev;
+                const byId = new Map(page.messages.map(message => [message.id, message]));
+                // Realtime/local edits already in memory take precedence over an older page response.
+                prev.forEach(message => byId.set(message.id, message));
+                return sortMessagesChronologically([...byId.values()]);
+            });
+        } catch (err: any) {
+            if (generation === generationRef.current && !controller.signal.aborted) {
+                setOlderError(err?.message || 'Could not load earlier messages.');
+            }
+        } finally {
+            if (olderRequestRef.current === controller) olderRequestRef.current = null;
+            if (generation === generationRef.current) setLoadingOlder(false);
+        }
+    }, [conversationId, currentUserId, messageCacheKey]);
+
+    useEffect(() => {
+        if (!messageCacheKey || loading || loadedKeyRef.current !== messageCacheKey) return;
+        const recent = messages.slice(-CHAT_MESSAGE_PAGE_SIZE);
+        const recentIds = new Set(recent.map(message => message.id));
+        const unresolved = messages.filter(message => !recentIds.has(message.id) &&
+            (message.local_status === 'sending' || message.local_status === 'failed'));
+        cacheSnapshotRef.current = { key: messageCacheKey, messages: [...unresolved, ...recent] };
+        if (cacheTimerRef.current) return;
+        cacheTimerRef.current = setTimeout(() => {
+            cacheTimerRef.current = null;
+            const snapshot = cacheSnapshotRef.current;
+            if (snapshot) void writeScreenCache(snapshot.key, snapshot.messages);
+        }, 500);
+    }, [loading, messageCacheKey, messages]);
+
+    useEffect(() => () => {
+        if (cacheTimerRef.current) clearTimeout(cacheTimerRef.current);
+        cacheTimerRef.current = null;
+        const snapshot = cacheSnapshotRef.current;
+        if (snapshot?.key === messageCacheKey) {
+            void writeScreenCache(snapshot.key, snapshot.messages);
+            cacheSnapshotRef.current = null;
+        }
+    }, [messageCacheKey]);
 
     // Subscribe to realtime updates
-    useEffect(() => {
-        if (!conversationId) return;
+    useFocusEffect(useCallback(() => {
+        if (!conversationId || !currentUserId) return;
+        let disposed = false;
 
         const channel: RealtimeChannel = supabase
             .channel(createRealtimeChannelTopic(`messages:${conversationId}`))
@@ -997,6 +1081,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                     filter: `conversation_id=eq.${conversationId}`,
                 },
                 async (payload) => {
+                    if (disposed) return;
                     let sender = senderProfileCache.get(payload.new.sender_id);
 
                     if (!sender) {
@@ -1009,6 +1094,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                         sender = fetchedSender || undefined;
                         cacheSenderProfile(sender || null);
                     }
+                    if (disposed) return;
 
                     const newMessage: Message = {
                         ...payload.new as Message,
@@ -1018,11 +1104,8 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                     };
 
                     setMessages((prev) => {
+                        if (currentKeyRef.current !== messageCacheKey) return prev;
                         const nextMessages = upsertMessage(prev, newMessage);
-
-                        if (messageCacheKey) {
-                            void writeScreenCache(messageCacheKey, nextMessages);
-                        }
 
                         return nextMessages;
                     });
@@ -1037,14 +1120,12 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                     filter: `conversation_id=eq.${conversationId}`,
                 },
                 (payload) => {
+                    if (disposed) return;
                     const updatedMessage = payload.new as Message;
 
                     setMessages((prev) => {
+                        if (currentKeyRef.current !== messageCacheKey) return prev;
                         const nextMessages = upsertMessage(prev, updatedMessage);
-
-                        if (messageCacheKey) {
-                            void writeScreenCache(messageCacheKey, nextMessages);
-                        }
 
                         return nextMessages;
                     });
@@ -1053,9 +1134,10 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             .subscribe();
 
         return () => {
+            disposed = true;
             supabase.removeChannel(channel);
         };
-    }, [conversationId, currentUserId, messageCacheKey]);
+    }, [conversationId, currentUserId, messageCacheKey]));
 
     // Send message function
     const sendMessage = useCallback(async (
@@ -1090,11 +1172,8 @@ export function useChat(conversationId: string | null, currentUserId: string | n
 
             setPendingSendCount((count) => count + 1);
             setMessages((prev) => {
+                if (currentKeyRef.current !== messageCacheKey) return prev;
                 const nextMessages = upsertMessage(prev, optimisticMessage);
-
-                if (messageCacheKey) {
-                    void writeScreenCache(messageCacheKey, nextMessages);
-                }
 
                 return nextMessages;
             });
@@ -1111,15 +1190,12 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             if (sendError) throw sendError;
 
             setMessages((prev) => {
+                if (currentKeyRef.current !== messageCacheKey) return prev;
                 const nextMessages = upsertMessage(prev, {
                     ...optimisticMessage,
                     local_status: 'sent',
                     local_error: null,
                 });
-
-                if (messageCacheKey) {
-                    void writeScreenCache(messageCacheKey, nextMessages);
-                }
 
                 return nextMessages;
             });
@@ -1139,6 +1215,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             console.error('Error sending message:', err);
             const messageError = err?.message || 'Message failed to send';
             setMessages((prev) => {
+                if (currentKeyRef.current !== messageCacheKey) return prev;
                 const failedMessages = prev.map((message) => {
                     if (
                         message.id === messageId &&
@@ -1154,15 +1231,11 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                     return message;
                 });
 
-                if (messageCacheKey) {
-                    void writeScreenCache(messageCacheKey, failedMessages);
-                }
-
                 return failedMessages;
             });
             return { error: messageError };
         } finally {
-            setPendingSendCount((count) => Math.max(0, count - 1));
+            if (currentKeyRef.current === messageCacheKey) setPendingSendCount((count) => Math.max(0, count - 1));
         }
     }, [conversationId, currentUserId, messageCacheKey]);
 
@@ -1196,11 +1269,8 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             setError(null);
             setPendingSendCount((count) => count + 1);
             setMessages((prev) => {
+                if (currentKeyRef.current !== messageCacheKey) return prev;
                 const nextMessages = upsertMessage(prev, nextMessage);
-
-                if (messageCacheKey) {
-                    void writeScreenCache(messageCacheKey, nextMessages);
-                }
 
                 return nextMessages;
             });
@@ -1219,15 +1289,12 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             if (sendError) throw sendError;
 
             setMessages((prev) => {
+                if (currentKeyRef.current !== messageCacheKey) return prev;
                 const nextMessages = upsertMessage(prev, {
                     ...nextMessage,
                     local_status: 'sent',
                     local_error: null,
                 });
-
-                if (messageCacheKey) {
-                    void writeScreenCache(messageCacheKey, nextMessages);
-                }
 
                 return nextMessages;
             });
@@ -1247,6 +1314,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             console.error('Error retrying message:', err);
             const messageError = err?.message || 'Message failed to send';
             setMessages((prev) => {
+                if (currentKeyRef.current !== messageCacheKey) return prev;
                 const failedMessages = prev.map((message) => {
                     if (message.id !== messageId) {
                         return message;
@@ -1259,15 +1327,11 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                     };
                 });
 
-                if (messageCacheKey) {
-                    void writeScreenCache(messageCacheKey, failedMessages);
-                }
-
                 return failedMessages;
             });
             return { error: messageError };
         } finally {
-            setPendingSendCount((count) => Math.max(0, count - 1));
+            if (currentKeyRef.current === messageCacheKey) setPendingSendCount((count) => Math.max(0, count - 1));
         }
     }, [conversationId, currentUserId, messageCacheKey, messages]);
 
@@ -1297,6 +1361,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
         }
 
         setMessages((prev) => {
+            if (currentKeyRef.current !== messageCacheKey) return prev;
             const nextMessages = prev.map((message) => {
                 if (message.sender_id === currentUserId || message.read_at) {
                     return message;
@@ -1307,10 +1372,6 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                     read_at: readAt,
                 };
             });
-
-            if (messageCacheKey) {
-                void writeScreenCache(messageCacheKey, nextMessages);
-            }
 
             return nextMessages;
         });
@@ -1335,7 +1396,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             if (upsertError) throw upsertError;
 
             // Update local state
-            setMessages(prev => prev.map(msg => {
+            setMessages(prev => currentKeyRef.current !== messageCacheKey ? prev : prev.map(msg => {
                 if (msg.id === messageId) {
                     const existingReactions = msg.reactions || [];
                     const existingIndex = existingReactions.findIndex(r => r.user_id === currentUserId);
@@ -1365,7 +1426,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             console.error('Error adding reaction:', err);
             return { error: err.message };
         }
-    }, [currentUserId]);
+    }, [currentUserId, messageCacheKey]);
 
     // Remove reaction from a message
     const removeReaction = useCallback(async (messageId: string) => {
@@ -1381,7 +1442,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             if (deleteError) throw deleteError;
 
             // Update local state
-            setMessages(prev => prev.map(msg => {
+            setMessages(prev => currentKeyRef.current !== messageCacheKey ? prev : prev.map(msg => {
                 if (msg.id === messageId) {
                     return {
                         ...msg,
@@ -1396,10 +1457,12 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             console.error('Error removing reaction:', err);
             return { error: err.message };
         }
-    }, [currentUserId]);
+    }, [currentUserId, messageCacheKey]);
 
-    return { messages, loading, sending, error, sendMessage, retryMessage, markAsRead, addReaction, removeReaction };
+    return { messages, loading, sending, error, hasOlderMessages, loadingOlder, olderError, loadOlderMessages,
+        sendMessage, retryMessage, markAsRead, addReaction, removeReaction };
 }
+
 
 // Helper to get total unread count (includes both 1-on-1 and group chats)
 export async function getUnreadMessageCount(userId: string): Promise<number> {

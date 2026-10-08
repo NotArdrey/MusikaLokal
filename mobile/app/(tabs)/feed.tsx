@@ -470,6 +470,10 @@ const getDistinctFeedCardImages = (
   preferredImages: (string | null | undefined)[],
   blockedImages: (string | null | undefined)[],
 ) => {
+  if (["artist", "profile", "musician"].includes(type.toLowerCase())) {
+    return Array.from(new Set(preferredImages.filter((image): image is string =>
+      typeof image === "string" && image.trim().length > 0)));
+  }
   const blockedKeys = new Set(
     blockedImages
       .map(getFeedImageIdentityKey)
@@ -486,9 +490,13 @@ const getDistinctFeedCardImages = (
   return [getDistinctFeedFallbackImage(type, id, blockedImages)];
 };
 
-const ensureFeedCardImage = <T extends { id?: string | null; type?: string; image?: string | null; images?: string[] }>(item: T): T => {
+const ensureFeedCardImage = <T extends { id?: string | null; type?: string; image?: string | null; images?: string[]; avatar_url?: string | null; uploader_avatar?: string | null }>(item: T): T => {
   if (String(item.type || "").toLowerCase() === "post") return normalizeFeedPost(item);
   const type = item.type || "Group";
+  if (["artist", "profile", "musician"].includes(type.toLowerCase())) {
+    const avatar = resolveFeedMediaUrl(item.avatar_url || item.uploader_avatar || "");
+    return { ...item, image: avatar || null, images: avatar ? [avatar] : [] };
+  }
   const validImages = Array.isArray(item.images)
     ? item.images.filter((image) => typeof image === "string" && image.trim().length > 0)
     : [];
@@ -1678,9 +1686,10 @@ const normalizeFeedAiRecommendationCard = (item: any) => {
   const displayName = item?.name || `Recommended ${displayType}`;
   const uploaderId = isProfile ? itemId : ownerId || organizerId;
   const uploaderAvatar = isProfile
-    ? primaryImage
+    ? item?.avatar_url || item?.uploader_avatar || null
     : item?.uploader_avatar || item?.owner_avatar || item?.organizer_avatar || null;
-  const images = getDistinctFeedCardImages(type, itemId, sourceImages, [uploaderAvatar]);
+  const images = getDistinctFeedCardImages(type, itemId,
+    isProfile ? uploaderAvatar ? [uploaderAvatar] : [] : sourceImages, [uploaderAvatar]);
   const cardImage = images[0] || null;
 
   return ensureFeedCardImage({
@@ -2574,15 +2583,15 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
   const activeRadioPlaybackRef = useRef({ isPlaying: false, stationId: "" });
   const activeStationId = typeof activeStation?.id === "string" ? activeStation.id : "";
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     const liveClockTimer = setInterval(() => {
-      setLiveNowMs(Date.now());
+      if (AppState.currentState === 'active') setLiveNowMs(Date.now());
     }, 1000);
 
     return () => {
       clearInterval(liveClockTimer);
     };
-  }, []);
+  }, []));
 
   useEffect(() => {
     activeRadioPlaybackRef.current = {
@@ -2591,8 +2600,9 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     };
   }, [activeStationId, isPlaying]);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     const rotationTimer = setInterval(() => {
+      if (AppState.currentState !== 'active') return;
       logFeedRadioDebug("rotation-tick", {
         radioCacheKey,
       });
@@ -2602,7 +2612,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     return () => {
       clearInterval(rotationTimer);
     };
-  }, [radioCacheKey]);
+  }, [radioCacheKey]));
 
   useEffect(() => {
     let cancelled = false;
@@ -2708,6 +2718,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     [displayStation, liveNowMs],
   );
   const displayStationId = typeof displayStation?.id === "string" ? displayStation.id : "";
+  const displayTrack = isCurrentStation && currentTrack?.stationId === displayStationId ? currentTrack : null;
   const liveTimelineTitle =
     liveTimelineState.item?.title ||
     liveTimelineState.slot?.playlist?.title ||
@@ -2718,7 +2729,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
       ? displayStation.name.trim()
       : "MusikaLokal Live";
   const primaryTrackTitle = hasDisplayStation
-    ? liveTimelineTitle || currentTrack?.title || getStationNowPlayingTitle(
+    ? displayTrack?.title || liveTimelineTitle || getStationNowPlayingTitle(
       displayStation,
       isCurrentStation ? currentSlotIndex : null,
     )
@@ -2728,8 +2739,8 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     displayStation?.recommendation_reason ||
     "";
   const primaryArtistName =
+    displayTrack?.sourceArtistName ||
     liveTimelineState.item?.artist_name ||
-    currentTrack?.sourceArtistName ||
     getStationLiveCurrentItem(displayStation, isCurrentStation ? currentSlotIndex : null)?.artist_name ||
     displayStation?.managed_group?.name ||
     displayStation?.managed_profile?.full_name ||
@@ -2742,7 +2753,7 @@ const LiveRadioCard = React.memo(function LiveRadioCard({
     ),
   ).join(" | ");
   const stationArtworkUrl = getStationNowPlayingArtworkUrl(displayStation, {
-    currentTrack: isCurrentStation ? currentTrack : null,
+    currentTrack: displayTrack,
     liveTimelineState,
     slotIndex: isCurrentStation ? currentSlotIndex : null,
   }) || null;
@@ -5209,7 +5220,7 @@ export default function FeedScreen() {
 
         feedPublicFallbackCursorRef.current = null;
         const aiRequest = fetchAiRecommendationCards("for_you");
-        const queryResult = await forYouFeedQueryRef.current.refetch();
+        const queryResult = await forYouFeedQueryRef.current.refreshFirstPage();
 
         if (requestId !== feedRequestIdRef.current[feedTab]) {
           return;
@@ -5277,7 +5288,7 @@ export default function FeedScreen() {
         : followingFeedQueryRef.current;
       const queryResult = append
         ? await currentFeedQuery.fetchNextPage()
-        : await currentFeedQuery.refetch();
+        : await currentFeedQuery.refreshFirstPage();
 
       if (queryResult.error) {
         logFeedInvokeError("manage-social-feed:get_feed", queryResult.error, {
@@ -5491,7 +5502,7 @@ export default function FeedScreen() {
 
   const scheduleRealtimeFeedRefresh = useCallback(() => {
     if (realtimeRefreshTimerRef.current) {
-      clearTimeout(realtimeRefreshTimerRef.current);
+      return;
     }
 
     realtimeRefreshTimerRef.current = setTimeout(() => {
@@ -5501,7 +5512,7 @@ export default function FeedScreen() {
       }
 
       void ensureFeedFresh({ force: true, reason: "realtime" });
-    }, 500);
+    }, Math.max(500, FEED_FOCUS_REFRESH_COOLDOWN_MS - (Date.now() - feedLastFetchAt[activeTabRef.current])));
   }, [ensureFeedFresh]);
 
   useEffect(() => {

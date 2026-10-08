@@ -1,0 +1,29 @@
+{
+  "sentEmails": 0,
+  "fixtureCreated": true,
+  "fixtureDeleted": true,
+  "steps": [
+    {
+      "action": "generate_email_change_current",
+      "hashReturned": true,
+      "responseHashMatchesActionLink": true
+    },
+    {
+      "action": "generate_email_change_new",
+      "hashReturned": true,
+      "responseHashMatchesActionLink": false
+    },
+    {
+      "action": "confirm_current",
+      "status": 200,
+      "returnedSession": false
+    },
+    {
+      "action": "confirm_new",
+      "status": 200,
+      "returnedSession": true
+    }
+  ],
+  "emailChangeCompleted": true,
+  "reusedHashRejected": true
+}

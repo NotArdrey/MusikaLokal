@@ -4,6 +4,7 @@ import { logLoadTime, summarizeEdgeFunctionBody } from "../utils/loadTimeLogger"
 type InvokeOptions = {
   body?: Record<string, unknown>;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
 };
 
 export type CursorPage<T> = {

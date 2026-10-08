@@ -1,0 +1,104 @@
+[
+  {
+    "slug": "didit-webhook",
+    "changedFiles": [
+      "supabase/functions/didit-webhook/index.ts",
+      "supabase/functions/_shared/actionLinks.ts"
+    ]
+  },
+  {
+    "slug": "paymongo",
+    "changedFiles": [
+      "supabase/functions/_shared/actionLinks.ts",
+      "supabase/functions/_shared/coreActionEmail.ts",
+      "supabase/functions/_shared/notificationRoutes.ts"
+    ]
+  },
+  {
+    "slug": "gig-applications",
+    "changedFiles": [
+      "supabase/functions/_shared/actionLinks.ts",
+      "supabase/functions/_shared/coreActionEmail.ts",
+      "supabase/functions/_shared/notificationRoutes.ts"
+    ]
+  },
+  {
+    "slug": "group-members",
+    "changedFiles": [
+      "supabase/functions/_shared/actionLinks.ts",
+      "supabase/functions/_shared/coreActionEmail.ts",
+      "supabase/functions/_shared/notificationRoutes.ts"
+    ]
+  },
+  {
+    "slug": "listings-crud",
+    "changedFiles": [
+      "supabase/functions/_shared/actionLinks.ts",
+      "supabase/functions/_shared/coreActionEmail.ts",
+      "supabase/functions/_shared/notificationRoutes.ts"
+    ]
+  },
+  {
+    "slug": "manage-bookings",
+    "changedFiles": [
+      "supabase/functions/_shared/actionLinks.ts",
+      "supabase/functions/_shared/coreActionEmail.ts",
+      "supabase/functions/_shared/notificationRoutes.ts"
+    ]
+  },
+  {
+    "slug": "manage-listings",
+    "changedFiles": [
+      "supabase/functions/_shared/actionLinks.ts",
+      "supabase/functions/_shared/coreActionEmail.ts",
+      "supabase/functions/_shared/notificationRoutes.ts"
+    ]
+  },
+  {
+    "slug": "permit-management",
+    "changedFiles": [
+      "supabase/functions/_shared/actionLinks.ts",
+      "supabase/functions/_shared/coreActionEmail.ts",
+      "supabase/functions/_shared/notificationRoutes.ts"
+    ]
+  },
+  {
+    "slug": "admin-reports-management",
+    "changedFiles": [
+      "supabase/functions/_shared/actionLinks.ts",
+      "supabase/functions/_shared/coreActionEmail.ts",
+      "supabase/functions/_shared/notificationRoutes.ts"
+    ]
+  },
+  {
+    "slug": "manage-marketplace",
+    "changedFiles": [
+      "supabase/functions/_shared/actionLinks.ts",
+      "supabase/functions/_shared/coreActionEmail.ts",
+      "supabase/functions/_shared/notificationRoutes.ts"
+    ]
+  },
+  {
+    "slug": "manage-production",
+    "changedFiles": [
+      "supabase/functions/_shared/actionLinks.ts",
+      "supabase/functions/_shared/coreActionEmail.ts",
+      "supabase/functions/_shared/notificationRoutes.ts"
+    ]
+  },
+  {
+    "slug": "account-email",
+    "changedFiles": [
+      "supabase/functions/account-email/index.ts",
+      "supabase/functions/_shared/emailChangeLinks.ts"
+    ]
+  },
+  {
+    "slug": "admin-listings-management",
+    "changedFiles": [
+      "supabase/functions/_shared/actionLinks.ts",
+      "supabase/functions/_shared/coreActionEmail.ts",
+      "supabase/functions/_shared/notificationRoutes.ts"
+    ]
+  }
+]

@@ -1,0 +1,151 @@
+[
+  {
+    "id": "f2155883-d6be-42e7-8adc-1c6bf63c2419",
+    "event_date": "2026-10-15 00:00:00+00",
+    "requirements": {
+      "slots": {
+        "duo": {
+          "roles": [],
+          "needed": 3,
+          "preferred_genres": [],
+          "preferred_instruments": [],
+          "specific_requirements": [
+            {
+              "label": "Duo 1",
+              "roles": [],
+              "members": [
+                {
+                  "label": "Member 1",
+                  "roles": [],
+                  "preferred_instruments": []
+                },
+                {
+                  "label": "Member 2",
+                  "roles": [],
+                  "preferred_instruments": []
+                }
+              ],
+              "slot_id": "duo-1",
+              "preferred_genres": [],
+              "preferred_instruments": []
+            },
+            {
+              "label": "Duo 2",
+              "roles": [],
+              "members": [
+                {
+                  "label": "Member 1",
+                  "roles": [],
+                  "preferred_instruments": []
+                },
+                {
+                  "label": "Member 2",
+                  "roles": [],
+                  "preferred_instruments": []
+                }
+              ],
+              "slot_id": "duo-2",
+              "preferred_genres": [],
+              "preferred_instruments": []
+            },
+            {
+              "label": "Duo 3",
+              "roles": [],
+              "members": [
+                {
+                  "label": "Member 1",
+                  "roles": [],
+                  "preferred_instruments": []
+                },
+                {
+                  "label": "Member 2",
+                  "roles": [],
+                  "preferred_instruments": []
+                }
+              ],
+              "slot_id": "duo-3",
+              "preferred_genres": [],
+              "preferred_instruments": []
+            }
+          ]
+        },
+        "band": {
+          "roles": [],
+          "needed": 2,
+          "preferred_genres": [],
+          "preferred_group_types": [],
+          "preferred_instruments": [],
+          "specific_requirements": [
+            {
+              "label": "Group 1",
+              "roles": [],
+              "slot_id": "band-1",
+              "group_type": "",
+              "preferred_genres": [],
+              "preferred_instruments": []
+            },
+            {
+              "label": "Group 2",
+              "roles": [],
+              "slot_id": "band-2",
+              "group_type": "",
+              "preferred_genres": [],
+              "preferred_instruments": []
+            }
+          ]
+        },
+        "solo": {
+          "roles": [],
+          "needed": 2,
+          "preferred_genres": [],
+          "preferred_instruments": [],
+          "specific_requirements": [
+            {
+              "label": "Solo Artist 1",
+              "roles": [],
+              "slot_id": "solo-1",
+              "preferred_genres": [],
+              "preferred_instruments": []
+            },
+            {
+              "label": "Solo Artist 2",
+              "roles": [],
+              "slot_id": "solo-2",
+              "preferred_genres": [],
+              "preferred_instruments": []
+            }
+          ]
+        }
+      },
+      "genres": [
+        "Rock",
+        "Pop",
+        "Jazz"
+      ],
+      "instruments": [],
+      "musician_type": "both",
+      "event_end_time": "11:00 PM",
+      "event_schedules": [
+        {
+          "date": "2026-10-15",
+          "end_time": "11:00 PM",
+          "start_time": "06:00 PM"
+        }
+      ],
+      "event_start_time": "06:00 PM",
+      "experience_level": null,
+      "total_slots_needed": 7,
+      "ai_recommendation_settings": {
+        "enabled": true,
+        "criteria": {
+          "genres": "required",
+          "location": "required",
+          "portfolio": "required",
+          "instruments": "required"
+        },
+        "location_radius_km": null
+      }
+    },
+    "pending_applications": 1
+  }
+]

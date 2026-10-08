@@ -13,6 +13,21 @@ test('a verified public testing release is downloadable', () => {
   assert.deepEqual(parseAndroidRelease(release), release);
 });
 
+test('the project APK bucket is downloadable with a matching immutable checksum path', () => {
+  const supabaseRelease = { ...release, downloadUrl: `https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/android-releases/android/testing/${release.sha256}/musikalokal-testing.apk?download=MusikaLokal.apk` };
+  assert.deepEqual(parseAndroidRelease(supabaseRelease), supabaseRelease);
+  for (const downloadUrl of [
+    supabaseRelease.downloadUrl.replace('aefldxegsvzecshlayza', 'anotherproject'),
+    supabaseRelease.downloadUrl.replace('supabase.co/', 'supabase.co.evil.example/'),
+    supabaseRelease.downloadUrl.replace('android-releases', 'documents'),
+    supabaseRelease.downloadUrl.replace('/public/', '/sign/'),
+    supabaseRelease.downloadUrl.replace(release.sha256, 'c'.repeat(64)),
+    supabaseRelease.downloadUrl.replace('musikalokal-testing.apk', 'other.apk'),
+    supabaseRelease.downloadUrl.replace('https:', 'http:'),
+    supabaseRelease.downloadUrl.replace('https://', 'https://user:password@'),
+  ]) assert.equal(parseAndroidRelease({ ...release, downloadUrl }), null);
+});
+
 test('missing, incomplete and non-testing manifests never enable downloads', () => {
   for (const value of [null, {}, [], { ...release, testing: false }, { ...release, sha256: '' },
     { ...release, sizeBytes: 0 }, { ...release, minSdk: 0 }, { ...release, builtAt: 'invalid' },

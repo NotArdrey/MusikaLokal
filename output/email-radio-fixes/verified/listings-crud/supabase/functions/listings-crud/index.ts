@@ -1,0 +1,1147 @@
+// @ts-ignore
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// @ts-ignore
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+    withNotificationRouteMeta,
+    withNotificationSeverityType,
+} from "../_shared/notificationRoutes.ts";
+import { scheduleCoreActionEmailForNotification } from "../_shared/coreActionEmail.ts";
+
+const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
+}
+
+const parseGigEventStartTime = (value: unknown) => {
+    const trimmed = String(value || '').trim()
+    const match = trimmed.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)
+    if (!match) return null
+
+    const hours = Number(match[1])
+    const minutes = Number(match[2])
+    const period = match[3].toUpperCase()
+
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null
+    if (hours < 1 || hours > 12 || minutes < 0 || minutes > 59) return null
+
+    let hour24 = hours
+    if (period === 'PM' && hours !== 12) hour24 += 12
+    if (period === 'AM' && hours === 12) hour24 = 0
+
+    return { hour24, minutes }
+}
+
+const getGigEventStartDate = (eventDate: unknown, eventStartTime: unknown) => {
+    if (!eventDate) return null
+
+    const parsedDate = new Date(String(eventDate))
+    if (!Number.isFinite(parsedDate.getTime())) return null
+
+    const parsedTime = parseGigEventStartTime(eventStartTime)
+    if (parsedTime) {
+        parsedDate.setHours(parsedTime.hour24, parsedTime.minutes, 0, 0)
+    }
+
+    return parsedDate
+}
+
+async function insertCoreNotifications(supabaseClient: any, payload: Record<string, unknown> | Record<string, unknown>[]) {
+    const payloads = (Array.isArray(payload) ? payload : [payload]).map(withNotificationSeverityType)
+    const insertPayload = Array.isArray(payload) ? payloads : payloads[0]
+    const { data, error } = await supabaseClient
+        .from('notifications')
+        .insert(insertPayload)
+        .select()
+
+    if (error) throw error
+
+    for (const item of payloads) {
+        scheduleCoreActionEmailForNotification(supabaseClient, item, { source: 'listings-crud' })
+    }
+
+    return data
+}
+
+const syncStudio3NF = async (client: any, studioId: string) => {
+    const { error } = await client.rpc('sync_studio_3nf', { p_studio_id: studioId })
+    if (error) throw error
+}
+
+const syncGig3NF = async (client: any, gigId: string) => {
+    const { error } = await client.rpc('sync_gig_3nf', { p_gig_id: gigId })
+    if (error) throw error
+}
+
+const normalizeScheduleSessionType = (value: any): string => {
+    const normalized = String(value || '').trim().toLowerCase()
+    return ['rehearsal', 'recording', 'both'].includes(normalized) ? normalized : 'both'
+}
+
+const buildWeeklyScheduleReason = (source: any): string =>
+    `Weekly schedule [session_type:${normalizeScheduleSessionType(source?.session_type ?? source?.sessionType)}]`
+
+const buildDateOverrideReason = (source: any): string =>
+    `Custom schedule [session_type:${normalizeScheduleSessionType(source?.session_type ?? source?.sessionType)}]`
+
+const normalizeWeeklyScheduleScope = (value: any): string => {
+    const normalized = String(value || '').trim().toLowerCase()
+    return ['indefinite', 'until', 'specific_dates'].includes(normalized) ? normalized : 'indefinite'
+}
+
+const normalizeWeeklyScheduleDates = (value: any): string[] =>
+    Array.isArray(value) ? value.filter((date) => typeof date === 'string') : []
+
+const weeklyScheduleColumnNames = [
+    'weekly_schedule_scope',
+    'weekly_schedule_end_date',
+    'weekly_schedule_dates',
+]
+
+const isMissingWeeklyScheduleColumns = (error: any): boolean => {
+    const message = String(error?.message || '')
+    return (
+        error?.code === 'PGRST204' &&
+        weeklyScheduleColumnNames.some((column) => message.includes(column))
+    )
+}
+
+const stripWeeklyScheduleColumns = (row: any) => {
+    const {
+        weekly_schedule_scope,
+        weekly_schedule_end_date,
+        weekly_schedule_dates,
+        ...rest
+    } = row || {}
+
+    return rest
+}
+
+const buildWeeklyScheduleScopeColumns = (source: any) => {
+    const scope = normalizeWeeklyScheduleScope(source?.weekly_schedule_scope ?? source?.weeklyScheduleScope)
+    return {
+        weekly_schedule_scope: scope,
+        weekly_schedule_end_date:
+            scope === 'until'
+                ? source?.weekly_schedule_end_date ?? source?.weeklyScheduleEndDate ?? null
+                : null,
+        weekly_schedule_dates:
+            scope === 'specific_dates'
+                ? normalizeWeeklyScheduleDates(source?.weekly_schedule_dates ?? source?.weeklyScheduleDates)
+                : [],
+    }
+}
+
+const insertStudioOperatingHours = async (client: any, operatingHours: any[]) => {
+    if (!operatingHours.length) return
+
+    let { error } = await client
+        .from('studio_operating_hours')
+        .insert(operatingHours)
+
+    if (error && isMissingWeeklyScheduleColumns(error)) {
+        console.warn('studio_operating_hours weekly schedule columns are not available yet; retrying without them.', error)
+        ;({ error } = await client
+            .from('studio_operating_hours')
+            .insert(operatingHours.map(stripWeeklyScheduleColumns)))
+    }
+
+    if (error) {
+        console.warn('Could not save studio operating hours:', error)
+    }
+}
+
+serve(async (req: Request) => {
+    if (req.method === 'OPTIONS') {
+        return new Response('ok', { headers: corsHeaders })
+    }
+
+    try {
+        const authHeader = req.headers.get('Authorization');
+        if (!authHeader) {
+            return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 401,
+            })
+        }
+
+        const sbUrl = Deno.env.get('SUPABASE_URL');
+        const sbKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+
+        if (!sbUrl || !sbKey) {
+            console.error('[listings-crud] Missing Supabase env vars');
+            return new Response(JSON.stringify({ error: 'Server misconfiguration: Missing Supabase env vars' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 500,
+            })
+        }
+
+        const supabaseClient = createClient(sbUrl, sbKey)
+        const token = authHeader.replace(/^Bearer\s+/i, '')
+        const {
+            data: { user: authUser },
+            error: authUserError,
+        } = await supabaseClient.auth.getUser(token)
+
+        if (authUserError || !authUser) {
+            return new Response(JSON.stringify({ error: 'Invalid token' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 401,
+            })
+        }
+
+        const authenticatedUserId = authUser.id
+
+        const body = await req.json()
+        const { action, ...params } = body
+        const { userId } = params
+
+
+        if (userId && userId !== authenticatedUserId) {
+            console.error(`[listings-crud] Forbidden: userId mismatch. Req: ${userId}, Auth: ${authenticatedUserId}`);
+            return new Response(JSON.stringify({ error: 'Forbidden: userId mismatch' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 403,
+            })
+        }
+
+        const effectiveUserId = userId || authenticatedUserId
+
+        // CREATE SINGLE NOTIFICATION
+        if (action === 'create_notification') {
+            const { targetUserId, title, message, type, image, meta } = params
+
+            if (!targetUserId || !title || !message) {
+                return new Response(JSON.stringify({ error: 'Missing required fields' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const payload = {
+                user_id: targetUserId,
+                type: type || 'info',
+                title,
+                message,
+                image: image || null,
+                meta: withNotificationRouteMeta(meta),
+                read: false
+            }
+
+            const [data] = await insertCoreNotifications(supabaseClient, payload)
+            return new Response(JSON.stringify(data), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
+        // CREATE MULTIPLE NOTIFICATIONS
+        if (action === 'create_notifications') {
+            const { notifications } = params
+
+            if (!Array.isArray(notifications) || notifications.length === 0) {
+                return new Response(JSON.stringify({ error: 'No notifications provided' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const payload = notifications
+                .filter((n: any) => n && n.user_id && n.title && n.message)
+                .map((n: any) => ({
+                    user_id: n.user_id,
+                    type: n.type || 'info',
+                    title: n.title,
+                    message: n.message,
+                    image: n.image || null,
+                    meta: withNotificationRouteMeta(n.meta),
+                    read: false
+                }))
+
+            if (payload.length === 0) {
+                return new Response(JSON.stringify({ error: 'Invalid notification payload' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const data = await insertCoreNotifications(supabaseClient, payload)
+            return new Response(JSON.stringify(data), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
+        // FETCH MY GIGS
+        if (action === 'fetch_my_gigs') {
+            const { data, error } = await supabaseClient
+                .from('gigs_with_stats')
+                .select('*')
+                .eq('organizer_id', effectiveUserId)
+                .order('created_at', { ascending: false })
+
+            if (error) throw error
+            const mapped = (data || []).map((item: any) => ({
+                ...item,
+                rating: item.rating || 0,
+                review_count: item.review_count || 0
+            }))
+            return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // FETCH MY GROUPS
+        if (action === 'fetch_my_groups') {
+            const { data, error } = await supabaseClient
+                .from('groups_with_stats')
+                .select('*')
+                .eq('owner_id', effectiveUserId)
+                .order('created_at', { ascending: false })
+
+            if (error) throw error
+            const mapped = (data || []).map((item: any) => ({
+                ...item,
+                rating: item.rating || 0,
+                review_count: item.review_count || 0
+            }))
+            return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // FETCH MY STUDIOS
+        if (action === 'fetch_my_studios') {
+            const { data, error } = await supabaseClient
+                .from('studios_with_stats')
+                .select('*')
+                .eq('owner_id', effectiveUserId)
+                .order('created_at', { ascending: false })
+
+            if (error) throw error
+
+            let settingsByStudioId = new Map<string, any>()
+            const studioIds = (data || []).map((item: any) => item.id).filter(Boolean)
+            if (studioIds.length > 0) {
+                const { data: settingsData, error: settingsError } = await supabaseClient
+                    .from('studio_settings')
+                    .select('studio_id, lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates')
+                    .in('studio_id', studioIds)
+
+                if (!settingsError && settingsData) {
+                    settingsByStudioId = new Map(settingsData.map((row: any) => [row.studio_id, row]))
+                }
+            }
+
+            const mapped = (data || []).map((item: any) => ({
+                ...item,
+                rating: item.rating || 0,
+                review_count: item.review_count || 0,
+                ...(settingsByStudioId.get(item.id)
+                    ? {
+                        lead_time_hours: settingsByStudioId.get(item.id).lead_time_hours,
+                        weekend_multiplier: settingsByStudioId.get(item.id).weekend_multiplier,
+                        peak_season_multiplier: settingsByStudioId.get(item.id).peak_season_multiplier,
+                        peak_season_dates: settingsByStudioId.get(item.id).peak_season_dates,
+                        off_peak_multiplier: settingsByStudioId.get(item.id).off_peak_multiplier,
+                        off_peak_dates: settingsByStudioId.get(item.id).off_peak_dates,
+                        booking_settings: {
+                            lead_time_hours: settingsByStudioId.get(item.id).lead_time_hours,
+                            weekend_multiplier: settingsByStudioId.get(item.id).weekend_multiplier,
+                            peak_season_multiplier: settingsByStudioId.get(item.id).peak_season_multiplier,
+                            peak_season_dates: settingsByStudioId.get(item.id).peak_season_dates,
+                            off_peak_multiplier: settingsByStudioId.get(item.id).off_peak_multiplier,
+                            off_peak_dates: settingsByStudioId.get(item.id).off_peak_dates,
+                        }
+                    }
+                    : { booking_settings: null })
+            }))
+
+            return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // FETCH SINGLE ENTITY
+        if (action === 'fetch_one') {
+            const { type, id } = params
+            const viewName = type + 's_with_stats'
+            const ownerField = type === 'gig' ? 'organizer_id' : 'owner_id'
+
+            const { data, error } = await supabaseClient
+                .from(viewName)
+                .select('*')
+                .eq('id', id)
+                .eq(ownerField, effectiveUserId)
+                .maybeSingle()
+
+            if (error) throw error
+            if (!data) {
+                return new Response(JSON.stringify(null), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+            }
+
+            if (type === 'studio') {
+                const { data: operatingHours, error: hoursError } = await supabaseClient
+                    .from('studio_operating_hours')
+                    .select('*')
+                    .eq('studio_id', id)
+                    .order('slot_order', { ascending: true });
+
+                if (!hoursError && operatingHours) {
+                    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                    const availability = dayNames.map((dayName, index) => {
+                        const dayHours = operatingHours.filter((h: any) => h.day_of_week === index && h.is_open);
+                        return {
+                            day: dayName,
+                            ...buildWeeklyScheduleScopeColumns(dayHours[0]),
+                            slots: dayHours.map((h: any) => ({
+                                start: h.open_time,
+                                end: h.close_time
+                            }))
+                        };
+                    });
+                    data.availability = availability;
+                }
+
+                const extendedStudioSettingsSelect = 'lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates, weekly_schedule_scope, weekly_schedule_end_date, weekly_schedule_dates'
+                const legacyStudioSettingsSelect = 'lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates'
+                let studioSettingsResult = await supabaseClient
+                    .from('studio_settings')
+                    .select(extendedStudioSettingsSelect)
+                    .eq('studio_id', id)
+                    .maybeSingle();
+
+                if (studioSettingsResult.error && isMissingWeeklyScheduleColumns(studioSettingsResult.error)) {
+                    studioSettingsResult = await supabaseClient
+                        .from('studio_settings')
+                        .select(legacyStudioSettingsSelect)
+                        .eq('studio_id', id)
+                        .maybeSingle();
+                }
+
+                const { data: studioSettings, error: settingsError } = studioSettingsResult
+
+                if (!settingsError && studioSettings) {
+                    data.lead_time_hours = studioSettings.lead_time_hours;
+                    data.weekend_multiplier = studioSettings.weekend_multiplier;
+                    data.peak_season_multiplier = studioSettings.peak_season_multiplier;
+                    data.peak_season_dates = studioSettings.peak_season_dates;
+                    data.off_peak_multiplier = studioSettings.off_peak_multiplier;
+                    data.off_peak_dates = studioSettings.off_peak_dates;
+                    data.booking_settings = {
+                        lead_time_hours: studioSettings.lead_time_hours,
+                        weekend_multiplier: studioSettings.weekend_multiplier,
+                        peak_season_multiplier: studioSettings.peak_season_multiplier,
+                        peak_season_dates: studioSettings.peak_season_dates,
+                        off_peak_multiplier: studioSettings.off_peak_multiplier,
+                        off_peak_dates: studioSettings.off_peak_dates,
+                        weekly_schedule_scope: studioSettings.weekly_schedule_scope,
+                        weekly_schedule_end_date: studioSettings.weekly_schedule_end_date,
+                        weekly_schedule_dates: studioSettings.weekly_schedule_dates
+                    };
+                }
+            }
+
+            const mapped = {
+                ...data,
+                rating: data.rating || 0,
+                review_count: data.review_count || 0
+            }
+
+            return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // CREATE ENTITY
+        if (action === 'create') {
+            const { type, payload } = params
+            const table = type + 's'
+            const ownerField = type === 'gig' ? 'organizer_id' : 'owner_id'
+
+            let studioAvailability = null;
+            let calendarAvailability = null;
+            let bookingSettings = null;
+            let insertPayload = { ...payload };
+
+            if (type === 'studio') {
+                const validStudioColumns = [
+                    'name', 'address', 'hourly_rate', 'description',
+                    'latitude', 'longitude', 'rate', 'contract_url',
+                    'availability', 'rehearsal_rate',
+                    'recording_rate', 'pax', 'business_permit_url'
+                ];
+                const filteredPayload: any = {};
+                for (const key of validStudioColumns) {
+                    if (insertPayload[key] !== undefined) {
+                        filteredPayload[key] = insertPayload[key];
+                    }
+                }
+                if (insertPayload.calendar_availability) filteredPayload.calendar_availability = insertPayload.calendar_availability;
+                if (insertPayload.booking_settings) filteredPayload.booking_settings = insertPayload.booking_settings;
+                insertPayload = filteredPayload;
+            }
+
+            // SPAM PREVENTION for Gig Applications
+            if (type === 'gig_application') {
+                const { gig_id, group_id, production_team_id, slot_type } = insertPayload;
+
+                const { data: gigData, error: gigError } = await supabaseClient
+                    .from('gigs')
+                    .select('reapplication_cooldown_days, total_slots_filled, status, event_date')
+                    .eq('id', gig_id)
+                    .single();
+
+                if (gigError) throw gigError;
+
+                const { data: gigLegacyProjection, error: gigLegacyProjectionError } = await supabaseClient
+                    .from('gigs_legacy_projection')
+                    .select('requirements')
+                    .eq('id', gig_id)
+                    .single();
+
+                if (gigLegacyProjectionError) throw gigLegacyProjectionError;
+                const gigRequirements = gigLegacyProjection?.requirements || {};
+
+                if (gigData.status !== 'open') {
+                    throw new Error('This gig is no longer accepting applications.');
+                }
+
+                const eventStartsAt = getGigEventStartDate(gigData.event_date, gigRequirements?.event_start_time);
+                if (eventStartsAt && eventStartsAt.getTime() <= Date.now()) {
+                    throw new Error('This gig has already started and is no longer accepting applications.');
+                }
+
+                const totalSlotsNeeded = gigRequirements?.total_slots_needed || 999;
+                const totalSlotsFilled = gigData.total_slots_filled || 0;
+
+                if (totalSlotsFilled >= totalSlotsNeeded) {
+                    throw new Error('All performer slots for this gig have been filled.');
+                }
+
+                if (slot_type && gigRequirements?.slots?.[slot_type]) {
+                    const slotNeeded = gigRequirements.slots[slot_type]?.needed || 0;
+                    let slotFilled = 0;
+
+                    if (slotNeeded > 0) {
+                        const { data: slotSummary, error: slotSummaryError } = await supabaseClient
+                            .from('gig_slot_fill_summary')
+                            .select('accepted_count')
+                            .eq('gig_id', gig_id)
+                            .eq('slot_type', slot_type)
+                            .maybeSingle();
+
+                        if (slotSummaryError) throw slotSummaryError;
+                        slotFilled = slotSummary?.accepted_count || 0;
+                    }
+
+                    if (slotNeeded > 0 && slotFilled >= slotNeeded) {
+                        throw new Error(`All ${slot_type} slots have been filled. Try applying for a different slot type.`);
+                    }
+                }
+
+                let existingApplicationQuery = supabaseClient
+                    .from('gig_applications')
+                    .select('id, status')
+                    .eq('gig_id', gig_id)
+                    .in('status', ['pending', 'accepted', 'approved'])
+
+                if (production_team_id) {
+                    existingApplicationQuery = existingApplicationQuery.eq('production_team_id', production_team_id)
+                } else if (group_id) {
+                    existingApplicationQuery = existingApplicationQuery
+                        .eq('group_id', group_id)
+                        .is('production_team_id', null)
+                } else {
+                    existingApplicationQuery = existingApplicationQuery
+                        .eq('applicant_id', effectiveUserId)
+                        .is('group_id', null)
+                        .is('production_team_id', null)
+                }
+
+                const { data: existingApp, error: existingError } = await existingApplicationQuery.maybeSingle();
+
+                if (existingError) throw existingError;
+
+                if (existingApp) {
+                    if (existingApp.status === 'accepted') {
+                        throw new Error('You have already been accepted for this gig.');
+                    }
+                    throw new Error('You already have a pending application for this gig.');
+                }
+
+                const cooldownDays = Number(gigData.reapplication_cooldown_days ?? 30);
+
+                if (cooldownDays > 0) {
+                    let rejectedApplicationQuery = supabaseClient
+                        .from('gig_applications')
+                        .select('id, rejected_at, created_at')
+                        .eq('gig_id', gig_id)
+                        .eq('status', 'rejected')
+                        .or('system_status_reason.is.null,system_status_reason.neq.system_requirements_changed')
+                        .order('rejected_at', { ascending: false, nullsFirst: false })
+                        .limit(1)
+
+                    if (production_team_id) {
+                        rejectedApplicationQuery = rejectedApplicationQuery.eq('production_team_id', production_team_id)
+                    } else if (group_id) {
+                        rejectedApplicationQuery = rejectedApplicationQuery
+                            .eq('group_id', group_id)
+                            .is('production_team_id', null)
+                    } else {
+                        rejectedApplicationQuery = rejectedApplicationQuery
+                            .eq('applicant_id', effectiveUserId)
+                            .is('group_id', null)
+                            .is('production_team_id', null)
+                    }
+
+                    const { data: rejectedApp, error: rejectedError } = await rejectedApplicationQuery.maybeSingle();
+
+                    if (rejectedError) throw rejectedError;
+
+                    if (rejectedApp) {
+                        const rejectionDate = rejectedApp.rejected_at || rejectedApp.created_at;
+                        const cooldownEnds = new Date(
+                            new Date(rejectionDate).getTime() + cooldownDays * 24 * 60 * 60 * 1000
+                        );
+
+                        const nowTime = Date.now();
+                        if (nowTime < cooldownEnds.getTime()) {
+                            if (eventStartsAt && eventStartsAt.getTime() <= cooldownEnds.getTime()) {
+                                throw new Error(`Your application was declined. Your cooldown ends on ${cooldownEnds.toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' })}, after this gig starts, so you cannot reapply.`);
+                            }
+
+                            throw new Error(`You cannot reapply to this gig until ${cooldownEnds.toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' })}.`);
+                        }
+                    }
+                }
+            }
+
+            if (type === 'studio' && insertPayload.availability) {
+                studioAvailability = insertPayload.availability;
+                delete insertPayload.availability;
+            }
+
+            if (type === 'studio' && insertPayload.calendar_availability) {
+                calendarAvailability = insertPayload.calendar_availability;
+                delete insertPayload.calendar_availability;
+            }
+
+            if (type === 'studio' && insertPayload.booking_settings) {
+                bookingSettings = insertPayload.booking_settings;
+                delete insertPayload.booking_settings;
+            }
+
+            if (type === 'gig') {
+                const validGigColumns = [
+                    'name', 'location', 'budget', 'description', 'event_date',
+                    'status', 'latitude',
+                    'longitude', 'contract_url', 'business_permit_url',
+                    'reapplication_cooldown_days'
+                ];
+                const filteredPayload: any = {};
+                for (const key of validGigColumns) {
+                    if (insertPayload[key] !== undefined) {
+                        filteredPayload[key] = insertPayload[key];
+                    }
+                }
+                insertPayload = filteredPayload;
+            }
+
+            const { data, error } = await supabaseClient
+                .from(table)
+                .insert({ ...insertPayload, [ownerField]: effectiveUserId })
+                .select()
+                .single()
+
+            if (error) throw error;
+
+            // Studio setup: settings and operating hours
+            if (type === 'studio') {
+                const studioId = data.id
+
+                const settingsPayload: any = {
+                    studio_id: studioId,
+                    buffer_minutes: 30,
+                    bulk_discount_threshold_hours: 10,
+                    bulk_discount_percentage: 0
+                };
+
+                if (bookingSettings) {
+                    if (bookingSettings.lead_time_hours) settingsPayload.lead_time_hours = parseInt(bookingSettings.lead_time_hours) || 24;
+                    if (bookingSettings.weekend_multiplier) settingsPayload.weekend_multiplier = parseFloat(bookingSettings.weekend_multiplier) || 1.0;
+                    if (bookingSettings.peak_season_multiplier) settingsPayload.peak_season_multiplier = parseFloat(bookingSettings.peak_season_multiplier) || 1.0;
+                    if (bookingSettings.peak_season_dates) settingsPayload.peak_season_dates = bookingSettings.peak_season_dates;
+                    if (bookingSettings.off_peak_multiplier) settingsPayload.off_peak_multiplier = parseFloat(bookingSettings.off_peak_multiplier) || 1.0;
+                    if (bookingSettings.off_peak_dates) settingsPayload.off_peak_dates = bookingSettings.off_peak_dates;
+                }
+
+                await supabaseClient.from('studio_settings').insert(settingsPayload)
+
+                let operatingHours = []
+
+                if (studioAvailability && Array.isArray(studioAvailability) && studioAvailability.length > 0) {
+                    const dayMap: { [key: string]: number } = {
+                        'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
+                    };
+
+                    for (const daySchedule of studioAvailability) {
+                        const dayIndex = dayMap[daySchedule.day];
+                        if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
+                            daySchedule.slots.forEach((slot: any, slotIndex: number) => {
+                                operatingHours.push({
+                                    studio_id: studioId,
+                                    day_of_week: dayIndex,
+                                    is_open: true,
+                                    open_time: slot.start,
+                                    close_time: slot.end,
+                                    slot_order: slotIndex,
+                                    ...buildWeeklyScheduleScopeColumns(daySchedule),
+                                    reason: buildWeeklyScheduleReason(daySchedule)
+                                });
+                            });
+                        }
+                    }
+                }
+
+                if (operatingHours.length === 0) {
+                    for (let day = 0; day <= 6; day++) {
+                        operatingHours.push({
+                            studio_id: studioId,
+                            day_of_week: day,
+                            is_open: true,
+                            open_time: '09:00',
+                            close_time: '22:00',
+                            reason: 'Weekly schedule [session_type:both]'
+                        })
+                    }
+                }
+
+                await insertStudioOperatingHours(supabaseClient, operatingHours)
+
+                if (calendarAvailability && Array.isArray(calendarAvailability) && calendarAvailability.length > 0) {
+                    const dateOverrides: any[] = [];
+
+                    for (const dateEntry of calendarAvailability) {
+                        if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
+                            dateEntry.slots.forEach((slot: any, slotIndex: number) => dateOverrides.push({
+                                studio_id: studioId,
+                                override_date: dateEntry.date,
+                                is_open: true,
+                                open_time: slot.start,
+                                close_time: slot.end,
+                                slot_order: slotIndex,
+                                reason: buildDateOverrideReason(dateEntry)
+                            }));
+                        }
+                    }
+
+                    if (dateOverrides.length > 0) {
+                        await supabaseClient.from('studio_date_overrides').insert(dateOverrides);
+                    }
+                }
+            }
+
+            // Group setup: add owner to group_members
+            if (type === 'group') {
+                const groupId = data.id;
+
+                await supabaseClient
+                    .from('group_members')
+                    .insert({
+                        group_id: groupId,
+                        user_id: effectiveUserId,
+                        role: 'owner'
+                    });
+
+                const membersArray = insertPayload.members || [];
+                if (Array.isArray(membersArray)) {
+                    const additionalMembers = membersArray
+                        .filter((m: any) => m.user_id && m.user_id !== effectiveUserId)
+                        .map((m: any) => ({
+                            group_id: groupId,
+                            user_id: m.user_id,
+                            role: 'member'
+                        }));
+
+                    if (additionalMembers.length > 0) {
+                        await supabaseClient
+                            .from('group_members')
+                            .insert(additionalMembers);
+                    }
+                }
+            }
+
+            if (type === 'studio') {
+                await syncStudio3NF(supabaseClient, data.id)
+            }
+
+            if (type === 'gig') {
+                await syncGig3NF(supabaseClient, data.id)
+            }
+
+            return new Response(JSON.stringify({ ...data, rating: 0, review_count: 0 }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // UPDATE ENTITY
+        if (action === 'update') {
+            const { type, id, payload } = params
+            const table = type + 's'
+            const ownerField = type === 'gig' ? 'organizer_id' : 'owner_id'
+
+            let studioAvailability = null;
+            let calendarAvailability = null;
+            let bookingSettings = null;
+            let updatePayload = { ...payload };
+
+            if (type === 'studio') {
+                const validStudioColumns = [
+                    'name', 'address', 'hourly_rate', 'description',
+                    'latitude', 'longitude', 'rate', 'contract_url',
+                    'availability', 'rehearsal_rate',
+                    'recording_rate', 'pax', 'business_permit_url'
+                ];
+                const filteredPayload: any = {};
+                for (const key of validStudioColumns) {
+                    if (updatePayload[key] !== undefined) {
+                        filteredPayload[key] = updatePayload[key];
+                    }
+                }
+                if (updatePayload.calendar_availability) filteredPayload.calendar_availability = updatePayload.calendar_availability;
+                if (updatePayload.booking_settings) filteredPayload.booking_settings = updatePayload.booking_settings;
+                updatePayload = filteredPayload;
+            }
+
+            if (type === 'studio' && updatePayload.availability) {
+                studioAvailability = updatePayload.availability;
+                delete updatePayload.availability;
+            }
+
+            if (type === 'studio' && updatePayload.calendar_availability) {
+                calendarAvailability = updatePayload.calendar_availability;
+                delete updatePayload.calendar_availability;
+            }
+
+            if (type === 'studio' && updatePayload.booking_settings) {
+                bookingSettings = updatePayload.booking_settings;
+                delete updatePayload.booking_settings;
+            }
+
+            if (type === 'gig') {
+                const validGigColumns = [
+                    'name', 'location', 'budget', 'description', 'event_date',
+                    'status', 'latitude',
+                    'longitude', 'contract_url', 'business_permit_url',
+                    'reapplication_cooldown_days'
+                ];
+                const filteredPayload: any = {};
+                for (const key of validGigColumns) {
+                    if (updatePayload[key] !== undefined) {
+                        filteredPayload[key] = updatePayload[key];
+                    }
+                }
+                const reapplicationCooldownDays =
+                    filteredPayload.reapplication_cooldown_days === undefined
+                        ? null
+                        : Number(filteredPayload.reapplication_cooldown_days);
+                delete filteredPayload.reapplication_cooldown_days;
+
+                const { data: rpcData, error: rpcError } = await supabaseClient.rpc('update_gig_safely', {
+                    p_gig_id: id,
+                    p_payload: filteredPayload,
+                    p_reason: 'Updated via listings-crud edge function',
+                });
+
+                if (rpcError) {
+                    console.error('❌ Gig update RPC error:', JSON.stringify(rpcError, null, 2));
+                    throw rpcError;
+                }
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                if (reapplicationCooldownDays !== null) {
+                    const { error: cooldownError } = await supabaseClient
+                        .from('gigs')
+                        .update({ reapplication_cooldown_days: reapplicationCooldownDays })
+                        .eq('id', id);
+                    if (cooldownError) throw cooldownError;
+                }
+
+                await syncGig3NF(supabaseClient, id)
+
+                return new Response(JSON.stringify({
+                    ...rpcResult.gig,
+                    ...(reapplicationCooldownDays === null
+                        ? {}
+                        : { reapplication_cooldown_days: reapplicationCooldownDays }),
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            const { data, error } = await supabaseClient
+                .from(table)
+                .update(updatePayload)
+                .eq('id', id)
+                .eq(ownerField, effectiveUserId)
+                .select()
+                .single()
+
+            if (error) throw error;
+
+            // Update studio operating hours
+            if (type === 'studio' && studioAvailability && Array.isArray(studioAvailability)) {
+                const studioId = id;
+
+                await supabaseClient
+                    .from('studio_operating_hours')
+                    .delete()
+                    .eq('studio_id', studioId);
+
+                const dayMap: { [key: string]: number } = {
+                    'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
+                };
+
+                let operatingHours: any[] = [];
+                for (const daySchedule of studioAvailability) {
+                    const dayIndex = dayMap[daySchedule.day];
+                    if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
+                        daySchedule.slots.forEach((slot: any, slotIndex: number) => {
+                            operatingHours.push({
+                                studio_id: studioId,
+                                day_of_week: dayIndex,
+                                is_open: true,
+                                open_time: slot.start,
+                                close_time: slot.end,
+                                slot_order: slotIndex,
+                                ...buildWeeklyScheduleScopeColumns(daySchedule),
+                                reason: buildWeeklyScheduleReason(daySchedule)
+                            });
+                        });
+                    }
+                }
+
+                await insertStudioOperatingHours(supabaseClient, operatingHours);
+            }
+
+            // Update studio date overrides
+            if (type === 'studio' && calendarAvailability && Array.isArray(calendarAvailability)) {
+                const studioId = id;
+
+                await supabaseClient
+                    .from('studio_date_overrides')
+                    .delete()
+                    .eq('studio_id', studioId);
+
+                const dateOverrides: any[] = [];
+
+                for (const dateEntry of calendarAvailability) {
+                    if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
+                        dateEntry.slots.forEach((slot: any, slotIndex: number) => dateOverrides.push({
+                            studio_id: studioId,
+                            override_date: dateEntry.date,
+                            is_open: true,
+                            open_time: slot.start,
+                            close_time: slot.end,
+                            slot_order: slotIndex,
+                            reason: buildDateOverrideReason(dateEntry)
+                        }));
+                    }
+                }
+
+                if (dateOverrides.length > 0) {
+                    await supabaseClient.from('studio_date_overrides').insert(dateOverrides);
+                }
+            }
+
+            // Update studio settings
+            if (type === 'studio' && bookingSettings) {
+                const studioId = id;
+
+                const settingsUpdate: any = {};
+                if (bookingSettings.lead_time_hours !== undefined) settingsUpdate.lead_time_hours = parseInt(bookingSettings.lead_time_hours) || 24;
+                if (bookingSettings.weekend_multiplier !== undefined) settingsUpdate.weekend_multiplier = parseFloat(bookingSettings.weekend_multiplier) || 1.0;
+                if (bookingSettings.peak_season_multiplier !== undefined) settingsUpdate.peak_season_multiplier = parseFloat(bookingSettings.peak_season_multiplier) || 1.0;
+                if (bookingSettings.peak_season_dates !== undefined) settingsUpdate.peak_season_dates = bookingSettings.peak_season_dates;
+                if (bookingSettings.off_peak_multiplier !== undefined) settingsUpdate.off_peak_multiplier = parseFloat(bookingSettings.off_peak_multiplier) || 1.0;
+                if (bookingSettings.off_peak_dates !== undefined) settingsUpdate.off_peak_dates = bookingSettings.off_peak_dates;
+
+                settingsUpdate.updated_at = new Date().toISOString();
+
+                await supabaseClient
+                    .from('studio_settings')
+                    .update(settingsUpdate)
+                    .eq('studio_id', studioId);
+            }
+
+            // Sync group_members
+            if (type === 'group' && updatePayload.members) {
+                const groupId = id;
+                const membersArray = updatePayload.members || [];
+
+                if (Array.isArray(membersArray)) {
+                    const registeredMembers = membersArray.filter((m: any) => m.user_id);
+
+                    const { data: currentMembers } = await supabaseClient
+                        .from('group_members')
+                        .select('user_id, role')
+                        .eq('group_id', groupId);
+
+                    const currentUserIds = new Set((currentMembers || []).map((m: any) => m.user_id));
+                    const newUserIds = new Set(registeredMembers.map((m: any) => m.user_id));
+
+                    const toAdd = registeredMembers
+                        .filter((m: any) => !currentUserIds.has(m.user_id))
+                        .map((m: any) => ({
+                            group_id: groupId,
+                            user_id: m.user_id,
+                            role: m.user_id === data?.owner_id ? 'owner' : 'member'
+                        }));
+
+                    const toRemove = (currentMembers || [])
+                        .filter((m: any) => !newUserIds.has(m.user_id) && m.user_id !== data?.owner_id)
+                        .map((m: any) => m.user_id);
+
+                    if (toAdd.length > 0) {
+                        await supabaseClient.from('group_members').insert(toAdd);
+                    }
+
+                    if (toRemove.length > 0) {
+                        await supabaseClient
+                            .from('group_members')
+                            .delete()
+                            .eq('group_id', groupId)
+                            .in('user_id', toRemove);
+                    }
+                }
+            }
+
+            if (type === 'studio') {
+                await syncStudio3NF(supabaseClient, id)
+            }
+
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // DELETE ENTITY
+        if (action === 'delete') {
+            const { type, id } = params
+            const rpcClient = createClient(sbUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? sbKey, {
+                global: {
+                    headers: {
+                        Authorization: authHeader,
+                    },
+                },
+            })
+
+            if (type === 'gig') {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_gig_safely', {
+                    p_gig_id: id,
+                    p_reason: 'Deleted via listings-crud edge function',
+                });
+
+                if (rpcError) throw rpcError;
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                return new Response(JSON.stringify({ success: true, ...rpcResult }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            if (type === 'group') {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_group_safely', {
+                    p_group_id: id,
+                    p_reason: 'Deleted via listings-crud edge function',
+                });
+
+                if (rpcError) throw rpcError;
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                return new Response(JSON.stringify({ success: true, ...rpcResult }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            if (type === 'studio') {
+                const { data: rpcData, error: rpcError } = await rpcClient.rpc('delete_studio_safely', {
+                    p_studio_id: id,
+                    p_reason: 'Deleted via listings-crud edge function',
+                });
+
+                if (rpcError) throw rpcError;
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                return new Response(JSON.stringify({ success: true, ...rpcResult }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            const table = type + 's'
+
+            const { error } = await supabaseClient
+                .from(table)
+                .delete()
+                .eq('id', id)
+                .eq(type === 'gig' ? 'organizer_id' : 'owner_id', effectiveUserId)
+
+            if (error) throw error
+            return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // FETCH REVIEWS
+        if (action === 'fetch_reviews') {
+            const { type, id } = params;
+            const field = type + '_id';
+
+            const { data, error } = await supabaseClient
+                .from('reviews')
+                .select(`
+                    *,
+                    author:profiles!author_id(full_name, avatar_url)
+                `)
+                .eq(field, id)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        throw new Error('Invalid action')
+
+    } catch (error: any) {
+        console.error('❌ Edge Function Error:', error);
+        return new Response(JSON.stringify({
+            error: error.message,
+            details: error.toString(),
+            hint: error.hint || null,
+            code: error.code || null
+        }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 400,
+        })
+    }
+})

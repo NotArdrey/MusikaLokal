@@ -17,7 +17,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import * as Linking from "expo-linking";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getShareDestination, PENDING_SHARE_STORAGE_KEY } from "../src/utils/shareLinks";
+import { getAppLinkDestination, PENDING_SHARE_STORAGE_KEY } from "../src/utils/appLinks";
 import { getPasswordRecoveryRoute } from "../src/utils/passwordRecovery";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -769,7 +769,7 @@ function RootContent() {
     if (session && (!roleResolved || !identityChecked || identityRequired)) return;
     let active = true;
     void AsyncStorage.getItem(PENDING_SHARE_STORAGE_KEY).then((stored) => {
-      const destination = stored ? getShareDestination(stored) : null;
+      const destination = stored ? getAppLinkDestination(stored) : null;
       if (active && destination) {
         router.replace({ pathname: "/shared", params: { destination } } as any);
       }

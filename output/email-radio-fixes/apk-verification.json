@@ -1,0 +1,21 @@
+{
+  "metadata": {
+    "packageId": "com.anonymous.musikalokal",
+    "versionName": "1.0.4",
+    "versionCode": 5,
+    "sizeBytes": 102456843,
+    "sha256": "5485f0131bf7b9ee9bb5b0bf8d119705a61f272d012a5f7533f4395b514b1157",
+    "minSdk": 24,
+    "builtAt": "2026-10-08T05:42:06.6336692Z",
+    "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+    "testing": true
+  },
+  "signingCertificateMatchesPrevious": true,
+  "embeddedBundleMatchesVerifiedSources": true,
+  "architectures": [
+    "arm64-v8a",
+    "x86_64"
+  ],
+  "apkBuildSucceeded": true,
+  "configuredPrivateCredentialScan": "passed"
+}

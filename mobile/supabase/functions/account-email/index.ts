@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { sendEmailWithGmail } from "../_shared/gmailEmail.ts";
+import { buildEmailChangeUrl, EMAIL_CHANGE_GATEWAY_URL } from "../_shared/emailChangeLinks.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,15 +24,6 @@ function escapeHtml(raw: unknown) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
-}
-
-function getRedirect(rawRedirectTo: unknown, envName: string, fallback: string) {
-  const redirectTo = String(rawRedirectTo || "").trim();
-  return redirectTo || Deno.env.get(envName) || fallback;
-}
-
-function getActionLink(data: any) {
-  return String(data?.properties?.action_link || data?.action_link || "").trim();
 }
 
 function displayNameForUser(user: any, email: string) {
@@ -289,8 +281,18 @@ async function generateEmailChangeLink(
   });
 
   if (error) return { link: null, error: error.message };
-  const link = getActionLink(data);
-  return { link: link || null, error: link ? null : "Generated email change link was empty" };
+  try {
+    // The new-address response's hashed_token can differ from the stored token.
+    // The generated action link carries the token actually used by Auth.
+    const actionLink = new URL(data?.properties?.action_link || data?.action_link || "");
+    if (actionLink.protocol !== "https:" || actionLink.pathname !== "/auth/v1/verify" ||
+        actionLink.searchParams.get("type") !== "email_change") {
+      throw new Error("Invalid email change action link");
+    }
+    return { link: buildEmailChangeUrl(actionLink.searchParams.get("token") || ""), error: null };
+  } catch {
+    return { link: null, error: "Generated email change token was empty or invalid" };
+  }
 }
 
 async function sendEmailChangeNotice(
@@ -354,7 +356,7 @@ async function handleEmailChange(req: Request, supabaseAdmin: any, body: any, su
   if (!currentEmail) return jsonResponse({ error: "Current account email was not found" }, 400);
   if (newEmail === currentEmail) return jsonResponse({ error: "New email must be different from your current email" }, 400);
 
-  const redirectTo = getRedirect(body?.redirectTo, "EMAIL_CHANGE_REDIRECT_TO", "musikalokal://account_details");
+  const redirectTo = EMAIL_CHANGE_GATEWAY_URL;
   const recipientName = displayNameForUser(user, currentEmail);
 
   const currentLink = await generateEmailChangeLink(

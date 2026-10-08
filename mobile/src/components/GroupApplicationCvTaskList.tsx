@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import React, { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { radius, typography } from "../theme/tokens";
+import { getGroupApplicationCvStatusLabel, isGroupApplicationCollectingCvs } from "../utils/groupApplicationCv";
 
 type Props = {
   userId: string | null;
@@ -15,24 +16,32 @@ type Props = {
 export default function GroupApplicationCvTaskList({ userId, visible, colors, isDark }: Props) {
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const requestRef = useRef(0);
 
   const loadTasks = useCallback(async () => {
     if (!visible || !userId) return;
+    const requestId = ++requestRef.current;
     setLoading(true);
     const { data, error } = await supabase.functions.invoke("gig-applications", {
       body: { action: "fetch_member_cv_tasks", userId },
     });
-    if (!error) setTasks(Array.isArray(data) ? data : []);
+    if (requestId !== requestRef.current) return;
+    setTasks(!error && Array.isArray(data) ? data.filter((task) => isGroupApplicationCollectingCvs(task.application)) : []);
     setLoading(false);
   }, [userId, visible]);
 
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      void loadTasks();
-    }, 0);
-
-    return () => clearTimeout(timeoutId);
-  }, [loadTasks]);
+  useFocusEffect(useCallback(() => {
+    setTasks([]);
+    void loadTasks();
+    if (!visible || !userId) return;
+    const channel = supabase.channel(`group-cv-tasks:${userId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "gig_applications" }, () => void loadTasks())
+      .subscribe();
+    return () => {
+      requestRef.current += 1;
+      void supabase.removeChannel(channel);
+    };
+  }, [loadTasks, userId, visible]));
 
   if (!visible || (!loading && tasks.length === 0)) return null;
 
@@ -49,7 +58,7 @@ export default function GroupApplicationCvTaskList({ userId, visible, colors, is
         const application = task.application || {};
         const needsCv = task.cv_status !== "submitted";
         const canFinalize = task.can_finalize === true;
-        const statusLabel = canFinalize ? "Ready to send" : needsCv ? "Your CV required" : "Waiting for members";
+        const statusLabel = getGroupApplicationCvStatusLabel(application, task);
         const statusColor = canFinalize ? "#10B981" : needsCv ? "#F59E0B" : colors.primary;
         const statusIcon = canFinalize ? "checkmark-circle" : "time-outline";
         return (

@@ -1,3 +1,5 @@
+import { BoundedCache } from './BoundedCache';
+
 export type StaffEntityType = 'studio' | 'venue' | 'production';
 export type StaffAccessLevel = 1 | 2 | 3;
 
@@ -32,9 +34,9 @@ type StaffAssignmentFetchOptions = {
 const STAFF_ASSIGNMENTS_CACHE_MS = 15_000;
 const STAFF_ASSIGNMENTS_TIMEOUT_MS = 10_000;
 
-const staffAssignmentsCache = new Map<string, { assignments: StaffAssignment[]; expiresAt: number }>();
+const staffAssignmentsCache = new BoundedCache<string, { assignments: StaffAssignment[]; expiresAt: number }>(40, STAFF_ASSIGNMENTS_CACHE_MS);
 const staffAssignmentsInFlight = new Map<string, Promise<StaffAssignment[]>>();
-const staffAssignmentCache = new Map<string, { assignment: StaffAssignment | null; expiresAt: number }>();
+const staffAssignmentCache = new BoundedCache<string, { assignment: StaffAssignment | null; expiresAt: number }>(80, STAFF_ASSIGNMENTS_CACHE_MS);
 const staffAssignmentInFlight = new Map<string, Promise<StaffAssignment | null>>();
 
 export const getCachedActiveStaffAssignments = (userId: string): StaffAssignment[] | null => {

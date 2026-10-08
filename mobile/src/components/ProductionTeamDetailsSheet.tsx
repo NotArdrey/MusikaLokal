@@ -1,5 +1,6 @@
 import { useListingLifecycle } from '../hooks/useListingLifecycle';
 import { useListingFavorite } from "../hooks/useListingFavorite";
+import { BoundedCache } from "../utils/BoundedCache";
 import { useListingReviews } from "../hooks/useListingReviews";
 import { buildListingShareUrl } from "../utils/shareLinks";
 import { Ionicons } from "@expo/vector-icons";
@@ -97,7 +98,7 @@ type ProductionTeamBaseCacheEntry = {
 };
 
 const PRODUCTION_TEAM_DETAILS_CACHE_TTL_MS = 60_000;
-const productionTeamBaseCache = new Map<string, ProductionTeamBaseCacheEntry>();
+const productionTeamBaseCache = new BoundedCache<string, ProductionTeamBaseCacheEntry>(40, 5 * 60_000);
 
 const formatRoleLabel = (value: string | null | undefined) => {
   if (!value) return "Member";

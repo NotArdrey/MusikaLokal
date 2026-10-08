@@ -27,11 +27,19 @@ module.exports = ({ config: expoConfig }) => {
   delete existingExtra.expoPublicGroqApiKey;
   delete existingExtra.EXPO_PUBLIC_GROQ_API_KEY;
 
+  const pushProjectId = readEnv('EXPO_PUBLIC_EAS_PROJECT_ID', sanitize(existingExtra.eas?.projectId));
+  const googleServicesFile = readEnv('GOOGLE_SERVICES_JSON', sanitize(expoConfig.android?.googleServicesFile));
+
   return {
     ...expoConfig,
+    android: {
+      ...expoConfig.android,
+      ...(googleServicesFile ? { googleServicesFile } : {}),
+    },
     plugins: [...(expoConfig.plugins || []), "./plugins/withAndroidBuildLimits", "./plugins/withBrandLauncher"],
     extra: {
       ...existingExtra,
+      ...(pushProjectId ? { eas: { ...existingExtra.eas, projectId: pushProjectId } } : {}),
       supabaseUrl: readPublicOrE2EEnv(
         "EXPO_PUBLIC_SUPABASE_URL",
         "E2E_SUPABASE_URL",

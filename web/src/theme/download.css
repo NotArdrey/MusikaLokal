@@ -33,6 +33,9 @@
 .download-notice:empty { display: none; }
 .release-description { color: var(--muted); font-size: 12px; line-height: 1.8; margin: 16px 0 8px; }
 .standalone-note { color: var(--muted); font-size: 12px; }
+.previous-release { color: var(--muted); font-size: 13px; line-height: 1.7; }
+.previous-release a { display: inline-flex; align-items: center; min-height: 44px; color: var(--violet); text-decoration: underline; text-underline-offset: 3px; }
+.dark .previous-release a { color: #a99bff; }
 .device-note { color: var(--muted); font-size: 12px; line-height: 1.8; max-width: 460px; }
 .download-progress { display: grid; gap: 8px; margin-top: 18px; max-width: 460px; color: var(--muted); font-size: 12px; }
 .download-site progress { display: block; width: 100%; height: 8px; border: 0; border-radius: 10px; overflow: hidden; background: var(--wash); accent-color: var(--violet); }

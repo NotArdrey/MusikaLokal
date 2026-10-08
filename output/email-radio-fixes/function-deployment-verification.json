@@ -1,0 +1,80 @@
+[
+  {
+    "slug": "didit-webhook",
+    "beforeVersion": 165,
+    "afterVersion": 166,
+    "verify_jwt": false
+  },
+  {
+    "slug": "paymongo",
+    "beforeVersion": 126,
+    "afterVersion": 127,
+    "verify_jwt": false
+  },
+  {
+    "slug": "gig-applications",
+    "beforeVersion": 123,
+    "afterVersion": 124,
+    "verify_jwt": false
+  },
+  {
+    "slug": "group-members",
+    "beforeVersion": 67,
+    "afterVersion": 68,
+    "verify_jwt": false
+  },
+  {
+    "slug": "listings-crud",
+    "beforeVersion": 65,
+    "afterVersion": 66,
+    "verify_jwt": false
+  },
+  {
+    "slug": "manage-bookings",
+    "beforeVersion": 110,
+    "afterVersion": 111,
+    "verify_jwt": false
+  },
+  {
+    "slug": "manage-listings",
+    "beforeVersion": 60,
+    "afterVersion": 61,
+    "verify_jwt": false
+  },
+  {
+    "slug": "permit-management",
+    "beforeVersion": 67,
+    "afterVersion": 68,
+    "verify_jwt": false
+  },
+  {
+    "slug": "admin-reports-management",
+    "beforeVersion": 68,
+    "afterVersion": 69,
+    "verify_jwt": false
+  },
+  {
+    "slug": "manage-marketplace",
+    "beforeVersion": 57,
+    "afterVersion": 58,
+    "verify_jwt": false
+  },
+  {
+    "slug": "manage-production",
+    "beforeVersion": 74,
+    "afterVersion": 75,
+    "verify_jwt": false
+  },
+  {
+    "slug": "account-email",
+    "beforeVersion": 38,
+    "afterVersion": 39,
+    "verify_jwt": false
+  },
+  {
+    "slug": "admin-listings-management",
+    "beforeVersion": 40,
+    "afterVersion": 41,
+    "verify_jwt": true
+  }
+]

@@ -1,10 +1,13 @@
+import { BoundedCache } from '../utils/BoundedCache';
+
 type AdminCacheEnvelope<T> = {
   timestamp: number;
   data: T;
 };
 
 const CACHE_PREFIX = 'admin-page-cache:v1:';
-const memoryCache = new Map<string, AdminCacheEnvelope<unknown>>();
+const CACHE_MAX_AGE_MS = 5 * 60_000;
+const memoryCache = new BoundedCache<string, AdminCacheEnvelope<unknown>>(40, CACHE_MAX_AGE_MS);
 
 const isBrowserSessionStorageAvailable = () => {
   try {
@@ -87,6 +90,20 @@ export const writeAdminPageCache = <T>(key: string, data: T) => {
 
   try {
     window.sessionStorage.setItem(storageKey, JSON.stringify(envelope));
+    const entries: { key: string; timestamp: number }[] = [];
+    const remove: string[] = [];
+    for (let index = 0; index < window.sessionStorage.length; index++) {
+      const key = window.sessionStorage.key(index);
+      if (!key?.startsWith(CACHE_PREFIX)) continue;
+      try {
+        const cached = JSON.parse(window.sessionStorage.getItem(key) || 'null');
+        if (!cached || !Number.isFinite(cached.timestamp) || Date.now() - cached.timestamp >= CACHE_MAX_AGE_MS) remove.push(key);
+        else entries.push({ key, timestamp: cached.timestamp });
+      } catch { remove.push(key); }
+    }
+    entries.sort((left, right) => right.timestamp - left.timestamp);
+    remove.push(...entries.slice(40).map(entry => entry.key));
+    remove.forEach(key => window.sessionStorage.removeItem(key));
   } catch {
     // Ignore storage write failures and keep the in-memory cache.
   }

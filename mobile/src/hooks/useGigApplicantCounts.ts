@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from "react";
 import { AppState } from "react-native";
 import { supabase } from "../../lib/supabase";
+import { createRefreshScheduler } from '../utils/refreshScheduler';
 
 const normalizeRole = (value: unknown) =>
   typeof value === "string" ? value.trim().toLowerCase().replace(/[_\s]+/g, "-") : "";
@@ -27,7 +29,7 @@ export const useGigApplicantCounts = (
     options.isGuest !== true &&
     normalizeRole(options.userRole) !== "fan";
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     let cancelled = false;
     const requestedGigIds = requestKey ? requestKey.split(",") : [];
 
@@ -62,24 +64,29 @@ export const useGigApplicantCounts = (
       setCountsByGigId(nextCounts);
     };
 
-    void loadCounts();
+    const refresh = createRefreshScheduler(loadCounts);
+    void refresh.run();
     const channel = supabase
       .channel(`gig-applicant-counts-${Date.now()}-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "gig_applications" },
-        () => void loadCounts(),
+        payload => {
+          const gigId = (payload.new as Record<string, unknown>).gig_id || (payload.old as Record<string, unknown>).gig_id;
+          if (!gigId || requestedGigIds.includes(String(gigId))) refresh.schedule();
+        },
       )
       .subscribe();
     const appStateSubscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void loadCounts();
+      if (state === "active") refresh.schedule();
     });
     return () => {
       cancelled = true;
+      refresh.cancel();
       appStateSubscription.remove();
       void supabase.removeChannel(channel);
     };
-  }, [canView, requestKey]);
+  }, [canView, requestKey]));
 
   return countsByGigId;
 };

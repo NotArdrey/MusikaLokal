@@ -19,10 +19,19 @@ import TrackPlayer, { Event, RepeatMode, State, isTrackPlayerAvailable } from ".
 import {
   buildStationQueue,
   getLiveStationCursor,
+  resolveRadioMediaUrl,
   ensureRadioPlayerSetup,
   type RadioQueueTrack,
   updateRadioPlayerCapabilities,
 } from "../audio/radioTrackPlayer";
+import {
+  getRadioPlaybackVersion,
+  invalidateRadioPlayback,
+  pauseRadioPlayback,
+  resumeRadioPlayback,
+  synchronizeRadioPlayback,
+  updateRadioNowPlayingMetadata,
+} from "../audio/radioLivePlayback";
 import {
   NAVBAR_BOTTOM_OFFSET,
   NAVBAR_HEIGHT,
@@ -34,6 +43,7 @@ import { useBottomOverlay } from "./BottomOverlayContext";
 import { useTheme } from "./ThemeContext";
 import { getStationLiveTimelineState } from "../utils/radioTimeline";
 import {getStationQueueEntries, getStationQueueFingerprint, mergeStationSnapshot} from '../utils/stationQueue';
+import { getStationArtwork } from "../utils/stationPresentation";
 import {useStationQueueRefresh} from '../hooks/useStationQueueRefresh';
 
 export const RADIO_MINI_PLAYER_HEIGHT = 60;
@@ -343,6 +353,9 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
   const fallbackAudioModePromiseRef = useRef<Promise<void> | null>(null);
   const fallbackPrearmCooldownUntilRef = useRef(0);
   const playQueueIndexRef = useRef<(queueIndex: number, shouldPlay?: boolean) => Promise<void>>(async () => undefined);
+  const synchronizeFallbackRef = useRef<() => Promise<void>>(async () => undefined);
+  const fallbackSyncInFlightRef = useRef(false);
+  const lastFallbackSyncAtRef = useRef(0);
 
   useEffect(() => {
     activeStationRef.current = activeStation;
@@ -392,11 +405,13 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const beginPlaybackRequest = useCallback(() => {
+    invalidateRadioPlayback();
     playbackRequestIdRef.current += 1;
     return playbackRequestIdRef.current;
   }, []);
 
   const invalidatePlaybackRequests = useCallback(() => {
+    invalidateRadioPlayback();
     playbackRequestIdRef.current += 1;
   }, []);
 
@@ -436,7 +451,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     if (!fallbackAudioModePromiseRef.current) {
       fallbackAudioModePromiseRef.current = setAudioModeAsync({
         playsInSilentMode: true,
-        interruptionMode: "duckOthers",
+        interruptionMode: "doNotMix",
         shouldPlayInBackground: true,
       }).catch((error) => {
         fallbackAudioModePromiseRef.current = null;
@@ -619,7 +634,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     let fastCursor = getFastStationLiveCursor(playableStation, slotIdx);
     const safeQueueIndex = normalizePrepareQueueIndex(fastCursor.queueIndex);
     const existingPreparedQueue = getPreparedQueueForStation(playableStation, safeQueueIndex);
-    const existingPreparedSnapshot = preparedQueueRef.current;
+    const existingPreparedSnapshot = existingPreparedQueue ? preparedQueueRef.current : null;
     if (existingPreparedQueue) {
       const canUpgradePreparedQueue =
         !activeStationRef.current &&
@@ -1058,6 +1073,10 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     setIsPlaying(status.isPlaying);
 
     if (!status.didJustFinish) {
+      if (status.isPlaying && Date.now() - lastFallbackSyncAtRef.current >= 5_000) {
+        lastFallbackSyncAtRef.current = Date.now();
+        void synchronizeFallbackRef.current().catch(error => console.warn("Radio live recovery failed:", error));
+      }
       return;
     }
 
@@ -1107,11 +1126,11 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       }
 
       const startPositionMillis = Math.max(0, Math.floor(startPositionSeconds * 1000));
-      const { sound, status } = await AudioSound.createAsync(
+      const { sound } = await AudioSound.createAsync(
         { uri: fullQueue[safeIndex].url },
         {
           positionMillis: startPositionMillis,
-          shouldPlay,
+          shouldPlay: false,
           progressUpdateIntervalMillis: 1000,
           volume: isMutedRef.current ? 0 : 1,
         },
@@ -1130,9 +1149,16 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       }
 
       fallbackSoundRef.current = sound;
-      sound.enableBackgroundPlayback(fullQueue[safeIndex].title || "MusikaLokal Radio");
+      sound.enableBackgroundPlayback(`${fullQueue[safeIndex].stationName} · LIVE`, {
+        artist: [fullQueue[safeIndex].title, fullQueue[safeIndex].artist].filter(Boolean).join(" · "),
+        artworkUrl: fullQueue[safeIndex].artwork,
+      }, true);
       updateSharedQueueState(stationData, fullQueue, safeIndex);
 
+      if (shouldPlay) await sound.playAsync();
+      if (!isCurrentRequest()) return;
+      const status = await sound.getStatusAsync();
+      if (!isCurrentRequest()) return;
       playWhenReadyRef.current = shouldPlay;
       playbackStateRef.current = status.isLoaded
         ? status.isPlaying
@@ -1163,6 +1189,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const controlVersion = getRadioPlaybackVersion();
     const isCurrentRequest = () => isPlaybackRequestCurrent(requestId);
 
     if (fullQueue.length === 0) {
@@ -1239,7 +1266,11 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
         requestId,
       });
 
-      if (!shouldPlay && startPositionSeconds > 0) {
+      const liveCursor = getFastStationLiveCursor(stationData, fullQueue[safeIndex].queueIndex);
+      if (liveCursor.isSynchronized && liveCursor.queueIndex === fullQueue[safeIndex].queueIndex) {
+        startPositionSeconds = liveCursor.positionSeconds;
+      }
+      if (startPositionSeconds > 0) {
         await TrackPlayer.seekTo(startPositionSeconds);
         if (!isCurrentRequest()) {
           return;
@@ -1249,8 +1280,10 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       playWhenReadyRef.current = shouldPlay;
       playbackStateRef.current = shouldPlay ? State.Playing : State.Paused;
       updateSharedQueueState(stationData, fullQueue, safeIndex);
+      await updateRadioNowPlayingMetadata(fullQueue[safeIndex]);
+      if (!isCurrentRequest()) return;
 
-      if (shouldPlay) {
+      if (shouldPlay && controlVersion === getRadioPlaybackVersion()) {
         const playStartedAt = Date.now();
         await TrackPlayer.play();
         logRadioTuneInDebug("player-play-complete", {
@@ -1262,18 +1295,13 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
         }
 
         setIsPlaying(true);
-        if (startPositionSeconds > 0) {
-          void TrackPlayer.seekTo(startPositionSeconds).then(() => {
-            logRadioTuneInDebug("player-live-seek-complete", {
-              positionSeconds: startPositionSeconds,
-              requestId,
-            });
-          }).catch((error: unknown) => {
-            console.warn("Radio live seek error:", error);
-          });
-        }
       } else {
-        setIsPlaying(false);
+        const state = await TrackPlayer.getPlaybackState();
+        const playWhenReady = await TrackPlayer.getPlayWhenReady();
+        if (!isCurrentRequest()) return;
+        playbackStateRef.current = state.state;
+        playWhenReadyRef.current = playWhenReady;
+        setIsPlaying(deriveIsPlaying(playWhenReady, state.state));
       }
 
       void TrackPlayer.setRepeatMode(isAutoplayEnabledRef.current ? RepeatMode.Queue : RepeatMode.Off).catch((error: unknown) => {
@@ -1318,6 +1346,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
+    const controlVersion = getRadioPlaybackVersion();
     const isCurrentRequest = () => isPlaybackRequestCurrent(requestId);
     queueTransitionInFlightRef.current = true;
 
@@ -1332,6 +1361,12 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
         return false;
       }
 
+      const nativeTrack = await TrackPlayer.getActiveTrack();
+      if (!isCurrentRequest() || nativeTrack?.id !== fullQueue[0].id ||
+          nativeTrack?.stationId !== stationData.id || nativeTrack?.url !== fullQueue[0].url) {
+        return false;
+      }
+
       playerQueueLengthRef.current = Math.max(1, playerQueueLengthRef.current);
       const volumeStartedAt = Date.now();
       await TrackPlayer.setVolume(isMutedRef.current ? 0 : 1);
@@ -1343,9 +1378,27 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
         return false;
       }
 
+      const liveCursor = getFastStationLiveCursor(stationData, fullQueue[0].queueIndex);
+      if (liveCursor.isSynchronized && liveCursor.queueIndex === fullQueue[0].queueIndex) {
+        startPositionSeconds = liveCursor.positionSeconds;
+      }
+      await TrackPlayer.seekTo(startPositionSeconds);
+      if (!isCurrentRequest()) return false;
+      await updateRadioNowPlayingMetadata(fullQueue[0]);
+      if (!isCurrentRequest()) return false;
+      updateSharedQueueState(stationData, fullQueue, 0);
+      if (controlVersion !== getRadioPlaybackVersion()) {
+        const state = await TrackPlayer.getPlaybackState();
+        const playWhenReady = await TrackPlayer.getPlayWhenReady();
+        if (!isCurrentRequest()) return false;
+        playbackStateRef.current = state.state;
+        playWhenReadyRef.current = playWhenReady;
+        setIsPlaying(deriveIsPlaying(playWhenReady, state.state));
+        return true;
+      }
+
       playWhenReadyRef.current = true;
       playbackStateRef.current = State.Playing;
-      updateSharedQueueState(stationData, fullQueue, 0);
 
       const playStartedAt = Date.now();
       await TrackPlayer.play();
@@ -1358,16 +1411,6 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       }
 
       setIsPlaying(true);
-      if (startPositionSeconds > 0) {
-        void TrackPlayer.seekTo(startPositionSeconds).then(() => {
-          logRadioTuneInDebug("prepared-player-live-seek-complete", {
-            positionSeconds: startPositionSeconds,
-            requestId,
-          });
-        }).catch((error: unknown) => {
-          console.warn("Radio prepared live seek error:", error);
-        });
-      }
 
       void TrackPlayer.setRepeatMode(isAutoplayEnabledRef.current ? RepeatMode.Queue : RepeatMode.Off).catch((error: unknown) => {
         console.warn("Radio prepared set repeat mode error:", error);
@@ -1413,7 +1456,10 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       }
 
       fallbackSoundRef.current = preparedSound;
-      preparedSound.enableBackgroundPlayback(fullQueue[0].title || "MusikaLokal Radio");
+      preparedSound.enableBackgroundPlayback(`${fullQueue[0].stationName} · LIVE`, {
+        artist: [fullQueue[0].title, fullQueue[0].artist].filter(Boolean).join(" · "),
+        artworkUrl: fullQueue[0].artwork,
+      }, true);
       preparedSound.setOnPlaybackStatusUpdate((status) => {
         handleFallbackStatusUpdate(status, requestId);
       });
@@ -1433,6 +1479,13 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
         return false;
       }
 
+      const liveCursor = getFastStationLiveCursor(stationData, fullQueue[0].queueIndex);
+      if (liveCursor.isSynchronized && liveCursor.queueIndex === fullQueue[0].queueIndex) {
+        startPositionSeconds = liveCursor.positionSeconds;
+      }
+      await preparedSound.setPositionAsync(startPositionSeconds * 1000);
+      if (!isCurrentRequest()) return false;
+
       playWhenReadyRef.current = true;
       playbackStateRef.current = State.Playing;
       const playStartedAt = Date.now();
@@ -1446,16 +1499,6 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       }
 
       setIsPlaying(true);
-      if (startPositionSeconds > 0) {
-        void preparedSound.setPositionAsync(startPositionSeconds * 1000).then(() => {
-          logRadioTuneInDebug("prepared-fallback-live-seek-complete", {
-            positionSeconds: startPositionSeconds,
-            requestId,
-          });
-        }).catch((error: unknown) => {
-          console.warn("Radio prepared fallback live seek error:", error);
-        });
-      }
 
       return true;
     } catch (error) {
@@ -1482,6 +1525,49 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     playQueueIndexRef.current = playQueueIndex;
   }, [playQueueIndex]);
+
+  const synchronizeFallbackPlayback = useCallback(async () => {
+    if (isTrackPlayerAvailable || fallbackSyncInFlightRef.current || !playWhenReadyRef.current) return;
+    const station = activeStationRef.current;
+    const queue = fullQueueRef.current;
+    if (!station || queue.length !== getStationQueueEntries(station).length) return;
+    const sound = fallbackSoundRef.current;
+    if (!sound) return;
+    const requestId = playbackRequestIdRef.current;
+    fallbackSyncInFlightRef.current = true;
+    try {
+      const status = await sound.getStatusAsync();
+      if (!isPlaybackRequestCurrent(requestId) || !playWhenReadyRef.current || !status.isLoaded || !status.isPlaying) return;
+      const cursor = getLiveStationCursor(station, queue);
+      if (!cursor.isSynchronized) return;
+      if (cursor.queueIndex !== currentQueueIndexRef.current) {
+        await applyFallbackQueue(station, queue, cursor.queueIndex, true, beginPlaybackRequest(), cursor.positionSeconds);
+      } else if (Math.abs(status.positionMillis / 1000 - cursor.positionSeconds) > 3) {
+        await sound.setPositionAsync(cursor.positionSeconds * 1000);
+      }
+    } finally {
+      fallbackSyncInFlightRef.current = false;
+    }
+  }, [applyFallbackQueue, beginPlaybackRequest, isPlaybackRequestCurrent]);
+
+  useEffect(() => {
+    synchronizeFallbackRef.current = synchronizeFallbackPlayback;
+  }, [synchronizeFallbackPlayback]);
+
+  const resumeLiveStation = useCallback(async () => {
+    if (isTrackPlayerAvailable) {
+      await resumeRadioPlayback();
+      return;
+    }
+    const station = activeStationRef.current;
+    let queue = fullQueueRef.current;
+    if (!station || queue.length === 0) return;
+    const requestId = beginPlaybackRequest();
+    if (queue.length !== getStationQueueEntries(station).length) queue = await buildStationQueue(station);
+    if (!isPlaybackRequestCurrent(requestId)) return;
+    const cursor = getLiveStationCursor(station, queue);
+    await applyFallbackQueue(station, queue, cursor.queueIndex, true, requestId, cursor.positionSeconds);
+  }, [applyFallbackQueue, beginPlaybackRequest, isPlaybackRequestCurrent]);
 
   const hydrateFullQueueAfterFastStart = useCallback(async (
     stationData: any,
@@ -1630,47 +1716,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      if (isTrackPlayerAvailable) {
-        logRadioTuneInDebug("resume-current-track-player", {
-          stationId,
-          playbackState: playbackStateRef.current,
-        });
-        if (playbackStateRef.current === State.Ended) {
-          await TrackPlayer.seekTo(0);
-        }
-
-        playWhenReadyRef.current = true;
-        await TrackPlayer.play();
-        setIsPlaying(true);
-        logRadioTuneInDebug("resume-current-track-player-complete", {
-          stationId,
-        });
-        return;
-      }
-
-      const sound = fallbackSoundRef.current;
-      if (!sound) {
-        logRadioTuneInDebug("resume-current-fallback-missing-sound", {
-          stationId,
-        });
-        return;
-      }
-
-      logRadioTuneInDebug("resume-current-fallback", {
-        stationId,
-      });
-      const status = await sound.getStatusAsync();
-      if (status.isLoaded && status.didJustFinish) {
-        await sound.setPositionAsync(0);
-      }
-
-      playWhenReadyRef.current = true;
-      playbackStateRef.current = State.Playing;
-      await sound.playAsync();
-      setIsPlaying(true);
-      logRadioTuneInDebug("resume-current-fallback-complete", {
-        stationId,
-      });
+      await resumeLiveStation();
       return;
     }
 
@@ -1931,7 +1977,7 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
         stationId,
       });
     }
-  }, [applyPlayerQueue, beginPlaybackRequest, cancelPendingPrepareForDirectStart, clearLocalPlaybackState, ensureStationData, getPreparedFallbackQueueForStation, getPreparedPlayerQueueForStation, getPreparedQueueForStation, hydrateFullQueueAfterFastStart, isPlaybackRequestCurrent, isPlaying, playPreparedFallbackQueue, playPreparedPlayerQueue, recordStationTuneIn]);
+  }, [applyPlayerQueue, beginPlaybackRequest, cancelPendingPrepareForDirectStart, clearLocalPlaybackState, ensureStationData, getPreparedFallbackQueueForStation, getPreparedPlayerQueueForStation, getPreparedQueueForStation, hydrateFullQueueAfterFastStart, isPlaybackRequestCurrent, isPlaying, playPreparedFallbackQueue, playPreparedPlayerQueue, recordStationTuneIn, resumeLiveStation]);
 
   const skipPrevious = useCallback(async () => {
     const stationData = activeStationRef.current;
@@ -1968,43 +2014,26 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
 
   const togglePlayPause = useCallback(async () => {
     if (activeStationRef.current && fullQueueRef.current.length > 0 && isPlaying) {
+      playWhenReadyRef.current = false;
+      if (isTrackPlayerAvailable) await pauseRadioPlayback();
+      else {
+        invalidatePlaybackRequests();
+        await fallbackSoundRef.current?.pauseAsync();
+      }
+      playbackStateRef.current = State.Paused;
+      setIsPlaying(false);
       return;
     }
 
     if (activeStationRef.current && fullQueueRef.current.length > 0 && !isPlaying) {
-      if (isTrackPlayerAvailable) {
-        if (playbackStateRef.current === State.Ended) {
-          await TrackPlayer.seekTo(0);
-        }
-
-        playWhenReadyRef.current = true;
-        await TrackPlayer.play();
-        setIsPlaying(true);
-        return;
-      }
-
-      const sound = fallbackSoundRef.current;
-      if (!sound) {
-        await playQueueIndex(currentQueueIndexRef.current);
-        return;
-      }
-
-      const status = await sound.getStatusAsync();
-      if (status.isLoaded && status.didJustFinish) {
-        await sound.setPositionAsync(0);
-      }
-
-      playWhenReadyRef.current = true;
-      playbackStateRef.current = State.Playing;
-      await sound.playAsync();
-      setIsPlaying(true);
+      await resumeLiveStation();
       return;
     }
 
     if (activeStationRef.current) {
-      await playQueueIndex(currentQueueIndexRef.current);
+      await resumeLiveStation();
     }
-  }, [isPlaying, playQueueIndex]);
+  }, [invalidatePlaybackRequests, isPlaying, resumeLiveStation]);
 
   const toggleMute = useCallback(async () => {
     const nextMuted = !isMutedRef.current;
@@ -2107,6 +2136,11 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     const nextStation = mergeStationSnapshot(previous, stationData);
     activeStationRef.current = nextStation;
     setActiveStation(nextStation);
+    if (isTrackPlayerAvailable) {
+      void synchronizeRadioPlayback().catch(error => console.warn("Radio live recovery failed:", error));
+    } else {
+      void synchronizeFallbackRef.current().catch(error => console.warn("Radio live recovery failed:", error));
+    }
   }, [applyPlayerQueue, beginPlaybackRequest, isPlaybackRequestCurrent]);
 
   useStationQueueRefresh(readUuidString(activeStation?.id) || null, syncStationData);
@@ -2121,6 +2155,11 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
     });
 
     const stateSubscription = TrackPlayer.addEventListener(Event.PlaybackState, (playbackState: { state: string }) => {
+      if (playbackState.state === State.None && activeStationRef.current && !queueTransitionInFlightRef.current) {
+        invalidatePlaybackRequests();
+        clearLocalPlaybackState(true);
+        return;
+      }
       playbackStateRef.current = playbackState.state;
       setIsPlaying(deriveIsPlaying(playWhenReadyRef.current, playbackState.state));
     });
@@ -2165,6 +2204,11 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
           return;
         }
 
+        if (nextTrack.stationId !== activeStationRef.current?.id ||
+            !fullQueueRef.current.some(track => track.id === nextTrack.id)) {
+          return;
+        }
+
         const nextQueueIndex = typeof nextTrack.queueIndex === "number"
           ? nextTrack.queueIndex
           : typeof event.index === "number"
@@ -2192,11 +2236,58 @@ export function RadioPlayerProvider({ children }: { children: ReactNode }) {
       playWhenReadySubscription.remove();
       activeTrackSubscription.remove();
       playbackErrorSubscription.remove();
-      void TrackPlayer.reset().catch(() => {
-        // Ignore teardown failures during unmount.
-      });
+      // The registered playback service owns native audio after the screen closes.
     };
-  }, [invalidatePlaybackRequests, updatePlaybackControlAvailability]);
+  }, [clearLocalPlaybackState, invalidatePlaybackRequests, updatePlaybackControlAvailability]);
+
+  useEffect(() => {
+    if (!isTrackPlayerAvailable) return;
+    let disposed = false;
+    const requestId = playbackRequestIdRef.current;
+    void (async () => {
+      await ensureRadioPlayerSetup();
+      const track: RadioQueueTrack | undefined = await TrackPlayer.getActiveTrack();
+      if (!track?.stationId || activeStationRef.current || preparingPlayerStationRef.current ||
+          preparedQueueRef.current?.playerPreparedAt) return;
+      const station = await ensureStationData({
+        id: track.stationId,
+        name: track.stationName,
+        queue_anchor_at: track.radioAnchorAt,
+        queue_revision: track.radioQueueRevision,
+      });
+      const queue: RadioQueueTrack[] = await TrackPlayer.getQueue();
+      const current: RadioQueueTrack | undefined = await TrackPlayer.getActiveTrack();
+      const state = await TrackPlayer.getPlaybackState();
+      const playWhenReady = await TrackPlayer.getPlayWhenReady();
+      if (disposed || !isPlaybackRequestCurrent(requestId) || activeStationRef.current ||
+          preparingPlayerStationRef.current || preparedQueueRef.current?.playerPreparedAt ||
+          (!playWhenReady && state.state !== State.Paused) ||
+          current?.stationId !== track.stationId || current?.radioAnchorAt !== track.radioAnchorAt || queue.length === 0) return;
+      const orderedQueue = [...queue].sort((a, b) => a.queueIndex - b.queueIndex);
+      const currentIndex = orderedQueue.findIndex(item => item.id === current.id);
+      if (currentIndex < 0) return;
+      const stationChanged = Number(station.queue_revision || 0) !== Number(current.radioQueueRevision || 0) ||
+        (station.queue_anchor_at && station.queue_anchor_at !== current.radioAnchorAt) ||
+        (station.__queueReady && JSON.stringify(getStationQueueEntries(station).map(entry => entry.item.id)) !==
+          JSON.stringify(orderedQueue.map(item => item.itemId)));
+      const restoredStation = stationChanged ? {
+        ...station,
+        queue_revision: current.radioQueueRevision,
+        queue_anchor_at: current.radioAnchorAt,
+        playback_queue: orderedQueue.map(item => ({
+          item_index: item.itemIndex,
+          item: {id: item.itemId, audio_url: item.url, duration_seconds: item.duration},
+        })),
+      } : station;
+      updateSharedQueueState(restoredStation, orderedQueue, currentIndex);
+      playerQueueLengthRef.current = queue.length;
+      playbackStateRef.current = state.state;
+      playWhenReadyRef.current = playWhenReady;
+      setIsPlaying(deriveIsPlaying(playWhenReady, state.state));
+      if (stationChanged) syncStationData(station);
+    })().catch(error => console.warn("Radio session restore failed:", error));
+    return () => { disposed = true; };
+  }, [ensureStationData, isPlaybackRequestCurrent, syncStationData, updateSharedQueueState]);
 
   useEffect(() => {
     return () => {
@@ -2350,7 +2441,7 @@ export function GlobalRadioMiniPlayer() {
   const activeTrackTitle = currentTrack?.title
     || activeLiveSlots[currentSlotIndex]?.playlist?.title
     || `Track ${currentSlotIndex + 1}`;
-  const activeArtworkUrl = currentTrack?.artwork
+  const activeArtworkUrl = resolveRadioMediaUrl(getStationArtwork(activeStation)) || currentTrack?.artwork
     || activeLiveSlots[currentSlotIndex]?.playlist?.cover_image_url
     || "";
 
@@ -2384,7 +2475,7 @@ export function GlobalRadioMiniPlayer() {
         style={{ flex: 1, marginRight: 10 }}
         onPress={() => router.push({ pathname: "/station_details" as any, params: { station_id: activeStation.id } })}
       >
-        <Text style={{ fontSize: 10, color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        <Text numberOfLines={1} style={{ fontSize: 10, color: colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 }}>
           {activeStation.name}
         </Text>
         <Text style={{ fontSize: 12, fontWeight: "600", color: colors.text }} numberOfLines={1}>

@@ -1,3 +1,8 @@
+export function getStudioBalanceAfterPayment(booking: any) {
+  return Math.max(Number(booking.remaining_balance || 0),
+    Number(booking.final_price || 0) - Number(booking.payment_amount || 0), 0);
+}
+
 export function getConfirmedProviderPayment(payment: any) {
   const attributes = payment?.attributes;
   const amount = Number(attributes?.amount);

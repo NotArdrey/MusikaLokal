@@ -222,6 +222,7 @@ for(const app of ['mobile','web']) test(`${app}: production refresh callback rep
   const activeStationRef={current:plain(station)},preparedQueueRef={current:{}};
   const globals={activeStationRef,preparedQueueRef,playWhenReadyRef:{current:true},audioRef:{current:{paused:false,pause(){},removeAttribute(){},load(){}}},
     requestIdRef:{get current(){return requestId;}},getStationQueueFingerprint:queue.getStationQueueFingerprint,mergeStationSnapshot:queue.mergeStationSnapshot,
+    isTrackPlayerAvailable:true,synchronizeRadioPlayback:async()=>{},
     beginPlaybackRequest:()=>++requestId,beginRequest:()=>++requestId,isPlaybackRequestCurrent:id=>id===requestId,
     setActiveStation:value=>{activeStationRef.current=value;},buildStationQueue:data=>new Promise(resolve=>pending.push(()=>resolve(queue.getStationQueueEntries(data)))),
     getLiveStationCursor:()=>({queueIndex:0,positionSeconds:3}),

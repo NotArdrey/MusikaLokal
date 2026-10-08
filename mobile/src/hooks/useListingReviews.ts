@@ -36,7 +36,7 @@ export function useListingReviews(type: string | null | undefined, id: string | 
       setState({ key, reviews, loading: true, error: null });
       try {
         const { data, error } = await supabase.from("reviews")
-          .select("*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url, updated_at)")
+          .select("*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url, created_at)")
           .eq(column, id).order("created_at", { ascending: false }).limit(5)
           .abortSignal(nextController.signal);
         if (error) throw error;

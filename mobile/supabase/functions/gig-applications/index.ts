@@ -1703,6 +1703,7 @@ async function finalizeGroupMemberCvCollection(
             leader_reviewed_at: completedAt,
         })
         .eq('id', application.id)
+        .eq('status', 'pending')
         .in('member_cv_status', ['collecting', 'ready'])
         .select('*, gig:gig_id(id, name, organizer_id), group:group_id(id, name, owner_id)')
         .maybeSingle()
@@ -2134,7 +2135,7 @@ Deno.serve(async (req: Request) => {
             }
             const { data: application, error: applicationError }: { data: any; error: any } = await supabaseClient
                 .from('gig_applications')
-                .select('id, applicant_id, submitted_by_user_id, gig_id, group_id, status, member_cv_status, member_cv_required_count, member_cv_submitted_count, video_url, created_at, gig:gig_id(id, name, location, event_date), group:group_id(id, name, owner_id, group_type)')
+                .select('id, applicant_id, submitted_by_user_id, gig_id, group_id, status, system_status_reason, completion_rate_penalty, member_cv_status, member_cv_required_count, member_cv_submitted_count, video_url, created_at, gig:gig_id(id, name, location, event_date), group:group_id(id, name, owner_id, group_type)')
                 .eq('id', applicationId)
                 .maybeSingle()
             if (applicationError) throw applicationError
@@ -2172,6 +2173,7 @@ Deno.serve(async (req: Request) => {
                     is_current_user: member.user_id === effectiveUserId,
                 })),
                 can_finalize:
+                    application.status === 'pending' &&
                     application.member_cv_status === 'ready' &&
                     application.group?.owner_id === effectiveUserId,
             }), {
@@ -2214,37 +2216,21 @@ Deno.serve(async (req: Request) => {
                 })
             }
 
-            const submittedAt = new Date().toISOString()
-            const { error: updateMemberError } = await supabaseClient
-                .from('gig_application_members')
-                .update({
-                    cv_storage_bucket: 'application-cvs',
-                    cv_storage_path: String(cvStoragePath).trim().replace(/^\/+/, ''),
-                    cv_filename: String(cvFilename || 'CV').trim(),
-                    cv_status: 'submitted',
-                    ai_review_consent: aiReviewConsent === true,
-                    member_verification_consent: memberVerificationConsent === true,
-                    cv_submitted_at: submittedAt,
-                    updated_at: submittedAt,
+            const { data: submission, error: submissionError } = await supabaseClient.rpc('submit_group_application_member_cv', {
+                p_application_id: applicationId,
+                p_actor_user_id: effectiveUserId,
+                p_storage_path: String(cvStoragePath).trim().replace(/^\/+/, ''),
+                p_filename: String(cvFilename || 'CV').trim(),
+                p_ai_review_consent: aiReviewConsent === true,
+                p_member_verification_consent: memberVerificationConsent === true,
+            })
+            if (submissionError) {
+                return new Response(JSON.stringify({ error: submissionError.message }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409,
                 })
-                .eq('id', memberRow.id)
-            if (updateMemberError) throw updateMemberError
+            }
 
-            const members = await loadGroupApplicationMembers(supabaseClient, applicationId)
-            const submittedCount = members.filter((member: any) => member.cv_status === 'submitted' && member.cv_storage_path).length
-            const allSubmitted = members.length > 0 && submittedCount === members.length
-            const nextMemberCvStatus = allSubmitted ? 'ready' : 'collecting'
-            const { error: updateApplicationError } = await supabaseClient
-                .from('gig_applications')
-                .update({
-                    member_cv_status: nextMemberCvStatus,
-                    member_cv_required_count: members.length,
-                    member_cv_submitted_count: submittedCount,
-                })
-                .eq('id', applicationId)
-            if (updateApplicationError) throw updateApplicationError
-
-            if (allSubmitted && application.member_cv_status !== 'ready') {
+            if (submission.became_ready) {
                 await insertCoreNotification(supabaseClient, {
                     user_id: application.group.owner_id,
                     type: 'success',
@@ -2264,12 +2250,7 @@ Deno.serve(async (req: Request) => {
                 })
             }
 
-            return new Response(JSON.stringify({
-                application_id: applicationId,
-                status: nextMemberCvStatus,
-                required_count: members.length,
-                submitted_count: submittedCount,
-            }), {
+            return new Response(JSON.stringify(submission), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
             })
@@ -3515,14 +3496,22 @@ Deno.serve(async (req: Request) => {
                 updates.status = 'rejected'
             }
 
-            const { data, error } = await supabaseClient
+            let leaderUpdate = supabaseClient
                 .from('gig_applications')
                 .update(updates)
                 .eq('id', applicationId)
-                .select()
-                .single()
+                .eq('status', 'pending')
+            leaderUpdate = appDetails.leader_approval_status == null
+                ? leaderUpdate.is('leader_approval_status', null)
+                : leaderUpdate.eq('leader_approval_status', appDetails.leader_approval_status)
+            const { data, error } = await leaderUpdate.select().maybeSingle()
 
             if (error) throw error
+            if (!data) {
+                return new Response(JSON.stringify({ error: 'Application changed. Refresh and try again.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 409,
+                })
+            }
 
             if (normalizedDecision === 'approved' && appDetails.ai_portfolio_review_consent === true) {
                 try {
@@ -3680,21 +3669,24 @@ Deno.serve(async (req: Request) => {
                 })
             }
 
-            const { error: updateError } = await supabaseClient
-                .from('gig_applications')
-                .update({ status: 'cancelled' })
-                .eq('id', applicationId)
-
-            if (updateError) throw updateError
-
-            try {
-                await notifyGigApplicationAudience(supabaseClient, applicationId, 'cancelled', {
-                    gigName: existingApp.gig?.name || 'this gig',
-                    actorUserId: effectiveUserId,
-                    includeOrganizer: true,
-                })
-            } catch (notifyError) {
-                console.error('Failed to notify gig application audience:', notifyError)
+            // Keep legacy callers on the same authorization, conditional update,
+            // penalty, capacity-refresh and notification path as Activity.
+            const { error: withdrawalError } = await supabaseClient.functions.invoke('manage-bookings', {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                body: {
+                    action: 'update_status', booking_id: applicationId,
+                    type_id: 'gig_application', new_status: 'cancelled',
+                    cancellation_reason: params.reason || null,
+                },
+            })
+            if (withdrawalError) {
+                const context = withdrawalError.context
+                if (context instanceof Response) {
+                    return new Response(await context.text(), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: context.status,
+                    })
+                }
+                throw withdrawalError
             }
 
             let cancellationCount = 0

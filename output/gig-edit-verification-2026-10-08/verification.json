@@ -1,0 +1,20 @@
+{
+  "verifiedAt": "2026-10-08T06:02:01.310Z",
+  "projectRef": "aefldxegsvzecshlayza",
+  "liveFunctionRead": true,
+  "livePendingClosureGuard": "v_major_change",
+  "localPendingClosureGuard": "v_eligibility_change",
+  "livePendingClosureConfirmation": false,
+  "checkedGigs": 1,
+  "slotReserializationChanges": 0,
+  "affectedGigsWithPending": 0,
+  "checks": [
+    {
+      "gigId": "f2155883-d6be-42e7-8adc-1c6bf63c2419",
+      "pendingApplications": 1,
+      "unchangedEditorSlotsDifferFromStored": false,
+      "differingSlotTypes": []
+    }
+  ],
+  "remoteMutationsPerformed": false
+}

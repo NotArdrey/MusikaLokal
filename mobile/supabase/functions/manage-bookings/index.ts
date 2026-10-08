@@ -927,6 +927,10 @@ function resolveMusicianViewerForApplication(
     };
   }
 
+  if (!app?.production_team_id && app?.group?.owner_id === userId && app.status === "pending") {
+    return { user_id: userId, viewer_access: "group_leader", viewer_can_act: true, viewer_read_only_reason: null };
+  }
+
   const rosterId = toStringId(app?.production_roster_id);
   if (rosterId && soloRosterIds.has(rosterId)) {
     return { ...getReadOnlyApplicationViewer("selected_performer"), user_id: userId };
@@ -940,10 +944,8 @@ function resolveMusicianViewerForApplication(
   }
 
   return {
+    ...getReadOnlyApplicationViewer("group_member"),
     user_id: userId,
-    viewer_access: "applicant",
-    viewer_can_act: true,
-    viewer_read_only_reason: null,
   };
 }
 
@@ -1791,6 +1793,9 @@ serve(async (req: Request) => {
             production_roster_id: g.production_roster_id,
             production_team_name: g.production_team?.name || null,
             raw_status: g.status,
+            member_cv_status: g.member_cv_status,
+            member_cv_required_count: g.member_cv_required_count,
+            member_cv_submitted_count: g.member_cv_submitted_count,
             reconfirmation_required_at: g.reconfirmation_required_at || null,
             reconfirmation_due_at: g.reconfirmation_due_at || null,
             system_status_reason: g.system_status_reason || null,
@@ -1917,6 +1922,12 @@ serve(async (req: Request) => {
             type_id: "gig_application",
             activity_at: app.activity_at || null,
             leader_approval_required: true,
+            raw_status: app.status,
+            member_cv_status: app.member_cv_status,
+            member_cv_required_count: app.member_cv_required_count,
+            member_cv_submitted_count: app.member_cv_submitted_count,
+            viewer_access: "group_leader",
+            viewer_can_act: true,
             gig_id: app.gig_id,
             group_id: app.group_id,
             applicant_id: app.applicant_id,
@@ -3753,7 +3764,7 @@ serve(async (req: Request) => {
       if (table === "gig_applications") {
         const { data: targetApplication, error: targetError } = await supabaseAdmin
           .from("gig_applications")
-          .select("id, applicant_id, submitted_by_user_id, group_id, gig_id, production_team_id, production_roster_id, status")
+          .select("id, applicant_id, submitted_by_user_id, group_id, gig_id, production_team_id, production_roster_id, status, group:group_id(owner_id)")
           .eq("id", booking_id)
           .maybeSingle();
 
@@ -3782,6 +3793,8 @@ serve(async (req: Request) => {
             targetApplication.applicant_id === authUser.id ||
             targetApplication.submitted_by_user_id === authUser.id
           );
+        const isGroupLeader = actorRole === "musician" && !targetApplication.production_team_id &&
+          targetApplication.group?.owner_id === authUser.id;
         let isProductionManager = false;
         const venueStaffAccessLevel = await getStaffAccessForGig(supabaseAdmin, authUser.id, targetApplication.gig_id);
         const productionStaffAccessLevel = targetApplication.production_team_id
@@ -3811,6 +3824,15 @@ serve(async (req: Request) => {
         );
         const canUseManagerAuthority = !hasPerformerConflict;
 
+        // Authorized retries are successful without changing the row or notifying again.
+        if (["cancelled", "resigned"].includes(new_status) &&
+          ["cancelled", "resigned"].includes(targetApplication.status) &&
+          (isApplicant || isGroupLeader || (canUseManagerAuthority && (isProductionManager || isProductionStaffManager || isOrganizer || isVenueStaffManager)))) {
+          return new Response(JSON.stringify(targetApplication), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200,
+          });
+        }
+
         const organizerTransitions: Record<string, string[]> = {
           pending: ["accepted", "approved", "rejected", "cancelled"],
           accepted: ["completed", "fired", "cancelled"],
@@ -3822,6 +3844,7 @@ serve(async (req: Request) => {
           approved: ["cancelled", "resigned"],
         };
         const productionManagerTransitions: Record<string, string[]> = {
+          pending: ["cancelled", "resigned"],
           accepted: ["cancelled", "resigned", "fired"],
           approved: ["cancelled", "resigned", "fired"],
         };
@@ -3832,6 +3855,7 @@ serve(async (req: Request) => {
         if (
           !(canUseManagerAuthority && isOrganizer && organizerTransitionAllowed) &&
           !(isApplicant && applicantTransitionAllowed) &&
+          !(isGroupLeader && targetApplication.status === "pending" && ["cancelled", "resigned"].includes(new_status)) &&
           !(canUseManagerAuthority && isProductionManager && productionTransitionAllowed) &&
           !(canUseManagerAuthority && isVenueStaffManager && organizerTransitionAllowed) &&
           !(canUseManagerAuthority && isProductionStaffManager && productionTransitionAllowed)
@@ -3851,6 +3875,9 @@ serve(async (req: Request) => {
           isApplicant,
           isOrganizer,
         });
+        if (["cancelled", "resigned"].includes(new_status) && (isApplicant || isGroupLeader || isProductionManager || isProductionStaffManager)) {
+          updateData.system_status_reason = "application_withdrawn";
+        }
       }
 
       // Add cancellation_reason if status is a terminal negative outcome and reason is provided
@@ -3906,6 +3933,19 @@ serve(async (req: Request) => {
       if (error) throw error;
 
       if (!data) {
+        if (table === "gig_applications" && ["cancelled", "resigned"].includes(new_status)) {
+          const { data: current, error: currentError } = await supabaseAdmin.from(table)
+            .select("*").eq("id", booking_id).maybeSingle();
+          if (currentError) throw currentError;
+          if (current && ["cancelled", "resigned"].includes(current.status)) {
+            return new Response(JSON.stringify(current), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200,
+            });
+          }
+          return new Response(JSON.stringify({ error: "Application changed. Refresh and try again." }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 409,
+          });
+        }
         return new Response(JSON.stringify({ error: "No matching record updated" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
           status: 404,
@@ -4124,7 +4164,8 @@ serve(async (req: Request) => {
 
               const actorIsApplicant =
                 authUser.id === application.applicant_id ||
-                authUser.id === application.submitted_by_user_id;
+                authUser.id === application.submitted_by_user_id ||
+                (!application.production_team_id && authUser.id === application.group?.owner_id);
               const actorIsOrganizer =
                 authUser.id === gigRow?.organizer_id ||
                 authUser.id === application.gig?.organizer_id;

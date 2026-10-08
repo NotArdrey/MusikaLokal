@@ -1,0 +1,168 @@
+{
+  "date": "2026-10-07",
+  "timezone": "Asia/Manila",
+  "scope": "Current working tree. Offline synthetic reproductions, not an Android device profile.",
+  "networkRequestsMade": 0,
+  "imageFailures": [
+    {
+      "path": "mobile/src/components/CachedImage.tsx",
+      "bothImagesFail": {
+        "errorCallbacks": 20,
+        "stopped": false,
+        "firstSixSources": [
+          "https://example.invalid/original.jpg",
+          "https://example.invalid/fallback.jpg",
+          "https://example.invalid/original.jpg",
+          "https://example.invalid/fallback.jpg",
+          "https://example.invalid/original.jpg",
+          "https://example.invalid/fallback.jpg"
+        ]
+      },
+      "onlyOriginalFails": {
+        "errorCallbacks": 1,
+        "stopped": true,
+        "firstSixSources": [
+          "https://example.invalid/original.jpg",
+          null
+        ]
+      }
+    },
+    {
+      "path": "web/src/components/CachedImage.tsx",
+      "bothImagesFail": {
+        "errorCallbacks": 20,
+        "stopped": false,
+        "firstSixSources": [
+          "https://example.invalid/original.jpg",
+          "https://example.invalid/fallback.jpg",
+          "https://example.invalid/original.jpg",
+          "https://example.invalid/fallback.jpg",
+          "https://example.invalid/original.jpg",
+          "https://example.invalid/fallback.jpg"
+        ]
+      },
+      "onlyOriginalFails": {
+        "errorCallbacks": 1,
+        "stopped": true,
+        "firstSixSources": [
+          "https://example.invalid/original.jpg",
+          null
+        ]
+      }
+    }
+  ],
+  "listingCache": {
+    "distinctListings": 1000,
+    "entryAgeHours": 24,
+    "freshnessTtlSeconds": 60,
+    "retainedEntries": 1000,
+    "expiredEntryStillReturned": true
+  },
+  "screenCache": {
+    "distinctKeys": 300,
+    "elapsedHours": 24,
+    "beforeRead": {
+      "memory": 300,
+      "storage": 300
+    },
+    "afterOneExpiredRead": {
+      "memory": 299,
+      "storage": 299
+    }
+  },
+  "infiniteFeed": {
+    "queryCoreVersion": "5.102.8",
+    "results": [
+      {
+        "loadedPages": 1,
+        "retainedPages": 1,
+        "retainedPosts": 12,
+        "requestsForOneRefresh": 1,
+        "maxPagesConfigured": null
+      },
+      {
+        "loadedPages": 10,
+        "retainedPages": 10,
+        "retainedPosts": 120,
+        "requestsForOneRefresh": 10,
+        "maxPagesConfigured": null
+      },
+      {
+        "loadedPages": 50,
+        "retainedPages": 50,
+        "retainedPosts": 600,
+        "requestsForOneRefresh": 50,
+        "maxPagesConfigured": null
+      }
+    ]
+  },
+  "headerSubscriptions": [
+    {
+      "mountedHeaders": 1,
+      "activeChannels": 1,
+      "readsForOneMessageEvent": 2,
+      "remainingChannelsAfterUnmount": 0
+    },
+    {
+      "mountedHeaders": 5,
+      "activeChannels": 5,
+      "readsForOneMessageEvent": 10,
+      "remainingChannelsAfterUnmount": 0
+    }
+  ],
+  "chatSerialization": [
+    {
+      "loadedMessages": 50,
+      "messagesSerializedForOneUpdate": 50,
+      "serializedBytes": 17926
+    },
+    {
+      "loadedMessages": 1000,
+      "messagesSerializedForOneUpdate": 1000,
+      "serializedBytes": 358926
+    }
+  ],
+  "globalInvalidation": {
+    "registeredTables": 38,
+    "rowFilteredRegistrations": 0,
+    "invalidatedKeysForAnotherVisibleProfile": [
+      [
+        "group-application-cv-tasks",
+        "synthetic-user"
+      ],
+      [
+        "bookings",
+        "summary",
+        "synthetic-user"
+      ],
+      [
+        "details"
+      ],
+      [
+        "feed"
+      ],
+      [
+        "home"
+      ],
+      [
+        "search"
+      ],
+      [
+        "wallet",
+        "summary",
+        "synthetic-user"
+      ]
+    ]
+  },
+  "sourceSha256": {
+    "mobile/src/components/CachedImage.tsx": "0c32a271d21b3026fc2d55e8e08af0558866383f3386850a9cb30329ffe18d79",
+    "web/src/components/CachedImage.tsx": "996daeea181509633a3b97b4e353d6443cd5a04829a6206887191971218b24b2",
+    "mobile/src/utils/listingDetailsCache.ts": "724b15a2740f2efa5d4e8390ea66bd3bbc891aa0b3c8341f3e092b355b117639",
+    "mobile/src/utils/screenCache.ts": "2e536db641a9ac4e6dba52cd6ded1cbb46c73f98fa1ad80d4ef031d777d1dd9b",
+    "mobile/src/data/queryKeys.ts": "a48180c1f316e7f416b4b143a4c6b93cd90aa5d6becb39abbbb3c3e4e9b4caf8",
+    "mobile/src/data/hooks.ts": "00c850b0f36f74ead43c488a5ab9f34d4fb7b47555c35b1b29f727f19ea01731",
+    "mobile/src/components/Header.tsx": "18eab4aebe42f0f1f1ed90c17771fd9d293ec886045a862f570c0ec0c9ecaedd",
+    "mobile/src/hooks/useChat.ts": "7e5aec51ee84d58a915093e7495e41ba5c337d003efe933fed97f77d86eb6051",
+    "mobile/src/data/realtime.ts": "68e0222a19d110e198c8420fcc323d2d7c28db8b88670dbafefc602ed3b00568"
+  }
+}

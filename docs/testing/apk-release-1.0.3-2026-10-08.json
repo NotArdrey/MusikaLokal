@@ -1,0 +1,125 @@
+{
+  "recordedAt": "2026-10-07T17:22:51.111Z",
+  "localDate": "2026-10-08",
+  "timezone": "Asia/Manila",
+  "release": {
+    "packageId": "com.anonymous.musikalokal",
+    "versionName": "1.0.3",
+    "versionCode": 4,
+    "sizeBytes": 102458983,
+    "sha256": "e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245",
+    "minSdk": 24,
+    "builtAt": "2026-10-07T17:16:44.3923878Z",
+    "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+    "testing": true,
+    "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245/musikalokal-testing.apk?download=1"
+  },
+  "website": {
+    "url": "https://musika-lokal.vercel.app",
+    "deploymentId": "dpl_4afkXGSH5vMjTok9TyT3MvEcPodj",
+    "state": "READY",
+    "rollbackDeploymentId": "dpl_3DSGNTd1o15tPs9nVaK3TW8k8ywx",
+    "previousArtifactsRetained": true
+  },
+  "previousRelease": {
+    "packageId": "com.anonymous.musikalokal",
+    "versionName": "1.0.2",
+    "versionCode": 3,
+    "sizeBytes": 102451471,
+    "sha256": "8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272",
+    "minSdk": 24,
+    "builtAt": "2026-10-07T15:48:49.6847215Z",
+    "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+    "testing": true,
+    "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272/musikalokal-testing.apk?download=1"
+  },
+  "changes": {
+    "activity": "Short Send label; CV/resume upload modal for leader review and leader-created applications; server-authorized final submission with all member CVs ready.",
+    "wallet": "Pay Now retains Opening… text; 30-second checkout timeout with abort and retry; concurrent checkout guard; stacked booking actions and aligned payment amounts.",
+    "radio": "Managed artist attribution and consistent station artwork; actual player track title; paused-station recovery and playback error handling; Up Next excludes the playing track and explains one-track loops."
+  },
+  "verification": {
+    "mobileTypecheck": "passed",
+    "webTypecheck": "passed",
+    "groupApplicationRegressionSuite": {
+      "passed": 97
+    },
+    "finalFocusedGroupCvSuite": {
+      "passed": 49
+    },
+    "groupApplicationModalLayouts": 24,
+    "walletLayouts": 16,
+    "walletRadioUiTests": {
+      "passed": 5
+    },
+    "radioRegressionTests": {
+      "passed": 66
+    },
+    "walletPaymentTests": {
+      "passed": 38
+    },
+    "studioEligibilityTests": {
+      "passed": 16
+    },
+    "websiteBuild": "passed",
+    "exportedWebsiteTest": "passed",
+    "androidBuild": "passed",
+    "standaloneBundle": "present",
+    "embeddedFixMarkers": "passed",
+    "configuredPrivateCredentialScan": "passed",
+    "signature": "APK v2 verified; signing certificate matches 1.0.2",
+    "downloadedPackage": "com.anonymous.musikalokal",
+    "downloadedVersion": "1.0.3 (4)",
+    "browser": {
+      "website": "https://musika-lokal.vercel.app",
+      "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245/musikalokal-testing.apk?download=1",
+      "sha256": "e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245",
+      "sizeBytes": 102458983,
+      "browserTransport": "browser default",
+      "downloadVerifiedAt": "https://musika-lokal.vercel.app",
+      "downloadTransport": "browser default",
+      "browserChecks": "passed"
+    },
+    "manifestAndAssociation": "passed",
+    "liveReadOnlyChecks": {
+      "checkedAt": "2026-10-07T16:55:59.285Z",
+      "mutationsPerformed": false,
+      "checks": [
+        {
+          "check_name": "application_state",
+          "state": "collecting",
+          "count": 5
+        },
+        {
+          "check_name": "application_state",
+          "state": "ready",
+          "count": 1
+        },
+        {
+          "check_name": "application_state",
+          "state": "complete",
+          "count": 3
+        },
+        {
+          "check_name": "cv_bucket",
+          "state": "private",
+          "count": 1
+        }
+      ]
+    },
+    "eslint": {
+      "newComponentsAndUtility": "passed",
+      "radioPlayerContext": "passed",
+      "existingErrors": {
+        "activity": 4,
+        "wallet": 2,
+        "stationDetails": 2
+      },
+      "note": "Existing effect and manual-memoization diagnostics remain outside the changed handlers and presentation."
+    }
+  },
+  "backendDeploymentRequired": false,
+  "limitations": [
+    "Physical Android acceptance of document picking, playback, and checkout remains pending."
+  ]
+}

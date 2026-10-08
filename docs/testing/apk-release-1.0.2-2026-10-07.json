@@ -1,0 +1,87 @@
+{
+  "releasedAt": "2026-10-07T15:51:34.388Z",
+  "release": {
+    "packageId": "com.anonymous.musikalokal",
+    "versionName": "1.0.2",
+    "versionCode": 3,
+    "sizeBytes": 102451471,
+    "sha256": "8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272",
+    "minSdk": 24,
+    "builtAt": "2026-10-07T15:48:49.6847215Z",
+    "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+    "testing": true,
+    "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272/musikalokal-testing.apk?download=1"
+  },
+  "website": {
+    "url": "https://musika-lokal.vercel.app",
+    "deploymentId": "dpl_3DSGNTd1o15tPs9nVaK3TW8k8ywx",
+    "state": "READY",
+    "rollbackDeploymentId": "dpl_EgTJwuy87t5jEebyt1Fy28ZHzUBW",
+    "previousArtifactsRetained": true
+  },
+  "previousRelease": {
+    "packageId": "com.anonymous.musikalokal",
+    "versionName": "1.0.1",
+    "versionCode": 2,
+    "sizeBytes": 102318427,
+    "sha256": "cbfa82e2779e705eb0efb03222d70ee172ee64b92eb7a227e4af1747c1519cf1",
+    "minSdk": 24,
+    "builtAt": "2026-10-07T08:09:08.8208462Z",
+    "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+    "testing": true,
+    "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/cbfa82e2779e705eb0efb03222d70ee172ee64b92eb7a227e4af1747c1519cf1/musikalokal-testing.apk?download=1"
+  },
+  "verification": {
+    "mobileTypecheck": "passed",
+    "webTypecheck": "passed",
+    "focusedReleaseTests": 61,
+    "websiteTests": "passed",
+    "gatewayTests": 8,
+    "standaloneBundle": "present",
+    "privateCredentialScan": "passed",
+    "downloadedSignature": "APK v2 verified; matches previous release",
+    "downloadedPackage": "com.anonymous.musikalokal",
+    "downloadedVersion": "1.0.2 (3)",
+    "browser": {
+      "website": "https://musika-lokal.vercel.app",
+      "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272/musikalokal-testing.apk?download=1",
+      "sha256": "8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272",
+      "sizeBytes": 102451471,
+      "browserTransport": "browser default",
+      "downloadVerifiedAt": "https://musika-lokal.vercel.app",
+      "downloadTransport": "browser default",
+      "browserChecks": "passed"
+    },
+    "publicFiles": {
+      "website": "https://musika-lokal.vercel.app",
+      "versionName": "1.0.2",
+      "versionCode": 3,
+      "sha256": "8d6cd6c0b1b643d0d4b1f3cf9ffb461742ce006ab3ac4ecc50cd9025611de272",
+      "verifiedRoutes": [
+        "feed",
+        "home",
+        "group_details",
+        "profile",
+        "production_team",
+        "product_details",
+        "playlist_details",
+        "share",
+        "share/flow.js",
+        "share/page.js",
+        "share/style.css",
+        "recovery",
+        "recovery/flow.js",
+        "recovery/page.js",
+        "recovery/config.js",
+        "recovery/styles.css",
+        ".well-known/assetlinks.json"
+      ],
+      "manifestAndAssociation": "passed",
+      "securityHeaders": "passed"
+    }
+  },
+  "limitations": [
+    "Physical Android device acceptance was not performed.",
+    "Background remote push notifications still require the missing Expo project ID and Firebase/FCM configuration."
+  ]
+}

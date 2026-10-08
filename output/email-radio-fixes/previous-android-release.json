@@ -1,0 +1,12 @@
+{
+  "packageId": "com.anonymous.musikalokal",
+  "versionName": "1.0.3",
+  "versionCode": 4,
+  "sizeBytes": 102458983,
+  "sha256": "e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245",
+  "minSdk": 24,
+  "builtAt": "2026-10-07T17:16:44.3923878Z",
+  "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+  "testing": true,
+  "downloadUrl": "https://aefldxegsvzecshlayza.supabase.co/storage/v1/object/public/android-releases/android/testing/e81b7db899b68667817c650eb8a244b458e6b2bbe8baeb184f028b2b7a22d245/musikalokal-testing.apk?download=MusikaLokal.apk"
+}

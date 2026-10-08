@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ExpoLinking from "expo-linking";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -20,8 +20,12 @@ import {
     View,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
+import { BoundedCache } from "../../src/utils/BoundedCache";
+import { useQueryScreenFocus } from "../../src/hooks/useQueryScreenFocus";
+import { getGroupApplicationCvStatusLabel, isGroupApplicationCollectingCvs } from "../../src/utils/groupApplicationCv";
 import BookingDetailsSheet from "../../src/components/BookingDetailsSheet";
 import ApplicantDetailsModal from "../../src/components/ApplicantDetailsModal";
+import GroupApplicationSendModal from "../../src/components/GroupApplicationSendModal";
 import CachedImage from "../../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../../src/components/CustomAlert";
 import GuestSignInGate from "../../src/components/GuestSignInGate";
@@ -733,7 +737,7 @@ type BookingsScreenCachePayload = {
 const BOOKINGS_FOCUS_REFRESH_COOLDOWN_MS = 30000;
 const BOOKINGS_BACKGROUND_REFRESH_INTERVAL_MS = 60000;
 const BOOKINGS_DYNAMIC_CLOCK_INTERVAL_MS = 30000;
-const bookingsScreenCache = new Map<string, BookingsScreenCachePayload>();
+const bookingsScreenCache = new BoundedCache<string, BookingsScreenCachePayload>(8, 5 * 60_000);
 
 const createEmptyBookingsData = (): BookingsTabData => ({
   Applicants: [],
@@ -1680,6 +1684,7 @@ export default function BookingsScreen() {
   const { session, loading: authLoading, userId, isGuest } = useAuth();
   const { isBottomOverlayActive } = useBottomOverlay();
   const queryClient = useQueryClient();
+  const queryScreenFocus = useQueryScreenFocus();
   const isAuthenticated = !!session;
   const params = useLocalSearchParams<{
     tab?: string;
@@ -1690,6 +1695,7 @@ export default function BookingsScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>("bookings");
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [sendApplicationId, setSendApplicationId] = useState<string | null>(null);
   const [bookingReportTarget, setBookingReportTarget] = useState<any | null>(null);
   const [cancellationReason, setCancellationReason] = useState("");
   const bookingDetailsRef =
@@ -1732,41 +1738,30 @@ export default function BookingsScreen() {
   const [applicationData, setApplicationData] = useState<ApplicationTabData>(
     () => initialBookingsCacheRef.current?.applicationData || createEmptyApplicationData(),
   );
-  const [groupApplicationTasksByApplicationId, setGroupApplicationTasksByApplicationId] = useState<Record<string, any>>({});
 
   const [loading, setLoading] = useState(false);
   const [userRole, setUserRole] = useState<string>(
     () => initialBookingsCacheRef.current?.userRole || "",
   );
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!isAuthenticated || !userId || userRole !== "musician") {
-        setGroupApplicationTasksByApplicationId({});
-        return undefined;
-      }
-
-      let active = true;
-      void supabase.functions.invoke("gig-applications", {
-        body: { action: "fetch_member_cv_tasks", userId },
-      }).then(({ data: taskRows, error }) => {
-        if (!active || error) return;
-        const tasksByApplicationId = (Array.isArray(taskRows) ? taskRows : []).reduce(
-          (result: Record<string, any>, task: any) => {
-            const applicationId = String(task?.application_id || "").trim();
-            if (applicationId) result[applicationId] = task;
-            return result;
-          },
-          {},
-        );
-        setGroupApplicationTasksByApplicationId(tasksByApplicationId);
+  const groupCvTasksQuery = useQuery({
+    queryKey: ["group-application-cv-tasks", userId],
+    enabled: () => isAuthenticated && !!userId && userRole === "musician" && queryScreenFocus.current,
+    queryFn: async ({ signal }) => {
+      const { data: rows, error } = await supabase.functions.invoke("gig-applications", {
+        body: { action: "fetch_member_cv_tasks", userId }, signal,
       });
-
-      return () => {
-        active = false;
-      };
-    }, [isAuthenticated, userId, userRole]),
-  );
+      if (error || rows?.error) throw error || new Error(rows.error);
+      return (Array.isArray(rows) ? rows : []).reduce((result: Record<string, any>, task: any) => {
+        if (task.application_id && isGroupApplicationCollectingCvs(task.application)) result[task.application_id] = task;
+        return result;
+      }, {});
+    },
+  });
+  const groupApplicationTasksByApplicationId = groupCvTasksQuery.data || {};
+  useFocusEffect(useCallback(() => {
+    if (isAuthenticated && userId && userRole === "musician") void groupCvTasksQuery.refetch();
+  }, [isAuthenticated, userId, userRole, groupCvTasksQuery.refetch]));
   const [staffBookingContexts, setStaffBookingContexts] = useState<any[]>([]);
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
   const [locallyReportedLateBookings, setLocallyReportedLateBookings] = useState<Record<string, boolean>>({});
@@ -1780,7 +1775,7 @@ export default function BookingsScreen() {
   const [relocationSlotError, setRelocationSlotError] = useState<string | null>(null);
   const [relocationSlotCalendarDate, setRelocationSlotCalendarDate] = useState("");
   useBottomOverlayVisibility(
-    showPaymentOptionModal || showScanModal || relocationSlotPickerVisible,
+    showPaymentOptionModal || showScanModal || relocationSlotPickerVisible || !!sendApplicationId,
     "BookingsPaymentOrScanModal",
   );
   const [searchQuery, setSearchQuery] = useState("");
@@ -1816,6 +1811,7 @@ export default function BookingsScreen() {
   const [applicantDetailsError, setApplicantDetailsError] = useState<string | null>(null);
   const bookingsSummaryQuery = useBookingsSummaryQuery(userId, {
     enabled: isAuthenticated && Boolean(userId),
+    focused: queryScreenFocus,
   });
 
   const openBookingProblemReport = useCallback((booking: any) => {
@@ -2244,7 +2240,7 @@ export default function BookingsScreen() {
             if (paymentConfirmed) {
               setActiveTab("Upcoming");
             }
-          } else if (userId) {
+          } else if (userId && queryScreenFocus.current) {
             // Even if not in payment flow, refresh when returning to app
             void refetchBookingsSummary();
           }
@@ -2256,7 +2252,7 @@ export default function BookingsScreen() {
     return () => {
       subscription.remove();
     };
-  }, [refetchBookingsSummary, userId]);
+  }, [queryScreenFocus, refetchBookingsSummary, userId]);
 
   // Bookings realtime is centralized in RootLayout and invalidates this query key.
 
@@ -2271,7 +2267,8 @@ export default function BookingsScreen() {
         const cached = bookingsScreenCache.get(userId);
         const cacheIsFresh =
           cached &&
-          Date.now() - cached.fetchedAt < BOOKINGS_FOCUS_REFRESH_COOLDOWN_MS;
+          Date.now() - cached.fetchedAt < BOOKINGS_FOCUS_REFRESH_COOLDOWN_MS &&
+          !queryClient.getQueryState(queryKeys.bookings.summary(userId))?.isInvalidated;
 
         if (cached) {
           setData(cached.data);
@@ -2322,7 +2319,7 @@ export default function BookingsScreen() {
         if (focusRefreshFallbackTimer) clearTimeout(focusRefreshFallbackTimer);
         if (intervalId) clearInterval(intervalId);
       };
-    }, [isAuthenticated, refetchBookingsSummary, userId]),
+    }, [isAuthenticated, queryClient, refetchBookingsSummary, userId]),
   );
 
   async function buildLocalStudioBookingsFallback(
@@ -3888,7 +3885,12 @@ export default function BookingsScreen() {
             ? queryClient.invalidateQueries({ queryKey: ["feed"] })
             : Promise.resolve(),
         ]);
-        await fetchBookings(userId, { showLoading: false });
+        await queryClient.cancelQueries({ queryKey: ["group-application-cv-tasks", userId] });
+        queryClient.setQueryData(["group-application-cv-tasks", userId], {});
+        await Promise.all([
+          fetchBookings(userId, { showLoading: false }),
+          queryClient.invalidateQueries({ queryKey: ["group-application-cv-tasks", userId] }),
+        ]);
       }
       setModalVisible(false);
       return true;
@@ -4807,7 +4809,14 @@ export default function BookingsScreen() {
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
 
-      if (userId) await fetchBookings(userId);
+      if (userId) {
+        await queryClient.cancelQueries({ queryKey: ["group-application-cv-tasks", userId] });
+        queryClient.setQueryData(["group-application-cv-tasks", userId], {});
+        await Promise.all([
+          fetchBookings(userId),
+          queryClient.invalidateQueries({ queryKey: ["group-application-cv-tasks", userId] }),
+        ]);
+      }
       setModalVisible(false);
       setCancellationReason("");
     } catch (err: any) {
@@ -6016,13 +6025,14 @@ export default function BookingsScreen() {
 
     setCurrentTime(new Date());
     const intervalId = setInterval(() => {
+      if (!queryScreenFocus.current || AppState.currentState !== 'active') return;
       setCurrentTime(new Date());
     }, BOOKINGS_DYNAMIC_CLOCK_INTERVAL_MS);
 
     return () => {
       clearInterval(intervalId);
     };
-  }, [isAuthenticated, isGuest, shouldRunDynamicBookingsClock]);
+  }, [isAuthenticated, isGuest, queryScreenFocus, shouldRunDynamicBookingsClock]);
 
   const activeListLabel =
     userRole === "musician" && viewMode === "applications"
@@ -7496,25 +7506,19 @@ export default function BookingsScreen() {
                 const applicationTypeBadge = `${applicationLabel} Application`;
                 const applicationReceivedAt = formatApplicationReceivedDateTime(item);
                 const applicationReceivedLabel = isMusicianView ? "Submitted" : "Received";
-                const memberCvTask = isMusicianView
+                const memberCvTask = isMusicianView && isGroupApplicationCollectingCvs(item)
                   ? groupApplicationTasksByApplicationId[String(item.id)]
                   : null;
-                const isReadOnlyApplication = isReadOnlyBookingItem(item) && !memberCvTask;
-                const requiredMemberCvCount = Number(memberCvTask?.application?.member_cv_required_count || 0);
-                const submittedMemberCvCount = Number(memberCvTask?.application?.member_cv_submitted_count || 0);
+                const isReadOnlyApplication = isReadOnlyBookingItem(item);
+                const collectingMemberCvs = isGroupApplicationCollectingCvs(item);
+                const requiredMemberCvCount = Number(memberCvTask?.application?.member_cv_required_count || item.member_cv_required_count || 0);
+                const submittedMemberCvCount = Number(memberCvTask?.application?.member_cv_submitted_count || item.member_cv_submitted_count || 0);
                 const remainingMemberCvCount = Math.max(0, requiredMemberCvCount - submittedMemberCvCount);
-                const memberCvStatus = memberCvTask
-                  ? memberCvTask.can_finalize === true
-                    ? "Ready to send"
-                    : memberCvTask.cv_status !== "submitted"
-                      ? "Your CV required"
-                      : remainingMemberCvCount > 0
-                        ? `Waiting for ${remainingMemberCvCount} ${remainingMemberCvCount === 1 ? "member" : "members"}`
-                        : "Waiting for members"
-                  : null;
-                const displayedApplicationStatus = memberCvStatus || item.status;
+                const displayedApplicationStatus = isMusicianView
+                  ? getGroupApplicationCvStatusLabel(memberCvTask ? { ...item, ...memberCvTask.application, raw_status: item.raw_status, status: item.status } : item, memberCvTask)
+                  : item.status;
                 const openApplicationDetails = () => {
-                  if (memberCvTask) {
+                  if (memberCvTask || (isLeaderConfirmation && collectingMemberCvs)) {
                     router.push({
                       pathname: "/group_application_cv",
                       params: { applicationId: item.id },
@@ -7629,7 +7633,7 @@ export default function BookingsScreen() {
                       </View>
                     </View>
                     <View style={styles.activityDetailGrid}>
-                      {memberCvTask && requiredMemberCvCount > 0 ? (
+                      {collectingMemberCvs && requiredMemberCvCount > 0 ? (
                         <View style={styles.activityDetailField}>
                           <Text style={[styles.activityFieldLabel, { color: colors.textSecondary }]}>Member CVs</Text>
                                 <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
@@ -7827,7 +7831,7 @@ export default function BookingsScreen() {
                             <TouchableOpacity activeOpacity={1}
                               testID={bookingActionTestId(item, "view-details")}
                               accessibilityLabel={bookingActionTestId(item, "view-details")}
-                              onPress={() => handleDetailsPress(item)}
+                              onPress={openApplicationDetails}
                               style={{
                                 flexDirection: "row",
                                 alignItems: "center",
@@ -7846,7 +7850,7 @@ export default function BookingsScreen() {
                                   fontSize: 12,
                                 }}
                               >
-                                View Details
+                                {memberCvTask?.cv_status !== "submitted" && memberCvTask ? "Upload Your CV" : "View Details"}
                               </Text>
                             </TouchableOpacity>
                           ) : renderActiveTab === "Pending" && isVenueManagerItem(item) ? (
@@ -7964,7 +7968,7 @@ export default function BookingsScreen() {
                                     fontSize: 12,
                                   }}
                                 >
-                                  {isGigReconfirmationItem(item) ? "Decline" : "View Details"}
+                                  {isGigReconfirmationItem(item) ? "Decline" : collectingMemberCvs ? "View" : "View Details"}
                                 </Text>
                               </TouchableOpacity>
                               <TouchableOpacity activeOpacity={1}
@@ -7980,7 +7984,7 @@ export default function BookingsScreen() {
                                   if (isGigReconfirmationItem(item)) {
                                     handleGigReconfirmationDecision(item, true);
                                   } else {
-                                    setSelectedItem(memberCvTask ? { ...item, viewer_can_act: true, viewer_access: "applicant" } : item);
+                                    setSelectedItem(item);
                                     setCancellationReason("");
                                     setModalMode("cancel");
                                     setModalVisible(true);
@@ -8008,14 +8012,30 @@ export default function BookingsScreen() {
                                   {isGigReconfirmationItem(item) ? "Reconfirm" : "Withdraw"}
                                 </Text>
                               </TouchableOpacity>
+                              {collectingMemberCvs && memberCvTask?.application?.group?.owner_id === userId ? (
+                                <TouchableOpacity
+                                  activeOpacity={0.82}
+                                  accessibilityRole="button"
+                                  testID={bookingActionTestId(item, "send")}
+                                  onPress={() => setSendApplicationId(String(item.id))}
+                                  style={[styles.outlineButton, { flex: 1, backgroundColor: "#10B981", borderColor: "#10B981" }]}
+                                >
+                                  <Text numberOfLines={1} style={[styles.actionButtonText, { color: "white" }]}>Send</Text>
+                                </TouchableOpacity>
+                              ) : null}
                             </View>
                           ) : renderActiveTab === "Pending" && isMusicianView && isLeaderConfirmation ? (
                             <>
+                              {collectingMemberCvs && remainingMemberCvCount > 0 ? (
+                                <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
+                                  {remainingMemberCvCount} {remainingMemberCvCount === 1 ? "CV is" : "CVs are"} still required. Tap Send to upload your CV and check member progress.
+                                </Text>
+                              ) : null}
                               <View style={styles.compactActionRow}>
                                 <TouchableOpacity activeOpacity={1}
                                   testID={bookingActionTestId(item, "view-details")}
                                   accessibilityLabel={bookingActionTestId(item, "view-details")}
-                                  onPress={() => handleDetailsPress(item)}
+                                  onPress={openApplicationDetails}
                                   style={[
                                     styles.outlineButton,
                                     {
@@ -8054,7 +8074,12 @@ export default function BookingsScreen() {
                                 <TouchableOpacity activeOpacity={1}
                                   testID={bookingActionTestId(item, "approve")}
                                   accessibilityLabel={bookingActionTestId(item, "approve")}
+                                  accessibilityRole="button"
                                   onPress={() => {
+                                    if (collectingMemberCvs) {
+                                      setSendApplicationId(String(item.id));
+                                      return;
+                                    }
                                     setSelectedItem(item);
                                     setModalMode("confirm");
                                     setModalVisible(true);
@@ -8069,12 +8094,27 @@ export default function BookingsScreen() {
                                   }}
                                 >
                                   <Text
+                                    numberOfLines={1}
                                     style={[styles.actionButtonText, { color: "white" }]}
                                   >
-                                    Approve
+                                    {collectingMemberCvs ? "Send" : "Approve"}
                                   </Text>
                                 </TouchableOpacity>
                               </View>
+                              <TouchableOpacity
+                                activeOpacity={0.82}
+                                accessibilityRole="button"
+                                testID={bookingActionTestId(item, "withdraw")}
+                                onPress={() => {
+                                  setSelectedItem(item);
+                                  setCancellationReason("");
+                                  setModalMode("cancel");
+                                  setModalVisible(true);
+                                }}
+                                style={[styles.outlineButton, { borderColor: "#EF4444" }]}
+                              >
+                                <Text style={[styles.outlineButtonText, { color: "#EF4444" }]}>Withdraw</Text>
+                              </TouchableOpacity>
                             </>
                           ) : renderActiveTab === "Active Musicians" ? (
                             (() => {
@@ -10064,6 +10104,20 @@ export default function BookingsScreen() {
           onClose={() => {
             setMediaViewerUrl(null);
             setMediaViewerSensitive(false);
+          }}
+        />
+      ) : null}
+
+      {sendApplicationId ? (
+        <GroupApplicationSendModal
+          key={sendApplicationId}
+          applicationId={sendApplicationId}
+          onClose={() => setSendApplicationId(null)}
+          onUpdated={() => {
+            if (userId) {
+              void fetchBookings(userId);
+              void groupCvTasksQuery.refetch();
+            }
           }}
         />
       ) : null}
