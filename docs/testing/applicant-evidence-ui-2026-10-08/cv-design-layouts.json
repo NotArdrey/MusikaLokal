@@ -1,0 +1,2834 @@
+[
+  {
+    "width": 320,
+    "dark": false,
+    "scale": 1,
+    "expanded": false,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "16px",
+        "lineHeight": "24px",
+        "left": 16,
+        "width": 288
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 288,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "16px",
+          "lineHeight": "24px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": false,
+    "scale": 1,
+    "expanded": true,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "16px",
+        "lineHeight": "24px",
+        "left": 16,
+        "width": 288
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 288,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "16px",
+          "lineHeight": "24px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": false,
+    "scale": 1.6,
+    "expanded": false,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "25.6px",
+        "lineHeight": "38.4px",
+        "left": 16,
+        "width": 288
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 288,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "25.6px",
+          "lineHeight": "38.4px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": false,
+    "scale": 1.6,
+    "expanded": true,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "25.6px",
+        "lineHeight": "38.4px",
+        "left": 16,
+        "width": 288
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 288,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "25.6px",
+          "lineHeight": "38.4px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "scale": 1,
+    "expanded": false,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "16px",
+        "lineHeight": "24px",
+        "left": 16,
+        "width": 288
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 288,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "16px",
+          "lineHeight": "24px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "scale": 1,
+    "expanded": true,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "16px",
+        "lineHeight": "24px",
+        "left": 16,
+        "width": 288
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 288,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "16px",
+          "lineHeight": "24px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "scale": 1.6,
+    "expanded": false,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "25.6px",
+        "lineHeight": "38.4px",
+        "left": 16,
+        "width": 288
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 288,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "25.6px",
+          "lineHeight": "38.4px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "scale": 1.6,
+    "expanded": true,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "25.6px",
+        "lineHeight": "38.4px",
+        "left": 16,
+        "width": 288
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 288,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "25.6px",
+          "lineHeight": "38.4px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 288
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 288,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": false,
+    "scale": 1,
+    "expanded": false,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "16px",
+        "lineHeight": "24px",
+        "left": 16,
+        "width": 358
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 358,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "16px",
+          "lineHeight": "24px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": false,
+    "scale": 1,
+    "expanded": true,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "16px",
+        "lineHeight": "24px",
+        "left": 16,
+        "width": 358
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 358,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "16px",
+          "lineHeight": "24px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": false,
+    "scale": 1.6,
+    "expanded": false,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "25.6px",
+        "lineHeight": "38.4px",
+        "left": 16,
+        "width": 358
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 358,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "25.6px",
+          "lineHeight": "38.4px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": false,
+    "scale": 1.6,
+    "expanded": true,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "25.6px",
+        "lineHeight": "38.4px",
+        "left": 16,
+        "width": 358
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 358,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "25.6px",
+          "lineHeight": "38.4px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": true,
+    "scale": 1,
+    "expanded": false,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "16px",
+        "lineHeight": "24px",
+        "left": 16,
+        "width": 358
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 358,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "16px",
+          "lineHeight": "24px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": true,
+    "scale": 1,
+    "expanded": true,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "16px",
+        "lineHeight": "24px",
+        "left": 16,
+        "width": 358
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 358,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "16px",
+          "lineHeight": "24px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": true,
+    "scale": 1.6,
+    "expanded": false,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "25.6px",
+        "lineHeight": "38.4px",
+        "left": 16,
+        "width": 358
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 358,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "25.6px",
+          "lineHeight": "38.4px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": true,
+    "scale": 1.6,
+    "expanded": true,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "25.6px",
+        "lineHeight": "38.4px",
+        "left": 16,
+        "width": 358
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 358,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "25.6px",
+          "lineHeight": "38.4px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 358
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 358,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "scale": 1,
+    "expanded": false,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "16px",
+        "lineHeight": "24px",
+        "left": 16,
+        "width": 398
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 398,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "16px",
+          "lineHeight": "24px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "scale": 1,
+    "expanded": true,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "16px",
+        "lineHeight": "24px",
+        "left": 16,
+        "width": 398
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 398,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "16px",
+          "lineHeight": "24px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "scale": 1.6,
+    "expanded": false,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "25.6px",
+        "lineHeight": "38.4px",
+        "left": 16,
+        "width": 398
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 398,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "25.6px",
+          "lineHeight": "38.4px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "scale": 1.6,
+    "expanded": true,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "25.6px",
+        "lineHeight": "38.4px",
+        "left": 16,
+        "width": 398
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 398,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "25.6px",
+          "lineHeight": "38.4px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "scale": 1,
+    "expanded": false,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "16px",
+        "lineHeight": "24px",
+        "left": 16,
+        "width": 398
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 398,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "16px",
+          "lineHeight": "24px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "scale": 1,
+    "expanded": true,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "16px",
+        "lineHeight": "24px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "16px",
+        "lineHeight": "24px",
+        "left": 16,
+        "width": 398
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 398,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "16px",
+          "lineHeight": "24px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "16px",
+            "lineHeight": "24px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "16px",
+            "lineHeight": "24px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "16px",
+              "lineHeight": "24px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "scale": 1.6,
+    "expanded": false,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "25.6px",
+        "lineHeight": "38.4px",
+        "left": 16,
+        "width": 398
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 398,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "25.6px",
+          "lineHeight": "38.4px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "scale": 1.6,
+    "expanded": true,
+    "cv": {
+      "heading": {
+        "family": "SpaceGrotesk_700Bold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "status": {
+        "family": "Manrope_600SemiBold",
+        "size": "25.6px",
+        "lineHeight": "38.4px"
+      },
+      "description": {
+        "family": "Manrope_400Regular",
+        "size": "25.6px",
+        "lineHeight": "38.4px",
+        "left": 16,
+        "width": 398
+      },
+      "contentGap": "12px",
+      "action": {
+        "left": 16,
+        "width": 398,
+        "minHeight": "48px",
+        "border": "1px",
+        "radius": "8px",
+        "padding": "10px 12px",
+        "color": "rgb(85, 70, 244)",
+        "text": {
+          "family": "Manrope_600SemiBold",
+          "size": "25.6px",
+          "lineHeight": "38.4px"
+        }
+      }
+    },
+    "requirements": [
+      {
+        "key": "genres",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      },
+      {
+        "key": "portfolio",
+        "design": {
+          "heading": {
+            "family": "SpaceGrotesk_700Bold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "status": {
+            "family": "Manrope_600SemiBold",
+            "size": "25.6px",
+            "lineHeight": "38.4px"
+          },
+          "description": {
+            "family": "Manrope_400Regular",
+            "size": "25.6px",
+            "lineHeight": "38.4px",
+            "left": 16,
+            "width": 398
+          },
+          "contentGap": "12px",
+          "action": {
+            "left": 16,
+            "width": 398,
+            "minHeight": "48px",
+            "border": "1px",
+            "radius": "8px",
+            "padding": "10px 12px",
+            "color": "rgb(85, 70, 244)",
+            "text": {
+              "family": "Manrope_600SemiBold",
+              "size": "25.6px",
+              "lineHeight": "38.4px"
+            }
+          }
+        }
+      }
+    ],
+    "overflow": [],
+    "passed": true
+  }
+]

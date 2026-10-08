@@ -1,0 +1,40 @@
+{
+  "packageId": "com.anonymous.musikalokal",
+  "versionName": "1.0.7",
+  "versionCode": 8,
+  "sizeBytes": 102453939,
+  "sha256": "2f65d6dbe19023409c814e7152b6eaa2df67da5f41763916a8487f77f8d838fb",
+  "minSdk": 24,
+  "builtAt": "2026-10-08T15:09:09.4367450Z",
+  "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+  "testing": true,
+  "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/2f65d6dbe19023409c814e7152b6eaa2df67da5f41763916a8487f77f8d838fb/musikalokal-testing.apk?download=1",
+  "website": "https://musika-lokal.vercel.app",
+  "deploymentId": "dpl_6hNJ2CUBen68jcQyAYEReLT44gMx",
+  "stagedWebsite": "https://musika-lokal-n7iqy5q6z-notardreys-projects.vercel.app",
+  "verification": {
+    "androidBuild": "passed",
+    "preservedSigningCertificate": "passed",
+    "privateCredentialScan": "passed",
+    "bundledApplicantSourceMatches": true,
+    "embeddedBundleMatches": true,
+    "experienceLabelIncluded": true,
+    "mobileAndWebTypecheck": "passed",
+    "focusedTests": "40 passed",
+    "updatedReleaseManifestTests": "4 passed",
+    "websiteDownloadRegression": "passed",
+    "uploadedApkFullDownloadChecksum": "passed",
+    "websiteBuild": "passed",
+    "stagedBrowserDownloadAndChecksum": "passed",
+    "productionBrowserChecks": "passed",
+    "productionRehashedStagedDownload": true
+  },
+  "storage": {
+    "provider": "existing Vercel Blob store",
+    "previousReleaseRetained": true
+  },
+  "backendDeployed": false,
+  "limitations": [
+    "Physical Android installation was not tested."
+  ]
+}

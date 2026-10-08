@@ -63,7 +63,7 @@ for (const root of ["mobile", "web"]) {
     const applications = read(`${root}/supabase/functions/gig-applications/index.ts`);
     const migration = read(`${root}/supabase/migrations/20260928120000_add_gig_recommendation_needs_review_status.sql`);
 
-    assert.match(applications, /gig-fit-v12-verified-applicants/);
+    assert.match(applications, /gig-fit-v11-submitted-media-state/);
     assert.match(applications, /verificationStatus === 'needs_verification'[\s\S]*\? 'needs_review'/);
     assert.match(applications, /fit_recommendation_status:\s*fitRecommendationStatus/);
     assert.match(applications, /identity_status:\s*verificationStatus/);

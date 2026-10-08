@@ -1,0 +1,599 @@
+{
+  "checkedAt": "2026-10-08T12:14:39.330Z",
+  "timezone": "Asia/Manila",
+  "project": "Musika Lokal",
+  "scope": "Quota and rate-limit audit; source/environment inventory, safe read-only API calls, one 90-token Groq inference probe, and production logs. No application settings changed.",
+  "logWindow": {
+    "iso_timestamp_start": "2026-10-07T12:04:32.926Z",
+    "iso_timestamp_end": "2026-10-08T12:04:32.926Z"
+  },
+  "credentialVerification": {
+    "groqLocalMatchesDeployed": true,
+    "faceppLocalMatchesDeployed": true,
+    "acrProjectRecognitionKeyAndSecretMatchDeployed": true,
+    "deployedSecretsApiReturnsHashes": true
+  },
+  "groq": {
+    "status": "confirmed_throttling_in_production",
+    "rateLimitErrors": {
+      "daily": 816,
+      "minute": 160,
+      "total": 976
+    },
+    "functionBreakdown": [
+      {
+        "function": "home-feed",
+        "dailyTokenErrors": 564,
+        "minuteTokenErrors": 108,
+        "firstError": "2026-10-07T12:47:44.382000Z",
+        "latestError": "2026-10-08T11:50:37.862000Z"
+      },
+      {
+        "function": "manage-playlists",
+        "dailyTokenErrors": 220,
+        "minuteTokenErrors": 30,
+        "firstError": "2026-10-07T12:49:00.522000Z",
+        "latestError": "2026-10-08T11:50:37.728000Z"
+      },
+      {
+        "function": "upload-safety-screen",
+        "dailyTokenErrors": 32,
+        "minuteTokenErrors": 22,
+        "firstError": "2026-10-07T16:18:32.294000Z",
+        "latestError": "2026-10-08T10:44:32.842000Z"
+      }
+    ],
+    "highUsageSnapshotsFromLatest100QuotaEvents": [
+      {
+        "model": "openai/gpt-oss-20b",
+        "window": "day",
+        "limit": 200000,
+        "used": 199839,
+        "requested": 3351,
+        "percentUsed": 99.9195,
+        "timestamp": "2026-10-08T11:37:40.266000"
+      },
+      {
+        "model": "qwen/qwen3.8-27b",
+        "window": "day",
+        "limit": 200000,
+        "used": 199873,
+        "requested": 3553,
+        "percentUsed": 99.9365,
+        "timestamp": "2026-10-08T11:47:39.926000"
+      },
+      {
+        "model": "openai/gpt-oss-120b",
+        "window": "day",
+        "limit": 200000,
+        "used": 199944,
+        "requested": 2706,
+        "percentUsed": 99.972,
+        "timestamp": "2026-10-08T11:46:19.419000"
+      }
+    ],
+    "tinyProbe": {
+      "model": "openai/gpt-oss-120b",
+      "status": 200,
+      "usage": {
+        "queue_time": 0.31825404,
+        "prompt_tokens": 74,
+        "prompt_time": 0.015215343,
+        "completion_tokens": 16,
+        "completion_time": 0.033321622,
+        "total_tokens": 90,
+        "total_time": 0.048536965,
+        "completion_tokens_details": {
+          "reasoning_tokens": 14
+        }
+      },
+      "rateLimitHeaders": {
+        "x-ratelimit-limit-requests": "1000",
+        "x-ratelimit-limit-tokens": "8000",
+        "x-ratelimit-remaining-requests": "999",
+        "x-ratelimit-remaining-tokens": "7910",
+        "x-ratelimit-reset-requests": "1m26.4s",
+        "x-ratelimit-reset-tokens": "674ms"
+      },
+      "note": "A small successful probe does not imply enough daily token capacity for normal multi-thousand-token application requests. Headers expose per-day requests and per-minute tokens, not remaining daily tokens."
+    },
+    "deployedModels": {
+      "GROQ_TEXT_MODEL": "openai/gpt-oss-120b",
+      "GROQ_REVIEW_MODEL": "openai/gpt-oss-120b",
+      "GROQ_VISION_MODEL": "qwen/qwen3.8-27b",
+      "GEMINI_MODEL": "gemini-3.5-flash-lite",
+      "GEMINI_FALLBACK_MODEL": "gemini-3.5-flash"
+    },
+    "otherProbedModels": [
+      {
+        "model": "llama-3.3-70b-versatile",
+        "httpStatus": 404,
+        "errorCode": "model_not_found"
+      },
+      {
+        "model": "llama-3.1-8b-instant",
+        "httpStatus": 404,
+        "errorCode": "model_not_found"
+      },
+      {
+        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+        "httpStatus": 404,
+        "errorCode": "model_not_found"
+      }
+    ],
+    "note": "Old Llama/Scout names returned model_not_found. Deployed text/review and vision model settings were matched to the current supported model names by hashing candidate values."
+  },
+  "supabase": {
+    "projectState": "ACTIVE_HEALTHY",
+    "plan": "pro",
+    "database": {
+      "database_bytes": 229362835,
+      "total_users": 18,
+      "users_signed_in_this_calendar_month": 9,
+      "storage_objects": 844,
+      "storage_bytes": "2250061731"
+    },
+    "disk": {
+      "allocatedBytes": 8350298112,
+      "availableBytes": 7653994496,
+      "usedIncludingReservedBytes": 696303616,
+      "percentUnavailable": 8.33866775366211
+    },
+    "activeFunctions": 49,
+    "functionLimit": 1000,
+    "httpStatuses": [
+      {
+        "count": 44,
+        "source": "edge_logs",
+        "status_code": "101"
+      },
+      {
+        "count": 23660,
+        "source": "edge_logs",
+        "status_code": "200"
+      },
+      {
+        "count": 197,
+        "source": "edge_logs",
+        "status_code": "201"
+      },
+      {
+        "count": 138,
+        "source": "edge_logs",
+        "status_code": "204"
+      },
+      {
+        "count": 939,
+        "source": "edge_logs",
+        "status_code": "206"
+      },
+      {
+        "count": 1,
+        "source": "edge_logs",
+        "status_code": "304"
+      },
+      {
+        "count": 15,
+        "source": "edge_logs",
+        "status_code": "400"
+      },
+      {
+        "count": 27,
+        "source": "edge_logs",
+        "status_code": "401"
+      },
+      {
+        "count": 17,
+        "source": "edge_logs",
+        "status_code": "403"
+      },
+      {
+        "count": 2639,
+        "source": "function_edge_logs",
+        "status_code": "200"
+      },
+      {
+        "count": 7,
+        "source": "function_edge_logs",
+        "status_code": "201"
+      },
+      {
+        "count": 23,
+        "source": "function_edge_logs",
+        "status_code": "202"
+      },
+      {
+        "count": 4,
+        "source": "function_edge_logs",
+        "status_code": "302"
+      },
+      {
+        "count": 13,
+        "source": "function_edge_logs",
+        "status_code": "401"
+      },
+      {
+        "count": 1,
+        "source": "function_edge_logs",
+        "status_code": "500"
+      }
+    ],
+    "realtimePresenceLimitEvents": [
+      "ClientPresenceRateLimitReached: :client_rate_limit_exceeded",
+      "ClientPresenceRateLimitReached: :client_rate_limit_exceeded"
+    ],
+    "authConfig": {
+      "hook_send_email_enabled": false,
+      "rate_limit_anonymous_users": 30,
+      "rate_limit_email_sent": 50,
+      "rate_limit_sms_sent": 30,
+      "rate_limit_token_refresh": 150,
+      "rate_limit_verify": 30,
+      "rate_limit_otp": 30,
+      "rate_limit_web3": 30,
+      "smtp_host": "smtp.gmail.com"
+    },
+    "monthlyBillingUsage": {
+      "verified": false,
+      "reason": "Supabase organization billing usage endpoint rejects personal access tokens (Unsupported access token). Database/storage bytes and 24-hour logs are verified; billing-cycle egress, billed storage average, total organization usage, realtime messages, and monthly edge invocations are unavailable."
+    }
+  },
+  "gemini": {
+    "status": "no_quota_errors_found_in_24_hour_logs",
+    "providerRequestCounts": {
+      "gemini / file-operation / 200": 35,
+      "gemini / gemini-3.5-flash / 200": 6,
+      "gemini / gemini-3.5-flash-lite / 200": 19,
+      "gemini / gemini-3.5-flash / 503": 4
+    },
+    "remainingQuotaVerified": false,
+    "reason": "Gemini keys are deployed; local environment does not contain usable keys or Google project billing/quota access. Four HTTP 503 provider responses were logged."
+  },
+  "aws": {
+    "plan": {
+      "type": "FREE",
+      "status": "ACTIVE",
+      "credits": {
+        "amount": 99.55,
+        "unit": "USD"
+      },
+      "expiresAt": "2027-03-28T10:21:45.702000+00:00"
+    },
+    "quotas": [
+      {
+        "name": "Transactions per second per account for the Amazon Rekognition Video stored video start operation StartFaceSearch",
+        "code": "L-8CA99658",
+        "limit": 5
+      },
+      {
+        "name": "Transactions per second per account for the Amazon Rekognition Image operation IndexFaces",
+        "code": "L-7C13EBAD",
+        "limit": 5,
+        "metric": {
+          "MetricNamespace": "AWS/Rekognition",
+          "MetricName": "CallCount",
+          "MetricDimensions": {
+            "Operation": "IndexFaces"
+          },
+          "MetricStatisticRecommendation": "Sum"
+        }
+      },
+      {
+        "name": "Transactions per second per account for the Amazon Rekognition Video stored video get operation GetFaceSearch",
+        "code": "L-3B051C64",
+        "limit": 5
+      },
+      {
+        "name": "Concurrent Amazon Rekognition Video stored video jobs per account",
+        "code": "L-A6079699",
+        "limit": 20
+      },
+      {
+        "name": "Transactions per second per account for the Amazon Rekognition Image operation DetectFaces",
+        "code": "L-A5121FD7",
+        "limit": 25,
+        "metric": {
+          "MetricNamespace": "AWS/Rekognition",
+          "MetricName": "CallCount",
+          "MetricDimensions": {
+            "Operation": "DetectFaces"
+          },
+          "MetricStatisticRecommendation": "Sum"
+        }
+      },
+      {
+        "name": "Transactions per second per account for the Amazon Rekognition Image operation CompareFaces",
+        "code": "L-73A341CE",
+        "limit": 25,
+        "metric": {
+          "MetricNamespace": "AWS/Rekognition",
+          "MetricName": "CallCount",
+          "MetricDimensions": {
+            "Operation": "CompareFaces"
+          },
+          "MetricStatisticRecommendation": "Sum"
+        }
+      }
+    ],
+    "metrics": {
+      "region": "ap-southeast-2",
+      "start": "2026-10-07T12:09:44.736212+00:00",
+      "end": "2026-10-08T12:09:44.736212+00:00",
+      "metrics": [
+        {
+          "label": "DetectFaces:SuccessfulRequestCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "DetectFaces:ThrottledCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "DetectFaces:UserErrorCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "DetectFaces:ServerErrorCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "CompareFaces:SuccessfulRequestCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "CompareFaces:ThrottledCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "CompareFaces:UserErrorCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "CompareFaces:ServerErrorCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "IndexFaces:SuccessfulRequestCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "IndexFaces:ThrottledCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "IndexFaces:UserErrorCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "IndexFaces:ServerErrorCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "StartFaceSearch:SuccessfulRequestCount",
+          "count": 7,
+          "maximum_60_second_count": 1,
+          "datapoints": 7,
+          "status": "Complete"
+        },
+        {
+          "label": "StartFaceSearch:ThrottledCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "StartFaceSearch:UserErrorCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "StartFaceSearch:ServerErrorCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "GetFaceSearch:SuccessfulRequestCount",
+          "count": 28,
+          "maximum_60_second_count": 4,
+          "datapoints": 10,
+          "status": "Complete"
+        },
+        {
+          "label": "GetFaceSearch:ThrottledCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "GetFaceSearch:UserErrorCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        },
+        {
+          "label": "GetFaceSearch:ServerErrorCount",
+          "count": 0,
+          "maximum_60_second_count": 0,
+          "datapoints": 0,
+          "status": "Complete"
+        }
+      ]
+    }
+  },
+  "acrcloud": {
+    "recognitionProjectMatchesDeployed": true,
+    "projectState": 1,
+    "projectLimits": {
+      "day_limit": 0,
+      "qps_limit": 0
+    },
+    "calendarMonthUsageThrough": "2026-10-08",
+    "calendarMonthUsage": {
+      "requests": 24,
+      "matched": 3,
+      "noMatch": 21,
+      "errors": 0
+    },
+    "dailyUsage": [
+      {
+        "date": "2026-10-05",
+        "matched": 0,
+        "noMatch": 3,
+        "errors": 0
+      },
+      {
+        "date": "2026-10-06",
+        "matched": 3,
+        "noMatch": 1,
+        "errors": 0
+      },
+      {
+        "date": "2026-10-07",
+        "matched": 0,
+        "noMatch": 10,
+        "errors": 0
+      },
+      {
+        "date": "2026-10-08",
+        "matched": 0,
+        "noMatch": 7,
+        "errors": 0
+      }
+    ],
+    "remainingMonthlyAllowanceVerified": false,
+    "customRecognitionProjectVerified": false,
+    "note": "The accessible console project matches deployed primary recognition credentials. Custom recognition credentials do not match this project. Zero custom day/QPS limit fields are not a measurement of remaining subscription credit."
+  },
+  "vercel": {
+    "plan": "hobby",
+    "website": {
+      "status": 200
+    },
+    "blob": {
+      "count": 3,
+      "bytes": 307370197,
+      "gib": 0.28626080323010683,
+      "percentOf1GiB": 28.626080323010683
+    },
+    "usageBillingQuery": {
+      "verified": false,
+      "reason": "Vercel usage command reports billing cost data unavailable for the Hobby team; this does not imply zero bandwidth or operation usage."
+    },
+    "blobMonthlyTransferVerified": false,
+    "blobCurrentStorageMegabytes": 307.370197,
+    "blobStorageAllowanceGB": 1,
+    "blobTransferAllowanceGB": 10
+  },
+  "facepp": {
+    "status": 200,
+    "faceSetCount": 0,
+    "headers": {},
+    "remainingQuotaKnown": false
+  },
+  "otherProviders": {
+    "didit": {
+      "deployed": true,
+      "localKey": false,
+      "remainingQuotaVerified": false,
+      "note": "No recent Didit quota error found; no recent traffic in the inspected window. Cannot prove remaining verification allowance."
+    },
+    "paymongo": {
+      "deployed": true,
+      "localKey": false,
+      "remainingQuotaVerified": false,
+      "note": "10 successful/redirect responses and 2 authorization responses from paymongo function; no quota error found in its available logs."
+    },
+    "gmail": {
+      "configuredAuthEmailsPerHour": 50,
+      "remainingProviderDailyQuotaVerified": false,
+      "note": "Auth SMTP host is smtp.gmail.com. No email quota error found in inspected auth/function logs. No test email was sent."
+    },
+    "resend": {
+      "deployed": true,
+      "localKey": false,
+      "remainingQuotaVerified": false,
+      "note": "Key exists among deployed secrets; current shared email helper uses Gmail. No live Resend quota endpoint access."
+    },
+    "smile": {
+      "deployed": true,
+      "localKey": false,
+      "remainingQuotaVerified": false,
+      "note": "Sandbox address-verification code and provider secrets exist; no traffic/quota counters verified."
+    },
+    "openai": {
+      "deployedKey": false,
+      "localKey": false,
+      "status": "not_configured"
+    },
+    "geocoding": {
+      "status": 200,
+      "results": 1,
+      "remainingQuotaKnown": false,
+      "provider": "Nominatim",
+      "publicRateLimitPerSecond": 1,
+      "appWideUsageVerified": false
+    },
+    "expoPush": {
+      "presentInDatabaseMigrations": true,
+      "publicNotificationsPerSecondLimit": 600,
+      "usageVerified": false,
+      "note": "No push was sent. Project-wide push rate and receipt history were not verified."
+    }
+  },
+  "sources": {
+    "groq": "https://console.groq.com/docs/rate-limits",
+    "supabasePricing": "https://supabase.com/pricing",
+    "supabaseDisk": "https://supabase.com/docs/guides/platform/database-size",
+    "supabaseManagement": "https://supabase.com/docs/reference/api/introduction",
+    "supabaseAuthRates": "https://supabase.com/docs/guides/auth/rate-limits",
+    "acrStatistics": "https://docs.acrcloud.com/reference/console-api/base-projects",
+    "awsMetrics": "https://docs.aws.amazon.com/rekognition/latest/dg/rekognition-monitoring.html",
+    "vercelBlob": "https://vercel.com/docs/vercel-blob/usage-and-pricing",
+    "faceppFreeTier": "https://www.faceplusplus.com/blog/face-overseas-free-policy-adjustment-notice/",
+    "nominatim": "https://operations.osmfoundation.org/policies/nominatim/",
+    "expoPush": "https://docs.expo.dev/push-notifications/faq/"
+  }
+}

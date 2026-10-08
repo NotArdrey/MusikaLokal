@@ -1,0 +1,12 @@
+{
+  "packageId": "com.anonymous.musikalokal",
+  "versionName": "1.0.6",
+  "versionCode": 7,
+  "sizeBytes": 102466027,
+  "sha256": "e1fb337982b84728b53281aa3070f2b8fcf82dbcfea2f31eba7666f8edae2437",
+  "minSdk": 24,
+  "builtAt": "2026-10-08T12:31:45.3674263Z",
+  "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+  "testing": true,
+  "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/e1fb337982b84728b53281aa3070f2b8fcf82dbcfea2f31eba7666f8edae2437/musikalokal-testing.apk?download=1"
+}

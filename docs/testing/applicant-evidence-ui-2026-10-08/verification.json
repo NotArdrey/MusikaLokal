@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-08",
+  "timezone": "Asia/Manila",
+  "scope": "Applicant review evidence presentation",
+  "component": "mobile/src/components/ApplicantDetailsModal.tsx",
+  "changes": [
+    "Requirements reuse the CV section's ReviewGroup, StatusRow, full-width body, and outlined action layout",
+    "Removed nested indentation, smaller status text, and two-line description cutoff",
+    "Expanded evidence uses full-width 16px labels and body text",
+    "Removed the redundant Evidence Source block; sentence-case extract or analysis labels identify the source",
+    "Expanded analysis replaces the collapsed explanation to avoid repetition",
+    "Removed the numeric review score, progress bar, and score wording",
+    "One separator between confirmed requirements and one before the CV section"
+  ],
+  "checks": {
+    "targeted_tests": { "passed": 34, "failed": 0 },
+    "cv_design_comparisons": {
+      "passed": 24,
+      "fixture": "Bea Navarro with a mismatched Jared Cariaso CV and two confirmed requirements",
+      "widths": [320, 390, 430],
+      "text_scales": [1, 1.6],
+      "themes": ["light", "dark"],
+      "evidence_states": ["collapsed", "expanded"],
+      "comparison": "Rendered heading, status, body and action typography, body and action widths, content gap, and button border, radius and padding equal the CV section",
+      "results": "cv-design-layouts.json"
+    },
+    "expanded_evidence_layouts": {
+      "passed": 12,
+      "widths": [320, 390, 430],
+      "text_scales": [1, 1.6],
+      "themes": ["light", "dark"],
+      "results": "expanded-layouts.json"
+    },
+    "applicant_review_layouts": { "passed": 24, "results": "review-layouts.json" },
+    "controlled_safe_area_layouts": { "passed": 16 },
+    "mobile_typecheck": "passed",
+    "targeted_mobile_eslint": "passed",
+    "react_component_review": "passed"
+  },
+  "test_command": "node --test scripts/test-applicant-review-ui.mjs scripts/test-applicant-safe-areas.mjs scripts/test-submitted-genre-fit.mjs scripts/test-connection-member-verification.mjs",
+  "previews": ["reference-390-light-1-collapsed.png", "reference-390-dark-1-collapsed.png", "reference-390-light-1-expanded.png", "reference-320-light-1.6-collapsed.png", "reference-320-dark-1.6-collapsed.png"],
+  "status": "source_only",
+  "new_apk_built": false,
+  "physical_android_verified": false,
+  "backend_scoring_changed": false
+}

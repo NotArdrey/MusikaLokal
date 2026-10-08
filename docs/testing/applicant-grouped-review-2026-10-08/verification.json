@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-08",
+  "timezone": "Asia/Manila",
+  "scope": "Applicant review grouped by CV and Performance",
+  "component": "mobile/src/components/ApplicantDetailsModal.tsx",
+  "changes": [
+    "Removed the confirmed-requirements dropdown and all View evidence and Hide evidence controls",
+    "CV name checks, processing notices, findings and member documents appear in one CV section",
+    "Video findings, singing observations, timestamps, song checks and member verification appear in one Performance section",
+    "Merged the File review details section and removed repeated document and video actions",
+    "CV and video source results remain independent and visible directly",
+    "Full-width 16px body text and one divider between CV and Performance",
+    "Review percentage and progress bar remain removed"
+  ],
+  "checks": {
+    "targeted_tests": { "passed": 37, "failed": 0 },
+    "source_group_layouts": {
+      "passed": 24,
+      "widths": [320, 390, 430],
+      "text_scales": [1, 1.6],
+      "themes": ["light", "dark"],
+      "cases": ["Bea Navarro with a mismatched Jared Cariaso CV", "CV confirms genre while video remains unclear"],
+      "results": "source-layouts.json"
+    },
+    "applicant_review_layouts": { "passed": 24, "results": "review-layouts.json" },
+    "controlled_safe_area_layouts": { "passed": 16 },
+    "mobile_typecheck": "passed",
+    "targeted_mobile_eslint": "passed",
+    "react_component_review": "passed"
+  },
+  "test_command": "node --test scripts/test-applicant-review-ui.mjs scripts/test-applicant-safe-areas.mjs scripts/test-submitted-genre-fit.mjs scripts/test-connection-member-verification.mjs scripts/test-group-application-member-cvs.mjs",
+  "previews": ["390-light-1-cv.png", "390-light-1-performance.png", "390-dark-1-cv.png", "390-dark-1-performance.png"],
+  "status": "source_only",
+  "new_apk_built": false,
+  "physical_android_verified": false,
+  "backend_scoring_changed": false
+}

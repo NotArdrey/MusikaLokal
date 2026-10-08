@@ -16,12 +16,14 @@ const theme = {};
 vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../mobile/src/theme/tokens.ts", import.meta.url), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS },
 }).outputText, { exports: theme });
+const iconDirectory = new URL("../mobile/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/", import.meta.url);
+const iconGlyphs = JSON.parse(readFileSync(new URL("glyphmaps/Ionicons.json", iconDirectory), "utf8"));
 const fontCss = Object.values(theme.typography).filter((value, index, fonts) => fonts.indexOf(value) === index).map(name => {
   const [family, weight] = name.split("_");
   const packageName = family === "Manrope" ? "manrope" : "space-grotesk";
   const file = new URL(`../mobile/node_modules/@expo-google-fonts/${packageName}/${weight}/${name}.ttf`, import.meta.url);
   return `@font-face{font-family:${name};src:url(data:font/ttf;base64,${readFileSync(file).toString("base64")})}`;
-}).join("\n");
+}).join("\n") + `\n@font-face{font-family:Ionicons;src:url(data:font/ttf;base64,${readFileSync(new URL("Fonts/Ionicons.ttf", iconDirectory)).toString("base64")})}`;
 const source = readFileSync(new URL("../mobile/src/components/ApplicantDetailsModal.tsx", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
@@ -40,7 +42,10 @@ vm.runInNewContext(compiled, {
     };
     if (name === "react-native-safe-area-context") return { SafeAreaProvider: RN.View, SafeAreaView: RN.View };
     if (name === "expo-router") return { useRouter: () => ({ push() {} }) };
-    if (name === "@expo/vector-icons") return { Ionicons: ({ size }) => h(RN.View, { style: { width: size, height: size, flexShrink: 0 } }) };
+    if (name === "@expo/vector-icons") return { Ionicons: ({ name, size, color }) => h("span", {
+      "aria-hidden": true,
+      style: { display: "inline-flex", fontFamily: "Ionicons", fontSize: size, lineHeight: `${size}px`, width: size, height: size, flexShrink: 0, color },
+    }, String.fromCodePoint(iconGlyphs[name])) };
     if (name.includes("gigApplicantFilters")) return { isActiveApplication: () => true };
     if (name.includes("cvApplicantName")) return cvApplicantName;
     if (name.includes("theme/tokens")) return theme;
@@ -64,11 +69,42 @@ const group = {
   member_verification: { status: "completed", result: "needs_review", expected_member_count: 2, verified_member_count: 0, reference_source: "verified_id_and_profile_photo", members: memberNames.map((member_name_snapshot, i) => ({ member_id: `member-${i}`, member_name_snapshot, status: "needs_review", profile_status: "needs_review", profile_issue_code: "identity_not_confirmed", reference_portrait_url: `https://example.test/portrait-${i}.jpg`, profile_photo_url: `https://example.test/profile-${i}.jpg` })) },
 };
 const solo = { ...group, id: "solo-application", group: null, member_cvs: [], cv_url: "https://example.test/solo.pdf?token=private" };
+const screenshotApplicant = {
+  ...solo, applicant: { ...solo.applicant, full_name: "Bea Navarro" }, member_verification: null,
+  ai_recommendation: { ...solo.ai_recommendation, criteria_snapshot: { requirement_results: [
+    { key: "genres", label: "Music genre", status: "met", source: "cv_and_performance_video", source_results: [
+      { source: "cv", status: "met", detail: "The CV lists Pop and Rock genres explicitly.", evidence: [{ source: "cv", observation: "Genres listed in the CV include Pop and Rock." }] },
+      { source: "performance_video", status: "met", detail: "The video demonstrates a Rock arrangement.", evidence: [{ source: "performance_video", observation: "Rock guitar accompaniment is heard in the performance." }] },
+    ] },
+    { key: "portfolio", label: "Performance evidence", status: "met", source: "performance_video", detail: "The submitted performance video contains direct performance evidence." },
+  ] } },
+  ai_portfolio_review: { status: "completed", source_summary: {
+    cv_processing_status: "reviewed", cv_document_classification: { status: "cv" },
+    cv_name_check: { status: "mismatch", extracted_name: "JARED CARIASO", confidence: 0.99 },
+  } },
+};
 const noop = () => {};
 function render(details, colors = baseColors, onOpenMedia = noop, onRetry = noop) {
   buttons.length = 0;
   return renderToStaticMarkup(h(exports.default, { visible: true, summary: details, details, colors, loading: false, error: null, onClose: noop, onRetry, onAccept: noop, onDecline: noop, onOpenMedia }));
 }
+
+function renderAllSections(details, colors = baseColors) {
+  const originalUseState = React.useState;
+  let falseStates = 0;
+  React.useState = initial => originalUseState(initial === false && falseStates++ > 0 ? true : initial);
+  try { return render(details, colors); } finally { React.useState = originalUseState; }
+}
+
+test("applicant review has no score, confirmed-requirements dropdown, or evidence controls", () => {
+  for (const score of [null, 0, 85, 100, "invalid"]) {
+    const details = { ...solo, ai_recommendation: { ...solo.ai_recommendation, score } };
+    for (const html of [render(details), renderAllSections(details)]) {
+      assert.match(html, /Review Summary/);
+      assert.doesNotMatch(html, /\b\d+(?:\.\d+)?%|match score|EVIDENCE SOURCE|RELEVANT EXTRACT|REVIEW ANALYSIS|View evidence|Hide evidence|\d+ requirements? confirmed|File review details/);
+    }
+  }
+});
 
 for (const kind of ["duo", "band"]) {
   test(`${kind} CVs are checked against their members and ignore a stale group-name warning`, () => {
@@ -80,7 +116,7 @@ for (const kind of ["duo", "band"]) {
       } })),
     };
     const html = render(details);
-    assert.equal((html.match(/Needs attention/g) || []).length, 1);
+    assert.doesNotMatch(html, /Needs attention/);
     assert.equal((html.match(/CV name matches this member/g) || []).length, 2);
     assert.doesNotMatch(html, /CV identity mismatch|application belongs to Fantastic duo/);
     assert.equal(buttons.some(props => props.accessibilityLabel === "View applicant CV"), false);
@@ -117,54 +153,106 @@ test("skipped member CVs prevent the group from appearing fully confirmed", () =
   assert.match(check.summary, /1 of 2/);
 });
 
-test("genre wording distinguishes a CV claim from an unconfirmed video, with evidence still accessible", async () => {
-  const details = { ...solo, ai_recommendation: { ...solo.ai_recommendation, criteria_snapshot: { requirement_results: [{
-    key: "genres", label: "Genre fit", status: "met", source: "cv_and_performance_video",
-    source_results: [
-      { source: "cv", status: "met", detail: "The CV lists Pop and Rock.", evidence: [{ source: "cv", observation: "Pop and Rock experience" }] },
-      { source: "performance_video", status: "unclear", detail: "Genre could not be confirmed from the video.", evidence: [] },
-    ],
-  }, {
-    key: "portfolio", label: "Performance evidence", status: "unclear", detail: "Open the video to confirm this performance.", source: "performance_video",
-  }] } }, ai_portfolio_review: { status: "completed", source_summary: { video_structured_output: {
-    singing_present: true, detected_genres: [{ genre: "Rock", observation: "Rock guitar arrangement", timestamp_seconds: 4 }],
-    vocal_performance: { status: "unclear", short_reason: "The singer's mouth is obscured.", evidence: [] },
-  } } } };
-  const browser = await chromium.launch({ channel: "msedge", headless: true });
-  const page = await browser.newPage({ viewport: { width: 320, height: 900 } });
-  try {
-    await page.setContent(`<style>${fontCss}html,body{margin:0;height:100%}#root{height:900px;display:flex;flex-direction:column}${RN.StyleSheet.getSheet().textContent}</style><div id="root">${render(details)}</div>`);
-    await page.evaluate(() => document.fonts.ready);
-    assert.equal(await page.getByText("Needs attention", { exact: true }).count(), 1);
-    assert.equal(await page.getByText("Performance evidence", { exact: true }).count(), 1);
-    assert.equal(await page.getByText("Performance evidence", { exact: true }).locator("..").getByText("View evidence", { exact: true }).count(), 1);
-    const originalUseState = React.useState;
-    let falseStates = 0;
-    React.useState = initial => originalUseState(initial === false && falseStates++ > 0 ? true : initial);
-    let expanded;
-    try { expanded = render(details); } finally { React.useState = originalUseState; }
-    assert.match(expanded, /Confirmed from CV/);
-    assert.doesNotMatch(expanded, /Confirmed from CV \+ Performance/);
-    assert.match(expanded, /CV statement: The CV lists Pop and Rock/);
-    assert.match(expanded, /Video analysis: Genre could not be confirmed from the video/);
-    await page.setContent(`<style>${fontCss}html,body{margin:0;height:100%}#root{height:900px;display:flex;flex-direction:column}${RN.StyleSheet.getSheet().textContent}</style><div id="root">${expanded}</div>`);
-    await page.evaluate(() => document.fonts.ready);
-    await page.evaluate(() => {
-      for (const node of document.querySelectorAll('[dir="auto"]')) {
-        const css = getComputedStyle(node);
-        node.style.fontSize = `${parseFloat(css.fontSize) * 1.6}px`;
-        node.style.lineHeight = `${parseFloat(css.lineHeight) * 1.6}px`;
-      }
-    });
-    const overflow = await page.evaluate(() => [...document.querySelectorAll('[dir="auto"]')].filter(node => node.scrollWidth > node.clientWidth + 1).map(node => node.textContent));
-    assert.deepEqual(overflow, []);
-    await page.getByText("Genre heard in video", { exact: true }).scrollIntoViewIfNeeded();
-    mkdirSync("docs/testing/applicant-cv-video-2026-10-08", { recursive: true });
-    await page.screenshot({ path: "docs/testing/applicant-cv-video-2026-10-08/video-analysis-320-large.png" });
-  } finally { await browser.close(); }
+test("member CV findings remain with their named documents and skipped reviews are not shown", () => {
+  const details = { ...group, member_cvs: group.member_cvs.map((member, index) => ({ ...member, ai_review_consent: !index,
+    ai_review_result: { findings: [{ criterion: "instrument_requirement", result: "supported", short_reason: index ? "A skipped member's old finding" : "Jared's CV lists guitar experience.", source: "cv", evidence: [] }] },
+  })) };
+  const html = render(details);
+  assert.match(html, /Jared&#x27;s CV lists guitar experience/);
+  assert.doesNotMatch(html, /A skipped member&#x27;s old finding/);
+  assert.equal((html.match(/data-testid="cv-review"/g) || []).length, 1);
+  assert.equal((html.match(/View CV/g) || []).length, 2);
 });
 
-test("every group member CV opens directly without expanding an evidence panel, including during video review", () => {
+test("CV and performance findings are visible in their own sections without evidence controls", async () => {
+  const weakVideo = { ...screenshotApplicant, ai_recommendation: { ...screenshotApplicant.ai_recommendation, criteria_snapshot: {
+    requirement_results: screenshotApplicant.ai_recommendation.criteria_snapshot.requirement_results.map(item => item.key !== "genres" ? item : {
+      ...item, source_results: item.source_results.map(check => check.source === "cv" ? check : { ...check, status: "unclear", detail: "Genre could not be confirmed from the video.", evidence: [] }),
+    }),
+  } } };
+  const browser = await chromium.launch({ channel: "msedge", headless: true });
+  const page = await browser.newPage();
+  const output = "docs/testing/applicant-grouped-review-2026-10-08";
+  mkdirSync(output, { recursive: true });
+  const results = [];
+  try {
+    for (const width of [320, 390, 430]) for (const dark of [false, true]) for (const scale of [1, 1.6]) for (const [kind, details] of [["matched", screenshotApplicant], ["weak-video", weakVideo]]) {
+      const colors = dark ? { ...baseColors, background: "#111218", surface: "#111218", border: "#34353f", text: "#f8f7f2", textSecondary: "#aaaab3" } : baseColors;
+      await page.setViewportSize({ width, height: 900 });
+      await page.setContent(`<style>${fontCss}html,body{margin:0;height:100%}#root{height:900px;display:flex;flex-direction:column}${RN.StyleSheet.getSheet().textContent}</style><div id="root">${render(details, colors)}</div>`);
+      await page.evaluate(() => document.fonts.ready);
+      if (scale !== 1) await page.evaluate(scale => {
+        for (const node of document.querySelectorAll('[dir="auto"]')) {
+          const css = getComputedStyle(node);
+          node.style.fontSize = `${parseFloat(css.fontSize) * scale}px`;
+          node.style.lineHeight = `${parseFloat(css.lineHeight) * scale}px`;
+        }
+      }, scale);
+      const cv = page.getByTestId("cv-review"), performance = page.getByTestId("performance-review");
+      assert.equal(await cv.count(), 1);
+      assert.equal(await performance.count(), 1);
+      assert.equal(await page.getByTestId("confirmed-requirements").count(), 0);
+      assert.equal(await page.getByRole("button", { name: /evidence/i }).count(), 0);
+      assert.equal(await page.getByText("File review details", { exact: true }).count(), 0);
+      assert.equal(await cv.getByText("CV identity mismatch", { exact: true }).count(), 1);
+      assert.equal(await page.getByText("CV identity mismatch", { exact: true }).count(), 1);
+      assert.equal(await cv.getByText("The CV lists Pop and Rock genres explicitly.", { exact: true }).count(), 1);
+      assert.equal(await performance.getByText(/The CV lists/).count(), 0);
+      assert.equal(await cv.getByText(/The video demonstrates|Genre could not be confirmed from the video/).count(), 0);
+      assert.equal(await cv.getByRole("button", { name: "View applicant CV", exact: true }).count(), 1);
+      assert.equal(await performance.getByRole("button", { name: "Watch performance", exact: true }).count(), 1);
+      const genre = performance.getByTestId("finding-video-genre_requirement");
+      assert.equal(await genre.getByText(kind === "matched" ? "Confirmed from video" : "Couldn't confirm", { exact: true }).count(), 1);
+      const metrics = await page.evaluate(() => {
+        const cv = document.querySelector('[data-testid="cv-review"]');
+        const performance = document.querySelector('[data-testid="performance-review"]');
+        const cvDescription = cv.lastElementChild.children[1];
+        const videoDescription = performance.lastElementChild.children[1];
+        const typography = node => { const css = getComputedStyle(node); return { family: css.fontFamily, size: css.fontSize, lineHeight: css.lineHeight }; };
+        const sourceFindings = [...document.querySelectorAll('[data-testid^="finding-cv-"], [data-testid^="finding-video-"]')];
+        return {
+          cvBody: typography(cvDescription), videoBody: typography(videoDescription),
+          cvBorder: parseFloat(getComputedStyle(cv).borderTopWidth), performanceBorder: parseFloat(getComputedStyle(performance).borderTopWidth),
+          findingBorders: sourceFindings.map(node => parseFloat(getComputedStyle(node).borderTopWidth)),
+          findingAlignment: sourceFindings.map(node => Math.abs(node.getBoundingClientRect().left - cvDescription.getBoundingClientRect().left)),
+          cvBeforePerformance: Boolean(cv.compareDocumentPosition(performance) & Node.DOCUMENT_POSITION_FOLLOWING),
+          overflow: [...document.querySelectorAll('[dir="auto"]')].filter(node => node.scrollWidth > node.clientWidth + 1).map(node => node.textContent),
+        };
+      });
+      assert.deepEqual(metrics.cvBody, metrics.videoBody);
+      assert.ok(Math.abs(parseFloat(metrics.cvBody.size) - 16 * scale) < 0.1);
+      assert.equal(metrics.cvBorder, 0);
+      assert.equal(metrics.performanceBorder, 1);
+      assert.ok(metrics.findingBorders.every(width => width === 0));
+      assert.ok(metrics.findingAlignment.every(offset => offset <= 1));
+      assert.equal(metrics.cvBeforePerformance, true);
+      assert.deepEqual(metrics.overflow, []);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      if (kind === "matched" && ((width === 390 && scale === 1) || (width === 320 && scale === 1.6))) {
+        await page.getByText("Qualification Review", { exact: true }).evaluate(node => node.scrollIntoView({ block: "start" }));
+        await page.screenshot({ path: `${output}/${width}-${dark ? "dark" : "light"}-${scale}-cv.png` });
+        await performance.locator('[dir="auto"]').first().evaluate(node => node.scrollIntoView({ block: "start" }));
+        await page.screenshot({ path: `${output}/${width}-${dark ? "dark" : "light"}-${scale}-performance.png` });
+      }
+      results.push({ width, dark, scale, kind, ...metrics, passed: true });
+    }
+  } finally { await browser.close(); }
+  writeFileSync(`${output}/source-layouts.json`, `${JSON.stringify(results, null, 2)}\n`);
+  console.log(`${results.length} grouped CV and performance layouts passed.`);
+});
+
+test("legacy combined CV support does not confirm contradictory video findings", () => {
+  const html = render({ ...solo, ai_recommendation: { criteria_snapshot: { requirement_results: [{ key: "genres", status: "met", source: "cv_and_performance_video" }] } },
+    ai_portfolio_review: { status: "completed", evidence: [{ criterion: "genre_requirement", result: "supported", source: "cv_and_performance_video", short_reason: "CV and video were reviewed.", evidence: [
+      { source: "cv", observation: "The CV lists Rock." },
+      { source: "performance_video", observation: "The video did not demonstrate Rock." },
+    ] }] },
+  });
+  assert.match(html, /Not demonstrated in video/);
+  assert.doesNotMatch(html, /Confirmed from video/);
+});
+
+test("every group member CV opens directly in the CV section, including during video review", () => {
   const opened = [];
   render(group, baseColors, (...args) => opened.push(args));
   for (const member of group.member_cvs) {
@@ -197,7 +285,7 @@ test("a member CV with an unavailable link explains how to recover without openi
 test("applicant CV and verification fit narrow screens, both themes, and enlarged text", { timeout: 120000 }, async () => {
   const browser = await chromium.launch({ channel: "msedge", headless: true });
   const page = await browser.newPage();
-  const output = "docs/testing/applicant-cv-video-2026-10-08";
+  const output = "docs/testing/applicant-grouped-review-2026-10-08";
   mkdirSync(output, { recursive: true });
   const results = [];
   try {
@@ -238,6 +326,6 @@ test("applicant CV and verification fit narrow screens, both themes, and enlarge
       results.push({ width, dark, scale, kind, ...metrics, passed: true });
     }
   } finally { await browser.close(); }
-  writeFileSync(`${output}/layouts.json`, `${JSON.stringify(results, null, 2)}\n`);
+  writeFileSync(`${output}/review-layouts.json`, `${JSON.stringify(results, null, 2)}\n`);
   console.log(`${results.length} applicant review layouts passed; physical Android acceptance remains pending.`);
 });

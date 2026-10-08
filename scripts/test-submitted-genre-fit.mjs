@@ -36,7 +36,7 @@ for (const root of ["mobile", "web"]) {
     criteria: { genres: "required", instruments: "ignore", location: "ignore", portfolio: "ignore" },
   });
   const base = () => helpers.evaluateGigApplication({
-    id: "app", gig_id: "gig", applicant: { genres: ["Rock"], is_verified: true, verification_status: "APPROVED" }, slot_type: "solo",
+    id: "app", gig_id: "gig", applicant: { genres: ["Rock"] }, slot_type: "solo",
   }, { genres: ["Rock"] }, settings);
   const withReview = async (review) => {
     const client = { from: () => ({ select: () => ({ in: async () => ({ data: [{ application_id: "app", status: "completed", ...review }], error: null }) }) }) };

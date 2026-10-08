@@ -1,0 +1,218 @@
+[
+  {
+    "width": 320,
+    "dark": false,
+    "scale": 1,
+    "kind": "group",
+    "minFont": 14,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": false,
+    "scale": 1,
+    "kind": "solo",
+    "minFont": 14,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": false,
+    "scale": 1.6,
+    "kind": "group",
+    "minFont": 22.4,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": false,
+    "scale": 1.6,
+    "kind": "solo",
+    "minFont": 22.4,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "scale": 1,
+    "kind": "group",
+    "minFont": 14,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "scale": 1,
+    "kind": "solo",
+    "minFont": 14,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "scale": 1.6,
+    "kind": "group",
+    "minFont": 22.4,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "scale": 1.6,
+    "kind": "solo",
+    "minFont": 22.4,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": false,
+    "scale": 1,
+    "kind": "group",
+    "minFont": 14,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": false,
+    "scale": 1,
+    "kind": "solo",
+    "minFont": 14,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": false,
+    "scale": 1.6,
+    "kind": "group",
+    "minFont": 22.4,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": false,
+    "scale": 1.6,
+    "kind": "solo",
+    "minFont": 22.4,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": true,
+    "scale": 1,
+    "kind": "group",
+    "minFont": 14,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": true,
+    "scale": 1,
+    "kind": "solo",
+    "minFont": 14,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": true,
+    "scale": 1.6,
+    "kind": "group",
+    "minFont": 22.4,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": true,
+    "scale": 1.6,
+    "kind": "solo",
+    "minFont": 22.4,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "scale": 1,
+    "kind": "group",
+    "minFont": 14,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "scale": 1,
+    "kind": "solo",
+    "minFont": 14,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "scale": 1.6,
+    "kind": "group",
+    "minFont": 22.4,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "scale": 1.6,
+    "kind": "solo",
+    "minFont": 22.4,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "scale": 1,
+    "kind": "group",
+    "minFont": 14,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "scale": 1,
+    "kind": "solo",
+    "minFont": 14,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "scale": 1.6,
+    "kind": "group",
+    "minFont": 22.4,
+    "shadows": 0,
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "scale": 1.6,
+    "kind": "solo",
+    "minFont": 22.4,
+    "shadows": 0,
+    "passed": true
+  }
+]

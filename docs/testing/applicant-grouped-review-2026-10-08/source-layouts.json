@@ -1,0 +1,746 @@
+[
+  {
+    "width": 320,
+    "dark": false,
+    "scale": 1,
+    "kind": "matched",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": false,
+    "scale": 1,
+    "kind": "weak-video",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": false,
+    "scale": 1.6,
+    "kind": "matched",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": false,
+    "scale": 1.6,
+    "kind": "weak-video",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "scale": 1,
+    "kind": "matched",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "scale": 1,
+    "kind": "weak-video",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "scale": 1.6,
+    "kind": "matched",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 320,
+    "dark": true,
+    "scale": 1.6,
+    "kind": "weak-video",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": false,
+    "scale": 1,
+    "kind": "matched",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": false,
+    "scale": 1,
+    "kind": "weak-video",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": false,
+    "scale": 1.6,
+    "kind": "matched",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": false,
+    "scale": 1.6,
+    "kind": "weak-video",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": true,
+    "scale": 1,
+    "kind": "matched",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": true,
+    "scale": 1,
+    "kind": "weak-video",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": true,
+    "scale": 1.6,
+    "kind": "matched",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "dark": true,
+    "scale": 1.6,
+    "kind": "weak-video",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "scale": 1,
+    "kind": "matched",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "scale": 1,
+    "kind": "weak-video",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "scale": 1.6,
+    "kind": "matched",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": false,
+    "scale": 1.6,
+    "kind": "weak-video",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "scale": 1,
+    "kind": "matched",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "scale": 1,
+    "kind": "weak-video",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "16px",
+      "lineHeight": "24px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "scale": 1.6,
+    "kind": "matched",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  },
+  {
+    "width": 430,
+    "dark": true,
+    "scale": 1.6,
+    "kind": "weak-video",
+    "cvBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "videoBody": {
+      "family": "Manrope_400Regular",
+      "size": "25.6px",
+      "lineHeight": "38.4px"
+    },
+    "cvBorder": 0,
+    "performanceBorder": 1,
+    "findingBorders": [
+      0,
+      0,
+      0
+    ],
+    "findingAlignment": [
+      0,
+      0,
+      0
+    ],
+    "cvBeforePerformance": true,
+    "overflow": [],
+    "passed": true
+  }
+]

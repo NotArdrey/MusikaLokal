@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-08",
+  "website": "https://musika-lokal.vercel.app",
+  "deploymentId": "dpl_Hb3Tfby3xd2xMXsvEn9qnVw213UZ",
+  "stagedWebsite": "https://musika-lokal-9c5av67hx-notardreys-projects.vercel.app",
+  "versionName": "1.0.6",
+  "versionCode": 7,
+  "packageId": "com.anonymous.musikalokal",
+  "sha256": "e1fb337982b84728b53281aa3070f2b8fcf82dbcfea2f31eba7666f8edae2437",
+  "sizeBytes": 102466027,
+  "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+  "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/e1fb337982b84728b53281aa3070f2b8fcf82dbcfea2f31eba7666f8edae2437/musikalokal-testing.apk?download=1",
+  "verification": {
+    "androidBuild": "passed",
+    "signatureAndUpdateCertificate": "passed",
+    "embeddedBundleAndPrivateCredentialScan": "passed",
+    "latestManageGigSourceMatchesEmbeddedSource": true,
+    "mobileTypecheck": "passed",
+    "webTypecheck": "passed",
+    "releaseManifestTests": "4 passed",
+    "websiteDownloadRegression": "passed",
+    "uploadedApkFullDownloadChecksum": "passed",
+    "websiteBuild": "passed on Vercel",
+    "stagedBrowserDownloadAndChecksum": "passed",
+    "productionBrowserChecks": "passed",
+    "productionRehashedStagedDownload": true,
+    "productionManifestMatchesLocalBuild": true,
+    "localWebsiteDependenciesRestored": true
+  },
+  "storage": {
+    "provider": "existing Vercel Blob store",
+    "reason": "Supabase publishing credentials returned HTTP 403; used the existing Blob store serving the previous APK.",
+    "previousReleaseRetained": true
+  },
+  "backendDeployed": false,
+  "limitations": [
+    "Physical Android installation was not tested.",
+    "Local Vercel build was stopped after Windows memory exhaustion; the website was built successfully from a focused source copy on Vercel."
+  ]
+}
