@@ -38,13 +38,19 @@ test('published share gateway preserves all targets, offers the APK and renders 
       ['/post_details',{post_id:id}],
     ]) {
       const link=buildActionEmailUrl({route,route_params:params});
-      await page.goto(link);
-      await page.locator('#open-app').waitFor({state:'visible'});
-      const href=await page.locator('#open-app').getAttribute('href');
-      assert.equal(getActionDestination(href),getActionDestination(link));
-      await page.waitForFunction(()=>document.getElementById('download').href.includes('testing.apk'));
-      await page.locator('#open-app').evaluate(node=>node.addEventListener('click',e=>{e.preventDefault();window.captureOpen(node.href);}));
-      await page.locator('#open-app').click();assert.equal(pressed,href);
+      const target=getActionDestination(link);
+      const legacy=new URL(link);
+      legacy.searchParams.set('destination',encodeURIComponent(target));
+      for (const input of [link,legacy.href]) {
+        await page.goto(input);
+        await page.locator('#open-app').waitFor({state:'visible'});
+        const href=await page.locator('#open-app').getAttribute('href');
+        assert.equal(getActionDestination(href),target);
+        assert.equal(new URL(href).searchParams.get('destination'),target,'gateway encodes the native destination once');
+        await page.waitForFunction(()=>document.getElementById('download').href.includes('testing.apk'));
+        await page.locator('#open-app').evaluate(node=>node.addEventListener('click',e=>{e.preventDefault();window.captureOpen(node.href);}));
+        await page.locator('#open-app').click();assert.equal(pressed,href);
+      }
     }
     mkdirSync('docs/testing/remaining-bugs-2026-10-07',{recursive:true});
     for(const colorScheme of ['light','dark'])for(const width of [320,1280])for(const scale of [1,1.6]) {

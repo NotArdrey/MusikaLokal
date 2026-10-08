@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import test from 'node:test';
 import vm from 'node:vm';
 import ts from 'typescript';
@@ -18,6 +19,11 @@ const load = (file, imports = {}, extra = {}) => {
   return exports;
 };
 const appLinks = load('mobile/src/utils/appLinks.ts', { './actionLinks': actions, './shareLinks': shares });
+// Use the URL implementation installed by mobile/lib/supabase.ts, not Node's.
+const nativeUrls = createRequire(new URL('../mobile/package.json', import.meta.url))('whatwg-url-without-unicode');
+const nativeActions = load('mobile/src/utils/actionLinks.ts', {}, nativeUrls);
+const nativeShares = load('mobile/src/utils/shareLinks.ts', {}, nativeUrls);
+const nativeAppLinks = load('mobile/src/utils/appLinks.ts', { './actionLinks': nativeActions, './shareLinks': nativeShares }, nativeUrls);
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const cases = [
   ['/feed', {}], ['/account_details', {}],
@@ -50,6 +56,54 @@ test('every ordinary action destination survives the HTTPS gateway, native hando
   }
 });
 
+test('Android URL implementation preserves route parameters without URLSearchParams.size', () => {
+  assert.equal(new nativeUrls.URLSearchParams('destination=/notifications').size, undefined);
+  for (const [route, params] of cases) {
+    const target = route + (Object.keys(params).length ? `?${new URLSearchParams(params)}` : '');
+    const link = nativeActions.buildActionEmailUrl({ route, route_params: params });
+    assert.equal(link, actions.buildActionEmailUrl({ route, route_params: params }));
+    const native = `musikalokal://action?${new URLSearchParams({ destination: target })}`;
+    for (const input of [link, native]) {
+      assert.equal(nativeAppLinks.getAppLinkDestination(input), target, input);
+    }
+    assert.equal(nativeActions.normalizeActionDestination(target), target);
+    assert.equal(nativeAppLinks.getAppLinkDestination(target), appLinks.getAppLinkDestination(target));
+  }
+});
+
+const screenshotCases = [
+  ['%252Fgig_feature_consent%253FapplicationId%253Dff586971-aa1a-4bdc-971c-f14ed5957bf2',
+    '/gig_feature_consent?applicationId=ff586971-aa1a-4bdc-971c-f14ed5957bf2'],
+  ['%252Fbookings%253Ftab%253DHistory', '/bookings?tab=History'],
+];
+
+test('Gmail screenshot links accept one additional encoding layer in browser and native URLs', () => {
+  for (const [encoded, target] of screenshotCases) {
+    for (const base of ['musikalokal://action', 'https://musika-lokal.vercel.app/action', '/action']) {
+      const link = `${base}?destination=${encoded}`;
+      assert.equal(appLinks.getAppLinkDestination(link), target, link);
+      assert.equal(nativeAppLinks.getAppLinkDestination(link), target, link);
+    }
+  }
+});
+
+test('extra encoding cannot bypass destination validation or introduce credentials', () => {
+  for (const target of ['/admin', '//evil.example/x', '/\\evil.example/x', '/group_application_cv',
+    '/gig_feature_consent?applicationId=bad', `/gig_feature_consent?applicationId=${id}&applicationId=${id}`,
+    '/bookings?tab=Admin', '/wallet?access_token=secret', '/wallet#token_hash=secret',
+    '/password_recovery?token_hash=secret&type=recovery', '/action?destination=/wallet',
+    'https://evil.example/wallet', '%2Fbookings%3Ftab%3DHistory', '%2Fbookings%3Ftab%3DHistory%ZZ']) {
+    const link = `musikalokal://action?${new URLSearchParams({ destination: encodeURIComponent(target) })}`;
+    assert.equal(appLinks.getAppLinkDestination(link), null, link);
+    assert.equal(nativeAppLinks.getAppLinkDestination(link), null, link);
+  }
+  for (const query of ['destination=%252Fwallet&destination=%252Fnotifications',
+    'destination=%252Fwallet&access_token=secret', 'destination=%252Fwallet#token_hash=secret',
+    'destination=%252Fbookings%253Ftab%253DHistory%25ZZ']) {
+    assert.equal(nativeAppLinks.getAppLinkDestination(`musikalokal://action?${query}`), null, query);
+  }
+});
+
 test('untrusted, malformed, duplicate, credential-bearing and unsupported action links are rejected', () => {
   for (const target of ['/admin', '//evil.example/x', '/\\evil.example/x', '/group_application_cv',
     '/group_application_cv?applicationId=bad', `/group_application_cv?applicationId=${id}&applicationId=${id}`,
@@ -60,6 +114,7 @@ test('untrusted, malformed, duplicate, credential-bearing and unsupported action
     assert.equal(actions.normalizeActionDestination(target), null, target);
     const link = `https://musika-lokal.vercel.app/action?${new URLSearchParams({ destination: target })}`;
     assert.equal(appLinks.getAppLinkDestination(link), null, link);
+    assert.equal(nativeAppLinks.getAppLinkDestination(link), null, link);
   }
   for (const link of ['https://evil.example/action?destination=/notifications',
     'https://user:pass@musika-lokal.vercel.app/action?destination=/notifications',
@@ -68,6 +123,7 @@ test('untrusted, malformed, duplicate, credential-bearing and unsupported action
     '/action?destination=/notifications&destination=/wallet', '/action?destination=/wallet&access_token=secret',
     '/action?destination=/wallet#token_hash=secret', '/action', 'javascript:alert(1)']) {
     assert.equal(appLinks.getAppLinkDestination(link), null, link);
+    assert.equal(nativeAppLinks.getAppLinkDestination(link), null, link);
   }
   for (const gateway of ['musikalokal://notifications', 'javascript:alert(1)', 'https://evil.example/action']) {
     assert.equal(new URL(actions.buildActionEmailUrl({ route: '/wallet' }, gateway)).origin, 'https://musika-lokal.vercel.app');
@@ -155,7 +211,34 @@ test('cold and warm ordinary links persist before sign-in while recovery callbac
   }
 });
 
-function authEntry() {
+test('Android cold and warm Gmail links save the screenshot destinations and open the authenticated screens', async () => {
+  const saved = new Map();
+  const intent = load('mobile/app/+native-intent.tsx', {
+    '../src/utils/appLinks': nativeAppLinks, '../src/utils/passwordRecovery': recovery,
+    '@react-native-async-storage/async-storage': { __esModule: true, default: { setItem: async (key, value) => saved.set(key, value) } },
+  }, nativeUrls);
+  for (const initial of [true, false]) {
+    for (const [encoded, target] of screenshotCases) {
+      const output = await intent.redirectSystemPath({ path: `musikalokal://action?destination=${encoded}`, initial });
+      const url = new nativeUrls.URL(output, actions.ACTION_GATEWAY_URL);
+      assert.equal(url.pathname, '/shared');
+      assert.equal(saved.get(shares.PENDING_SHARE_STORAGE_KEY), target);
+      assert.equal(url.searchParams.get('destination'), target);
+      const view = authEntry(nativeAppLinks);
+      const auth = { loading: false, session: { user: { id } }, roleResolved: true, identityChecked: true, identityRequired: false };
+      view.render({ ...auth, session: null }, target);
+      assert.equal(view.routes.at(-1), '/');
+      view.render({ ...auth, identityRequired: true }, target);
+      assert.equal(view.routes.at(-1), '/identity_verification');
+      assert.equal(view.removals.length, 0);
+      view.render(auth, url.searchParams.get('destination'));
+      await tick();
+      assert.equal(view.routes.at(-1), target);
+    }
+  }
+});
+
+function authEntry(links = appLinks) {
   const effects = [], routes = [], removals = [];
   let auth, destination;
   const screen = load('mobile/app/shared.tsx', {
@@ -164,7 +247,7 @@ function authEntry() {
     'expo-router': { router: { replace: value => routes.push(value) }, useLocalSearchParams: () => ({ destination }) },
     '@react-native-async-storage/async-storage': { __esModule: true, default: { removeItem: async key => removals.push(key) } },
     '../src/context/AuthContext': { useAuth: () => auth },
-    '../src/utils/appLinks': appLinks, '../src/components/LoadingState': { default() {} },
+    '../src/utils/appLinks': links, '../src/components/LoadingState': { default() {} },
   });
   return { routes, removals, render(value, target) { auth = value; destination = target; effects.length = 0; screen.default(); effects.forEach(fn => fn()); } };
 }

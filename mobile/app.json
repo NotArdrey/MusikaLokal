@@ -2,7 +2,7 @@
   "expo": {
     "name": "musika-lokal",
     "slug": "musika-lokal",
-    "version": "1.0.7",
+    "version": "1.0.8",
     "orientation": "portrait",
     "icon": "./assets/images/musika-lokal-logo-modern-wordmark.png",
     "scheme": "musikalokal",
@@ -75,7 +75,7 @@
       "@react-native-community/datetimepicker"
     ],
     "android": {
-      "versionCode": 8,
+      "versionCode": 9,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#0F172A",

@@ -43,7 +43,8 @@ export function normalizeActionDestination(raw: string): string | null {
       params.set(key, value);
     }
     if (url.pathname === "/feed" && params.has("listingId") && !params.has("listingType")) return null;
-    return `${url.pathname}${params.size ? `?${params}` : ""}`;
+    const query = params.toString();
+    return `${url.pathname}${query ? `?${query}` : ""}`;
   } catch {
     return null;
   }
@@ -58,8 +59,12 @@ export function getActionDestination(raw: string): string | null {
     const route = (url.protocol === "musikalokal:" ? `/${url.hostname}${url.pathname}` : url.pathname)
       .replace(/^\/+/, "/").replace(/^\/\(tabs\)\//, "/");
     if (route === "/action") {
-      if (url.searchParams.size !== 1 || url.searchParams.getAll("destination").length !== 1) return null;
-      return normalizeActionDestination(url.searchParams.get("destination") || "");
+      // The mobile URL polyfill has no URLSearchParams.size property.
+      if (Array.from(url.searchParams).length !== 1 || url.searchParams.getAll("destination").length !== 1) return null;
+      let destination = url.searchParams.get("destination") || "";
+      // Older handoffs can encode the entire nested path an additional time.
+      if (/^%2f/i.test(destination)) destination = decodeURIComponent(destination);
+      return normalizeActionDestination(destination);
     }
     // Existing content shares retain their feed entry. Team application links
     // need their Applications tab rather than the generic team preview.
@@ -80,7 +85,8 @@ export function buildActionEmailUrl(meta: Record<string, unknown> | null | undef
     }
   }
   const path = typeof meta?.route === "string" ? meta.route : "";
-  const destination = normalizeActionDestination(`${path}${params.size ? `?${params}` : ""}`) || "/notifications";
+  const query = params.toString();
+  const destination = normalizeActionDestination(`${path}${query ? `?${query}` : ""}`) || "/notifications";
   let base = new URL(ACTION_GATEWAY_URL);
   try {
     const configured = new URL(gatewayBase || ACTION_GATEWAY_URL);

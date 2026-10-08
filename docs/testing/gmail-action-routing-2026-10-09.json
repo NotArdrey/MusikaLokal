@@ -1,0 +1,297 @@
+{
+  "recordedAt": "2026-10-08T18:07:07.539Z",
+  "localDate": "2026-10-09",
+  "timezone": "Asia/Manila",
+  "release": {
+    "packageId": "com.anonymous.musikalokal",
+    "versionName": "1.0.8",
+    "versionCode": 9,
+    "sizeBytes": 102454639,
+    "sha256": "1d25d1a693858edaa7b28950b0643c9cfe6d29181271207142b34ca659c69b1b",
+    "minSdk": 24,
+    "builtAt": "2026-10-08T17:28:46.1513677Z",
+    "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+    "testing": true,
+    "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/1d25d1a693858edaa7b28950b0643c9cfe6d29181271207142b34ca659c69b1b/musikalokal-testing.apk?download=1"
+  },
+  "website": {
+    "url": "https://musika-lokal.vercel.app",
+    "target": "production",
+    "state": "READY",
+    "deploymentId": "dpl_8z1eGscaMXynWAP2XEQBXwnsVUub",
+    "stagedUrl": "https://musika-lokal-a33pd301a-notardreys-projects.vercel.app",
+    "previousDeploymentId": "dpl_6hNJ2CUBen68jcQyAYEReLT44gMx",
+    "previousReleaseRetained": true
+  },
+  "baseCommit": "6a7703f0",
+  "cause": {
+    "library": "react-native-url-polyfill@3.0.0 / whatwg-url-without-unicode@8.0.0-3",
+    "issue": "URLSearchParams.size is undefined on the installed mobile URL implementation; gateway links were rejected and destination queries could be dropped.",
+    "baseline": "Published APK 1.0.7/build 8 reproduced Unmatched Route with a correctly encoded native History link in Android 36."
+  },
+  "changes": [
+    "Use iterable parameter counts and serialized queries across all four shared action-link source copies.",
+    "Accept one extra encoding layer, then apply the existing route, UUID and query allowlist.",
+    "Regenerate the browser gateway and publish the corrected APK with the original signing certificate."
+  ],
+  "verification": {
+    "emailSharingRecoveryTests": 52,
+    "releaseManifestTests": 4,
+    "exportedWebsiteTests": 1,
+    "mobileTypecheck": "passed",
+    "webTypecheck": "passed",
+    "focusedMobileEslint": "passed",
+    "denoSharedHelpers": "passed",
+    "androidReleaseBuild": "passed",
+    "privateCredentialScan": "passed",
+    "preservedSigningCertificate": "passed",
+    "bundle": {
+      "bundledActionLinksSourceMatches": true,
+      "bundledNativeIntent": true,
+      "source": "/src/utils/actionLinks.ts",
+      "intent": "/app/+native-intent.tsx",
+      "embeddedBundleMatchesGeneratedBundle": true,
+      "bundleSha256": "f76a6376c828e3139a81d6d869939cdd5677466c0e09307d6e0c97d3910c3002"
+    },
+    "nativeEmulator": {
+      "android": 36,
+      "packageId": "com.anonymous.musikalokal",
+      "version": "1.0.8",
+      "build": 9,
+      "status": "passed",
+      "checks": [
+        {
+          "launch": "cold",
+          "destination": "/gig_feature_consent?applicationId=ff586971-aa1a-4bdc-971c-f14ed5957bf2",
+          "form": "native",
+          "signInVisible": true,
+          "pendingDestinationVerifiedInSQLite": true,
+          "unmatchedRoute": false
+        },
+        {
+          "launch": "cold",
+          "destination": "/gig_feature_consent?applicationId=ff586971-aa1a-4bdc-971c-f14ed5957bf2",
+          "form": "native-extra-encoded",
+          "signInVisible": true,
+          "pendingDestinationVerifiedInSQLite": true,
+          "unmatchedRoute": false
+        },
+        {
+          "launch": "cold",
+          "destination": "/gig_feature_consent?applicationId=ff586971-aa1a-4bdc-971c-f14ed5957bf2",
+          "form": "https",
+          "signInVisible": true,
+          "pendingDestinationVerifiedInSQLite": true,
+          "unmatchedRoute": false
+        },
+        {
+          "launch": "cold",
+          "destination": "/bookings?tab=History",
+          "form": "native",
+          "signInVisible": true,
+          "pendingDestinationVerifiedInSQLite": true,
+          "unmatchedRoute": false
+        },
+        {
+          "launch": "cold",
+          "destination": "/bookings?tab=History",
+          "form": "native-extra-encoded",
+          "signInVisible": true,
+          "pendingDestinationVerifiedInSQLite": true,
+          "unmatchedRoute": false
+        },
+        {
+          "launch": "cold",
+          "destination": "/bookings?tab=History",
+          "form": "https",
+          "signInVisible": true,
+          "pendingDestinationVerifiedInSQLite": true,
+          "unmatchedRoute": false
+        },
+        {
+          "launch": "warm",
+          "destination": "/gig_feature_consent?applicationId=ff586971-aa1a-4bdc-971c-f14ed5957bf2",
+          "form": "native",
+          "signInVisible": true,
+          "pendingDestinationVerifiedInSQLite": true,
+          "unmatchedRoute": false
+        },
+        {
+          "launch": "warm",
+          "destination": "/gig_feature_consent?applicationId=ff586971-aa1a-4bdc-971c-f14ed5957bf2",
+          "form": "native-extra-encoded",
+          "signInVisible": true,
+          "pendingDestinationVerifiedInSQLite": true,
+          "unmatchedRoute": false
+        },
+        {
+          "launch": "warm",
+          "destination": "/gig_feature_consent?applicationId=ff586971-aa1a-4bdc-971c-f14ed5957bf2",
+          "form": "https",
+          "signInVisible": true,
+          "pendingDestinationVerifiedInSQLite": true,
+          "unmatchedRoute": false
+        },
+        {
+          "launch": "warm",
+          "destination": "/bookings?tab=History",
+          "form": "native",
+          "signInVisible": true,
+          "pendingDestinationVerifiedInSQLite": true,
+          "unmatchedRoute": false
+        },
+        {
+          "launch": "warm",
+          "destination": "/bookings?tab=History",
+          "form": "native-extra-encoded",
+          "signInVisible": true,
+          "pendingDestinationVerifiedInSQLite": true,
+          "unmatchedRoute": false
+        },
+        {
+          "launch": "warm",
+          "destination": "/bookings?tab=History",
+          "form": "https",
+          "signInVisible": true,
+          "pendingDestinationVerifiedInSQLite": true,
+          "unmatchedRoute": false
+        }
+      ],
+      "limitations": [
+        "Fresh emulator with no signed-in user; no Gmail mailbox clicks or physical-device acceptance."
+      ]
+    },
+    "upload": {
+      "uploadVerified": true,
+      "transport": "existing app chunked downloader with full SHA-256 validation",
+      "release": {
+        "packageId": "com.anonymous.musikalokal",
+        "versionName": "1.0.8",
+        "versionCode": 9,
+        "sizeBytes": 102454639,
+        "sha256": "1d25d1a693858edaa7b28950b0643c9cfe6d29181271207142b34ca659c69b1b",
+        "minSdk": 24,
+        "builtAt": "2026-10-08T17:28:46.1513677Z",
+        "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+        "testing": true,
+        "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/1d25d1a693858edaa7b28950b0643c9cfe6d29181271207142b34ca659c69b1b/musikalokal-testing.apk?download=1"
+      }
+    },
+    "stagedWebsite": {
+      "website": "https://musika-lokal-a33pd301a-notardreys-projects.vercel.app",
+      "release": {
+        "packageId": "com.anonymous.musikalokal",
+        "versionName": "1.0.8",
+        "versionCode": 9,
+        "sizeBytes": 102454639,
+        "sha256": "1d25d1a693858edaa7b28950b0643c9cfe6d29181271207142b34ca659c69b1b",
+        "minSdk": 24,
+        "builtAt": "2026-10-08T17:28:46.1513677Z",
+        "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+        "testing": true,
+        "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/1d25d1a693858edaa7b28950b0643c9cfe6d29181271207142b34ca659c69b1b/musikalokal-testing.apk?download=1"
+      },
+      "browserChecks": "passed",
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "gatewayChecks": [
+        {
+          "target": "/gig_feature_consent?applicationId=ff586971-aa1a-4bdc-971c-f14ed5957bf2",
+          "extraEncoded": false,
+          "parserPassed": true,
+          "publicGatewayUiChecked": false
+        },
+        {
+          "target": "/gig_feature_consent?applicationId=ff586971-aa1a-4bdc-971c-f14ed5957bf2",
+          "extraEncoded": true,
+          "parserPassed": true,
+          "publicGatewayUiChecked": false
+        },
+        {
+          "target": "/bookings?tab=History",
+          "extraEncoded": false,
+          "parserPassed": true,
+          "publicGatewayUiChecked": false
+        },
+        {
+          "target": "/bookings?tab=History",
+          "extraEncoded": true,
+          "parserPassed": true,
+          "publicGatewayUiChecked": false
+        }
+      ],
+      "publishedGatewaySourceMatches": true,
+      "browserCorsAndRangeDownload": {
+        "status": 206,
+        "bytes": 262144,
+        "sha256": "662a6f8aea06cabb3498d8d67a1acdab4b811beedc3f0a6ac27bbe05544809f2"
+      },
+      "fullPublicApkChecksumVerifiedBy": "existing app chunked downloader in Node; see upload-verification.json"
+    },
+    "productionWebsite": {
+      "website": "https://musika-lokal.vercel.app",
+      "release": {
+        "packageId": "com.anonymous.musikalokal",
+        "versionName": "1.0.8",
+        "versionCode": 9,
+        "sizeBytes": 102454639,
+        "sha256": "1d25d1a693858edaa7b28950b0643c9cfe6d29181271207142b34ca659c69b1b",
+        "minSdk": 24,
+        "builtAt": "2026-10-08T17:28:46.1513677Z",
+        "certificateSha256": "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c",
+        "testing": true,
+        "downloadUrl": "https://yr5chc4fi5tszotq.public.blob.vercel-storage.com/android/testing/1d25d1a693858edaa7b28950b0643c9cfe6d29181271207142b34ca659c69b1b/musikalokal-testing.apk?download=1"
+      },
+      "browserChecks": "passed",
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "gatewayChecks": [
+        {
+          "target": "/gig_feature_consent?applicationId=ff586971-aa1a-4bdc-971c-f14ed5957bf2",
+          "extraEncoded": false,
+          "parserPassed": true,
+          "publicGatewayUiChecked": true
+        },
+        {
+          "target": "/gig_feature_consent?applicationId=ff586971-aa1a-4bdc-971c-f14ed5957bf2",
+          "extraEncoded": true,
+          "parserPassed": true,
+          "publicGatewayUiChecked": true
+        },
+        {
+          "target": "/bookings?tab=History",
+          "extraEncoded": false,
+          "parserPassed": true,
+          "publicGatewayUiChecked": true
+        },
+        {
+          "target": "/bookings?tab=History",
+          "extraEncoded": true,
+          "parserPassed": true,
+          "publicGatewayUiChecked": true
+        }
+      ],
+      "publishedGatewaySourceMatches": true,
+      "browserCorsAndRangeDownload": {
+        "status": 206,
+        "bytes": 262144,
+        "sha256": "662a6f8aea06cabb3498d8d67a1acdab4b811beedc3f0a6ac27bbe05544809f2"
+      },
+      "fullPublicApkChecksumVerifiedBy": "existing app chunked downloader in Node; see upload-verification.json"
+    },
+    "androidAppLinkDomain": "musika-lokal.vercel.app: verified",
+    "emulatorStopped": true,
+    "directFullDownload": "Timed out; complete public bytes subsequently downloaded and SHA-256 verified with the existing app chunked downloader."
+  },
+  "backendDeploymentRequired": false,
+  "limitations": [
+    "No physical Android Gmail clicks or authenticated device roundtrip were performed.",
+    "Native emulator checks used a fresh signed-out installation and verified preserved destinations in SQLite; authenticated/identity-gate routing was verified with executable local handler tests.",
+    "Browser checks validated real CORS/range downloads; the entire public file was checksum-verified using the actual app downloader in Node.",
+    "No real mailbox message, application decision, or payment was submitted."
+  ]
+}
