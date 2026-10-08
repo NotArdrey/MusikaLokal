@@ -5,6 +5,7 @@ import vm from "node:vm";
 import { test } from "node:test";
 import ts from "typescript";
 import { chromium } from "@playwright/test";
+import * as cvApplicantName from "../mobile/supabase/functions/_shared/cvApplicantName.ts";
 
 const requireMobile = createRequire(new URL("../mobile/package.json", import.meta.url));
 const React = requireMobile("react");
@@ -41,6 +42,7 @@ vm.runInNewContext(compiled, {
     if (name === "expo-router") return { useRouter: () => ({ push() {} }) };
     if (name === "@expo/vector-icons") return { Ionicons: ({ size }) => h(RN.View, { style: { width: size, height: size, flexShrink: 0 } }) };
     if (name.includes("gigApplicantFilters")) return { isActiveApplication: () => true };
+    if (name.includes("cvApplicantName")) return cvApplicantName;
     if (name.includes("theme/tokens")) return theme;
     if (name.includes("ProfileAvatar")) return { __esModule: true, default: ({ size }) => h(RN.View, { style: { width: size, height: size, flexShrink: 0, borderRadius: size / 2, backgroundColor: "#cbd5e1" } }) };
     throw new Error(`Unexpected dependency ${name}`);
@@ -67,6 +69,100 @@ function render(details, colors = baseColors, onOpenMedia = noop, onRetry = noop
   buttons.length = 0;
   return renderToStaticMarkup(h(exports.default, { visible: true, summary: details, details, colors, loading: false, error: null, onClose: noop, onRetry, onAccept: noop, onDecline: noop, onOpenMedia }));
 }
+
+for (const kind of ["duo", "band"]) {
+  test(`${kind} CVs are checked against their members and ignore a stale group-name warning`, () => {
+    const details = {
+      ...group, group: { ...group.group, name: "Fantastic duo", group_type: kind }, cv_url: "https://example.test/legacy.pdf",
+      ai_portfolio_review: { status: "completed", source_summary: { cv_name_check: { status: "mismatch", extracted_name: "Jared Cariaso", confidence: 0.99 } } },
+      member_cvs: group.member_cvs.map((member, index) => ({ ...member, ai_review_result: {
+        name_check: { status: "mismatch", extracted_name: index ? "Neil Laza" : "Jared Cariaso", confidence: 0.99 },
+      } })),
+    };
+    const html = render(details);
+    assert.equal((html.match(/Needs attention/g) || []).length, 1);
+    assert.equal((html.match(/CV name matches this member/g) || []).length, 2);
+    assert.doesNotMatch(html, /CV identity mismatch|application belongs to Fantastic duo/);
+    assert.equal(buttons.some(props => props.accessibilityLabel === "View applicant CV"), false);
+  });
+}
+
+test("a different person's CV is flagged for the correct member even after the first CV matches", () => {
+  const details = { ...group, member_cvs: group.member_cvs.map((member, index) => ({ ...member, ai_review_result: {
+    name_check: { status: "match", extracted_name: index ? "Bea Navarro" : "Jared Cariaso", confidence: 0.99 },
+  } })) };
+  const html = render(details);
+  assert.match(html, /CV name does not match this member/);
+  assert.match(html, /registered member is Neil Ardrey Payoyo Laza/);
+  assert.doesNotMatch(html, /application belongs to Malakas Band/);
+});
+
+test("video genre and singing observations are shown independently of CV claims", () => {
+  const html = render({ ...solo, ai_portfolio_review: { status: "completed", source_summary: { video_structured_output: {
+    singing_present: true, detected_genres: [{ genre: "Rock", observation: "Rock rhythm", timestamp_seconds: 4 }],
+    vocal_performance: { status: "unclear", short_reason: "The mouth is obscured.", evidence: [] },
+  } } } });
+  assert.match(html, /Genre heard in video/);
+  assert.match(html, /Singing heard/);
+  assert.match(html, /Visible singing and audio need manual review/);
+  assert.match(html, /cannot prove live singing or rule out lip-syncing/);
+});
+
+test("skipped member CVs prevent the group from appearing fully confirmed", () => {
+  const check = cvApplicantName.summarizeMemberCvNameChecks([
+    { member_name: "Jared Cariaso", name_check: cvApplicantName.compareCvApplicantName("Jared Cariaso", ["Jared Cariaso"], 0.99) },
+    { member_name: "Neil Laza" },
+  ]);
+  assert.equal(check.status, "unclear");
+  assert.match(check.summary, /1 of 2/);
+});
+
+test("genre wording distinguishes a CV claim from an unconfirmed video, with evidence still accessible", async () => {
+  const details = { ...solo, ai_recommendation: { ...solo.ai_recommendation, criteria_snapshot: { requirement_results: [{
+    key: "genres", label: "Genre fit", status: "met", source: "cv_and_performance_video",
+    source_results: [
+      { source: "cv", status: "met", detail: "The CV lists Pop and Rock.", evidence: [{ source: "cv", observation: "Pop and Rock experience" }] },
+      { source: "performance_video", status: "unclear", detail: "Genre could not be confirmed from the video.", evidence: [] },
+    ],
+  }, {
+    key: "portfolio", label: "Performance evidence", status: "unclear", detail: "Open the video to confirm this performance.", source: "performance_video",
+  }] } }, ai_portfolio_review: { status: "completed", source_summary: { video_structured_output: {
+    singing_present: true, detected_genres: [{ genre: "Rock", observation: "Rock guitar arrangement", timestamp_seconds: 4 }],
+    vocal_performance: { status: "unclear", short_reason: "The singer's mouth is obscured.", evidence: [] },
+  } } } };
+  const browser = await chromium.launch({ channel: "msedge", headless: true });
+  const page = await browser.newPage({ viewport: { width: 320, height: 900 } });
+  try {
+    await page.setContent(`<style>${fontCss}html,body{margin:0;height:100%}#root{height:900px;display:flex;flex-direction:column}${RN.StyleSheet.getSheet().textContent}</style><div id="root">${render(details)}</div>`);
+    await page.evaluate(() => document.fonts.ready);
+    assert.equal(await page.getByText("Needs attention", { exact: true }).count(), 1);
+    assert.equal(await page.getByText("Performance evidence", { exact: true }).count(), 1);
+    assert.equal(await page.getByText("Performance evidence", { exact: true }).locator("..").getByText("View evidence", { exact: true }).count(), 1);
+    const originalUseState = React.useState;
+    let falseStates = 0;
+    React.useState = initial => originalUseState(initial === false && falseStates++ > 0 ? true : initial);
+    let expanded;
+    try { expanded = render(details); } finally { React.useState = originalUseState; }
+    assert.match(expanded, /Confirmed from CV/);
+    assert.doesNotMatch(expanded, /Confirmed from CV \+ Performance/);
+    assert.match(expanded, /CV statement: The CV lists Pop and Rock/);
+    assert.match(expanded, /Video analysis: Genre could not be confirmed from the video/);
+    await page.setContent(`<style>${fontCss}html,body{margin:0;height:100%}#root{height:900px;display:flex;flex-direction:column}${RN.StyleSheet.getSheet().textContent}</style><div id="root">${expanded}</div>`);
+    await page.evaluate(() => document.fonts.ready);
+    await page.evaluate(() => {
+      for (const node of document.querySelectorAll('[dir="auto"]')) {
+        const css = getComputedStyle(node);
+        node.style.fontSize = `${parseFloat(css.fontSize) * 1.6}px`;
+        node.style.lineHeight = `${parseFloat(css.lineHeight) * 1.6}px`;
+      }
+    });
+    const overflow = await page.evaluate(() => [...document.querySelectorAll('[dir="auto"]')].filter(node => node.scrollWidth > node.clientWidth + 1).map(node => node.textContent));
+    assert.deepEqual(overflow, []);
+    await page.getByText("Genre heard in video", { exact: true }).scrollIntoViewIfNeeded();
+    mkdirSync("docs/testing/applicant-cv-video-2026-10-08", { recursive: true });
+    await page.screenshot({ path: "docs/testing/applicant-cv-video-2026-10-08/video-analysis-320-large.png" });
+  } finally { await browser.close(); }
+});
 
 test("every group member CV opens directly without expanding an evidence panel, including during video review", () => {
   const opened = [];
@@ -101,7 +197,7 @@ test("a member CV with an unavailable link explains how to recover without openi
 test("applicant CV and verification fit narrow screens, both themes, and enlarged text", { timeout: 120000 }, async () => {
   const browser = await chromium.launch({ channel: "msedge", headless: true });
   const page = await browser.newPage();
-  const output = "docs/testing/applicant-review-ui-2026-10-08";
+  const output = "docs/testing/applicant-cv-video-2026-10-08";
   mkdirSync(output, { recursive: true });
   const results = [];
   try {

@@ -32,7 +32,7 @@ for (const app of ["mobile", "web"]) {
     assert.match(backend, /createSignedUrl\(member\.cv_storage_path, 15 \* 60\)/);
     assert.match(backend, /\.in\('member_cv_status', ORGANIZER_VISIBLE_MEMBER_CV_STATUSES\)/);
 
-    assert.match(review, /gig-portfolio-v17-split-workers/);
+    assert.match(review, /gig-portfolio-v18-member-cv-video-evidence/);
     assert.match(review, /from\('gig_application_members'\)/);
     assert.match(review, /member_cv_reviews/);
     assert.match(review, /Member did not authorize optional AI review/);

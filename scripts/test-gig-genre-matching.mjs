@@ -3,10 +3,11 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
+import * as cvApplicantName from "../mobile/supabase/functions/_shared/cvApplicantName.ts";
 
-function loadGenreHelpers(relativePath) {
+function loadGenreHelpers(relativePath, fetchOverride = fetch) {
   const source = readFileSync(new URL(relativePath, import.meta.url), "utf8");
-  const javascript = ts.transpileModule(source, {
+  const javascript = ts.transpileModule(`${source}\nexport { reviewVideoWithGemini };`, {
     compilerOptions: {
       target: ts.ScriptTarget.ES2022,
       module: ts.ModuleKind.CommonJS,
@@ -15,9 +16,10 @@ function loadGenreHelpers(relativePath) {
   const exports = {};
   const context = vm.createContext({
     exports,
-    console: { log() {}, warn() {}, error() {} },
+    console: { log() {}, info() {}, warn() {}, error() {} },
     URL,
-    fetch,
+    fetch: fetchOverride,
+    Response,
     FormData,
     Blob,
     crypto: globalThis.crypto,
@@ -27,6 +29,7 @@ function loadGenreHelpers(relativePath) {
     AbortSignal,
     Deno: { env: { get: () => undefined } },
     require: (specifier) => {
+      if (specifier.endsWith("cvApplicantName.ts")) return cvApplicantName;
       throw new Error("Unexpected import while loading genre helpers");
     },
   });
@@ -38,6 +41,76 @@ for (const relativePath of [
   "../mobile/supabase/functions/_shared/gigPortfolioReview.ts",
   "../web/supabase/functions/_shared/gigPortfolioReview.ts",
 ]) {
+  test(`${relativePath} requires observed genre evidence and timestamped vocal cues`, () => {
+    const helpers = loadGenreHelpers(relativePath);
+    const safe = helpers.sanitizeVideoPerformanceDetails({
+      performance_visible: true, singing_present: true,
+      detected_genres: [
+        { genre: "Rock", confidence: 0.93, observation: "Distorted guitars and a rock drum pattern", timestamp_seconds: 5 },
+        { genre: "Jazz", confidence: 0.2, observation: "Possible swing", timestamp_seconds: 8 },
+        { genre: "Pop", confidence: 0.99, observation: "" },
+      ],
+      vocal_performance: { status: "supported", confidence: 0.94, short_reason: "Visible mouth movements appear consistent with the vocal phrases.", evidence: [{ observation: "Mouth opens at the start of the audible phrase", timestamp_seconds: 5 }] },
+    });
+    assert.equal(safe.detected_genres.length, 1);
+    assert.equal(safe.detected_genres[0].genre, "Rock");
+    assert.equal(safe.vocal_performance.status, "supported");
+    assert.match(safe.vocal_performance.limitations[0], /cannot prove live singing/);
+    for (const override of [
+      { singing_present: null }, { performance_visible: false },
+      { singing_present: false, vocal_performance: { status: "not_supported", confidence: 0.99, evidence: [{ observation: "Instrumental video", timestamp_seconds: 5 }] } },
+      { vocal_performance: { status: "supported", confidence: 0.99, evidence: [] } },
+      { vocal_performance: { status: "supported", confidence: 0.2, evidence: [{ observation: "Uncertain", timestamp_seconds: 2 }] } },
+      { vocal_performance: { status: "supported", confidence: 0.99, evidence: [{ observation: "Unknown time", timestamp_seconds: null }] } },
+    ]) {
+      const checked = helpers.sanitizeVideoPerformanceDetails({ ...safe, performance_visible: true, singing_present: true, ...override });
+      assert.equal(checked.vocal_performance.status, "unclear");
+    }
+    const empty = helpers.sanitizeVideoPerformanceDetails(null);
+    assert.equal(empty.detected_genres.length, 0);
+    assert.equal(empty.vocal_performance.status, "unclear");
+  });
+
+  test(`${relativePath} submits the complete video and retains genre and vocal results`, async () => {
+    const mediaUrl = "https://fixture.supabase.co/storage/v1/object/sign/videos/performance.mp4";
+    const bytes = new Uint8Array([0, 1, 2, 3, 4, 5]);
+    const result = {
+      performance_visible: true, performer_count: 1, visible_instruments: ["Guitar"], singing_present: true,
+      performance_evidence: "supported", observations: ["A vocalist plays guitar"],
+      detected_genres: [{ genre: "Rock", confidence: 0.9, observation: "Rock rhythm and guitar arrangement", timestamp_seconds: 5 }],
+      vocal_performance: { status: "supported", confidence: 0.92, short_reason: "Audible phrases appear consistent with visible singing.", evidence: [{ observation: "Visible singing starts with the audible phrase", timestamp_seconds: 5 }], limitations: [] },
+      criterion_findings: [{ criterion: "genre_requirement", status: "supported", source: "performance_video", confidence: 0.9, short_reason: "Rock arrangement heard", evidence: [{ source: "performance_video", observation: "Rock rhythm and guitar arrangement", timestamp_seconds: 5 }], limitations: [] }],
+    };
+    let generated = false, deleted = false;
+    const helpers = loadGenreHelpers(relativePath, async (url, options = {}) => {
+      if (url === mediaUrl) return new Response(bytes, { headers: { "content-type": "video/mp4" } });
+      if (String(url).endsWith("/upload/v1beta/files")) return new Response("{}", { headers: { "x-goog-upload-url": "https://generativelanguage.googleapis.com/fixture-upload" } });
+      if (String(url).endsWith("/fixture-upload")) {
+        assert.deepEqual(new Uint8Array(await options.body.arrayBuffer()), bytes);
+        return Response.json({ file: { name: "files/fixture", uri: "https://generativelanguage.googleapis.com/v1beta/files/fixture", state: "ACTIVE" } });
+      }
+      if (String(url).includes(":generateContent")) {
+        const payload = JSON.parse(options.body);
+        assert.equal(payload.contents[0].parts[1].fileData.mimeType, "video/mp4");
+        assert.ok(payload.contents[0].parts[1].fileData.fileUri);
+        assert.match(payload.systemInstruction.parts[0].text, /both its audio and visual streams/);
+        assert.match(payload.systemInstruction.parts[0].text, /cannot prove live singing/);
+        assert.ok(payload.generationConfig.responseJsonSchema.required.includes("detected_genres"));
+        assert.ok(payload.generationConfig.responseJsonSchema.required.includes("vocal_performance"));
+        generated = true;
+        return Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(result) }] } }] });
+      }
+      if (options.method === "DELETE") { deleted = true; return new Response(null, { status: 204 }); }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const reviewed = await helpers.reviewVideoWithGemini(mediaUrl, "https://fixture.supabase.co", [{ key: "genre_requirement", requirement: "Rock" }], "fixture-key", "gemini-3.5-flash-lite", "fixture-app");
+    assert.equal(reviewed.processing_status, "reviewed");
+    assert.equal(reviewed.structured_output.detected_genres[0].genre, "Rock");
+    assert.equal(reviewed.structured_output.vocal_performance.status, "supported");
+    assert.equal(generated, true);
+    assert.equal(deleted, true);
+  });
+
   test(`${relativePath} detects CV formats from signatures before filenames`, () => {
     const helpers = loadGenreHelpers(relativePath);
     assert.equal(helpers.detectDocumentFormat(new Uint8Array([0x25, 0x50, 0x44, 0x46]), "application/octet-stream", "/resume.bin"), "pdf");

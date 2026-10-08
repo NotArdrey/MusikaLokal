@@ -5,6 +5,7 @@ import vm from "node:vm";
 import ts from "typescript";
 import { submittedGenreFit } from "../mobile/supabase/functions/_shared/submittedGenreFit.ts";
 import * as memberMatching from "../mobile/supabase/functions/_shared/gigMemberRequirementMatching.ts";
+import * as cvApplicantName from "../mobile/supabase/functions/_shared/cvApplicantName.ts";
 
 function loadGigReview(root) {
   const source = readFileSync(new URL(`../${root}/supabase/functions/gig-applications/index.ts`, import.meta.url), "utf8");
@@ -15,6 +16,7 @@ function loadGigReview(root) {
   vm.runInNewContext(javascript, {
     exports, console, Deno: { serve() {}, env: { get() {} } },
     require: (name) => name.endsWith("submittedGenreFit.ts") ? { submittedGenreFit }
+      : name.endsWith("cvApplicantName.ts") ? cvApplicantName
       : name.endsWith("gigMemberRequirementMatching.ts") ? memberMatching
       : {},
   });
@@ -34,7 +36,7 @@ for (const root of ["mobile", "web"]) {
     criteria: { genres: "required", instruments: "ignore", location: "ignore", portfolio: "ignore" },
   });
   const base = () => helpers.evaluateGigApplication({
-    id: "app", gig_id: "gig", applicant: { genres: ["Rock"] }, slot_type: "solo",
+    id: "app", gig_id: "gig", applicant: { genres: ["Rock"], is_verified: true, verification_status: "APPROVED" }, slot_type: "solo",
   }, { genres: ["Rock"] }, settings);
   const withReview = async (review) => {
     const client = { from: () => ({ select: () => ({ in: async () => ({ data: [{ application_id: "app", status: "completed", ...review }], error: null }) }) }) };
@@ -52,6 +54,23 @@ for (const root of ["mobile", "web"]) {
     assert.equal(result.recommendation_status, "recommended");
     assert.equal(result.criteria_snapshot.requirement_results[0].source, "cv_and_performance_video");
     assert.equal(result.criteria_snapshot.requirement_results[0].source_results.length, 2);
+  });
+  test(`${root}: CV identity follows member records and catches later member mismatches`, async () => {
+    const reviews = [
+      { member_name: "Jared Cariaso", name_check: { status: "mismatch", extracted_name: "Jared Cariaso", confidence: 0.99 } },
+      { member_name: "Neil Laza", name_check: { status: "match", extracted_name: "Neil Laza", confidence: 0.99 } },
+    ];
+    const reviewed = (members) => withReview({
+      cv_result: { evidence: [finding("cv")] }, video_result: { evidence: [finding("performance_video")] },
+      source_summary: { cv_name_check: { status: "mismatch", extracted_name: "Jared Cariaso" }, member_cv_reviews: members },
+    });
+    const valid = await reviewed(reviews);
+    assert.equal(valid.criteria_snapshot.identity_status, "clear");
+    assert.equal(valid.recommendation_status, "recommended");
+    const mismatch = await reviewed([reviews[0], { ...reviews[1], name_check: { status: "match", extracted_name: "Bea Navarro", confidence: 0.99 } }]);
+    assert.equal(mismatch.criteria_snapshot.identity_status, "needs_verification");
+    assert.equal(mismatch.recommendation_status, "needs_review");
+    assert.equal(mismatch.score, valid.score);
   });
   test(`${root}: contradictory video cannot be hidden by a supported combined CV finding`, async () => {
     const result = await withReview({

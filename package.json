@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "test:gig-management": "node --test scripts/test-gig-management-requirements.mjs scripts/test-submitted-genre-fit.mjs scripts/test-gig-feature-preferences.mjs scripts/test-gig-group-visibility.mjs scripts/test-share-links.mjs",
     "test:performance": "node scripts/inspect-session-performance.mjs",
     "test:heads-up-notifications": "node --test scripts/test-heads-up-notifications.mjs",
     "users:reset-passwords": "node scripts/reset-all-user-passwords.mjs",

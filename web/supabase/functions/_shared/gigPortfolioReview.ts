@@ -1,3 +1,6 @@
+import { compareCvApplicantName, normalizedNameTokens, summarizeMemberCvNameChecks } from './cvApplicantName.ts'
+export { compareCvApplicantName } from './cvApplicantName.ts'
+
 type ReviewCriterionResult = 'supported' | 'not_supported' | 'unclear'
 
 type ReviewEvidenceSource =
@@ -48,7 +51,7 @@ const DEFAULT_TEXT_FALLBACK_MODELS = ['qwen/qwen3.8-27b', 'openai/gpt-oss-20b']
 const DEFAULT_VISION_MODEL = 'qwen/qwen3.8-27b'
 const DEFAULT_SPEECH_MODEL = 'whisper-large-v3-turbo'
 const DEFAULT_SPEECH_FALLBACK_MODEL = 'whisper-large-v3'
-export const GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION = 'gig-portfolio-v17-split-workers'
+export const GIG_PORTFOLIO_REVIEW_PIPELINE_VERSION = 'gig-portfolio-v18-member-cv-video-evidence'
 const MAX_CV_BYTES = 10 * 1024 * 1024
 const MAX_CV_TEXT_CHARS = 16_000
 const MAX_TRANSCRIPT_CHARS = 16_000
@@ -95,102 +98,6 @@ const cleanText = (value: unknown, maxLength = 500) => String(value || '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, maxLength)
-
-const NAME_IGNORED_TOKENS = new Set([
-    'mr', 'mrs', 'ms', 'miss', 'dr', 'engr', 'eng', 'atty',
-    'jr', 'sr', 'ii', 'iii', 'iv', 'v', 'vi',
-])
-
-function normalizedNameTokens(value: unknown) {
-    return String(value || '')
-        .normalize('NFKD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, ' ')
-        .trim()
-        .split(/\s+/)
-        .filter((token) => token && !NAME_IGNORED_TOKENS.has(token))
-}
-
-function nameTokenMatches(left: string, right: string) {
-    return left === right || (left[0] === right[0] && (left.length === 1 || right.length === 1))
-}
-
-function normalizedNamesMatch(left: unknown, right: unknown) {
-    const leftTokens = normalizedNameTokens(left)
-    const rightTokens = normalizedNameTokens(right)
-    if (leftTokens.length === 0 || rightTokens.length === 0) return false
-    if (leftTokens.join(' ') === rightTokens.join(' ')) return true
-    if (leftTokens.length < 2 || rightTokens.length < 2) return false
-
-    const directMatch = nameTokenMatches(leftTokens[0], rightTokens[0]) &&
-        nameTokenMatches(leftTokens[leftTokens.length - 1], rightTokens[rightTokens.length - 1])
-    const reversedMatch = nameTokenMatches(leftTokens[0], rightTokens[rightTokens.length - 1]) &&
-        nameTokenMatches(leftTokens[leftTokens.length - 1], rightTokens[0])
-    return directMatch || reversedMatch
-}
-
-export function compareCvApplicantName(
-    extractedName: unknown,
-    expectedNames: unknown[],
-    extractionConfidence = 1,
-) {
-    const candidateName = cleanText(extractedName, 160)
-    const candidates = uniqueStrings(expectedNames).map((name) => cleanText(name, 160)).filter(Boolean)
-    const confidence = Math.max(0, Math.min(1, Number(extractionConfidence) || 0))
-    if (!candidateName) {
-        return {
-            status: 'unclear' as CvNameCheckStatus,
-            confidence,
-            extracted_name: null,
-            matched_name: null,
-            summary: "We couldn't find a clear name on the CV. Verify it manually.",
-        }
-    }
-    if (candidates.length === 0) {
-        return {
-            status: 'unclear' as CvNameCheckStatus,
-            confidence,
-            extracted_name: candidateName,
-            matched_name: null,
-            summary: "We couldn't determine which applicant name to compare with the CV.",
-        }
-    }
-    if (confidence < 0.7) {
-        return {
-            status: 'unclear' as CvNameCheckStatus,
-            confidence,
-            extracted_name: candidateName,
-            matched_name: null,
-            summary: "We couldn't confidently read the name on the CV. Verify it manually.",
-        }
-    }
-
-    const matchedName = candidates.find((name) => normalizedNamesMatch(candidateName, name)) || null
-    if (matchedName) {
-        return {
-            status: 'match' as CvNameCheckStatus,
-            confidence,
-            extracted_name: candidateName,
-            matched_name: matchedName,
-            summary: "The name on the CV matches the applicant's record.",
-        }
-    }
-
-    const candidateTokens = new Set(normalizedNameTokens(candidateName))
-    const sharesNamePart = candidates.some((name) => normalizedNameTokens(name).some((token) => (
-        token.length > 1 && candidateTokens.has(token)
-    )))
-    return {
-        status: (sharesNamePart ? 'unclear' : 'mismatch') as CvNameCheckStatus,
-        confidence,
-        extracted_name: candidateName,
-        matched_name: null,
-        summary: sharesNamePart
-            ? "The CV name only partially matches the applicant's record. Verify it manually."
-            : "The name on the CV may not match the applicant's record. Verify it manually.",
-    }
-}
 
 const redactSensitiveText = (value: unknown, maxLength: number) => String(value || '')
     .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[email redacted]')
@@ -488,6 +395,7 @@ async function geminiJson(
     responseJsonSchema: Record<string, unknown>,
     operation: string,
     timeoutMs = 45_000,
+    maxOutputTokens = 2_048,
 ) {
     const response = await geminiFetch(
         `${GEMINI_API_BASE}/v1beta/models/${encodeURIComponent(model)}:generateContent`,
@@ -499,7 +407,7 @@ async function geminiJson(
                 systemInstruction: { parts: [{ text: systemInstruction }] },
                 contents: [{ role: 'user', parts }],
                 generationConfig: {
-                    maxOutputTokens: 2_048,
+                    maxOutputTokens,
                     thinkingConfig: { thinkingLevel: 'minimal' },
                     responseMimeType: 'application/json',
                     responseJsonSchema,
@@ -1453,6 +1361,38 @@ async function uploadVideoToGemini(
     throw new ReviewProviderError('Gemini video processing timed out', 'file_processing_timeout', null, true)
 }
 
+export function sanitizeVideoPerformanceDetails(parsed: any) {
+    const timestamp = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+    const confidence = (value: unknown) => Number.isFinite(Number(value)) ? Math.max(0, Math.min(1, Number(value))) : 0
+    const detectedGenres = (Array.isArray(parsed?.detected_genres) ? parsed.detected_genres : [])
+        .map((item: any) => ({
+            genre: cleanText(item?.genre, 80), confidence: confidence(item?.confidence),
+            observation: redactSensitiveText(item?.observation, 500), timestamp_seconds: timestamp(item?.timestamp_seconds),
+        }))
+        .filter((item: any) => item.genre && item.observation && item.confidence >= 0.7)
+        .slice(0, 6)
+    const vocal = parsed?.vocal_performance || {}
+    const evidence = (Array.isArray(vocal.evidence) ? vocal.evidence : [])
+        .map((item: any) => ({ observation: redactSensitiveText(item?.observation, 500), timestamp_seconds: timestamp(item?.timestamp_seconds) }))
+        .filter((item: any) => item.observation && item.timestamp_seconds !== null).slice(0, 6)
+    const canAssessSinging = parsed?.singing_present === true && parsed?.performance_visible === true
+    const status = canAssessSinging && evidence.length > 0 && confidence(vocal.confidence) >= 0.8 && ['supported', 'not_supported'].includes(vocal.status)
+        ? String(vocal.status) : 'unclear'
+    return {
+        detected_genres: detectedGenres,
+        vocal_performance: {
+            status, confidence: confidence(vocal.confidence), evidence,
+            short_reason: status === 'unclear'
+                ? 'The available audio and visible singing cues are insufficient to confirm who is producing the vocals.'
+                : redactSensitiveText(vocal.short_reason, 500),
+            limitations: uniqueStrings([
+                Array.isArray(vocal.limitations) ? vocal.limitations : [],
+                'Audio and visual cues cannot prove live singing or rule out lip-syncing or prerecorded vocals.',
+            ]).map((item) => redactSensitiveText(item, 400)).slice(0, 8),
+        },
+    }
+}
+
 async function reviewVideoWithGemini(
     videoUrl: string | null,
     supabaseUrl: string,
@@ -1494,11 +1434,47 @@ async function reviewVideoWithGemini(
                     performer_count: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
                     visible_instruments: { type: 'array', items: { type: 'string' }, maxItems: 12 },
                     singing_present: { anyOf: [{ type: 'boolean' }, { type: 'null' }] },
+                    detected_genres: {
+                        type: 'array', maxItems: 6,
+                        items: {
+                            type: 'object',
+                            properties: {
+                                genre: { type: 'string' },
+                                confidence: { type: 'number', minimum: 0, maximum: 1 },
+                                observation: { type: 'string' },
+                                timestamp_seconds: { anyOf: [{ type: 'number', minimum: 0 }, { type: 'null' }] },
+                            },
+                            required: ['genre', 'confidence', 'observation', 'timestamp_seconds'],
+                            additionalProperties: false,
+                        },
+                    },
+                    vocal_performance: {
+                        type: 'object',
+                        properties: {
+                            status: { type: 'string', enum: ['supported', 'not_supported', 'unclear'] },
+                            confidence: { type: 'number', minimum: 0, maximum: 1 },
+                            short_reason: { type: 'string' },
+                            evidence: {
+                                type: 'array', maxItems: 6,
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        observation: { type: 'string' },
+                                        timestamp_seconds: { anyOf: [{ type: 'number', minimum: 0 }, { type: 'null' }] },
+                                    },
+                                    required: ['observation', 'timestamp_seconds'], additionalProperties: false,
+                                },
+                            },
+                            limitations: { type: 'array', items: { type: 'string' } },
+                        },
+                        required: ['status', 'confidence', 'short_reason', 'evidence', 'limitations'],
+                        additionalProperties: false,
+                    },
                     performance_evidence: { type: 'string', enum: ['supported', 'not_supported', 'unclear'] },
                     observations: { type: 'array', items: { type: 'string' }, maxItems: 8 },
                     criterion_findings: { type: 'array', items: REVIEW_FINDING_SCHEMA },
                 },
-                required: ['performance_visible', 'performer_count', 'visible_instruments', 'singing_present', 'performance_evidence', 'observations', 'criterion_findings'],
+                required: ['performance_visible', 'performer_count', 'visible_instruments', 'singing_present', 'detected_genres', 'vocal_performance', 'performance_evidence', 'observations', 'criterion_findings'],
                 additionalProperties: false,
             }
         const reviewed = await withGeminiFallback(
@@ -1509,7 +1485,7 @@ async function reviewVideoWithGemini(
                 apiKey,
                 selectedModel,
                 applicationId,
-                `Review this submitted performance video only for observable or audible musical-performance facts. Never identify people, compare faces, infer protected or sensitive traits, rate talent, calculate a score, rank, accept, or reject. Do not use transcript quality as a proxy for whether a performance exists. Use null or unclear instead of guessing. performance_evidence is supported only when the video itself provides direct evidence of a musical performance. Absence of a requested instrument or genre is generally unclear unless the reviewed content clearly contradicts the requirement. Song/catalog identification is handled separately and must not be invented. Return concise neutral observations.`,
+                `Review this submitted performance video using both its audio and visual streams, only for observable or audible musical-performance facts. Never identify people, compare faces, infer protected or sensitive traits, rate talent, calculate a score, rank, accept, or reject. Do not use transcript quality as a proxy for whether a performance exists. Use null or unclear instead of guessing. performance_evidence is supported only when the video itself provides direct evidence of a musical performance. Detect genres from the audible arrangement, rhythm, instrumentation, and vocal style; include concise observations with timestamps and confidence. Return an empty detected_genres array if audio is missing, ambiguous, or insufficient. Never infer genre from clothing, captions, a CV, or a requested genre. Evaluate genre_requirement from what is actually heard. Absence of a requested instrument or genre is generally unclear unless the reviewed content clearly contradicts the requirement. singing_present means singing is audible; background vocals alone do not establish that a visible musician is singing. vocal_performance describes whether audible singing appears consistent with the visible vocal performance. supported requires clear time-linked audible and visible singing cues; not_supported requires clear observable contradictory cues such as a visible person remaining silent during audible vocals. Do not assume every duo or group member must sing. Do not treat rests or vocals from another visible member as contradictions. Use unclear for obscured mouths, several performers with uncertain vocal attribution, edits, dubbing uncertainty, audio-only content, instrumental clips, or insufficient timing detail. Include timestamped evidence and limitations. These cues cannot prove live singing, authenticity, or the absence of lip-syncing or prerecorded vocals; never claim they do. Song/catalog identification is handled separately and must not be invented. Return concise neutral observations.`,
                 [
                     { text: JSON.stringify({ criteria: observableCriteria }) },
                     { fileData: { mimeType: uploaded.mimeType, fileUri: uploaded.file.uri } },
@@ -1517,15 +1493,18 @@ async function reviewVideoWithGemini(
                 videoSchema,
                 'video_evidence_review',
                 90_000,
+                4_096,
             ),
             (value: any) => String(value?.performance_evidence || '') === 'unclear' || findingsNeedFallback(value?.criterion_findings),
         )
         const parsed: any = reviewed.value
+        const performanceDetails = sanitizeVideoPerformanceDetails(parsed)
         const safeOutput = {
             performance_visible: typeof parsed?.performance_visible === 'boolean' ? parsed.performance_visible : null,
             performer_count: Number.isInteger(parsed?.performer_count) ? Math.max(0, Number(parsed.performer_count)) : null,
             visible_instruments: uniqueStrings(Array.isArray(parsed?.visible_instruments) ? parsed.visible_instruments : []).slice(0, 12),
             singing_present: typeof parsed?.singing_present === 'boolean' ? parsed.singing_present : null,
+            ...performanceDetails,
             performance_evidence: ['supported', 'not_supported', 'unclear'].includes(String(parsed?.performance_evidence))
                 ? String(parsed.performance_evidence)
                 : 'unclear',
@@ -2090,7 +2069,7 @@ async function runGeminiGigPortfolioReview(client: any, applicationId: string, s
             cvSources.push({
                 memberRowId: member.id,
                 memberUserId: member.user_id,
-                memberName: cleanText(member.member_name_snapshot, 160) || 'Group member',
+                memberName: cleanText(member.member_name_snapshot, 160),
                 role: cleanText(member.role_snapshot, 160),
                 instrument: cleanText(member.instrument_snapshot, 160),
                 url: signed.signedUrl,
@@ -2101,7 +2080,7 @@ async function runGeminiGigPortfolioReview(client: any, applicationId: string, s
         cvSources = [{
             memberRowId: null,
             memberUserId: profileId || application.applicant_id,
-            memberName: cleanText(profileResult.data?.full_name || groupResult.data?.name, 160) || 'Applicant',
+            memberName: cleanText(profileResult.data?.full_name, 160),
             role: '',
             instrument: '',
             url: application.cv_url,
@@ -2217,7 +2196,9 @@ async function runGeminiGigPortfolioReview(client: any, applicationId: string, s
         error: null,
     }
     const cvDocumentClassification = cvReview.classification
-    const cvNameCheck = primaryCvReview?.nameCheck || {
+    const cvNameCheck = application.group_id && application.member_cv_status === 'complete'
+        ? summarizeMemberCvNameChecks([...memberCvReviews.map((review) => review.result), ...skippedMemberCvReviews])
+        : primaryCvReview?.nameCheck || {
         status: 'not_run' as CvNameCheckStatus,
         confidence: 0,
         extracted_name: null,
@@ -2539,7 +2520,6 @@ export async function runGigPortfolioReview(client: any, applicationId: string, 
                 cvDocumentClassification.candidate_name,
                 [
                     profileResult.data?.full_name,
-                    groupResult.data?.name,
                 ],
                 cvDocumentClassification.name_confidence,
             )
@@ -2950,7 +2930,7 @@ export async function runGigCvReview(client: any, applicationId: string, supabas
 
     try {
         const context = await loadSplitReviewContext(client, applicationId)
-        const { application, criteria, profile, group } = context
+        const { application, criteria, profile } = context
         if (application.ai_portfolio_review_consent !== true || !application.ai_portfolio_review_consented_at) {
             await saveSplitReviewComponent(client, applicationId, 'cv', 'consent_revoked', {
                 processing_status: 'consent_revoked',
@@ -3027,7 +3007,7 @@ export async function runGigCvReview(client: any, applicationId: string, supabas
                 cvSources.push({
                     memberRowId: member.id,
                     memberUserId: member.user_id,
-                    memberName: cleanText(member.member_name_snapshot, 160) || 'Group member',
+                    memberName: cleanText(member.member_name_snapshot, 160),
                     role: cleanText(member.role_snapshot, 160),
                     instrument: cleanText(member.instrument_snapshot, 160),
                     url: signed.signedUrl,
@@ -3038,7 +3018,7 @@ export async function runGigCvReview(client: any, applicationId: string, supabas
             cvSources = [{
                 memberRowId: null,
                 memberUserId: context.profileId || application.applicant_id,
-                memberName: cleanText(profile?.full_name || group?.name, 160) || 'Applicant',
+                memberName: cleanText(profile?.full_name, 160),
                 role: '',
                 instrument: '',
                 url: application.cv_url,
@@ -3190,7 +3170,9 @@ export async function runGigCvReview(client: any, applicationId: string, supabas
                     confidence: 0,
                     summary: 'No CV was available for automatic review.',
                 },
-                cv_name_check: primary?.nameCheck || {
+                cv_name_check: application.group_id && application.member_cv_status === 'complete'
+                    ? summarizeMemberCvNameChecks([...memberCvReviews.map((review) => review.result), ...skippedMemberCvReviews])
+                    : primary?.nameCheck || {
                     status: 'not_run',
                     confidence: 0,
                     extracted_name: null,

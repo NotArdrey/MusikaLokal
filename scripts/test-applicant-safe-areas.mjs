@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import {test} from 'node:test';
 import ts from 'typescript';
 import {chromium} from '@playwright/test';
+import * as cvApplicantName from '../mobile/supabase/functions/_shared/cvApplicantName.ts';
 const require=createRequire(new URL('../mobile/package.json',import.meta.url));
 const React=require('react'),RN=require('react-native-web'),{renderToStaticMarkup}=require('react-dom/server');
 const h=React.createElement;
@@ -27,6 +28,7 @@ function load(file) {
      if(name==='expo-router')return {useRouter:()=>({push(){}})};
      if(name==='@expo/vector-icons')return {Ionicons:({size=16})=>h(RN.View,{style:{width:size,height:size,flexShrink:0}})};
      if(name.includes('gigApplicantFilters'))return {isActiveApplication:()=>true};
+     if(name.includes('cvApplicantName'))return cvApplicantName;
      if(name.includes('theme/tokens'))return {typography:{body:'sans-serif',heading:'sans-serif',medium:'sans-serif',semibold:'sans-serif',bold:'sans-serif'}};
      if(name.includes('ProfileAvatar'))return {__esModule:true,default:({size})=>h(RN.View,{style:{width:size,height:size,flexShrink:0}})};
      if(name.includes('InAppMediaViewer'))return {__esModule:true,default:()=>null};

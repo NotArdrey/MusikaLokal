@@ -10,6 +10,7 @@ import {
 } from '../_shared/gigPortfolioReview.ts'
 import { matchGigMemberRequirements, normalizeGigRosterMembers } from '../_shared/gigMemberRequirementMatching.ts'
 import { submittedGenreFit } from '../_shared/submittedGenreFit.ts'
+import { compareCvApplicantName, summarizeMemberCvNameChecks } from '../_shared/cvApplicantName.ts'
 import {
     applyMemberVerificationRecommendationGate,
     attachGigMemberVerification,
@@ -627,7 +628,30 @@ const DEFAULT_RECOMMENDATION_SETTINGS = {
     },
 }
 
-const RECOMMENDATION_MODEL_VERSION = 'gig-fit-v11-submitted-media-state'
+const RECOMMENDATION_MODEL_VERSION = 'gig-fit-v12-verified-applicants'
+
+function applyProfileVerificationRecommendationGate(recommendation: any) {
+    if (recommendation.is_verified === true) return recommendation
+    return {
+        ...recommendation,
+        is_eligible: false,
+        recommendation_status: recommendation.recommendation_status === 'recommended'
+            ? 'needs_review'
+            : recommendation.recommendation_status,
+        explanation: String(recommendation.explanation || '').startsWith('Applicant identity verification is not approved.')
+            ? recommendation.explanation
+            : `Applicant identity verification is not approved. ${recommendation.explanation}`,
+        criteria_snapshot: {
+            ...recommendation.criteria_snapshot,
+            fit_recommendation_status: recommendation.criteria_snapshot?.fit_recommendation_status ||
+                recommendation.recommendation_status,
+            recommendation_reason_codes: [
+                ...new Set([...(recommendation.criteria_snapshot?.recommendation_reason_codes || []),
+                    'applicant_identity_not_verified']),
+            ],
+        },
+    }
+}
 
 function recommendationSortRank(recommendation: any) {
     const status = String(recommendation?.recommendation_status || '')
@@ -781,9 +805,9 @@ function getApplicationPerformer(application: any) {
         group,
         verified:
             profile?.is_verified === true &&
-            String(profile?.verification_status || '')
+            ['APPROVED', 'VERIFIED'].includes(String(profile?.verification_status || '')
                 .trim()
-                .toUpperCase() === 'APPROVED',
+                .toUpperCase()),
         genres: stringValues([profile?.genres, group?.genre, snapshot?.genres, snapshot?.group_genre]),
         instruments: stringValues([
             profile?.skills,
@@ -967,7 +991,7 @@ function evaluateGigApplication(
             ? 'No applicable AI Match Review criteria are configured for this gig.'
             : 'Not recommended because a required gig criterion is missing.'
 
-    return {
+    return applyProfileVerificationRecommendationGate({
         application_id: application.id,
         gig_id: application.gig_id,
         score,
@@ -1003,7 +1027,7 @@ function evaluateGigApplication(
         },
         model_provider: 'rules',
         model_version: RECOMMENDATION_MODEL_VERSION,
-    }
+    })
 }
 
 async function addGroqRecommendationExplanations(evaluations: any[]) {
@@ -1319,7 +1343,15 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
                 : missingRequiredItems[0] === 'location'
                 ? 'The required location range could not be confirmed.'
                 : 'The required submitted performance evidence could not be confirmed.'
-        const cvNameCheck = review?.source_summary?.cv_name_check || null
+        const memberCvReviews = Array.isArray(review?.source_summary?.member_cv_reviews) ? review.source_summary.member_cv_reviews : []
+        const cvNameCheck = memberCvReviews.length > 0
+            ? summarizeMemberCvNameChecks(memberCvReviews.map((member: any) => ({
+                ...member,
+                name_check: member.name_check?.extracted_name
+                    ? compareCvApplicantName(member.name_check.extracted_name, [member.member_name], member.name_check.confidence ?? 0)
+                    : member.name_check,
+            })))
+            : review?.source_summary?.cv_name_check || null
         const cvNameCheckStatus = String(cvNameCheck?.status || 'not_run')
         const verificationStatus = cvNameCheckStatus === 'mismatch'
             ? 'needs_verification'
@@ -1430,7 +1462,7 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
                 : "A performance video was submitted, but we couldn't confidently confirm the required performance evidence.",
             videoProcessingStatus === 'processing_failed' || portfolioResult !== 'not_supported',
         )
-        return {
+        return applyProfileVerificationRecommendationGate({
             ...item,
             score,
             is_eligible: isEligible,
@@ -1456,7 +1488,7 @@ export async function addAdvisoryMediaReviewSummaries(supabaseClient: any, evalu
                     possible_points: possiblePoints,
                 },
             },
-        }
+        })
     })
 }
 
@@ -1493,6 +1525,7 @@ async function attachGigApplicationRecommendations(
     let evaluations = applications.map((application) => evaluateGigApplication(application, requirements, settings))
     if (includeAiExplanations) evaluations = await addGroqRecommendationExplanations(evaluations)
     evaluations = await addAdvisoryMediaReviewSummaries(supabaseClient, evaluations)
+    evaluations = evaluations.map(applyProfileVerificationRecommendationGate)
 
     if (evaluations.length > 0) {
         const now = new Date().toISOString()
@@ -2617,7 +2650,10 @@ Deno.serve(async (req: Request) => {
             const applicationWithVerification = await attachGigMemberVerification(supabaseClient, {
                 ...applicationWithMemberCvs,
                 ai_portfolio_review: reviewData,
-                ai_recommendation: recommendationData,
+                ai_recommendation: recommendationData ? applyProfileVerificationRecommendationGate({
+                    ...recommendationData,
+                    is_verified: getApplicationPerformer(applicationWithHistory).verified,
+                }) : null,
             })
             const verificationNextPollAt = Date.parse(String(applicationWithVerification.member_verification?.next_poll_at || ''))
             const verificationStartedAt = Date.parse(String(applicationWithVerification.member_verification?.started_at || ''))
@@ -2759,13 +2795,17 @@ Deno.serve(async (req: Request) => {
                 rankedGroups.flat().map((application: any) => [application.id, application.ai_recommendation || null])
             )
             const rankedApplications = hydratedData
-                .map((application: any) => ({
-                    ...application,
-                    ai_recommendation:
-                        existingByApplicationId.get(application.id) ||
-                        generatedByApplicationId.get(application.id) ||
-                        null,
-                }))
+                .map((application: any) => {
+                    const recommendation = existingByApplicationId.get(application.id) ||
+                        generatedByApplicationId.get(application.id) || null
+                    return {
+                        ...application,
+                        ai_recommendation: recommendation ? applyProfileVerificationRecommendationGate({
+                            ...recommendation,
+                            is_verified: getApplicationPerformer(application).verified,
+                        }) : null,
+                    }
+                })
                 .sort((left: any, right: any) => {
                     const leftRecommendation = left.ai_recommendation
                     const rightRecommendation = right.ai_recommendation

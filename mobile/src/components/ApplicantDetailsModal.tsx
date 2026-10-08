@@ -14,6 +14,7 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import ProfileAvatar from "./ProfileAvatar";
 import { isActiveApplication } from "../utils/gigApplicantFilters";
 import { typography } from "../theme/tokens";
+import { compareCvApplicantName, summarizeMemberCvNameChecks } from "../../supabase/functions/_shared/cvApplicantName";
 
 type Colors = {
   background: string;
@@ -123,7 +124,7 @@ const friendlyRecommendationSummary = (recommendation: any, matchPercentage: num
     return "One or more required items could not be confirmed. Review the checks below before deciding.";
   }
   if (status === "needs_review") {
-    return "The gig-fit score is unchanged, but an important document issue must be verified before deciding.";
+    return "Some application checks still need review. Check the CVs and performance evidence before deciding.";
   }
   if (status === "insufficient_data") {
     return "There is not enough configured information to calculate a reliable match. Review the application manually.";
@@ -550,6 +551,7 @@ export default function ApplicantDetailsModal({
       );
   const recommendation = application.ai_recommendation || null;
   const aiReview = application.ai_portfolio_review || null;
+  const memberCvs = list(application.member_cvs);
   const memberVerification = application.member_verification || null;
   const usesVerifiedIdPortrait = ["verified_id_portrait", "verified_id_and_profile_photo"].includes(String(memberVerification?.reference_source || ""));
   const usesDualReference = memberVerification?.reference_source === "verified_id_and_profile_photo";
@@ -593,8 +595,28 @@ export default function ApplicantDetailsModal({
   const videoProcessingStatus = String(aiReview?.source_summary?.video_processing_status || (application.video_url ? "" : "no_media")).toLowerCase();
   const cvTextExtracted = aiReview?.source_summary?.cv_text_extracted === true;
   const cvExtractionLimitation = String(aiReview?.source_summary?.cv_extraction_limitation || "");
-  const cvNameCheck = aiReview?.source_summary?.cv_name_check || null;
+  const storedMemberCvReviews = list(aiReview?.source_summary?.member_cv_reviews);
+  const memberCvReviews = memberCvs.map((member) => {
+    const review = member.ai_review_result?.name_check ? member.ai_review_result
+      : storedMemberCvReviews.find((item) => item.member_id === member.id) || member.ai_review_result || {};
+    const check = member.ai_review_consent === false ? null : review.name_check;
+    return {
+      member_name: member.member_name,
+      name_check: check?.extracted_name
+        ? compareCvApplicantName(check.extracted_name, [member.member_name], check.confidence ?? 0)
+        : check,
+    };
+  });
+  const savedCvNameCheck = aiReview?.source_summary?.cv_name_check || null;
+  const cvNameCheck = memberCvs.length > 0
+    ? summarizeMemberCvNameChecks(memberCvReviews)
+    : savedCvNameCheck?.extracted_name
+      ? compareCvApplicantName(savedCvNameCheck.extracted_name, [profile.full_name], savedCvNameCheck.confidence ?? 0)
+      : savedCvNameCheck;
   const cvNameCheckStatus = String(cvNameCheck?.status || "not_run").toLowerCase();
+  const videoAnalysis = aiReview?.source_summary?.video_structured_output || null;
+  const videoGenres = list(videoAnalysis?.detected_genres);
+  const vocalPerformance = videoAnalysis?.vocal_performance || null;
   const cvEvidence = (storedCvReview.length ? storedCvReview : evidence)
     .filter((item) => String(item?.criterion || "") !== "portfolio_requirement")
     .map((item) => ({
@@ -627,7 +649,6 @@ export default function ApplicantDetailsModal({
       }
     : screeningMeta(application.video_copyright_status);
   const portfolio = list(profile.portfolio_urls);
-  const memberCvs = Array.isArray(application.member_cvs) ? application.member_cvs : [];
   const isPending = String(application.status || "pending").toLowerCase() === "pending";
   const priorApplicationCounts = application.prior_application_counts || null;
   const hasPriorApplicationCounts =
@@ -648,7 +669,6 @@ export default function ApplicantDetailsModal({
   const memberRequirementCoverage = recommendation?.criteria_snapshot?.member_requirement_coverage || null;
   const memberCoverageItems = list(memberRequirementCoverage?.members);
   const requirementResults = list(recommendation?.criteria_snapshot?.requirement_results);
-  const metRequirementResults = requirementResults.filter((item) => item?.status === "met");
   const notMetRequirementResults = requirementResults.filter((item) => item?.status === "not_met");
   const unclearRequirementResults = requirementResults.filter((item) => item?.status === "unclear");
   const recommendationSettings = recommendation?.criteria_snapshot?.settings || {};
@@ -689,12 +709,12 @@ export default function ApplicantDetailsModal({
         ? {
             label: "Song genre matches the gig",
             color: "#10B981",
-            message: `The detected genre (${recognizedAudioGenres.join(", ")}) fits the gig's requested genre (${requiredGenres.join(", ")}).`,
+            message: `The identified song's catalog genre (${recognizedAudioGenres.join(", ")}) fits the gig's requested genre (${requiredGenres.join(", ")}). A live arrangement may differ.`,
           }
         : {
             label: "Song genre does not match the gig",
             color: "#EF4444",
-            message: `The detected genre (${recognizedAudioGenres.join(", ")}) does not match the gig's requested genre (${requiredGenres.join(", ")}).`,
+            message: `The identified song's catalog genre (${recognizedAudioGenres.join(", ")}) does not match the gig's requested genre (${requiredGenres.join(", ")}). A live arrangement may differ.`,
           }
     : screening;
 
@@ -725,7 +745,9 @@ export default function ApplicantDetailsModal({
     const confirmationSource = String(item?.source || evidenceItem?.source || "");
     const hasCvSource = confirmationSource === "cv";
     const hasVideoSource = ["performance_video", "video_transcript", "video_frame", "recognized_audio"].includes(confirmationSource);
-    const sourceLabel = key === "genres" ? "CV + Performance Video" : sourceKeys.map(evidenceSourceLabel).join(" + ") || "Application";
+    const sourceLabel = key === "genres" && sourceChecks.length > 0
+      ? sourceChecks.filter((check) => check.status === "met").map((check) => check.source === "cv" ? "CV" : "Performance video").join(" + ") || "CV + Performance video"
+      : sourceKeys.map(evidenceSourceLabel).join(" + ") || "Application";
     const status = String(item?.status || "unclear");
     const tone: ReviewTone = status === "met" ? "confirmed" : status === "not_met" ? "failed" : "review";
     const statusLabel = status === "met"
@@ -744,7 +766,9 @@ export default function ApplicantDetailsModal({
       label: requirementLabels[key] || item?.label || criterionLabel(item?.criterion),
       tone,
       statusLabel,
-      detail: String(item?.detail || evidenceItem?.short_reason || "Review the available evidence before deciding."),
+      detail: key === "genres" && sourceChecks.length > 0
+        ? sourceChecks.map((check) => `${check.source === "cv" ? "CV statement" : "Video analysis"}: ${check.detail}`).join("\n")
+        : String(item?.detail || evidenceItem?.short_reason || "Review the available evidence before deciding."),
       sourceLabel,
       evidenceEntries,
       analysis: String(key === "genres" ? item?.detail || "Review the CV and performance video." : evidenceItem?.short_reason || item?.detail || "No additional automated analysis was recorded."),
@@ -778,14 +802,16 @@ export default function ApplicantDetailsModal({
       : `${Number(memberVerification.verified_member_count || 0)} of ${Number(memberVerification.expected_member_count || 0)} registered members were confidently matched in this historical check using registered profile photos. New checks use approved government-ID holder portraits.`
     : "No registered-member verification result is available for this application.";
   const cvIdentityMismatch = cvNameCheckStatus === "mismatch";
-  const cvIdentityDetail = cvIdentityMismatch && cvNameCheck?.extracted_name
-    ? `Major verification issue. The CV lists ${cvNameCheck.extracted_name}, while the application belongs to ${name}.`
+  const cvIdentityDetail = cvIdentityMismatch && cvNameCheck?.extracted_name && cvNameCheck?.expected_name
+    ? `The CV lists ${cvNameCheck.extracted_name}, while the registered member is ${cvNameCheck.expected_name}. Verify this CV manually.`
     : cvNameCheck?.summary || "The CV name could not be confirmed against the applicant name.";
-  const cvNeedsManualReview = Boolean(application.cv_url) && !cvIdentityMismatch && (
+  const cvNeedsManualReview = !cvIdentityMismatch && (memberCvs.length > 0
+    ? cvNameCheckStatus !== "match"
+    : Boolean(application.cv_url) && (
     application.ai_portfolio_review_consent !== true ||
     cvProcessingStatus === "processing_failed" ||
     ["not_a_cv", "uncertain", "not_run"].includes(cvDocumentStatus)
-  );
+  ));
   const attentionItems: { key: string; title: string; detail: string; tone: ReviewTone; category: "not_met" | "review" }[] = [
     ...visibleRequirementRows.map((row) => ({
       key: `requirement-${row.key}`,
@@ -952,9 +978,11 @@ export default function ApplicantDetailsModal({
                   <SummaryMetric value={needsReviewCount} label="Need review" tone="review" />
                 </View>
                 <Text style={[styles.attentionSectionTitle, { color: colors.text }]}>Needs attention</Text>
-                {attentionItems.length > 0 ? attentionItems.map((item) => (
-                  <AttentionItem key={item.key} title={item.title} detail={item.detail} tone={item.tone} colors={colors} />
-                )) : (
+                {attentionItems.length > 0 ? attentionItems.map((item) => {
+                  const row = visibleRequirementRows.find((row) => item.key === `requirement-${row.key}`);
+                  return row ? <RequirementRow key={item.key} row={row} colors={colors} />
+                    : <AttentionItem key={item.key} title={item.title} detail={item.detail} tone={item.tone} colors={colors} />;
+                }) : (
                   <View style={styles.allClearRow}>
                     <Ionicons name="checkmark-circle" size={19} color="#059669" />
                     <Text style={styles.allClearText}>No unresolved checks were found.</Text>
@@ -973,7 +1001,7 @@ export default function ApplicantDetailsModal({
                     <Text style={[styles.label, { color: "#10B981" }]}>Requirements met</Text>
                     <BulletList
                       values={requirementResults.length > 0
-                        ? metRequirementResults.map((item) => `${item.label}: ${item.detail}`)
+                        ? confirmedRequirementRows.map((row) => `${row.label}: ${row.statusLabel}`)
                         : list(recommendation.matched_criteria)}
                       colors={colors}
                       empty="No matched requirements were recorded."
@@ -1129,26 +1157,12 @@ export default function ApplicantDetailsModal({
             </Section>
 
             <Section title="Qualification Review" icon="checkmark-done-outline" colors={colors} defaultOpen>
-              <ReviewGroup title="Needs attention" icon="alert-circle-outline" colors={colors}>
-                {visibleRequirementRows.length > 0 ? visibleRequirementRows.map((row, index) => (
-                  <RequirementRow key={`${row.key}-${index}`} row={row} colors={colors} />
-                )) : (
-                  <Text style={[styles.body, { color: colors.textSecondary }]}>No requirement exceptions need review.</Text>
-                )}
-                {cvIdentityMismatch ? (
-                  <View accessibilityLabel="Important verification needed">
-                    <AttentionItem title="CV identity mismatch" detail={cvIdentityDetail} tone="failed" colors={colors} />
-                  </View>
-                ) : null}
-                {memberVerification && !memberIdentityVerified ? <AttentionItem title="Performance identity" detail={memberIdentityDetail} tone="review" colors={colors} /> : null}
-              </ReviewGroup>
-
               <ConfirmedRequirements rows={confirmedRequirementRows} colors={colors} />
 
               <ReviewGroup title="CV" icon="document-text-outline" colors={colors}>
-                {!application.cv_url && memberCvs.length === 0 ? (
+                {memberCvs.length === 0 && !application.cv_url ? (
                   <EmptyState colors={colors}>No CV was uploaded.</EmptyState>
-                ) : (
+                ) : memberCvs.length === 0 ? (
                   <>
                     <StatusRow
                       icon={cvIdentityMismatch ? "close-circle-outline" : cvNameCheckStatus === "match" ? "checkmark-circle-outline" : "warning-outline"}
@@ -1168,13 +1182,15 @@ export default function ApplicantDetailsModal({
                       </TouchableOpacity>
                     ) : null}
                   </>
-                )}
+                ) : null}
                 {memberCvs.length > 0 ? (
                   <View style={styles.stackMedium}>
-                    <Text style={[styles.body, { color: colors.textSecondary }]}>Each CV belongs to the named group member. The performance video is shared by the whole group.</Text>
-                    {memberCvs.map((member: any) => {
+                    <Text style={[styles.body, { color: colors.textSecondary }]}>Duo and group members submit individual CVs. Each CV name is checked against that member’s registered name. The performance video is shared.</Text>
+                    {memberCvs.map((member: any, index: number) => {
                       const reviewStatus = String(member.ai_review_status || "not_requested");
-                      const reviewSummary = member.ai_review_result?.classification?.summary
+                      const nameCheck = memberCvReviews[index]?.name_check;
+                      const reviewSummary = member.ai_review_consent === false ? "AI review was not authorized by this member."
+                        : nameCheck?.summary || member.ai_review_result?.classification?.summary
                         || member.ai_review_result?.reason
                         || (member.ai_review_consent ? "Automatic review is pending." : "AI review was not authorized by this member.");
                       return (
@@ -1184,9 +1200,9 @@ export default function ApplicantDetailsModal({
                             {[member.role, member.instrument].filter(Boolean).join(" · ") || "Group member"}
                           </Text>
                           <StatusRow
-                            icon={reviewStatus === "completed" ? "checkmark-circle-outline" : "information-circle-outline"}
-                            label={reviewStatus === "completed" ? "CV reviewed" : reviewStatus === "failed" ? "Manual review needed" : reviewStatus === "skipped" ? "AI review not authorized" : "CV submitted"}
-                            color={reviewStatus === "completed" ? "#10B981" : reviewStatus === "failed" ? "#F59E0B" : colors.primary}
+                            icon={nameCheck?.status === "mismatch" ? "close-circle-outline" : nameCheck?.status === "match" ? "checkmark-circle-outline" : "information-circle-outline"}
+                            label={nameCheck?.status === "mismatch" ? "CV name does not match this member" : nameCheck?.status === "match" ? "CV name matches this member" : reviewStatus === "completed" || reviewStatus === "failed" ? "Manual review needed" : reviewStatus === "skipped" ? "AI review not authorized" : "CV submitted"}
+                            color={nameCheck?.status === "mismatch" ? "#DC2626" : nameCheck?.status === "match" ? "#059669" : "#D97706"}
                           />
                           <Text style={[styles.body, { color: colors.textSecondary }]}>{reviewSummary}</Text>
                           {member.cv_url ? (
@@ -1228,6 +1244,28 @@ export default function ApplicantDetailsModal({
                       color={videoProcessingStatus === "processing_failed" ? "#D97706" : "#059669"}
                     />
                     <Text style={[styles.body, { color: colors.textSecondary }]}>{videoProcessingStatus === "processing_failed" ? "Review the submitted performance manually." : "Open the performance when you need to verify the evidence."}</Text>
+                    {videoAnalysis ? (
+                      <View style={styles.stackSmall}>
+                        <DetailRow icon="musical-notes-outline" label="Genre heard in video" value={videoGenres.length > 0 ? videoGenres.map((item) => item.genre).join(", ") : "Could not confirm"} colors={colors} />
+                        <DetailRow icon="mic-outline" label="Singing heard" value={videoAnalysis.singing_present === true ? "Yes" : videoAnalysis.singing_present === false ? "No" : "Could not confirm"} colors={colors} />
+                        <StatusRow
+                          icon={vocalPerformance?.status === "supported" ? "checkmark-circle-outline" : "warning-outline"}
+                          label={videoAnalysis.singing_present === false ? "No singing heard to compare" : vocalPerformance?.status === "supported" ? "Visible singing and audio appear consistent" : vocalPerformance?.status === "not_supported" ? "Visible singing and audio may be inconsistent" : "Visible singing and audio need manual review"}
+                          color={vocalPerformance?.status === "supported" ? "#059669" : "#D97706"}
+                        />
+                        <Text style={[styles.body, { color: colors.textSecondary }]}>{vocalPerformance?.short_reason || "This earlier review did not assess whether the visible singing matches the audio."}</Text>
+                        {videoGenres.length > 0 || list(vocalPerformance?.evidence).length > 0 ? (
+                          <ReviewDetails colors={colors}>
+                            {[...videoGenres, ...list(vocalPerformance?.evidence)].map((item, index) => (
+                              <Text key={index} style={[styles.body, { color: colors.textSecondary }]}>
+                                {typeof item.timestamp_seconds === "number" ? `${Math.floor(item.timestamp_seconds / 60)}:${String(Math.floor(item.timestamp_seconds % 60)).padStart(2, "0")} — ` : ""}{item.genre ? `${item.genre}: ` : ""}{item.observation}
+                              </Text>
+                            ))}
+                          </ReviewDetails>
+                        ) : null}
+                        <Text style={[styles.advisory, { color: colors.textSecondary }]}>These observations cannot prove live singing or rule out lip-syncing or prerecorded vocals.</Text>
+                      </View>
+                    ) : null}
                     <TouchableOpacity onPress={() => onOpenMedia(application.video_url, "Performance Video")} style={[styles.outlineButton, { borderColor: colors.primary }]}>
                       <Ionicons name="play-outline" size={18} color={colors.primary} />
                       <Text style={[styles.outlineButtonText, { color: colors.primary }]}>Watch performance</Text>
@@ -1301,7 +1339,7 @@ export default function ApplicantDetailsModal({
             </Section>
 
             <Section title="File review details" icon="document-text-outline" colors={colors}>
-              {application.cv_url &&
+              {memberCvs.length === 0 && application.cv_url &&
               application.ai_portfolio_review_consent === true &&
               cvDocumentStatus === "cv" &&
               cvProcessingStatus === "reviewed" ? (
@@ -1312,9 +1350,7 @@ export default function ApplicantDetailsModal({
                     color={cvNameCheckStatus === "match" ? "#10B981" : cvNameCheckStatus === "mismatch" ? "#DC2626" : "#F59E0B"}
                   />
                   <Text style={[styles.body, { color: colors.textSecondary }]}>
-                    {cvNameCheckStatus === "mismatch" && cvNameCheck?.extracted_name
-                      ? `The CV lists ${cvNameCheck.extracted_name}, while the application belongs to ${name}.`
-                      : cvNameCheck?.summary || "We couldn't confirm the name on the CV. Verify it manually."}
+                    {cvNameCheck?.summary || "We couldn't confirm the name on the CV. Verify it manually."}
                   </Text>
                   <TouchableOpacity onPress={() => onOpenMedia(application.cv_url, "Applicant CV")} style={[styles.outlineButton, { borderColor: colors.primary }]}>
                     <Ionicons name="open-outline" size={17} color={colors.primary} />
@@ -1323,7 +1359,7 @@ export default function ApplicantDetailsModal({
                   {cvNameCheck?.extracted_name ? (
                     <ReviewDetails colors={colors}>
                       <Text style={[styles.body, { color: colors.textSecondary }]}>CV name: {cvNameCheck.extracted_name}</Text>
-                      <Text style={[styles.body, { color: colors.textSecondary }]}>Application name: {name}</Text>
+                      <Text style={[styles.body, { color: colors.textSecondary }]}>Registered member: {cvNameCheck.expected_name || profile.full_name || "Unavailable"}</Text>
                     </ReviewDetails>
                   ) : null}
                   <Text style={[styles.advisory, { color: colors.textSecondary }]}>This issue does not change the match score, but it places the recommendation in Needs review until the document is verified.</Text>

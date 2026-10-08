@@ -1490,6 +1490,9 @@ export default function GigDetailsScreen() {
                   ) : null}
                 </View>
 
+                <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 14, lineHeight: 21, marginBottom: 10 }}>
+                  AI recommendations compare verified applicants with your saved gig criteria. Gig management makes the final acceptance decision.
+                </Text>
                 <Text style={{ color: colors.textSecondary, fontFamily: typography.body, fontSize: 12, marginBottom: 10 }}>
                   {applicationCounts["Pending"]} pending | {applicationCounts["Accepted"]} accepted | {applicationCounts["Declined"]} declined
                 </Text>
@@ -2429,4 +2432,3 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.3)",
   },
 });
-

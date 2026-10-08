@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-08",
+  "timezone": "Asia/Manila",
+  "scope": "Individual duo/group CV identity, duplicate attention section, genre wording, and video genre/vocal observations",
+  "release_status": "source_only",
+  "checks": {
+    "targeted_tests": { "passed": 73, "failed": 0 },
+    "mobile_typecheck": "passed",
+    "web_typecheck": "passed",
+    "applicant_modal_eslint": "passed",
+    "backend_deno_check": { "passed": 6, "targets": ["mobile/gig-cv-review", "mobile/gig-video-review", "mobile/gig-applications", "web/gig-cv-review", "web/gig-video-review", "web/gig-applications"] },
+    "applicant_layouts": { "passed": 24, "widths": [320, 390, 430], "text_scales": [1, 1.6], "themes": ["light", "dark"] },
+    "safe_area_layouts": { "passed": 16 },
+    "expanded_genre_and_video_evidence_320px_1_6x": "passed",
+    "gemini_transport_and_output": "passed_with_mocked_provider_responses",
+    "git_diff_check": "passed"
+  },
+  "limitations": [
+    "No live provider accuracy evaluation was performed.",
+    "No physical Android check was performed.",
+    "No backend deployment or APK publication was performed.",
+    "Previously completed video reviews need an authorized rerun after deployment to populate the added fields.",
+    "AI audio/visual observations cannot prove live singing or rule out lip-syncing or prerecorded vocals."
+  ]
+}
